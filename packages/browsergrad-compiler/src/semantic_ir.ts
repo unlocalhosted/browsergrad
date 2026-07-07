@@ -44,6 +44,9 @@ export interface CudaLiteSemanticSymbol {
     | "builtin";
   readonly valueType?: CudaLiteScalarType;
   readonly pointer?: boolean;
+  readonly pointerRoot?: string;
+  readonly pointerAddressSpace?: SemanticAddressSpace;
+  readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly constant?: boolean;
   readonly initialized?: boolean;
   readonly dimensions: readonly number[];
@@ -336,8 +339,11 @@ function lowerStatement(
     case "block":
       return { kind: "block", body: lowerStatements(statement.body, scope), span: statement.span };
     case "var": {
-      const target = symbolForVar(statement);
+      const target = symbolForVar(statement, scope);
       scope.set(target.name, target);
+      if (target.pointerRoot && target.pointerAddressSpace === "local" && target.pointerBaseIndices) {
+        return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
+      }
       return {
         kind: "declare",
         target,
@@ -504,6 +510,8 @@ function lowerExpression(
       };
     }
     case "index": {
+      const aliased = localPointerAliasIndexExpression(expression, scope);
+      if (aliased) return aliased;
       const target = lowerExpression(expression.target, scope);
       return {
         kind: "index",
@@ -565,6 +573,8 @@ function lowerExpression(
         span: expression.span,
       };
     case "unary": {
+      const aliased = expression.operator === "*" ? localPointerAliasDerefExpression(expression.argument, scope, expression.span) : undefined;
+      if (aliased) return aliased;
       const argument = lowerExpression(expression.argument, scope);
       return { kind: "unary", operator: expression.operator, argument, ...optionalValueType(expression.operator === "&" ? "voidptr" : expressionValueType(argument)), span: expression.span };
     }
@@ -838,17 +848,120 @@ function symbolForFunctionParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
   return { ...symbol, addressSpace: "local" };
 }
 
-function symbolForVar(statement: CudaLiteVarDecl): CudaLiteSemanticSymbol {
+function symbolForVar(
+  statement: CudaLiteVarDecl,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): CudaLiteSemanticSymbol {
+  const pointerAlias = statement.pointer ? localPointerAliasForInitializer(statement.init, scope) : undefined;
   return {
     name: statement.name,
     kind: statement.storage === "shared" ? "shared" : "local",
     valueType: statement.valueType,
     pointer: statement.pointer,
+    ...(pointerAlias === undefined ? {} : pointerAlias),
     constant: false,
     dimensions: statement.dimensions,
     addressSpace: statement.storage,
     span: statement.span,
   };
+}
+
+function localPointerAliasForInitializer(
+  expression: CudaLiteExpression | undefined,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices"> | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "cast" && expression.pointer) return localPointerAliasForInitializer(expression.expression, scope);
+  if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
+  const ref = localPointerAliasRoot(expression.argument, scope);
+  if (!ref || ref.root.addressSpace !== "local" || ref.root.dimensions.length !== 1) return undefined;
+  return {
+    pointerRoot: ref.root.name,
+    pointerAddressSpace: ref.root.addressSpace,
+    pointerBaseIndices: ref.indices,
+  };
+}
+
+function localPointerAliasRoot(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): { readonly root: CudaLiteSemanticSymbol; readonly indices: readonly SemanticExpression[] } | undefined {
+  if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
+  const root = scope.get(expression.target.name);
+  if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
+  return { root, indices: [lowerExpression(expression.index, scope)] };
+}
+
+function localPointerAliasIndexExpression(
+  expression: Extract<CudaLiteExpression, { readonly kind: "index" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  if (expression.target.kind !== "identifier") return undefined;
+  const symbol = scope.get(expression.target.name);
+  if (!symbol?.pointerRoot || symbol.pointerAddressSpace !== "local" || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
+  const root = scope.get(symbol.pointerRoot);
+  if (!root) return undefined;
+  const target = semanticSymbolExpression(root, expression.target.span);
+  const index = addIndexExpressions(symbol.pointerBaseIndices[0]!, lowerExpression(expression.index, scope), expression.index.span);
+  return {
+    kind: "index",
+    target,
+    index,
+    ...optionalValueType(symbol.valueType ?? root.valueType),
+    addressSpace: root.addressSpace,
+    span: expression.span,
+  };
+}
+
+function localPointerAliasDerefExpression(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticExpression | undefined {
+  if (expression.kind !== "identifier") return undefined;
+  const symbol = scope.get(expression.name);
+  if (!symbol?.pointerRoot || symbol.pointerAddressSpace !== "local" || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
+  const root = scope.get(symbol.pointerRoot);
+  if (!root) return undefined;
+  return {
+    kind: "index",
+    target: semanticSymbolExpression(root, expression.span),
+    index: symbol.pointerBaseIndices[0]!,
+    ...optionalValueType(symbol.valueType ?? root.valueType),
+    addressSpace: root.addressSpace,
+    span,
+  };
+}
+
+function semanticSymbolExpression(symbol: CudaLiteSemanticSymbol, span: SourceSpan): Extract<SemanticExpression, { readonly kind: "symbol" }> {
+  return {
+    kind: "symbol",
+    name: symbol.name,
+    ...(symbol.valueType === undefined ? {} : { valueType: symbol.valueType }),
+    addressSpace: symbol.addressSpace,
+    span,
+  };
+}
+
+function addIndexExpressions(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  if (isZeroLiteral(right)) return left;
+  if (isZeroLiteral(left)) return right;
+  return {
+    kind: "binary",
+    operator: "+",
+    left,
+    right,
+    ...optionalValueType(expressionValueType(left) ?? expressionValueType(right)),
+    span,
+  };
+}
+
+function isZeroLiteral(expression: SemanticExpression): boolean {
+  return expression.kind === "literal" && expression.literalKind === "number" && expression.value === 0;
+}
+
+function zeroExpression(span: SourceSpan): SemanticExpression {
+  return { kind: "literal", literalKind: "number", value: 0, valueType: "int", span };
 }
 
 function paramAddressSpace(param: CudaLiteParam): SemanticAddressSpace {
