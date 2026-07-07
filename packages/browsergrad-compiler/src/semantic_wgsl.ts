@@ -602,7 +602,7 @@ function semanticWgslFunctionCallSupported(
   const fn = ir.functions.find((item) => item.name === callee);
   if (!fn || !semanticWgslValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
-  if (fn.params.some((param) => param.addressSpace === "local" && !semanticWgslScalarTypeSupported(param.valueType))) return false;
+  if (fn.params.some((param) => param.addressSpace === "local" && !semanticWgslValueTypeSupported(param.valueType))) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
@@ -617,7 +617,7 @@ function semanticWgslFunctionArgSupported(
   if (!param) return false;
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
   if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
-  return semanticWgslExpressionSupported(arg, "scalar", ir);
+  return semanticWgslExpressionSupported(arg, isSemanticWgslFloatVectorType(param.valueType) ? "any" : "scalar", ir);
 }
 
 function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -876,7 +876,7 @@ function semanticWgslSurfaceWriteSupported(
   const target = operation.surface;
   return target.kind === "symbol" &&
     target.addressSpace === "surface" &&
-    semanticWgslExpressionSupported(operation.value, "scalar", ir) &&
+    semanticWgslExpressionSupported(operation.value, "any", ir) &&
     semanticWgslExpressionSupported(operation.xBytes, "scalar", ir) &&
     semanticWgslExpressionSupported(operation.y, "scalar", ir) &&
     (operation.z === undefined || semanticWgslExpressionSupported(operation.z, "scalar", ir));
@@ -1124,10 +1124,39 @@ function emitSemanticSurfaceWrite(
   const xBytes = emitSemanticExpressionAs(operation.xBytes, ir, names, "i32", options, textureSpecializations);
   const y = emitSemanticExpressionAs(operation.y, ir, names, "i32", options, textureSpecializations);
   const z = operation.z ? emitSemanticExpressionAs(operation.z, ir, names, "i32", options, textureSpecializations) : "0";
-  const value = emitSemanticExpressionAs(operation.value, ir, names, "f32", options, textureSpecializations);
+  const valueType = semanticExpressionValueType(operation.value);
+  const value = isSemanticWgslFloatVectorType(valueType)
+    ? emitSemanticExpression(operation.value, ir, names, options, textureSpecializations)
+    : emitSemanticExpressionAs(operation.value, ir, names, "f32", options, textureSpecializations);
   const directSurface = surfaceSymbols(ir).find((surface) => surface.name === surfaceName);
+  if (isSemanticWgslFloatVectorType(valueType)) {
+    return emitSemanticSurfaceVectorWrite(valueType, surfaceName, directSurface, value, xBytes, y, z, names, indentLevel);
+  }
   if (!directSurface) return [`${prefix}${GENERIC_SURFACE_WRITE_HELPER_NAME}(${nameFor(surfaceName, names)}, ${value}, ${xBytes}, ${y}, ${z});`];
   return emitSemanticSurfaceWriteBody(directSurface, value, xBytes, y, z, names, indentLevel);
+}
+
+function emitSemanticSurfaceVectorWrite(
+  valueType: CudaLiteScalarType | undefined,
+  surfaceName: string,
+  directSurface: SemanticKernelIrModule["params"][number] | undefined,
+  value: string,
+  xBytes: string,
+  y: string,
+  z: string,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  const fields = ["x", "y", "z", "w"];
+  return Array.from({ length: cudaVectorLaneCount(valueType) }).flatMap((_, lane) => {
+    const laneValue = `(${value}).${fields[lane]}`;
+    const laneXBytes = `(${xBytes} + ${lane * 4})`;
+    if (!directSurface) {
+      return [`${prefix}${GENERIC_SURFACE_WRITE_HELPER_NAME}(${nameFor(surfaceName, names)}, ${laneValue}, ${laneXBytes}, ${y}, ${z});`];
+    }
+    return emitSemanticSurfaceWriteBody(directSurface, laneValue, laneXBytes, y, z, names, indentLevel);
+  });
 }
 
 function emitSemanticStore(
@@ -1182,7 +1211,7 @@ function emitSemanticFunction(
 function emitSemanticFunctionParamType(param: SemanticKernelIrModule["functions"][number]["params"][number]): string {
   if (param.addressSpace === "texture") return "texture_2d<f32>";
   if (param.addressSpace === "surface") return "u32";
-  return wgslScalar(param.valueType);
+  return wgslValueType(param.valueType);
 }
 
 function emitSemanticAssignmentStatement(
@@ -1697,6 +1726,7 @@ function emitSemanticFunctionArg(
     if (handle === undefined) throw semanticWgslError(`unknown surface '${arg.name}'`, arg.span);
     return `${handle}u`;
   }
+  if (isSemanticWgslFloatVectorType(param?.valueType)) return emitSemanticExpression(arg, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType), options, textureSpecializations);
 }
 

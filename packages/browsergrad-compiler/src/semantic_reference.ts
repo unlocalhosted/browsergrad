@@ -437,7 +437,7 @@ function semanticReferenceFunctionCallSupported(
   const fn = compiled.kernelIr.functions.find((item) => item.name === callee);
   if (!fn || !semanticReferenceValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
-  if (fn.params.some((param) => param.addressSpace === "local" && !semanticReferenceScalarTypeSupported(param.valueType))) return false;
+  if (fn.params.some((param) => param.addressSpace === "local" && !semanticReferenceValueTypeSupported(param.valueType))) return false;
   if (!semanticReferenceFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
@@ -452,7 +452,7 @@ function semanticReferenceFunctionArgSupported(
   if (!param) return false;
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
   if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
-  return semanticReferenceExpressionSupported(arg, "scalar", compiled);
+  return semanticReferenceExpressionSupported(arg, isSemanticReferenceFloatVectorType(param.valueType) ? "any" : "scalar", compiled);
 }
 
 function semanticReferenceFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -524,7 +524,7 @@ function semanticReferenceSurfaceWriteSupported(
   const surface = operation.surface;
   return surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
-    semanticReferenceExpressionSupported(operation.value, "scalar", compiled) &&
+    semanticReferenceExpressionSupported(operation.value, "any", compiled) &&
     semanticReferenceExpressionSupported(operation.xBytes, "scalar", compiled) &&
     semanticReferenceExpressionSupported(operation.y, "scalar", compiled) &&
     (operation.z === undefined || semanticReferenceExpressionSupported(operation.z, "scalar", compiled));
@@ -896,16 +896,38 @@ function execSemanticSurfaceWrite(
   }
   const surface = context.surfaces[operation.surface.name];
   if (!surface) throw semanticReferenceError(`missing surface input '${operation.surface.name}'`, operation.surface.span);
+  const surfaceName = operation.surface.name;
   const xBytes = Math.trunc(evalNumber(operation.xBytes, context));
   const aligned = xBytes % 4 === 0;
   const x = Math.trunc(xBytes / 4);
   const y = Math.trunc(evalNumber(operation.y, context));
   const z = operation.z ? Math.trunc(evalNumber(operation.z, context)) : 0;
+  const value = evalSemanticExpression(operation.value, context);
+  if (Array.isArray(value)) {
+    value.forEach((laneValue, lane) => {
+      writeSemanticSurfaceLane(surface, surfaceName, xBytes + lane * 4, y, z, laneValue, context);
+    });
+    return;
+  }
+  if (typeof value !== "number") throw semanticReferenceError("semantic surface write value is not scalar/vector", operation.value.span);
+  writeSemanticSurfaceLane(surface, surfaceName, aligned ? x * 4 : xBytes, y, z, value, context);
+}
+
+function writeSemanticSurfaceLane(
+  surface: WgslTexture2DInput,
+  surfaceName: string,
+  xBytes: number,
+  y: number,
+  z: number,
+  value: number,
+  context: SemanticReferenceContext,
+): void {
+  const aligned = xBytes % 4 === 0;
+  const x = Math.trunc(xBytes / 4);
   const index = ((z * surface.height) + y) * surface.width + x;
-  const value = evalNumber(operation.value, context);
   const ok = aligned && xBytes >= 0 && x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index >= 0 && index < surface.data.length;
   if (ok) surface.data[index] = value;
-  context.trace.writes.push({ name: operation.surface.name, index, value, ok });
+  context.trace.writes.push({ name: surfaceName, index, value, ok });
 }
 
 function storeValue(
@@ -1422,7 +1444,7 @@ function runSemanticFunction(
       surfaces[param.name] = surface;
       continue;
     }
-    locals.set(param.name, evalNumber(arg, context));
+    locals.set(param.name, isSemanticReferenceFloatVectorType(param.valueType) ? evalSemanticExpression(arg, context) : evalNumber(arg, context));
   }
   const child: SemanticReferenceContext = {
     compiled: context.compiled,

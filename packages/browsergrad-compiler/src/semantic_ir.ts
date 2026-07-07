@@ -248,7 +248,7 @@ const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::sync"]);
 const ATOMIC_CALL_PREFIX = "atomic";
 const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
-const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite"]);
+const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite", "surf3Dwrite"]);
 
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
