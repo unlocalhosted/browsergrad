@@ -367,7 +367,7 @@ function lowerStatement(
     case "asm":
       return { kind: "inline-asm", statement, span: statement.span };
     case "expr": {
-      const aliasAssignment = localPointerAliasAssignment(statement.expression, scope);
+      const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const expression = lowerExpression(statement.expression, scope);
       if (expression.kind === "call" && expression.callee.kind === "symbol" && BARRIER_CALLS.has(expression.callee.name)) {
@@ -952,17 +952,28 @@ function hasLaterLocalPointerAliasAssignment(
   return false;
 }
 
-function localPointerAliasAssignment(
+function localPointerAliasUpdate(
   expression: CudaLiteExpression,
   scope: Map<string, CudaLiteSemanticSymbol>,
 ): boolean {
-  if (expression.kind !== "assignment" || expression.operator !== "=" || expression.left.kind !== "identifier") return false;
+  if (expression.kind !== "assignment" || expression.left.kind !== "identifier") return false;
   const target = scope.get(expression.left.name);
   if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length > 0) return false;
-  const alias = localPointerAliasForInitializer(expression.right, scope);
-  if (!alias || alias.pointerAddressSpace !== "local") return false;
-  scope.set(target.name, { ...target, ...alias });
-  return true;
+  if (expression.operator === "=") {
+    const alias = localPointerAliasForInitializer(expression.right, scope);
+    if (!alias || alias.pointerAddressSpace !== "local") return false;
+    scope.set(target.name, { ...target, ...alias });
+    return true;
+  }
+  if ((expression.operator === "+=" || expression.operator === "-=") && target.pointerRoot && target.pointerAddressSpace === "local" && target.pointerBaseIndices?.length === 1) {
+    const delta = lowerExpression(expression.right, scope);
+    const index = expression.operator === "+="
+      ? addIndexExpressions(target.pointerBaseIndices[0]!, delta, expression.span)
+      : subtractIndexExpressions(target.pointerBaseIndices[0]!, delta, expression.span);
+    scope.set(target.name, { ...target, pointerBaseIndices: [index] });
+    return true;
+  }
+  return false;
 }
 
 function localPointerAliasRoot(
@@ -1032,6 +1043,18 @@ function addIndexExpressions(left: SemanticExpression, right: SemanticExpression
   return {
     kind: "binary",
     operator: "+",
+    left,
+    right,
+    ...optionalValueType(expressionValueType(left) ?? expressionValueType(right)),
+    span,
+  };
+}
+
+function subtractIndexExpressions(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  if (isZeroLiteral(right)) return left;
+  return {
+    kind: "binary",
+    operator: "-",
     left,
     right,
     ...optionalValueType(expressionValueType(left) ?? expressionValueType(right)),
