@@ -113,6 +113,19 @@ export function emitScalarWarpReduceCall(
   return `${helper.name}(${callbacks.emitExpressionAsValueType(valueExpression, valueType)}, 32u, local_id)`;
 }
 
+export function emitWorkgroupPredicateReduceCall(
+  op: "count" | "and" | "or",
+  predicateExpression: CudaLiteExpression | undefined,
+  context: EmitContext,
+  callbacks: WgslCooperativeCallbacks,
+): string {
+  const workgroupSize = context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2];
+  const helperOp: ScalarWarpReduceHelper["op"] = op === "count" ? "sum" : op === "and" ? "min" : "max";
+  const helper = registerScalarWarpReduceHelper(context, helperOp, "uint", workgroupSize);
+  const predicate = predicateExpression ? callbacks.emitTruthinessExpression(predicateExpression) : "false";
+  return `i32(${helper.name}(select(0u, 1u, ${predicate}), ${workgroupSize}u, local_id))`;
+}
+
 export function emitScalarWarpShuffleCall(
   op: ScalarWarpShuffleHelper["op"],
   expression: CudaLiteCallExpression,

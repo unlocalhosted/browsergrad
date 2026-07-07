@@ -4723,6 +4723,34 @@ __global__ void voteKernel(uint *input, uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
   });
 
+  it("lowers CUDA syncthreads predicate collectives through native workgroup memory", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void syncPredicates(int *out) {
+  int tid = threadIdx.x;
+  int count = __syncthreads_count(tid < 3);
+  int all = __syncthreads_and(tid < 4);
+  int any = __syncthreads_or(tid == 2);
+  out[tid * 3] = count;
+  out[tid * 3 + 1] = all;
+  out[tid * 3 + 2] = any;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(12) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_sum_uint_4");
+    expect(compiled.wgsl).toContain("workgroupBarrier()");
+    expect([...result.buffers.out as Int32Array]).toEqual([
+      3, 1, 1,
+      3, 1, 1,
+      3, 1, 1,
+      3, 1, 1,
+    ]);
+  });
+
   it("lowers CUDA activemask to native WebGPU subgroup ballot", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void activeMaskKernel(uint *out) {

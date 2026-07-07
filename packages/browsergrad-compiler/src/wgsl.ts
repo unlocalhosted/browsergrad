@@ -107,6 +107,7 @@ import {
   emitScalarWarpShuffleWorkgroupStorage,
   emitVectorCooperativeReduceHelper,
   emitVectorCooperativeReduceWorkgroupStorage,
+  emitWorkgroupPredicateReduceCall,
   type WgslCooperativeCallbacks,
 } from "./wgsl_cooperative.js";
 import { emitKernelEntryPoint, emitKernelModulePrelude } from "./wgsl_module.js";
@@ -5628,6 +5629,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (name === "subgroupAny" || name === "subgroupAll") return "bool";
     if (name === "subgroupBallot") return "uint";
     if (name === "__activemask") return "uint";
+    if (isSyncthreadsPredicateCall(name)) return "int";
     if (isAddressSpacePredicateCall(name)) return "int";
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
     if (expression.callee.kind === "member" && expression.callee.property === "ballot") return "uint";
@@ -6153,6 +6155,10 @@ function isAddressSpacePredicateCall(name: string | undefined): name is "__isGlo
   return name === "__isGlobal" || name === "__isShared" || name === "__isConstant" || name === "__isLocal";
 }
 
+function isSyncthreadsPredicateCall(name: string | undefined): name is "__syncthreads_count" | "__syncthreads_and" | "__syncthreads_or" {
+  return name === "__syncthreads_count" || name === "__syncthreads_and" || name === "__syncthreads_or";
+}
+
 function emitAddressSpacePredicateCall(
   name: "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal",
   target: CudaLiteExpression,
@@ -6341,6 +6347,12 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "__threadfence_block":
     case "__threadfence_system":
       return "storageBarrier()";
+    case "__syncthreads_count":
+      return emitWorkgroupPredicateReduceCall("count", expression.args[0], context, cooperativeCallbacks(context));
+    case "__syncthreads_and":
+      return emitWorkgroupPredicateReduceCall("and", expression.args[0], context, cooperativeCallbacks(context));
+    case "__syncthreads_or":
+      return emitWorkgroupPredicateReduceCall("or", expression.args[0], context, cooperativeCallbacks(context));
     case "__nanosleep":
     case "__prof_trigger":
       return "0";

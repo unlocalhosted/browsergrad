@@ -2063,6 +2063,16 @@ __global__ void intrinsicPack(half2 *h, float2 *f, float *out) {
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
 }`,
+  syncthreadsPredicates: `
+__global__ void syncthreadsPredicates(int *out) {
+  int tid = threadIdx.x;
+  int count = __syncthreads_count(tid < 3);
+  int all = __syncthreads_and(tid < 4);
+  int any = __syncthreads_or(tid == 2);
+  out[tid * 3] = count;
+  out[tid * 3 + 1] = all;
+  out[tid * 3 + 2] = any;
+}`,
   addressSpacePredicates: `
 __global__ void addressSpacePredicates(float *global, int *out) {
   __shared__ float tile[1];
@@ -12456,6 +12466,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [15, 15, 15, 15] },
+          },
+          {
+            name: "sync:syncthreads-predicates",
+            source: SOURCES.syncthreadsPredicates,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(12),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [3, 1, 1, 3, 1, 1, 3, 1, 1, 3, 1, 1] },
           },
           {
             name: "intrinsics:address-space-predicates",

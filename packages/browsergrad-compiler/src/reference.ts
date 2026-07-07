@@ -1106,13 +1106,15 @@ function applyAssignmentOperator(current: number, value: number, operator: CudaL
 }
 
 function collectiveCall(expression: CudaLiteExpression, context: ThreadContext): CollectiveYield | undefined {
-  if (context.subgroupMode === "scalar") return undefined;
   if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  const syncthreadsPredicate = syncthreadsPredicateCollective(name, expression.args, context);
+  if (syncthreadsPredicate) return syncthreadsPredicate;
+  if (context.subgroupMode === "scalar") return undefined;
   const cooperativeReduce = cooperativeReduceCollective(expression, context);
   if (cooperativeReduce) return cooperativeReduce;
   const shuffle = shuffleCollective(expression, context);
   if (shuffle) return shuffle;
-  const name = expressionName(expression.callee);
   const op = collectiveOpForCall(name);
   if (!op) return undefined;
   if (op === "activemask") {
@@ -1130,6 +1132,30 @@ function collectiveCall(expression: CudaLiteExpression, context: ThreadContext):
     op,
     value: evalNumber(value, context),
     groupKey: `warp:${Math.floor(localLinearRank(context) / 32)}`,
+  };
+}
+
+function syncthreadsPredicateCollective(
+  name: string | undefined,
+  args: readonly CudaLiteExpression[],
+  context: ThreadContext,
+): CollectiveYield | undefined {
+  const op = name === "__syncthreads_count"
+    ? "sum"
+    : name === "__syncthreads_and"
+      ? "all"
+      : name === "__syncthreads_or"
+        ? "any"
+        : undefined;
+  if (!op) return undefined;
+  const predicate = args[0];
+  if (!predicate) return undefined;
+  const value = truthy(evalNumber(predicate, context)) ? 1 : 0;
+  return {
+    kind: "collective",
+    op,
+    value,
+    groupKey: `block:${context.blockIdx.x}:${context.blockIdx.y}:${context.blockIdx.z}`,
   };
 }
 

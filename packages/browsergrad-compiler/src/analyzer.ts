@@ -55,6 +55,9 @@ const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
   ["__syncthreads", [0, 0]],
+  ["__syncthreads_count", [1, 1]],
+  ["__syncthreads_and", [1, 1]],
+  ["__syncthreads_or", [1, 1]],
   ["__syncwarp", [0, 1]],
   ["__threadfence", [0, 0]],
   ["__threadfence_block", [0, 0]],
@@ -2011,6 +2014,11 @@ function validateCallExpression(
       valueType: intrinsic.returnType === "argument1" ? argumentValueType : intrinsic.returnType,
     };
   }
+  if (isSyncthreadsPredicateBuiltin(callName)) {
+    const predicate = expression.args[0];
+    if (predicate) validateScalarOperand(walkExpression(predicate, scope), predicate.span, diagnostics);
+    return { kind: "scalar", valueType: "int" };
+  }
   if (callName === "__activemask") {
     requiredFeatures.add("subgroups");
     return { kind: "scalar", valueType: "uint" };
@@ -3783,6 +3791,10 @@ function isShuffleBuiltin(callName: string): boolean {
 
 function isVoteBuiltin(callName: string): boolean {
   return callName === "__any_sync" || callName === "__all_sync" || callName === "__ballot_sync";
+}
+
+function isSyncthreadsPredicateBuiltin(callName: string): boolean {
+  return callName === "__syncthreads_count" || callName === "__syncthreads_and" || callName === "__syncthreads_or";
 }
 
 function isMaskedWarpReductionBuiltin(callName: string): boolean {
