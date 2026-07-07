@@ -1005,7 +1005,13 @@ function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement
     statement.storage === "local" &&
     statement.pointer &&
     statement.dimensions.length === 0 &&
-    statement.init === undefined;
+    (statement.init === undefined || isNullPointerLiteral(statement.init));
+}
+
+function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
+  if (expression.kind === "number") return expression.value === 0;
+  if (expression.kind === "identifier") return expression.name === "NULL" || expression.name === "nullptr";
+  return expression.kind === "cast" && expression.pointer === true && isNullPointerLiteral(expression.expression);
 }
 
 function hasLaterLocalPointerAliasAssignment(
