@@ -279,7 +279,6 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace === "shared" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length !== 1) return false;
-  if (ref.addressSpace === "device-global" && ref.indices.length > 1) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
 }
 
@@ -994,6 +993,11 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
     return flatIndexForDimensions(symbol.dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
   }
   if (ref.addressSpace === "device-global") {
+    const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === "device-global");
+    if (symbol?.dimensions.length) {
+      if (ref.indices.length !== symbol.dimensions.length) throw semanticReferenceError(`device-global array '${ref.base}' index rank mismatch`, ref.span);
+      return flatIndexForDimensions(symbol.dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
+    }
     if (ref.indices.length === 0) return 0;
     if (ref.indices.length === 1) return Math.trunc(evalNumber(ref.indices[0]!, context));
     throw semanticReferenceError("semantic reference supports scalar/1D device-global indexing", ref.span);

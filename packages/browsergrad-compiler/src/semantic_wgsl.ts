@@ -350,7 +350,6 @@ function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.fields.length > 0) return false;
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length !== 1) return false;
-  if (ref.addressSpace === "device-global" && ref.indices.length > 1) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
 }
@@ -375,7 +374,6 @@ function semanticWgslAtomicSupported(
   if (!operation.target || (operation.target.addressSpace !== "storage" && operation.target.addressSpace !== "device-global")) return false;
   if (!semanticWgslMemoryRefSupported(operation.target)) return false;
   if (operation.target.addressSpace === "storage" && operation.target.indices.length !== 1) return false;
-  if (operation.target.addressSpace === "device-global" && operation.target.indices.length > 1) return false;
   if (operation.target.fields.length > 0) return false;
   if (operation.target.valueType !== "uint" && operation.target.valueType !== "int") return false;
   if (!semanticWgslAtomicTargetRootSupported(operation.target, ir)) {
@@ -437,7 +435,6 @@ function semanticWgslAtomicCallSupported(
   if (!target || (target.addressSpace !== "storage" && target.addressSpace !== "device-global")) return false;
   if (!semanticWgslMemoryRefSupported(target)) return false;
   if (target.addressSpace === "storage" && target.indices.length !== 1) return false;
-  if (target.addressSpace === "device-global" && target.indices.length > 1) return false;
   if (target.fields.length > 0) return false;
   if (target.valueType !== "uint" && target.valueType !== "int") return false;
   if (!semanticWgslAtomicTargetRootSupported(target, ir)) return false;
@@ -1043,9 +1040,9 @@ function emitSemanticMemoryRef(
     return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
   }
   if (ref.addressSpace === "device-global") {
-    if (ref.indices.length > 1) throw semanticWgslError("semantic WGSL supports scalar/1D device globals only", ref.span);
-    const index = ref.indices[0] ? emitSemanticExpressionAs(ref.indices[0], ir, names, "u32") : "0u";
-    return `${nameFor(ref.base, names)}[${index}]`;
+    const symbol = deviceGlobalMemorySymbols(ir).find((item) => item.name === ref.base);
+    if (!symbol) throw semanticWgslError(`unknown device-global memory '${ref.base}'`, ref.span);
+    return `${nameFor(ref.base, names)}[${emitFlatDeviceGlobalIndex(symbol, ref.indices, ir, names, ref.span)}]`;
   }
   if (ref.addressSpace === "local") {
     const local = localMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
@@ -1186,6 +1183,28 @@ function emitFlatSharedIndex(
   if (indices.length === 1) return emitSemanticExpressionAs(indices[0]!, ir, names, "u32");
   if (indices.length !== symbol.dimensions.length) {
     throw semanticWgslError(`shared memory '${symbol.name}' index rank mismatch`, symbol.span);
+  }
+  const terms = indices.map((index, offset) => {
+    const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
+    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
+  });
+  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+}
+
+function emitFlatDeviceGlobalIndex(
+  symbol: SemanticKernelIrModule["memory"][number],
+  indices: readonly SemanticExpression[],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  span: SourceSpan,
+): string {
+  if (symbol.dimensions.length === 0) {
+    if (indices.length > 1) throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
+    return indices[0] ? emitSemanticExpressionAs(indices[0], ir, names, "u32") : "0u";
+  }
+  if (indices.length !== symbol.dimensions.length) {
+    throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
   }
   const terms = indices.map((index, offset) => {
     const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);

@@ -1958,6 +1958,38 @@ __global__ void globals_atomic(uint* out) {
     expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 1u)");
   });
 
+  it("flattens multidimensional __device__ globals through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint gMatrix[2][3];
+
+__global__ void globals_matrix(uint* out) {
+  int row = threadIdx.y;
+  int col = threadIdx.x;
+  gMatrix[row][col] = uint(row * 10 + col);
+  out[row * 3 + col] = gMatrix[row][col];
+}`, { workgroupSize: [3, 2, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [3, 2, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [3, 2, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<storage, read_write> gMatrix: array<u32>;");
+    expect(compiled.wgsl).toContain("* 3u");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1, 2, 10, 11, 12]);
+    expect([...semanticResult.buffers.gMatrix as Uint32Array]).toEqual([0, 1, 2, 10, 11, 12]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 10, 11, 12]);
+    expect([...result.buffers.gMatrix as Uint32Array]).toEqual([0, 1, 2, 10, 11, 12]);
+  });
+
   it("supports read-modify-write atomics through device pointer helper parameters to __device__ globals", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ int g_i[1];
