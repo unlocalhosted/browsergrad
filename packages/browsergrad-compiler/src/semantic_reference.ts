@@ -281,7 +281,7 @@ function unsupportedSemanticReferenceOperation(
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
         if (!semanticReferenceValueTypeSupported(operation.target.valueType)) return operation;
-        if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init)) return operation;
+        if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init, operation.target.valueType, compiled)) return operation;
         if (operation.target.dimensions.length === 0) {
           const vectorTarget = isSemanticReferenceFloatVectorType(operation.target.valueType);
           if (operation.init && !semanticReferenceExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", compiled)) return operation;
@@ -491,11 +491,16 @@ function semanticReferenceValueExpressionSupported(expression: SemanticExpressio
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
 
-function semanticReferenceLocalArrayInitSupported(expression: SemanticExpression): boolean {
+function semanticReferenceLocalArrayInitSupported(
+  expression: SemanticExpression,
+  targetValueType: CudaLiteScalarType | undefined,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  const expected = isSemanticReferenceFloatVectorType(targetValueType) ? "any" : "scalar";
   if (expression.kind === "initializer") {
-    return flattenInitializerExpressions(expression).every((item) => semanticReferenceExpressionSupported(item, "scalar"));
+    return flattenInitializerExpressions(expression).every((item) => semanticReferenceExpressionSupported(item, expected, compiled));
   }
-  return semanticReferenceExpressionSupported(expression, "scalar");
+  return semanticReferenceExpressionSupported(expression, expected, compiled);
 }
 
 function semanticReferenceMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -601,7 +606,7 @@ function semanticReferenceVectorIndexSupported(
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
   const ref = memoryRefFromIndexExpression(expression);
-  if (ref && !(ref.addressSpace === "local" && expression.target.kind === "symbol" && isSemanticReferenceFloatVectorType(expression.target.valueType))) return false;
+  if (ref && !(ref.addressSpace === "local" && isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression.target)))) return false;
   return isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression.target)) &&
     semanticReferenceExpressionSupported(expression.target, "any", compiled) &&
     semanticReferenceExpressionSupported(expression.index, "scalar", compiled);
@@ -1259,23 +1264,31 @@ function semanticDeclareValue(
   context: SemanticReferenceContext,
 ): SemanticValue {
   if (operation.target.dimensions.length > 0) {
-    const values = Array.from({ length: totalElements(operation.target.dimensions) }, () => 0);
+    const vectorTarget = isSemanticReferenceFloatVectorType(operation.target.valueType);
+    const zeroValue = vectorTarget && operation.target.valueType !== undefined ? zeroSemanticVector(operation.target.valueType) : 0;
+    const values: SemanticValue[] = Array.from({ length: totalElements(operation.target.dimensions) }, () =>
+      Array.isArray(zeroValue) ? [...zeroValue] : zeroValue
+    );
     if (operation.init?.kind === "initializer") {
       for (const [index, expression] of flattenInitializerExpressions(operation.init).entries()) {
         if (index >= values.length) break;
-        values[index] = evalNumber(expression, context);
+        values[index] = vectorTarget ? evalSemanticExpression(expression, context) : evalNumber(expression, context);
       }
     } else if (operation.init) {
-      const fillValue = evalNumber(operation.init, context);
-      values.fill(fillValue);
+      const fillValue = vectorTarget ? evalSemanticExpression(operation.init, context) : evalNumber(operation.init, context);
+      for (let index = 0; index < values.length; index++) values[index] = Array.isArray(fillValue) ? [...fillValue] : fillValue;
     }
-    return values;
+    return values as number[];
   }
   if (operation.init) return evalSemanticExpression(operation.init, context);
   if (isSemanticReferenceFloatVectorType(operation.target.valueType)) {
     return Array.from({ length: cudaVectorLaneCount(operation.target.valueType) }, () => 0);
   }
   return 0;
+}
+
+function zeroSemanticVector(valueType: CudaLiteScalarType): number[] {
+  return Array.from({ length: cudaVectorLaneCount(valueType) }, () => 0);
 }
 
 function execSemanticAtomic(
@@ -2947,6 +2960,13 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
   if (!isSemanticReferenceFloatVectorType(ref.valueType)) throw semanticReferenceError("semantic reference vector read requires vector memory type", ref.span);
   const laneCount = cudaVectorLaneCount(ref.valueType);
   const base = flatIndex(ref, context) * semanticReferenceVectorStorageStride(ref, context);
+  if (ref.addressSpace === "local") {
+    const buffer = context.locals.get(ref.base);
+    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    const value = buffer[flatIndex(ref, context)];
+    if (!Array.isArray(value)) throw semanticReferenceError(`local vector array '${ref.base}' contains scalar value`, ref.span);
+    return Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));
+  }
   const buffer = ref.addressSpace === "constant"
     ? context.constants.get(ref.base)
     : ref.addressSpace === "device-global"
@@ -2970,6 +2990,15 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
   }
   if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector write received scalar value", ref.span);
   const laneCount = cudaVectorLaneCount(ref.valueType);
+  if (ref.addressSpace === "local") {
+    const buffer = context.locals.get(ref.base);
+    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    const index = flatIndex(ref, context);
+    if (index >= 0 && index < buffer.length) {
+      (buffer as SemanticValue[])[index] = Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));
+    }
+    return;
+  }
   const base = flatIndex(ref, context) * semanticReferenceVectorStorageStride(ref, context);
   const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);

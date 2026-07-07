@@ -597,7 +597,7 @@ function lowerExpression(
         kind: "index",
         target,
         index: lowerExpression(expression.index, scope),
-        ...optionalValueType(indexedValueType(target)),
+        ...optionalValueType(indexedExpressionValueType(expression, target, scope)),
         addressSpace: expressionAddressSpace(target),
         span: expression.span,
       };
@@ -2136,6 +2136,35 @@ function indexedValueType(target: SemanticExpression): CudaLiteScalarType | unde
   return expressionAddressSpace(target) === "local" && targetType !== undefined && isCudaVectorType(targetType)
     ? cudaVectorScalarType(targetType)
     : targetType;
+}
+
+function indexedExpressionValueType(
+  expression: Extract<CudaLiteExpression, { readonly kind: "index" }>,
+  target: SemanticExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): CudaLiteScalarType | undefined {
+  const vectorArray = vectorArrayIndexInfo(expression, scope);
+  if (vectorArray) {
+    if (vectorArray.indexDepth === vectorArray.dimensions.length) return vectorArray.valueType;
+    if (vectorArray.indexDepth > vectorArray.dimensions.length) return cudaVectorScalarType(vectorArray.valueType);
+  }
+  return indexedValueType(target);
+}
+
+function vectorArrayIndexInfo(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): { readonly valueType: CudaLiteScalarType; readonly dimensions: readonly number[]; readonly indexDepth: number } | undefined {
+  let current = expression;
+  let indexDepth = 0;
+  while (current.kind === "index") {
+    indexDepth += 1;
+    current = current.target;
+  }
+  if (current.kind !== "identifier") return undefined;
+  const symbol = scope.get(current.name);
+  if (!symbol || symbol.dimensions.length === 0 || !isCudaVectorType(symbol.valueType)) return undefined;
+  return { valueType: symbol.valueType, dimensions: symbol.dimensions, indexDepth };
 }
 
 function optionalValueType(valueType: CudaLiteScalarType | undefined): { readonly valueType?: CudaLiteScalarType } {

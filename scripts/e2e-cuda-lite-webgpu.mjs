@@ -1419,6 +1419,12 @@ __global__ void localArrayScalarInit(float *out) {
   float vals[2][2] = 1.5f + (float)tid;
   out[tid] = vals[tid][0] + vals[tid][1];
 }`,
+  localVectorArrayScalarInit: `
+__global__ void localVectorArrayScalarInit(float4 *out) {
+  int tid = threadIdx.x;
+  float4 vals[2] = make_float4(1.0f + (float)tid, 2.0f, 3.0f, 4.0f);
+  out[tid] = make_float4(vals[tid][0], vals[tid].y, vals[tid].z, vals[tid].w);
+}`,
   sharedVectorHelper: `
 __device__ float4 load_shared_float4(float4 *tile, int index) {
   return tile[index];
@@ -11604,6 +11610,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [3, 5] },
+          },
+          {
+            name: "storage:local-vector-array-scalar-init",
+            source: SOURCES.localVectorArrayScalarInit,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 2, 2, 3, 4] },
           },
           {
             name: "storage:shared-vector-helper",

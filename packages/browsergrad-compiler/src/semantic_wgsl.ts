@@ -693,7 +693,7 @@ function unsupportedSemanticWgslOperation(
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
         if (!semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
-        if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init)) return operation;
+        if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init, operation.target.valueType, ir)) return operation;
         if (operation.target.dimensions.length === 0) {
           const vectorTarget = isSemanticWgslFloatVectorType(operation.target.valueType);
           if (operation.init && !semanticWgslExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", ir)) return operation;
@@ -1074,17 +1074,22 @@ function semanticWgslVectorIndexSupported(
   ir?: SemanticKernelIrModule,
 ): boolean {
   const ref = memoryRefFromIndexExpression(expression);
-  if (ref && !(ref.addressSpace === "local" && expression.target.kind === "symbol" && isSemanticWgslFloatVectorType(expression.target.valueType))) return false;
+  if (ref && !(ref.addressSpace === "local" && isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.target, ir)))) return false;
   return isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.target, ir)) &&
     semanticWgslExpressionSupported(expression.target, "any", ir) &&
     semanticWgslExpressionSupported(expression.index, "scalar", ir);
 }
 
-function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
+function semanticWgslLocalArrayInitSupported(
+  expression: SemanticExpression,
+  targetValueType: CudaLiteScalarType | undefined,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const expected = isSemanticWgslFloatVectorType(targetValueType) ? "any" : "scalar";
   if (expression.kind === "initializer") {
-    return flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, "scalar"));
+    return flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, expected, ir));
   }
-  return semanticWgslExpressionSupported(expression, "scalar");
+  return semanticWgslExpressionSupported(expression, expected, ir);
 }
 
 function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1992,6 +1997,9 @@ function emitSemanticStore(
   }
   if (isSemanticWgslFloatVectorType(operation.target.valueType)) {
     if (operation.operator !== "=") throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
+    if (operation.target.addressSpace === "local") {
+      return `${emitSemanticMemoryRef(operation.target, ir, names, options)} = ${emitSemanticExpression(operation.value, ir, names, options, textureSpecializations)}`;
+    }
     return emitSemanticVectorMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
   }
   const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
@@ -2105,10 +2113,13 @@ function emitLocalArrayInit(
   if (!operation.init) return [];
   const prefix = "  ".repeat(indentLevel);
   if (operation.init.kind !== "initializer") {
+    const value = isSemanticWgslFloatVectorType(operation.target.valueType)
+      ? emitSemanticExpression(operation.init, ir, names, options, textureSpecializations)
+      : emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
     return emitLocalArrayFill(
       nameFor(operation.target.name, names),
       operation.target.dimensions,
-      emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations),
+      value,
       indentLevel,
     );
   }
@@ -2118,7 +2129,10 @@ function emitLocalArrayInit(
       const indices = flatIndicesForDimensions(operation.target.dimensions, index)
         .map((item) => `[${item}u]`)
         .join("");
-      return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations)};`;
+      const emittedValue = isSemanticWgslFloatVectorType(operation.target.valueType)
+        ? emitSemanticExpression(value, ir, names, options, textureSpecializations)
+        : emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
+      return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emittedValue};`;
     });
 }
 
@@ -2801,6 +2815,9 @@ function emitSemanticExpression(
       }
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) {
+        if (isSemanticWgslFloatVectorType(ref.valueType) && ref.addressSpace === "local") {
+          return emitSemanticMemoryRef(ref, ir, names, options);
+        }
         if (isSemanticWgslFloatVectorType(ref.valueType)) return emitSemanticVectorMemoryRead(ref, ir, names, options);
         const memoryRef = emitSemanticMemoryRef(ref, ir, names, options);
         if (
@@ -4198,20 +4215,23 @@ function emitSemanticMember(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  if (expression.object.kind !== "symbol") throw semanticWgslError("semantic WGSL supports builtin vector members only", expression.span);
   const axisIndex = expression.property === "x" ? 0 : expression.property === "y" ? 1 : 2;
-  switch (expression.object.name) {
-    case "threadIdx":
-      return ir.workgroupSize[axisIndex] === 1 ? "0u" : `local_id.${expression.property}`;
-    case "blockIdx":
-      return `workgroup_id.${expression.property}`;
-    case "blockDim":
-      return `${ir.workgroupSize[axisIndex]}u`;
-    case "gridDim":
-      return `num_workgroups.${expression.property}`;
-    default:
-      return `${emitSemanticExpression(expression.object, ir, names, options)}.${semanticVectorFieldName(expression)}`;
+  if (expression.object.kind === "symbol") {
+    switch (expression.object.name) {
+      case "threadIdx":
+        return ir.workgroupSize[axisIndex] === 1 ? "0u" : `local_id.${expression.property}`;
+      case "blockIdx":
+        return `workgroup_id.${expression.property}`;
+      case "blockDim":
+        return `${ir.workgroupSize[axisIndex]}u`;
+      case "gridDim":
+        return `num_workgroups.${expression.property}`;
+    }
   }
+  if (!isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.object, ir))) {
+    throw semanticWgslError("semantic WGSL supports builtin vector members only", expression.span);
+  }
+  return `${emitSemanticExpression(expression.object, ir, names, options)}.${semanticVectorFieldName(expression)}`;
 }
 
 function semanticVectorFieldName(expression: Extract<SemanticExpression, { readonly kind: "member" }>): string {
@@ -4506,7 +4526,7 @@ function localArraySymbol(ir: SemanticKernelIrModule, name: string): SemanticKer
 function emitLocalArrayType(symbol: SemanticKernelIrModule["memory"][number]): string {
   return symbol.dimensions.reduceRight<string>(
     (element, dimension) => `array<${element}, ${Math.max(1, dimension)}>`,
-    wgslScalar(symbol.valueType),
+    wgslValueType(symbol.valueType),
   );
 }
 

@@ -2549,17 +2549,32 @@ __global__ void localScalarInit(float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([3, 5]);
   });
 
-  it("rejects vector local-array scalar-fill initializers until vector-lane fill is modeled", () => {
-    const analysis = analyzeCudaLite(parseCudaLite(`
+  it("lowers vector local-array scalar-fill initializers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
 __global__ void vectorLocalArrayInit(float4* out) {
-  float4 vals[2] = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
-  out[0] = vals[0];
+  int tid = threadIdx.x;
+  float4 vals[2] = make_float4(1.0f + (float)tid, 2.0f, 3.0f, 4.0f);
+  out[tid] = make_float4(vals[tid][0], vals[tid].y, vals[tid].z, vals[tid].w);
 }
-`));
+`, { workgroupSize: [2, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
 
-    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-local-array-init",
-    }));
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-array-init");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var vals: array<vec4<f32>, 2>;");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
   });
 
   it("fills fixed local arrays through semantic reference and WGSL", () => {

@@ -1300,10 +1300,12 @@ function validateArrayInitializer(
 ): void {
   if (!statement.init) return;
   if (statement.init.kind !== "initializer") {
+    const info = walkExpression(statement.init, scope);
     if (isCudaVectorType(statement.valueType)) {
-      diagnostics.push(error("unsupported-local-array-init", "CUDA vector local array scalar-fill initializers require vector-lane fill lowering", statement.init.span));
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", "CUDA vector local array scalar-fill initializer expects a vector value", statement.init.span));
+      }
     } else {
-      const info = walkExpression(statement.init, scope);
       validateScalarOperand(info, statement.init.span, diagnostics);
     }
     return;
