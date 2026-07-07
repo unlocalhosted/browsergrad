@@ -17156,17 +17156,32 @@ __global__ void atomic_system_aliases(int* x, int* out) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: new Int32Array([4, 7, 1, 9]),
+          out: new Int32Array(11),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect([...result.buffers.x as Int32Array]).toEqual([3, 13, 1, 11]);
     expect([...result.buffers.out as Int32Array]).toEqual([4, 6, 5, 5, 7, 6, 14, 1, 2, 9, 12]);
-    expect(compiled.wgsl).toContain("atomicAdd(&x[0], 2)");
-    expect(compiled.wgsl).toContain("atomicSub(&x[0], 1)");
-    expect(compiled.wgsl).toContain("atomicMax(&x[0], 5)");
-    expect(compiled.wgsl).toContain("atomicMin(&x[0], 3)");
-    expect(compiled.wgsl).toContain("out[7] = i32(bg_atomicInc_storage_i32(&x[2], u32(2)))");
-    expect(compiled.wgsl).toContain("out[8] = i32(bg_atomicDec_storage_i32(&x[2], u32(2)))");
-    expect(compiled.wgsl).toContain("atomicExchange(&x[3], 12)");
-    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[3], 12, 11).old_value");
+    expect([...semanticResult.buffers.x as Int32Array]).toEqual([3, 13, 1, 11]);
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([4, 6, 5, 5, 7, 6, 14, 1, 2, 9, 12]);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("out[0u] = atomicAdd(&x[0u], 2);");
+    expect(compiled.wgsl).toContain("out[1u] = atomicSub(&x[0u], 1);");
+    expect(compiled.wgsl).toContain("out[2u] = atomicMax(&x[0u], 5);");
+    expect(compiled.wgsl).toContain("out[3u] = atomicMin(&x[0u], 3);");
+    expect(compiled.wgsl).toContain("out[7u] = i32(bg_atomicInc_storage_i32(&x[2u], 2u));");
+    expect(compiled.wgsl).toContain("out[8u] = i32(bg_atomicDec_storage_i32(&x[2u], 2u));");
+    expect(compiled.wgsl).toContain("out[9u] = atomicExchange(&x[3u], 12);");
+    expect(compiled.wgsl).toContain("out[10u] = atomicCompareExchangeWeak(&x[3u], 12, 11).old_value;");
   });
 
   it("supports CUDA atomic inc/dec and atomics through pointer aliases", () => {
@@ -17232,11 +17247,59 @@ __global__ void shared_counter(uint* out) {
       { buffers: { out: new Uint32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 0]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 0]);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("var<workgroup> counter: array<atomic<u32>, 1>;");
-    expect(compiled.wgsl).toContain("bg_atomicInc_workgroup_u32(&counter[0], u32(1))");
-    expect(compiled.wgsl).toContain("bg_atomicDec_workgroup_u32(&counter[0], u32(1))");
+    expect(compiled.wgsl).toContain("out[0u] = bg_atomicInc_workgroup_u32(&counter[0u], 1u);");
+    expect(compiled.wgsl).toContain("out[1u] = bg_atomicDec_workgroup_u32(&counter[0u], 1u);");
+  });
+
+  it("lowers CUDA atomic inc/dec on storage buffers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_inc_dec_storage(uint* data, uint* out) {
+  if (threadIdx.x == 0) {
+    out[0] = atomicInc(&data[0], 2u);
+    out[1] = atomicDec(&data[0], 2u);
+    out[2] = data[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        data: new Uint32Array([1]),
+        out: new Uint32Array(3),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          data: new Uint32Array([1]),
+          out: new Uint32Array(3),
+        },
+      },
+      launch,
+    );
+
+    expect([...result.buffers.data as Uint32Array]).toEqual([1]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 1]);
+    expect([...semanticResult.buffers.data as Uint32Array]).toEqual([1]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 2, 1]);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("out[0u] = bg_atomicInc_storage_u32(&data[0u], 2u);");
+    expect(compiled.wgsl).toContain("out[1u] = bg_atomicDec_storage_u32(&data[0u], 2u);");
   });
 
   it("supports CUDA atomic inc/dec through helper pointer params", () => {

@@ -28,7 +28,7 @@ import type {
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | Vector3 | number[];
-type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas";
+type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas" | "inc" | "dec";
 type SemanticControl = "fallthrough" | "return" | "break" | "continue";
 
 const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
@@ -50,6 +50,10 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
   ["atomicExch_system", "exchange"],
   ["atomicCAS", "cas"],
   ["atomicCAS_system", "cas"],
+  ["atomicInc", "inc"],
+  ["atomicInc_system", "inc"],
+  ["atomicDec", "dec"],
+  ["atomicDec_system", "dec"],
 ]);
 const SEMANTIC_MATH_CALLS = new Set([
   "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
@@ -1270,6 +1274,8 @@ function semanticAtomicValue(
     case "or": return Math.trunc(oldValue) | Math.trunc(value);
     case "xor": return Math.trunc(oldValue) ^ Math.trunc(value);
     case "exchange": return value;
+    case "inc": return oldValue >= value ? 0 : oldValue + 1;
+    case "dec": return oldValue === 0 || oldValue > value ? value : oldValue - 1;
     case "cas": {
       const replacement = operation.args[2];
       const callee = operation.kind === "atomic"
