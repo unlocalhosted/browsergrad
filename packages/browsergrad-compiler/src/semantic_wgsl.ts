@@ -737,6 +737,7 @@ function emitSemanticOperation(
     case "call":
       return emitSemanticCall(operation, ir, names, indentLevel);
     case "expression":
+      if (isSemanticNoopExpression(operation.expression)) return [];
       if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names)};`];
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names)};`];
     case "branch": {
@@ -1019,6 +1020,7 @@ function emitSemanticLoopUpdate(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
 ): string {
+  if (isSemanticNoopExpression(update)) return "";
   return update.kind === "assignment"
     ? emitSemanticAssignmentStatement(update, ir, names)
     : emitSemanticExpression(update, ir, names);
@@ -1035,8 +1037,12 @@ function emitSemanticLoopInit(
     const value = init.init ? emitSemanticExpressionAs(init.init, ir, names, wgslValueScalar(init.target.valueType)) : zeroForType(type);
     return `var ${nameFor(init.target.name, names)}: ${type} = ${value}`;
   }
-  if (init.kind === "expression") return emitSemanticExpression(init.expression, ir, names);
+  if (init.kind === "expression") return isSemanticNoopExpression(init.expression) ? "" : emitSemanticExpression(init.expression, ir, names);
   throw semanticWgslError(`semantic WGSL does not support ${init.kind} loop initializer`, init.span);
+}
+
+function isSemanticNoopExpression(expression: SemanticExpression): boolean {
+  return expression.kind === "literal" && expression.literalKind === "number" && expression.value === 0;
 }
 
 function emitSemanticExpression(

@@ -362,7 +362,7 @@ function lowerStatement(
     case "var": {
       const target = symbolForVar(statement, scope);
       scope.set(target.name, target);
-      if (target.pointerRoot && target.pointerAddressSpace === "local" && target.pointerBaseIndices) {
+      if (target.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices) {
         return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       }
       return {
@@ -467,7 +467,7 @@ function lowerStatement(
       {
         const loopScope = new Map(scope);
         const init = statement.init?.kind === "var"
-          ? lowerStatement(statement.init, loopScope)
+          ? lowerForInitStatement(statement.init, loopScope)
           : statement.init
           ? lowerExpression(statement.init, loopScope)
           : undefined;
@@ -651,6 +651,35 @@ function lowerExpression(
       return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
     }
   }
+}
+
+function lowerForInitStatement(
+  statement: Extract<CudaLiteStatement, { readonly kind: "var" }>,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): SemanticKernelIrOperation {
+  const target = symbolForVar(statement, scope);
+  if (target.pointerRoot && target.pointerAddressSpace === "storage") {
+    const legacyTarget = semanticSymbolWithoutPointerAlias(target);
+    scope.set(legacyTarget.name, legacyTarget);
+    return {
+      kind: "declare",
+      target: legacyTarget,
+      ...(statement.init === undefined ? {} : { init: lowerExpression(statement.init, scope) }),
+      span: statement.span,
+    };
+  }
+  return lowerStatement(statement, scope);
+}
+
+function semanticSymbolWithoutPointerAlias(symbol: CudaLiteSemanticSymbol): CudaLiteSemanticSymbol {
+  const {
+    pointerRoot: _pointerRoot,
+    pointerAddressSpace: _pointerAddressSpace,
+    pointerBaseIndices: _pointerBaseIndices,
+    pointerValid: _pointerValid,
+    ...rest
+  } = symbol;
+  return rest;
 }
 
 function lowerDeviceLaunch(
@@ -920,7 +949,7 @@ function localPointerAliasForInitializer(
     const consequentNull = isNullPointerLiteral(expression.consequent);
     const alternateNull = isNullPointerLiteral(expression.alternate);
     const nonNull = consequent ?? alternate;
-    if ((consequentNull || alternateNull) && nonNull?.pointerRoot && nonNull.pointerAddressSpace === "local" && nonNull.pointerBaseIndices?.length === 1) {
+    if ((consequentNull || alternateNull) && nonNull?.pointerRoot && semanticPointerAliasAddressSpaceSupported(nonNull.pointerAddressSpace) && nonNull.pointerBaseIndices?.length === 1) {
       return {
         pointerRoot: nonNull.pointerRoot,
         pointerAddressSpace: nonNull.pointerAddressSpace,
@@ -956,7 +985,7 @@ function localPointerAliasForInitializer(
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     const left = localPointerAliasForInitializer(expression.left, scope);
-    if (left?.pointerRoot && left.pointerAddressSpace === "local" && left.pointerBaseIndices?.length === 1) {
+    if (left?.pointerRoot && semanticPointerAliasAddressSpaceSupported(left.pointerAddressSpace) && left.pointerBaseIndices?.length === 1) {
       const right = lowerExpression(expression.right, scope);
       return {
         pointerRoot: left.pointerRoot,
@@ -968,7 +997,7 @@ function localPointerAliasForInitializer(
     }
     if (expression.operator === "+") {
       const right = localPointerAliasForInitializer(expression.right, scope);
-      if (right?.pointerRoot && right.pointerAddressSpace === "local" && right.pointerBaseIndices?.length === 1) {
+      if (right?.pointerRoot && semanticPointerAliasAddressSpaceSupported(right.pointerAddressSpace) && right.pointerBaseIndices?.length === 1) {
         const leftOffset = lowerExpression(expression.left, scope);
         return {
           pointerRoot: right.pointerRoot,
@@ -980,11 +1009,18 @@ function localPointerAliasForInitializer(
   }
   if (expression.kind === "identifier") {
     const root = scope.get(expression.name);
-    if (root?.pointerRoot && root.pointerAddressSpace === "local" && root.pointerBaseIndices?.length === 1) {
+    if (root?.pointerRoot && semanticPointerAliasAddressSpaceSupported(root.pointerAddressSpace) && root.pointerBaseIndices?.length === 1) {
       return {
         pointerRoot: root.pointerRoot,
         pointerAddressSpace: root.pointerAddressSpace,
         pointerBaseIndices: root.pointerBaseIndices,
+      };
+    }
+    if (root?.kind === "param" && root.pointer && root.addressSpace === "storage") {
+      return {
+        pointerRoot: root.name,
+        pointerAddressSpace: root.addressSpace,
+        pointerBaseIndices: [zeroExpression(expression.span)],
       };
     }
     if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
@@ -1023,6 +1059,10 @@ function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement
     (statement.init === undefined || isNullPointerLiteral(statement.init));
 }
 
+function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "storage" {
+  return addressSpace === "local" || addressSpace === "storage";
+}
+
 function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
   if (expression.kind === "number") return expression.value === 0;
   if (expression.kind === "identifier") return expression.name === "NULL" || expression.name === "nullptr";
@@ -1039,7 +1079,7 @@ function hasLaterLocalPointerAliasAssignment(
     const expression = statement.expression;
     if (expression.kind !== "assignment" || expression.operator !== "=" || expression.left.kind !== "identifier" || expression.left.name !== name) continue;
     const alias = localPointerAliasForInitializer(expression.right, scope);
-    return alias !== undefined && alias.pointerAddressSpace === "local";
+    return alias !== undefined && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace);
   }
   return false;
 }
@@ -1050,7 +1090,7 @@ function localPointerAliasUpdate(
 ): boolean {
   if (expression.kind === "update" && expression.argument.kind === "identifier") {
     const target = scope.get(expression.argument.name);
-    if (!target?.pointerRoot || target.pointerAddressSpace !== "local" || target.pointerBaseIndices?.length !== 1) return false;
+    if (!target?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) || target.pointerBaseIndices?.length !== 1) return false;
     const one = { kind: "literal" as const, literalKind: "number" as const, value: 1, valueType: "int" as const, span: expression.span };
     const index = expression.operator === "++"
       ? addIndexExpressions(target.pointerBaseIndices[0]!, one, expression.span)
@@ -1063,11 +1103,11 @@ function localPointerAliasUpdate(
   if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length > 0) return false;
   if (expression.operator === "=") {
     const alias = localPointerAliasForInitializer(expression.right, scope);
-    if (!alias || alias.pointerAddressSpace !== "local") return false;
+    if (!alias || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace)) return false;
     scope.set(target.name, { ...target, ...alias });
     return true;
   }
-  if ((expression.operator === "+=" || expression.operator === "-=") && target.pointerRoot && target.pointerAddressSpace === "local" && target.pointerBaseIndices?.length === 1) {
+  if ((expression.operator === "+=" || expression.operator === "-=") && target.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices?.length === 1) {
     const delta = lowerExpression(expression.right, scope);
     const index = expression.operator === "+="
       ? addIndexExpressions(target.pointerBaseIndices[0]!, delta, expression.span)
@@ -1097,7 +1137,7 @@ function mergeBlockLocalPointerAliases(
     parent.set(name, {
       ...current,
       pointerRoot: next.pointerRoot,
-      pointerAddressSpace: "local",
+      pointerAddressSpace: next.pointerAddressSpace,
       pointerBaseIndices: next.pointerBaseIndices,
     });
   }
@@ -1130,7 +1170,7 @@ function mergeBranchLocalPointerAliases(
     parent.set(name, {
       ...current,
       pointerRoot: left.pointerRoot,
-      pointerAddressSpace: "local",
+      pointerAddressSpace: left.pointerAddressSpace,
       pointerBaseIndices: [{
         kind: "conditional",
         condition,
@@ -1193,7 +1233,7 @@ function localPointerAliasIndexExpression(
 ): SemanticExpression | undefined {
   if (expression.target.kind !== "identifier") return undefined;
   const symbol = scope.get(expression.target.name);
-  if (!symbol?.pointerRoot || symbol.pointerAddressSpace !== "local" || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
+  if (!symbol?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(symbol.pointerAddressSpace) || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
   const root = scope.get(symbol.pointerRoot);
   if (!root) return undefined;
   const target = semanticSymbolExpression(root, expression.target.span);
@@ -1215,7 +1255,7 @@ function localPointerAliasDerefExpression(
 ): SemanticExpression | undefined {
   if (expression.kind !== "identifier") return undefined;
   const symbol = scope.get(expression.name);
-  if (!symbol?.pointerRoot || symbol.pointerAddressSpace !== "local" || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
+  if (!symbol?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(symbol.pointerAddressSpace) || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
   const root = scope.get(symbol.pointerRoot);
   if (!root) return undefined;
   return {
@@ -1273,7 +1313,7 @@ function localPointerAliasScalarIndex(
 ): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression } | undefined {
   if (expression.kind !== "identifier") return undefined;
   const symbol = scope.get(expression.name);
-  if (!symbol?.pointerRoot || symbol.pointerAddressSpace !== "local" || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
+  if (!symbol?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(symbol.pointerAddressSpace) || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
   return { root: symbol.pointerRoot, index: symbol.pointerBaseIndices[0]!, ...(symbol.pointerValid === undefined ? {} : { valid: symbol.pointerValid }) };
 }
 

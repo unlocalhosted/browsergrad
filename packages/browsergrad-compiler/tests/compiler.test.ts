@@ -614,6 +614,37 @@ __global__ void pointerOffset(float* out, const float* input, int stride) {
     expect([...result.buffers.out as Float32Array]).toEqual([0, 3, 0, 30]);
   });
 
+  it("lowers local storage pointer aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localStoragePointerAlias(float* out, const float* input, int stride) {
+  int row = threadIdx.x;
+  float* outRow = out + row * stride;
+  const float* inRow = input + row * stride;
+  outRow[1] = inRow[0] + inRow[1];
+}
+`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(4),
+        input: new Float32Array([1, 2, 10, 20]),
+      },
+      scalars: { stride: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var outRow:");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_f32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([0, 3, 0, 30]);
+    expect([...result.buffers.out as Float32Array]).toEqual([0, 3, 0, 30]);
+  });
+
   it("emits integer read-modify-write atomic statements from semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicRmw(int* x, int* out) {
@@ -1768,9 +1799,12 @@ __global__ void aliased_rows(float* out, const float* inp, int rows, int cols) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 5, 6, 7]);
-    expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32");
-    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
-    expect(compiled.wgsl).toContain("bg_ptr_write_f32(0u, ((0u + u32((0 + (row * bg_uniforms.cols)))) + u32(col))");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_f32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toContain("out[u32(((row * bg_uniforms.cols) + col))]");
   });
 
   it("lowers mutable local pointer aliases declared in for initializers", () => {
@@ -3605,8 +3639,10 @@ __global__ void mutable_local_ptr(const float* a, float* b, float* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     expect([...mutableLocalPointerResult.buffers.out as Float32Array]).toEqual([2, 5]);
-    expect(mutableLocalPointer.wgsl).toMatch(/var p_\d+_buffer: u32/u);
-    expect(mutableLocalPointer.wgsl).toMatch(/p_\d+_buffer = 1u;/u);
+    expect(canRunCompiledKernelSemanticReference(mutableLocalPointer)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(mutableLocalPointer.kernelIr)).toBe(true);
+    expect(mutableLocalPointer.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(mutableLocalPointer.wgsl).not.toMatch(/var p_\d+_buffer: u32/u);
 
     const alignedPointer = compileCudaLiteKernel(`
 __global__ void aligned(float* x, float* out) {
@@ -7844,8 +7880,11 @@ __global__ void localPointerAliases(float *out, const float *left, const float *
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32");
-    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_f32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
     expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33, 44]);
   });
 
@@ -13028,7 +13067,9 @@ __global__ void kernel(unsigned int *out, unsigned int pitch) {
   row[i] = 7;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * bg_uniforms.pitch)");
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("(workgroup_id.x * bg_uniforms.pitch)");
     expect(compiled.wgsl).toContain("+ u32(i)");
   });
 
