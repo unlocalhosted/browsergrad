@@ -9277,8 +9277,9 @@ __global__ void surfaceRead3d(cudaSurfaceObject_t surf, float *out) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([7, 8]);
-    expect(compiled.wgsl).toContain("bg_surf2dread_surf(0, 1, 1)");
-    expect(compiled.wgsl).toContain("bg_surf2dread_surf((1 * 4), 1, 1)");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bg_sem_surf2dread_surf(0, 1, 1)");
+    expect(compiled.wgsl).toContain("bg_sem_surf2dread_surf((1 * 4), 1, 1)");
 
     const helperCompiled = compileCudaLiteKernel(`
 __device__ float read_z(cudaSurfaceObject_t surfaceArg, int row, int z) {
@@ -9288,7 +9289,8 @@ __device__ float read_z(cudaSurfaceObject_t surfaceArg, int row, int z) {
 __global__ void surfaceRead3d(cudaSurfaceObject_t surf, float *out) {
   out[0] = read_z(surf, 1, 1);
 }`, { workgroupSize: [1, 1, 1] });
-    expect(helperCompiled.wgsl).toContain("bg_surf2dread(surfaceArg, (1 * 4), row, z)");
+    expect(helperCompiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(helperCompiled.wgsl).toContain("bg_sem_surf2dread(surfaceArg, (1 * 4), row, z)");
   });
 
   it("lowers layered and 3D vector surface reads lane-wise through z-linearized storage", () => {
@@ -9315,10 +9317,22 @@ __global__ void surfaceVectorLayeredRead(cudaSurfaceObject_t surf, float *out) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(4) },
+        surfaces: { surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...result.buffers.out as Float32Array]).toEqual([10, 12, 14, 16]);
-    expect(compiled.wgsl).toContain("layeredPointer = select(vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1))), vec4<f32>(0.0), 0 < 0);");
-    expect(compiled.wgsl).toContain("var layeredReturn: vec4<f32> = select(vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1))), vec4<f32>(0.0), 0 < 0);");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([10, 12, 14, 16]);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("layeredPointer = vec4<f32>(f32(bg_sem_surf2dread_surf((0 + 0), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 4), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 8), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 12), 0, 1)))");
+    expect(compiled.wgsl).toContain("var layeredReturn: vec4<f32> = vec4<f32>(f32(bg_sem_surf2dread_surf((0 + 0), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 4), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 8), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 12), 0, 1)))");
 
     const helperCompiled = compileCudaLiteKernel(`
 __device__ float4 read_layer_vec(cudaSurfaceObject_t surfaceArg, int row, int layer) {
@@ -9334,8 +9348,9 @@ __global__ void surfaceVectorLayeredRead(cudaSurfaceObject_t surf, float *out) {
   float4 zReturn = read_z_vec(surf, 0, 1);
   out[0] = layeredReturn.x + zReturn.x;
 }`, { workgroupSize: [1, 1, 1] });
-    expect(helperCompiled.wgsl).toContain("return select(vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, layer))), vec4<f32>(0.0), 0 < 0);");
-    expect(helperCompiled.wgsl).toContain("return select(vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, z))), vec4<f32>(0.0), 0 < 0);");
+    expect(helperCompiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(helperCompiled.wgsl).toContain("return vec4<f32>(f32(bg_sem_surf2dread(surfaceArg, (0 + 0), row, layer)), f32(bg_sem_surf2dread(surfaceArg, (0 + 4), row, layer)), f32(bg_sem_surf2dread(surfaceArg, (0 + 8), row, layer)), f32(bg_sem_surf2dread(surfaceArg, (0 + 12), row, layer)))");
+    expect(helperCompiled.wgsl).toContain("return vec4<f32>(f32(bg_sem_surf2dread(surfaceArg, (0 + 0), row, z)), f32(bg_sem_surf2dread(surfaceArg, (0 + 4), row, z)), f32(bg_sem_surf2dread(surfaceArg, (0 + 8), row, z)), f32(bg_sem_surf2dread(surfaceArg, (0 + 12), row, z)))");
   });
 
   it("passes surface object params through device helpers as dispatch handles", () => {
@@ -9414,9 +9429,20 @@ __global__ void surfaceVectorRead(cudaSurfaceObject_t surf, float *out) {
   out[2] = value.z;
   out[3] = value.w;
 }`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(4) },
+      surfaces: { surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
-    expect(compiled.wgsl).toContain("value = select(vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 0)), f32(bg_surf2dread_surf((0 + 4), 0, 0)), f32(bg_surf2dread_surf((0 + 8), 0, 0)), f32(bg_surf2dread_surf((0 + 12), 0, 0))), vec4<f32>(0.0), 0 < 0);");
-    expect(compiled.wgsl).not.toContain("value = vec4<f32>(bg_surf2dread_surf(0, 0, 0));");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("value = vec4<f32>(f32(bg_sem_surf2dread_surf((0 + 0), 0, 0)), f32(bg_sem_surf2dread_surf((0 + 4), 0, 0)), f32(bg_sem_surf2dread_surf((0 + 8), 0, 0)), f32(bg_sem_surf2dread_surf((0 + 12), 0, 0)))");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
   it("preserves templated vector surf2Dread return type in device helpers", () => {
@@ -9429,9 +9455,21 @@ __global__ void surfaceHelperVectorRead(cudaSurfaceObject_t surf, float *out) {
   float4 value = read_surface_vec_return(surf);
   out[0] = value.x;
 }`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      surfaces: { surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
-    expect(compiled.wgsl).toContain("return select(vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 4), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 8), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 12), 0, 0))), vec4<f32>(0.0), 0 < 0);");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("return vec4<f32>(f32(bg_sem_surf2dread(surfaceArg, (0 + 0), 0, 0)), f32(bg_sem_surf2dread(surfaceArg, (0 + 4), 0, 0)), f32(bg_sem_surf2dread(surfaceArg, (0 + 8), 0, 0)), f32(bg_sem_surf2dread(surfaceArg, (0 + 12), 0, 0)))");
     expect(compiled.wgsl).not.toContain("return f32(vec4<f32>");
+    expect([...result.buffers.out as Float32Array]).toEqual([1]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1]);
   });
 
   it("lowers f32 atomic max helpers through CAS semantics", () => {

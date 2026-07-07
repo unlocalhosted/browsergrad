@@ -202,7 +202,6 @@ function unsupportedSemanticReferenceOperation(
         if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init)) return operation;
         if (operation.target.dimensions.length === 0) {
           const vectorTarget = isSemanticReferenceFloatVectorType(operation.target.valueType);
-          if (vectorTarget && !operation.init) return operation;
           if (operation.init && !semanticReferenceExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", compiled)) return operation;
         }
         break;
@@ -418,7 +417,10 @@ function semanticReferenceSurfaceReadSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   const surface = expression.surface;
-  return (expression.valueType === "float" || expression.valueType === "uint" || expression.valueType === "int") &&
+  return (expression.valueType === "float" ||
+      expression.valueType === "uint" ||
+      expression.valueType === "int" ||
+      isSemanticReferenceFloatVectorType(expression.valueType)) &&
     surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
     semanticReferenceExpressionSupported(expression.xBytes, "scalar", compiled) &&
@@ -532,7 +534,7 @@ function semanticReferenceSurfaceReadStoreSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return semanticReferenceSurfaceReadTargetName(operation.target) !== undefined &&
+  return semanticReferenceSurfaceReadTarget(operation.target) !== undefined &&
     semanticReferenceSurfaceReadSupported(
       {
         kind: "surface-read",
@@ -847,8 +849,8 @@ function execSemanticSurfaceReadStore(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
   context: SemanticReferenceContext,
 ): void {
-  const targetName = semanticReferenceSurfaceReadTargetName(operation.target);
-  if (!targetName) throw semanticReferenceError("semantic reference supports only local scalar surf2Dread targets", operation.span);
+  const target = semanticReferenceSurfaceReadTarget(operation.target);
+  if (!target) throw semanticReferenceError("semantic reference supports only local scalar/vector surf2Dread targets", operation.span);
   const value = evalSemanticSurfaceRead(
     {
       kind: "surface-read",
@@ -857,20 +859,32 @@ function execSemanticSurfaceReadStore(
       xBytes: operation.xBytes,
       y: operation.y,
       ...(operation.z === undefined ? {} : { z: operation.z }),
-      valueType: operation.valueType === "uint" || operation.valueType === "int" ? operation.valueType : "float",
+      valueType: semanticSurfaceReadValueType(operation.valueType ?? target.valueType),
       span: operation.span,
     },
     context,
   );
-  context.locals.set(targetName, value);
+  context.locals.set(target.name, value);
 }
 
-function semanticReferenceSurfaceReadTargetName(expression: SemanticExpression): string | undefined {
+function semanticReferenceSurfaceReadTarget(expression: SemanticExpression): { readonly name: string; readonly valueType?: CudaLiteScalarType } | undefined {
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "symbol" && expression.argument.addressSpace === "local") {
-    return expression.argument.name;
+    return {
+      name: expression.argument.name,
+      ...(expression.argument.valueType === undefined ? {} : { valueType: expression.argument.valueType }),
+    };
   }
-  if (expression.kind === "symbol" && expression.addressSpace === "local") return expression.name;
+  if (expression.kind === "symbol" && expression.addressSpace === "local") {
+    return {
+      name: expression.name,
+      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    };
+  }
   return undefined;
+}
+
+function semanticSurfaceReadValueType(valueType: CudaLiteScalarType | undefined): Exclude<CudaLiteScalarType, "void"> {
+  return valueType === undefined || valueType === "void" ? "float" : valueType;
 }
 
 function execSemanticSurfaceWrite(
@@ -920,7 +934,11 @@ function semanticDeclareValue(
     }
     return values;
   }
-  return operation.init ? evalSemanticExpression(operation.init, context) : 0;
+  if (operation.init) return evalSemanticExpression(operation.init, context);
+  if (isSemanticReferenceFloatVectorType(operation.target.valueType)) {
+    return Array.from({ length: cudaVectorLaneCount(operation.target.valueType) }, () => 0);
+  }
+  return 0;
 }
 
 function execSemanticAtomic(
@@ -1104,21 +1122,36 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
 function evalSemanticSurfaceRead(
   expression: Extract<SemanticExpression, { readonly kind: "surface-read" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
   if (!semanticReferenceSurfaceReadSupported(expression, context.compiled) || expression.surface.kind !== "symbol") {
-    throw semanticReferenceError("semantic reference supports only direct scalar surf2Dread", expression.span);
+    throw semanticReferenceError("semantic reference supports only direct scalar/vector surf2Dread", expression.span);
   }
-  const surface = context.surfaces[expression.surface.name];
-  if (!surface) throw semanticReferenceError(`missing surface input '${expression.surface.name}'`, expression.surface.span);
+  const surfaceName = expression.surface.name;
+  const surface = context.surfaces[surfaceName];
+  if (!surface) throw semanticReferenceError(`missing surface input '${surfaceName}'`, expression.surface.span);
   const xBytes = Math.trunc(evalNumber(expression.xBytes, context));
-  const aligned = xBytes % 4 === 0;
-  const x = Math.trunc(xBytes / 4);
   const y = Math.trunc(evalNumber(expression.y, context));
   const z = expression.z ? Math.trunc(evalNumber(expression.z, context)) : 0;
+  if (isSemanticReferenceFloatVectorType(expression.valueType)) {
+    return Array.from({ length: cudaVectorLaneCount(expression.valueType) }, (_, lane) => evalSemanticSurfaceLane(surface, surfaceName, xBytes + lane * 4, y, z, context));
+  }
+  return evalSemanticSurfaceLane(surface, surfaceName, xBytes, y, z, context);
+}
+
+function evalSemanticSurfaceLane(
+  surface: WgslTexture2DInput,
+  surfaceName: string,
+  xBytes: number,
+  y: number,
+  z: number,
+  context: SemanticReferenceContext,
+): number {
+  const aligned = xBytes % 4 === 0;
+  const x = Math.trunc(xBytes / 4);
   const index = ((z * surface.height) + y) * surface.width + x;
   const ok = aligned && xBytes >= 0 && x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index >= 0 && index < surface.data.length;
   const value = ok ? surface.data[index] ?? 0 : 0;
-  context.trace.reads.push({ name: expression.surface.name, index, value, ok });
+  context.trace.reads.push({ name: surfaceName, index, value, ok });
   return value;
 }
 

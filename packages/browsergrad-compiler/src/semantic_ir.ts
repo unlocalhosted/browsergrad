@@ -136,7 +136,7 @@ export type SemanticExpression =
     }
   | {
       readonly kind: "surface-read";
-      readonly callee: "surf2Dread" | "surf2DLayeredread";
+      readonly callee: "surf2Dread" | "surf2DLayeredread" | "surf3Dread";
       readonly surface: SemanticExpression;
       readonly xBytes: SemanticExpression;
       readonly y: SemanticExpression;
@@ -434,7 +434,7 @@ function lowerStatement(
         }
         if (
           (expression.callee.name === "surf2Dread" && expression.args.length === 4) ||
-          (expression.callee.name === "surf2DLayeredread" && expression.args.length === 5)
+          ((expression.callee.name === "surf2DLayeredread" || expression.callee.name === "surf3Dread") && expression.args.length === 5)
         ) {
           const target = expression.args[0]!;
           return {
@@ -620,11 +620,11 @@ function lowerExpression(
       if (
         expression.callee.kind === "identifier" &&
         (expression.callee.name === "surf2Dread" && args.length === 3 ||
-          expression.callee.name === "surf2DLayeredread" && args.length === 4)
+          (expression.callee.name === "surf2DLayeredread" || expression.callee.name === "surf3Dread") && args.length === 4)
       ) {
         return {
           kind: "surface-read",
-          callee: expression.callee.name as "surf2Dread" | "surf2DLayeredread",
+          callee: expression.callee.name as "surf2Dread" | "surf2DLayeredread" | "surf3Dread",
           surface: args[0]!,
           xBytes: args[1]!,
           y: args[2]!,
