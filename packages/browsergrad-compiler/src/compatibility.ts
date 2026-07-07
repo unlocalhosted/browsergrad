@@ -66,7 +66,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-atomic-target", "atomic", "Unsupported atomic target", "unsupported", false, true, "Atomic must target modeled memory."),
   feature("atomic-address-required", "atomic", "Atomic address form required", "unsupported", false, true, "CUDA address semantics not recoverable from value form."),
   feature("unsupported-cache-hint-address", "memory", "Unsupported cache-hint address", "unsupported", false, true, "Modeled cache-hint loads/stores lower as plain semantic memory ops; remaining cache-hint forms require a modeled pointer expression."),
-  feature("unsupported-device-pointer-param", "memory", "Unsupported device pointer parameter", "unsupported", false, true, "Device pointer arguments must map to modeled storage, shared, constant, or device-global memory."),
+  feature("unsupported-device-pointer-param", "memory", "Unsupported device pointer parameter", "unsupported", false, true, "Direct kernel pointer dereference maps to semantic storage index 0; remaining device pointer arguments must map to modeled storage, shared, constant, or device-global memory."),
   feature("unsupported-device-pool", "memory", "Unsupported DevicePool use", "unsupported", false, true, "DevicePool operations require modeled pool data and offset bindings."),
   feature("dynamic-shared-memory", "memory", "Dynamic shared memory", "native", true, true, "Supported when launch metadata supplies element count."),
   feature("missing-feature-shader-f16", "feature", "Missing shader-f16", "unsupported", false, true, "Requires WebGPU shader-f16."),

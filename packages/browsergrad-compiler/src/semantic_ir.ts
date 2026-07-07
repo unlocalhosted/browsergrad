@@ -1794,6 +1794,16 @@ function localPointerAliasDerefExpression(
 ): SemanticExpression | undefined {
   if (expression.kind !== "identifier") return undefined;
   const symbol = scope.get(expression.name);
+  if (symbol?.kind === "param" && symbol.pointer && semanticPointerAliasAddressSpaceSupported(symbol.addressSpace)) {
+    return {
+      kind: "index",
+      target: semanticSymbolExpression(symbol, expression.span),
+      index: zeroExpression(expression.span),
+      ...optionalValueType(symbol.valueType),
+      addressSpace: symbol.addressSpace,
+      span,
+    };
+  }
   if (!symbol?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(symbol.pointerAddressSpace) || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
   const root = scope.get(symbol.pointerRoot);
   if (!root) return undefined;

@@ -1174,7 +1174,7 @@ __global__ void mutateParams(float* out, float alpha, float beta, int n, bool en
     expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
   });
 
-  it("emits pointer helpers for direct kernel pointer dereference writes", () => {
+  it("lowers direct kernel pointer dereference writes through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void directDeref(float* result, int* count) {
   *result = 3.5f;
@@ -1187,8 +1187,13 @@ __global__ void directDeref(float* result, int* count) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
-    expect(compiled.wgsl).toContain("fn bg_ptr_write_i32(buffer: u32, index: u32, value: i32)");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+    expect(compiled.wgsl).toContain("result[0u] = 3.5;");
+    expect(compiled.wgsl).toContain("count[0u] = 2;");
     expect([...result.buffers.result as Float32Array]).toEqual([3.5]);
     expect([...result.buffers.count as Int32Array]).toEqual([2]);
   });
@@ -2636,7 +2641,10 @@ __global__ void derefKernel(const int* n, float* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("0 < n[0]");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("0u < u32(n[0u])");
     expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
 
@@ -8476,7 +8484,11 @@ __global__ void derefWrite(float *x) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("bg_x_base = (bg_x_base + u32(1))");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("x__bg_ptr_offset = (x__bg_ptr_offset + 1);");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
     expect(compiled.wgsl).not.toContain("var p");
     expect([...result.buffers.x as Float32Array]).toEqual([1, 5, 8]);
   });
