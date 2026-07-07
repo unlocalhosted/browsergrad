@@ -4821,6 +4821,35 @@ __global__ void semanticShuffleKernel(uint *out) {
     ]);
   });
 
+  it("lowers CUDA match_any through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticMatchAnyKernel(uint *input, uint *out) {
+  int tid = threadIdx.x;
+  out[tid] = __match_any_sync(0xffffffffu, input[tid]);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+    const launch = { gridDim: [1, 1, 1], blockDim: [4, 1, 1] } as const;
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Uint32Array([0, 1, 0, 1]), out: new Uint32Array(4) } },
+      launch,
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Uint32Array([0, 1, 0, 1]), out: new Uint32Array(4) } },
+      launch,
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bg_semantic_match_any_uint_32");
+    expect([...result.buffers.out as Uint32Array]).toEqual([5, 10, 5, 10]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([5, 10, 5, 10]);
+  });
+
   it("lowers CUDA syncthreads predicate collectives through native workgroup memory", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void syncPredicates(int *out) {

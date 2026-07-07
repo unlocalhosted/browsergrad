@@ -125,6 +125,7 @@ const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__any_sync",
   "__all_sync",
   "__ballot_sync",
+  "__match_any_sync",
   "__reduce_add_sync",
   "__shfl_sync",
   "__shfl_down_sync",
@@ -1425,7 +1426,7 @@ function evalSemanticSubgroupCall(
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
   if (context.compiled.subgroupMode === "scalar") {
     const scalar = evalNumber(value, context);
-    if (name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync") return truthy(scalar) ? 1 : 0;
+    if (name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync" || name === "__match_any_sync") return truthy(scalar) ? 1 : 0;
     return scalar;
   }
   const peers = semanticWarpContexts(context);
@@ -1435,6 +1436,15 @@ function evalSemanticSubgroupCall(
     let mask = 0;
     for (const peer of peers) {
       if (!truthy(evalNumber(value, peer))) continue;
+      mask |= 1 << (semanticLocalLinearRank(peer) % 32);
+    }
+    return mask >>> 0;
+  }
+  if (name === "__match_any_sync") {
+    const current = evalNumber(value, context);
+    let mask = 0;
+    for (const peer of peers) {
+      if (evalNumber(value, peer) !== current) continue;
       mask |= 1 << (semanticLocalLinearRank(peer) % 32);
     }
     return mask >>> 0;

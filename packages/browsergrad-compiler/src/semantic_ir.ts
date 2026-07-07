@@ -651,7 +651,7 @@ function lowerExpression(
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
         ...optionalValueType(expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
           ? "uint"
-          : expression.callee.kind === "identifier" && (expression.callee.name === "__any_sync" || expression.callee.name === "__all_sync" || expression.callee.name === "__ballot_sync")
+          : expression.callee.kind === "identifier" && (expression.callee.name === "__any_sync" || expression.callee.name === "__all_sync" || expression.callee.name === "__ballot_sync" || expression.callee.name === "__match_any_sync")
             ? "uint"
           : expression.callee.kind === "identifier" && (
               expression.callee.name === "__reduce_add_sync" ||

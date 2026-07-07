@@ -2090,6 +2090,11 @@ __global__ void semanticShuffleFunction(uint *out) {
   uint value = uint(threadIdx.x) + 5u;
   out[threadIdx.x] = pick_first_lane(value);
 }`,
+  semanticMatchAny: `
+__global__ void semanticMatchAny(uint *input, uint *out) {
+  int tid = threadIdx.x;
+  out[tid] = __match_any_sync(0xffffffffu, input[tid]);
+}`,
   syncthreadsPredicates: `
 __global__ void syncthreadsPredicates(int *out) {
   int tid = threadIdx.x;
@@ -12552,6 +12557,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [5, 5, 5, 5] },
+          },
+          {
+            name: "subgroup:semantic-match-any",
+            source: SOURCES.semanticMatchAny,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                input: new Uint32Array([0, 1, 0, 1]),
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [5, 10, 5, 10] },
           },
           {
             name: "sync:syncthreads-predicates",

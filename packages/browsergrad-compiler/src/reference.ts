@@ -196,7 +196,7 @@ interface MutableTrace {
 
 type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
-type CollectiveOp = "sum" | "max" | "min" | "any" | "all" | "activemask" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
+type CollectiveOp = "sum" | "max" | "min" | "any" | "all" | "activemask" | "match_any" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
 interface CollectiveYield {
   readonly kind: "collective";
   readonly op: CollectiveOp;
@@ -508,6 +508,14 @@ function collectiveResultValues(group: {
   if (group.op === "activemask") {
     const mask = group.threads.reduce((bits, thread) => bits | (1 << (thread % 32)), 0);
     return group.threads.map(() => mask >>> 0);
+  }
+  if (group.op === "match_any") {
+    return group.threads.map((_thread, index) => {
+      const value = group.values[index]!;
+      const mask = group.threads.reduce((bits, peerThread, peerIndex) =>
+        group.values[peerIndex] === value ? bits | (1 << (peerThread % 32)) : bits, 0);
+      return mask >>> 0;
+    });
   }
   const value = reduceCollectiveValues(group.op, group.values, group.deviceOp, group.context);
   return group.threads.map(() => value);
@@ -1294,6 +1302,8 @@ function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined
       return "all";
     case "__activemask":
       return "activemask";
+    case "__match_any_sync":
+      return "match_any";
     default:
       return undefined;
   }
@@ -1304,7 +1314,7 @@ function collectiveValueExpression(
   args: readonly CudaLiteExpression[],
 ): CudaLiteExpression | undefined {
   if (name === "__reduce_add_sync") return args[1];
-  if (name === "__any_sync" || name === "__all_sync") return args[1];
+  if (name === "__any_sync" || name === "__all_sync" || name === "__match_any_sync") return args[1];
   return args.length === 2 ? args[1] : args[0];
 }
 
@@ -3289,6 +3299,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return truthy(args[1] ?? 0) ? 1 : 0;
     case "__ballot_sync":
       return truthy(args[1] ?? 0) ? 1 : 0;
+    case "__match_any_sync":
+      return 1;
     case "__reduce_add_sync":
       return args[1] ?? 0;
     case "warpReduceSum":

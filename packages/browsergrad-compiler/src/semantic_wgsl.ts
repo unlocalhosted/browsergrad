@@ -65,6 +65,13 @@ interface SemanticWarpShuffleHelper {
   readonly tileSize: number;
 }
 
+interface SemanticMatchAnyHelper {
+  readonly key: string;
+  readonly name: string;
+  readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly tileSize: number;
+}
+
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
 const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
@@ -88,6 +95,7 @@ const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__any_sync",
   "__all_sync",
   "__ballot_sync",
+  "__match_any_sync",
   "__reduce_add_sync",
   "__shfl_sync",
   "__shfl_down_sync",
@@ -590,6 +598,9 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticWarpShuffleHelpers(ir)) {
     lines.push(`var<workgroup> ${semanticWarpShuffleScratchName(helper)}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
   }
+  for (const helper of semanticMatchAnyHelpers(ir)) {
+    lines.push(`var<workgroup> ${semanticMatchAnyScratchName(helper)}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
+  }
   for (const shared of sharedMemorySymbols(ir)) {
     lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared, atomicShared.has(shared.name))};`);
   }
@@ -618,6 +629,9 @@ export function emitSemanticKernelIrWgsl(
   }
   for (const helper of semanticWarpShuffleHelpers(ir)) {
     lines.push("", ...emitSemanticWarpShuffleHelper(helper, ir));
+  }
+  for (const helper of semanticMatchAnyHelpers(ir)) {
+    lines.push("", ...emitSemanticMatchAnyHelper(helper, ir));
   }
   lines.push(
     "",
@@ -2268,6 +2282,113 @@ function collectSemanticWarpShuffleExpressionHelpers(
   }
 }
 
+function semanticMatchAnyHelpers(ir: SemanticKernelIrModule): readonly SemanticMatchAnyHelper[] {
+  const helpers = new Map<string, SemanticMatchAnyHelper>();
+  collectSemanticMatchAnyHelpers(ir.operations, helpers);
+  for (const fn of ir.functions) collectSemanticMatchAnyHelpers(fn.body, helpers);
+  return [...helpers.values()];
+}
+
+function collectSemanticMatchAnyHelpers(
+  operations: readonly SemanticKernelIrOperation[],
+  helpers: Map<string, SemanticMatchAnyHelper>,
+): void {
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.init) collectSemanticMatchAnyExpressionHelpers(operation.init, helpers);
+    if (operation.kind === "store") {
+      collectSemanticMatchAnyExpressionHelpers(operation.value, helpers);
+      operation.target.indices.forEach((index) => collectSemanticMatchAnyExpressionHelpers(index, helpers));
+    }
+    if (operation.kind === "atomic") {
+      operation.args.forEach((arg) => collectSemanticMatchAnyExpressionHelpers(arg, helpers));
+      operation.target?.indices.forEach((index) => collectSemanticMatchAnyExpressionHelpers(index, helpers));
+    }
+    if (operation.kind === "call") operation.args.forEach((arg) => collectSemanticMatchAnyExpressionHelpers(arg, helpers));
+    if (operation.kind === "expression") collectSemanticMatchAnyExpressionHelpers(operation.expression, helpers);
+    if (operation.kind === "branch") {
+      collectSemanticMatchAnyExpressionHelpers(operation.condition, helpers);
+      collectSemanticMatchAnyHelpers(operation.consequent, helpers);
+      collectSemanticMatchAnyHelpers(operation.alternate, helpers);
+    }
+    if (operation.kind === "loop") {
+      if (operation.init !== undefined) {
+        if (isSemanticKernelIrOperation(operation.init)) collectSemanticMatchAnyHelpers([operation.init], helpers);
+        else collectSemanticMatchAnyExpressionHelpers(operation.init, helpers);
+      }
+      if (operation.condition) collectSemanticMatchAnyExpressionHelpers(operation.condition, helpers);
+      if (operation.update) collectSemanticMatchAnyExpressionHelpers(operation.update, helpers);
+      collectSemanticMatchAnyHelpers(operation.body, helpers);
+    }
+    if (operation.kind === "return" && operation.value) collectSemanticMatchAnyExpressionHelpers(operation.value, helpers);
+    if (operation.kind === "block") collectSemanticMatchAnyHelpers(operation.body, helpers);
+  }
+}
+
+function collectSemanticMatchAnyExpressionHelpers(
+  expression: SemanticExpression,
+  helpers: Map<string, SemanticMatchAnyHelper>,
+): void {
+  if (expression.kind === "call" && expression.callee.kind === "symbol" && expression.callee.name === "__match_any_sync") {
+    const value = expression.args[1];
+    const valueType = value ? semanticExpressionValueType(value) : undefined;
+    if (valueType && valueType !== "void") {
+      const helper = semanticMatchAnyHelper(valueType, 32);
+      helpers.set(helper.key, helper);
+    }
+  }
+  for (const child of semanticExpressionChildren(expression)) {
+    collectSemanticMatchAnyExpressionHelpers(child, helpers);
+  }
+}
+
+function semanticMatchAnyHelper(
+  valueType: Exclude<CudaLiteScalarType, "void">,
+  tileSize: number,
+): SemanticMatchAnyHelper {
+  const key = `${valueType}:${tileSize}`;
+  return {
+    key,
+    name: `bg_semantic_match_any_${safeWgslIdentifier(valueType)}_${tileSize}`,
+    valueType,
+    tileSize,
+  };
+}
+
+function semanticMatchAnyScratchName(helper: SemanticMatchAnyHelper): string {
+  return `${helper.name}_scratch`;
+}
+
+function emitSemanticMatchAnyHelper(
+  helper: SemanticMatchAnyHelper,
+  ir: SemanticKernelIrModule,
+): readonly string[] {
+  const type = wgslValueScalar(helper.valueType);
+  const workgroupSize = semanticWorkgroupSize(ir);
+  const scratch = semanticMatchAnyScratchName(helper);
+  return [
+    `fn ${helper.name}(value_arg: ${type}, width_arg: u32, local_id: vec3<u32>) -> u32 {`,
+    `  let bg_linear_rank: u32 = ${semanticLocalLinearRank(ir)};`,
+    `  let bg_tile_lane: u32 = bg_linear_rank % ${helper.tileSize}u;`,
+    `  let bg_width: u32 = clamp(width_arg, 1u, ${helper.tileSize}u);`,
+    "  let bg_logical_lane: u32 = bg_tile_lane % bg_width;",
+    "  let bg_group_base: u32 = bg_linear_rank - bg_logical_lane;",
+    `  ${scratch}[bg_linear_rank] = value_arg;`,
+    "  workgroupBarrier();",
+    "  var bg_mask: u32 = 0u;",
+    "  var bg_lane: u32 = 0u;",
+    "  while (bg_lane < bg_width) {",
+    "    let bg_source_rank: u32 = bg_group_base + bg_lane;",
+    `    if (bg_source_rank < ${workgroupSize}u && ${scratch}[bg_source_rank] == value_arg) {`,
+    "      bg_mask = bg_mask | (1u << bg_lane);",
+    "    }",
+    "    bg_lane = bg_lane + 1u;",
+    "  }",
+    "  workgroupBarrier();",
+    "  return bg_mask;",
+    "}",
+  ];
+}
+
 function semanticShuffleOpForCall(name: string): SemanticShuffleOp | undefined {
   if (name === "__shfl_sync") return "sync";
   if (name === "__shfl_down_sync") return "down";
@@ -3320,6 +3441,12 @@ function emitSemanticSubgroupCall(
     if (name === "__any_sync") return `select(0u, 1u, subgroupAny(${predicate}))`;
     if (name === "__all_sync") return `select(0u, 1u, subgroupAll(${predicate}))`;
     return `subgroupBallot(${predicate}).x`;
+  }
+  if (name === "__match_any_sync") {
+    const valueType = semanticExpressionValueType(value);
+    if (!valueType || valueType === "void") throw semanticWgslError(`${name} expects scalar value operand`, expression.span);
+    const helper = semanticMatchAnyHelper(valueType, 32);
+    return `${helper.name}(${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(valueType), options, textureSpecializations)}, 32u, local_id)`;
   }
   const shuffleOp = semanticShuffleOpForCall(name);
   if (shuffleOp) {
