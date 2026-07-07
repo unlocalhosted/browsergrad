@@ -905,6 +905,9 @@ function localPointerAliasForInitializer(
 ): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices"> | undefined {
   if (!expression) return undefined;
   if (expression.kind === "cast" && expression.pointer) return localPointerAliasForInitializer(expression.expression, scope);
+  if (expression.kind === "call" && localPointerIdentityCallName(expression.callee)) {
+    return localPointerAliasForInitializer(expression.args[0], scope);
+  }
   if (expression.kind === "conditional") {
     const consequent = localPointerAliasForInitializer(expression.consequent, scope);
     const alternate = localPointerAliasForInitializer(expression.alternate, scope);
@@ -986,6 +989,13 @@ function localPointerAliasForInitializer(
     pointerAddressSpace: ref.root.addressSpace,
     pointerBaseIndices: ref.indices,
   };
+}
+
+function localPointerIdentityCallName(expression: CudaLiteExpression): string | undefined {
+  if (expression.kind === "identifier") {
+    return expression.name === "__builtin_assume_aligned" || expression.name === "ct::assume_aligned" ? expression.name : undefined;
+  }
+  return undefined;
 }
 
 function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { readonly kind: "var" }> {
