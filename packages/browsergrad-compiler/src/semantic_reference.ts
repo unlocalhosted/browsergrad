@@ -19,7 +19,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import { cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | Vector3 | number[];
 type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas";
@@ -455,6 +455,27 @@ function semanticReferenceFunctionArgSupported(
   return semanticReferenceExpressionSupported(arg, isSemanticReferenceFloatVectorType(param.valueType) ? "any" : "scalar", compiled);
 }
 
+function semanticReferenceVectorConstructorSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  expected: "scalar" | "any",
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  if (expected === "scalar" || expression.callee.kind !== "symbol") return false;
+  const valueType = cudaVectorConstructorType(expression.callee.name);
+  return isSemanticReferenceFloatVectorType(valueType) &&
+    expression.args.length > 0 &&
+    expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "any", compiled));
+}
+
+function semanticReferenceVectorIndexSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "index" }>,
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  return isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression.target)) &&
+    semanticReferenceExpressionSupported(expression.target, "any", compiled) &&
+    semanticReferenceExpressionSupported(expression.index, "scalar", compiled);
+}
+
 function semanticReferenceFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
   return operations.every((operation) => {
     if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
@@ -581,6 +602,7 @@ function semanticReferenceExpressionSupported(
     case "member":
       return isBuiltinVectorMember(expression) || semanticReferenceVectorMemberSupported(expression, compiled);
     case "index":
+      if (semanticReferenceVectorIndexSupported(expression, compiled)) return true;
       return expected === "scalar" && semanticReferenceMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
     case "cast":
       return !expression.pointer && semanticReferenceExpressionSupported(expression.expression, "scalar", compiled);
@@ -607,7 +629,8 @@ function semanticReferenceExpressionSupported(
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
-        semanticReferenceMathCallSupported(expression);
+        semanticReferenceMathCallSupported(expression) ||
+        semanticReferenceVectorConstructorSupported(expression, expected, compiled);
     case "texture-read":
       return compiled !== undefined &&
         (expected === "any" || expression.valueType === "float") &&
@@ -676,7 +699,8 @@ function semanticReferenceExpressionContainsUnsupportedCall(
   if (expression.kind === "call") {
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
       semanticReferenceFunctionCallSupported(expression, compiled) ||
-      semanticReferenceMathCallSupported(expression)) ||
+      semanticReferenceMathCallSupported(expression) ||
+      semanticReferenceVectorConstructorSupported(expression, "any", compiled)) ||
       expression.args.some((arg) => semanticReferenceExpressionContainsUnsupportedCall(arg, compiled));
   }
   if (expression.kind === "texture-read") {
@@ -1127,6 +1151,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     }
     case "call":
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
+      if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);
       if (semanticReferenceFunctionCallSupported(expression, context.compiled)) return evalSemanticFunctionCall(expression, context);
       if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
@@ -1279,6 +1304,12 @@ function evalUpdate(
 }
 
 function readIndexExpression(expression: Extract<SemanticExpression, { kind: "index" }>, context: SemanticReferenceContext): number {
+  if (semanticReferenceVectorIndexSupported(expression, context.compiled)) {
+    const value = evalSemanticExpression(expression.target, context);
+    if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector index target is not a vector", expression.target.span);
+    const index = Math.trunc(evalNumber(expression.index, context));
+    return value[index] ?? 0;
+  }
   const ref = memoryRefFromIndexExpression(expression);
   if (!ref) throw semanticReferenceError("semantic reference supports only direct storage indexing", expression.span);
   return readMemory(ref, context);
@@ -1413,6 +1444,22 @@ function evalSemanticFunctionCall(
     throw semanticReferenceError(`semantic reference function '${fn.name}' did not return value`, fn.span);
   }
   return child.returnValue;
+}
+
+function evalSemanticVectorConstructor(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): SemanticValue {
+  const valueType = expression.callee.kind === "symbol" ? cudaVectorConstructorType(expression.callee.name) : undefined;
+  if (!isSemanticReferenceFloatVectorType(valueType)) throw semanticReferenceError("semantic reference vector constructor requires float vector target", expression.span);
+  const targetLanes = cudaVectorLaneCount(valueType);
+  const values = expression.args.map((arg) => evalSemanticExpression(arg, context));
+  if (values.length === 1 && typeof values[0] === "number") return Array.from({ length: targetLanes }, () => values[0] as number);
+  const lanes = values.flatMap((value) => Array.isArray(value) ? value : [value]);
+  return Array.from({ length: targetLanes }, (_, lane) => {
+    const value = lanes[lane];
+    return typeof value === "number" ? value : 0;
+  });
 }
 
 function runSemanticFunction(

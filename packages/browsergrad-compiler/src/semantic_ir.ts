@@ -591,7 +591,7 @@ function lowerExpression(
         kind: "index",
         target,
         index: lowerExpression(expression.index, scope),
-        ...optionalValueType(expressionValueType(target)),
+        ...optionalValueType(indexedValueType(target)),
         addressSpace: expressionAddressSpace(target),
         span: expression.span,
       };
@@ -2053,6 +2053,11 @@ function expressionAddressSpace(expression: SemanticExpression): SemanticAddress
 function expressionValueType(expression: SemanticExpression | undefined): CudaLiteScalarType | undefined {
   if (!expression || expression.kind === "initializer") return undefined;
   return "valueType" in expression ? expression.valueType : undefined;
+}
+
+function indexedValueType(target: SemanticExpression): CudaLiteScalarType | undefined {
+  const targetType = expressionValueType(target);
+  return targetType !== undefined && isCudaVectorType(targetType) ? cudaVectorScalarType(targetType) : targetType;
 }
 
 function optionalValueType(valueType: CudaLiteScalarType | undefined): { readonly valueType?: CudaLiteScalarType } {

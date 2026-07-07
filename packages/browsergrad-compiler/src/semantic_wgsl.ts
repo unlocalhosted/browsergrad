@@ -18,7 +18,7 @@ import type {
 import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
-import { cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
 
 export interface SemanticKernelIrWgslOutput {
   readonly wgsl: string;
@@ -554,6 +554,15 @@ function semanticWgslVectorMemberSupported(
     cudaVectorFieldIndex(valueType, expression.property) !== undefined;
 }
 
+function semanticWgslVectorIndexSupported(
+  expression: Extract<SemanticExpression, { kind: "index" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  return isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.target, ir)) &&
+    semanticWgslExpressionSupported(expression.target, "any", ir) &&
+    semanticWgslExpressionSupported(expression.index, "scalar", ir);
+}
+
 function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
   return expression.kind === "initializer" &&
     flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, "scalar"));
@@ -618,6 +627,18 @@ function semanticWgslFunctionArgSupported(
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
   if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
   return semanticWgslExpressionSupported(arg, isSemanticWgslFloatVectorType(param.valueType) ? "any" : "scalar", ir);
+}
+
+function semanticWgslVectorConstructorSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  expected: "scalar" | "any",
+  ir?: SemanticKernelIrModule,
+): boolean {
+  if (expected === "scalar" || expression.callee.kind !== "symbol") return false;
+  const valueType = cudaVectorConstructorType(expression.callee.name);
+  return isSemanticWgslFloatVectorType(valueType) &&
+    expression.args.length > 0 &&
+    expression.args.every((arg) => semanticWgslExpressionSupported(arg, "any", ir));
 }
 
 function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -937,6 +958,7 @@ function semanticWgslExpressionSupported(
         (expression.property === "x" || expression.property === "y" || expression.property === "z") ||
         semanticWgslVectorMemberSupported(expression, ir);
     case "index":
+      if (semanticWgslVectorIndexSupported(expression, ir)) return true;
       return expected === "scalar" && semanticWgslMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
     case "cast":
       return !expression.pointer && semanticWgslExpressionSupported(expression.expression, "scalar", ir);
@@ -962,7 +984,8 @@ function semanticWgslExpressionSupported(
       return expression.expressions.every((item) => semanticWgslExpressionSupported(item, "scalar", ir));
     case "call":
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
-        semanticWgslMathCallSupported(expression);
+        semanticWgslMathCallSupported(expression) ||
+        semanticWgslVectorConstructorSupported(expression, expected, ir);
     case "texture-read":
       return ir !== undefined &&
         (expected === "any" || expression.valueType === "float") &&
@@ -1432,6 +1455,11 @@ function emitSemanticExpression(
     case "member":
       return emitSemanticMember(expression, ir, names, options);
     case "index": {
+      if (semanticWgslVectorIndexSupported(expression, ir)) {
+        const target = emitSemanticExpression(expression.target, ir, names, options, textureSpecializations);
+        const index = emitSemanticExpressionAs(expression.index, ir, names, "u32", options, textureSpecializations);
+        return `${target}[${index}]`;
+      }
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) {
         const memoryRef = emitSemanticMemoryRef(ref, ir, names, options);
@@ -1467,6 +1495,7 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options, textureSpecializations);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
@@ -1706,6 +1735,33 @@ function emitSemanticFunctionCall(
   const args = expression.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names, options, textureSpecializations));
   const calleeName = semanticFunctionCallName(callee, fn, expression.args, options, textureSpecializations);
   return `${nameFor(calleeName, names)}(${args.join(", ")})`;
+}
+
+function emitSemanticVectorConstructor(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  const valueType = expression.callee.kind === "symbol" ? cudaVectorConstructorType(expression.callee.name) : undefined;
+  if (!isSemanticWgslFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector constructor requires float vector target", expression.span);
+  const fields = ["x", "y", "z", "w"];
+  const targetLanes = cudaVectorLaneCount(valueType);
+  if (expression.args.length === 1 && !isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.args[0]!, ir))) {
+    const scalar = emitSemanticExpressionAs(expression.args[0]!, ir, names, "f32", options, textureSpecializations);
+    return `vec${targetLanes}<f32>(${Array.from({ length: targetLanes }, () => `f32(${scalar})`).join(", ")})`;
+  }
+  const lanes = expression.args.flatMap((arg) => {
+    const argType = semanticExpressionVectorValueType(arg, ir);
+    if (isSemanticWgslFloatVectorType(argType)) {
+      const value = emitSemanticExpression(arg, ir, names, options, textureSpecializations);
+      return Array.from({ length: cudaVectorLaneCount(argType) }, (_, lane) => `f32((${value}).${fields[lane]})`);
+    }
+    return [`f32(${emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations)})`];
+  });
+  while (lanes.length < targetLanes) lanes.push("0.0");
+  return `vec${targetLanes}<f32>(${lanes.slice(0, targetLanes).join(", ")})`;
 }
 
 function emitSemanticFunctionArg(
@@ -2379,6 +2435,17 @@ function wgslUniformScalar(valueType: CudaLiteScalarType | undefined): WgslValue
 
 function semanticExpressionValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
   return "valueType" in expression ? expression.valueType : undefined;
+}
+
+function semanticExpressionVectorValueType(
+  expression: SemanticExpression,
+  ir?: SemanticKernelIrModule,
+): CudaLiteScalarType | undefined {
+  if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    const calleeName = expression.callee.name;
+    return cudaVectorConstructorType(calleeName) ?? ir?.functions.find((fn) => fn.name === calleeName)?.returnType ?? semanticExpressionValueType(expression);
+  }
+  return semanticExpressionValueType(expression);
 }
 
 function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {
