@@ -47,9 +47,12 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
 ]);
 const SEMANTIC_MATH_CALLS = new Set([
   "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
-  "exp", "expf", "__expf", "log", "logf", "__logf", "fabs", "fabsf", "abs",
-  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "sin", "sinf", "__sinf", "cos", "cosf", "__cosf",
+  "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
+  "log", "logf", "__logf", "log2", "log2f", "__log2f", "log10", "log10f", "__log10f", "log1p", "log1pf",
+  "fabs", "fabsf", "abs",
+  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "sin", "sinf", "__sinf", "sinpi", "sinpif", "cos", "cosf", "__cosf", "cospi", "cospif",
   "tan", "tanf", "__tanf", "atan", "atanf", "atan2", "atan2f", "tanh", "tanhf", "__tanhf",
+  "cbrt", "cbrtf", "rcbrt", "rcbrtf", "__frcp_rn",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -1417,9 +1420,25 @@ function evalSemanticMathCall(
     case "exp":
     case "expf":
     case "__expf": return Math.exp(args[0] ?? 0);
+    case "exp2":
+    case "exp2f":
+    case "__exp2f": return 2 ** (args[0] ?? 0);
+    case "exp10":
+    case "exp10f":
+    case "__exp10f": return 10 ** (args[0] ?? 0);
+    case "expm1":
+    case "expm1f": return Math.expm1(args[0] ?? 0);
     case "log":
     case "logf":
     case "__logf": return Math.log(args[0] ?? 0);
+    case "log2":
+    case "log2f":
+    case "__log2f": return Math.log2(args[0] ?? 0);
+    case "log10":
+    case "log10f":
+    case "__log10f": return Math.log10(args[0] ?? 0);
+    case "log1p":
+    case "log1pf": return Math.log1p(args[0] ?? 0);
     case "fabs":
     case "fabsf":
     case "abs": return Math.abs(args[0] ?? 0);
@@ -1432,9 +1451,13 @@ function evalSemanticMathCall(
     case "sin":
     case "sinf":
     case "__sinf": return Math.sin(args[0] ?? 0);
+    case "sinpi":
+    case "sinpif": return Math.sin(Math.PI * (args[0] ?? 0));
     case "cos":
     case "cosf":
     case "__cosf": return Math.cos(args[0] ?? 0);
+    case "cospi":
+    case "cospif": return Math.cos(Math.PI * (args[0] ?? 0));
     case "tan":
     case "tanf":
     case "__tanf": return Math.tan(args[0] ?? 0);
@@ -1445,6 +1468,10 @@ function evalSemanticMathCall(
     case "tanh":
     case "tanhf":
     case "__tanhf": return Math.tanh(args[0] ?? 0);
+    case "cbrt":
+    case "cbrtf": return Math.cbrt(args[0] ?? 0);
+    case "rcbrt":
+    case "rcbrtf": return 1 / Math.cbrt(args[0] ?? 0);
     case "fmin":
     case "fminf":
     case "min": return Math.min(args[0] ?? 0, args[1] ?? 0);
@@ -1457,6 +1484,7 @@ function evalSemanticMathCall(
     case "__fdividef":
     case "fdividef":
     case "__fdiv_rn": return (args[0] ?? 0) / (args[1] ?? 0);
+    case "__frcp_rn": return 1 / (args[0] ?? 0);
     case "__fadd_rn": return (args[0] ?? 0) + (args[1] ?? 0);
     case "__fsub_rn": return (args[0] ?? 0) - (args[1] ?? 0);
     case "__fmul_rn": return (args[0] ?? 0) * (args[1] ?? 0);

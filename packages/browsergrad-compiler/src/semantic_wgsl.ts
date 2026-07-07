@@ -57,9 +57,25 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["exp", "exp"],
   ["expf", "exp"],
   ["__expf", "exp"],
+  ["exp2", "exp2"],
+  ["exp2f", "exp2"],
+  ["__exp2f", "exp2"],
+  ["exp10", "exp10"],
+  ["exp10f", "exp10"],
+  ["__exp10f", "exp10"],
+  ["expm1", "expm1"],
+  ["expm1f", "expm1"],
   ["log", "log"],
   ["logf", "log"],
   ["__logf", "log"],
+  ["log2", "log2"],
+  ["log2f", "log2"],
+  ["__log2f", "log2"],
+  ["log10", "log10"],
+  ["log10f", "log10"],
+  ["__log10f", "log10"],
+  ["log1p", "log1p"],
+  ["log1pf", "log1p"],
   ["fabs", "abs"],
   ["fabsf", "abs"],
   ["abs", "abs"],
@@ -72,9 +88,13 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["sin", "sin"],
   ["sinf", "sin"],
   ["__sinf", "sin"],
+  ["sinpi", "sinpi"],
+  ["sinpif", "sinpi"],
   ["cos", "cos"],
   ["cosf", "cos"],
   ["__cosf", "cos"],
+  ["cospi", "cospi"],
+  ["cospif", "cospi"],
   ["tan", "tan"],
   ["tanf", "tan"],
   ["__tanf", "tan"],
@@ -85,6 +105,10 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["tanh", "tanh"],
   ["tanhf", "tanh"],
   ["__tanhf", "tanh"],
+  ["cbrt", "cbrt"],
+  ["cbrtf", "cbrt"],
+  ["rcbrt", "rcbrt"],
+  ["rcbrtf", "rcbrt"],
   ["fmin", "min"],
   ["fminf", "min"],
   ["min", "min"],
@@ -100,6 +124,7 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__fsub_rn", "sub"],
   ["__fmul_rn", "mul"],
   ["__fdiv_rn", "divide"],
+  ["__frcp_rn", "reciprocal"],
   ["__builtin_inff", "builtin_inf"],
   ["__builtin_huge_valf", "builtin_inf"],
   ["__uint_as_float", "uint_as_float"],
@@ -2055,6 +2080,31 @@ function emitSemanticMathCall(
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     return `(${emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations)} / ${emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations)})`;
+  }
+  if (
+    wgslCallee === "exp10" ||
+    wgslCallee === "expm1" ||
+    wgslCallee === "log10" ||
+    wgslCallee === "log1p" ||
+    wgslCallee === "sinpi" ||
+    wgslCallee === "cospi" ||
+    wgslCallee === "cbrt" ||
+    wgslCallee === "rcbrt" ||
+    wgslCallee === "reciprocal"
+  ) {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
+    if (wgslCallee === "exp10") return `pow(10.0, ${emitted})`;
+    if (wgslCallee === "expm1") return `(exp(${emitted}) - 1.0)`;
+    if (wgslCallee === "log10") return `(log(${emitted}) / 2.302585092994046)`;
+    if (wgslCallee === "log1p") return `log(1.0 + ${emitted})`;
+    if (wgslCallee === "sinpi") return `sin(3.141592653589793 * ${emitted})`;
+    if (wgslCallee === "cospi") return `cos(3.141592653589793 * ${emitted})`;
+    const signedCbrt = `select(pow(abs(${emitted}), 0.3333333333333333), -pow(abs(${emitted}), 0.3333333333333333), (${emitted} < 0.0))`;
+    if (wgslCallee === "cbrt") return signedCbrt;
+    if (wgslCallee === "rcbrt") return `(1.0 / ${signedCbrt})`;
+    return `(1.0 / ${emitted})`;
   }
   if (wgslCallee === "builtin_inf") return "bitcast<f32>(0x7f800000u)";
   if (wgslCallee === "uint_as_float" || wgslCallee === "int_as_float") {
