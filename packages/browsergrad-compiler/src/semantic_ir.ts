@@ -1201,6 +1201,12 @@ function localPointerAliasRoot(
   }
   if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
   const target = scope.get(expression.target.name);
+  if (target?.kind === "param" && target.pointer && target.addressSpace === "storage") {
+    return {
+      root: target,
+      indices: [lowerExpression(expression.index, scope)],
+    };
+  }
   if (target?.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices?.length === 1) {
     const root = scope.get(target.pointerRoot);
     if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;

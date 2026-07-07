@@ -674,6 +674,36 @@ __global__ void storagePointerAddressOfIndex(float* out, const float* input) {
     expect([...result.buffers.out as Float32Array]).toEqual([2, 20]);
   });
 
+  it("lowers direct address-of storage parameter indices through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void storageParamAddressOfIndex(float* out, const float* input) {
+  float* target = &out[1];
+  const float* source = &input[2];
+  target[0] = source[0];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array([0, 0]),
+        input: new Float32Array([3, 7, 11]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var target:");
+    expect(compiled.wgsl).not.toContain("var source:");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_f32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([0, 11]);
+    expect([...result.buffers.out as Float32Array]).toEqual([0, 11]);
+  });
+
   it("lowers address-of dereferenced storage pointer aliases through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void storagePointerAddressOfDeref(float* out, const float* input) {
@@ -2533,7 +2563,7 @@ __global__ void nullablePointer(float* out, int n) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 0]);
   });
 
-  it("keeps same-named local pointer handles distinct across C block scopes", () => {
+  it("keeps same-named direct storage pointer aliases distinct across C block scopes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void scopedPointerHandles(float* out) {
   if (threadIdx.x == 0) {
@@ -2547,14 +2577,24 @@ __global__ void scopedPointerHandles(float* out) {
     value[0] = out[0] + 1.0f;
   }
 }`, { workgroupSize: [1, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
     const result = runCompiledKernelReference(
       compiled,
       { buffers: { out: new Float32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    const handles = [...compiled.wgsl.matchAll(/var (value_\d+_buffer): u32/gu)].map((match) => match[1]);
-    expect(new Set(handles).size).toBe(2);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var value:");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2]);
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
   });
 
