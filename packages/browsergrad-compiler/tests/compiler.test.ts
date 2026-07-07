@@ -12395,15 +12395,28 @@ __global__ void sample(float *out, int width) {
       },
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(2) },
+        textures: { texRef: { width: 2, height: 1, data: new Float32Array([4, 8]) } },
+        scalars: { width: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
 
     expect(backendIr(compiled).textures.map((texture) => texture.name)).toEqual(["texRef"]);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("var texRef: texture_2d<f32>;");
-    expect(compiled.wgsl).toContain("bg_tex2d_f32_texRef");
+    expect(compiled.wgsl).toContain("textureLoad(texRef");
     expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
       kind: "texture2d",
       name: "texRef",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([4, 8]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 8]);
   });
 
   it("lowers CUDA texture object params and templated tex2D reads", () => {
@@ -12423,15 +12436,28 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
       },
       { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        textures: { tex: { width: 3, height: 1, data: new Float32Array([2, 4, 6]) } },
+        scalars: { width: 3 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
 
     expect(backendIr(compiled).params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("var tex: texture_2d<f32>;");
-    expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
+    expect(compiled.wgsl).toContain("textureLoad(tex");
     expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
       kind: "texture2d",
       name: "tex",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([2, 4, 6]);
   });
 
   it("honors normalized point-wrap texture descriptors in reference and WGSL lowering", () => {

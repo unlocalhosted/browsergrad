@@ -131,6 +131,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   ];
   const constantBuffers = constantMemorySymbols(ir).filter((symbol) => symbol.dimensions.length > 0);
   const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
+  const textures = textureSymbols(ir);
   const atomicStorage = semanticAtomicStorageNames(ir.operations);
   const atomicDeviceGlobals = semanticAtomicDeviceGlobalNames(ir.operations);
   const atomicShared = semanticAtomicSharedNames(ir.operations);
@@ -161,6 +162,14 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
       binding: bindings.length,
     });
   }
+  for (const texture of textures) {
+    bindings.push({
+      kind: "texture2d",
+      name: texture.name,
+      valueType: "f32",
+      binding: bindings.length,
+    });
+  }
   if (uniformParams.length > 0) {
     bindings.push({
       kind: "uniform",
@@ -186,6 +195,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
       ? `atomic<${wgslAtomicScalar(global.valueType)}>`
       : wgslScalar(global.valueType);
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, global.name)}) var<storage, read_write> ${nameFor(global.name, names)}: array<${elementType}>;`);
+  }
+  for (const texture of textures) {
+    lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
   }
   for (const shared of sharedMemorySymbols(ir)) {
     lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared, atomicShared.has(shared.name))};`);
@@ -295,6 +307,7 @@ function unsupportedSemanticWgslOperation(
 function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][number]): boolean {
   if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
+  if (param.addressSpace === "texture") return param.valueType === "texture2d";
   return false;
 }
 
@@ -302,6 +315,7 @@ function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memor
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
   if (symbol.kind === "constant") return !symbol.initialized && semanticWgslScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "device-global") return semanticWgslScalarTypeSupported(symbol.valueType);
+  if (symbol.kind === "texture") return symbol.valueType === "texture2d";
   return false;
 }
 
@@ -387,7 +401,8 @@ function semanticWgslAtomicSupported(
 
 function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
   return semanticWgslExpressionSupported(expression, "scalar", ir) ||
-    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression));
+    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression)) ||
+    expression.kind === "texture-read" && semanticWgslTextureReadSupported(expression, ir);
 }
 
 function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
@@ -399,6 +414,19 @@ function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
   const arity = semanticMathCallArity(expression.callee.name);
   return expression.args.length === arity && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
+}
+
+function semanticWgslTextureReadSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const texture = expression.texture;
+  return expression.valueType === "float" &&
+    texture.kind === "symbol" &&
+    texture.addressSpace === "texture" &&
+    textureSymbols(ir).some((symbol) => symbol.name === texture.name) &&
+    semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
+    semanticWgslExpressionSupported(expression.y, "scalar", ir);
 }
 
 function semanticWgslFunctionCallSupported(
@@ -516,6 +544,8 @@ function semanticWgslExpressionSupported(
     case "call":
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
         semanticWgslMathCallSupported(expression);
+    case "texture-read":
+      return ir !== undefined && expected === "scalar" && semanticWgslTextureReadSupported(expression, ir);
     case "initializer":
       return false;
   }
@@ -846,9 +876,26 @@ function emitSemanticExpression(
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names);
       if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
+    case "texture-read":
+      return emitSemanticTextureRead(expression, ir, names);
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
   }
+}
+
+function emitSemanticTextureRead(
+  expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (!semanticWgslTextureReadSupported(expression, ir) || expression.texture.kind !== "symbol") {
+    throw semanticWgslError("semantic WGSL supports only direct tex2D<float> reads", expression.span);
+  }
+  const texture = nameFor(expression.texture.name, names);
+  const x = emitSemanticExpressionAs(expression.x, ir, names, "f32");
+  const y = emitSemanticExpressionAs(expression.y, ir, names, "f32");
+  const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
+  return `textureLoad(${texture}, ${coord}, 0).r`;
 }
 
 function emitSemanticFunctionCall(
@@ -1118,6 +1165,13 @@ function deviceGlobalMemorySymbols(ir: SemanticKernelIrModule): readonly Semanti
   return ir.memory.filter((symbol) => symbol.kind === "device-global");
 }
 
+function textureSymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
+  const byName = new Map<string, SemanticKernelIrModule["memory"][number]>();
+  for (const param of ir.params.filter((symbol) => symbol.addressSpace === "texture")) byName.set(param.name, param);
+  for (const symbol of ir.memory.filter((item) => item.kind === "texture")) byName.set(symbol.name, symbol);
+  return [...byName.values()];
+}
+
 function localMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
   return ir.memory.filter((symbol) => symbol.kind === "local" && symbol.dimensions.length > 0);
 }
@@ -1334,6 +1388,8 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
       const atomicType = semanticAtomicCallValueType(expression);
       return atomicType ? wgslAtomicScalar(atomicType) : wgslValueScalar(expression.valueType);
     }
+    case "texture-read":
+      return "f32";
     case "binary": {
       const left = semanticExpressionWgslScalar(expression.left);
       const right = semanticExpressionWgslScalar(expression.right);
@@ -1535,6 +1591,8 @@ function semanticExpressionChildren(expression: SemanticExpression): readonly Se
       return [expression.target, expression.index];
     case "call":
       return [expression.callee, ...expression.args];
+    case "texture-read":
+      return [expression.texture, expression.x, expression.y];
     case "cast":
       return [expression.expression];
     case "unary":

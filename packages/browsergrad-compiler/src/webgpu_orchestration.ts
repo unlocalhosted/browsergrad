@@ -550,6 +550,10 @@ function expressionNeedsParentDispatch(expression: SemanticExpression): boolean 
       const name = semanticCallName(expression.callee);
       return semanticCallNeedsParentDispatch(name, expression.args);
     }
+    case "texture-read":
+      return expressionNeedsParentDispatch(expression.texture) ||
+        expressionNeedsParentDispatch(expression.x) ||
+        expressionNeedsParentDispatch(expression.y);
   }
 }
 

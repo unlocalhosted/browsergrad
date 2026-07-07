@@ -1,4 +1,4 @@
-import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
+import type { WgslTexture2DInput, WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
@@ -64,6 +64,7 @@ interface SemanticReferenceContext {
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly deviceGlobals: Map<string, WgslTypedArray>;
+  readonly textures: Readonly<Record<string, WgslTexture2DInput>>;
   readonly sharedMemory: Map<string, WgslTypedArray>;
   readonly storageOffsets: Map<string, number>;
   readonly scalars: Readonly<Record<string, number>>;
@@ -89,7 +90,9 @@ export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLite
   return compiled.kernelIr.params.every(semanticReferenceParamSupported) &&
     compiled.kernelIr.memory.every(semanticReferenceMemorySymbolSupported) &&
     semanticReferenceSharedShapeSupported(compiled) &&
-    unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled) === undefined;
+    unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled) === undefined &&
+    !semanticReferenceOperationsContainUnsupportedCalls(compiled.kernelIr.operations, compiled) &&
+    compiled.kernelIr.functions.every((fn) => !semanticReferenceOperationsContainUnsupportedCalls(fn.body, compiled));
 }
 
 export function runCompiledKernelSemanticReference(
@@ -132,9 +135,10 @@ export function runCompiledKernelSemanticReference(
               blockContexts.push({
                 compiled,
                 buffers,
-                constants,
-                deviceGlobals,
-                sharedMemory,
+            constants,
+            deviceGlobals,
+            textures: input.textures ?? {},
+            sharedMemory,
                 storageOffsets: new Map(),
                 scalars,
                 locals: new Map(),
@@ -234,6 +238,7 @@ function unsupportedSemanticReferenceOperation(
 function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr"]["params"][number]): boolean {
   if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticReferenceScalarTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType);
+  if (param.addressSpace === "texture") return param.valueType === "texture2d";
   return false;
 }
 
@@ -241,6 +246,7 @@ function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
   if (symbol.kind === "constant") return !symbol.initialized && semanticReferenceScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "device-global") return semanticReferenceScalarTypeSupported(symbol.valueType);
+  if (symbol.kind === "texture") return symbol.valueType === "texture2d";
   return false;
 }
 
@@ -326,7 +332,8 @@ function semanticReferenceAtomicSupported(
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression));
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression)) ||
+    expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled);
 }
 
 function semanticReferenceLocalArrayInitSupported(expression: SemanticExpression): boolean {
@@ -338,6 +345,18 @@ function semanticReferenceMathCallSupported(expression: Extract<SemanticExpressi
   if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
   const arity = semanticMathCallArity(expression.callee.name);
   return expression.args.length === arity && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+}
+
+function semanticReferenceTextureReadSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return expression.valueType === "float" &&
+    expression.texture.kind === "symbol" &&
+    expression.texture.addressSpace === "texture" &&
+    (compiled.textureDescriptors?.[expression.texture.name] === undefined) &&
+    semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
+    semanticReferenceExpressionSupported(expression.y, "scalar", compiled);
 }
 
 function semanticReferenceFunctionCallSupported(
@@ -458,6 +477,8 @@ function semanticReferenceExpressionSupported(
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         semanticReferenceMathCallSupported(expression);
+    case "texture-read":
+      return compiled !== undefined && expected === "scalar" && semanticReferenceTextureReadSupported(expression, compiled);
     case "initializer":
       return false;
   }
@@ -465,6 +486,87 @@ function semanticReferenceExpressionSupported(
 
 function unsupportedMemoryRef(span: SourceSpan): SemanticMemoryRef {
   return { base: "", addressSpace: "unknown", indices: [], fields: [], span };
+}
+
+function semanticReferenceOperationsContainUnsupportedCalls(
+  operations: readonly SemanticKernelIrOperation[],
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === "declare" && operation.init) return semanticReferenceExpressionContainsUnsupportedCall(operation.init, compiled);
+    if (operation.kind === "store") {
+      return operation.target.indices.some((index) => semanticReferenceExpressionContainsUnsupportedCall(index, compiled)) ||
+        semanticReferenceExpressionContainsUnsupportedCall(operation.value, compiled);
+    }
+    if (operation.kind === "atomic") return operation.args.some((arg) => semanticReferenceExpressionContainsUnsupportedCall(arg, compiled));
+    if (operation.kind === "call") return operation.args.some((arg) => semanticReferenceExpressionContainsUnsupportedCall(arg, compiled));
+    if (operation.kind === "expression") return semanticReferenceExpressionContainsUnsupportedCall(operation.expression, compiled);
+    if (operation.kind === "branch") {
+      return semanticReferenceExpressionContainsUnsupportedCall(operation.condition, compiled) ||
+        semanticReferenceOperationsContainUnsupportedCalls(operation.consequent, compiled) ||
+        semanticReferenceOperationsContainUnsupportedCalls(operation.alternate, compiled);
+    }
+    if (operation.kind === "loop") {
+      return Boolean(operation.init && (isSemanticKernelIrOperation(operation.init)
+        ? semanticReferenceOperationsContainUnsupportedCalls([operation.init], compiled)
+        : semanticReferenceExpressionContainsUnsupportedCall(operation.init, compiled))) ||
+        Boolean(operation.condition && semanticReferenceExpressionContainsUnsupportedCall(operation.condition, compiled)) ||
+        Boolean(operation.update && semanticReferenceExpressionContainsUnsupportedCall(operation.update, compiled)) ||
+        semanticReferenceOperationsContainUnsupportedCalls(operation.body, compiled);
+    }
+    if (operation.kind === "return") return Boolean(operation.value && semanticReferenceExpressionContainsUnsupportedCall(operation.value, compiled));
+    if (operation.kind === "block") return semanticReferenceOperationsContainUnsupportedCalls(operation.body, compiled);
+    return false;
+  });
+}
+
+function semanticReferenceExpressionContainsUnsupportedCall(
+  expression: SemanticExpression,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.kind === "call") {
+    return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
+      semanticReferenceFunctionCallSupported(expression, compiled) ||
+      semanticReferenceMathCallSupported(expression)) ||
+      expression.args.some((arg) => semanticReferenceExpressionContainsUnsupportedCall(arg, compiled));
+  }
+  if (expression.kind === "texture-read") {
+    return !semanticReferenceTextureReadSupported(expression, compiled) ||
+      semanticReferenceExpressionContainsUnsupportedCall(expression.x, compiled) ||
+      semanticReferenceExpressionContainsUnsupportedCall(expression.y, compiled);
+  }
+  return semanticReferenceExpressionChildren(expression).some((child) => semanticReferenceExpressionContainsUnsupportedCall(child, compiled));
+}
+
+function semanticReferenceExpressionChildren(expression: SemanticExpression): readonly SemanticExpression[] {
+  switch (expression.kind) {
+    case "literal":
+    case "symbol":
+      return [];
+    case "member":
+      return [expression.object];
+    case "index":
+      return [expression.target, expression.index];
+    case "cast":
+      return [expression.expression];
+    case "unary":
+    case "update":
+      return [expression.argument];
+    case "binary":
+      return [expression.left, expression.right];
+    case "conditional":
+      return [expression.condition, expression.consequent, expression.alternate];
+    case "assignment":
+      return [expression.target, expression.value];
+    case "initializer":
+      return expression.elements;
+    case "sequence":
+      return expression.expressions;
+    case "call":
+      return expression.args;
+    case "texture-read":
+      return [expression.x, expression.y];
+  }
 }
 
 function semanticReferenceAssignmentOperatorSupported(operator: string): boolean {
@@ -741,11 +843,28 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (semanticReferenceFunctionCallSupported(expression, context.compiled)) return evalSemanticFunctionCall(expression, context);
       if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
+    case "texture-read":
+      return evalSemanticTextureRead(expression, context);
     case "initializer":
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "update":
       return evalUpdate(expression, context);
   }
+}
+
+function evalSemanticTextureRead(
+  expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (!semanticReferenceTextureReadSupported(expression, context.compiled) || expression.texture.kind !== "symbol") {
+    throw semanticReferenceError("semantic reference supports only direct tex2D<float> reads", expression.span);
+  }
+  const texture = context.textures[expression.texture.name];
+  if (!texture) throw semanticReferenceError(`missing texture input '${expression.texture.name}'`, expression.texture.span);
+  const channels = texture.channels ?? 1;
+  const x = clampTextureCoord(Math.floor(evalNumber(expression.x, context)), texture.width);
+  const y = clampTextureCoord(Math.floor(evalNumber(expression.y, context)), texture.height);
+  return texture.data[(y * texture.width + x) * channels] ?? 0;
 }
 
 function evalUpdate(
@@ -865,6 +984,7 @@ function evalSemanticFunctionCall(
     buffers: context.buffers,
     constants: context.constants,
     deviceGlobals: context.deviceGlobals,
+    textures: context.textures,
     sharedMemory: context.sharedMemory,
     storageOffsets: new Map(context.storageOffsets),
     scalars: context.scalars,
@@ -1120,9 +1240,14 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       }
     } else if (param.addressSpace === "uniform") {
       if (input.scalars?.[param.name] === undefined) throw semanticReferenceError(`missing scalar input '${param.name}'`, param.span);
+    } else if (param.addressSpace === "texture") {
+      if (!input.textures?.[param.name]) throw semanticReferenceError(`missing texture input '${param.name}'`, param.span);
     } else {
       throw semanticReferenceError(`semantic reference does not support ${param.addressSpace} parameter '${param.name}'`, param.span);
     }
+  }
+  for (const texture of compiled.kernelIr.memory.filter((symbol) => symbol.kind === "texture")) {
+    if (!input.textures?.[texture.name]) throw semanticReferenceError(`missing texture input '${texture.name}'`, texture.span);
   }
   for (const constant of compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant")) {
     if (constant.initialized) continue;
@@ -1211,6 +1336,10 @@ function cloneTypedArray(buffer: WgslTypedArray): WgslTypedArray {
 
 function totalElements(dimensions: readonly number[]): number {
   return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
+}
+
+function clampTextureCoord(value: number, extent: number): number {
+  return Math.max(0, Math.min(Math.max(0, extent - 1), value));
 }
 
 function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {

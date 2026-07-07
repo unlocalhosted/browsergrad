@@ -86,7 +86,7 @@ export function compileCudaLiteKernel(
   }
   const semantic = createCudaLiteSemanticModel(analysis);
   const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
-  const emitted = options.pointerBaseOffsets === undefined && canEmitSemanticKernelIrWgsl(kernelIr)
+  const emitted = options.pointerBaseOffsets === undefined && options.textureDescriptors === undefined && canEmitSemanticKernelIrWgsl(kernelIr)
     ? emitSemanticKernelIrWgsl(kernelIr)
     : emitKernelIrWgsl(
       lowerAnalyzedCudaLiteToKernelIr(analysis, options),

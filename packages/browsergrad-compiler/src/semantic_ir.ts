@@ -117,6 +117,15 @@ export type SemanticExpression =
       readonly span: SourceSpan;
     }
   | {
+      readonly kind: "texture-read";
+      readonly callee: "tex2D";
+      readonly texture: SemanticExpression;
+      readonly x: SemanticExpression;
+      readonly y: SemanticExpression;
+      readonly valueType: Exclude<CudaLiteScalarType, "void">;
+      readonly span: SourceSpan;
+    }
+  | {
       readonly kind: "cast";
       readonly valueType: Exclude<CudaLiteScalarType, "void">;
       readonly pointer: boolean;
@@ -466,6 +475,17 @@ function lowerExpression(
     }
     case "call": {
       const args = expression.args.map((arg) => lowerExpression(arg, scope));
+      if (expression.callee.kind === "identifier" && expression.callee.name === "tex2D" && args.length === 3) {
+        return {
+          kind: "texture-read",
+          callee: "tex2D",
+          texture: args[0]!,
+          x: args[1]!,
+          y: args[2]!,
+          valueType: expression.templateValueType ?? "float",
+          span: expression.span,
+        };
+      }
       return {
         kind: "call",
         callee: lowerExpression(expression.callee, scope),
@@ -585,6 +605,11 @@ function collectMemoryRefsInto(expression: SemanticExpression, refs: SemanticMem
     case "call":
       collectMemoryRefsInto(expression.callee, refs);
       for (const arg of expression.args) collectMemoryRefsInto(arg, refs);
+      return;
+    case "texture-read":
+      collectMemoryRefsInto(expression.texture, refs);
+      collectMemoryRefsInto(expression.x, refs);
+      collectMemoryRefsInto(expression.y, refs);
       return;
     case "cast":
       collectMemoryRefsInto(expression.expression, refs);
