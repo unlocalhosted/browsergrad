@@ -6811,6 +6811,68 @@ __global__ void semantic_norm_math(float *x, float *out) {
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
+  it("lowers CUDA numeric conversion intrinsics through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_numeric_conversions(float *x, int *iout, uint *uout, float *fout) {
+  float a = x[0];
+  float b = x[1];
+  iout[0] = lrintf(a);
+  iout[1] = llrint(b);
+  iout[2] = lroundf(a);
+  iout[3] = llround(b);
+  iout[4] = __float2int_rz(a);
+  iout[5] = __float2int_ru(a);
+  iout[6] = __float2int_rd(b);
+  uout[0] = __float2uint_rn(3.5f);
+  uout[1] = __float2uint_rz(3.9f);
+  uout[2] = __float2uint_ru(3.1f);
+  uout[3] = __float2uint_rd(3.9f);
+  fout[0] = __int2float_rn(iout[5]);
+  fout[1] = __uint2float_rn(uout[2]);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([-2.5, 3.5]),
+        iout: new Int32Array(7),
+        uout: new Uint32Array(4),
+        fout: new Float32Array(2),
+      },
+    };
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      input,
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([-2.5, 3.5]),
+          iout: new Int32Array(7),
+          uout: new Uint32Array(4),
+          fout: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("i32(bg_semantic_round_even_f32(a))");
+    expect(compiled.wgsl).toContain("i32(select(floor(abs(a) + 0.5)");
+    expect(compiled.wgsl).toContain("i32(trunc(a))");
+    expect(compiled.wgsl).toContain("u32(max(bg_semantic_round_even_f32(3.5), 0.0))");
+    expect(compiled.wgsl).toContain("f32(atomicLoad(&iout[5u]))");
+    expect(compiled.wgsl).toContain("f32(atomicLoad(&uout[2u]))");
+    expect([...semanticResult.buffers.iout as Int32Array]).toEqual([-2, 4, -3, 4, -2, -2, 3]);
+    expect([...semanticResult.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
+    expect([...semanticResult.buffers.fout as Float32Array]).toEqual([-2, 4]);
+    expect([...result.buffers.iout as Int32Array]).toEqual([-2, 4, -3, 4, -2, -2, 3]);
+    expect([...result.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
+    expect([...result.buffers.fout as Float32Array]).toEqual([-2, 4]);
+  });
+
   it("lowers unordered CUDA float predicates without treating them as unsupported calls", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void float_predicates(float *out) {
@@ -7758,11 +7820,11 @@ __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout)
     );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(a))");
-    expect(compiled.wgsl).toContain("i32(trunc(f32(a)))");
-    expect(compiled.wgsl).toContain("i32(ceil(f32(a)))");
-    expect(compiled.wgsl).toContain("i32(floor(f32(a)))");
-    expect(compiled.wgsl).toContain("u32(max(bg_round_even_f32(f32(3.5)), 0.0))");
+    expect(compiled.wgsl).toContain("bg_semantic_round_even_f32(a)");
+    expect(compiled.wgsl).toContain("i32(trunc(a))");
+    expect(compiled.wgsl).toContain("i32(ceil(a))");
+    expect(compiled.wgsl).toContain("i32(floor(a))");
+    expect(compiled.wgsl).toContain("u32(max(bg_semantic_round_even_f32(3.5), 0.0))");
     expect([...result.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4]);
     expect([...result.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
     expect([...result.buffers.fout as Float32Array]).toEqual([2, 4]);
@@ -7793,9 +7855,9 @@ __global__ void round_integer_aliases(float *x, int *out) {
     );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(compiled.wgsl).toContain("i32(bg_round_even_f32(f32(x[0])))");
-    expect(compiled.wgsl).toContain("i32(bg_round_away_f32(f32(x[0])))");
-    expect(compiled.wgsl).toContain("bg_round_away_f32(f32(x[4]))");
+    expect(compiled.wgsl).toContain("i32(bg_semantic_round_even_f32(atomicLoad(&x[0u])))");
+    expect(compiled.wgsl).toContain("i32(select(floor(abs(atomicLoad(&x[0u])) + 0.5)");
+    expect(compiled.wgsl).toContain("select(floor(abs(atomicLoad(&x[4u])) + 0.5)");
     expect([...result.buffers.out as Int32Array]).toEqual([2, 4, -2, -4, 3, -3, -4, -2, -2]);
   });
 

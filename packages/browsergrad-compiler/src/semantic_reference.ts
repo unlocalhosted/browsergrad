@@ -58,6 +58,11 @@ const SEMANTIC_MATH_CALLS = new Set([
   "ldexp", "ldexpf", "scalbn", "scalbnf", "scalbln", "scalblnf",
   "fmod", "fmodf", "remainder", "remainderf", "logb", "logbf", "ilogb", "ilogbf", "fdim", "fdimf",
   "hypot", "hypotf", "rhypot", "rhypotf", "norm3df", "norm4df", "rnorm3df", "rnorm4df",
+  "lrint", "lrintf", "llrint", "llrintf", "lround", "lroundf", "llround", "llroundf",
+  "__float2int_rn", "__float2int_rz", "__float2int_ru", "__float2int_rd",
+  "__float2uint_rn", "__float2uint_rz", "__float2uint_ru", "__float2uint_rd",
+  "__int2float_rn", "__int2float_rz", "__int2float_ru", "__int2float_rd",
+  "__uint2float_rn", "__uint2float_rz", "__uint2float_ru", "__uint2float_rd",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -1521,6 +1526,30 @@ function evalSemanticMathCall(
     case "norm4df": return Math.hypot(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, args[3] ?? 0);
     case "rnorm3df": return 1 / Math.hypot(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
     case "rnorm4df": return 1 / Math.hypot(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, args[3] ?? 0);
+    case "lrint":
+    case "lrintf":
+    case "llrint":
+    case "llrintf":
+    case "__float2int_rn": return roundTiesToEvenNumber(args[0] ?? 0) | 0;
+    case "lround":
+    case "lroundf":
+    case "llround":
+    case "llroundf": return roundAwayFromZero(args[0] ?? 0) | 0;
+    case "__float2int_rz": return Math.trunc(args[0] ?? 0) | 0;
+    case "__float2int_ru": return Math.ceil(args[0] ?? 0) | 0;
+    case "__float2int_rd": return Math.floor(args[0] ?? 0) | 0;
+    case "__float2uint_rn": return roundTiesToEvenNumber(args[0] ?? 0) >>> 0;
+    case "__float2uint_rz": return Math.trunc(args[0] ?? 0) >>> 0;
+    case "__float2uint_ru": return Math.ceil(args[0] ?? 0) >>> 0;
+    case "__float2uint_rd": return Math.floor(args[0] ?? 0) >>> 0;
+    case "__int2float_rn":
+    case "__int2float_rz":
+    case "__int2float_ru":
+    case "__int2float_rd": return Math.trunc(args[0] ?? 0) | 0;
+    case "__uint2float_rn":
+    case "__uint2float_rz":
+    case "__uint2float_ru":
+    case "__uint2float_rd": return Math.trunc(args[0] ?? 0) >>> 0;
     case "fmin":
     case "fminf":
     case "min": return Math.min(args[0] ?? 0, args[1] ?? 0);

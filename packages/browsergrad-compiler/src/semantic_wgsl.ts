@@ -153,6 +153,30 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["norm4df", "norm"],
   ["rnorm3df", "rnorm"],
   ["rnorm4df", "rnorm"],
+  ["lrint", "float_to_int_rn"],
+  ["lrintf", "float_to_int_rn"],
+  ["llrint", "float_to_int_rn"],
+  ["llrintf", "float_to_int_rn"],
+  ["lround", "float_to_int_round"],
+  ["lroundf", "float_to_int_round"],
+  ["llround", "float_to_int_round"],
+  ["llroundf", "float_to_int_round"],
+  ["__float2int_rn", "float_to_int_rn"],
+  ["__float2int_rz", "float_to_int_rz"],
+  ["__float2int_ru", "float_to_int_ru"],
+  ["__float2int_rd", "float_to_int_rd"],
+  ["__float2uint_rn", "float_to_uint_rn"],
+  ["__float2uint_rz", "float_to_uint_rz"],
+  ["__float2uint_ru", "float_to_uint_ru"],
+  ["__float2uint_rd", "float_to_uint_rd"],
+  ["__int2float_rn", "int_to_float"],
+  ["__int2float_rz", "int_to_float"],
+  ["__int2float_ru", "int_to_float"],
+  ["__int2float_rd", "int_to_float"],
+  ["__uint2float_rn", "uint_to_float"],
+  ["__uint2float_rz", "uint_to_float"],
+  ["__uint2float_ru", "uint_to_float"],
+  ["__uint2float_rd", "uint_to_float"],
   ["fmin", "min"],
   ["fminf", "min"],
   ["min", "min"],
@@ -2196,7 +2220,8 @@ function emitSemanticMathCall(
     wgslCallee === "atanh" ||
     wgslCallee === "cbrt" ||
     wgslCallee === "rcbrt" ||
-    wgslCallee === "reciprocal"
+    wgslCallee === "reciprocal" ||
+    wgslCallee.startsWith("float_to_")
   ) {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
@@ -2219,7 +2244,22 @@ function emitSemanticMathCall(
     const signedCbrt = `select(pow(abs(${emitted}), 0.3333333333333333), -pow(abs(${emitted}), 0.3333333333333333), (${emitted} < 0.0))`;
     if (wgslCallee === "cbrt") return signedCbrt;
     if (wgslCallee === "rcbrt") return `(1.0 / ${signedCbrt})`;
+    if (wgslCallee === "float_to_int_rn") return `i32(bg_semantic_round_even_f32(${emitted}))`;
+    if (wgslCallee === "float_to_int_round") return `i32(select(floor(abs(${emitted}) + 0.5), -floor(abs(${emitted}) + 0.5), (${emitted} < 0.0)))`;
+    if (wgslCallee === "float_to_int_rz") return `i32(trunc(${emitted}))`;
+    if (wgslCallee === "float_to_int_ru") return `i32(ceil(${emitted}))`;
+    if (wgslCallee === "float_to_int_rd") return `i32(floor(${emitted}))`;
+    if (wgslCallee === "float_to_uint_rn") return `u32(max(bg_semantic_round_even_f32(${emitted}), 0.0))`;
+    if (wgslCallee === "float_to_uint_rz") return `u32(max(trunc(${emitted}), 0.0))`;
+    if (wgslCallee === "float_to_uint_ru") return `u32(max(ceil(${emitted}), 0.0))`;
+    if (wgslCallee === "float_to_uint_rd") return `u32(max(floor(${emitted}), 0.0))`;
     return `(1.0 / ${emitted})`;
+  }
+  if (wgslCallee === "int_to_float" || wgslCallee === "uint_to_float") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const scalar = wgslCallee === "int_to_float" ? "i32" : "u32";
+    return `f32(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
   }
   if (wgslCallee === "builtin_inf") return "bitcast<f32>(0x7f800000u)";
   if (wgslCallee === "uint_as_float" || wgslCallee === "int_as_float") {
