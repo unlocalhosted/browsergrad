@@ -2942,6 +2942,34 @@ __global__ void localPointerCompare(uint *out, int pick) {
     expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1]);
   });
 
+  it("lowers local pointer alias null comparisons through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localPointerNullCompare(uint *out) {
+  uint values[2];
+  uint *p = values;
+  out[0] = p != NULL ? 1u : 0u;
+  out[1] = nullptr == p ? 1u : 0u;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-pointer-comparison");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var p:");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 0]);
+  });
+
   it("lowers local pointer alias ordering comparisons through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void localPointerOrder(uint *out) {

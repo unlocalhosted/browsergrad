@@ -1229,6 +1229,12 @@ function localPointerAliasComparisonExpression(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): SemanticExpression | undefined {
   if (!POINTER_ORDER_OPERATORS.has(expression.operator)) return undefined;
+  if (expression.operator === "==" || expression.operator === "!=") {
+    const leftAlias = localPointerAliasScalarIndex(expression.left, scope);
+    const rightAlias = localPointerAliasScalarIndex(expression.right, scope);
+    if (leftAlias && isNullPointerLiteral(expression.right)) return booleanExpression(expression.operator === "!=", expression.span);
+    if (rightAlias && isNullPointerLiteral(expression.left)) return booleanExpression(expression.operator === "!=", expression.span);
+  }
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
   if (!left || !right || left.root !== right.root) return undefined;
@@ -1319,6 +1325,18 @@ function isZeroLiteral(expression: SemanticExpression): boolean {
 
 function zeroExpression(span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value: 0, valueType: "int", span };
+}
+
+function booleanExpression(value: boolean, span: SourceSpan): SemanticExpression {
+  const zero = zeroExpression(span);
+  return {
+    kind: "binary",
+    operator: value ? "==" : "!=",
+    left: zero,
+    right: zero,
+    valueType: "bool",
+    span,
+  };
 }
 
 function paramAddressSpace(param: CudaLiteParam): SemanticAddressSpace {
