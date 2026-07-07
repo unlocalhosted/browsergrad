@@ -1253,14 +1253,18 @@ function localPointerAliasComparisonExpression(
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
   if (!left || !right || left.root !== right.root) return undefined;
-  return {
+  const indexComparisonOperator = left.valid || right.valid ? "==" : expression.operator;
+  const indexComparison: SemanticExpression = {
     kind: "binary",
-    operator: expression.operator,
+    operator: indexComparisonOperator,
     left: left.index,
     right: right.index,
     valueType: "bool",
     span: expression.span,
   };
+  if (!left.valid && !right.valid) return indexComparison;
+  if (expression.operator !== "==" && expression.operator !== "!=") return undefined;
+  return nullablePointerAliasEqualityExpression(left, right, indexComparison, expression.operator, expression.span);
 }
 
 function localPointerAliasScalarIndex(
@@ -1357,6 +1361,37 @@ function booleanExpression(value: boolean, span: SourceSpan): SemanticExpression
 function pointerNullComparisonExpression(valid: SemanticExpression | undefined, operator: string, span: SourceSpan): SemanticExpression {
   if (!valid) return booleanExpression(operator === "!=", span);
   return operator === "!=" ? valid : negateExpression(valid, span);
+}
+
+function nullablePointerAliasEqualityExpression(
+  left: { readonly valid?: SemanticExpression },
+  right: { readonly valid?: SemanticExpression },
+  indexEqual: SemanticExpression,
+  operator: string,
+  span: SourceSpan,
+): SemanticExpression {
+  const leftValid = left.valid ?? booleanExpression(true, span);
+  const rightValid = right.valid ?? booleanExpression(true, span);
+  const bothValidAndSame = andExpression(andExpression(leftValid, rightValid, span), indexEqual, span);
+  const bothInvalid = andExpression(
+    left.valid ? negateExpression(left.valid, span) : booleanExpression(false, span),
+    right.valid ? negateExpression(right.valid, span) : booleanExpression(false, span),
+    span,
+  );
+  const equal = orExpression(bothInvalid, bothValidAndSame, span);
+  return operator === "==" ? equal : negateExpression(equal, span);
+}
+
+function andExpression(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return logicalExpression("&&", left, right, span);
+}
+
+function orExpression(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return logicalExpression("||", left, right, span);
+}
+
+function logicalExpression(operator: "&&" | "||", left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return { kind: "binary", operator, left, right, valueType: "bool", span };
 }
 
 function negateExpression(expression: SemanticExpression, span: SourceSpan): SemanticExpression {
