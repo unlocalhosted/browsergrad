@@ -16290,10 +16290,26 @@ __global__ void bf162_bits(float* data, unsigned int* out) {
   out[0] = atomicCAS((unsigned int*)&packed[0], currentBits, nextBits);
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("bitcast<u32>(current.x) >> 16u");
     expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&data[");
     expect(compiled.wgsl).not.toContain("*&current");
     expect(compiled.wgsl).not.toContain("&vec2<f32>");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bitcast<u32>(f32((current).x)) >> 16u");
+
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          data: new Float32Array([1.5, 2.5]),
+          out: new Uint32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1069547520]);
+    expect([...semanticResult.buffers.data as Float32Array]).toEqual([1.5, 2.5]);
   });
 
   it("passes nullable conditional storage pointers into device helpers", () => {

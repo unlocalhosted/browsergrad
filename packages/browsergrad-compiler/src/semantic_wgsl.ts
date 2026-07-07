@@ -1324,6 +1324,7 @@ function semanticWgslExpressionSupported(
     case "cast":
       return !expression.pointer && semanticWgslExpressionSupported(expression.expression, "scalar", ir);
     case "unary":
+      if (expected === "scalar" && semanticWgslBf162LocalBitsCastSupported(expression, ir)) return true;
       return expression.operator !== "*" && expression.operator !== "&" && semanticWgslExpressionSupported(expression.argument, "scalar", ir);
     case "binary":
       if (expected === "any" && isSemanticWgslFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
@@ -1890,6 +1891,7 @@ function emitSemanticExpression(
     case "cast":
       return `${wgslScalar(expression.valueType)}(${emitSemanticExpression(expression.expression, ir, names, options, textureSpecializations)})`;
     case "unary":
+      if (semanticWgslBf162LocalBitsCastSupported(expression, ir)) return emitSemanticBf162LocalBitsCast(expression, ir, names, options, textureSpecializations);
       return emitSemanticUnary(expression, ir, names, options, textureSpecializations);
     case "binary":
       return emitSemanticBinary(expression, ir, names, options, textureSpecializations);
@@ -2484,6 +2486,41 @@ function emitSemanticBf162Call(
     return `vec2<f32>(bitcast<f32>((${bits} & 0x0000ffffu) << 16u), bitcast<f32>(${bits} & 0xffff0000u))`;
   }
   throw semanticWgslError(`semantic WGSL does not support bf162 call '${name}'`, expression.span);
+}
+
+function semanticWgslBf162LocalBitsCastSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "unary" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  if (expression.operator !== "*" || expression.valueType !== "uint") return false;
+  const arg = expression.argument;
+  if (arg.kind !== "cast" || !arg.pointer || arg.valueType !== "uint") return false;
+  const address = arg.expression;
+  if (address.kind !== "unary" || address.operator !== "&" || address.argument.kind !== "symbol") return false;
+  const target = address.argument;
+  return target.addressSpace === "local" &&
+    semanticExpressionVectorValueType(target, ir) === "bf162" &&
+    (ir === undefined || ir.operations.some((operation) =>
+      operation.kind === "declare" &&
+      operation.target.name === target.name &&
+      operation.target.addressSpace === "local" &&
+      operation.target.valueType === "bf162"
+    ));
+}
+
+function emitSemanticBf162LocalBitsCast(
+  expression: Extract<SemanticExpression, { readonly kind: "unary" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  const cast = expression.argument;
+  if (cast.kind !== "cast" || cast.expression.kind !== "unary" || cast.expression.argument.kind !== "symbol") {
+    throw semanticWgslError("semantic WGSL bf162 bitcast requires local bf162 symbol", expression.span);
+  }
+  const value = emitSemanticExpression(cast.expression.argument, ir, names, options, textureSpecializations);
+  return `((bitcast<u32>(f32((${value}).x)) >> 16u) | (bitcast<u32>(f32((${value}).y)) & 0xffff0000u))`;
 }
 
 function emitSemanticFunctionArg(
@@ -3292,7 +3329,13 @@ function emitSemanticVectorMemoryRead(
   const base = emitFlatStorageVectorBaseIndex(ref, ir, names, options);
   const storage = nameFor(ref.base, names);
   const laneCount = cudaVectorLaneCount(ref.valueType);
-  return `${wgslValueType(ref.valueType)}(${Array.from({ length: laneCount }, (_, lane) => `${storage}[(${base} + ${lane}u)]`).join(", ")})`;
+  const atomicStorage = semanticAtomicStorageNames(ir.operations).has(ref.base) ||
+    semanticAtomicDeviceGlobalNames(ir.operations).has(ref.base) ||
+    semanticAtomicSharedNames(ir.operations).has(ref.base);
+  return `${wgslValueType(ref.valueType)}(${Array.from({ length: laneCount }, (_, lane) => {
+    const access = `${storage}[(${base} + ${lane}u)]`;
+    return atomicStorage ? `bitcast<f32>(atomicLoad(&${access}))` : access;
+  }).join(", ")})`;
 }
 
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
@@ -4029,6 +4072,17 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
   if (expression.callee.kind !== "symbol" || !WGSL_ATOMIC_CALLEES.has(expression.callee.name)) return undefined;
   const firstArg = expression.args[0];
   if (!firstArg) return undefined;
+  if (
+    firstArg.kind === "cast" &&
+    firstArg.pointer &&
+    (firstArg.valueType === "uint" || firstArg.valueType === "int") &&
+    firstArg.expression.kind === "unary" &&
+    firstArg.expression.operator === "&" &&
+    firstArg.expression.argument.kind === "index"
+  ) {
+    const ref = memoryRefFromIndexExpression(firstArg.expression.argument);
+    return ref ? { ...ref, valueType: firstArg.valueType } : undefined;
+  }
   if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
     return memoryRefFromIndexExpression(firstArg.argument);
   }

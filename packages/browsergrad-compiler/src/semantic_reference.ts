@@ -760,6 +760,7 @@ function semanticReferenceExpressionSupported(
     case "cast":
       return !expression.pointer && semanticReferenceExpressionSupported(expression.expression, "scalar", compiled);
     case "unary":
+      if (expected === "scalar" && semanticReferenceBf162LocalBitsCastSupported(expression, compiled)) return true;
       return expression.operator !== "*" && expression.operator !== "&" && semanticReferenceExpressionSupported(expression.argument, "scalar", compiled);
     case "binary":
       if (isStoragePointerNullComparison(expression)) return true;
@@ -1178,9 +1179,9 @@ function execSemanticAtomic(
   }
   const value = operation.args[1];
   if (!value) throw semanticReferenceError(`semantic reference atomic '${operation.callee}' missing operand`, operation.span);
-  const oldValue = readMemory(operation.target, context);
+  const oldValue = readAtomicMemory(operation.target, context);
   const nextValue = semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), operation, context);
-  writeMemory(operation.target, nextValue, context);
+  writeAtomicMemory(operation.target, nextValue, context);
 }
 
 function execSemanticCall(
@@ -1311,6 +1312,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "cast":
       return castNumber(evalNumber(expression.expression, context), expression.valueType);
     case "unary":
+      if (semanticReferenceBf162LocalBitsCastSupported(expression, context.compiled)) return evalSemanticBf162LocalBitsCast(expression, context);
       return evalUnary(expression.operator, evalNumber(expression.argument, context));
     case "binary": {
       const left = evalSemanticExpression(expression.left, context);
@@ -1528,8 +1530,8 @@ function evalSemanticAtomicCall(
   if (!atomicOp || !target || !value) {
     throw semanticReferenceError(`semantic reference does not support atomic '${expression.callee.name}'`, expression.span);
   }
-  const oldValue = readMemory(target, context);
-  writeMemory(target, semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), expression, context), context);
+  const oldValue = readAtomicMemory(target, context);
+  writeAtomicMemory(target, semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), expression, context), context);
   return oldValue;
 }
 
@@ -2329,6 +2331,41 @@ function evalSemanticBf162Call(
   throw semanticReferenceError(`semantic reference does not support bf162 call '${name}'`, expression.span);
 }
 
+function semanticReferenceBf162LocalBitsCastSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "unary" }>,
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.operator !== "*" || expression.valueType !== "uint") return false;
+  const arg = expression.argument;
+  if (arg.kind !== "cast" || !arg.pointer || arg.valueType !== "uint") return false;
+  const address = arg.expression;
+  if (address.kind !== "unary" || address.operator !== "&" || address.argument.kind !== "symbol") return false;
+  const target = address.argument;
+  return target.addressSpace === "local" &&
+    semanticExpressionVectorValueType(target) === "bf162" &&
+    (compiled === undefined || compiled.kernelIr.operations.some((operation) =>
+      operation.kind === "declare" &&
+      operation.target.name === target.name &&
+      operation.target.addressSpace === "local" &&
+      operation.target.valueType === "bf162"
+    ));
+}
+
+function evalSemanticBf162LocalBitsCast(
+  expression: Extract<SemanticExpression, { readonly kind: "unary" }>,
+  context: SemanticReferenceContext,
+): number {
+  const cast = expression.argument;
+  if (cast.kind !== "cast" || cast.expression.kind !== "unary" || cast.expression.argument.kind !== "symbol") {
+    throw semanticReferenceError("semantic reference bf162 bitcast requires local bf162 symbol", expression.span);
+  }
+  const value = evalSemanticExpression(cast.expression.argument, context);
+  if (!Array.isArray(value)) throw semanticReferenceError("semantic reference bf162 bitcast expects vector local", expression.span);
+  const low = (float32ToUintBits(roundSemanticBfloat16(value[0] ?? 0)) >>> 16) & 0xffff;
+  const high = float32ToUintBits(roundSemanticBfloat16(value[1] ?? 0)) & 0xffff0000;
+  return (high | low) >>> 0;
+}
+
 function assignLocalVectorMember(
   expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
   context: SemanticReferenceContext,
@@ -2512,6 +2549,17 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
   if (expression.callee.kind !== "symbol" || !SEMANTIC_ATOMIC_OPS.has(expression.callee.name)) return undefined;
   const firstArg = expression.args[0];
   if (!firstArg) return undefined;
+  if (
+    firstArg.kind === "cast" &&
+    firstArg.pointer &&
+    (firstArg.valueType === "uint" || firstArg.valueType === "int") &&
+    firstArg.expression.kind === "unary" &&
+    firstArg.expression.operator === "&" &&
+    firstArg.expression.argument.kind === "index"
+  ) {
+    const ref = memoryRefFromIndexExpression(firstArg.expression.argument);
+    return ref ? { ...ref, valueType: firstArg.valueType } : undefined;
+  }
   if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
     return memoryRefFromIndexExpression(firstArg.argument);
   }
@@ -2606,6 +2654,21 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   const ok = index >= 0 && index < buffer.length;
   if (ok) buffer[index] = value;
   context.trace.writes.push({ name: ref.base, index, value, ok });
+}
+
+function readAtomicMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  const value = readMemory(ref, context);
+  return atomicMemoryUsesFloatBits(ref, context) ? float32ToUintBits(value) : value;
+}
+
+function writeAtomicMemory(ref: SemanticMemoryRef, value: number, context: SemanticReferenceContext): void {
+  writeMemory(ref, atomicMemoryUsesFloatBits(ref, context) ? uintBitsToFloat32(value) : value, context);
+}
+
+function atomicMemoryUsesFloatBits(ref: SemanticMemoryRef, context: SemanticReferenceContext): boolean {
+  return ref.addressSpace === "storage" &&
+    (ref.valueType === "uint" || ref.valueType === "int") &&
+    context.compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && param.valueType === "float");
 }
 
 function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number[] {
