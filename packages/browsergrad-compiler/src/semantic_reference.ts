@@ -221,6 +221,9 @@ function unsupportedSemanticReferenceOperation(
       case "branch":
         if (!semanticReferenceExpressionSupported(operation.condition, "scalar", compiled)) return operation;
         break;
+      case "block":
+        if (operationsContainDeclare(operation.body)) return operation;
+        break;
       case "loop":
         if (operation.init && !semanticReferenceLoopInitSupported(operation.init, compiled)) return operation;
         if (operation.condition && !semanticReferenceExpressionSupported(operation.condition, "scalar", compiled)) return operation;
@@ -242,6 +245,7 @@ function unsupportedSemanticReferenceOperation(
       return unsupportedSemanticReferenceOperation(operation.consequent, compiled, allowReturnValue) ??
         unsupportedSemanticReferenceOperation(operation.alternate, compiled, allowReturnValue);
     }
+    if (operation.kind === "block") return unsupportedSemanticReferenceOperation(operation.body, compiled, allowReturnValue);
     if (operation.kind === "loop") return unsupportedSemanticReferenceOperation(operation.body, compiled, allowReturnValue);
   }
   return undefined;
@@ -253,6 +257,15 @@ function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
   return false;
+}
+
+function operationsContainDeclare(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some((operation) =>
+    operation.kind === "declare" ||
+    operation.kind === "branch" && (operationsContainDeclare(operation.consequent) || operationsContainDeclare(operation.alternate)) ||
+    operation.kind === "loop" && operationsContainDeclare(operation.body) ||
+    operation.kind === "block" && operationsContainDeclare(operation.body)
+  );
 }
 
 function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): boolean {
@@ -420,6 +433,7 @@ function semanticReferenceFunctionBodyShapeSupported(operations: readonly Semant
     if (operation.kind === "surface-write") return true;
     if (operation.kind === "call") return true;
     if (operation.kind === "branch") return semanticReferenceFunctionBodyShapeSupported(operation.consequent) && semanticReferenceFunctionBodyShapeSupported(operation.alternate);
+    if (operation.kind === "block") return semanticReferenceFunctionBodyShapeSupported(operation.body);
     if (operation.kind === "loop") return semanticReferenceFunctionBodyShapeSupported(operation.body);
     return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
   });
@@ -754,6 +768,12 @@ function execSemanticOperations(
           if (control !== "fallthrough") return control;
         } else {
           const control = execSemanticOperations(operation.alternate, context);
+          if (control !== "fallthrough") return control;
+        }
+        break;
+      case "block":
+        {
+          const control = execSemanticOperations(operation.body, context);
           if (control !== "fallthrough") return control;
         }
         break;

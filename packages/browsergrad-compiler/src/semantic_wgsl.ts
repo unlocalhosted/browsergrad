@@ -315,6 +315,13 @@ function unsupportedSemanticWgslOperation(
           if (unsupported) return unsupported;
         }
         break;
+      case "block":
+        if (operationsContainDeclare(operation.body)) return operation;
+        {
+          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue);
+          if (unsupported) return unsupported;
+        }
+        break;
       case "loop":
         if (operation.init && !semanticWgslLoopInitSupported(operation.init, ir)) return operation;
         if (operation.condition && !semanticWgslExpressionSupported(operation.condition, "scalar", ir)) return operation;
@@ -346,6 +353,15 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
   return false;
+}
+
+function operationsContainDeclare(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some((operation) =>
+    operation.kind === "declare" ||
+    operation.kind === "branch" && (operationsContainDeclare(operation.consequent) || operationsContainDeclare(operation.alternate)) ||
+    operation.kind === "loop" && operationsContainDeclare(operation.body) ||
+    operation.kind === "block" && operationsContainDeclare(operation.body)
+  );
 }
 
 function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
@@ -717,6 +733,12 @@ function emitSemanticOperation(
       lines.push(`${prefix}}`);
       return lines;
     }
+    case "block":
+      return [
+        `${prefix}{`,
+        ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue),
+        `${prefix}}`,
+      ];
     case "loop":
       return emitSemanticLoop(operation, ir, names, indentLevel, allowReturnValue);
     case "barrier":

@@ -351,8 +351,12 @@ function lowerStatement(
   scope: Map<string, CudaLiteSemanticSymbol>,
 ): SemanticKernelIrOperation {
   switch (statement.kind) {
-    case "block":
-      return { kind: "block", body: lowerStatements(statement.body, scope), span: statement.span };
+    case "block": {
+      const childScope = new Map(scope);
+      const body = lowerStatementsWithScope(statement.body, childScope);
+      mergeBlockLocalPointerAliases(scope, childScope);
+      return { kind: "block", body, span: statement.span };
+    }
     case "var": {
       const target = symbolForVar(statement, scope);
       scope.set(target.name, target);
@@ -996,6 +1000,31 @@ function localPointerAliasUpdate(
   return false;
 }
 
+function mergeBlockLocalPointerAliases(
+  parent: Map<string, CudaLiteSemanticSymbol>,
+  child: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): void {
+  for (const [name, current] of parent) {
+    if (!current.pointer || current.dimensions.length > 0) continue;
+    const next = child.get(name);
+    if (
+      !next ||
+      !sameSymbolDeclaration(current, next) ||
+      !next.pointerRoot ||
+      next.pointerAddressSpace !== "local" ||
+      next.pointerBaseIndices?.length !== 1
+    ) {
+      continue;
+    }
+    parent.set(name, {
+      ...current,
+      pointerRoot: next.pointerRoot,
+      pointerAddressSpace: "local",
+      pointerBaseIndices: next.pointerBaseIndices,
+    });
+  }
+}
+
 function mergeBranchLocalPointerAliases(
   parent: Map<string, CudaLiteSemanticSymbol>,
   consequent: ReadonlyMap<string, CudaLiteSemanticSymbol>,
@@ -1010,6 +1039,8 @@ function mergeBranchLocalPointerAliases(
     if (
       !left?.pointerRoot ||
       !right?.pointerRoot ||
+      !sameSymbolDeclaration(current, left) ||
+      !sameSymbolDeclaration(current, right) ||
       left.pointerRoot !== right.pointerRoot ||
       left.pointerAddressSpace !== "local" ||
       right.pointerAddressSpace !== "local" ||
@@ -1032,6 +1063,13 @@ function mergeBranchLocalPointerAliases(
       }],
     });
   }
+}
+
+function sameSymbolDeclaration(left: CudaLiteSemanticSymbol, right: CudaLiteSemanticSymbol): boolean {
+  return left.name === right.name &&
+    left.kind === right.kind &&
+    left.span.start === right.span.start &&
+    left.span.end === right.span.end;
 }
 
 function localPointerAliasRoot(

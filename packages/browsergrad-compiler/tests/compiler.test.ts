@@ -2620,6 +2620,40 @@ __global__ void localPointerBranchMerge(float *out, int pick) {
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([11]);
   });
 
+  it("lowers block-updated local pointer aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localPointerBlockUpdate(float *out) {
+  float values[3];
+  values[0] = 2.0f;
+  values[1] = 5.0f;
+  values[2] = 11.0f;
+  float *p = values;
+  {
+    p = &values[1];
+    p += 1;
+  }
+  out[0] = p[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var p:");
+    expect([...result.buffers.out as Float32Array]).toEqual([11]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([11]);
+  });
+
   it("lowers local pointer alias comparisons through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void localPointerCompare(uint *out, int pick) {
