@@ -325,7 +325,14 @@ function lowerStatements(
 ): readonly SemanticKernelIrOperation[] {
   const scope = new Map(parentScope);
   const out: SemanticKernelIrOperation[] = [];
-  for (const statement of statements) {
+  for (let index = 0; index < statements.length; index++) {
+    const statement = statements[index]!;
+    if (isLocalPointerAliasPlaceholder(statement) && hasLaterLocalPointerAliasAssignment(statement.name, statements.slice(index + 1), scope)) {
+      const target = symbolForVar(statement, scope);
+      scope.set(target.name, target);
+      out.push({ kind: "expression", expression: zeroExpression(statement.span), span: statement.span });
+      continue;
+    }
     out.push(lowerStatement(statement, scope));
   }
   return out;
@@ -360,6 +367,8 @@ function lowerStatement(
     case "asm":
       return { kind: "inline-asm", statement, span: statement.span };
     case "expr": {
+      const aliasAssignment = localPointerAliasAssignment(statement.expression, scope);
+      if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const expression = lowerExpression(statement.expression, scope);
       if (expression.kind === "call" && expression.callee.kind === "symbol" && BARRIER_CALLS.has(expression.callee.name)) {
         return { kind: "barrier", callee: expression.callee.name, span: statement.span };
@@ -889,6 +898,42 @@ function localPointerAliasForInitializer(
     pointerAddressSpace: ref.root.addressSpace,
     pointerBaseIndices: ref.indices,
   };
+}
+
+function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { readonly kind: "var" }> {
+  return statement.kind === "var" &&
+    statement.storage === "local" &&
+    statement.pointer &&
+    statement.dimensions.length === 0 &&
+    statement.init === undefined;
+}
+
+function hasLaterLocalPointerAliasAssignment(
+  name: string,
+  statements: readonly CudaLiteStatement[],
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): boolean {
+  for (const statement of statements) {
+    if (statement.kind !== "expr") continue;
+    const expression = statement.expression;
+    if (expression.kind !== "assignment" || expression.operator !== "=" || expression.left.kind !== "identifier" || expression.left.name !== name) continue;
+    const alias = localPointerAliasForInitializer(expression.right, scope);
+    return alias !== undefined && alias.pointerAddressSpace === "local";
+  }
+  return false;
+}
+
+function localPointerAliasAssignment(
+  expression: CudaLiteExpression,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): boolean {
+  if (expression.kind !== "assignment" || expression.operator !== "=" || expression.left.kind !== "identifier") return false;
+  const target = scope.get(expression.left.name);
+  if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length > 0) return false;
+  const alias = localPointerAliasForInitializer(expression.right, scope);
+  if (!alias || alias.pointerAddressSpace !== "local") return false;
+  scope.set(target.name, { ...target, ...alias });
+  return true;
 }
 
 function localPointerAliasRoot(

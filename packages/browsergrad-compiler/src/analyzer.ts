@@ -3964,7 +3964,11 @@ function validateNonCallExpression(
         }
       } else if (left.kind === "pointer") {
         if (expression.operator === "=") {
-          if (right.kind !== "pointer" && right.kind !== "pool-pointer" && right.kind !== "address" && right.kind !== "unknown") {
+          const localArrayDecay = right.kind === "array" &&
+            right.symbol?.kind === "local" &&
+            (right.symbol.dimensions?.length ?? 0) > 0 &&
+            pointerTypesCompatible(left.valueType ?? "float", right.valueType ?? "float", hasExplicitPointerCast(expression.right));
+          if (right.kind !== "pointer" && right.kind !== "pool-pointer" && right.kind !== "address" && right.kind !== "unknown" && !localArrayDecay) {
             diagnostics.push(error("unsupported-pointer-assignment", "CUDA pointer assignment expects a pointer value", expression.right.span));
           }
         } else if (isPointerRebaseOperator(expression.operator)) {
