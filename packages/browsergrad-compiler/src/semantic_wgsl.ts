@@ -289,6 +289,9 @@ function unsupportedSemanticWgslOperation(
       case "surface-write":
         if (!semanticWgslSurfaceWriteSupported(operation, ir)) return operation;
         break;
+      case "surface-read-store":
+        if (!semanticWgslSurfaceReadStoreSupported(operation, ir)) return operation;
+        break;
       case "atomic":
         if (!semanticWgslAtomicSupported(operation, ir)) return operation;
         break;
@@ -542,6 +545,26 @@ function semanticWgslSurfaceWriteSupported(
     (operation.z === undefined || semanticWgslExpressionSupported(operation.z, "scalar", ir));
 }
 
+function semanticWgslSurfaceReadStoreSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  return semanticWgslSurfaceReadTargetName(operation.target) !== undefined &&
+    semanticWgslSurfaceReadSupported(
+      {
+        kind: "surface-read",
+        callee: operation.z === undefined ? "surf2Dread" : "surf2DLayeredread",
+        surface: operation.surface,
+        xBytes: operation.xBytes,
+        y: operation.y,
+        ...(operation.z === undefined ? {} : { z: operation.z }),
+        valueType: operation.valueType === "uint" || operation.valueType === "int" ? operation.valueType : "float",
+        span: operation.span,
+      },
+      ir,
+    );
+}
+
 function semanticWgslAtomicTargetRootSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (ref.addressSpace === "storage") {
     return ir.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
@@ -645,6 +668,8 @@ function emitSemanticOperation(
       return [`${prefix}${emitSemanticStore(operation, ir, names)};`];
     case "surface-write":
       return emitSemanticSurfaceWrite(operation, ir, names, indentLevel);
+    case "surface-read-store":
+      return [`${prefix}${emitSemanticSurfaceReadStore(operation, ir, names)};`];
     case "atomic":
       return [`${prefix}${emitSemanticAtomic(operation, ir, names)};`];
     case "call":
@@ -679,6 +704,38 @@ function emitSemanticOperation(
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
+}
+
+function emitSemanticSurfaceReadStore(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  const targetName = semanticWgslSurfaceReadTargetName(operation.target);
+  if (!targetName) throw semanticWgslError("semantic WGSL supports only local scalar surf2Dread targets", operation.span);
+  const value = emitSemanticSurfaceRead(
+    {
+      kind: "surface-read",
+      callee: operation.z === undefined ? "surf2Dread" : "surf2DLayeredread",
+      surface: operation.surface,
+      xBytes: operation.xBytes,
+      y: operation.y,
+      ...(operation.z === undefined ? {} : { z: operation.z }),
+      valueType: operation.valueType === "uint" || operation.valueType === "int" ? operation.valueType : "float",
+      span: operation.span,
+    },
+    ir,
+    names,
+  );
+  return `${nameFor(targetName, names)} = ${value}`;
+}
+
+function semanticWgslSurfaceReadTargetName(expression: SemanticExpression): string | undefined {
+  if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "symbol" && expression.argument.addressSpace === "local") {
+    return expression.argument.name;
+  }
+  if (expression.kind === "symbol" && expression.addressSpace === "local") return expression.name;
+  return undefined;
 }
 
 function emitSemanticSurfaceWrite(
@@ -1679,6 +1736,7 @@ function semanticAtomicStorageNamesFromOperation(operation: SemanticKernelIrOper
   if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
   if (operation.kind === "store") expressions.push(operation.value, ...operation.target.indices);
   if (operation.kind === "surface-write") expressions.push(operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
+  if (operation.kind === "surface-read-store") expressions.push(operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
   if (operation.kind === "expression") expressions.push(operation.expression);
   if (operation.kind === "branch") expressions.push(operation.condition);
   if (operation.kind === "loop") {
@@ -1717,6 +1775,7 @@ function semanticAtomicNamesFromOperation(
   if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
   if (operation.kind === "store") expressions.push(operation.value, ...operation.target.indices);
   if (operation.kind === "surface-write") expressions.push(operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
+  if (operation.kind === "surface-read-store") expressions.push(operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
   if (operation.kind === "expression") expressions.push(operation.expression);
   if (operation.kind === "branch") expressions.push(operation.condition);
   if (operation.kind === "loop") {
@@ -1831,6 +1890,8 @@ function isSemanticKernelIrOperation(
     case "cooperative-group-declare":
     case "load":
     case "store":
+    case "surface-write":
+    case "surface-read-store":
     case "atomic":
     case "expression":
     case "branch":

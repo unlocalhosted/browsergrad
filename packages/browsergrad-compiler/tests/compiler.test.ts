@@ -7844,8 +7844,9 @@ __global__ void surfaceLayeredRead(cudaSurfaceObject_t surf, float *out) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([7, 8]);
-    expect(compiled.wgsl).toContain("bg_surf2dread_surf(0, 1, 1)");
-    expect(compiled.wgsl).toContain("bg_surf2dread_surf((1 * 4), 1, 1)");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bg_sem_surf2dread_surf(0, 1, 1)");
+    expect(compiled.wgsl).toContain("bg_sem_surf2dread_surf((1 * 4), 1, 1)");
 
     const helperCompiled = compileCudaLiteKernel(`
 __device__ float read_layer(cudaSurfaceObject_t surfaceArg, int row, int layer) {
@@ -12985,9 +12986,21 @@ __global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(1) },
+        surfaces: { surf: { width: 2, height: 1, data: new Float32Array([3, 9]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("fn bg_surf2dread_surf");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bg_sem_surf2dread_surf");
     expect([...result.buffers.out as Uint32Array]).toEqual([9]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([9]);
   });
 
   it("lowers templated surf2Dread return-form calls", () => {

@@ -206,6 +206,9 @@ function unsupportedSemanticReferenceOperation(
       case "surface-write":
         if (!semanticReferenceSurfaceWriteSupported(operation, compiled)) return operation;
         break;
+      case "surface-read-store":
+        if (!semanticReferenceSurfaceReadStoreSupported(operation, compiled)) return operation;
+        break;
       case "atomic":
         if (!semanticReferenceAtomicSupported(operation, compiled)) return operation;
         break;
@@ -459,6 +462,26 @@ function semanticReferenceSurfaceWriteSupported(
     (operation.z === undefined || semanticReferenceExpressionSupported(operation.z, "scalar", compiled));
 }
 
+function semanticReferenceSurfaceReadStoreSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return semanticReferenceSurfaceReadTargetName(operation.target) !== undefined &&
+    semanticReferenceSurfaceReadSupported(
+      {
+        kind: "surface-read",
+        callee: operation.z === undefined ? "surf2Dread" : "surf2DLayeredread",
+        surface: operation.surface,
+        xBytes: operation.xBytes,
+        y: operation.y,
+        ...(operation.z === undefined ? {} : { z: operation.z }),
+        valueType: operation.valueType === "uint" || operation.valueType === "int" ? operation.valueType : "float",
+        span: operation.span,
+      },
+      compiled,
+    );
+}
+
 function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (ref.addressSpace === "storage") {
     return compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
@@ -542,6 +565,13 @@ function semanticReferenceOperationsContainUnsupportedCalls(
     if (operation.kind === "surface-write") {
       return semanticReferenceExpressionContainsUnsupportedCall(operation.surface, compiled) ||
         semanticReferenceExpressionContainsUnsupportedCall(operation.value, compiled) ||
+        semanticReferenceExpressionContainsUnsupportedCall(operation.xBytes, compiled) ||
+        semanticReferenceExpressionContainsUnsupportedCall(operation.y, compiled) ||
+        Boolean(operation.z && semanticReferenceExpressionContainsUnsupportedCall(operation.z, compiled));
+    }
+    if (operation.kind === "surface-read-store") {
+      return semanticReferenceExpressionContainsUnsupportedCall(operation.target, compiled) ||
+        semanticReferenceExpressionContainsUnsupportedCall(operation.surface, compiled) ||
         semanticReferenceExpressionContainsUnsupportedCall(operation.xBytes, compiled) ||
         semanticReferenceExpressionContainsUnsupportedCall(operation.y, compiled) ||
         Boolean(operation.z && semanticReferenceExpressionContainsUnsupportedCall(operation.z, compiled));
@@ -681,6 +711,9 @@ function execSemanticOperations(
       case "surface-write":
         execSemanticSurfaceWrite(operation, context);
         break;
+      case "surface-read-store":
+        execSemanticSurfaceReadStore(operation, context);
+        break;
       case "atomic":
         execSemanticAtomic(operation, context);
         break;
@@ -719,6 +752,36 @@ function execSemanticOperations(
     }
   }
   return "fallthrough";
+}
+
+function execSemanticSurfaceReadStore(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
+  context: SemanticReferenceContext,
+): void {
+  const targetName = semanticReferenceSurfaceReadTargetName(operation.target);
+  if (!targetName) throw semanticReferenceError("semantic reference supports only local scalar surf2Dread targets", operation.span);
+  const value = evalSemanticSurfaceRead(
+    {
+      kind: "surface-read",
+      callee: operation.z === undefined ? "surf2Dread" : "surf2DLayeredread",
+      surface: operation.surface,
+      xBytes: operation.xBytes,
+      y: operation.y,
+      ...(operation.z === undefined ? {} : { z: operation.z }),
+      valueType: operation.valueType === "uint" || operation.valueType === "int" ? operation.valueType : "float",
+      span: operation.span,
+    },
+    context,
+  );
+  context.locals.set(targetName, value);
+}
+
+function semanticReferenceSurfaceReadTargetName(expression: SemanticExpression): string | undefined {
+  if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "symbol" && expression.argument.addressSpace === "local") {
+    return expression.argument.name;
+  }
+  if (expression.kind === "symbol" && expression.addressSpace === "local") return expression.name;
+  return undefined;
 }
 
 function execSemanticSurfaceWrite(
@@ -1507,6 +1570,8 @@ function isSemanticKernelIrOperation(
     case "cooperative-group-declare":
     case "load":
     case "store":
+    case "surface-write":
+    case "surface-read-store":
     case "atomic":
     case "expression":
     case "branch":

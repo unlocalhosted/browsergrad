@@ -200,6 +200,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
   | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
+  | { readonly kind: "surface-read-store"; readonly target: SemanticExpression; readonly surface: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly valueType?: CudaLiteScalarType; readonly span: SourceSpan }
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
@@ -238,7 +239,6 @@ const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::
 const ATOMIC_CALL_PREFIX = "atomic";
 const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
 const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite"]);
-const SURFACE_READ_CALLS = new Set(["surf2Dread", "surf2DLayeredread"]);
 
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
@@ -383,6 +383,22 @@ function lowerStatement(
             span: statement.span,
           };
         }
+        if (
+          (expression.callee.name === "surf2Dread" && expression.args.length === 4) ||
+          (expression.callee.name === "surf2DLayeredread" && expression.args.length === 5)
+        ) {
+          const target = expression.args[0]!;
+          return {
+            kind: "surface-read-store",
+            target,
+            surface: expression.args[1]!,
+            xBytes: expression.args[2]!,
+            y: expression.args[3]!,
+            ...(expression.args[4] === undefined ? {} : { z: expression.args[4]! }),
+            ...optionalValueType(target.kind === "unary" && target.operator === "&" ? expressionValueType(target.argument) : expressionValueType(target)),
+            span: statement.span,
+          };
+        }
         const target = atomicTargetFromCall(expression);
         if (expression.callee.name.startsWith(ATOMIC_CALL_PREFIX)) {
           return {
@@ -517,8 +533,8 @@ function lowerExpression(
       }
       if (
         expression.callee.kind === "identifier" &&
-        SURFACE_READ_CALLS.has(expression.callee.name) &&
-        (args.length === 3 || args.length === 4)
+        (expression.callee.name === "surf2Dread" && args.length === 3 ||
+          expression.callee.name === "surf2DLayeredread" && args.length === 4)
       ) {
         return {
           kind: "surface-read",

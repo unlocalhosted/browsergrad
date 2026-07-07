@@ -234,6 +234,7 @@ function isSemanticOperation(value: SemanticKernelIrOperation | SemanticExpressi
     value.kind === "load" ||
     value.kind === "store" ||
     value.kind === "surface-write" ||
+    value.kind === "surface-read-store" ||
     value.kind === "atomic" ||
     value.kind === "expression" ||
     value.kind === "branch" ||
@@ -259,6 +260,8 @@ function semanticExpressionsForOperation(operation: SemanticKernelIrOperation): 
       return [operation.value, ...operation.target.indices, ...operation.reads.flatMap((read) => read.indices)];
     case "surface-write":
       return [operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : [])];
+    case "surface-read-store":
+      return [operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : [])];
     case "atomic":
       return [...operation.args, ...(operation.target?.indices ?? [])];
     case "call":

@@ -505,6 +505,8 @@ function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boo
       return true;
     case "surface-write":
       return true;
+    case "surface-read-store":
+      return true;
     case "atomic":
       return true;
     case "call":
