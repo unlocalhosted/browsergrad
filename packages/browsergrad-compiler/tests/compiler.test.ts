@@ -6964,13 +6964,28 @@ __global__ void mathOutAliases(float *out, int *ints) {
       { buffers: { out: new Float32Array(8), ints: new Int32Array(3) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(8), ints: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-frexp-exponent");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sincos-output");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
-    expect(compiled.wgsl).toContain("bg_ptr_write_f32");
-    expect(compiled.wgsl).toContain("bg_ptr_write_i32");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+    expect(compiled.wgsl).not.toContain("var intpart:");
+    expect(compiled.wgsl).toContain("out[1u] = 3.0;");
+    expect(compiled.wgsl).toContain("out[0u] = 0.75;");
+    expect(compiled.wgsl).toContain("ints[1u] = 4;");
+    expect(compiled.wgsl).toContain("out[4u] = 0.5625;");
+    expect(compiled.wgsl).toContain("ints[2u] = 4;");
+    expect(compiled.wgsl).toContain("out[5u] = -1.0;");
     const out = [...result.buffers.out as Float32Array];
     expect(out[0]).toBeCloseTo(0.75, 6);
     expect(out[1]).toBeCloseTo(3, 6);
@@ -6981,6 +6996,8 @@ __global__ void mathOutAliases(float *out, int *ints) {
     expect(out[6]).toBe(4);
     expect(out[7]).toBe(4);
     expect([...result.buffers.ints as Int32Array]).toEqual([0, 4, 4]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+    expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
   });
 
   it("lets user device functions shadow CUDA math aliases when CUDA source defines them", () => {

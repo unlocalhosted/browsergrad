@@ -1,6 +1,8 @@
 import type {
   CudaLiteAnalysis,
   CudaLiteAsmStatement,
+  CudaLiteAssignmentExpression,
+  CudaLiteCallExpression,
   CudaLiteCooperativeGroupDecl,
   CudaLiteExpression,
   CudaLiteKernelLaunchStatement,
@@ -389,6 +391,10 @@ function lowerStatement(
         return { kind: "barrier", callee: expression.callee.name, span: statement.span };
       }
       if (expression.kind === "assignment") {
+        if (statement.expression.kind === "assignment") {
+          const mathOutAssignment = semanticMathOutAssignmentBlock(statement.expression, expression, scope, statement.span);
+          if (mathOutAssignment) return mathOutAssignment;
+        }
         const target = memoryRefFromExpression(expression.target);
         if (target) {
           return {
@@ -752,6 +758,92 @@ function cacheHintStoreTarget(
   return target === undefined ? undefined : memoryRefFromExpression(target);
 }
 
+function semanticMathOutAssignmentBlock(
+  source: CudaLiteAssignmentExpression,
+  expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (source.operator !== "=" || source.right.kind !== "call" || expression.value.kind !== "call") return undefined;
+  const target = memoryRefFromExpression(expression.target);
+  if (!target) return undefined;
+  const stores = semanticMathOutAssignmentStores(source.right, expression.value, target, scope, span);
+  return stores === undefined ? undefined : { kind: "block", body: stores, span };
+}
+
+function semanticMathOutAssignmentStores(
+  source: CudaLiteCallExpression,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  target: SemanticMemoryRef,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (expression.callee.kind !== "symbol") return undefined;
+  if (isModfCallName(expression.callee.name)) return semanticModfAssignmentStores(source, expression, target, scope, span);
+  if (isFrexpCallName(expression.callee.name)) return semanticFrexpAssignmentStores(source, expression, target, scope, span);
+  if (isRemquoCallName(expression.callee.name)) return semanticRemquoAssignmentStores(source, expression, target, scope, span);
+  return undefined;
+}
+
+function semanticModfAssignmentStores(
+  source: CudaLiteCallExpression,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  target: SemanticMemoryRef,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): readonly SemanticKernelIrOperation[] | undefined {
+  const value = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const intpartTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
+  if (value === undefined || !intpartTarget) return undefined;
+  const intpartRef = memoryRefFromExpression(intpartTarget);
+  if (!intpartRef) return undefined;
+  const intpart = Math.trunc(value);
+  return [
+    storeOperation(intpartRef, numberExpression(intpart, expression.span), span),
+    storeOperation(target, numberExpression(value - intpart, expression.span), span),
+  ];
+}
+
+function semanticFrexpAssignmentStores(
+  source: CudaLiteCallExpression,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  target: SemanticMemoryRef,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): readonly SemanticKernelIrOperation[] | undefined {
+  const value = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const exponentTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
+  if (value === undefined || !exponentTarget) return undefined;
+  const exponentRef = memoryRefFromExpression(exponentTarget);
+  if (!exponentRef) return undefined;
+  const exponent = frexpExponentForFiniteNumber(value);
+  const mantissa = exponent === 0 ? value : value / (2 ** exponent);
+  return [
+    storeOperation(exponentRef, intNumberExpression(exponent, expression.span), span),
+    storeOperation(target, numberExpression(mantissa, expression.span), span),
+  ];
+}
+
+function semanticRemquoAssignmentStores(
+  source: CudaLiteCallExpression,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  target: SemanticMemoryRef,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): readonly SemanticKernelIrOperation[] | undefined {
+  const dividend = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const divisor = expression.args[1] ? staticNumberValue(expression.args[1]) : undefined;
+  const quotientTarget = source.args[2] === undefined ? undefined : pointerAliasValueExpression(source.args[2], scope, source.args[2].span);
+  if (dividend === undefined || divisor === undefined || divisor === 0 || !quotientTarget) return undefined;
+  const quotientRef = memoryRefFromExpression(quotientTarget);
+  if (!quotientRef) return undefined;
+  const quotient = roundTiesToEvenNumber(dividend / divisor);
+  return [
+    storeOperation(quotientRef, intNumberExpression(quotient, expression.span), span),
+    storeOperation(target, numberExpression(dividend - quotient * divisor, expression.span), span),
+  ];
+}
+
 function semanticModfStore(
   source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
@@ -811,7 +903,7 @@ function semanticFrexpStore(
   if (value === undefined || !target) return undefined;
   const targetRef = memoryRefFromExpression(target);
   if (!targetRef) return undefined;
-  const exponent = value === 0 ? 0 : Math.floor(Math.log2(Math.abs(value))) + 1;
+  const exponent = frexpExponentForFiniteNumber(value);
   return {
     kind: "store",
     target: targetRef,
@@ -910,6 +1002,21 @@ function staticNumberValue(expression: SemanticExpression): number | undefined {
     return value === undefined ? undefined : -value;
   }
   return undefined;
+}
+
+function storeOperation(target: SemanticMemoryRef, value: SemanticExpression, span: SourceSpan): SemanticKernelIrOperation {
+  return {
+    kind: "store",
+    target,
+    value,
+    operator: "=",
+    reads: collectMemoryRefs(value),
+    span,
+  };
+}
+
+function frexpExponentForFiniteNumber(value: number): number {
+  return value === 0 ? 0 : Math.floor(Math.log2(Math.abs(value))) + 1;
 }
 
 function roundTiesToEvenNumber(value: number): number {
