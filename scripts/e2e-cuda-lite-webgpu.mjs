@@ -2059,6 +2059,10 @@ __global__ void intrinsicPack(half2 *h, float2 *f, float *out) {
   f[0] = __half22float2(value);
   out[0] = __fmaf_rn(f[0].x, 2.0f, f[0].y);
 }`,
+  activeMask: `
+__global__ void activeMask(uint *out) {
+  out[threadIdx.x] = __activemask();
+}`,
   complexMagnitude: `
 __global__ void complexMagnitude(cufftComplex *data, float *mag, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -12402,6 +12406,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [0, 0, 0, 1, 1, 15] },
+          },
+          {
+            name: "subgroup:activemask",
+            source: SOURCES.activeMask,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [15, 15, 15, 15] },
           },
           {
             name: "compat:double-f32-mode-atomic",

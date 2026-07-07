@@ -4730,12 +4730,12 @@ __global__ void activeMaskKernel(uint *out) {
   out[threadIdx.x] = mask;
 }`, {
       features: { subgroups: true },
-      workgroupSize: [32, 1, 1],
+      workgroupSize: [4, 1, 1],
     });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Uint32Array(32) } },
-      { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("// browsergrad-semantic-wgsl: direct semantic IR emission");
@@ -4743,7 +4743,7 @@ __global__ void activeMaskKernel(uint *out) {
     expect(compiled.wgsl).toContain("subgroupBallot(true).x");
     expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-subgroup");
-    expect([...result.buffers.out as Uint32Array]).toEqual(new Array(32).fill(0xffffffff));
+    expect([...result.buffers.out as Uint32Array]).toEqual([15, 15, 15, 15]);
   });
 
   it("runs CUDA activemask scalar subgroup fallback in reference mode", () => {
