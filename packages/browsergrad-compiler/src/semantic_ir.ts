@@ -325,6 +325,13 @@ function lowerStatements(
   parentScope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): readonly SemanticKernelIrOperation[] {
   const scope = new Map(parentScope);
+  return lowerStatementsWithScope(statements, scope);
+}
+
+function lowerStatementsWithScope(
+  statements: readonly CudaLiteStatement[],
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] {
   const out: SemanticKernelIrOperation[] = [];
   for (let index = 0; index < statements.length; index++) {
     const statement = statements[index]!;
@@ -435,14 +442,21 @@ function lowerStatement(
       }
       return { kind: "expression", expression, span: statement.span };
     }
-    case "if":
+    case "if": {
+      const condition = lowerExpression(statement.condition, scope);
+      const consequentScope = new Map(scope);
+      const alternateScope = new Map(scope);
+      const consequent = lowerStatementsWithScope(statement.consequent, consequentScope);
+      const alternate = lowerStatementsWithScope(statement.alternate ?? [], alternateScope);
+      mergeBranchLocalPointerAliases(scope, consequentScope, alternateScope, condition, statement.span);
       return {
         kind: "branch",
-        condition: lowerExpression(statement.condition, scope),
-        consequent: lowerStatements(statement.consequent, scope),
-        alternate: lowerStatements(statement.alternate ?? [], scope),
+        condition,
+        consequent,
+        alternate,
         span: statement.span,
       };
+    }
     case "for":
       {
         const loopScope = new Map(scope);
@@ -980,6 +994,44 @@ function localPointerAliasUpdate(
     return true;
   }
   return false;
+}
+
+function mergeBranchLocalPointerAliases(
+  parent: Map<string, CudaLiteSemanticSymbol>,
+  consequent: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  alternate: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  condition: SemanticExpression,
+  span: SourceSpan,
+): void {
+  for (const [name, current] of parent) {
+    if (!current.pointer || current.dimensions.length > 0) continue;
+    const left = consequent.get(name);
+    const right = alternate.get(name);
+    if (
+      !left?.pointerRoot ||
+      !right?.pointerRoot ||
+      left.pointerRoot !== right.pointerRoot ||
+      left.pointerAddressSpace !== "local" ||
+      right.pointerAddressSpace !== "local" ||
+      left.pointerBaseIndices?.length !== 1 ||
+      right.pointerBaseIndices?.length !== 1
+    ) {
+      continue;
+    }
+    parent.set(name, {
+      ...current,
+      pointerRoot: left.pointerRoot,
+      pointerAddressSpace: "local",
+      pointerBaseIndices: [{
+        kind: "conditional",
+        condition,
+        consequent: left.pointerBaseIndices[0]!,
+        alternate: right.pointerBaseIndices[0]!,
+        valueType: "int",
+        span,
+      }],
+    });
+  }
 }
 
 function localPointerAliasRoot(
