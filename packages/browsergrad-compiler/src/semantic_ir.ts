@@ -936,6 +936,13 @@ function localPointerAliasForInitializer(
   }
   if (expression.kind === "identifier") {
     const root = scope.get(expression.name);
+    if (root?.pointerRoot && root.pointerAddressSpace === "local" && root.pointerBaseIndices?.length === 1) {
+      return {
+        pointerRoot: root.pointerRoot,
+        pointerAddressSpace: root.pointerAddressSpace,
+        pointerBaseIndices: root.pointerBaseIndices,
+      };
+    }
     if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
     return {
       pointerRoot: root.name,

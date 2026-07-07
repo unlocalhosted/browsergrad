@@ -2525,6 +2525,39 @@ __global__ void localPointerAssignment(float *out) {
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([9, 4]);
   });
 
+  it("lowers local pointer alias copies through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localPointerCopy(float *out, int pick) {
+  float values[3];
+  values[0] = 2.0f;
+  values[1] = 5.0f;
+  values[2] = 11.0f;
+  float *p = &values[2];
+  float *q = p;
+  float *r = pick != 0 ? q : values;
+  out[0] = r[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var q:");
+    expect(compiled.wgsl).not.toContain("var r:");
+    expect([...result.buffers.out as Float32Array]).toEqual([11]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([11]);
+  });
+
   it("lowers local pointer conditionals into fixed local arrays through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void localPointerConditional(float *out, int pick) {
