@@ -519,6 +519,7 @@ function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boo
         operation.alternate.some(operationNeedsParentDispatch);
     case "loop":
     case "barrier":
+    case "fence":
       return true;
   }
 }

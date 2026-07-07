@@ -217,6 +217,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "barrier"; readonly callee: string; readonly span: SourceSpan }
+  | { readonly kind: "fence"; readonly callee: string; readonly span: SourceSpan }
   | { readonly kind: "device-launch"; readonly launch: SemanticDeviceLaunch; readonly span: SourceSpan }
   | { readonly kind: "inline-asm"; readonly statement: CudaLiteAsmStatement; readonly span: SourceSpan }
   | { readonly kind: "return"; readonly value?: SemanticExpression; readonly span: SourceSpan }
@@ -247,6 +248,7 @@ const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::sync"]);
+const FENCE_CALLS = new Set(["__threadfence", "__threadfence_block", "__threadfence_system"]);
 const ATOMIC_CALL_PREFIX = "atomic";
 const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
 const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite", "surf3Dwrite"]);
@@ -403,6 +405,9 @@ function lowerStatement(
       const expression = lowerExpression(statement.expression, scope);
       if (expression.kind === "call" && expression.callee.kind === "symbol" && BARRIER_CALLS.has(expression.callee.name)) {
         return { kind: "barrier", callee: expression.callee.name, span: statement.span };
+      }
+      if (expression.kind === "call" && expression.callee.kind === "symbol" && FENCE_CALLS.has(expression.callee.name)) {
+        return { kind: "fence", callee: expression.callee.name, span: statement.span };
       }
       if (expression.kind === "assignment") {
         if (statement.expression.kind === "assignment") {

@@ -16508,6 +16508,48 @@ __global__ void bf162_bits(float* data, unsigned int* out) {
     expect([...semanticResult.buffers.data as Float32Array]).toEqual([1.5, 2.5]);
   });
 
+  it("lowers syncwarp and fences through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void syncwarp_fence_semantic(int *out) {
+  int tid = threadIdx.x;
+  __syncwarp(0xffffffff);
+  __threadfence();
+  __threadfence_block();
+  __threadfence_system();
+  __nanosleep(tid);
+  __prof_trigger(1);
+  out[tid] = tid + 7;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.kernelIr.operations.map((operation) => operation.kind)).toEqual([
+      "declare",
+      "barrier",
+      "fence",
+      "fence",
+      "fence",
+      "call",
+      "call",
+      "store",
+    ]);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).toContain("storageBarrier();");
+    expect([...result.buffers.out as Int32Array]).toEqual([7, 8, 9, 10]);
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([7, 8, 9, 10]);
+  });
+
   it("passes nullable conditional storage pointers into device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void maybe_store(float* target, float* fallback, float value) {

@@ -240,6 +240,7 @@ function isSemanticOperation(value: SemanticKernelIrOperation | SemanticExpressi
     value.kind === "branch" ||
     value.kind === "loop" ||
     value.kind === "barrier" ||
+    value.kind === "fence" ||
     value.kind === "device-launch" ||
     value.kind === "inline-asm" ||
     value.kind === "return" ||
@@ -282,6 +283,7 @@ function semanticExpressionsForOperation(operation: SemanticKernelIrOperation): 
       return operation.value ? [operation.value] : [];
     case "cooperative-group-declare":
     case "barrier":
+    case "fence":
     case "inline-asm":
     case "continue":
     case "break":

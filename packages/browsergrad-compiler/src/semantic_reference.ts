@@ -113,7 +113,11 @@ const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
-const SEMANTIC_NOOP_CALLS = new Set(["__trap"]);
+const SEMANTIC_NOOP_CALLS = new Set([
+  "__nanosleep",
+  "__prof_trigger",
+  "__trap",
+]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 
 interface Vector3 {
@@ -302,7 +306,14 @@ function unsupportedSemanticReferenceOperation(
         if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "any", compiled))) return operation;
         break;
       case "barrier":
-        if (operation.callee !== "__syncthreads") return operation;
+        if (operation.callee !== "__syncthreads" && operation.callee !== "__syncwarp") return operation;
+        break;
+      case "fence":
+        if (
+          operation.callee !== "__threadfence" &&
+          operation.callee !== "__threadfence_block" &&
+          operation.callee !== "__threadfence_system"
+        ) return operation;
         break;
       case "break":
       case "continue":
@@ -685,7 +696,7 @@ function semanticReferenceCallSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (operation.callee === "assert") return operation.args.length === 1 && semanticReferenceExpressionSupported(operation.args[0]!, "scalar", compiled);
-  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.length === 0;
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -1086,6 +1097,8 @@ function execSemanticOperations(
         if (operation.value) context.returnValue = evalSemanticExpression(operation.value, context);
         return "return";
       case "barrier":
+        break;
+      case "fence":
         break;
       case "break":
         return "break";
@@ -3220,6 +3233,7 @@ function isSemanticKernelIrOperation(
     case "branch":
     case "loop":
     case "barrier":
+    case "fence":
     case "device-launch":
     case "inline-asm":
     case "return":

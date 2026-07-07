@@ -2073,6 +2073,17 @@ __global__ void syncthreadsPredicates(int *out) {
   out[tid * 3 + 1] = all;
   out[tid * 3 + 2] = any;
 }`,
+  syncwarpFenceSemantic: `
+__global__ void syncwarpFenceSemantic(int *out) {
+  int tid = threadIdx.x;
+  __syncwarp(0xffffffff);
+  __threadfence();
+  __threadfence_block();
+  __threadfence_system();
+  __nanosleep(tid);
+  __prof_trigger(1);
+  out[tid] = tid + 7;
+}`,
   addressSpacePredicates: `
 __global__ void addressSpacePredicates(float *global, int *out) {
   __shared__ float tile[1];
@@ -12479,6 +12490,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [3, 1, 1, 3, 1, 1, 3, 1, 1, 3, 1, 1] },
+          },
+          {
+            name: "sync:semantic-syncwarp-fence",
+            source: SOURCES.syncwarpFenceSemantic,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [7, 8, 9, 10] },
           },
           {
             name: "intrinsics:address-space-predicates",

@@ -67,7 +67,11 @@ const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
-const SEMANTIC_NOOP_CALLS = new Set(["__trap"]);
+const SEMANTIC_NOOP_CALLS = new Set([
+  "__nanosleep",
+  "__prof_trigger",
+  "__trap",
+]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_MATH_CALLS = new Map([
   ["sqrt", "sqrt"],
@@ -680,7 +684,14 @@ function unsupportedSemanticWgslOperation(
         }
         break;
       case "barrier":
-        if (operation.callee !== "__syncthreads") return operation;
+        if (operation.callee !== "__syncthreads" && operation.callee !== "__syncwarp") return operation;
+        break;
+      case "fence":
+        if (
+          operation.callee !== "__threadfence" &&
+          operation.callee !== "__threadfence_block" &&
+          operation.callee !== "__threadfence_system"
+        ) return operation;
         break;
       case "return":
         if (operation.value && (!allowReturnValue || !semanticWgslExpressionSupported(operation.value, "any", ir))) return operation;
@@ -1190,6 +1201,7 @@ function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKer
     if (operation.kind === "store") return operation.target.addressSpace === "local";
     if (operation.kind === "surface-write") return true;
     if (operation.kind === "call") return true;
+    if (operation.kind === "barrier" || operation.kind === "fence") return true;
     if (operation.kind === "branch") return semanticWgslFunctionBodyShapeSupported(operation.consequent) && semanticWgslFunctionBodyShapeSupported(operation.alternate);
     if (operation.kind === "loop") return semanticWgslFunctionBodyShapeSupported(operation.body);
     return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
@@ -1411,7 +1423,7 @@ function semanticWgslCallSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (operation.callee === "assert") return operation.args.length === 1 && semanticWgslExpressionSupported(operation.args[0]!, "scalar", ir);
-  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.length === 0;
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -1644,6 +1656,8 @@ function emitSemanticOperation(
       return emitSemanticLoop(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations);
     case "barrier":
       return [`${prefix}workgroupBarrier();`];
+    case "fence":
+      return [`${prefix}storageBarrier();`];
     case "return":
       if (operation.value) {
         if (!allowReturnValue) throw semanticWgslError("semantic WGSL supports kernel return without value only", operation.span);
@@ -4620,6 +4634,7 @@ function isSemanticKernelIrOperation(
     case "branch":
     case "loop":
     case "barrier":
+    case "fence":
     case "device-launch":
     case "inline-asm":
     case "return":
