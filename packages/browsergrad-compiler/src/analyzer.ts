@@ -1348,6 +1348,17 @@ function validatePointerInitializerExpression(
     return;
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    const leftSource = pointerSourceType(expression.left, scope);
+    if (leftSource !== undefined) {
+      validatePointerInitializerExpression(expression.left, scope, diagnostics, walkExpression);
+      validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
+      return;
+    }
+    if (expression.operator === "+" && pointerSourceType(expression.right, scope) !== undefined) {
+      validateScalarOperand(walkExpression(expression.left, scope), expression.left.span, diagnostics);
+      validatePointerInitializerExpression(expression.right, scope, diagnostics, walkExpression);
+      return;
+    }
     validatePointerInitializerExpression(expression.left, scope, diagnostics, walkExpression);
     validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
     return;
@@ -1401,9 +1412,17 @@ function validateReadPointerExpression(
     return validateReadPointerExpression(expression.expression, scope, diagnostics, walkExpression);
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
-    const info = validateReadPointerExpression(expression.left, scope, diagnostics, walkExpression);
+    const left = validateReadPointerExpression(expression.left, scope, diagnostics, walkExpression);
+    if (isPointerLikeInfo(left) || left.kind === "array" || left.kind === "address" || left.kind === "unknown") {
+      validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
+      return left;
+    }
+    if (expression.operator === "+") {
+      validateScalarOperand(left, expression.left.span, diagnostics);
+      return validateReadPointerExpression(expression.right, scope, diagnostics, walkExpression);
+    }
     validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
-    return info;
+    return left;
   }
   if (expression.kind === "conditional") {
     const condition = walkExpression(expression.condition, scope);
@@ -1477,7 +1496,9 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
     return pointerTypesCompatible(left, right, true) ? right : undefined;
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
-    return pointerSourceType(expression.left, scope);
+    const left = pointerSourceType(expression.left, scope);
+    if (left !== undefined) return left;
+    return expression.operator === "+" ? pointerSourceType(expression.right, scope) : undefined;
   }
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
     return pointerSourceType(expression.args[0], scope);
@@ -3894,9 +3915,17 @@ function validateNonCallExpression(
         validateScalarOperand(right, expression.right.span, diagnostics);
         return left;
       }
+      if (expression.operator === "+" && isPointerLikeInfo(right)) {
+        validateScalarOperand(left, expression.left.span, diagnostics);
+        return right;
+      }
       if ((expression.operator === "+" || expression.operator === "-") && left.kind === "array") {
         validateScalarOperand(right, expression.right.span, diagnostics);
         return { kind: "pointer", valueType: left.valueType, symbol: left.symbol };
+      }
+      if (expression.operator === "+" && right.kind === "array") {
+        validateScalarOperand(left, expression.left.span, diagnostics);
+        return { kind: "pointer", valueType: right.valueType, symbol: right.symbol };
       }
       if (isVectorArithmeticOperator(expression.operator) && left.kind === "vector" && right.kind === "vector") {
         if (!left.valueType || !right.valueType || left.valueType !== right.valueType) {

@@ -934,6 +934,30 @@ function localPointerAliasForInitializer(
       }],
     };
   }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    const left = localPointerAliasForInitializer(expression.left, scope);
+    if (left?.pointerRoot && left.pointerAddressSpace === "local" && left.pointerBaseIndices?.length === 1) {
+      const right = lowerExpression(expression.right, scope);
+      return {
+        pointerRoot: left.pointerRoot,
+        pointerAddressSpace: left.pointerAddressSpace,
+        pointerBaseIndices: [expression.operator === "+"
+          ? addIndexExpressions(left.pointerBaseIndices[0]!, right, expression.span)
+          : subtractIndexExpressions(left.pointerBaseIndices[0]!, right, expression.span)],
+      };
+    }
+    if (expression.operator === "+") {
+      const right = localPointerAliasForInitializer(expression.right, scope);
+      if (right?.pointerRoot && right.pointerAddressSpace === "local" && right.pointerBaseIndices?.length === 1) {
+        const leftOffset = lowerExpression(expression.left, scope);
+        return {
+          pointerRoot: right.pointerRoot,
+          pointerAddressSpace: right.pointerAddressSpace,
+          pointerBaseIndices: [addIndexExpressions(right.pointerBaseIndices[0]!, leftOffset, expression.span)],
+        };
+      }
+    }
+  }
   if (expression.kind === "identifier") {
     const root = scope.get(expression.name);
     if (root?.pointerRoot && root.pointerAddressSpace === "local" && root.pointerBaseIndices?.length === 1) {
