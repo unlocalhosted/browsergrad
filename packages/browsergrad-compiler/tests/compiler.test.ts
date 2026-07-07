@@ -4766,6 +4766,38 @@ __global__ void activeMaskScalar(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([1]);
   });
 
+  it("lowers CUDA address-space predicates as native compile-time constants", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float caddr[1];
+__global__ void addressPredicates(float *global, int *out) {
+  __shared__ float tile[1];
+  float local[1];
+  if (threadIdx.x == 0) {
+    out[0] = __isGlobal(global);
+    out[1] = __isGlobal(&global[0]);
+    out[2] = __isShared(tile);
+    out[3] = __isShared(&tile[0]);
+    out[4] = __isConstant(caddr);
+    out[5] = __isConstant(&caddr[0]);
+    out[6] = __isLocal(local);
+    out[7] = __isLocal(&local[0]);
+    out[8] = __isShared(global);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { global: new Float32Array(1), out: new Int32Array(9) },
+        constants: { caddr: new Float32Array([3]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("// browsergrad-semantic-wgsl: direct semantic IR emission");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...result.buffers.out as Int32Array]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 0]);
+  });
+
   it("lowers CUDA warp vote helpers with boolean predicates", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void voteBoolKernel(bool *info, int warp_size) {

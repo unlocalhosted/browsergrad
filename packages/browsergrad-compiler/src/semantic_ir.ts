@@ -646,7 +646,9 @@ function lowerExpression(
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
         ...optionalValueType(expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
           ? "uint"
-          : expression.templateValueType ?? expressionValueType(callee) ?? expressionValueType(args[0])),
+          : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)
+            ? "int"
+            : expression.templateValueType ?? expressionValueType(callee) ?? expressionValueType(args[0])),
         span: expression.span,
       };
     }
@@ -1654,6 +1656,10 @@ function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement
 
 function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "storage" {
   return addressSpace === "local" || addressSpace === "storage";
+}
+
+function isAddressSpacePredicateName(name: string): boolean {
+  return name === "__isGlobal" || name === "__isShared" || name === "__isConstant" || name === "__isLocal";
 }
 
 function isNullPointerLiteral(expression: CudaLiteExpression): boolean {

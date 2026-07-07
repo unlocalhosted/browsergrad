@@ -1423,6 +1423,44 @@ function addressWithValueType(value: AddressValue, valueType: CudaLiteScalarType
   };
 }
 
+function isAddressSpacePredicateCall(name: string | undefined): name is "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal" {
+  return name === "__isGlobal" || name === "__isShared" || name === "__isConstant" || name === "__isLocal";
+}
+
+function evalAddressSpacePredicateCall(
+  name: "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal",
+  target: CudaLiteExpression,
+  context: ThreadContext,
+): number {
+  const space = addressPredicateSpace(target, context);
+  if (name === "__isGlobal") return space === "buffer" || space === "device-global" ? 1 : 0;
+  if (name === "__isShared") return space === "shared" ? 1 : 0;
+  if (name === "__isConstant") return space === "constant" ? 1 : 0;
+  return space === "local" ? 1 : 0;
+}
+
+function addressPredicateSpace(expression: CudaLiteExpression, context: ThreadContext): LValue["space"] | undefined {
+  try {
+    const value = pointerArgumentValue(expression, pointerValueTypeForExpression(expression, context), context);
+    if (isAddress(value)) return value.target.space;
+    if (isPoolPointer(value)) return "pool";
+  } catch {
+    // Scalar locals and malformed candidates fall back to root-based classification.
+  }
+  const root = rootIdentifierFromExpression(expression);
+  if (!root) return undefined;
+  const local = context.locals.get(root);
+  if (isAddress(local)) return local.target.space;
+  if (isPoolPointer(local)) return "pool";
+  if (context.shared.has(root)) return "shared";
+  if (context.deviceGlobals.has(root)) return "device-global";
+  const constant = context.constants.get(root);
+  if (constant !== undefined && typeof constant !== "number") return "constant";
+  if (context.buffers.has(root)) return "buffer";
+  if (local !== undefined) return "local";
+  return undefined;
+}
+
 function pointerOffsetArgumentValue(
   arg: CudaLiteExpression,
   valueType: CudaLiteScalarType,
@@ -3006,6 +3044,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const target = expression.args[0];
     if (!target) throw compilerFailure("__cvta_generic_to_shared expects pointer argument");
     return lvalueStorageIndex(resolvePointerArgument(target, context), context);
+  }
+  if (isAddressSpacePredicateCall(name)) {
+    const target = expression.args[0];
+    if (!target) throw compilerFailure(`${name} expects pointer argument`);
+    return evalAddressSpacePredicateCall(name, target, context);
   }
   if (isPointerIdentityCall(name)) {
     const pointer = expression.args[0];

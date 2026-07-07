@@ -4,6 +4,7 @@ import {
   type WgslValueType,
 } from "@unlocalhosted/browsergrad-kernels";
 import type {
+  SemanticAddressSpace,
   SemanticExpression,
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
@@ -67,6 +68,7 @@ const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "
 const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
 const SEMANTIC_NOOP_CALLS = new Set(["__trap"]);
+const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_MATH_CALLS = new Map([
   ["sqrt", "sqrt"],
   ["sqrtf", "sqrt"],
@@ -975,6 +977,7 @@ function semanticWgslScalarCallSupported(
   return semanticWgslFunctionCallSupported(expression, ir) ||
     semanticWgslAtomicCallSupported(expression, ir) ||
     semanticWgslSubgroupCallSupported(expression, ir) ||
+    semanticWgslAddressPredicateCallSupported(expression) ||
     semanticWgslMathCallSupported(expression) ||
     SEMANTIC_HALF2_SCALAR_CALLS.has(callee) && semanticWgslHalf2CallSupported(expression, ir) ||
     SEMANTIC_BF162_SCALAR_CALLS.has(callee) && semanticWgslBf162CallSupported(expression, ir) ||
@@ -1021,6 +1024,13 @@ function semanticWgslSubgroupCallSupported(
     expression.callee.name === "__activemask" &&
     expression.args.length === 0 &&
     ir?.requiredFeatures.includes("subgroups") === true;
+}
+
+function semanticWgslAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
+  return expression.callee.kind === "symbol" &&
+    SEMANTIC_ADDRESS_PREDICATE_CALLS.has(expression.callee.name) &&
+    expression.args.length === 1 &&
+    semanticAddressPredicateAddressSpace(expression.args[0]) !== undefined;
 }
 
 function semanticWgslTextureReadSupported(
@@ -1533,6 +1543,7 @@ function semanticWgslExpressionSupported(
     case "call":
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
         semanticWgslSubgroupCallSupported(expression, ir) ||
+        semanticWgslAddressPredicateCallSupported(expression) ||
         semanticWgslMathCallSupported(expression) ||
         semanticWgslHalf2CallSupported(expression, ir) ||
         semanticWgslBf162CallSupported(expression, ir) ||
@@ -2342,6 +2353,7 @@ function emitSemanticExpression(
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslSubgroupCallSupported(expression, ir)) return "subgroupBallot(true).x";
+      if (semanticWgslAddressPredicateCallSupported(expression)) return emitSemanticAddressPredicateCall(expression);
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorLerpCallSupported(expression, ir)) return emitSemanticVectorLerpCall(expression, ir, names, options, textureSpecializations);
@@ -3066,6 +3078,33 @@ function emitSemanticAtomicCall(
   const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType), options, textureSpecializations));
   const call = `${wgslCallee}(&${memoryRef}, ${emitted.join(", ")})`;
   return wgslCallee === "atomicCompareExchangeWeak" ? `${call}.old_value` : call;
+}
+
+function emitSemanticAddressPredicateCall(expression: Extract<SemanticExpression, { readonly kind: "call" }>): string {
+  if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL address predicate requires symbol callee", expression.span);
+  const addressSpace = semanticAddressPredicateAddressSpace(expression.args[0]);
+  const matches =
+    expression.callee.name === "__isGlobal" ? addressSpace === "storage" || addressSpace === "device-global" :
+      expression.callee.name === "__isShared" ? addressSpace === "shared" :
+        expression.callee.name === "__isConstant" ? addressSpace === "constant" :
+          expression.callee.name === "__isLocal" ? addressSpace === "local" :
+            false;
+  return matches ? "1" : "0";
+}
+
+function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "symbol") return expression.addressSpace;
+  if (expression.kind === "index") return expression.addressSpace;
+  if (expression.kind === "member") return semanticAddressPredicateAddressSpace(expression.object);
+  if (expression.kind === "cast" && expression.pointer) return semanticAddressPredicateAddressSpace(expression.expression);
+  if (expression.kind === "unary" && expression.operator === "&") return semanticAddressPredicateAddressSpace(expression.argument);
+  if (expression.kind === "conditional") {
+    const consequent = semanticAddressPredicateAddressSpace(expression.consequent);
+    const alternate = semanticAddressPredicateAddressSpace(expression.alternate);
+    return consequent === alternate ? consequent : undefined;
+  }
+  return undefined;
 }
 
 function emitSemanticMathCall(

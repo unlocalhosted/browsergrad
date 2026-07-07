@@ -21,6 +21,7 @@ import type {
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
 import type {
+  SemanticAddressSpace,
   SemanticExpression,
   SemanticKernelIrOperation,
   SemanticMemoryRef,
@@ -113,6 +114,7 @@ const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "
 const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
 const SEMANTIC_NOOP_CALLS = new Set(["__trap"]);
+const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 
 interface Vector3 {
   readonly x: number;
@@ -453,7 +455,7 @@ function semanticReferenceFloatAtomicOpSupported(atomicOp: SemanticAtomicOp): bo
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -473,6 +475,13 @@ function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpr
   return expression.callee.kind === "symbol" &&
     expression.callee.name === "__activemask" &&
     expression.args.length === 0;
+}
+
+function semanticReferenceAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
+  return expression.callee.kind === "symbol" &&
+    SEMANTIC_ADDRESS_PREDICATE_CALLS.has(expression.callee.name) &&
+    expression.args.length === 1 &&
+    semanticAddressPredicateAddressSpace(expression.args[0]) !== undefined;
 }
 
 function semanticReferenceTextureReadSupported(
@@ -809,6 +818,7 @@ function semanticReferenceExpressionSupported(
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         semanticReferenceSubgroupCallSupported(expression) ||
+        semanticReferenceAddressPredicateCallSupported(expression) ||
         semanticReferenceMathCallSupported(expression) ||
         semanticReferenceHalf2CallSupported(expression, compiled) ||
         semanticReferenceBf162CallSupported(expression, compiled) ||
@@ -884,6 +894,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
       semanticReferenceFunctionCallSupported(expression, compiled) ||
       semanticReferenceSubgroupCallSupported(expression) ||
+      semanticReferenceAddressPredicateCallSupported(expression) ||
       semanticReferenceMathCallSupported(expression) ||
       semanticReferenceHalf2CallSupported(expression, compiled) ||
       semanticReferenceBf162CallSupported(expression, compiled) ||
@@ -1357,6 +1368,32 @@ function semanticReferenceActiveMask(context: SemanticReferenceContext): number 
   return mask >>> 0;
 }
 
+function evalSemanticAddressPredicateCall(expression: Extract<SemanticExpression, { readonly kind: "call" }>): number {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic address predicate requires symbol callee", expression.span);
+  const addressSpace = semanticAddressPredicateAddressSpace(expression.args[0]);
+  if (!addressSpace) return 0;
+  if (expression.callee.name === "__isGlobal") return addressSpace === "storage" || addressSpace === "device-global" ? 1 : 0;
+  if (expression.callee.name === "__isShared") return addressSpace === "shared" ? 1 : 0;
+  if (expression.callee.name === "__isConstant") return addressSpace === "constant" ? 1 : 0;
+  if (expression.callee.name === "__isLocal") return addressSpace === "local" ? 1 : 0;
+  throw semanticReferenceError(`semantic reference does not support address predicate '${expression.callee.name}'`, expression.span);
+}
+
+function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "symbol") return expression.addressSpace;
+  if (expression.kind === "index") return expression.addressSpace;
+  if (expression.kind === "member") return semanticAddressPredicateAddressSpace(expression.object);
+  if (expression.kind === "cast" && expression.pointer) return semanticAddressPredicateAddressSpace(expression.expression);
+  if (expression.kind === "unary" && expression.operator === "&") return semanticAddressPredicateAddressSpace(expression.argument);
+  if (expression.kind === "conditional") {
+    const consequent = semanticAddressPredicateAddressSpace(expression.consequent);
+    const alternate = semanticAddressPredicateAddressSpace(expression.alternate);
+    return consequent === alternate ? consequent : undefined;
+  }
+  return undefined;
+}
+
 function evalSemanticExpression(expression: SemanticExpression, context: SemanticReferenceContext): SemanticValue {
   switch (expression.kind) {
     case "literal":
@@ -1415,6 +1452,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "call":
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
       if (semanticReferenceSubgroupCallSupported(expression)) return semanticReferenceActiveMask(context);
+      if (semanticReferenceAddressPredicateCallSupported(expression)) return evalSemanticAddressPredicateCall(expression);
       if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);
       if (semanticReferenceVectorAtCallSupported(expression, context.compiled)) return evalSemanticVectorAtCall(expression, context);
       if (semanticReferenceVectorLerpCallSupported(expression, context.compiled)) return evalSemanticVectorLerpCall(expression, context);

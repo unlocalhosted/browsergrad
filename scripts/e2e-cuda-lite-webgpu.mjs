@@ -2063,6 +2063,17 @@ __global__ void intrinsicPack(half2 *h, float2 *f, float *out) {
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
 }`,
+  addressSpacePredicates: `
+__global__ void addressSpacePredicates(float *global, int *out) {
+  __shared__ float tile[1];
+  float local[1];
+  if (threadIdx.x == 0) {
+    out[0] = __isGlobal(global);
+    out[1] = __isShared(tile);
+    out[2] = __isLocal(local);
+    out[3] = __isShared(global);
+  }
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -12426,6 +12437,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [15, 15, 15, 15] },
+          },
+          {
+            name: "intrinsics:address-space-predicates",
+            source: SOURCES.addressSpacePredicates,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                global: new Float32Array(1),
+                out: new Int32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [1, 1, 1, 0] },
           },
           {
             name: "inline-asm:warpid",

@@ -5625,6 +5625,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (name === "subgroupAny" || name === "subgroupAll") return "bool";
     if (name === "subgroupBallot") return "uint";
     if (name === "__activemask") return "uint";
+    if (isAddressSpacePredicateCall(name)) return "int";
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
     if (expression.callee.kind === "member" && expression.callee.property === "ballot") return "uint";
     if (name !== undefined && isTextureReadCall(name)) return expression.templateValueType ?? "float";
@@ -6145,6 +6146,52 @@ function curandStateAddressSpace(
   return "function";
 }
 
+function isAddressSpacePredicateCall(name: string | undefined): name is "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal" {
+  return name === "__isGlobal" || name === "__isShared" || name === "__isConstant" || name === "__isLocal";
+}
+
+function emitAddressSpacePredicateCall(
+  name: "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal",
+  target: CudaLiteExpression,
+  context: EmitContext,
+): string {
+  const space = addressPredicateSpaceForEmit(target, context);
+  const matches =
+    name === "__isGlobal" ? space === "global" :
+      name === "__isShared" ? space === "shared" :
+        name === "__isConstant" ? space === "constant" :
+          space === "local";
+  return matches ? "1" : "0";
+}
+
+function addressPredicateSpaceForEmit(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+): "global" | "shared" | "constant" | "local" | "pool" | undefined {
+  const storageView = storageViewForPointerExpression(expression, zeroExpression(expression.span), context);
+  if (storageView) {
+    const root = storageView.rootName;
+    if (context.paramFor(root)?.pointer || context.deviceGlobalFor(root)) return "global";
+    if (sharedDeclarationFor(root, context)) return "shared";
+    if (context.ir.constants.some((item) => item.name === root)) return "constant";
+    if (localArrayForStorageView(root, expression.span, context) || context.localValueTypeFor(root) !== undefined) return "local";
+  }
+  const root = rootIdentifier(expression);
+  if (!root) return undefined;
+  const alias = flattenedPointerAlias(root, expression.span, context);
+  if (alias) {
+    if (context.paramFor(alias.rootName)?.pointer || context.deviceGlobalFor(alias.rootName)) return "global";
+    if (sharedDeclarationFor(alias.rootName, context)) return "shared";
+    if (localArrayForStorageView(alias.rootName, expression.span, context) || context.localValueTypeFor(alias.rootName) !== undefined) return "local";
+  }
+  if (context.paramFor(root)?.pointer || context.deviceGlobalFor(root)) return "global";
+  if (sharedDeclarationFor(root, context)) return "shared";
+  if (context.ir.constants.some((item) => item.name === root)) return "constant";
+  if (context.poolPointerFor(root) || context.externalPoolNames.includes(root)) return "pool";
+  if (localArrayForStorageView(root, expression.span, context) || context.localValueTypeFor(root) !== undefined) return "local";
+  return undefined;
+}
+
 function emitCall(expression: CudaLiteCallExpression, context: EmitContext): string {
   const name = expressionName(expression.callee);
   const cooperativeGroupCall = emitCooperativeGroupCall(expression, context, cooperativeCallbacks(context));
@@ -6171,6 +6218,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
         ? localPointerSpecializationLinkName(deviceFunction, localPointerParams, context.ir)
         : deviceFunctionLinkName(deviceFunction, context.ir));
     return `${context.nameFor(linkName)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
+  }
+  if (isAddressSpacePredicateCall(name)) {
+    const target = expression.args[0];
+    return target ? emitAddressSpacePredicateCall(name, target, context) : "0";
   }
   const args = expression.args.map((arg) => emitExpression(arg, context));
   const vectorFma = emitVectorFmaCall(expression, name, context);

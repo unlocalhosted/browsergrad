@@ -115,6 +115,10 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__shfl_up_sync", [3, 4]],
   ["__shfl_xor_sync", [3, 4]],
   ["__activemask", [0, 0]],
+  ["__isGlobal", [1, 1]],
+  ["__isShared", [1, 1]],
+  ["__isConstant", [1, 1]],
+  ["__isLocal", [1, 1]],
   ["__any_sync", [2, 2]],
   ["__all_sync", [2, 2]],
   ["__ballot_sync", [2, 2]],
@@ -1782,6 +1786,10 @@ function validateCallExpression(
     validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
+  if (isAddressSpacePredicateCall(callName)) {
+    validateAddressSpacePredicateCall(expression, callName, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "int" };
+  }
   if (isPointerIdentityCall(callName)) {
     return validatePointerIdentityCall(expression, callName, scope, diagnostics, walkExpression);
   }
@@ -2435,6 +2443,36 @@ function validateVectorMathBuiltin(
 
 function isPointerIdentityCall(callName: string | undefined): boolean {
   return callName === "__builtin_assume_aligned" || callName === "ct::assume_aligned";
+}
+
+function isAddressSpacePredicateCall(callName: string | undefined): callName is "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal" {
+  return callName === "__isGlobal" || callName === "__isShared" || callName === "__isConstant" || callName === "__isLocal";
+}
+
+function validateAddressSpacePredicateCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const target = expression.args[0];
+  if (!target) return;
+  const info = walkExpression(target, scope);
+  if (!isAddressSpacePredicateTarget(info)) {
+    diagnostics.push(error("unsupported-call", `${callName} expects a modeled pointer, array, or address expression`, target.span));
+  }
+}
+
+function isAddressSpacePredicateTarget(info: ExpressionInfo): boolean {
+  if (info.kind === "pointer" || info.kind === "pool-pointer" || info.kind === "address" || info.kind === "array" || info.kind === "unknown") {
+    return true;
+  }
+  if (info.kind !== "scalar") return false;
+  return info.symbol?.kind === "shared" ||
+    info.symbol?.kind === "constant" ||
+    info.symbol?.kind === "device-global" ||
+    info.symbol?.kind === "local";
 }
 
 function validatePointerIdentityCall(
