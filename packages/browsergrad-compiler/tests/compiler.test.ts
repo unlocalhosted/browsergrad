@@ -6754,6 +6754,37 @@ __global__ void frexpKernel(float *out, int *expOut) {
     expect([...result.buffers.expOut as Int32Array]).toEqual([4, 4, 4]);
   });
 
+  it("lowers statement frexp storage exponent aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticFrexp(int *expOut) {
+  int *expAlias = expOut + 1;
+  frexpf(9.0f, expAlias);
+  frexp(0.0f, &expOut[2]);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { expOut: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { expOut: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-frexp-exponent");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+    expect(compiled.wgsl).not.toContain("var expAlias:");
+    expect(compiled.wgsl).toContain("expOut[1u] = 4;");
+    expect(compiled.wgsl).toContain("expOut[2u] = 0;");
+    expect([...semanticResult.buffers.expOut as Int32Array]).toEqual([0, 4, 0]);
+    expect([...result.buffers.expOut as Int32Array]).toEqual([0, 4, 0]);
+  });
+
   it("lowers C modf integer-part out params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void modfKernel(float *out) {

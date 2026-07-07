@@ -446,6 +446,8 @@ function lowerStatement(
           if (modf) return modf;
           const remquo = semanticRemquoStore(statement.expression, expression, scope, statement.span);
           if (remquo) return remquo;
+          const frexp = semanticFrexpStore(statement.expression, expression, scope, statement.span);
+          if (frexp) return frexp;
         }
         if (statement.expression.kind === "call" && CUDA_CACHE_HINT_STORES.has(expression.callee.name)) {
           const cacheTarget = cacheHintStoreTarget(statement.expression, scope);
@@ -797,6 +799,29 @@ function semanticRemquoStore(
   };
 }
 
+function semanticFrexpStore(
+  source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (expression.callee.kind !== "symbol" || !isFrexpCallName(expression.callee.name)) return undefined;
+  const value = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const target = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
+  if (value === undefined || !target) return undefined;
+  const targetRef = memoryRefFromExpression(target);
+  if (!targetRef) return undefined;
+  const exponent = value === 0 ? 0 : Math.floor(Math.log2(Math.abs(value))) + 1;
+  return {
+    kind: "store",
+    target: targetRef,
+    value: intNumberExpression(exponent, expression.span),
+    operator: "=",
+    reads: [],
+    span,
+  };
+}
+
 function semanticSincosStores(
   source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
@@ -909,6 +934,10 @@ function isModfCallName(name: string): boolean {
 
 function isRemquoCallName(name: string): boolean {
   return name === "remquo" || name === "remquof";
+}
+
+function isFrexpCallName(name: string): boolean {
+  return name === "frexp" || name === "frexpf";
 }
 
 function pointerAliasValueExpression(
