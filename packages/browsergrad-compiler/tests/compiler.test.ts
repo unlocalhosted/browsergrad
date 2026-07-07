@@ -702,6 +702,68 @@ __global__ void storagePointerAddressOfDeref(float* out, const float* input) {
     expect([...result.buffers.out as Float32Array]).toEqual([7]);
   });
 
+  it("lowers branch-merged storage pointer aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void storagePointerBranchMerge(float* out, const float* input, int pick) {
+  const float* p = input;
+  if (pick != 0) {
+    p = input + 1;
+  } else {
+    p = input + 2;
+  }
+  out[0] = p[0];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(1),
+        input: new Float32Array([3, 7, 11]),
+      },
+      scalars: { pick: 0 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var p:");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([11]);
+    expect([...result.buffers.out as Float32Array]).toEqual([11]);
+  });
+
+  it("lowers block-updated storage pointer aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void storagePointerBlockUpdate(float* out, const float* input) {
+  const float* p = input;
+  {
+    p = input + 1;
+    p += 1;
+  }
+  out[0] = p[0];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(1),
+        input: new Float32Array([3, 7, 11]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var p:");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([11]);
+    expect([...result.buffers.out as Float32Array]).toEqual([11]);
+  });
+
   it("emits integer read-modify-write atomic statements from semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicRmw(int* x, int* out) {

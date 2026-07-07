@@ -1129,7 +1129,7 @@ function mergeBlockLocalPointerAliases(
       !next ||
       !sameSymbolDeclaration(current, next) ||
       !next.pointerRoot ||
-      next.pointerAddressSpace !== "local" ||
+      !semanticPointerAliasAddressSpaceSupported(next.pointerAddressSpace) ||
       next.pointerBaseIndices?.length !== 1
     ) {
       continue;
@@ -1160,8 +1160,8 @@ function mergeBranchLocalPointerAliases(
       !sameSymbolDeclaration(current, left) ||
       !sameSymbolDeclaration(current, right) ||
       left.pointerRoot !== right.pointerRoot ||
-      left.pointerAddressSpace !== "local" ||
-      right.pointerAddressSpace !== "local" ||
+      left.pointerAddressSpace !== right.pointerAddressSpace ||
+      !semanticPointerAliasAddressSpaceSupported(left.pointerAddressSpace) ||
       left.pointerBaseIndices?.length !== 1 ||
       right.pointerBaseIndices?.length !== 1
     ) {
