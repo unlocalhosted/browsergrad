@@ -29,6 +29,18 @@ export interface EmitSemanticKernelIrWgslOptions {
   readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
 }
 
+interface SemanticTextureDescriptorSignature {
+  readonly key: string;
+  readonly descriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>;
+}
+
+type SemanticTextureDescriptorSpecializations = ReadonlyMap<string, ReadonlyMap<string, SemanticTextureDescriptorSignature>>;
+
+interface SemanticTextureDescriptorHelper {
+  readonly textureName: string;
+  readonly descriptor: CudaLiteTextureDescriptor;
+}
+
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
 const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
@@ -120,7 +132,6 @@ export function canEmitSemanticKernelIrWgsl(
   _options: EmitSemanticKernelIrWgslOptions = {},
 ): boolean {
   return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
-    semanticTextureDescriptorsSupported(ir, _options) &&
     ir.requiredFeatures.length === 0 &&
     ir.params.every(semanticWgslParamSupported) &&
     semanticWgslSharedBarrierShapeSupported(ir) &&
@@ -133,19 +144,20 @@ export function emitSemanticKernelIrWgsl(
 ): SemanticKernelIrWgslOutput {
   const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
   if (unsupported) throw semanticWgslError(`semantic WGSL does not support ${unsupported.kind}`, unsupported.span);
-  if (!semanticTextureDescriptorsSupported(ir, options)) {
-    throw semanticWgslError("semantic WGSL does not support descriptor-specialized texture helper params yet", ir.span);
-  }
   if (ir.requiredFeatures.length > 0) throw semanticWgslError("semantic WGSL does not support required WebGPU features yet", ir.span);
   const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
   if (unsupportedParam) throw semanticWgslError(`semantic WGSL does not support parameter '${unsupportedParam.name}'`, unsupportedParam.span);
 
+  const textureSpecializations = collectSemanticTextureDescriptorSpecializations(ir, options);
   const storageOffsetBases = semanticStorageOffsetBaseNames(ir.operations, ir, options);
   const rawNames = new Set(ir.params.map((param) => param.name));
   for (const base of storageOffsetBases) rawNames.add(storageOffsetSymbol(base));
   for (const operation of ir.operations) collectOperationNames(operation, rawNames);
   for (const fn of ir.functions) {
     rawNames.add(fn.name);
+    for (const signature of textureSpecializations.get(fn.name)?.values() ?? []) {
+      rawNames.add(semanticSpecializedFunctionName(fn.name, signature.key));
+    }
     for (const param of fn.params) rawNames.add(param.name);
     for (const operation of fn.body) collectOperationNames(operation, rawNames);
   }
@@ -257,9 +269,8 @@ export function emitSemanticKernelIrWgsl(
   for (const texture of textures) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
   }
-  for (const texture of textures) {
-    const descriptor = options.textureDescriptors?.[texture.name];
-    if (descriptor) lines.push("", ...emitSemanticTextureDescriptorHelper(texture.name, descriptor, names));
+  for (const helper of semanticTextureDescriptorHelpers(options, textureSpecializations, names)) {
+    lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
   for (const constant of initializedScalarConstants) {
     lines.push(`const ${nameFor(constant.name, names)}: ${wgslScalar(constant.valueType)} = ${emitSemanticExpressionAs(constant.init ?? zeroExpression(constant.span), ir, names, wgslValueScalar(constant.valueType), options)};`);
@@ -286,7 +297,17 @@ export function emitSemanticKernelIrWgsl(
     lines.push(`@group(0) @binding(${bindings.length - 1}) var<uniform> ${UNIFORM_PARAMS_NAME}: Params;`);
   }
   for (const fn of ir.functions) {
-    lines.push("", ...emitSemanticFunction(fn, ir, names, options));
+    lines.push("", ...emitSemanticFunction(fn, ir, names, options, fn.name, textureSpecializations));
+    for (const signature of textureSpecializations.get(fn.name)?.values() ?? []) {
+      lines.push("", ...emitSemanticFunction(
+        fn,
+        ir,
+        names,
+        semanticOptionsWithTextureDescriptors(options, signature.descriptors),
+        semanticSpecializedFunctionName(fn.name, signature.key),
+        textureSpecializations,
+      ));
+    }
   }
   lines.push(
     "",
@@ -298,7 +319,7 @@ export function emitSemanticKernelIrWgsl(
     "  @builtin(num_workgroups) num_workgroups: vec3<u32>",
     ") {",
     ...emitSemanticStorageOffsetDeclarations(ir, names, 1, options),
-    ...emitSemanticOperations(ir.operations, ir, names, 1, false, options),
+    ...emitSemanticOperations(ir.operations, ir, names, 1, false, options, textureSpecializations),
     "}",
   );
   const wgsl = lines.join("\n");
@@ -589,12 +610,197 @@ function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKer
   });
 }
 
-function semanticTextureDescriptorsSupported(
+function collectSemanticTextureDescriptorSpecializations(
   ir: SemanticKernelIrModule,
   options: EmitSemanticKernelIrWgslOptions,
+): SemanticTextureDescriptorSpecializations {
+  if (options.textureDescriptors === undefined) return new Map();
+  const out = new Map<string, Map<string, SemanticTextureDescriptorSignature>>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    changed = collectSemanticTextureDescriptorSpecializationsFromOperations(ir.operations, options.textureDescriptors, ir, out) || changed;
+    for (const fn of ir.functions) {
+      for (const signature of out.get(fn.name)?.values() ?? []) {
+        const scope = { ...options.textureDescriptors, ...signature.descriptors };
+        changed = collectSemanticTextureDescriptorSpecializationsFromOperations(fn.body, scope, ir, out) || changed;
+      }
+    }
+  }
+  return out;
+}
+
+function collectSemanticTextureDescriptorSpecializationsFromOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  scope: Readonly<Record<string, CudaLiteTextureDescriptor>>,
+  ir: SemanticKernelIrModule,
+  out: Map<string, Map<string, SemanticTextureDescriptorSignature>>,
 ): boolean {
-  if (options.textureDescriptors === undefined) return true;
-  return ir.functions.every((fn) => fn.params.every((param) => param.addressSpace !== "texture"));
+  let changed = false;
+  for (const operation of operations) {
+    for (const expression of semanticOperationExpressions(operation)) {
+      changed = collectSemanticTextureDescriptorSpecializationsFromExpression(expression, scope, ir, out) || changed;
+    }
+    if (operation.kind === "call") {
+      changed = addSemanticTextureDescriptorSignature(operation.callee, operation.args, scope, ir, out) || changed;
+    }
+    if (operation.kind === "branch") {
+      changed = collectSemanticTextureDescriptorSpecializationsFromOperations(operation.consequent, scope, ir, out) || changed;
+      changed = collectSemanticTextureDescriptorSpecializationsFromOperations(operation.alternate, scope, ir, out) || changed;
+    }
+    if (operation.kind === "loop") {
+      if (operation.init && isSemanticKernelIrOperation(operation.init)) {
+        changed = collectSemanticTextureDescriptorSpecializationsFromOperations([operation.init], scope, ir, out) || changed;
+      }
+      changed = collectSemanticTextureDescriptorSpecializationsFromOperations(operation.body, scope, ir, out) || changed;
+    }
+    if (operation.kind === "block") {
+      changed = collectSemanticTextureDescriptorSpecializationsFromOperations(operation.body, scope, ir, out) || changed;
+    }
+  }
+  return changed;
+}
+
+function semanticOperationExpressions(operation: SemanticKernelIrOperation): readonly SemanticExpression[] {
+  const expressions: SemanticExpression[] = [];
+  if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
+  if (operation.kind === "store") expressions.push(...operation.target.indices, operation.value);
+  if (operation.kind === "surface-write") expressions.push(operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
+  if (operation.kind === "surface-read-store") expressions.push(operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
+  if (operation.kind === "atomic") expressions.push(...operation.args, ...(operation.target?.indices ?? []));
+  if (operation.kind === "call") expressions.push(...operation.args);
+  if (operation.kind === "expression") expressions.push(operation.expression);
+  if (operation.kind === "branch") expressions.push(operation.condition);
+  if (operation.kind === "loop") {
+    if (operation.init && !isSemanticKernelIrOperation(operation.init)) expressions.push(operation.init);
+    if (operation.condition) expressions.push(operation.condition);
+    if (operation.update) expressions.push(operation.update);
+  }
+  if (operation.kind === "return" && operation.value) expressions.push(operation.value);
+  return expressions;
+}
+
+function collectSemanticTextureDescriptorSpecializationsFromExpression(
+  expression: SemanticExpression,
+  scope: Readonly<Record<string, CudaLiteTextureDescriptor>>,
+  ir: SemanticKernelIrModule,
+  out: Map<string, Map<string, SemanticTextureDescriptorSignature>>,
+): boolean {
+  let changed = false;
+  if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    changed = addSemanticTextureDescriptorSignature(expression.callee.name, expression.args, scope, ir, out);
+  }
+  for (const child of semanticExpressionChildren(expression)) {
+    changed = collectSemanticTextureDescriptorSpecializationsFromExpression(child, scope, ir, out) || changed;
+  }
+  return changed;
+}
+
+function addSemanticTextureDescriptorSignature(
+  callee: string,
+  args: readonly SemanticExpression[],
+  scope: Readonly<Record<string, CudaLiteTextureDescriptor>>,
+  ir: SemanticKernelIrModule,
+  out: Map<string, Map<string, SemanticTextureDescriptorSignature>>,
+): boolean {
+  const fn = ir.functions.find((item) => item.name === callee);
+  if (!fn) return false;
+  const signature = semanticTextureDescriptorSignatureForCall(fn, args, scope);
+  if (!signature) return false;
+  let signatures = out.get(fn.name);
+  if (!signatures) {
+    signatures = new Map();
+    out.set(fn.name, signatures);
+  }
+  if (signatures.has(signature.key)) return false;
+  signatures.set(signature.key, signature);
+  return true;
+}
+
+function semanticFunctionCallName(
+  callee: string,
+  fn: SemanticKernelIrModule["functions"][number],
+  args: readonly SemanticExpression[],
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): string {
+  const signature = semanticTextureDescriptorSignatureForCall(fn, args, options.textureDescriptors ?? {});
+  if (!signature || !textureSpecializations.get(callee)?.has(signature.key)) return callee;
+  return semanticSpecializedFunctionName(callee, signature.key);
+}
+
+function semanticTextureDescriptorSignatureForCall(
+  fn: SemanticKernelIrModule["functions"][number],
+  args: readonly SemanticExpression[],
+  scope: Readonly<Record<string, CudaLiteTextureDescriptor>>,
+): SemanticTextureDescriptorSignature | undefined {
+  const descriptors: Record<string, CudaLiteTextureDescriptor> = {};
+  for (const [index, param] of fn.params.entries()) {
+    if (param.addressSpace !== "texture") continue;
+    const arg = args[index];
+    if (arg?.kind !== "symbol" || arg.addressSpace !== "texture") continue;
+    const descriptor = scope[arg.name];
+    if (descriptor !== undefined) descriptors[param.name] = descriptor;
+  }
+  if (Object.keys(descriptors).length === 0) return undefined;
+  const key = semanticTextureDescriptorSignatureKey(descriptors);
+  return { key, descriptors };
+}
+
+function semanticTextureDescriptorSignatureKey(
+  descriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>,
+): string {
+  return Object.entries(descriptors)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, descriptor]) => `${name}=${semanticTextureDescriptorKey(descriptor)}`)
+    .join(",");
+}
+
+function semanticTextureDescriptorKey(descriptor: CudaLiteTextureDescriptor): string {
+  return JSON.stringify({
+    normalizedCoords: descriptor.normalizedCoords ?? false,
+    addressMode: descriptor.addressMode ?? ["clamp", "clamp"],
+    filterMode: descriptor.filterMode ?? "point",
+  });
+}
+
+function semanticSpecializedFunctionName(name: string, key: string): string {
+  return `${name}__bg_tex_${semanticStableHash(key)}`;
+}
+
+function semanticStableHash(value: string): string {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i++) hash = ((hash * 33) ^ value.charCodeAt(i)) >>> 0;
+  return hash.toString(36);
+}
+
+function semanticOptionsWithTextureDescriptors(
+  options: EmitSemanticKernelIrWgslOptions,
+  descriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>,
+): EmitSemanticKernelIrWgslOptions {
+  const next: EmitSemanticKernelIrWgslOptions = {
+    textureDescriptors: Object.assign({}, options.textureDescriptors, descriptors),
+  };
+  if (options.pointerBaseOffsets !== undefined) return { ...next, pointerBaseOffsets: options.pointerBaseOffsets };
+  return next;
+}
+
+function semanticTextureDescriptorHelpers(
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+  names: ReadonlyMap<string, string>,
+): readonly SemanticTextureDescriptorHelper[] {
+  const helpers = new Map<string, SemanticTextureDescriptorHelper>();
+  const add = (textureName: string, descriptor: CudaLiteTextureDescriptor): void => {
+    helpers.set(semanticTextureDescriptorHelperName(textureName, names, descriptor), { textureName, descriptor });
+  };
+  for (const [textureName, descriptor] of Object.entries(options.textureDescriptors ?? {})) add(textureName, descriptor);
+  for (const specializations of textureSpecializations.values()) {
+    for (const signature of specializations.values()) {
+      for (const [textureName, descriptor] of Object.entries(signature.descriptors)) add(textureName, descriptor);
+    }
+  }
+  return [...helpers.values()];
 }
 
 function semanticWgslAtomicCallSupported(
@@ -749,8 +955,9 @@ function emitSemanticOperations(
   indentLevel: number,
   allowReturnValue = false,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
-  return operations.flatMap((operation) => emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue, options));
+  return operations.flatMap((operation) => emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
 }
 
 function emitSemanticOperation(
@@ -760,6 +967,7 @@ function emitSemanticOperation(
   indentLevel: number,
   allowReturnValue = false,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   switch (operation.kind) {
@@ -768,33 +976,33 @@ function emitSemanticOperation(
       if (operation.target.dimensions.length > 0) {
         return [
           `${prefix}var ${nameFor(operation.target.name, names)}: ${emitLocalArrayType(operation.target)};`,
-          ...emitLocalArrayInit(operation, ir, names, indentLevel, options),
+          ...emitLocalArrayInit(operation, ir, names, indentLevel, options, textureSpecializations),
         ];
       }
       const type = wgslScalar(operation.target.valueType);
-      const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType), options)}` : "";
+      const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations)}` : "";
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
     }
     case "store":
-      return [`${prefix}${emitSemanticStore(operation, ir, names, options)};`];
+      return [`${prefix}${emitSemanticStore(operation, ir, names, options, textureSpecializations)};`];
     case "surface-write":
-      return emitSemanticSurfaceWrite(operation, ir, names, indentLevel, options);
+      return emitSemanticSurfaceWrite(operation, ir, names, indentLevel, options, textureSpecializations);
     case "surface-read-store":
       return [`${prefix}${emitSemanticSurfaceReadStore(operation, ir, names, options)};`];
     case "atomic":
-      return [`${prefix}${emitSemanticAtomic(operation, ir, names, options)};`];
+      return [`${prefix}${emitSemanticAtomic(operation, ir, names, options, textureSpecializations)};`];
     case "call":
-      return emitSemanticCall(operation, ir, names, indentLevel, options);
+      return emitSemanticCall(operation, ir, names, indentLevel, options, textureSpecializations);
     case "expression":
       if (isSemanticNoopExpression(operation.expression)) return [];
-      if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names, options)};`];
-      return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options)};`];
+      if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names, options, textureSpecializations)};`];
+      return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options, textureSpecializations)};`];
     case "branch": {
       const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names, options)}) {`];
-      lines.push(...emitSemanticOperations(operation.consequent, ir, names, indentLevel + 1, allowReturnValue, options));
+      lines.push(...emitSemanticOperations(operation.consequent, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
       if (operation.alternate.length > 0) {
         lines.push(`${prefix}} else {`);
-        lines.push(...emitSemanticOperations(operation.alternate, ir, names, indentLevel + 1, allowReturnValue, options));
+        lines.push(...emitSemanticOperations(operation.alternate, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
       }
       lines.push(`${prefix}}`);
       return lines;
@@ -802,17 +1010,17 @@ function emitSemanticOperation(
     case "block":
       return [
         `${prefix}{`,
-        ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
+        ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
         `${prefix}}`,
       ];
     case "loop":
-      return emitSemanticLoop(operation, ir, names, indentLevel, allowReturnValue, options);
+      return emitSemanticLoop(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations);
     case "barrier":
       return [`${prefix}workgroupBarrier();`];
     case "return":
       if (operation.value) {
         if (!allowReturnValue) throw semanticWgslError("semantic WGSL supports kernel return without value only", operation.span);
-        return [`${prefix}return ${emitSemanticExpression(operation.value, ir, names, options)};`];
+        return [`${prefix}return ${emitSemanticExpression(operation.value, ir, names, options, textureSpecializations)};`];
       }
       return [`${prefix}return;`];
     case "break":
@@ -864,16 +1072,17 @@ function emitSemanticSurfaceWrite(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   if (!semanticWgslSurfaceWriteSupported(operation, ir) || operation.surface.kind !== "symbol") {
     throw semanticWgslError("semantic WGSL supports only direct scalar surf2Dwrite", operation.span);
   }
   const prefix = "  ".repeat(indentLevel);
   const surfaceName = operation.surface.name;
-  const xBytes = emitSemanticExpressionAs(operation.xBytes, ir, names, "i32", options);
-  const y = emitSemanticExpressionAs(operation.y, ir, names, "i32", options);
-  const z = operation.z ? emitSemanticExpressionAs(operation.z, ir, names, "i32", options) : "0";
-  const value = emitSemanticExpressionAs(operation.value, ir, names, "f32", options);
+  const xBytes = emitSemanticExpressionAs(operation.xBytes, ir, names, "i32", options, textureSpecializations);
+  const y = emitSemanticExpressionAs(operation.y, ir, names, "i32", options, textureSpecializations);
+  const z = operation.z ? emitSemanticExpressionAs(operation.z, ir, names, "i32", options, textureSpecializations) : "0";
+  const value = emitSemanticExpressionAs(operation.value, ir, names, "f32", options, textureSpecializations);
   const directSurface = surfaceSymbols(ir).find((surface) => surface.name === surfaceName);
   if (!directSurface) return [`${prefix}${GENERIC_SURFACE_WRITE_HELPER_NAME}(${nameFor(surfaceName, names)}, ${value}, ${xBytes}, ${y}, ${z});`];
   return emitSemanticSurfaceWriteBody(directSurface, value, xBytes, y, z, names, indentLevel);
@@ -884,10 +1093,11 @@ function emitSemanticStore(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (semanticWgslStorageOffsetStoreSupported(operation, ir)) {
     const offset = nameFor(storageOffsetSymbol(operation.target.base), names);
-    const value = emitSemanticExpressionAs(operation.value, ir, names, "i32", options);
+    const value = emitSemanticExpressionAs(operation.value, ir, names, "i32", options, textureSpecializations);
     return operation.operator === "-=" ? `${offset} = (${offset} - ${value})` : `${offset} = (${offset} + ${value})`;
   }
   const target = emitSemanticMemoryRef(operation.target, ir, names, options);
@@ -899,10 +1109,10 @@ function emitSemanticStore(
     if (operation.operator !== "=") {
       throw semanticWgslError(`semantic WGSL does not support atomic storage assignment '${operation.operator}'`, operation.span);
     }
-    const atomicValue = emitSemanticExpressionAs(operation.value, ir, names, wgslAtomicScalar(operation.target.valueType), options);
+    const atomicValue = emitSemanticExpressionAs(operation.value, ir, names, wgslAtomicScalar(operation.target.valueType), options, textureSpecializations);
     return `atomicStore(&${target}, ${atomicValue})`;
   }
-  const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options);
+  const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
   if (operation.operator === "=") return `${target} = ${value}`;
   if (operation.operator === "+=") return `${target} = (${target} + ${value})`;
   if (operation.operator === "-=") return `${target} = (${target} - ${value})`;
@@ -914,12 +1124,14 @@ function emitSemanticFunction(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  rawName = fn.name,
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   const params = fn.params.map((param) => `${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)}`).join(", ");
   const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
   return [
-    `fn ${nameFor(fn.name, names)}(${params})${returnType} {`,
-    ...emitSemanticOperations(fn.body, ir, names, 1, true, options),
+    `fn ${nameFor(rawName, names)}(${params})${returnType} {`,
+    ...emitSemanticOperations(fn.body, ir, names, 1, true, options, textureSpecializations),
     ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslScalar(fn.returnType))};`]),
     "}",
   ];
@@ -936,10 +1148,11 @@ function emitSemanticAssignmentStatement(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
   const target = nameFor(expression.target.name, names);
-  const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.target.valueType), options);
+  const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.target.valueType), options, textureSpecializations);
   if (expression.operator === "+=") return `${target} += ${value}`;
   if (expression.operator === "-=") return `${target} -= ${value}`;
   return `${target} = ${value}`;
@@ -951,6 +1164,7 @@ function emitLocalArrayInit(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   if (!operation.init || operation.init.kind !== "initializer") return [];
   const prefix = "  ".repeat(indentLevel);
@@ -960,7 +1174,7 @@ function emitLocalArrayInit(
       const indices = flatIndicesForDimensions(operation.target.dimensions, index)
         .map((item) => `[${item}u]`)
         .join("");
-      return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType), options)};`;
+      return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations)};`;
     });
 }
 
@@ -986,6 +1200,7 @@ function emitSemanticAtomic(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   const wgslCallee = WGSL_ATOMIC_CALLEES.get(operation.callee);
   if (!operation.target || !wgslCallee) {
@@ -997,7 +1212,7 @@ function emitSemanticAtomic(
     throw semanticWgslError(`semantic WGSL atomic '${operation.callee}' missing operand`, operation.span);
   }
   const emitted = operands.map((operand) =>
-    emitSemanticExpressionAs(operand!, ir, names, wgslAtomicScalar(operation.target!.valueType), options)
+    emitSemanticExpressionAs(operand!, ir, names, wgslAtomicScalar(operation.target!.valueType), options, textureSpecializations)
   );
   return `_ = ${wgslCallee}(&${target}, ${emitted.join(", ")})`;
 }
@@ -1008,9 +1223,10 @@ function emitSemanticCall(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
-  if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options)};`];
-  if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options);
+  if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
+  if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
 }
 
@@ -1019,10 +1235,12 @@ function emitSemanticVoidFunctionCall(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   const fn = ir.functions.find((item) => item.name === operation.callee);
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${operation.callee}'`, operation.span);
-  return `${nameFor(fn.name, names)}(${operation.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names, options)).join(", ")})`;
+  const callee = semanticFunctionCallName(operation.callee, fn, operation.args, options, textureSpecializations);
+  return `${nameFor(callee, names)}(${operation.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names, options, textureSpecializations)).join(", ")})`;
 }
 
 function emitSemanticLocalArrayFill(
@@ -1031,6 +1249,7 @@ function emitSemanticLocalArrayFill(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   const [target, valueExpression] = operation.args;
   if (target?.kind !== "symbol" || target.addressSpace !== "local" || valueExpression === undefined) {
@@ -1041,7 +1260,7 @@ function emitSemanticLocalArrayFill(
   return emitLocalArrayFill(
     nameFor(target.name, names),
     symbol.dimensions,
-    emitSemanticExpressionAs(valueExpression, ir, names, wgslValueScalar(symbol.valueType), options),
+    emitSemanticExpressionAs(valueExpression, ir, names, wgslValueScalar(symbol.valueType), options, textureSpecializations),
     indentLevel,
   );
 }
@@ -1053,28 +1272,29 @@ function emitSemanticLoop(
   indentLevel: number,
   allowReturnValue = false,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   if (operation.loopKind === "for") {
-    const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names, options) : "";
+    const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names, options, textureSpecializations) : "";
     const condition = operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "true";
-    const update = operation.update ? emitSemanticLoopUpdate(operation.update, ir, names, options) : "";
+    const update = operation.update ? emitSemanticLoopUpdate(operation.update, ir, names, options, textureSpecializations) : "";
     return [
       `${prefix}for (${init}; ${condition}; ${update}) {`,
-      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
+      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
       `${prefix}}`,
     ];
   }
   if (operation.loopKind === "while") {
     return [
       `${prefix}while (${operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "true"}) {`,
-      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
+      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
       `${prefix}}`,
     ];
   }
   return [
     `${prefix}loop {`,
-    ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
+    ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
     `${"  ".repeat(indentLevel + 1)}continuing {`,
     `${"  ".repeat(indentLevel + 2)}break if !(${operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "false"});`,
     `${"  ".repeat(indentLevel + 1)}}`,
@@ -1087,11 +1307,12 @@ function emitSemanticLoopUpdate(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (isSemanticNoopExpression(update)) return "";
   return update.kind === "assignment"
-    ? emitSemanticAssignmentStatement(update, ir, names, options)
-    : emitSemanticExpression(update, ir, names, options);
+    ? emitSemanticAssignmentStatement(update, ir, names, options, textureSpecializations)
+    : emitSemanticExpression(update, ir, names, options, textureSpecializations);
 }
 
 function emitSemanticLoopInit(
@@ -1099,14 +1320,15 @@ function emitSemanticLoopInit(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
-  if (!isSemanticKernelIrOperation(init)) return emitSemanticExpression(init, ir, names, options);
+  if (!isSemanticKernelIrOperation(init)) return emitSemanticExpression(init, ir, names, options, textureSpecializations);
   if (init.kind === "declare") {
     const type = wgslScalar(init.target.valueType);
-    const value = init.init ? emitSemanticExpressionAs(init.init, ir, names, wgslValueScalar(init.target.valueType), options) : zeroForType(type);
+    const value = init.init ? emitSemanticExpressionAs(init.init, ir, names, wgslValueScalar(init.target.valueType), options, textureSpecializations) : zeroForType(type);
     return `var ${nameFor(init.target.name, names)}: ${type} = ${value}`;
   }
-  if (init.kind === "expression") return isSemanticNoopExpression(init.expression) ? "" : emitSemanticExpression(init.expression, ir, names, options);
+  if (init.kind === "expression") return isSemanticNoopExpression(init.expression) ? "" : emitSemanticExpression(init.expression, ir, names, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support ${init.kind} loop initializer`, init.span);
 }
 
@@ -1119,6 +1341,7 @@ function emitSemanticExpression(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   switch (expression.kind) {
     case "literal":
@@ -1151,18 +1374,18 @@ function emitSemanticExpression(
       throw semanticWgslError("semantic WGSL does not support index target", expression.span);
     }
     case "cast":
-      return `${wgslScalar(expression.valueType)}(${emitSemanticExpression(expression.expression, ir, names, options)})`;
+      return `${wgslScalar(expression.valueType)}(${emitSemanticExpression(expression.expression, ir, names, options, textureSpecializations)})`;
     case "unary":
-      return emitSemanticUnary(expression, ir, names, options);
+      return emitSemanticUnary(expression, ir, names, options, textureSpecializations);
     case "binary":
-      return emitSemanticBinary(expression, ir, names, options);
+      return emitSemanticBinary(expression, ir, names, options, textureSpecializations);
     case "conditional":
-      return `select(${emitSemanticExpression(expression.alternate, ir, names, options)}, ${emitSemanticExpression(expression.consequent, ir, names, options)}, ${emitTruthiness(expression.condition, ir, names, options)})`;
+      return `select(${emitSemanticExpression(expression.alternate, ir, names, options, textureSpecializations)}, ${emitSemanticExpression(expression.consequent, ir, names, options, textureSpecializations)}, ${emitTruthiness(expression.condition, ir, names, options)})`;
     case "assignment":
       if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
       {
         const target = nameFor(expression.target.name, names);
-        const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType), options);
+        const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType), options, textureSpecializations);
         if (expression.operator === "+=") return `(${target} += ${value})`;
         if (expression.operator === "-=") return `(${target} -= ${value})`;
         return `(${target} = ${value})`;
@@ -1170,11 +1393,11 @@ function emitSemanticExpression(
     case "update":
       return emitSemanticUpdate(expression, names);
     case "sequence":
-      return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options);
+      return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
-      if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options);
-      if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options);
-      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options);
+      if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options, textureSpecializations);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
     case "texture-read":
       return emitSemanticTextureRead(expression, ir, names, options);
@@ -1313,9 +1536,9 @@ function emitSemanticTextureRead(
   }
   const x = emitSemanticExpressionAs(expression.x, ir, names, "f32", options);
   const y = emitSemanticExpressionAs(expression.y, ir, names, "f32", options);
-  const descriptor = options.textureDescriptors?.[expression.texture.name];
-  if (descriptor) return `${semanticTextureDescriptorHelperName(expression.texture.name, names)}(${x}, ${y})`;
   const texture = nameFor(expression.texture.name, names);
+  const descriptor = options.textureDescriptors?.[expression.texture.name];
+  if (descriptor) return `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`;
   const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
   return `textureLoad(${texture}, ${coord}, 0).r`;
 }
@@ -1325,11 +1548,11 @@ function emitSemanticTextureDescriptorHelper(
   descriptor: CudaLiteTextureDescriptor,
   names: ReadonlyMap<string, string>,
 ): readonly string[] {
-  const texture = nameFor(textureName, names);
-  const helper = semanticTextureDescriptorHelperName(textureName, names);
+  const texture = "bg_texture";
+  const helper = semanticTextureDescriptorHelperName(textureName, names, descriptor);
   if (descriptor.filterMode === "linear") {
     return [
-      `fn ${helper}(x: f32, y: f32) -> f32 {`,
+      `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> f32 {`,
       `  let dims = textureDimensions(${texture});`,
       `  let sx = ${semanticTextureScaledCoord("x", "dims.x", descriptor)};`,
       `  let sy = ${semanticTextureScaledCoord("y", "dims.y", descriptor)};`,
@@ -1352,7 +1575,7 @@ function emitSemanticTextureDescriptorHelper(
     ];
   }
   return [
-    `fn ${helper}(x: f32, y: f32) -> f32 {`,
+    `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> f32 {`,
     `  let dims = textureDimensions(${texture});`,
     `  let ix = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("x", "dims.x", descriptor)}))`, "dims.x", descriptor, "x")};`,
     `  let iy = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("y", "dims.y", descriptor)}))`, "dims.y", descriptor, "y")};`,
@@ -1364,8 +1587,9 @@ function emitSemanticTextureDescriptorHelper(
 function semanticTextureDescriptorHelperName(
   textureName: string,
   names: ReadonlyMap<string, string>,
+  descriptor: CudaLiteTextureDescriptor,
 ): string {
-  return `bg_sem_tex2d_${safeWgslIdentifier(nameFor(textureName, names))}`;
+  return `bg_sem_tex2d_${safeWgslIdentifier(nameFor(textureName, names))}_${semanticStableHash(semanticTextureDescriptorKey(descriptor))}`;
 }
 
 function semanticTextureScaledCoord(
@@ -1393,13 +1617,15 @@ function emitSemanticFunctionCall(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL function call requires symbol callee", expression.span);
   const callee = expression.callee.name;
   const fn = ir.functions.find((item) => item.name === callee);
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${callee}'`, expression.span);
-  const args = expression.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names, options));
-  return `${nameFor(fn.name, names)}(${args.join(", ")})`;
+  const args = expression.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names, options, textureSpecializations));
+  const calleeName = semanticFunctionCallName(callee, fn, expression.args, options, textureSpecializations);
+  return `${nameFor(calleeName, names)}(${args.join(", ")})`;
 }
 
 function emitSemanticFunctionArg(
@@ -1408,6 +1634,7 @@ function emitSemanticFunctionArg(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (param?.addressSpace === "texture") {
     if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticWgslError("semantic WGSL texture helper argument must be a texture symbol", arg.span);
@@ -1419,7 +1646,7 @@ function emitSemanticFunctionArg(
     if (handle === undefined) throw semanticWgslError(`unknown surface '${arg.name}'`, arg.span);
     return `${handle}u`;
   }
-  return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType), options);
+  return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType), options, textureSpecializations);
 }
 
 function emitSemanticUpdate(
@@ -1439,11 +1666,12 @@ function emitSemanticExpressionAs(
   names: ReadonlyMap<string, string>,
   targetType: WgslValueType,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (expression.kind === "literal" && typeof expression.value === "number") {
     return emitNumberLiteral(expression.value, expression.valueType, targetType);
   }
-  const emitted = emitSemanticExpression(expression, ir, names, options);
+  const emitted = emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   const atomicValueType = semanticAtomicCallValueType(expression);
   if (atomicValueType) {
     const sourceType = wgslAtomicScalar(atomicValueType);
@@ -1464,6 +1692,7 @@ function emitSemanticAtomicCall(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL atomic call requires symbol callee", expression.span);
   const wgslCallee = WGSL_ATOMIC_CALLEES.get(expression.callee.name);
@@ -1471,7 +1700,7 @@ function emitSemanticAtomicCall(
   if (!wgslCallee || !target) throw semanticWgslError(`semantic WGSL does not support atomic '${expression.callee.name}'`, expression.span);
   const memoryRef = emitSemanticMemoryRef(target, ir, names, options);
   const operands = expression.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);
-  const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType), options));
+  const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType), options, textureSpecializations));
   const call = `${wgslCallee}(&${memoryRef}, ${emitted.join(", ")})`;
   return wgslCallee === "atomicCompareExchangeWeak" ? `${call}.old_value` : call;
 }
@@ -1481,6 +1710,7 @@ function emitSemanticMathCall(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL math call requires symbol callee", expression.span);
   const wgslCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
@@ -1489,27 +1719,27 @@ function emitSemanticMathCall(
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     const scalar = semanticExpressionWgslScalar(left) === "u32" ? "u32" : "i32";
-    const lhs = emitSemanticExpressionAs(left, ir, names, scalar, options);
-    const rhs = emitSemanticExpressionAs(right, ir, names, scalar, options);
+    const lhs = emitSemanticExpressionAs(left, ir, names, scalar, options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, scalar, options, textureSpecializations);
     return `(((${lhs} + ${rhs}) - ${scalar === "u32" ? "1u" : "1"}) / ${rhs})`;
   }
   if (wgslCallee === "divide") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
-    return `(${emitSemanticExpressionAs(left, ir, names, "f32", options)} / ${emitSemanticExpressionAs(right, ir, names, "f32", options)})`;
+    return `(${emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations)} / ${emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations)})`;
   }
   if (wgslCallee === "lerp") {
     const [left, right, factor] = expression.args;
     if (!left || !right || !factor) throw semanticWgslError("lerp expects three operands", expression.span);
-    const start = emitSemanticExpressionAs(left, ir, names, "f32", options);
-    const end = emitSemanticExpressionAs(right, ir, names, "f32", options);
-    const amount = emitSemanticExpressionAs(factor, ir, names, "f32", options);
+    const start = emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations);
+    const end = emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations);
+    const amount = emitSemanticExpressionAs(factor, ir, names, "f32", options, textureSpecializations);
     return `fma(${amount}, (${end} - ${start}), ${start})`;
   }
   if (wgslCallee === "modf_intpart" || wgslCallee === "modf_fraction") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
-    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
     const nonFinite = `((${emitted} != ${emitted}) || (abs(${emitted}) > 3.4028234663852886e38))`;
     if (wgslCallee === "modf_intpart") return `select(trunc(${emitted}), ${emitted}, ${nonFinite})`;
     const infinityFraction = `select(0.0, -0.0, ${emitted} < 0.0)`;
@@ -1518,7 +1748,7 @@ function emitSemanticMathCall(
   if (wgslCallee === "frexp_exponent" || wgslCallee === "frexp_mantissa") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
-    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
     const nonFiniteOrZero = `((${emitted} == 0.0) || (${emitted} != ${emitted}) || (abs(${emitted}) > 3.4028234663852886e38))`;
     const exponent = `(i32(floor(log2(abs(${emitted})))) + 1)`;
     if (wgslCallee === "frexp_exponent") return `select(${exponent}, 0, ${nonFiniteOrZero})`;
@@ -1527,8 +1757,8 @@ function emitSemanticMathCall(
   if (wgslCallee === "remquo_quotient" || wgslCallee === "remquo_remainder") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
-    const x = emitSemanticExpressionAs(left, ir, names, "f32", options);
-    const y = emitSemanticExpressionAs(right, ir, names, "f32", options);
+    const x = emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations);
+    const y = emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations);
     const ratio = `(${x} / ${y})`;
     const base = `floor(${ratio})`;
     const diff = `(${ratio} - ${base})`;
@@ -1536,7 +1766,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "remquo_quotient") return quotient;
     return `(${x} - f32(${quotient}) * ${y})`;
   }
-  return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32", options)).join(", ")})`;
+  return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations)).join(", ")})`;
 }
 
 function semanticMathCallArity(name: string): number {
@@ -1591,11 +1821,12 @@ function emitSemanticUnary(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (expression.operator === "!") return `!(${emitTruthiness(expression.argument, ir, names, options)})`;
-  if (expression.operator === "~") return `~(${emitSemanticExpression(expression.argument, ir, names, options)})`;
-  if (expression.operator === "+") return emitSemanticExpression(expression.argument, ir, names, options);
-  if (expression.operator === "-") return `-(${emitSemanticExpression(expression.argument, ir, names, options)})`;
+  if (expression.operator === "~") return `~(${emitSemanticExpression(expression.argument, ir, names, options, textureSpecializations)})`;
+  if (expression.operator === "+") return emitSemanticExpression(expression.argument, ir, names, options, textureSpecializations);
+  if (expression.operator === "-") return `-(${emitSemanticExpression(expression.argument, ir, names, options, textureSpecializations)})`;
   throw semanticWgslError(`semantic WGSL does not support unary '${expression.operator}'`, expression.span);
 }
 
@@ -1604,13 +1835,14 @@ function emitSemanticBinary(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return `(${emitTruthiness(expression.left, ir, names, options)} ${expression.operator} ${emitTruthiness(expression.right, ir, names, options)})`;
   }
   const operandType = semanticBinaryOperandType(expression);
-  const left = emitSemanticExpressionAs(expression.left, ir, names, operandType, options);
-  const right = emitSemanticExpressionAs(expression.right, ir, names, operandType, options);
+  const left = emitSemanticExpressionAs(expression.left, ir, names, operandType, options, textureSpecializations);
+  const right = emitSemanticExpressionAs(expression.right, ir, names, operandType, options, textureSpecializations);
   return `(${left} ${expression.operator} ${right})`;
 }
 

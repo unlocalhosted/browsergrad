@@ -69,6 +69,7 @@ interface SemanticReferenceContext {
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly deviceGlobals: Map<string, WgslTypedArray>;
   readonly textures: Readonly<Record<string, WgslTexture2DInput>>;
+  readonly textureDescriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>;
   readonly surfaces: Readonly<Record<string, WgslTexture2DInput>>;
   readonly sharedMemory: Map<string, WgslTypedArray>;
   readonly storageOffsets: Map<string, number>;
@@ -145,6 +146,7 @@ export function runCompiledKernelSemanticReference(
                 constants,
                 deviceGlobals,
                 textures: input.textures ?? {},
+                textureDescriptors: compiled.textureDescriptors ?? {},
                 surfaces,
                 sharedMemory,
                 storageOffsets: new Map(),
@@ -398,9 +400,8 @@ function semanticReferenceTextureReadSupported(
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled);
 }
 
-function semanticReferenceTextureDescriptorsSupported(compiled: CompiledCudaLiteKernel): boolean {
-  if (compiled.textureDescriptors === undefined) return true;
-  return compiled.kernelIr.functions.every((fn) => fn.params.every((param) => param.addressSpace !== "texture"));
+function semanticReferenceTextureDescriptorsSupported(_compiled: CompiledCudaLiteKernel): boolean {
+  return true;
 }
 
 function semanticReferenceSurfaceReadSupported(
@@ -1105,7 +1106,7 @@ function evalSemanticTextureRead(
   const texture = context.textures[expression.texture.name];
   if (!texture) throw semanticReferenceError(`missing texture input '${expression.texture.name}'`, expression.texture.span);
   const channels = texture.channels ?? 1;
-  const descriptor = context.compiled.textureDescriptors?.[expression.texture.name] ?? {};
+  const descriptor = context.textureDescriptors[expression.texture.name] ?? {};
   if (descriptor.filterMode === "linear") return evalSemanticLinearTextureRead(texture, descriptor, expression, context, channels);
   const x = semanticTextureCoord(evalNumber(expression.x, context), texture.width, descriptor, "x");
   const y = semanticTextureCoord(evalNumber(expression.y, context), texture.height, descriptor, "y");
@@ -1326,6 +1327,7 @@ function runSemanticFunction(
 ): SemanticReferenceContext {
   const locals = new Map<string, SemanticValue>();
   const textures = { ...context.textures };
+  const textureDescriptors = { ...context.textureDescriptors };
   const surfaces = { ...context.surfaces };
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
@@ -1335,6 +1337,8 @@ function runSemanticFunction(
       const texture = context.textures[arg.name];
       if (!texture) throw semanticReferenceError(`missing texture input '${arg.name}'`, arg.span);
       textures[param.name] = texture;
+      const descriptor = context.textureDescriptors[arg.name];
+      if (descriptor !== undefined) textureDescriptors[param.name] = descriptor;
       continue;
     }
     if (param.addressSpace === "surface") {
@@ -1352,6 +1356,7 @@ function runSemanticFunction(
     constants: context.constants,
     deviceGlobals: context.deviceGlobals,
     textures,
+    textureDescriptors,
     surfaces,
     sharedMemory: context.sharedMemory,
     storageOffsets: new Map(context.storageOffsets),

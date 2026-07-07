@@ -14224,10 +14224,24 @@ __global__ void sample(float *out, int width, int height, cudaTextureObject_t te
       },
       { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(8) },
+        textures: { tex: { width: 4, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+        scalars: { width: 4, height: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr, compiled.textureDescriptors ? { textureDescriptors: compiled.textureDescriptors } : {})).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("fn sampleAt(texSrc: texture_2d<f32>");
-    expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
+    expect(compiled.wgsl).toContain("fn sampleAt__bg_tex_");
+    expect(compiled.wgsl).toContain("bg_sem_tex2d_texSrc_");
     expect([...result.buffers.out as Float32Array]).toEqual([4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5]);
   });
 
   it("propagates texture descriptors through nested device helper texture params", () => {
@@ -14257,10 +14271,25 @@ __global__ void sample(float *out, int width, int height, cudaTextureObject_t te
       },
       { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(8) },
+        textures: { tex: { width: 4, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+        scalars: { width: 4, height: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr, compiled.textureDescriptors ? { textureDescriptors: compiled.textureDescriptors } : {})).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("fn sampleInner(texInner: texture_2d<f32>");
-    expect(compiled.wgsl).toContain("textureDimensions(texInner).x");
+    expect(compiled.wgsl).toContain("fn sampleInner__bg_tex_");
+    expect(compiled.wgsl).toContain("fn sampleOuter__bg_tex_");
+    expect(compiled.wgsl).toContain("bg_sem_tex2d_texInner_");
     expect([...result.buffers.out as Float32Array]).toEqual([4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5]);
   });
 
   it("specializes texture descriptor helper params for conflicting descriptors", () => {
@@ -14282,9 +14311,6 @@ __global__ void sample(float *out, int width, int height, cudaTextureObject_t li
       },
     });
 
-    expect(compiled.wgsl).toContain("fn sampleAt__bg_tex_0");
-    expect(compiled.wgsl).toContain("fn sampleAt__bg_tex_1");
-    expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
     const result = runCompiledKernelReference(
       compiled,
       {
@@ -14297,7 +14323,28 @@ __global__ void sample(float *out, int width, int height, cudaTextureObject_t li
       },
       { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(16) },
+        textures: {
+          linearTex: { width: 4, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+          pointTex: { width: 4, height: 2, data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]) },
+        },
+        scalars: { width: 4, height: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    );
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr, compiled.textureDescriptors ? { textureDescriptors: compiled.textureDescriptors } : {})).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect((compiled.wgsl.match(/fn sampleAt__bg_tex_/g) ?? []).length).toBe(2);
+    expect((compiled.wgsl.match(/fn bg_sem_tex2d_texSrc_/g) ?? []).length).toBe(2);
     expect([...result.buffers.out as Float32Array]).toEqual([
+      4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5,
+      11, 12, 13, 14, 15, 16, 17, 18,
+    ]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([
       4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5,
       11, 12, 13, 14, 15, 16, 17, 18,
     ]);
