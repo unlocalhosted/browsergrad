@@ -439,6 +439,10 @@ function lowerStatement(
             span: statement.span,
           };
         }
+        if (statement.expression.kind === "call") {
+          const sincos = semanticSincosStores(statement.expression, expression, scope, statement.span);
+          if (sincos) return sincos;
+        }
         if (statement.expression.kind === "call" && CUDA_CACHE_HINT_STORES.has(expression.callee.name)) {
           const cacheTarget = cacheHintStoreTarget(statement.expression, scope);
           const value = expression.args[1];
@@ -740,6 +744,80 @@ function cacheHintStoreTarget(
   if (pointer === undefined) return undefined;
   const target = pointerAliasValueExpression(pointer, scope, pointer.span);
   return target === undefined ? undefined : memoryRefFromExpression(target);
+}
+
+function semanticSincosStores(
+  source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (expression.callee.kind !== "symbol" || !isSincosCallName(expression.callee.name)) return undefined;
+  const value = expression.args[0];
+  const sinTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
+  const cosTarget = source.args[2] === undefined ? undefined : pointerAliasValueExpression(source.args[2], scope, source.args[2].span);
+  if (!value || !sinTarget || !cosTarget) return undefined;
+  const sinRef = memoryRefFromExpression(sinTarget);
+  const cosRef = memoryRefFromExpression(cosTarget);
+  if (!sinRef || !cosRef) return undefined;
+  const angle = isSincosPiCallName(expression.callee.name)
+    ? multiplyFloatExpressions(numberExpression(Math.PI, value.span), value, value.span)
+    : value;
+  return {
+    kind: "block",
+    body: [
+      {
+        kind: "store",
+        target: sinRef,
+        value: mathCallExpression("sin", angle, value.span),
+        operator: "=",
+        reads: collectMemoryRefs(angle),
+        span,
+      },
+      {
+        kind: "store",
+        target: cosRef,
+        value: mathCallExpression("cos", angle, value.span),
+        operator: "=",
+        reads: collectMemoryRefs(angle),
+        span,
+      },
+    ],
+    span,
+  };
+}
+
+function mathCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "call",
+    callee: { kind: "symbol", name, valueType: "float", addressSpace: "builtin", span },
+    args: [value],
+    valueType: "float",
+    span,
+  };
+}
+
+function multiplyFloatExpressions(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "binary",
+    operator: "*",
+    left,
+    right,
+    valueType: "float",
+    span,
+  };
+}
+
+function numberExpression(value: number, span: SourceSpan): SemanticExpression {
+  return { kind: "literal", literalKind: "number", value, valueType: "float", span };
+}
+
+function isSincosCallName(name: string): boolean {
+  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
+}
+
+function isSincosPiCallName(name: string): boolean {
+  return name === "sincospi" || name === "sincospif";
 }
 
 function pointerAliasValueExpression(

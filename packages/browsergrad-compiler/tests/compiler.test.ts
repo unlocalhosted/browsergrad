@@ -6785,6 +6785,41 @@ __global__ void sincosKernel(float *out) {
     expect(out[5]).toBeCloseTo(0, 6);
   });
 
+  it("lowers storage-only CUDA sincos output params through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticSincos(float *out) {
+  if (threadIdx.x == 0) {
+    sincosf(0.25f, &out[0], &out[1]);
+    sincospi(0.5f, &out[2], &out[3]);
+  }
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sincos-output");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("out[0u] = sin(0.25);");
+    expect(compiled.wgsl).toContain("out[1u] = cos(0.25);");
+    expect(compiled.wgsl).toContain("out[2u] = sin((3.141592653589793 * 0.5));");
+    const out = [...semanticResult.buffers.out as Float32Array];
+    expect(out[0]).toBeCloseTo(Math.sin(0.25), 6);
+    expect(out[1]).toBeCloseTo(Math.cos(0.25), 6);
+    expect(out[2]).toBeCloseTo(1, 6);
+    expect(out[3]).toBeCloseTo(0, 6);
+    expect([...result.buffers.out as Float32Array]).toEqual([...semanticResult.buffers.out as Float32Array]);
+  });
+
   it("lowers CUDA math output params through local pointer aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void mathOutAliases(float *out, int *ints) {
