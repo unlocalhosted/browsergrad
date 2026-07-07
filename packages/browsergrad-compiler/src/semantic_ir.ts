@@ -1011,6 +1011,16 @@ function localPointerAliasUpdate(
   expression: CudaLiteExpression,
   scope: Map<string, CudaLiteSemanticSymbol>,
 ): boolean {
+  if (expression.kind === "update" && expression.argument.kind === "identifier") {
+    const target = scope.get(expression.argument.name);
+    if (!target?.pointerRoot || target.pointerAddressSpace !== "local" || target.pointerBaseIndices?.length !== 1) return false;
+    const one = { kind: "literal" as const, literalKind: "number" as const, value: 1, valueType: "int" as const, span: expression.span };
+    const index = expression.operator === "++"
+      ? addIndexExpressions(target.pointerBaseIndices[0]!, one, expression.span)
+      : subtractIndexExpressions(target.pointerBaseIndices[0]!, one, expression.span);
+    scope.set(target.name, { ...target, pointerBaseIndices: [index] });
+    return true;
+  }
   if (expression.kind !== "assignment" || expression.left.kind !== "identifier") return false;
   const target = scope.get(expression.left.name);
   if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length > 0) return false;
