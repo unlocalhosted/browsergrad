@@ -655,6 +655,8 @@ function lowerExpression(
             ? "uint"
           : expression.callee.kind === "identifier" && (
               expression.callee.name === "__reduce_add_sync" ||
+              expression.callee.name === "__reduce_min_sync" ||
+              expression.callee.name === "__reduce_max_sync" ||
               expression.callee.name === "__shfl_sync" ||
               expression.callee.name === "__shfl_down_sync" ||
               expression.callee.name === "__shfl_up_sync" ||

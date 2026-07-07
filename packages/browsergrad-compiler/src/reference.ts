@@ -1289,6 +1289,10 @@ function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined
     case "warp_reduce_sum_i8_i32":
     case "warp_reduce_sum_i32_i32":
       return "sum";
+    case "__reduce_min_sync":
+      return "min";
+    case "__reduce_max_sync":
+      return "max";
     case "warpReduceMax":
     case "warp_reduce_max":
     case "warp_reduce_max_f32":
@@ -1313,7 +1317,7 @@ function collectiveValueExpression(
   name: string | undefined,
   args: readonly CudaLiteExpression[],
 ): CudaLiteExpression | undefined {
-  if (name === "__reduce_add_sync") return args[1];
+  if (name === "__reduce_add_sync" || name === "__reduce_min_sync" || name === "__reduce_max_sync") return args[1];
   if (name === "__any_sync" || name === "__all_sync" || name === "__match_any_sync") return args[1];
   return args.length === 2 ? args[1] : args[0];
 }
@@ -3302,6 +3306,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__match_any_sync":
       return 1;
     case "__reduce_add_sync":
+    case "__reduce_min_sync":
+    case "__reduce_max_sync":
       return args[1] ?? 0;
     case "warpReduceSum":
     case "warpReduceMax":

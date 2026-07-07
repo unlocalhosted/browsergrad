@@ -4850,6 +4850,38 @@ __global__ void semanticMatchAnyKernel(uint *input, uint *out) {
     expect([...semanticResult.buffers.out as Uint32Array]).toEqual([5, 10, 5, 10]);
   });
 
+  it("lowers CUDA min/max subgroup reductions through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticMinMaxReduceKernel(uint *input, uint *out) {
+  int tid = threadIdx.x;
+  uint mask = 0xffffffffu;
+  out[tid * 2] = __reduce_min_sync(mask, input[tid]);
+  out[tid * 2 + 1] = __reduce_max_sync(mask, input[tid]);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+    const launch = { gridDim: [1, 1, 1], blockDim: [4, 1, 1] } as const;
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Uint32Array([9, 4, 7, 2]), out: new Uint32Array(8) } },
+      launch,
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Uint32Array([9, 4, 7, 2]), out: new Uint32Array(8) } },
+      launch,
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("subgroupMin");
+    expect(compiled.wgsl).toContain("subgroupMax");
+    expect([...result.buffers.out as Uint32Array]).toEqual([2, 9, 2, 9, 2, 9, 2, 9]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([2, 9, 2, 9, 2, 9, 2, 9]);
+  });
+
   it("lowers CUDA syncthreads predicate collectives through native workgroup memory", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void syncPredicates(int *out) {

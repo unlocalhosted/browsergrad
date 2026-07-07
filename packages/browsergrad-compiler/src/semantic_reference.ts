@@ -127,6 +127,8 @@ const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__ballot_sync",
   "__match_any_sync",
   "__reduce_add_sync",
+  "__reduce_min_sync",
+  "__reduce_max_sync",
   "__shfl_sync",
   "__shfl_down_sync",
   "__shfl_up_sync",
@@ -1450,6 +1452,8 @@ function evalSemanticSubgroupCall(
     return mask >>> 0;
   }
   if (name === "__reduce_add_sync") return peers.reduce((sum, peer) => sum + evalNumber(value, peer), 0);
+  if (name === "__reduce_min_sync") return Math.min(...peers.map((peer) => evalNumber(value, peer)));
+  if (name === "__reduce_max_sync") return Math.max(...peers.map((peer) => evalNumber(value, peer)));
   if (name === "__shfl_sync" || name === "__shfl_down_sync" || name === "__shfl_up_sync" || name === "__shfl_xor_sync") {
     const index = expression.args[2] ? Math.trunc(evalNumber(expression.args[2], context)) : 0;
     const width = semanticShuffleWidth(expression.args[3] ? evalNumber(expression.args[3], context) : 32);

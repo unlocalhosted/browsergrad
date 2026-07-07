@@ -127,6 +127,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__ballot_sync", [2, 2]],
   ["__match_any_sync", [2, 2]],
   ["__reduce_add_sync", [2, 2]],
+  ["__reduce_min_sync", [2, 2]],
+  ["__reduce_max_sync", [2, 2]],
   ["warpReduceSum", [1, 2]],
   ["warpReduceMax", [1, 2]],
   ["warpReduceMin", [1, 2]],
@@ -3799,7 +3801,7 @@ function isSyncthreadsPredicateBuiltin(callName: string): boolean {
 }
 
 function isMaskedWarpReductionBuiltin(callName: string): boolean {
-  return callName === "__reduce_add_sync";
+  return callName === "__reduce_add_sync" || callName === "__reduce_min_sync" || callName === "__reduce_max_sync";
 }
 
 function isWarpReductionBuiltin(callName: string): boolean {

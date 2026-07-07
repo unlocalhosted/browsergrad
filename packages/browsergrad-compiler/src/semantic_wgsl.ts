@@ -97,6 +97,8 @@ const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__ballot_sync",
   "__match_any_sync",
   "__reduce_add_sync",
+  "__reduce_min_sync",
+  "__reduce_max_sync",
   "__shfl_sync",
   "__shfl_down_sync",
   "__shfl_up_sync",
@@ -3457,9 +3459,10 @@ function emitSemanticSubgroupCall(
     const width = expression.args[3] ? emitSemanticExpressionAs(expression.args[3], ir, names, "u32", options, textureSpecializations) : "32u";
     return `${helper.name}(${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(valueType), options, textureSpecializations)}, ${index}, ${width}, local_id)`;
   }
-  if (name === "__reduce_add_sync") {
+  if (name === "__reduce_add_sync" || name === "__reduce_min_sync" || name === "__reduce_max_sync") {
     const scalar = semanticExpressionWgslScalar(value);
-    return `subgroupAdd(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
+    const wgslCall = name === "__reduce_add_sync" ? "subgroupAdd" : name === "__reduce_min_sync" ? "subgroupMin" : "subgroupMax";
+    return `${wgslCall}(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
   }
   throw semanticWgslError(`semantic WGSL does not support subgroup call '${name}'`, expression.span);
 }
