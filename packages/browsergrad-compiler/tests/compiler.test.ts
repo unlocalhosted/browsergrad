@@ -6561,6 +6561,49 @@ __global__ void float_predicates(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 0, 1, 1, 1, 1, 1, 1, 1, 0]);
   });
 
+  it("lowers CUDA float predicates through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_float_predicates(float *x, float *out) {
+  float nan_value = x[0];
+  float inf_value = x[1];
+  float neg_zero = x[2];
+  float normal = x[3];
+  float subnormal = x[4];
+  out[0] = isnan(nan_value) ? 1.0f : 0.0f;
+  out[1] = isinf(inf_value) ? 1.0f : 0.0f;
+  out[2] = isfinite(inf_value) ? 1.0f : 0.0f;
+  out[3] = finitef(normal) && isfinitef(normal) && __finitef(normal) ? 1.0f : 0.0f;
+  out[4] = signbit(neg_zero) && signbitf(-normal) ? 1.0f : 0.0f;
+  out[5] = isnormal(normal) ? 1.0f : 0.0f;
+  out[6] = isnormal(subnormal) ? 1.0f : 0.0f;
+  out[7] = isgreater(normal, 2.0f) ? 1.0f : 0.0f;
+  out[8] = isgreaterequal(normal, normal) && isless(2.0f, normal) && islessequal(normal, normal) ? 1.0f : 0.0f;
+  out[9] = islessgreater(normal, normal) ? 1.0f : 0.0f;
+  out[10] = isunordered(nan_value, normal) ? 1.0f : 0.0f;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = new Float32Array([NaN, Infinity, -0, 3, 1e-40]);
+    const runInput = { buffers: { x: input, out: new Float32Array(11) } };
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      runInput,
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(11) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("select(0u, 1u, ((nan_value) != (nan_value)))");
+    expect(compiled.wgsl).toContain("select(0u, 1u, (abs(inf_value) > 3.4028234663852886e38))");
+    expect(compiled.wgsl).toContain("select(0u, 1u, ((bitcast<u32>(neg_zero) & 0x80000000u) != 0u))");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1]);
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1]);
+  });
+
   it("uses round-to-even semantics for rint, nearbyint, and remainder", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void rounding(float *x, float *out) {

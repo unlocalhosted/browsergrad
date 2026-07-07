@@ -103,6 +103,26 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__saturatef", "saturate"],
   ["copysign", "copysign"],
   ["copysignf", "copysign"],
+  ["isinf", "isinf"],
+  ["isinff", "isinf"],
+  ["__isinff", "isinf"],
+  ["isfinite", "isfinite"],
+  ["isfinitef", "isfinite"],
+  ["finite", "isfinite"],
+  ["finitef", "isfinite"],
+  ["__finitef", "isfinite"],
+  ["isnan", "isnan"],
+  ["isnanf", "isnan"],
+  ["__isnanf", "isnan"],
+  ["signbit", "signbit"],
+  ["signbitf", "signbit"],
+  ["isnormal", "isnormal"],
+  ["isgreater", "isgreater"],
+  ["isgreaterequal", "isgreaterequal"],
+  ["isless", "isless"],
+  ["islessequal", "islessequal"],
+  ["islessgreater", "islessgreater"],
+  ["isunordered", "isunordered"],
   ["fma", "fma"],
   ["fmaf", "fma"],
   ["__fmaf_rn", "fma"],
@@ -2044,6 +2064,35 @@ function emitSemanticMathCall(
     const rhs = emitSemanticExpressionAs(sign, ir, names, "f32", options, textureSpecializations);
     return `select(abs(${lhs}), -abs(${lhs}), ((bitcast<u32>(${rhs}) & 0x80000000u) != 0u))`;
   }
+  if (wgslCallee === "isnan" || wgslCallee === "isinf" || wgslCallee === "isfinite" || wgslCallee === "signbit" || wgslCallee === "isnormal") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
+    const absValue = `abs(${emitted})`;
+    const condition =
+      wgslCallee === "isnan" ? `((${emitted}) != (${emitted}))` :
+      wgslCallee === "isinf" ? `(${absValue} > 3.4028234663852886e38)` :
+      wgslCallee === "isfinite" ? `((${absValue} <= 3.4028234663852886e38) && ((${emitted}) == (${emitted})))` :
+      wgslCallee === "signbit" ? `((bitcast<u32>(${emitted}) & 0x80000000u) != 0u)` :
+      `((${absValue} >= 1.1754943508222875e-38) && (${absValue} <= 3.4028234663852886e38))`;
+    return `select(0u, 1u, ${condition})`;
+  }
+  if (wgslCallee === "isgreater" || wgslCallee === "isgreaterequal" || wgslCallee === "isless" || wgslCallee === "islessequal" || wgslCallee === "islessgreater" || wgslCallee === "isunordered") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const lhs = emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations);
+    const unordered = `((${lhs}) != (${lhs}) || (${rhs}) != (${rhs}))`;
+    const comparison =
+      wgslCallee === "isgreater" ? `((${lhs}) > (${rhs}))` :
+      wgslCallee === "isgreaterequal" ? `((${lhs}) >= (${rhs}))` :
+      wgslCallee === "isless" ? `((${lhs}) < (${rhs}))` :
+      wgslCallee === "islessequal" ? `((${lhs}) <= (${rhs}))` :
+      wgslCallee === "islessgreater" ? `(((${lhs}) < (${rhs})) || ((${lhs}) > (${rhs})))` :
+      "";
+    const condition = wgslCallee === "isunordered" ? unordered : `(!${unordered} && ${comparison})`;
+    return `select(0u, 1u, ${condition})`;
+  }
   if (wgslCallee === "lerp") {
     const [left, right, factor] = expression.args;
     if (!left || !right || !factor) throw semanticWgslError("lerp expects three operands", expression.span);
@@ -2103,6 +2152,12 @@ function semanticMathCallArity(name: string): number {
     name === "__fdiv_rn" ||
     name === "copysign" ||
     name === "copysignf" ||
+    name === "isgreater" ||
+    name === "isgreaterequal" ||
+    name === "isless" ||
+    name === "islessequal" ||
+    name === "islessgreater" ||
+    name === "isunordered" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
     name === "__bg_remquo_quotient" ||

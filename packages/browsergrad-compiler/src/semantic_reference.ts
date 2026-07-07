@@ -53,6 +53,9 @@ const SEMANTIC_MATH_CALLS = new Set([
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__saturatef", "copysign", "copysignf", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
+  "isinf", "isinff", "__isinff", "isfinite", "isfinitef", "finite", "finitef", "__finitef",
+  "isnan", "isnanf", "__isnanf", "signbit", "signbitf", "isnormal",
+  "isgreater", "isgreaterequal", "isless", "islessequal", "islessgreater", "isunordered",
   "__bg_modf_intpart", "__bg_modf_fraction",
   "__bg_frexp_exponent", "__bg_frexp_mantissa",
   "__bg_remquo_quotient", "__bg_remquo_remainder",
@@ -1459,6 +1462,29 @@ function evalSemanticMathCall(
     case "__saturatef": return Math.min(1, Math.max(0, args[0] ?? 0));
     case "copysign":
     case "copysignf": return Math.sign(args[1] ?? 0) < 0 || Object.is(args[1] ?? 0, -0) ? -Math.abs(args[0] ?? 0) : Math.abs(args[0] ?? 0);
+    case "isinf":
+    case "isinff":
+    case "__isinff": return !Number.isFinite(args[0] ?? 0) && !Number.isNaN(args[0] ?? 0) ? 1 : 0;
+    case "isfinite":
+    case "isfinitef":
+    case "finite":
+    case "finitef":
+    case "__finitef": return Number.isFinite(args[0] ?? 0) ? 1 : 0;
+    case "isnan":
+    case "isnanf":
+    case "__isnanf": return Number.isNaN(args[0] ?? 0) ? 1 : 0;
+    case "signbit":
+    case "signbitf": return Math.sign(args[0] ?? 0) < 0 || Object.is(args[0] ?? 0, -0) ? 1 : 0;
+    case "isnormal": {
+      const value = Math.abs(args[0] ?? 0);
+      return Number.isFinite(value) && value >= 1.1754943508222875e-38 && value <= 3.4028234663852886e38 ? 1 : 0;
+    }
+    case "isgreater": return orderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left > right);
+    case "isgreaterequal": return orderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left >= right);
+    case "isless": return orderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left < right);
+    case "islessequal": return orderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left <= right);
+    case "islessgreater": return orderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left !== right);
+    case "isunordered": return Number.isNaN(args[0] ?? 0) || Number.isNaN(args[1] ?? 0) ? 1 : 0;
     case "fma":
     case "fmaf":
     case "__fmaf_rn": return (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0);
@@ -1481,6 +1507,10 @@ function evalSemanticMathCall(
 
 function frexpExponent(value: number): number {
   return value === 0 || !Number.isFinite(value) ? 0 : Math.floor(Math.log2(Math.abs(value))) + 1;
+}
+
+function orderedCompare(left: number, right: number, compare: (left: number, right: number) => boolean): number {
+  return !Number.isNaN(left) && !Number.isNaN(right) && compare(left, right) ? 1 : 0;
 }
 
 function frexpMantissa(value: number): number {
@@ -1659,6 +1689,12 @@ function semanticMathCallArity(name: string): number {
     name === "__fdiv_rn" ||
     name === "copysign" ||
     name === "copysignf" ||
+    name === "isgreater" ||
+    name === "isgreaterequal" ||
+    name === "isless" ||
+    name === "islessequal" ||
+    name === "islessgreater" ||
+    name === "isunordered" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
     name === "__bg_remquo_quotient" ||
