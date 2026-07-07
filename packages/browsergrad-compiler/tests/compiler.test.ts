@@ -16114,15 +16114,76 @@ __global__ void bf16_int_modes(int* iout, uint* uout, __nv_bfloat16* output) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          iout: new Int32Array(7),
+          uout: new Uint32Array(4),
+          output: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
-    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(a))");
+    expect(compiled.wgsl).toContain("bg_semantic_round_even_f32(f32(a))");
     expect(compiled.wgsl).toContain("i32(trunc(f32(a)))");
-    expect(compiled.wgsl).toContain("u32(max(bg_round_even_f32(f32(b)), 0.0))");
+    expect(compiled.wgsl).toContain("u32(max(bg_semantic_round_even_f32(f32(b)), 0.0))");
     expect([...result.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4, -2, -3]);
     expect([...result.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
     expect([...result.buffers.output as Float32Array]).toEqual([3, 4]);
+    expect([...semanticResult.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4, -2, -3]);
+    expect([...semanticResult.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
+    expect([...semanticResult.buffers.output as Float32Array]).toEqual([3, 4]);
+  });
+
+  it("lowers scalar CUDA bf16 arithmetic through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16_scalar_ops(const __nv_bfloat16* input, __nv_bfloat16* output) {
+  __nv_bfloat16 a = input[0];
+  __nv_bfloat16 b = input[1];
+  output[0] = __hadd(a, b);
+  output[1] = __hsub(a, b);
+  output[2] = __hmul(a, b);
+  output[3] = __hdiv(a, b);
+  output[4] = __hfma(a, b, __float2bfloat16(1.0f));
+  output[5] = __hmin(a, b);
+  output[6] = __hmax(a, b);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        input: new Float32Array([2, 0.5]),
+        output: new Float32Array(7),
+      },
+    };
+    const result = runCompiledKernelReference(
+      compiled,
+      input,
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([2, 0.5]),
+          output: new Float32Array(7),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bitcast<f32>((bitcast<u32>(f32((a + b))) + 0x8000u) & 0xffff0000u)");
+    expect(compiled.wgsl).toContain("fma(a, b, bitcast<f32>((bitcast<u32>(f32(1.0)) + 0x8000u) & 0xffff0000u))");
+    expect([...result.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2]);
+    expect([...semanticResult.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2]);
   });
 
   it("supports CUDA cache-hint pointer helpers for bf16 storage", () => {
