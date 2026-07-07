@@ -86,7 +86,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-local-pointer", "memory", "Local pointer aliases", "unsupported", false, true, "Fixed local-array decay, element aliases, and straight-line local pointer assignments are lowered into semantic IR; remaining local pointer forms need modeled alias rules."),
   feature("unsupported-pointer-cast", "memory", "Unsupported pointer cast", "unsupported", false, true, "Pointer cast requires a modeled source and target memory view."),
   feature("unsupported-pointer-assignment", "memory", "Unsupported pointer assignment", "unsupported", false, true, "Pointer assignment must stay within modeled memory and alias rules."),
-  feature("unsupported-pointer-conditional", "memory", "Unsupported pointer conditional", "unsupported", false, true, "Conditional pointer expressions require compatible modeled pointer branches."),
+  feature("unsupported-pointer-conditional", "memory", "Unsupported pointer conditional", "unsupported", false, true, "Same-root fixed local-array pointer conditionals are lowered into semantic IR; remaining pointer conditionals require compatible modeled pointer branches."),
   feature("unsupported-pointer-pointer-comparison", "memory", "Unsupported pointer comparison", "unsupported", false, true, "Pointer comparison requires null checks or addresses in the same modeled address system."),
   feature("unsupported-pointer-difference", "memory", "Unsupported pointer difference", "unsupported", false, true, "Pointer difference requires modeled pointers with compatible pointee types and address roots."),
   feature("invalid-array-dimension", "memory", "Invalid array dimension", "unsupported", false, false, "Requires positive constant dimensions."),

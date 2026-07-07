@@ -2525,6 +2525,35 @@ __global__ void localPointerAssignment(float *out) {
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([9, 4]);
   });
 
+  it("lowers local pointer conditionals into fixed local arrays through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localPointerConditional(float *out, int pick) {
+  float values[2];
+  values[0] = 6.0f;
+  values[1] = 11.0f;
+  float *p = pick != 0 ? &values[1] : values;
+  out[0] = p[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-conditional");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("select(");
+    expect([...result.buffers.out as Float32Array]).toEqual([11]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([11]);
+  });
+
   it("stores modeled memory pointers in fixed local pointer arrays", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float read_x(float3 *value) {
