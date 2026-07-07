@@ -79,6 +79,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["lerp", "lerp"],
   ["div_ceil", "div_ceil"],
   ["ceil_div", "div_ceil"],
+  ["__bg_modf_intpart", "modf_intpart"],
+  ["__bg_modf_fraction", "modf_fraction"],
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const WGSL_ATOMIC_CALLEES = new Map([
@@ -1360,6 +1362,15 @@ function emitSemanticMathCall(
     const end = emitSemanticExpressionAs(right, ir, names, "f32");
     const amount = emitSemanticExpressionAs(factor, ir, names, "f32");
     return `fma(${amount}, (${end} - ${start}), ${start})`;
+  }
+  if (wgslCallee === "modf_intpart" || wgslCallee === "modf_fraction") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32");
+    const nonFinite = `((${emitted} != ${emitted}) || (abs(${emitted}) > 3.4028234663852886e38))`;
+    if (wgslCallee === "modf_intpart") return `select(trunc(${emitted}), ${emitted}, ${nonFinite})`;
+    const infinityFraction = `select(0.0, -0.0, ${emitted} < 0.0)`;
+    return `select(select((${emitted} - trunc(${emitted})), ${infinityFraction}, abs(${emitted}) > 3.4028234663852886e38), ${emitted}, ${emitted} != ${emitted})`;
   }
   return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32")).join(", ")})`;
 }

@@ -50,6 +50,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "tan", "tanf", "__tanf", "atan", "atanf", "atan2", "atan2f", "tanh", "tanhf", "__tanhf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__fdividef", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
+  "__bg_modf_intpart", "__bg_modf_fraction",
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 
@@ -1196,9 +1197,21 @@ function evalSemanticMathCall(
     case "lerp": return (args[0] ?? 0) + (args[2] ?? 0) * ((args[1] ?? 0) - (args[0] ?? 0));
     case "div_ceil":
     case "ceil_div": return Math.trunc((Math.trunc(args[0] ?? 0) + Math.trunc(args[1] ?? 1) - 1) / Math.trunc(args[1] ?? 1));
+    case "__bg_modf_intpart": return modfIntpart(args[0] ?? 0);
+    case "__bg_modf_fraction": return modfFraction(args[0] ?? 0);
     default:
       throw semanticReferenceError(`semantic reference does not support math call '${expression.callee.name}'`, expression.span);
   }
+}
+
+function modfIntpart(value: number): number {
+  return Number.isFinite(value) ? Math.trunc(value) : value;
+}
+
+function modfFraction(value: number): number {
+  if (Number.isNaN(value)) return value;
+  if (!Number.isFinite(value)) return value < 0 ? -0 : 0;
+  return value - Math.trunc(value);
 }
 
 function evalSemanticFunctionCall(

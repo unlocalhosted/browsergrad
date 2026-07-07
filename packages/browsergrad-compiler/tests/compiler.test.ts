@@ -6839,8 +6839,9 @@ __global__ void semanticModfOut(float *out) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
     expect(compiled.wgsl).not.toContain("var intpart:");
-    expect(compiled.wgsl).toContain("out[1u] = trunc(8.125);");
-    expect(compiled.wgsl).toContain("out[2u] = trunc(-(2.25));");
+    expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
+    expect(compiled.wgsl).toContain("out[1u] = select(trunc(bg__bg_modf_value_");
+    expect(compiled.wgsl).toContain("out[2u] = select(trunc(bg__bg_modf_value_");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([0, 8, -2]);
     expect([...result.buffers.out as Float32Array]).toEqual([0, 8, -2]);
   });
@@ -6980,8 +6981,9 @@ __global__ void mathOutAliases(float *out, int *ints) {
     expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
     expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
     expect(compiled.wgsl).not.toContain("var intpart:");
-    expect(compiled.wgsl).toContain("out[1u] = 3.0;");
-    expect(compiled.wgsl).toContain("out[0u] = 0.75;");
+    expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
+    expect(compiled.wgsl).toContain("out[1u] = select(trunc(bg__bg_modf_value_");
+    expect(compiled.wgsl).toContain("out[0u] = select(select((bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("ints[1u] = 4;");
     expect(compiled.wgsl).toContain("out[4u] = 0.5625;");
     expect(compiled.wgsl).toContain("ints[2u] = 4;");
@@ -7035,14 +7037,66 @@ __global__ void mathOutVarInits(float *out, int *ints) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
     expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
-    expect(compiled.wgsl).toContain("out[1u] = -3.0;");
-    expect(compiled.wgsl).toContain("var frac: f32 = -0.75;");
+    expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
+    expect(compiled.wgsl).toContain("out[1u] = select(trunc(bg__bg_modf_value_");
+    expect(compiled.wgsl).toContain("var frac: f32 = select(select((bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("ints[1u] = 4;");
     expect(compiled.wgsl).toContain("var mantissa: f32 = 0.5625;");
     expect(compiled.wgsl).toContain("ints[2u] = 4;");
     expect(compiled.wgsl).toContain("var rem: f32 = -1.0;");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
     expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
+  });
+
+  it("lowers dynamic CUDA modf storage outputs through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicModf(float *out, float x) {
+  float *intpart = out + 1;
+  out[0] = modff(x, intpart);
+  float y = modf(x + out[0], &out[2]);
+  out[3] = y;
+  out[4] = x;
+  out[4] = modff(out[4], &out[4]);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(5) }, scalars: { x: -3.75 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_modf(");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toContain("bg_uniforms.x");
+    expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(-0.75, 6);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(-3, 6);
+    expect([...semanticResult.buffers.out as Float32Array][2]).toBeCloseTo(-4, 6);
+    expect([...semanticResult.buffers.out as Float32Array][3]).toBeCloseTo(-0.5, 6);
+    expect([...semanticResult.buffers.out as Float32Array][4]).toBeCloseTo(-0.75, 6);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+
+    for (const x of [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN]) {
+      const expected = runCompiledKernelReference(
+        compiled,
+        { buffers: { out: new Float32Array(5) }, scalars: { x } },
+        launch,
+      );
+      const actual = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(5) }, scalars: { x } },
+        launch,
+      );
+      const expectedOut = [...expected.buffers.out as Float32Array];
+      const actualOut = [...actual.buffers.out as Float32Array];
+      for (const [index, value] of expectedOut.entries()) {
+        const actualValue = actualOut[index]!;
+        expect(Number.isNaN(actualValue) && Number.isNaN(value) || Object.is(actualValue, value)).toBe(true);
+      }
+    }
   });
 
   it("lets user device functions shadow CUDA math aliases when CUDA source defines them", () => {

@@ -356,7 +356,9 @@ function lowerStatementOperations(
   scope: Map<string, CudaLiteSemanticSymbol>,
 ): readonly SemanticKernelIrOperation[] {
   const mathOutVarDecl = semanticMathOutVarDeclOperations(statement, scope);
-  return mathOutVarDecl ?? [lowerStatement(statement, scope)];
+  const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
+  const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
+  return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
 }
 
 function lowerStatement(
@@ -798,6 +800,29 @@ function semanticMathOutVarDeclOperations(
   ];
 }
 
+function semanticMathOutAssignmentOperations(
+  statement: CudaLiteStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "expr" || statement.expression.kind !== "assignment" || statement.expression.operator !== "=" || statement.expression.right.kind !== "call") return undefined;
+  const expression = lowerExpression(statement.expression, scope);
+  if (expression.kind !== "assignment" || expression.value.kind !== "call") return undefined;
+  const target = memoryRefFromExpression(expression.target);
+  if (!target) return undefined;
+  return semanticMathOutAssignmentStores(statement.expression.right, expression.value, target, scope, statement.span);
+}
+
+function semanticMathOutCallStatementOperations(
+  statement: CudaLiteStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "expr" || statement.expression.kind !== "call") return undefined;
+  const expression = lowerExpression(statement.expression, scope);
+  if (expression.kind !== "call") return undefined;
+  const result = semanticMathOutCallResult(statement.expression, expression, scope, statement.span);
+  return result?.sideEffects;
+}
+
 function semanticMathOutAssignmentBlock(
   source: CudaLiteAssignmentExpression,
   expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
@@ -845,15 +870,19 @@ function semanticModfCallResult(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   span: SourceSpan,
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
-  const value = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const value = expression.args[0];
   const intpartTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
-  if (value === undefined || !intpartTarget) return undefined;
+  if (value === undefined || !intpartTarget || !semanticExpressionSideEffectFree(value)) return undefined;
   const intpartRef = memoryRefFromExpression(intpartTarget);
   if (!intpartRef) return undefined;
-  const intpart = Math.trunc(value);
+  const temp = tempScalarSymbol("__bg.modf.value", span, "float");
+  const tempValue = semanticSymbolExpression(temp, value.span);
   return {
-    sideEffects: [storeOperation(intpartRef, numberExpression(intpart, expression.span), span)],
-    value: numberExpression(value - intpart, expression.span),
+    sideEffects: [
+      { kind: "declare", target: temp, init: value, span },
+      storeOperation(intpartRef, unaryFloatCallExpression("__bg_modf_intpart", tempValue, expression.span), span),
+    ],
+    value: unaryFloatCallExpression("__bg_modf_fraction", tempValue, expression.span),
   };
 }
 
@@ -1016,6 +1045,10 @@ function mathCallExpression(name: string, value: SemanticExpression, span: Sourc
   };
 }
 
+function unaryFloatCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return mathCallExpression(name, value, span);
+}
+
 function multiplyFloatExpressions(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
   return {
     kind: "binary",
@@ -1033,6 +1066,17 @@ function numberExpression(value: number, span: SourceSpan): SemanticExpression {
 
 function intNumberExpression(value: number, span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value, valueType: "int", span };
+}
+
+function tempScalarSymbol(prefix: string, span: SourceSpan, valueType: CudaLiteScalarType): CudaLiteSemanticSymbol {
+  return {
+    name: `${prefix}.${span.start}.${span.end}`,
+    kind: "local",
+    valueType,
+    addressSpace: "local",
+    dimensions: [],
+    span,
+  };
 }
 
 function isFiniteStaticNumberExpression(expression: SemanticExpression): boolean {
@@ -1053,6 +1097,45 @@ function staticNumberValue(expression: SemanticExpression): number | undefined {
     return value === undefined ? undefined : -value;
   }
   return undefined;
+}
+
+function semanticExpressionSideEffectFree(expression: SemanticExpression): boolean {
+  switch (expression.kind) {
+    case "assignment":
+    case "update":
+    case "sequence":
+      return false;
+    case "literal":
+    case "symbol":
+      return true;
+    case "member":
+      return semanticExpressionSideEffectFree(expression.object);
+    case "index":
+      return semanticExpressionSideEffectFree(expression.target) && semanticExpressionSideEffectFree(expression.index);
+    case "call":
+      return semanticExpressionSideEffectFree(expression.callee) && expression.args.every(semanticExpressionSideEffectFree);
+    case "texture-read":
+      return semanticExpressionSideEffectFree(expression.texture) &&
+        semanticExpressionSideEffectFree(expression.x) &&
+        semanticExpressionSideEffectFree(expression.y);
+    case "surface-read":
+      return semanticExpressionSideEffectFree(expression.surface) &&
+        semanticExpressionSideEffectFree(expression.xBytes) &&
+        semanticExpressionSideEffectFree(expression.y) &&
+        (expression.z === undefined || semanticExpressionSideEffectFree(expression.z));
+    case "cast":
+      return semanticExpressionSideEffectFree(expression.expression);
+    case "unary":
+      return semanticExpressionSideEffectFree(expression.argument);
+    case "binary":
+      return semanticExpressionSideEffectFree(expression.left) && semanticExpressionSideEffectFree(expression.right);
+    case "conditional":
+      return semanticExpressionSideEffectFree(expression.condition) &&
+        semanticExpressionSideEffectFree(expression.consequent) &&
+        semanticExpressionSideEffectFree(expression.alternate);
+    case "initializer":
+      return expression.elements.every(semanticExpressionSideEffectFree);
+  }
 }
 
 function storeOperation(target: SemanticMemoryRef, value: SemanticExpression, span: SourceSpan): SemanticKernelIrOperation {
