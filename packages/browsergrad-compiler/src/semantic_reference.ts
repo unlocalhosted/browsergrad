@@ -383,7 +383,7 @@ function semanticReferenceAtomicSupported(
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -492,6 +492,20 @@ function semanticReferenceVectorAtCallSupported(
     isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression.args[0])) &&
     semanticReferenceExpressionSupported(expression.args[0], "any", compiled) &&
     semanticReferenceExpressionSupported(expression.args[1], "scalar", compiled);
+}
+
+function semanticReferenceVectorLerpCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  const [left, right, amount] = expression.args;
+  if (expression.callee.kind !== "symbol" || expression.callee.name !== "lerp" || !left || !right || !amount) return false;
+  const valueType = semanticExpressionValueType(left);
+  return isSemanticReferenceFloatVectorType(valueType) &&
+    semanticExpressionValueType(right) === valueType &&
+    semanticReferenceExpressionSupported(left, "any", compiled) &&
+    semanticReferenceExpressionSupported(right, "any", compiled) &&
+    semanticReferenceExpressionSupported(amount, "scalar", compiled);
 }
 
 function semanticReferenceFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -656,7 +670,8 @@ function semanticReferenceExpressionSupported(
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         semanticReferenceMathCallSupported(expression) ||
         semanticReferenceVectorConstructorSupported(expression, expected, compiled) ||
-        expected === "scalar" && semanticReferenceVectorAtCallSupported(expression, compiled);
+        expected === "scalar" && semanticReferenceVectorAtCallSupported(expression, compiled) ||
+        expected === "any" && semanticReferenceVectorLerpCallSupported(expression, compiled);
     case "texture-read":
       return compiled !== undefined &&
         (expected === "any" || expression.valueType === "float") &&
@@ -727,7 +742,8 @@ function semanticReferenceExpressionContainsUnsupportedCall(
       semanticReferenceFunctionCallSupported(expression, compiled) ||
       semanticReferenceMathCallSupported(expression) ||
       semanticReferenceVectorConstructorSupported(expression, "any", compiled) ||
-      semanticReferenceVectorAtCallSupported(expression, compiled)) ||
+      semanticReferenceVectorAtCallSupported(expression, compiled) ||
+      semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
       expression.args.some((arg) => semanticReferenceExpressionContainsUnsupportedCall(arg, compiled));
   }
   if (expression.kind === "texture-read") {
@@ -1200,6 +1216,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
       if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);
       if (semanticReferenceVectorAtCallSupported(expression, context.compiled)) return evalSemanticVectorAtCall(expression, context);
+      if (semanticReferenceVectorLerpCallSupported(expression, context.compiled)) return evalSemanticVectorLerpCall(expression, context);
       if (semanticReferenceFunctionCallSupported(expression, context.compiled)) return evalSemanticFunctionCall(expression, context);
       if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
@@ -1530,6 +1547,22 @@ function evalSemanticVectorAtCall(
   if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vec_at target is not a vector", target.span);
   const index = Math.trunc(evalNumber(indexExpression, context));
   return value[index] ?? 0;
+}
+
+function evalSemanticVectorLerpCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number[] {
+  const [leftExpression, rightExpression, amountExpression] = expression.args;
+  if (!leftExpression || !rightExpression || !amountExpression) throw semanticReferenceError("semantic reference vector lerp requires three operands", expression.span);
+  const left = evalSemanticExpression(leftExpression, context);
+  const right = evalSemanticExpression(rightExpression, context);
+  if (!Array.isArray(left) || !Array.isArray(right)) throw semanticReferenceError("semantic reference vector lerp requires vector endpoints", expression.span);
+  const amount = evalNumber(amountExpression, context);
+  return Array.from({ length: Math.max(left.length, right.length) }, (_, lane) => {
+    const start = left[lane] ?? 0;
+    return start + amount * ((right[lane] ?? 0) - start);
+  });
 }
 
 function assignLocalVectorMember(

@@ -555,7 +555,7 @@ function semanticWgslAtomicSupported(
 function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
   return semanticWgslExpressionSupported(expression, "scalar", ir) ||
     semanticWgslExpressionSupported(expression, "any", ir) && isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression, ir)) ||
-    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression) || semanticWgslVectorConstructorSupported(expression, "any", ir) || semanticWgslVectorAtCallSupported(expression, ir)) ||
+    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression) || semanticWgslVectorConstructorSupported(expression, "any", ir) || semanticWgslVectorAtCallSupported(expression, ir) || semanticWgslVectorLerpCallSupported(expression, ir)) ||
     expression.kind === "texture-read" && semanticWgslTextureReadSupported(expression, ir) ||
     expression.kind === "surface-read" && semanticWgslSurfaceReadSupported(expression, ir);
 }
@@ -671,6 +671,20 @@ function semanticWgslVectorAtCallSupported(
     isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.args[0], ir)) &&
     semanticWgslExpressionSupported(expression.args[0], "any", ir) &&
     semanticWgslExpressionSupported(expression.args[1], "scalar", ir);
+}
+
+function semanticWgslVectorLerpCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  const [left, right, amount] = expression.args;
+  if (expression.callee.kind !== "symbol" || expression.callee.name !== "lerp" || !left || !right || !amount) return false;
+  const valueType = semanticExpressionVectorValueType(left, ir);
+  return isSemanticWgslFloatVectorType(valueType) &&
+    semanticExpressionVectorValueType(right, ir) === valueType &&
+    semanticWgslExpressionSupported(left, "any", ir) &&
+    semanticWgslExpressionSupported(right, "any", ir) &&
+    semanticWgslExpressionSupported(amount, "scalar", ir);
 }
 
 function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -1025,7 +1039,8 @@ function semanticWgslExpressionSupported(
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
         semanticWgslMathCallSupported(expression) ||
         semanticWgslVectorConstructorSupported(expression, expected, ir) ||
-        expected === "scalar" && semanticWgslVectorAtCallSupported(expression, ir);
+        expected === "scalar" && semanticWgslVectorAtCallSupported(expression, ir) ||
+        expected === "any" && semanticWgslVectorLerpCallSupported(expression, ir);
     case "texture-read":
       return ir !== undefined &&
         (expected === "any" || expression.valueType === "float") &&
@@ -1582,6 +1597,7 @@ function emitSemanticExpression(
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslVectorLerpCallSupported(expression, ir)) return emitSemanticVectorLerpCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options, textureSpecializations);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
@@ -1860,6 +1876,23 @@ function emitSemanticVectorAtCall(
   const [target, index] = expression.args;
   if (!target || !index) throw semanticWgslError("semantic WGSL vec_at requires vector and index", expression.span);
   return `${emitSemanticExpression(target, ir, names, options, textureSpecializations)}[${emitSemanticExpressionAs(index, ir, names, "u32", options, textureSpecializations)}]`;
+}
+
+function emitSemanticVectorLerpCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  const [left, right, amount] = expression.args;
+  if (!left || !right || !amount) throw semanticWgslError("semantic WGSL vector lerp requires three operands", expression.span);
+  const valueType = semanticExpressionVectorValueType(left, ir);
+  if (!isSemanticWgslFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector lerp requires vector endpoints", expression.span);
+  const start = emitSemanticExpression(left, ir, names, options, textureSpecializations);
+  const end = emitSemanticExpression(right, ir, names, options, textureSpecializations);
+  const factor = emitSemanticVectorOperand(amount, valueType as CudaLiteScalarType, ir, names, options, textureSpecializations);
+  return `fma(${factor}, (${end} - ${start}), ${start})`;
 }
 
 function emitSemanticFunctionArg(
