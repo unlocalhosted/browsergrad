@@ -1469,6 +1469,10 @@ function emitSemanticMemoryRef(
   if (ref.addressSpace === "local") {
     const local = localMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
     if (!local) throw semanticWgslError(`unknown local memory '${ref.base}'`, ref.span);
+    if (ref.indices.length === 1 && local.dimensions.length > 1) {
+      const flat = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32");
+      return `${nameFor(ref.base, names)}${emitFlatLocalArrayIndexes(flat, local.dimensions)}`;
+    }
     if (ref.indices.length !== local.dimensions.length) throw semanticWgslError(`local memory '${ref.base}' index rank mismatch`, ref.span);
     return `${nameFor(ref.base, names)}${ref.indices.map((index) => `[${emitSemanticExpressionAs(index, ir, names, "u32")}]`).join("")}`;
   }
@@ -1765,6 +1769,14 @@ function emitFlatConstantIndex(
     return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
   });
   return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+}
+
+function emitFlatLocalArrayIndexes(flat: string, dimensions: readonly number[]): string {
+  return dimensions.map((dimension, offset) => {
+    const stride = dimensions.slice(offset + 1).reduce((product, item) => product * item, 1);
+    const quotient = stride === 1 ? flat : `(${flat} / ${stride}u)`;
+    return `[${dimension > 1 ? `(${quotient} % ${Math.max(1, dimension)}u)` : "0u"}]`;
+  }).join("");
 }
 
 function semanticStorageOffsetBaseNames(operations: readonly SemanticKernelIrOperation[]): Set<string> {

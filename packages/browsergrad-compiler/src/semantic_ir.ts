@@ -985,7 +985,7 @@ function localPointerAliasForInitializer(
     if (alias?.pointerAddressSpace === "local") return alias;
   }
   const ref = localPointerAliasRoot(expression.argument, scope);
-  if (!ref || ref.root.addressSpace !== "local" || ref.root.dimensions.length !== 1) return undefined;
+  if (!ref || ref.root.addressSpace !== "local" || ref.root.dimensions.length === 0) return undefined;
   return {
     pointerRoot: ref.root.name,
     pointerAddressSpace: ref.root.addressSpace,
@@ -1133,19 +1133,37 @@ function localPointerAliasRoot(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): { readonly root: CudaLiteSemanticSymbol; readonly indices: readonly SemanticExpression[] } | undefined {
+  const ref = localArrayRefFromExpression(expression, scope);
+  if (ref) {
+    if (ref.root.dimensions.length === 0) return undefined;
+    return { root: ref.root, indices: [flatIndexExpressionForDimensions(ref.root.dimensions, ref.indices, expression.span)] };
+  }
   if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
   const target = scope.get(expression.target.name);
   if (target?.pointerRoot && target.pointerAddressSpace === "local" && target.pointerBaseIndices?.length === 1) {
     const root = scope.get(target.pointerRoot);
-    if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
+    if (!root || root.kind !== "local" || root.dimensions.length === 0 || root.pointer) return undefined;
     return {
       root,
       indices: [addIndexExpressions(target.pointerBaseIndices[0]!, lowerExpression(expression.index, scope), expression.span)],
     };
   }
-  const root = target;
-  if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
-  return { root, indices: [lowerExpression(expression.index, scope)] };
+  return undefined;
+}
+
+function localArrayRefFromExpression(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): { readonly root: CudaLiteSemanticSymbol; readonly indices: readonly SemanticExpression[] } | undefined {
+  if (expression.kind !== "index") return undefined;
+  if (expression.target.kind === "identifier") {
+    const root = scope.get(expression.target.name);
+    if (!root || root.kind !== "local" || root.dimensions.length === 0 || root.pointer) return undefined;
+    return { root, indices: [lowerExpression(expression.index, scope)] };
+  }
+  const target = localArrayRefFromExpression(expression.target, scope);
+  if (!target) return undefined;
+  return { root: target.root, indices: [...target.indices, lowerExpression(expression.index, scope)] };
 }
 
 function localPointerAliasIndexExpression(
@@ -1259,6 +1277,32 @@ function subtractIndexExpressions(left: SemanticExpression, right: SemanticExpre
     left,
     right,
     ...optionalValueType(expressionValueType(left) ?? expressionValueType(right)),
+    span,
+  };
+}
+
+function flatIndexExpressionForDimensions(
+  dimensions: readonly number[],
+  indices: readonly SemanticExpression[],
+  span: SourceSpan,
+): SemanticExpression {
+  let flat = zeroExpression(span);
+  for (const [offset, index] of indices.entries()) {
+    const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const term = stride === 1 ? index : multiplyIndexExpression(index, stride, span);
+    flat = addIndexExpressions(flat, term, span);
+  }
+  return flat;
+}
+
+function multiplyIndexExpression(left: SemanticExpression, right: number, span: SourceSpan): SemanticExpression {
+  if (right === 1) return left;
+  return {
+    kind: "binary",
+    operator: "*",
+    left,
+    right: { kind: "literal", literalKind: "number", value: right, valueType: "int", span },
+    ...optionalValueType(expressionValueType(left)),
     span,
   };
 }

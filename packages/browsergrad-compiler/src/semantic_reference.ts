@@ -1393,6 +1393,9 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
     const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
     if (!symbol) throw semanticReferenceError(`unknown ${ref.addressSpace} array '${ref.base}'`, ref.span);
     const dimensions = ref.addressSpace === "shared" ? semanticReferenceSharedDimensions(context.compiled, symbol) : symbol.dimensions;
+    if (ref.addressSpace === "local" && ref.indices.length === 1 && dimensions.length > 1) {
+      return Math.trunc(evalNumber(ref.indices[0]!, context));
+    }
     if (ref.indices.length !== dimensions.length) throw semanticReferenceError(`${ref.addressSpace} array '${ref.base}' index rank mismatch`, ref.span);
     return flatIndexForDimensions(dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
   }
