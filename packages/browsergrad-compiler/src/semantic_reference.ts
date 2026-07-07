@@ -48,6 +48,7 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
 const SEMANTIC_MATH_CALLS = new Set([
   "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
   "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
+  "erf", "erff", "erfc", "erfcf", "erfcx", "erfcxf", "normcdf", "normcdff", "tgamma", "tgammaf", "lgamma", "lgammaf",
   "log", "logf", "__logf", "log2", "log2f", "__log2f", "log10", "log10f", "__log10f", "log1p", "log1pf",
   "fabs", "fabsf", "abs",
   "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "round", "roundf", "rint", "rintf", "nearbyint", "nearbyintf",
@@ -1439,6 +1440,18 @@ function evalSemanticMathCall(
     case "__exp10f": return 10 ** (args[0] ?? 0);
     case "expm1":
     case "expm1f": return Math.expm1(args[0] ?? 0);
+    case "erf":
+    case "erff": return evalSemanticErf(args[0] ?? 0);
+    case "erfc":
+    case "erfcf": return 1 - evalSemanticErf(args[0] ?? 0);
+    case "erfcx":
+    case "erfcxf": return Math.exp((args[0] ?? 0) * (args[0] ?? 0)) * (1 - evalSemanticErf(args[0] ?? 0));
+    case "normcdf":
+    case "normcdff": return 0.5 * (1 + evalSemanticErf((args[0] ?? 0) * Math.SQRT1_2));
+    case "tgamma":
+    case "tgammaf": return evalSemanticGamma(args[0] ?? 0);
+    case "lgamma":
+    case "lgammaf": return evalSemanticLgamma(args[0] ?? 0);
     case "log":
     case "logf":
     case "__logf": return Math.log(args[0] ?? 0);
@@ -1652,6 +1665,48 @@ function evalNextafter(x: number, y: number): number {
     ? (x < y ? bits + 1 : bits - 1)
     : (x < y ? bits - 1 : bits + 1);
   return uintBitsToFloat32(bits >>> 0);
+}
+
+function evalSemanticErf(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (!Number.isFinite(value)) return Math.sign(value);
+  const sign = value < 0 ? -1 : 1;
+  const magnitude = Math.abs(value);
+  const t = 1 / (1 + 0.3275911 * magnitude);
+  const polynomial = (((((1.061405429 * t) - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+  return sign * (1 - polynomial * Math.exp(-magnitude * magnitude));
+}
+
+const SEMANTIC_LANCZOS_COEFFICIENTS = [
+  0.9999999999998099,
+  676.5203681218851,
+  -1259.1392167224028,
+  771.3234287776531,
+  -176.6150291621406,
+  12.507343278686905,
+  -0.13857109526572012,
+  9.984369578019572e-6,
+  1.5056327351493116e-7,
+] as const;
+
+function evalSemanticGamma(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (value === Infinity) return Infinity;
+  if (value === -Infinity) return NaN;
+  if (value <= 0 && Number.isInteger(value)) return NaN;
+  if (value < 0.5) return Math.PI / (Math.sin(Math.PI * value) * evalSemanticGamma(1 - value));
+  const z = value - 1;
+  let x = SEMANTIC_LANCZOS_COEFFICIENTS[0];
+  for (let i = 1; i < SEMANTIC_LANCZOS_COEFFICIENTS.length; i++) x += SEMANTIC_LANCZOS_COEFFICIENTS[i]! / (z + i);
+  const t = z + 7.5;
+  return Math.sqrt(2 * Math.PI) * (t ** (z + 0.5)) * Math.exp(-t) * x;
+}
+
+function evalSemanticLgamma(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (!Number.isFinite(value)) return Infinity;
+  if (value <= 0 && Number.isInteger(value)) return Infinity;
+  return Math.log(Math.abs(evalSemanticGamma(value)));
 }
 
 function frexpMantissa(value: number): number {

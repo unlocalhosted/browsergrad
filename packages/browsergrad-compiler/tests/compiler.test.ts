@@ -6315,10 +6315,9 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("floor(value)");
     expect(compiled.wgsl).toContain("ceil(value)");
     expect(compiled.wgsl).toContain("trunc(value)");
-    expect(compiled.wgsl).toContain("bg_round_away_f32(f32(value))");
-    expect(compiled.wgsl).toContain("fn bg_round_even_f32(");
-    expect(compiled.wgsl).toContain("fn bg_round_away_f32(");
-    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(value))");
+    expect(compiled.wgsl).toContain("select(floor(abs(value) + 0.5), -floor(abs(value) + 0.5), (value < 0.0))");
+    expect(compiled.wgsl).toContain("fn bg_semantic_round_even_f32(");
+    expect(compiled.wgsl).toContain("bg_semantic_round_even_f32(value)");
     expect(compiled.wgsl).toContain("sin(value)");
     expect(compiled.wgsl).toContain("sin(3.141592653589793 * value)");
     expect(compiled.wgsl).toContain("cos(value)");
@@ -6332,8 +6331,8 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("(0.5 * log((1.0 + (clamp(value, 0.0, 1.0) * 0.5)) / (1.0 - (clamp(value, 0.0, 1.0) * 0.5))))");
     expect(compiled.wgsl).toContain("atan2(value, 2.0)");
     expect(compiled.wgsl).toContain("tanh(value)");
-    expect(compiled.wgsl).toContain("sinh(value)");
-    expect(compiled.wgsl).toContain("cosh(value)");
+    expect(compiled.wgsl).toContain("(0.5 * (exp(value) - exp(-value)))");
+    expect(compiled.wgsl).toContain("(0.5 * (exp(value) + exp(-value)))");
     expect(compiled.wgsl).toContain("sqrt(abs(value))");
     expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 4.0))");
     expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 2.0))");
@@ -6345,9 +6344,9 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("(exp(value) - 1.0)");
     expect(compiled.wgsl).toContain("(exp(value * value) * (1.0 - ");
     expect(compiled.wgsl).toContain("(0.5 * (1.0 + ");
-    expect(compiled.wgsl).toContain("fn bg_tgamma(");
-    expect(compiled.wgsl).toContain("bg_tgamma(f32((abs(value) + 1.0)))");
-    expect(compiled.wgsl).toContain("bg_lgamma(f32((abs(value) + 1.0)))");
+    expect(compiled.wgsl).toContain("fn bg_semantic_tgamma_f32(");
+    expect(compiled.wgsl).toContain("bg_semantic_tgamma_f32((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("bg_semantic_lgamma_f32((abs(value) + 1.0))");
     expect(compiled.wgsl).toContain("log2((abs(value) + 1.0))");
     expect(compiled.wgsl).toContain("(log((abs(value) + 1.0)) / 2.302585092994046)");
     expect(compiled.wgsl).toContain("log(1.0 + abs(value))");
@@ -6356,33 +6355,33 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("pow(abs(value), 3.0)");
     expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0))");
     expect(compiled.wgsl).toContain("(1.0 / sqrt((value * value) + (2.0 * 2.0)))");
-    expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + ((-3.0) * (-3.0)))");
-    expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + ((-3.0) * (-3.0)) + (4.0 * 4.0))");
-    expect(compiled.wgsl).toContain("(f32(value) * exp2(f32(i32(2))))");
-    expect(compiled.wgsl).toContain("(f32(value) * exp2(f32(i32(3))))");
-    expect(compiled.wgsl).toContain("(f32(value) * exp2(f32(i32(1))))");
+    expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + (-(3.0) * -(3.0)))");
+    expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + (-(3.0) * -(3.0)) + (4.0 * 4.0))");
+    expect(compiled.wgsl).toContain("(value * exp2(f32(2)))");
+    expect(compiled.wgsl).toContain("(value * exp2(f32(3)))");
+    expect(compiled.wgsl).toContain("(value * exp2(f32(1)))");
     expect(compiled.wgsl).toContain("min(value, 1.0)");
-    expect(compiled.wgsl).toContain("max(value, (-1.0))");
+    expect(compiled.wgsl).toContain("max(value, -(1.0))");
     expect(compiled.wgsl).toContain("(value - trunc(value / 2.0) * 2.0)");
-    expect(compiled.wgsl).toContain("bg_remainder(f32(value), f32(2.0))");
-    expect(compiled.wgsl).toContain("bg_logb(f32((abs(value) + 1.0)))");
-    expect(compiled.wgsl).toContain("bg_ilogb(f32((abs(value) + 1.0)))");
-    expect(compiled.wgsl).toContain("max((value - (-0.5)), 0.0)");
-    expect(compiled.wgsl).toContain("bitcast<f32>(bitcast<u32>(abs(f32(value))) | (bitcast<u32>(f32((-2.0))) & 0x80000000u))");
+    expect(compiled.wgsl).toContain("bg_semantic_remainder_f32(value, 2.0)");
+    expect(compiled.wgsl).toContain("bg_semantic_logb_f32((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("bg_semantic_ilogb_i32((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("max((value - -(0.5)), 0.0)");
+    expect(compiled.wgsl).toContain("select(abs(value), -abs(value), ((bitcast<u32>(-(2.0)) & 0x80000000u) != 0u))");
     expect(compiled.wgsl).toContain("(value / 4.0)");
-    expect(compiled.wgsl).toContain("((bitcast<u32>(f32(value)) & 0x80000000u) != 0u)");
-    expect(compiled.wgsl).toContain("(!(((value) != (value)) || (((-2.0)) != ((-2.0)))) && ((value) > ((-2.0))))");
-    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((value) != (value))) && ((value) >= (value)))");
-    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((2.0) != (2.0))) && ((value) < (2.0)))");
-    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((value) != (value))) && ((value) <= (value)))");
-    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((0.0) != (0.0))) && (((value) < (0.0)) || ((value) > (0.0))))");
+    expect(compiled.wgsl).toContain("((bitcast<u32>(value) & 0x80000000u) != 0u)");
+    expect(compiled.wgsl).toContain("!((value) != (value) || (-(2.0)) != (-(2.0))) && ((value) > (-(2.0)))");
+    expect(compiled.wgsl).toContain("!((value) != (value) || (value) != (value)) && ((value) >= (value))");
+    expect(compiled.wgsl).toContain("!((value) != (value) || (2.0) != (2.0)) && ((value) < (2.0))");
+    expect(compiled.wgsl).toContain("!((value) != (value) || (value) != (value)) && ((value) <= (value))");
+    expect(compiled.wgsl).toContain("!((value) != (value) || (0.0) != (0.0)) && (((value) < (0.0)) || ((value) > (0.0)))");
     expect(compiled.wgsl).toContain("abs(value) <= 3.4028234663852886e38");
     expect(compiled.wgsl).toContain("abs(value) >= 1.1754943508222875e-38");
     expect(compiled.wgsl).toContain("(value + 2.0)");
     expect(compiled.wgsl).toContain("(value - 2.0)");
     expect(compiled.wgsl).toContain("(value * 2.0)");
     expect(compiled.wgsl).toContain("fma(value, 2.0, 1.0)");
-    expect(compiled.wgsl).toContain("fma(value, (-1.0), 0.5)");
+    expect(compiled.wgsl).toContain("fma(value, -(1.0), 0.5)");
     const expected = [...input].map((value) =>
       Math.abs(value) +
       Math.floor(value) +
@@ -7072,6 +7071,59 @@ __global__ void semanticRemquo(int *quo) {
     expect([...result.buffers.quo as Int32Array]).toEqual([0, 4, -4]);
   });
 
+  it("lowers CUDA special function math through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticSpecialMath(float *x, float *out) {
+  int idx = threadIdx.x;
+  float value = x[idx];
+  float positive = fabsf(value) + 1.0f;
+  out[idx] =
+    erff(value) +
+    erfcf(value) +
+    erfcxf(value) +
+    normcdff(value) +
+    tgammaf(positive) +
+    lgammaf(positive);
+}
+`, { workgroupSize: [2, 1, 1] });
+    const input = new Float32Array([-0.25, 0.5]);
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const expected = [...input].map((value) => {
+      const positive = Math.abs(value) + 1;
+      const gamma = gammaApprox(positive);
+      return erfApprox(value) +
+        (1 - erfApprox(value)) +
+        (Math.exp(value * value) * (1 - erfApprox(value))) +
+        (0.5 * (1 + erfApprox(value * Math.SQRT1_2))) +
+        gamma +
+        Math.log(Math.abs(gamma));
+    });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_semantic_erf_f32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_tgamma_f32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_lgamma_f32(");
+    expect(compiled.wgsl).toContain("bg_semantic_erf_f32(value)");
+    expect(compiled.wgsl).toContain("bg_semantic_tgamma_f32(positive)");
+    expect(compiled.wgsl).toContain("bg_semantic_lgamma_f32(positive)");
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+  });
+
   it("lowers CUDA nextafter and nexttoward intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void nextafterKernel(float *out) {
@@ -7133,8 +7185,8 @@ __global__ void c_math_aliases(float *x, float *out) {
     expect(compiled.wgsl).toContain("abs(value)");
     expect(compiled.wgsl).toContain("exp(value)");
     expect(compiled.wgsl).toContain("0.3275911");
-    expect(compiled.wgsl).toContain("bg_tgamma(f32((abs(value) + 1.0)))");
-    expect(compiled.wgsl).toContain("bg_lgamma(f32((abs(value) + 1.0)))");
+    expect(compiled.wgsl).toContain("bg_semantic_tgamma_f32((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("bg_semantic_lgamma_f32((abs(value) + 1.0))");
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("fma(0.25, (6.0 - 2.0), 2.0)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected, 5);
