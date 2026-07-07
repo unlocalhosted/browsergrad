@@ -758,6 +758,7 @@ function semanticModfStore(
   const value = expression.args[0];
   const target = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
   if (!value || !target) return undefined;
+  if (!isFiniteStaticNumberExpression(value)) return undefined;
   const targetRef = memoryRefFromExpression(target);
   if (!targetRef) return undefined;
   return {
@@ -834,6 +835,18 @@ function multiplyFloatExpressions(left: SemanticExpression, right: SemanticExpre
 
 function numberExpression(value: number, span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value, valueType: "float", span };
+}
+
+function isFiniteStaticNumberExpression(expression: SemanticExpression): boolean {
+  if (
+    expression.kind === "literal" &&
+    expression.literalKind === "number" &&
+    typeof expression.value === "number" &&
+    Number.isFinite(expression.value)
+  ) {
+    return true;
+  }
+  return expression.kind === "unary" && expression.operator === "-" && isFiniteStaticNumberExpression(expression.argument);
 }
 
 function isSincosCallName(name: string): boolean {
