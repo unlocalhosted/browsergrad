@@ -57,6 +57,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "cbrt", "cbrtf", "rcbrt", "rcbrtf", "__frcp_rn",
   "ldexp", "ldexpf", "scalbn", "scalbnf", "scalbln", "scalblnf",
   "fmod", "fmodf", "remainder", "remainderf", "logb", "logbf", "ilogb", "ilogbf", "fdim", "fdimf",
+  "hypot", "hypotf", "rhypot", "rhypotf", "norm3df", "norm4df", "rnorm3df", "rnorm4df",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -1512,6 +1513,14 @@ function evalSemanticMathCall(
     case "ilogbf": return evalIlogb(args[0] ?? 0);
     case "fdim":
     case "fdimf": return Math.max((args[0] ?? 0) - (args[1] ?? 0), 0);
+    case "hypot":
+    case "hypotf": return Math.hypot(args[0] ?? 0, args[1] ?? 0);
+    case "rhypot":
+    case "rhypotf": return 1 / Math.hypot(args[0] ?? 0, args[1] ?? 0);
+    case "norm3df": return Math.hypot(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+    case "norm4df": return Math.hypot(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, args[3] ?? 0);
+    case "rnorm3df": return 1 / Math.hypot(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+    case "rnorm4df": return 1 / Math.hypot(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, args[3] ?? 0);
     case "fmin":
     case "fminf":
     case "min": return Math.min(args[0] ?? 0, args[1] ?? 0);
@@ -1811,6 +1820,10 @@ function semanticMathCallArity(name: string): number {
     name === "remainderf" ||
     name === "fdim" ||
     name === "fdimf" ||
+    name === "hypot" ||
+    name === "hypotf" ||
+    name === "rhypot" ||
+    name === "rhypotf" ||
     name === "__bg_remquo_quotient" ||
     name === "__bg_remquo_remainder" ||
     name === "atan2" ||
@@ -1819,8 +1832,13 @@ function semanticMathCallArity(name: string): number {
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||
-      name === "lerp"
+      name === "lerp" ||
+      name === "norm3df" ||
+      name === "rnorm3df"
     ? 3
+    : name === "norm4df" ||
+      name === "rnorm4df"
+    ? 4
     : 1;
 }
 

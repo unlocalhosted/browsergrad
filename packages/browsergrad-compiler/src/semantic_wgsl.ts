@@ -145,6 +145,14 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["ilogbf", "ilogb"],
   ["fdim", "fdim"],
   ["fdimf", "fdim"],
+  ["hypot", "hypot"],
+  ["hypotf", "hypot"],
+  ["rhypot", "rhypot"],
+  ["rhypotf", "rhypot"],
+  ["norm3df", "norm"],
+  ["norm4df", "norm"],
+  ["rnorm3df", "rnorm"],
+  ["rnorm4df", "rnorm"],
   ["fmin", "min"],
   ["fminf", "min"],
   ["min", "min"],
@@ -2163,6 +2171,13 @@ function emitSemanticMathCall(
     if (wgslCallee === "remainder") return `bg_semantic_remainder_f32(${lhs}, ${rhs})`;
     return `max((${lhs} - ${rhs}), 0.0)`;
   }
+  if (wgslCallee === "hypot" || wgslCallee === "rhypot" || wgslCallee === "norm" || wgslCallee === "rnorm") {
+    const emitted = expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations));
+    if (emitted.length < 2) throw semanticWgslError(`${expression.callee.name} expects at least two operands`, expression.span);
+    const sum = emitted.map((arg) => `(${arg} * ${arg})`).join(" + ");
+    const norm = `sqrt(${sum})`;
+    return wgslCallee === "rhypot" || wgslCallee === "rnorm" ? `(1.0 / ${norm})` : norm;
+  }
   if (
     wgslCallee === "exp10" ||
     wgslCallee === "expm1" ||
@@ -2340,6 +2355,10 @@ function semanticMathCallArity(name: string): number {
     name === "remainderf" ||
     name === "fdim" ||
     name === "fdimf" ||
+    name === "hypot" ||
+    name === "hypotf" ||
+    name === "rhypot" ||
+    name === "rhypotf" ||
     name === "__bg_remquo_quotient" ||
     name === "__bg_remquo_remainder" ||
     name === "atan2" ||
@@ -2348,8 +2367,13 @@ function semanticMathCallArity(name: string): number {
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||
-      name === "lerp"
+      name === "lerp" ||
+      name === "norm3df" ||
+      name === "rnorm3df"
     ? 3
+    : name === "norm4df" ||
+      name === "rnorm4df"
+    ? 4
     : 1;
 }
 
