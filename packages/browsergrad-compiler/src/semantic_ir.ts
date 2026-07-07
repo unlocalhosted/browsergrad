@@ -1108,7 +1108,16 @@ function localPointerAliasRoot(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): { readonly root: CudaLiteSemanticSymbol; readonly indices: readonly SemanticExpression[] } | undefined {
   if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
-  const root = scope.get(expression.target.name);
+  const target = scope.get(expression.target.name);
+  if (target?.pointerRoot && target.pointerAddressSpace === "local" && target.pointerBaseIndices?.length === 1) {
+    const root = scope.get(target.pointerRoot);
+    if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
+    return {
+      root,
+      indices: [addIndexExpressions(target.pointerBaseIndices[0]!, lowerExpression(expression.index, scope), expression.span)],
+    };
+  }
+  const root = target;
   if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
   return { root, indices: [lowerExpression(expression.index, scope)] };
 }
