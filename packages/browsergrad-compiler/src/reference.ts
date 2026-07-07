@@ -196,7 +196,7 @@ interface MutableTrace {
 
 type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
-type CollectiveOp = "sum" | "max" | "min" | "any" | "all" | "activemask" | "match_any" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
+type CollectiveOp = "sum" | "max" | "min" | "and" | "or" | "xor" | "any" | "all" | "activemask" | "match_any" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
 interface CollectiveYield {
   readonly kind: "collective";
   readonly op: CollectiveOp;
@@ -550,6 +550,12 @@ function reduceCollectiveValues(
       return values.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...values.map((value) => valueAsNumber(value, "collective value")));
     case "min":
       return values.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...values.map((value) => valueAsNumber(value, "collective value")));
+    case "and":
+      return values.reduce<number>((acc, value) => acc & (valueAsNumber(value, "collective value") | 0), -1) >>> 0;
+    case "or":
+      return values.reduce<number>((acc, value) => acc | (valueAsNumber(value, "collective value") | 0), 0) >>> 0;
+    case "xor":
+      return values.reduce<number>((acc, value) => acc ^ (valueAsNumber(value, "collective value") | 0), 0) >>> 0;
     case "any":
       return values.some((value) => truthy(valueAsNumber(value, "collective value"))) ? 1 : 0;
     case "all":
@@ -1293,6 +1299,12 @@ function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined
       return "min";
     case "__reduce_max_sync":
       return "max";
+    case "__reduce_and_sync":
+      return "and";
+    case "__reduce_or_sync":
+      return "or";
+    case "__reduce_xor_sync":
+      return "xor";
     case "warpReduceMax":
     case "warp_reduce_max":
     case "warp_reduce_max_f32":
@@ -1317,7 +1329,14 @@ function collectiveValueExpression(
   name: string | undefined,
   args: readonly CudaLiteExpression[],
 ): CudaLiteExpression | undefined {
-  if (name === "__reduce_add_sync" || name === "__reduce_min_sync" || name === "__reduce_max_sync") return args[1];
+  if (
+    name === "__reduce_add_sync" ||
+    name === "__reduce_min_sync" ||
+    name === "__reduce_max_sync" ||
+    name === "__reduce_and_sync" ||
+    name === "__reduce_or_sync" ||
+    name === "__reduce_xor_sync"
+  ) return args[1];
   if (name === "__any_sync" || name === "__all_sync" || name === "__match_any_sync") return args[1];
   return args.length === 2 ? args[1] : args[0];
 }
@@ -3308,6 +3327,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__reduce_add_sync":
     case "__reduce_min_sync":
     case "__reduce_max_sync":
+    case "__reduce_and_sync":
+    case "__reduce_or_sync":
+    case "__reduce_xor_sync":
       return args[1] ?? 0;
     case "warpReduceSum":
     case "warpReduceMax":

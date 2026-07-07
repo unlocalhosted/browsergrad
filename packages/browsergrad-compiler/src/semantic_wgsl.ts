@@ -72,6 +72,16 @@ interface SemanticMatchAnyHelper {
   readonly tileSize: number;
 }
 
+type SemanticBitwiseReduceOp = "and" | "or" | "xor";
+
+interface SemanticBitwiseReduceHelper {
+  readonly key: string;
+  readonly name: string;
+  readonly op: SemanticBitwiseReduceOp;
+  readonly valueType: "int" | "uint";
+  readonly tileSize: number;
+}
+
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
 const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
@@ -99,6 +109,9 @@ const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__reduce_add_sync",
   "__reduce_min_sync",
   "__reduce_max_sync",
+  "__reduce_and_sync",
+  "__reduce_or_sync",
+  "__reduce_xor_sync",
   "__shfl_sync",
   "__shfl_down_sync",
   "__shfl_up_sync",
@@ -603,6 +616,9 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticMatchAnyHelpers(ir)) {
     lines.push(`var<workgroup> ${semanticMatchAnyScratchName(helper)}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
   }
+  for (const helper of semanticBitwiseReduceHelpers(ir)) {
+    lines.push(`var<workgroup> ${semanticBitwiseReduceScratchName(helper)}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
+  }
   for (const shared of sharedMemorySymbols(ir)) {
     lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared, atomicShared.has(shared.name))};`);
   }
@@ -634,6 +650,9 @@ export function emitSemanticKernelIrWgsl(
   }
   for (const helper of semanticMatchAnyHelpers(ir)) {
     lines.push("", ...emitSemanticMatchAnyHelper(helper, ir));
+  }
+  for (const helper of semanticBitwiseReduceHelpers(ir)) {
+    lines.push("", ...emitSemanticBitwiseReduceHelper(helper, ir));
   }
   lines.push(
     "",
@@ -1078,6 +1097,13 @@ function semanticWgslSubgroupCallSupported(
 ): boolean {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) || ir?.requiredFeatures.includes("subgroups") !== true) return false;
   if (expression.callee.name === "__activemask") return expression.args.length === 0;
+  if (semanticBitwiseReduceOpForCall(expression.callee.name)) {
+    const value = expression.args[1];
+    const valueType = value ? semanticExpressionValueType(value) : undefined;
+    return expression.args.length === 2 &&
+      (valueType === "int" || valueType === "uint") &&
+      expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  }
   if (semanticShuffleOpForCall(expression.callee.name)) {
     return (expression.args.length === 3 || expression.args.length === 4) &&
       expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
@@ -2391,6 +2417,124 @@ function emitSemanticMatchAnyHelper(
   ];
 }
 
+function semanticBitwiseReduceHelpers(ir: SemanticKernelIrModule): readonly SemanticBitwiseReduceHelper[] {
+  const helpers = new Map<string, SemanticBitwiseReduceHelper>();
+  collectSemanticBitwiseReduceHelpers(ir.operations, helpers);
+  for (const fn of ir.functions) collectSemanticBitwiseReduceHelpers(fn.body, helpers);
+  return [...helpers.values()];
+}
+
+function collectSemanticBitwiseReduceHelpers(
+  operations: readonly SemanticKernelIrOperation[],
+  helpers: Map<string, SemanticBitwiseReduceHelper>,
+): void {
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.init) collectSemanticBitwiseReduceExpressionHelpers(operation.init, helpers);
+    if (operation.kind === "store") {
+      collectSemanticBitwiseReduceExpressionHelpers(operation.value, helpers);
+      operation.target.indices.forEach((index) => collectSemanticBitwiseReduceExpressionHelpers(index, helpers));
+    }
+    if (operation.kind === "atomic") {
+      operation.args.forEach((arg) => collectSemanticBitwiseReduceExpressionHelpers(arg, helpers));
+      operation.target?.indices.forEach((index) => collectSemanticBitwiseReduceExpressionHelpers(index, helpers));
+    }
+    if (operation.kind === "call") operation.args.forEach((arg) => collectSemanticBitwiseReduceExpressionHelpers(arg, helpers));
+    if (operation.kind === "expression") collectSemanticBitwiseReduceExpressionHelpers(operation.expression, helpers);
+    if (operation.kind === "branch") {
+      collectSemanticBitwiseReduceExpressionHelpers(operation.condition, helpers);
+      collectSemanticBitwiseReduceHelpers(operation.consequent, helpers);
+      collectSemanticBitwiseReduceHelpers(operation.alternate, helpers);
+    }
+    if (operation.kind === "loop") {
+      if (operation.init !== undefined) {
+        if (isSemanticKernelIrOperation(operation.init)) collectSemanticBitwiseReduceHelpers([operation.init], helpers);
+        else collectSemanticBitwiseReduceExpressionHelpers(operation.init, helpers);
+      }
+      if (operation.condition) collectSemanticBitwiseReduceExpressionHelpers(operation.condition, helpers);
+      if (operation.update) collectSemanticBitwiseReduceExpressionHelpers(operation.update, helpers);
+      collectSemanticBitwiseReduceHelpers(operation.body, helpers);
+    }
+    if (operation.kind === "return" && operation.value) collectSemanticBitwiseReduceExpressionHelpers(operation.value, helpers);
+    if (operation.kind === "block") collectSemanticBitwiseReduceHelpers(operation.body, helpers);
+  }
+}
+
+function collectSemanticBitwiseReduceExpressionHelpers(
+  expression: SemanticExpression,
+  helpers: Map<string, SemanticBitwiseReduceHelper>,
+): void {
+  if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    const op = semanticBitwiseReduceOpForCall(expression.callee.name);
+    const value = expression.args[1];
+    const valueType = value ? semanticExpressionValueType(value) : undefined;
+    if (op && (valueType === "int" || valueType === "uint")) {
+      const helper = semanticBitwiseReduceHelper(op, valueType, 32);
+      helpers.set(helper.key, helper);
+    }
+  }
+  for (const child of semanticExpressionChildren(expression)) {
+    collectSemanticBitwiseReduceExpressionHelpers(child, helpers);
+  }
+}
+
+function semanticBitwiseReduceOpForCall(name: string): SemanticBitwiseReduceOp | undefined {
+  if (name === "__reduce_and_sync") return "and";
+  if (name === "__reduce_or_sync") return "or";
+  if (name === "__reduce_xor_sync") return "xor";
+  return undefined;
+}
+
+function semanticBitwiseReduceHelper(
+  op: SemanticBitwiseReduceOp,
+  valueType: "int" | "uint",
+  tileSize: number,
+): SemanticBitwiseReduceHelper {
+  const key = `${op}:${valueType}:${tileSize}`;
+  return {
+    key,
+    name: `bg_semantic_reduce_${op}_${safeWgslIdentifier(valueType)}_${tileSize}`,
+    op,
+    valueType,
+    tileSize,
+  };
+}
+
+function semanticBitwiseReduceScratchName(helper: SemanticBitwiseReduceHelper): string {
+  return `${helper.name}_scratch`;
+}
+
+function emitSemanticBitwiseReduceHelper(
+  helper: SemanticBitwiseReduceHelper,
+  ir: SemanticKernelIrModule,
+): readonly string[] {
+  const type = wgslValueScalar(helper.valueType);
+  const workgroupSize = semanticWorkgroupSize(ir);
+  const start = Math.max(1, Math.floor(Math.min(helper.tileSize, workgroupSize) / 2));
+  const scratch = semanticBitwiseReduceScratchName(helper);
+  const operator = helper.op === "and" ? "&" : helper.op === "or" ? "|" : "^";
+  return [
+    `fn ${helper.name}(value_arg: ${type}, width_arg: u32, local_id: vec3<u32>) -> ${type} {`,
+    `  let bg_linear_rank: u32 = ${semanticLocalLinearRank(ir)};`,
+    `  let bg_width: u32 = clamp(width_arg, 1u, ${helper.tileSize}u);`,
+    "  let bg_tile_lane: u32 = bg_linear_rank % bg_width;",
+    "  let bg_tile_base: u32 = bg_linear_rank - bg_tile_lane;",
+    `  ${scratch}[bg_linear_rank] = value_arg;`,
+    "  workgroupBarrier();",
+    `  var bg_stride: u32 = ${start}u;`,
+    "  while (bg_stride > 0u) {",
+    `    if (bg_stride < bg_width && bg_tile_lane < bg_stride && (bg_tile_lane + bg_stride) < bg_width && (bg_linear_rank + bg_stride) < ${workgroupSize}u) {`,
+    `      ${scratch}[bg_linear_rank] = ${scratch}[bg_linear_rank] ${operator} ${scratch}[bg_linear_rank + bg_stride];`,
+    "    }",
+    "    workgroupBarrier();",
+    "    bg_stride = bg_stride / 2u;",
+    "  }",
+    `  let bg_result: ${type} = ${scratch}[bg_tile_base];`,
+    "  workgroupBarrier();",
+    "  return bg_result;",
+    "}",
+  ];
+}
+
 function semanticShuffleOpForCall(name: string): SemanticShuffleOp | undefined {
   if (name === "__shfl_sync") return "sync";
   if (name === "__shfl_down_sync") return "down";
@@ -3448,6 +3592,13 @@ function emitSemanticSubgroupCall(
     const valueType = semanticExpressionValueType(value);
     if (!valueType || valueType === "void") throw semanticWgslError(`${name} expects scalar value operand`, expression.span);
     const helper = semanticMatchAnyHelper(valueType, 32);
+    return `${helper.name}(${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(valueType), options, textureSpecializations)}, 32u, local_id)`;
+  }
+  const bitwiseReduceOp = semanticBitwiseReduceOpForCall(name);
+  if (bitwiseReduceOp) {
+    const valueType = semanticExpressionValueType(value);
+    if (valueType !== "int" && valueType !== "uint") throw semanticWgslError(`${name} expects int or uint value operand`, expression.span);
+    const helper = semanticBitwiseReduceHelper(bitwiseReduceOp, valueType, 32);
     return `${helper.name}(${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(valueType), options, textureSpecializations)}, 32u, local_id)`;
   }
   const shuffleOp = semanticShuffleOpForCall(name);

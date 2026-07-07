@@ -129,6 +129,9 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__reduce_add_sync", [2, 2]],
   ["__reduce_min_sync", [2, 2]],
   ["__reduce_max_sync", [2, 2]],
+  ["__reduce_and_sync", [2, 2]],
+  ["__reduce_or_sync", [2, 2]],
+  ["__reduce_xor_sync", [2, 2]],
   ["warpReduceSum", [1, 2]],
   ["warpReduceMax", [1, 2]],
   ["warpReduceMin", [1, 2]],
@@ -2046,6 +2049,21 @@ function validateCallExpression(
     }
     return { kind: "scalar", valueType };
   }
+  if (isMaskedWarpBitwiseReductionBuiltin(callName)) {
+    requiredFeatures.add("subgroups");
+    let valueType: ValueType | undefined;
+    for (const [index, arg] of expression.args.entries()) {
+      const info = walkExpression(arg, scope);
+      validateScalarOperand(info, arg.span, diagnostics);
+      if (index === 1) {
+        valueType = info.valueType;
+        if (valueType !== undefined && valueType !== "int" && valueType !== "uint") {
+          diagnostics.push(error("unsupported-subgroup", `${callName} expects an int or uint value operand`, arg.span));
+        }
+      }
+    }
+    return { kind: "scalar", valueType };
+  }
   if (isWarpReductionBuiltin(callName)) {
     requiredFeatures.add("subgroups");
     const arg = expression.args.length === 2 ? expression.args[1] : expression.args[0];
@@ -3802,6 +3820,10 @@ function isSyncthreadsPredicateBuiltin(callName: string): boolean {
 
 function isMaskedWarpReductionBuiltin(callName: string): boolean {
   return callName === "__reduce_add_sync" || callName === "__reduce_min_sync" || callName === "__reduce_max_sync";
+}
+
+function isMaskedWarpBitwiseReductionBuiltin(callName: string): boolean {
+  return callName === "__reduce_and_sync" || callName === "__reduce_or_sync" || callName === "__reduce_xor_sync";
 }
 
 function isWarpReductionBuiltin(callName: string): boolean {
