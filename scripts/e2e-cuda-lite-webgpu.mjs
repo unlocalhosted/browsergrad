@@ -1413,6 +1413,12 @@ __global__ void localArrayVectorScalarRoundtrip(float *out) {
   out[tid * 4 + 2] = scratch[6];
   out[tid * 4 + 3] = scratch[7];
 }`,
+  localArrayScalarInit: `
+__global__ void localArrayScalarInit(float *out) {
+  int tid = threadIdx.x;
+  float vals[2][2] = 1.5f + (float)tid;
+  out[tid] = vals[tid][0] + vals[tid][1];
+}`,
   sharedVectorHelper: `
 __device__ float4 load_shared_float4(float4 *tile, int index) {
   return tile[index];
@@ -11585,6 +11591,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [5, 16, 27, 38, 6, 16, 27, 38] },
+          },
+          {
+            name: "storage:local-array-scalar-init",
+            source: SOURCES.localArrayScalarInit,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [3, 5] },
           },
           {
             name: "storage:shared-vector-helper",

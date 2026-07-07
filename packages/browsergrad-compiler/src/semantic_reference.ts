@@ -492,8 +492,10 @@ function semanticReferenceValueExpressionSupported(expression: SemanticExpressio
 }
 
 function semanticReferenceLocalArrayInitSupported(expression: SemanticExpression): boolean {
-  return expression.kind === "initializer" &&
-    flattenInitializerExpressions(expression).every((item) => semanticReferenceExpressionSupported(item, "scalar"));
+  if (expression.kind === "initializer") {
+    return flattenInitializerExpressions(expression).every((item) => semanticReferenceExpressionSupported(item, "scalar"));
+  }
+  return semanticReferenceExpressionSupported(expression, "scalar");
 }
 
 function semanticReferenceMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1263,6 +1265,9 @@ function semanticDeclareValue(
         if (index >= values.length) break;
         values[index] = evalNumber(expression, context);
       }
+    } else if (operation.init) {
+      const fillValue = evalNumber(operation.init, context);
+      values.fill(fillValue);
     }
     return values;
   }

@@ -2521,6 +2521,47 @@ __global__ void localInit(float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([3, 3]);
   });
 
+  it("lowers scalar-fill thread-local array initializers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localScalarInit(float* out) {
+  int tid = threadIdx.x;
+  float vals[2][2] = 1.5f + (float)tid;
+  out[tid] = vals[tid][0] + vals[tid][1];
+}
+`, { workgroupSize: [2, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-array-init");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("for (var fill_vals_0");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 5]);
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 5]);
+  });
+
+  it("rejects vector local-array scalar-fill initializers until vector-lane fill is modeled", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__global__ void vectorLocalArrayInit(float4* out) {
+  float4 vals[2] = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  out[0] = vals[0];
+}
+`));
+
+    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-local-array-init",
+    }));
+  });
+
   it("fills fixed local arrays through semantic reference and WGSL", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void localFill(float* out) {
@@ -3884,7 +3925,7 @@ __global__ void bad(float* x) {
   float tmp[2] = 1.0;
   if (threadIdx.x < 1) { x[0] = 1.0; }
 }`));
-    expect(localArrayInit.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-array-init");
+    expect(localArrayInit.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-array-init");
 
     const localPointer = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {

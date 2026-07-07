@@ -1081,8 +1081,10 @@ function semanticWgslVectorIndexSupported(
 }
 
 function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
-  return expression.kind === "initializer" &&
-    flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, "scalar"));
+  if (expression.kind === "initializer") {
+    return flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, "scalar"));
+  }
+  return semanticWgslExpressionSupported(expression, "scalar");
 }
 
 function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -2100,8 +2102,16 @@ function emitLocalArrayInit(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
-  if (!operation.init || operation.init.kind !== "initializer") return [];
+  if (!operation.init) return [];
   const prefix = "  ".repeat(indentLevel);
+  if (operation.init.kind !== "initializer") {
+    return emitLocalArrayFill(
+      nameFor(operation.target.name, names),
+      operation.target.dimensions,
+      emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations),
+      indentLevel,
+    );
+  }
   return flattenInitializerExpressions(operation.init)
     .slice(0, totalElements(operation.target.dimensions))
     .map((value, index) => {
