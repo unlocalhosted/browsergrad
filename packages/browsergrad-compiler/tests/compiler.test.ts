@@ -2628,6 +2628,38 @@ __global__ void localPointerAliasAddress(float *out) {
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([17]);
   });
 
+  it("lowers address-of dereferenced local pointer aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localPointerAddressOfDeref(float *out) {
+  float values[3];
+  values[0] = 2.0f;
+  values[1] = 5.0f;
+  values[2] = 11.0f;
+  float *p = values + 1;
+  float *q = &*p;
+  out[0] = q[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var p:");
+    expect(compiled.wgsl).not.toContain("var q:");
+    expect([...result.buffers.out as Float32Array]).toEqual([5]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([5]);
+  });
+
   it("lowers local pointer increment and decrement updates through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void localPointerUpdates(float *out) {

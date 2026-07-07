@@ -975,6 +975,10 @@ function localPointerAliasForInitializer(
     };
   }
   if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
+  if (expression.argument.kind === "unary" && expression.argument.operator === "*") {
+    const alias = localPointerAliasForInitializer(expression.argument.argument, scope);
+    if (alias?.pointerAddressSpace === "local") return alias;
+  }
   const ref = localPointerAliasRoot(expression.argument, scope);
   if (!ref || ref.root.addressSpace !== "local" || ref.root.dimensions.length !== 1) return undefined;
   return {
