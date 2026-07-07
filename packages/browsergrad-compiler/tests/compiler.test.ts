@@ -13907,6 +13907,38 @@ __global__ void apply(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33]);
   });
 
+  it("lowers CUDA vector constant arrays as scalarized readonly storage inputs", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float3 table[2];
+__global__ void apply(float *out) {
+  int idx = threadIdx.x;
+  float3 value = table[idx];
+  out[idx] = value.x + value.y + value.z;
+}`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(2) },
+      constants: { table: new Float32Array([1, 2, 3, 4, 5, 6]) },
+    };
+    const result = runCompiledKernelReference(
+      compiled,
+      input,
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      input,
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<storage, read> table: array<f32>;");
+    expect(compiled.wgsl).toContain("vec3<f32>(table[((u32(idx) * 3u) + 0u)]");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([6, 15]);
+    expect([...result.buffers.out as Float32Array]).toEqual([6, 15]);
+  });
+
   it("embeds initialized scalar CUDA vector constants", () => {
     const compiled = compileCudaLiteKernel(`
 __constant__ float3 metric = {1.0f, 2.0f, 3.0f};

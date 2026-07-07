@@ -472,6 +472,8 @@ function semanticReferenceVectorIndexSupported(
   expression: Extract<SemanticExpression, { readonly kind: "index" }>,
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
+  const ref = memoryRefFromIndexExpression(expression);
+  if (ref && !(ref.addressSpace === "local" && expression.target.kind === "symbol" && isSemanticReferenceFloatVectorType(expression.target.valueType))) return false;
   return isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression.target)) &&
     semanticReferenceExpressionSupported(expression.target, "any", compiled) &&
     semanticReferenceExpressionSupported(expression.index, "scalar", compiled);

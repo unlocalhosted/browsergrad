@@ -565,6 +565,8 @@ function semanticWgslVectorIndexSupported(
   expression: Extract<SemanticExpression, { kind: "index" }>,
   ir?: SemanticKernelIrModule,
 ): boolean {
+  const ref = memoryRefFromIndexExpression(expression);
+  if (ref && !(ref.addressSpace === "local" && expression.target.kind === "symbol" && isSemanticWgslFloatVectorType(expression.target.valueType))) return false;
   return isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.target, ir)) &&
     semanticWgslExpressionSupported(expression.target, "any", ir) &&
     semanticWgslExpressionSupported(expression.index, "scalar", ir);
