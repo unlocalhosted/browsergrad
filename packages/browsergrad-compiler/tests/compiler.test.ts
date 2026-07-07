@@ -6600,6 +6600,59 @@ __global__ void semantic_elementary_math(float *x, float *out) {
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
+  it("lowers CUDA inverse and hyperbolic math intrinsics through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_hyperbolic_math(float *x, float *out) {
+  int idx = threadIdx.x;
+  float value = x[idx];
+  float unit = __saturatef((value + 1.0f) * 0.5f);
+  out[idx] =
+    asinf(unit) +
+    acosf(unit) +
+    sinhf(value) +
+    coshf(value) +
+    asinhf(value) +
+    acoshf(fabsf(value) + 1.5f) +
+    atanhf(unit * 0.5f);
+}`, { workgroupSize: [2, 1, 1] });
+    const input = new Float32Array([-0.25, 0.5]);
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const expected = [...input].map((value) => {
+      const unit = Math.min(1, Math.max(0, (value + 1) * 0.5));
+      return Math.asin(unit) +
+        Math.acos(unit) +
+        Math.sinh(value) +
+        Math.cosh(value) +
+        Math.asinh(value) +
+        Math.acosh(Math.abs(value) + 1.5) +
+        Math.atanh(unit * 0.5);
+    });
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("asin(unit)");
+    expect(compiled.wgsl).toContain("acos(unit)");
+    expect(compiled.wgsl).toContain("(0.5 * (exp(value) - exp(-value)))");
+    expect(compiled.wgsl).toContain("(0.5 * (exp(value) + exp(-value)))");
+    expect(compiled.wgsl).toContain("log(value + sqrt((value * value) + 1.0))");
+    expect(compiled.wgsl).toContain("log((abs(value) + 1.5) + sqrt(((abs(value) + 1.5) * (abs(value) + 1.5)) - 1.0))");
+    expect(compiled.wgsl).toContain("(0.5 * log((1.0 + (unit * 0.5)) / (1.0 - (unit * 0.5))))");
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+  });
+
   it("lowers unordered CUDA float predicates without treating them as unsupported calls", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void float_predicates(float *out) {

@@ -50,8 +50,10 @@ const SEMANTIC_MATH_CALLS = new Set([
   "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
   "log", "logf", "__logf", "log2", "log2f", "__log2f", "log10", "log10f", "__log10f", "log1p", "log1pf",
   "fabs", "fabsf", "abs",
-  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "sin", "sinf", "__sinf", "sinpi", "sinpif", "cos", "cosf", "__cosf", "cospi", "cospif",
-  "tan", "tanf", "__tanf", "atan", "atanf", "atan2", "atan2f", "tanh", "tanhf", "__tanhf",
+  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf",
+  "sin", "sinf", "__sinf", "sinpi", "sinpif", "cos", "cosf", "__cosf", "cospi", "cospif",
+  "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf", "atan", "atanf", "atan2", "atan2f",
+  "sinh", "sinhf", "cosh", "coshf", "tanh", "tanhf", "__tanhf", "asinh", "asinhf", "acosh", "acoshf", "atanh", "atanhf",
   "cbrt", "cbrtf", "rcbrt", "rcbrtf", "__frcp_rn",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
@@ -1461,13 +1463,27 @@ function evalSemanticMathCall(
     case "tan":
     case "tanf":
     case "__tanf": return Math.tan(args[0] ?? 0);
+    case "asin":
+    case "asinf": return Math.asin(args[0] ?? 0);
+    case "acos":
+    case "acosf": return Math.acos(args[0] ?? 0);
     case "atan":
     case "atanf": return Math.atan(args[0] ?? 0);
     case "atan2":
     case "atan2f": return Math.atan2(args[0] ?? 0, args[1] ?? 0);
+    case "sinh":
+    case "sinhf": return Math.sinh(args[0] ?? 0);
+    case "cosh":
+    case "coshf": return Math.cosh(args[0] ?? 0);
     case "tanh":
     case "tanhf":
     case "__tanhf": return Math.tanh(args[0] ?? 0);
+    case "asinh":
+    case "asinhf": return Math.asinh(args[0] ?? 0);
+    case "acosh":
+    case "acoshf": return Math.acosh(args[0] ?? 0);
+    case "atanh":
+    case "atanhf": return Math.atanh(args[0] ?? 0);
     case "cbrt":
     case "cbrtf": return Math.cbrt(args[0] ?? 0);
     case "rcbrt":

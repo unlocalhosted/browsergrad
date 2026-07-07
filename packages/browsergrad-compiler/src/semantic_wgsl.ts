@@ -98,13 +98,27 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["tan", "tan"],
   ["tanf", "tan"],
   ["__tanf", "tan"],
+  ["asin", "asin"],
+  ["asinf", "asin"],
+  ["acos", "acos"],
+  ["acosf", "acos"],
   ["atan", "atan"],
   ["atanf", "atan"],
   ["atan2", "atan2"],
   ["atan2f", "atan2"],
+  ["sinh", "sinh"],
+  ["sinhf", "sinh"],
+  ["cosh", "cosh"],
+  ["coshf", "cosh"],
   ["tanh", "tanh"],
   ["tanhf", "tanh"],
   ["__tanhf", "tanh"],
+  ["asinh", "asinh"],
+  ["asinhf", "asinh"],
+  ["acosh", "acosh"],
+  ["acoshf", "acosh"],
+  ["atanh", "atanh"],
+  ["atanhf", "atanh"],
   ["cbrt", "cbrt"],
   ["cbrtf", "cbrt"],
   ["rcbrt", "rcbrt"],
@@ -2088,6 +2102,11 @@ function emitSemanticMathCall(
     wgslCallee === "log1p" ||
     wgslCallee === "sinpi" ||
     wgslCallee === "cospi" ||
+    wgslCallee === "sinh" ||
+    wgslCallee === "cosh" ||
+    wgslCallee === "asinh" ||
+    wgslCallee === "acosh" ||
+    wgslCallee === "atanh" ||
     wgslCallee === "cbrt" ||
     wgslCallee === "rcbrt" ||
     wgslCallee === "reciprocal"
@@ -2101,6 +2120,11 @@ function emitSemanticMathCall(
     if (wgslCallee === "log1p") return `log(1.0 + ${emitted})`;
     if (wgslCallee === "sinpi") return `sin(3.141592653589793 * ${emitted})`;
     if (wgslCallee === "cospi") return `cos(3.141592653589793 * ${emitted})`;
+    if (wgslCallee === "sinh") return `(0.5 * (exp(${emitted}) - exp(-${emitted})))`;
+    if (wgslCallee === "cosh") return `(0.5 * (exp(${emitted}) + exp(-${emitted})))`;
+    if (wgslCallee === "asinh") return `log(${emitted} + sqrt((${emitted} * ${emitted}) + 1.0))`;
+    if (wgslCallee === "acosh") return `log(${emitted} + sqrt((${emitted} * ${emitted}) - 1.0))`;
+    if (wgslCallee === "atanh") return `(0.5 * log((1.0 + ${emitted}) / (1.0 - ${emitted})))`;
     const signedCbrt = `select(pow(abs(${emitted}), 0.3333333333333333), -pow(abs(${emitted}), 0.3333333333333333), (${emitted} < 0.0))`;
     if (wgslCallee === "cbrt") return signedCbrt;
     if (wgslCallee === "rcbrt") return `(1.0 / ${signedCbrt})`;
