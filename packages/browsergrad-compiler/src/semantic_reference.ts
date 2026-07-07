@@ -52,6 +52,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__fdividef", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
   "__bg_modf_intpart", "__bg_modf_fraction",
   "__bg_frexp_exponent", "__bg_frexp_mantissa",
+  "__bg_remquo_quotient", "__bg_remquo_remainder",
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 
@@ -1202,6 +1203,11 @@ function evalSemanticMathCall(
     case "__bg_modf_fraction": return modfFraction(args[0] ?? 0);
     case "__bg_frexp_exponent": return frexpExponent(args[0] ?? 0);
     case "__bg_frexp_mantissa": return frexpMantissa(args[0] ?? 0);
+    case "__bg_remquo_quotient": return roundTiesToEvenNumber((args[0] ?? 0) / (args[1] ?? 1));
+    case "__bg_remquo_remainder": {
+      const quotient = roundTiesToEvenNumber((args[0] ?? 0) / (args[1] ?? 1));
+      return (args[0] ?? 0) - quotient * (args[1] ?? 1);
+    }
     default:
       throw semanticReferenceError(`semantic reference does not support math call '${expression.callee.name}'`, expression.span);
   }
@@ -1214,6 +1220,14 @@ function frexpExponent(value: number): number {
 function frexpMantissa(value: number): number {
   const exponent = frexpExponent(value);
   return exponent === 0 ? value : value / 2 ** exponent;
+}
+
+function roundTiesToEvenNumber(value: number): number {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (diff < 0.5) return floor;
+  if (diff > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
 }
 
 function modfIntpart(value: number): number {
@@ -1305,6 +1319,8 @@ function semanticMathCallArity(name: string): number {
     name === "__fdividef" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
+    name === "__bg_remquo_quotient" ||
+    name === "__bg_remquo_remainder" ||
     name === "atan2" ||
     name === "atan2f"
     ? 2

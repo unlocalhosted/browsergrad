@@ -914,16 +914,21 @@ function semanticRemquoCallResult(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   span: SourceSpan,
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
-  const dividend = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const dividend = expression.args[0];
   const divisor = expression.args[1] ? staticNumberValue(expression.args[1]) : undefined;
   const quotientTarget = source.args[2] === undefined ? undefined : pointerAliasValueExpression(source.args[2], scope, source.args[2].span);
-  if (dividend === undefined || divisor === undefined || divisor === 0 || !quotientTarget) return undefined;
+  if (dividend === undefined || divisor === undefined || divisor === 0 || !quotientTarget || !semanticExpressionSideEffectFree(dividend)) return undefined;
   const quotientRef = memoryRefFromExpression(quotientTarget);
   if (!quotientRef) return undefined;
-  const quotient = roundTiesToEvenNumber(dividend / divisor);
+  const temp = tempScalarSymbol("__bg.remquo.dividend", span, "float");
+  const tempValue = semanticSymbolExpression(temp, dividend.span);
+  const divisorValue = numberExpression(divisor, expression.span);
   return {
-    sideEffects: [storeOperation(quotientRef, intNumberExpression(quotient, expression.span), span)],
-    value: numberExpression(dividend - quotient * divisor, expression.span),
+    sideEffects: [
+      { kind: "declare", target: temp, init: dividend, span },
+      storeOperation(quotientRef, binaryIntCallExpression("__bg_remquo_quotient", tempValue, divisorValue, expression.span), span),
+    ],
+    value: binaryFloatCallExpression("__bg_remquo_remainder", tempValue, divisorValue, expression.span),
   };
 }
 
@@ -1057,6 +1062,26 @@ function unaryIntCallExpression(name: string, value: SemanticExpression, span: S
     kind: "call",
     callee: { kind: "symbol", name, valueType: "int", addressSpace: "builtin", span },
     args: [value],
+    valueType: "int",
+    span,
+  };
+}
+
+function binaryFloatCallExpression(name: string, left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "call",
+    callee: { kind: "symbol", name, valueType: "float", addressSpace: "builtin", span },
+    args: [left, right],
+    valueType: "float",
+    span,
+  };
+}
+
+function binaryIntCallExpression(name: string, left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "call",
+    callee: { kind: "symbol", name, valueType: "int", addressSpace: "builtin", span },
+    args: [left, right],
     valueType: "int",
     span,
   };

@@ -83,6 +83,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__bg_modf_fraction", "modf_fraction"],
   ["__bg_frexp_exponent", "frexp_exponent"],
   ["__bg_frexp_mantissa", "frexp_mantissa"],
+  ["__bg_remquo_quotient", "remquo_quotient"],
+  ["__bg_remquo_remainder", "remquo_remainder"],
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const WGSL_ATOMIC_CALLEES = new Map([
@@ -1383,6 +1385,18 @@ function emitSemanticMathCall(
     if (wgslCallee === "frexp_exponent") return `select(${exponent}, 0, ${nonFiniteOrZero})`;
     return `select((${emitted} / exp2(f32(${exponent}))), ${emitted}, ${nonFiniteOrZero})`;
   }
+  if (wgslCallee === "remquo_quotient" || wgslCallee === "remquo_remainder") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const x = emitSemanticExpressionAs(left, ir, names, "f32");
+    const y = emitSemanticExpressionAs(right, ir, names, "f32");
+    const ratio = `(${x} / ${y})`;
+    const base = `floor(${ratio})`;
+    const diff = `(${ratio} - ${base})`;
+    const quotient = `select(select(i32(${base}), i32(${base}) + 1, ${diff} > 0.5), select(i32(${base}), i32(${base}) + 1, (i32(${base}) % 2) != 0), ${diff} == 0.5)`;
+    if (wgslCallee === "remquo_quotient") return quotient;
+    return `(${x} - f32(${quotient}) * ${y})`;
+  }
   return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32")).join(", ")})`;
 }
 
@@ -1398,6 +1412,8 @@ function semanticMathCallArity(name: string): number {
     name === "__fdividef" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
+    name === "__bg_remquo_quotient" ||
+    name === "__bg_remquo_remainder" ||
     name === "atan2" ||
     name === "atan2f"
     ? 2

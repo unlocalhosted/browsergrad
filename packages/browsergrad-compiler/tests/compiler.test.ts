@@ -6574,8 +6574,9 @@ __global__ void semanticRemquo(int *quo) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
     expect(compiled.wgsl).not.toContain("var q:");
-    expect(compiled.wgsl).toContain("quo[1u] = 4;");
-    expect(compiled.wgsl).toContain("quo[2u] = -4;");
+    expect(compiled.wgsl).toContain("var bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("quo[1u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("quo[2u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
     expect([...semanticResult.buffers.quo as Int32Array]).toEqual([0, 4, -4]);
     expect([...result.buffers.quo as Int32Array]).toEqual([0, 4, -4]);
   });
@@ -6987,8 +6988,8 @@ __global__ void mathOutAliases(float *out, int *ints) {
     expect(compiled.wgsl).toContain("out[0u] = select(select((bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("ints[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
     expect(compiled.wgsl).toContain("out[4u] = select((bg__bg_frexp_value_");
-    expect(compiled.wgsl).toContain("ints[2u] = 4;");
-    expect(compiled.wgsl).toContain("out[5u] = -1.0;");
+    expect(compiled.wgsl).toContain("ints[2u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("out[5u] = (bg__bg_remquo_dividend_");
     const out = [...result.buffers.out as Float32Array];
     expect(out[0]).toBeCloseTo(0.75, 6);
     expect(out[1]).toBeCloseTo(3, 6);
@@ -7043,8 +7044,8 @@ __global__ void mathOutVarInits(float *out, int *ints) {
     expect(compiled.wgsl).toContain("var frac: f32 = select(select((bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("ints[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
     expect(compiled.wgsl).toContain("var mantissa: f32 = select((bg__bg_frexp_value_");
-    expect(compiled.wgsl).toContain("ints[2u] = 4;");
-    expect(compiled.wgsl).toContain("var rem: f32 = -1.0;");
+    expect(compiled.wgsl).toContain("ints[2u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("var rem: f32 = (bg__bg_remquo_dividend_");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
     expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
   });
@@ -7150,6 +7151,35 @@ __global__ void dynamicFrexp(float *out, int *ints, float x) {
       }
       expect([...actual.buffers.ints as Int32Array]).toEqual([...expected.buffers.ints as Int32Array]);
     }
+  });
+
+  it("lowers dynamic CUDA remquo storage outputs through semantic IR for static divisors", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicRemquo(float *out, int *ints, float x) {
+  int *quoOut = ints + 1;
+  out[0] = remquof(x, 2.0f, quoOut);
+  float rem = remquo(x + out[0], 2.0f, &ints[2]);
+  out[1] = rem;
+  out[2] = (float)ints[1];
+  out[3] = (float)ints[2];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4), ints: new Int32Array(3) }, scalars: { x: 7 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+    expect(compiled.wgsl).toContain("bg_uniforms.x");
+    expect(compiled.wgsl).toContain("var bg__bg_remquo_dividend_");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([-1, 0, 4, 3]);
+    expect([...semanticResult.buffers.ints as Int32Array]).toEqual([0, 4, 3]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+    expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
   });
 
   it("lets user device functions shadow CUDA math aliases when CUDA source defines them", () => {
