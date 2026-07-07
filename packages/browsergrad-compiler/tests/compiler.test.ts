@@ -12762,10 +12762,22 @@ __global__ void sample(float *out, cudaTextureObject_t tex) {
       },
       { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        textures: { tex: { width: 3, height: 1, data: new Float32Array([3, 6, 9]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("fn sampleAt(texSrc: texture_2d<f32>");
     expect(compiled.wgsl).toContain("textureLoad(texSrc");
     expect([...result.buffers.out as Float32Array]).toEqual([3, 6, 9]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 6, 9]);
   });
 
   it("propagates texture descriptors through device helper texture params", () => {

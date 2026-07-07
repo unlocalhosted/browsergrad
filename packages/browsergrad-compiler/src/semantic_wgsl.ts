@@ -456,7 +456,6 @@ function semanticWgslTextureReadSupported(
   return expression.valueType === "float" &&
     texture.kind === "symbol" &&
     texture.addressSpace === "texture" &&
-    textureSymbols(ir).some((symbol) => symbol.name === texture.name) &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
     semanticWgslExpressionSupported(expression.y, "scalar", ir);
 }
@@ -483,12 +482,22 @@ function semanticWgslFunctionCallSupported(
   const callee = expression.callee.name;
   const fn = ir.functions.find((item) => item.name === callee);
   if (!fn || !semanticWgslScalarTypeSupported(fn.returnType)) return false;
-  if (fn.params.some((param) => param.pointer || param.addressSpace !== "local")) return false;
-  if (fn.params.some((param) => !semanticWgslScalarTypeSupported(param.valueType))) return false;
+  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture"))) return false;
+  if (fn.params.some((param) => param.addressSpace === "local" && !semanticWgslScalarTypeSupported(param.valueType))) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
-    expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir)) &&
+    expression.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
     unsupportedSemanticWgslOperation(fn.body, ir, true) === undefined;
+}
+
+function semanticWgslFunctionArgSupported(
+  arg: SemanticExpression,
+  param: SemanticKernelIrModule["functions"][number]["params"][number] | undefined,
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (!param) return false;
+  if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
+  return semanticWgslExpressionSupported(arg, "scalar", ir);
 }
 
 function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -806,13 +815,18 @@ function emitSemanticFunction(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
 ): readonly string[] {
-  const params = fn.params.map((param) => `${nameFor(param.name, names)}: ${wgslScalar(param.valueType)}`).join(", ");
+  const params = fn.params.map((param) => `${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)}`).join(", ");
   return [
     `fn ${nameFor(fn.name, names)}(${params}) -> ${wgslScalar(fn.returnType)} {`,
     ...emitSemanticOperations(fn.body, ir, names, 1, true),
     `  return ${zeroForType(wgslScalar(fn.returnType))};`,
     "}",
   ];
+}
+
+function emitSemanticFunctionParamType(param: SemanticKernelIrModule["functions"][number]["params"][number]): string {
+  if (param.addressSpace === "texture") return "texture_2d<f32>";
+  return wgslScalar(param.valueType);
 }
 
 function emitSemanticAssignmentStatement(
@@ -1108,10 +1122,21 @@ function emitSemanticFunctionCall(
   const callee = expression.callee.name;
   const fn = ir.functions.find((item) => item.name === callee);
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${callee}'`, expression.span);
-  const args = expression.args.map((arg, index) =>
-    emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(fn.params[index]?.valueType))
-  );
+  const args = expression.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names));
   return `${nameFor(fn.name, names)}(${args.join(", ")})`;
+}
+
+function emitSemanticFunctionArg(
+  arg: SemanticExpression,
+  param: SemanticKernelIrModule["functions"][number]["params"][number] | undefined,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (param?.addressSpace === "texture") {
+    if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticWgslError("semantic WGSL texture helper argument must be a texture symbol", arg.span);
+    return nameFor(arg.name, names);
+  }
+  return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType));
 }
 
 function emitSemanticUpdate(
