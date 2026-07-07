@@ -2615,6 +2615,33 @@ __global__ void localPointerCompare(uint *out, int pick) {
     expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1]);
   });
 
+  it("lowers local pointer alias differences through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localPointerDifference(int *out, int pick) {
+  float values[4];
+  float *base = values;
+  float *left = pick != 0 ? &values[3] : &values[1];
+  out[0] = left - base;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-difference");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...result.buffers.out as Int32Array]).toEqual([3]);
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([3]);
+  });
+
   it("stores modeled memory pointers in fixed local pointer arrays", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float read_x(float3 *value) {

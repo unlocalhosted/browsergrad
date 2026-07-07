@@ -588,6 +588,8 @@ function lowerExpression(
       return { kind: "unary", operator: expression.operator, argument, ...optionalValueType(expression.operator === "&" ? "voidptr" : expressionValueType(argument)), span: expression.span };
     }
     case "binary": {
+      const pointerDifference = localPointerAliasDifferenceExpression(expression, scope);
+      if (pointerDifference) return pointerDifference;
       const pointerComparison = localPointerAliasComparisonExpression(expression, scope);
       if (pointerComparison) return pointerComparison;
       const left = lowerExpression(expression.left, scope);
@@ -1028,6 +1030,17 @@ function localPointerAliasDerefExpression(
     addressSpace: root.addressSpace,
     span,
   };
+}
+
+function localPointerAliasDifferenceExpression(
+  expression: Extract<CudaLiteExpression, { readonly kind: "binary" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  if (expression.operator !== "-") return undefined;
+  const left = localPointerAliasScalarIndex(expression.left, scope);
+  const right = localPointerAliasScalarIndex(expression.right, scope);
+  if (!left || !right || left.root !== right.root) return undefined;
+  return subtractIndexExpressions(left.index, right.index, expression.span);
 }
 
 function localPointerAliasComparisonExpression(
