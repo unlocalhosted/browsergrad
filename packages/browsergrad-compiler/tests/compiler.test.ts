@@ -4468,7 +4468,7 @@ __global__ void scalarCppIntake(float *out, half *halfOut, std::size_t n) {
 
     expect(compiled.wgsl).toContain("var idx: i32");
     expect(compiled.wgsl).toContain("var total: u32");
-    expect(compiled.wgsl).toContain("halfOut[idx] = f16");
+    expect(compiled.wgsl).toContain("halfOut[u32(idx)] = f16");
   });
 
   it("lowers scalar __device__ helper functions", () => {
@@ -6862,8 +6862,8 @@ __global__ void semantic_numeric_conversions(float *x, int *iout, uint *uout, fl
     expect(compiled.wgsl).toContain("i32(select(floor(abs(a) + 0.5)");
     expect(compiled.wgsl).toContain("i32(trunc(a))");
     expect(compiled.wgsl).toContain("u32(max(bg_semantic_round_even_f32(3.5), 0.0))");
-    expect(compiled.wgsl).toContain("f32(atomicLoad(&iout[5u]))");
-    expect(compiled.wgsl).toContain("f32(atomicLoad(&uout[2u]))");
+    expect(compiled.wgsl).toContain("f32(iout[5u])");
+    expect(compiled.wgsl).toContain("f32(uout[2u])");
     expect([...semanticResult.buffers.iout as Int32Array]).toEqual([-2, 4, -3, 4, -2, -2, 3]);
     expect([...semanticResult.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
     expect([...semanticResult.buffers.fout as Float32Array]).toEqual([-2, 4]);
@@ -6982,8 +6982,8 @@ __global__ void semantic_float_bitcasts(uint *bits, int *signedBits, float *out)
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&bits[0u]))");
-    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&signedBits[0u]))");
+    expect(compiled.wgsl).toContain("bitcast<f32>(bits[0u])");
+    expect(compiled.wgsl).toContain("bitcast<f32>(signedBits[0u])");
     expect(compiled.wgsl).toContain("bitcast<f32>(0x7f800000u)");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, -1, Infinity, Infinity]);
     expect([...result.buffers.out as Float32Array]).toEqual([1, -1, Infinity, Infinity]);
@@ -7065,8 +7065,8 @@ __global__ void semanticRemquo(int *quo) {
     expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
     expect(compiled.wgsl).not.toContain("var q:");
     expect(compiled.wgsl).toContain("var bg__bg_remquo_dividend_");
-    expect(compiled.wgsl).toContain("quo[1u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
-    expect(compiled.wgsl).toContain("quo[2u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("quo[1u] = select(select(i32(floor((bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("quo[2u] = select(select(i32(floor((bg__bg_remquo_dividend_");
     expect([...semanticResult.buffers.quo as Int32Array]).toEqual([0, 4, -4]);
     expect([...result.buffers.quo as Int32Array]).toEqual([0, 4, -4]);
   });
@@ -7334,8 +7334,8 @@ __global__ void semanticFrexp(int *expOut) {
     expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
     expect(compiled.wgsl).not.toContain("var expAlias:");
     expect(compiled.wgsl).toContain("var bg__bg_frexp_value_");
-    expect(compiled.wgsl).toContain("expOut[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
-    expect(compiled.wgsl).toContain("expOut[2u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("expOut[1u] = select((i32(floor(log2(abs(bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("expOut[2u] = select((i32(floor(log2(abs(bg__bg_frexp_value_");
     expect([...semanticResult.buffers.expOut as Int32Array]).toEqual([0, 4, 0]);
     expect([...result.buffers.expOut as Int32Array]).toEqual([0, 4, 0]);
   });
@@ -7539,9 +7539,9 @@ __global__ void mathOutAliases(float *out, int *ints) {
     expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("out[1u] = select(trunc(bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("out[0u] = select(select((bg__bg_modf_value_");
-    expect(compiled.wgsl).toContain("ints[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("ints[1u] = select((i32(floor(log2(abs(bg__bg_frexp_value_");
     expect(compiled.wgsl).toContain("out[4u] = select((bg__bg_frexp_value_");
-    expect(compiled.wgsl).toContain("ints[2u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("ints[2u] = select(select(i32(floor((bg__bg_remquo_dividend_");
     expect(compiled.wgsl).toContain("out[5u] = (bg__bg_remquo_dividend_");
     const out = [...result.buffers.out as Float32Array];
     expect(out[0]).toBeCloseTo(0.75, 6);
@@ -7595,9 +7595,9 @@ __global__ void mathOutVarInits(float *out, int *ints) {
     expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("out[1u] = select(trunc(bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("var frac: f32 = select(select((bg__bg_modf_value_");
-    expect(compiled.wgsl).toContain("ints[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("ints[1u] = select((i32(floor(log2(abs(bg__bg_frexp_value_");
     expect(compiled.wgsl).toContain("var mantissa: f32 = select((bg__bg_frexp_value_");
-    expect(compiled.wgsl).toContain("ints[2u] = i32(select(select(i32(floor((bg__bg_remquo_dividend_");
+    expect(compiled.wgsl).toContain("ints[2u] = select(select(i32(floor((bg__bg_remquo_dividend_");
     expect(compiled.wgsl).toContain("var rem: f32 = (bg__bg_remquo_dividend_");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
     expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
@@ -7868,7 +7868,7 @@ __global__ void bitcast_intrinsics(float *x, uint *bits, int *signed_bits, float
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("bitcast<u32>(value)");
     expect(compiled.wgsl).toContain("bitcast<i32>(value)");
-    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&bits[0u]))");
+    expect(compiled.wgsl).toContain("bitcast<f32>(bits[0u])");
     expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0xc0600000]);
     expect([...semanticResult.buffers.signed_bits as Int32Array]).toEqual([-1067450368]);
     expect([...semanticResult.buffers.roundtrip as Float32Array]).toEqual([-3.5, -3.5]);
@@ -7943,9 +7943,9 @@ __global__ void round_integer_aliases(float *x, int *out) {
     );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(compiled.wgsl).toContain("i32(bg_semantic_round_even_f32(atomicLoad(&x[0u])))");
-    expect(compiled.wgsl).toContain("i32(select(floor(abs(atomicLoad(&x[0u])) + 0.5)");
-    expect(compiled.wgsl).toContain("select(floor(abs(atomicLoad(&x[4u])) + 0.5)");
+    expect(compiled.wgsl).toContain("i32(bg_semantic_round_even_f32(x[0u]))");
+    expect(compiled.wgsl).toContain("i32(select(floor(abs(x[0u]) + 0.5)");
+    expect(compiled.wgsl).toContain("select(floor(abs(x[4u]) + 0.5)");
     expect([...result.buffers.out as Int32Array]).toEqual([2, 4, -2, -4, 3, -3, -4, -2, -2]);
   });
 
@@ -15891,7 +15891,7 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
   if (idx < 1) {
     float value = __half2float(input[idx]);
     float big = 1e6f;
-    if (big > 999999.0f) { atomicExch(flag, 1); }
+    if (big > 999999.0f) { flag[0] = 1; }
     output[idx] = __float2half(value * 2.0f);
     output[idx + 1] = __uint2half_rn(4u);
     flag[idx + 1] = __half_as_ushort(__float2half(1.5f));
@@ -15912,15 +15912,32 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: createWgslFloat16Array([1.5]),
+          output: createWgslFloat16Array(3),
+          flag: new Int32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("f32(input[idx])");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("enable f16;");
+    expect(compiled.wgsl).toContain("f32(input[u32(idx)])");
     expect(compiled.wgsl).toContain("f16((value * 2.0))");
-    expect(compiled.wgsl).toContain("f16(f32(u32(4u)))");
+    expect(compiled.wgsl).toContain("f16(f32(4u))");
     expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32(f16(1.5)), 0.0)) & 0xffffu");
-    expect(compiled.wgsl).toContain("f16(unpack2x16float(u32(0x3c00u)).x)");
-    expect(compiled.wgsl).toContain("1e6");
+    expect(compiled.wgsl).toContain("f16(unpack2x16float(15360u).x)");
+    expect(compiled.wgsl).toContain("1000000.0");
     expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3, 4, 1]);
     expect([...result.buffers.flag as Int32Array]).toEqual([1, 0x3e00]);
+    expect(Array.from(semanticResult.buffers.output as Iterable<number>)).toEqual([3, 4, 1]);
+    expect([...semanticResult.buffers.flag as Int32Array]).toEqual([1, 0x3e00]);
   });
 
   it("lowers CUDA half-to-int conversion rounding modes", () => {
@@ -15956,15 +15973,32 @@ __global__ void half_int_modes(const half* input, int* iout, uint* uout) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: createWgslFloat16Array([2.5, 3.5, -2.5, 3.25]),
+          iout: new Int32Array(7),
+          uout: new Uint32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("enable f16;");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(a))");
+    expect(compiled.wgsl).toContain("bg_semantic_round_even_f32(f32(a))");
     expect(compiled.wgsl).toContain("i32(trunc(f32(a)))");
     expect(compiled.wgsl).toContain("i32(ceil(f32(a)))");
     expect(compiled.wgsl).toContain("i32(floor(f32(a)))");
-    expect(compiled.wgsl).toContain("u32(max(bg_round_even_f32(f32(b)), 0.0))");
+    expect(compiled.wgsl).toContain("u32(max(bg_semantic_round_even_f32(f32(b)), 0.0))");
     expect([...result.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4, -2, -3]);
     expect([...result.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
+    expect([...semanticResult.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4, -2, -3]);
+    expect([...semanticResult.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
   });
 
   it("lowers CUDA fp8 storage conversions through explicit helpers", () => {
@@ -16231,13 +16265,30 @@ __global__ void half_ops(const __half* input, half* output, int* flags) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: createWgslFloat16Array([1.5, 0.25]),
+          output: createWgslFloat16Array(1),
+          flags: new Int32Array(6),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("enable f16;");
     expect(compiled.wgsl).toContain("fma(");
     expect(compiled.wgsl).toContain("f16(exp(f32(f16(0.0))))");
     expect(compiled.wgsl).toContain("min(mixed, f16(3.0))");
     expect(compiled.wgsl).toContain("max(");
     expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([1.5]);
     expect([...result.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(Array.from(semanticResult.buffers.output as Iterable<number>)).toEqual([1.5]);
+    expect([...semanticResult.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1]);
   });
 
   it("emits atomic storage buffers with explicit load/store operations", () => {

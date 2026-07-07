@@ -1,4 +1,10 @@
-import type { WgslTexture2DInput, WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
+import {
+  float16BitsToFloat32,
+  float32ToFloat16Bits,
+  isWgslFloat16Array,
+  type WgslTexture2DInput,
+  type WgslTypedArray,
+} from "@unlocalhosted/browsergrad-kernels";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
@@ -66,6 +72,12 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__float2uint_rn", "__float2uint_rz", "__float2uint_ru", "__float2uint_rd",
   "__int2float_rn", "__int2float_rz", "__int2float_ru", "__int2float_rd",
   "__uint2float_rn", "__uint2float_rz", "__uint2float_ru", "__uint2float_rd",
+  "__half2float", "__float2half", "__float2half_rn", "__int2half_rn", "__uint2half_rn",
+  "__half_as_ushort", "__ushort_as_half",
+  "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
+  "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
+  "hrsqrt", "__hneg", "__hsub", "__hmul", "__hdiv", "__hfma", "hexp", "__hmin", "__hmax",
+  "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle",
   "wmma::__float_to_tf32", "isNan",
   "__clz", "__clzll", "__ffs", "__ffsll", "__popc", "__popcll", "__brev", "__brevll",
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
@@ -360,7 +372,7 @@ function semanticReferenceLoopInitSupported(
 }
 
 function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" || valueType === "int" || valueType === "uint";
+  return valueType === "float" || valueType === "half" || valueType === "int" || valueType === "uint";
 }
 
 function semanticReferenceValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -1597,6 +1609,36 @@ function evalSemanticMathCall(
     case "__uint2float_rz":
     case "__uint2float_ru":
     case "__uint2float_rd": return Math.trunc(args[0] ?? 0) >>> 0;
+    case "__half2float": return args[0] ?? 0;
+    case "__float2half":
+    case "__float2half_rn": return roundSemanticHalf(args[0] ?? 0);
+    case "__int2half_rn": return roundSemanticHalf(Math.trunc(args[0] ?? 0) | 0);
+    case "__uint2half_rn": return roundSemanticHalf(Math.trunc(args[0] ?? 0) >>> 0);
+    case "__half_as_ushort": return float32ToFloat16Bits(args[0] ?? 0) >>> 0;
+    case "__ushort_as_half": return float16BitsToFloat32(args[0] ?? 0);
+    case "__half2int_rn": return roundTiesToEvenNumber(args[0] ?? 0) | 0;
+    case "__half2int_rz": return Math.trunc(args[0] ?? 0) | 0;
+    case "__half2int_ru": return Math.ceil(args[0] ?? 0) | 0;
+    case "__half2int_rd": return Math.floor(args[0] ?? 0) | 0;
+    case "__half2uint_rn": return roundTiesToEvenNumber(args[0] ?? 0) >>> 0;
+    case "__half2uint_rz": return Math.trunc(args[0] ?? 0) >>> 0;
+    case "__half2uint_ru": return Math.ceil(args[0] ?? 0) >>> 0;
+    case "__half2uint_rd": return Math.floor(args[0] ?? 0) >>> 0;
+    case "hrsqrt": return roundSemanticHalf(1 / Math.sqrt(args[0] ?? 0));
+    case "__hneg": return roundSemanticHalf(-(args[0] ?? 0));
+    case "__hsub": return roundSemanticHalf((args[0] ?? 0) - (args[1] ?? 0));
+    case "__hmul": return roundSemanticHalf((args[0] ?? 0) * (args[1] ?? 0));
+    case "__hdiv": return roundSemanticHalf((args[0] ?? 0) / (args[1] ?? 0));
+    case "__hfma": return roundSemanticHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0));
+    case "hexp": return roundSemanticHalf(Math.exp(args[0] ?? 0));
+    case "__hmin": return roundSemanticHalf(Math.min(args[0] ?? 0, args[1] ?? 0));
+    case "__hmax": return roundSemanticHalf(Math.max(args[0] ?? 0, args[1] ?? 0));
+    case "__heq": return (args[0] ?? 0) === (args[1] ?? 0) ? 1 : 0;
+    case "__hne": return (args[0] ?? 0) !== (args[1] ?? 0) ? 1 : 0;
+    case "__hgt": return (args[0] ?? 0) > (args[1] ?? 0) ? 1 : 0;
+    case "__hge": return (args[0] ?? 0) >= (args[1] ?? 0) ? 1 : 0;
+    case "__hlt": return (args[0] ?? 0) < (args[1] ?? 0) ? 1 : 0;
+    case "__hle": return (args[0] ?? 0) <= (args[1] ?? 0) ? 1 : 0;
     case "wmma::__float_to_tf32": return args[0] ?? 0;
     case "__clz": return Math.clz32(args[0] ?? 0);
     case "__clzll": return Math.clz32(args[0] ?? 0) + 32;
@@ -1620,7 +1662,9 @@ function evalSemanticMathCall(
     case "__rhadd": return roundedSignedAverage(args[0] ?? 0, args[1] ?? 0);
     case "__uhadd": return unsignedAverage(args[0] ?? 0, args[1] ?? 0);
     case "__urhadd": return roundedUnsignedAverage(args[0] ?? 0, args[1] ?? 0);
-    case "__hadd": return signedAverage(args[0] ?? 0, args[1] ?? 0);
+    case "__hadd": return expression.valueType === "half"
+      ? roundSemanticHalf((args[0] ?? 0) + (args[1] ?? 0))
+      : signedAverage(args[0] ?? 0, args[1] ?? 0);
     case "__float_as_int": return float32ToUintBits(args[0] ?? 0) | 0;
     case "__float_as_uint": return float32ToUintBits(args[0] ?? 0) >>> 0;
     case "__sad": return (Math.abs((Math.trunc(args[0] ?? 0) | 0) - (Math.trunc(args[1] ?? 0) | 0)) + (Math.trunc(args[2] ?? 0) >>> 0)) >>> 0;
@@ -1718,6 +1762,10 @@ function float32ToUintBits(value: number): number {
   const view = new DataView(buffer);
   view.setFloat32(0, value, true);
   return view.getUint32(0, true);
+}
+
+function roundSemanticHalf(value: number): number {
+  return float16BitsToFloat32(float32ToFloat16Bits(value));
 }
 
 function evalNextafter(x: number, y: number): number {
@@ -2091,6 +2139,17 @@ function semanticMathCallArity(name: string): number {
     name === "__fsub_rn" ||
     name === "__fmul_rn" ||
     name === "__fdiv_rn" ||
+    name === "__hsub" ||
+    name === "__hmul" ||
+    name === "__hdiv" ||
+    name === "__hmin" ||
+    name === "__hmax" ||
+    name === "__heq" ||
+    name === "__hne" ||
+    name === "__hgt" ||
+    name === "__hge" ||
+    name === "__hlt" ||
+    name === "__hle" ||
     name === "copysign" ||
     name === "copysignf" ||
     name === "isgreater" ||
@@ -2141,6 +2200,7 @@ function semanticMathCallArity(name: string): number {
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||
+      name === "__hfma" ||
       name === "lerp" ||
       name === "norm3df" ||
       name === "rnorm3df" ||
@@ -2162,6 +2222,7 @@ function semanticMathCallArity(name: string): number {
 }
 
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
+  if (expression.callee.kind !== "symbol" || !SEMANTIC_ATOMIC_OPS.has(expression.callee.name)) return undefined;
   const firstArg = expression.args[0];
   if (!firstArg) return undefined;
   if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
@@ -2460,6 +2521,9 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       }
       if (param.valueType === "uint" && !(buffer instanceof Uint32Array)) {
         throw semanticReferenceError(`buffer '${param.name}' expects Uint32Array`, param.span);
+      }
+      if (param.valueType === "half" && !isWgslFloat16Array(buffer)) {
+        throw semanticReferenceError(`buffer '${param.name}' expects Float16Array`, param.span);
       }
     } else if (param.addressSpace === "uniform") {
       if (input.scalars?.[param.name] === undefined) throw semanticReferenceError(`missing scalar input '${param.name}'`, param.span);

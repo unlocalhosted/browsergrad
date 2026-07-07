@@ -200,6 +200,36 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__uint2float_ru", "uint_to_float"],
   ["__uint2float_rd", "uint_to_float"],
   ["wmma::__float_to_tf32", "tf32"],
+  ["__half2float", "half_to_float"],
+  ["__float2half", "to_half"],
+  ["__float2half_rn", "to_half"],
+  ["__int2half_rn", "int_to_half"],
+  ["__uint2half_rn", "uint_to_half"],
+  ["__half_as_ushort", "half_as_ushort"],
+  ["__ushort_as_half", "ushort_as_half"],
+  ["__half2int_rn", "half_to_int_rn"],
+  ["__half2int_rz", "half_to_int_rz"],
+  ["__half2int_ru", "half_to_int_ru"],
+  ["__half2int_rd", "half_to_int_rd"],
+  ["__half2uint_rn", "half_to_uint_rn"],
+  ["__half2uint_rz", "half_to_uint_rz"],
+  ["__half2uint_ru", "half_to_uint_ru"],
+  ["__half2uint_rd", "half_to_uint_rd"],
+  ["hrsqrt", "half_rsqrt"],
+  ["__hneg", "half_neg"],
+  ["__hsub", "half_sub"],
+  ["__hmul", "half_mul"],
+  ["__hdiv", "half_div"],
+  ["__hfma", "half_fma"],
+  ["hexp", "half_exp"],
+  ["__hmin", "half_min"],
+  ["__hmax", "half_max"],
+  ["__heq", "half_eq"],
+  ["__hne", "half_ne"],
+  ["__hgt", "half_gt"],
+  ["__hge", "half_ge"],
+  ["__hlt", "half_lt"],
+  ["__hle", "half_le"],
   ["__clz", "clz"],
   ["__clzll", "clzll"],
   ["__ffs", "ffs"],
@@ -317,7 +347,7 @@ export function canEmitSemanticKernelIrWgsl(
   _options: EmitSemanticKernelIrWgslOptions = {},
 ): boolean {
   return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
-    ir.requiredFeatures.length === 0 &&
+    semanticWgslRequiredFeaturesSupported(ir.requiredFeatures) &&
     ir.params.every(semanticWgslParamSupported) &&
     semanticWgslSharedBarrierShapeSupported(ir) &&
     ir.memory.every(semanticWgslMemorySymbolSupported);
@@ -329,7 +359,7 @@ export function emitSemanticKernelIrWgsl(
 ): SemanticKernelIrWgslOutput {
   const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
   if (unsupported) throw semanticWgslError(`semantic WGSL does not support ${unsupported.kind}`, unsupported.span);
-  if (ir.requiredFeatures.length > 0) throw semanticWgslError("semantic WGSL does not support required WebGPU features yet", ir.span);
+  if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) throw semanticWgslError("semantic WGSL does not support required WebGPU features yet", ir.span);
   const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
   if (unsupportedParam) throw semanticWgslError(`semantic WGSL does not support parameter '${unsupportedParam.name}'`, unsupportedParam.span);
 
@@ -432,6 +462,7 @@ export function emitSemanticKernelIrWgsl(
   }
 
   const lines: string[] = ["// browsergrad-semantic-wgsl: direct semantic IR emission"];
+  if (ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
   for (const param of ir.params.filter((item) => item.addressSpace === "storage")) {
     const access = param.constant ? "read" : "read_write";
     const elementType = atomicStorage.has(param.name)
@@ -478,7 +509,11 @@ export function emitSemanticKernelIrWgsl(
   }
   if (uniformParams.length > 0) {
     lines.push("struct Params {");
-    for (const param of uniformParams) lines.push(`  ${nameFor(param.name, names)}: ${wgslUniformScalar(param.valueType)},`);
+    for (const param of uniformParams) {
+      const scalar = wgslUniformScalar(param.valueType);
+      const align = scalar === "f16" ? "@align(4) " : "";
+      lines.push(`  ${align}${nameFor(param.name, names)}: ${scalar},`);
+    }
     lines.push("};");
     lines.push(`@group(0) @binding(${bindings.length - 1}) var<uniform> ${UNIFORM_PARAMS_NAME}: Params;`);
   }
@@ -663,8 +698,12 @@ function operationsHaveOnlyTopLevelBarriers(operations: readonly SemanticKernelI
   );
 }
 
+function semanticWgslRequiredFeaturesSupported(requiredFeatures: readonly string[]): boolean {
+  return requiredFeatures.every((feature) => feature === "shader-f16");
+}
+
 function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" || valueType === "int" || valueType === "uint";
+  return valueType === "float" || valueType === "half" || valueType === "int" || valueType === "uint";
 }
 
 function semanticWgslValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -2311,7 +2350,8 @@ function emitSemanticExpressionAs(
     return `${targetType}(${emitted})`;
   }
   if (expression.kind === "call" && semanticWgslMathCallSupported(expression)) {
-    if (targetType === "f32") return emitted;
+    const sourceType = semanticExpressionWgslScalar(expression);
+    if (sourceType === targetType) return emitted;
     return `${targetType}(${emitted})`;
   }
   const sourceType = semanticExpressionWgslScalar(expression);
@@ -2397,6 +2437,61 @@ function emitSemanticMathCall(
     const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
     return wgslCallee === "float_as_int" ? `bitcast<i32>(${emitted})` : `bitcast<u32>(${emitted})`;
   }
+  if (wgslCallee === "half_to_float" || wgslCallee === "to_half" || wgslCallee === "int_to_half" || wgslCallee === "uint_to_half" || wgslCallee === "half_as_ushort" || wgslCallee === "ushort_as_half") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    if (wgslCallee === "half_to_float") return `f32(${emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations)})`;
+    if (wgslCallee === "to_half") return `f16(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
+    if (wgslCallee === "int_to_half") return `f16(f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)}))`;
+    if (wgslCallee === "uint_to_half") return `f16(f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)}))`;
+    if (wgslCallee === "half_as_ushort") return `(pack2x16float(vec2<f32>(f32(${emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations)}), 0.0)) & 0xffffu)`;
+    return `f16(unpack2x16float(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)}).x)`;
+  }
+  if (wgslCallee.startsWith("half_to_int_") || wgslCallee.startsWith("half_to_uint_")) {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = `f32(${emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations)})`;
+    const rounded = wgslCallee.endsWith("_rn")
+      ? emitRoundEvenWgsl(emitted)
+      : wgslCallee.endsWith("_rz")
+      ? `trunc(${emitted})`
+      : wgslCallee.endsWith("_ru")
+      ? `ceil(${emitted})`
+      : `floor(${emitted})`;
+    return wgslCallee.startsWith("half_to_uint_") ? `u32(max(${rounded}, 0.0))` : `i32(${rounded})`;
+  }
+  if (wgslCallee === "half_rsqrt" || wgslCallee === "half_neg" || wgslCallee === "half_exp") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations);
+    if (wgslCallee === "half_rsqrt") return `f16(inverseSqrt(f32(${emitted})))`;
+    if (wgslCallee === "half_exp") return `f16(exp(f32(${emitted})))`;
+    return `(-${emitted})`;
+  }
+  if (wgslCallee === "half_fma") {
+    const [first, second, third] = expression.args;
+    if (!first || !second || !third) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
+    return `fma(${emitSemanticExpressionAs(first, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(second, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(third, ir, names, "f16", options, textureSpecializations)})`;
+  }
+  if (wgslCallee === "half_sub" || wgslCallee === "half_mul" || wgslCallee === "half_div" || wgslCallee === "half_min" || wgslCallee === "half_max" || wgslCallee === "half_eq" || wgslCallee === "half_ne" || wgslCallee === "half_gt" || wgslCallee === "half_ge" || wgslCallee === "half_lt" || wgslCallee === "half_le") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const lhs = emitSemanticExpressionAs(left, ir, names, "f16", options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, "f16", options, textureSpecializations);
+    if (wgslCallee === "half_sub") return `(${lhs} - ${rhs})`;
+    if (wgslCallee === "half_mul") return `(${lhs} * ${rhs})`;
+    if (wgslCallee === "half_div") return `(${lhs} / ${rhs})`;
+    if (wgslCallee === "half_min") return `min(${lhs}, ${rhs})`;
+    if (wgslCallee === "half_max") return `max(${lhs}, ${rhs})`;
+    const operator =
+      wgslCallee === "half_eq" ? "==" :
+      wgslCallee === "half_ne" ? "!=" :
+      wgslCallee === "half_gt" ? ">" :
+      wgslCallee === "half_ge" ? ">=" :
+      wgslCallee === "half_lt" ? "<" :
+      "<=";
+    return `select(0u, 1u, (${lhs} ${operator} ${rhs}))`;
+  }
   if (wgslCallee === "clz" || wgslCallee === "clzll" || wgslCallee === "ffs" || wgslCallee === "popc" || wgslCallee === "brev") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
@@ -2445,6 +2540,9 @@ function emitSemanticMathCall(
       const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
       const rhs = emitSemanticExpressionAs(right, ir, names, "u32", options, textureSpecializations);
       return `min(${lhs}, ${rhs})`;
+    }
+    if (wgslCallee === "hadd" && expression.valueType === "half") {
+      return `(${emitSemanticExpressionAs(left, ir, names, "f16", options, textureSpecializations)} + ${emitSemanticExpressionAs(right, ir, names, "f16", options, textureSpecializations)})`;
     }
     const scalar = wgslCallee === "uhadd" || wgslCallee === "urhadd" ? "u32" : "i32";
     const lhs = emitSemanticExpressionAs(left, ir, names, scalar, options, textureSpecializations);
@@ -2717,6 +2815,17 @@ function semanticMathCallArity(name: string): number {
     name === "__fsub_rn" ||
     name === "__fmul_rn" ||
     name === "__fdiv_rn" ||
+    name === "__hsub" ||
+    name === "__hmul" ||
+    name === "__hdiv" ||
+    name === "__hmin" ||
+    name === "__hmax" ||
+    name === "__heq" ||
+    name === "__hne" ||
+    name === "__hgt" ||
+    name === "__hge" ||
+    name === "__hlt" ||
+    name === "__hle" ||
     name === "copysign" ||
     name === "copysignf" ||
     name === "isgreater" ||
@@ -2767,6 +2876,7 @@ function semanticMathCallArity(name: string): number {
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||
+      name === "__hfma" ||
       name === "lerp" ||
       name === "norm3df" ||
       name === "rnorm3df" ||
@@ -3319,6 +3429,7 @@ function wgslBindingType(valueType: CudaLiteScalarType | undefined): WgslValueTy
 }
 
 function wgslScalar(valueType: CudaLiteScalarType | undefined): WgslValueType | "bool" {
+  if (valueType === "half") return "f16";
   if (valueType === "int") return "i32";
   if (valueType === "uint") return "u32";
   if (valueType === "bool") return "bool";
@@ -3342,6 +3453,7 @@ function wgslAtomicScalar(valueType: CudaLiteScalarType | undefined): Extract<Wg
 }
 
 function wgslUniformScalar(valueType: CudaLiteScalarType | undefined): WgslValueType {
+  if (valueType === "half") return "f16";
   if (valueType === "int") return "i32";
   if (valueType === "uint" || valueType === "bool") return "u32";
   return "f32";
@@ -3365,7 +3477,14 @@ function semanticExpressionVectorValueType(
 function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {
   switch (expression.kind) {
     case "call": {
-      if (expression.callee.kind === "symbol" && SEMANTIC_MATH_CALLS.get(expression.callee.name) && semanticMathCallReturnsFloat(expression.callee.name)) return "f32";
+      if (expression.callee.kind === "symbol") {
+        const mathCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
+        if (mathCallee && semanticMathCallReturnsFloat(expression.callee.name)) return "f32";
+        if (mathCallee === "hadd" && expression.valueType === "half") return "f16";
+        if (mathCallee && semanticMathCallReturnsHalf(mathCallee)) return "f16";
+        if (mathCallee && mathCallee.startsWith("half_to_int_")) return "i32";
+        if (mathCallee && (mathCallee.startsWith("half_to_uint_") || mathCallee === "half_as_ushort" || mathCallee.startsWith("half_") && !semanticMathCallReturnsHalf(mathCallee))) return "u32";
+      }
       if (semanticWgslMathCallSupported(expression) && (expression.valueType === undefined || expression.valueType === "float")) return "f32";
       const atomicType = semanticAtomicCallValueType(expression);
       return atomicType ? wgslAtomicScalar(atomicType) : wgslValueScalar(expression.valueType);
@@ -3405,7 +3524,23 @@ function isSemanticWgslFloatVectorType(valueType: CudaLiteScalarType | undefined
 
 function semanticMathCallReturnsFloat(name: string): boolean {
   const callee = SEMANTIC_MATH_CALLS.get(name);
-  return callee === "builtin_inf" || callee === "uint_as_float" || callee === "int_as_float";
+  return callee === "builtin_inf" || callee === "uint_as_float" || callee === "int_as_float" || callee === "half_to_float";
+}
+
+function semanticMathCallReturnsHalf(callee: string): boolean {
+  return callee === "to_half" ||
+    callee === "int_to_half" ||
+    callee === "uint_to_half" ||
+    callee === "ushort_as_half" ||
+    callee === "half_rsqrt" ||
+    callee === "half_neg" ||
+    callee === "half_sub" ||
+    callee === "half_mul" ||
+    callee === "half_div" ||
+    callee === "half_fma" ||
+    callee === "half_exp" ||
+    callee === "half_min" ||
+    callee === "half_max";
 }
 
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {
@@ -3413,6 +3548,7 @@ function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefi
   if (type === "u32") return `${Math.trunc(value) >>> 0}u`;
   if (type === "i32" && value > 2147483647) return `bitcast<i32>(${Math.trunc(value) >>> 0}u)`;
   if (type === "i32") return String(Math.trunc(value));
+  if (type === "f16") return `f16(${Number.isInteger(value) ? `${value}.0` : String(value)})`;
   if (Number.isInteger(value)) return `${value}.0`;
   return String(value);
 }
@@ -3425,6 +3561,7 @@ function zeroForType(valueType: SemanticWgslValueType): string {
   if (valueType === "u32") return "0u";
   if (valueType === "i32") return "0";
   if (valueType === "bool") return "false";
+  if (valueType === "f16") return "f16(0.0)";
   if (valueType === "vec2<f32>") return "vec2<f32>(0.0)";
   if (valueType === "vec3<f32>") return "vec3<f32>(0.0)";
   if (valueType === "vec4<f32>") return "vec4<f32>(0.0)";
@@ -3614,6 +3751,7 @@ function semanticExpressionChildren(expression: SemanticExpression): readonly Se
 }
 
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
+  if (expression.callee.kind !== "symbol" || !WGSL_ATOMIC_CALLEES.has(expression.callee.name)) return undefined;
   const firstArg = expression.args[0];
   if (!firstArg) return undefined;
   if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
