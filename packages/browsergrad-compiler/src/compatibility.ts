@@ -99,7 +99,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("invalid-constant-input", "memory", "Invalid constant input", "unsupported", false, false, "Constant binding has an incompatible host representation."),
   feature("invalid-memory-pool", "memory", "Invalid memory-pool input", "unsupported", false, false, "Memory pool binding has incompatible data or offset storage."),
   feature("unguarded-write", "safety", "Unguarded pointer write", "native", true, true, "Compiler warning; launch/rubric may enforce bounds discipline."),
-  feature("unsupported-constant-memory", "memory", "Constant memory", "unsupported", false, true, "Future readonly binding lowering."),
+  feature("unsupported-constant-memory", "memory", "Constant memory", "unsupported", false, true, "Readonly scalar inputs, initialized scalar constants, and readonly constant arrays lower through modeled memory paths; remaining vector/advanced constant-memory forms need backend-neutral semantic lowering."),
   feature("unsupported-texture", "texture", "Texture/surface access", "unsupported", false, true, "Scalar direct and texture-helper-param tex2D/tex2DLod paths lower through semantic IR; descriptor, vector, atlas, and advanced texture forms use remaining modeled paths or are unsupported."),
   feature("unsupported-surface", "texture", "Unsupported surface access", "unsupported", false, true, "Direct scalar surface reads/writes and scalar surface helper params lower through semantic IR; vector and advanced surface forms use remaining modeled paths or are unsupported."),
   feature("unsupported-cooperative-groups", "subgroup", "Cooperative groups", "unsupported", false, true, "Future group semantic IR."),

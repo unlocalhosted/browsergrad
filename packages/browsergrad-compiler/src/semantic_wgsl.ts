@@ -130,9 +130,10 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     rawNames.add(surfaceHeightField(surface.name));
   }
   const names = createWgslNameMap([...rawNames]);
+  const initializedScalarConstants = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length === 0);
   const uniformParams = [
     ...ir.params.filter((param) => param.addressSpace === "uniform"),
-    ...constantMemorySymbols(ir).filter((symbol) => symbol.dimensions.length === 0),
+    ...constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length === 0),
     ...surfaces.flatMap((surface) => [
       { name: surfaceWidthField(surface.name), valueType: "uint" as const, span: surface.span },
       { name: surfaceHeightField(surface.name), valueType: "uint" as const, span: surface.span },
@@ -219,6 +220,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   }
   for (const texture of textures) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
+  }
+  for (const constant of initializedScalarConstants) {
+    lines.push(`const ${nameFor(constant.name, names)}: ${wgslScalar(constant.valueType)} = ${emitSemanticExpressionAs(constant.init ?? zeroExpression(constant.span), ir, names, wgslValueScalar(constant.valueType))};`);
   }
   if (semanticUsesGenericSurfaceRead(ir)) {
     lines.push("", ...emitSemanticGenericSurfaceReadHelper(surfaces, names));
@@ -366,7 +370,13 @@ function operationsContainDeclare(operations: readonly SemanticKernelIrOperation
 
 function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
-  if (symbol.kind === "constant") return !symbol.initialized && semanticWgslScalarTypeSupported(symbol.valueType);
+  if (symbol.kind === "constant") {
+    if (!semanticWgslScalarTypeSupported(symbol.valueType)) return false;
+    return !symbol.initialized ||
+      symbol.dimensions.length === 0 &&
+      symbol.init !== undefined &&
+      semanticWgslExpressionSupported(symbol.init, "scalar");
+  }
   if (symbol.kind === "device-global") return semanticWgslScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "texture") return symbol.valueType === "texture2d";
   return false;

@@ -270,7 +270,13 @@ function operationsContainDeclare(operations: readonly SemanticKernelIrOperation
 
 function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): boolean {
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
-  if (symbol.kind === "constant") return !symbol.initialized && semanticReferenceScalarTypeSupported(symbol.valueType);
+  if (symbol.kind === "constant") {
+    if (!semanticReferenceScalarTypeSupported(symbol.valueType)) return false;
+    return !symbol.initialized ||
+      symbol.dimensions.length === 0 &&
+      symbol.init !== undefined &&
+      semanticReferenceExpressionSupported(symbol.init, "scalar");
+  }
   if (symbol.kind === "device-global") return semanticReferenceScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "texture") return symbol.valueType === "texture2d";
   return false;
@@ -1571,8 +1577,30 @@ function semanticReferenceConstants(compiled: CompiledCudaLiteKernel, input: Com
   for (const constant of compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant")) {
     const value = input.constants?.[constant.name];
     if (value !== undefined) constants.set(constant.name, value);
+    else if (constant.initialized && constant.dimensions.length === 0 && constant.init !== undefined) {
+      constants.set(constant.name, evalConstantInitNumber(constant.init));
+    }
   }
   return constants;
+}
+
+function evalConstantInitNumber(expression: SemanticExpression): number {
+  switch (expression.kind) {
+    case "literal":
+      return typeof expression.value === "number" ? expression.value : 0;
+    case "cast":
+      return castNumber(evalConstantInitNumber(expression.expression), expression.valueType);
+    case "unary":
+      return evalUnary(expression.operator, evalConstantInitNumber(expression.argument));
+    case "binary":
+      return evalBinary(expression.operator, evalConstantInitNumber(expression.left), evalConstantInitNumber(expression.right));
+    case "conditional":
+      return truthy(evalConstantInitNumber(expression.condition))
+        ? evalConstantInitNumber(expression.consequent)
+        : evalConstantInitNumber(expression.alternate);
+    default:
+      return 0;
+  }
 }
 
 function typedArrayForScalar(valueType: CudaLiteScalarType | undefined, length: number): WgslTypedArray {

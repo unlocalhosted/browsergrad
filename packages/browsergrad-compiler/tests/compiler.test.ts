@@ -12602,6 +12602,43 @@ __global__ void scale(const float *x, float *y, int n) {
     expect([...result.buffers.y as Float32Array]).toEqual([3, 6, 9, 12]);
   });
 
+  it("embeds initialized scalar CUDA constants through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float scaleFactor = 0.5f;
+__global__ void scaleInitialized(float *x, float *y) {
+  int idx = threadIdx.x;
+  y[idx] = x[idx] * scaleFactor;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2, 4, 6, 8]),
+          y: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2, 4, 6, 8]),
+          y: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("const scaleFactor: f32 = 0.5;");
+    expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("scaleFactor");
+    expect([...semanticResult.buffers.y as Float32Array]).toEqual([1, 2, 3, 4]);
+    expect([...result.buffers.y as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
   it("accepts const-qualified CUDA constant arrays", () => {
     const compiled = compileCudaLiteKernel(`
 __constant__ const int table[2] = {3, 5};

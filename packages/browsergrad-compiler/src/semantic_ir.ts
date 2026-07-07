@@ -49,6 +49,7 @@ export interface CudaLiteSemanticSymbol {
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly constant?: boolean;
   readonly initialized?: boolean;
+  readonly init?: SemanticExpression;
   readonly dimensions: readonly number[];
   readonly addressSpace: SemanticAddressSpace;
   readonly span: SourceSpan;
@@ -826,6 +827,7 @@ function symbolForConstant(constant: CudaLiteGlobalConstant): CudaLiteSemanticSy
     pointer: false,
     constant: true,
     initialized: constant.init !== undefined,
+    ...(constant.init === undefined ? {} : { init: lowerExpression(constant.init, new Map()) }),
     dimensions: constant.dimensions,
     addressSpace: "constant",
     span: constant.span,
