@@ -8150,6 +8150,42 @@ __global__ void textureSurfaceVectorHelperRoundtrip(cudaSurfaceObject_t surf, cu
     expect(compiled.wgsl).not.toContain("; 0;");
   });
 
+  it("lowers scalar surface write helper params through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void write_value(cudaSurfaceObject_t surfaceArg, float value) {
+  surf2Dwrite(value, surfaceArg, 4, 0);
+}
+
+__global__ void surfaceHelperWrite(cudaSurfaceObject_t surf) {
+  write_value(surf, 17.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {},
+        surfaces: { surf: { width: 2, height: 1, data: new Float32Array(2) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {},
+        surfaces: { surf: { width: 2, height: 1, data: new Float32Array(2) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_sem_surf2dwrite(surface: u32, value: f32, x_bytes: i32, y: i32, z: i32)");
+    expect(compiled.wgsl).toContain("write_value(0u, 17.0)");
+    expect(compiled.wgsl).toContain("bg_sem_surf2dwrite(surfaceArg, value, 4, 0, 0);");
+    expect([...result.buffers.surf as Float32Array]).toEqual([0, 17]);
+    expect([...semanticResult.buffers.surf as Float32Array]).toEqual([0, 17]);
+  });
+
   it("lowers vector surf2Dread pointer-form calls lane-wise", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void surfaceVectorRead(cudaSurfaceObject_t surf, float *out) {

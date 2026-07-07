@@ -223,6 +223,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   if (semanticUsesGenericSurfaceRead(ir)) {
     lines.push("", ...emitSemanticGenericSurfaceReadHelper(surfaces, names));
   }
+  if (semanticUsesGenericSurfaceWrite(ir)) {
+    lines.push("", ...emitSemanticGenericSurfaceWriteHelper(surfaces, names));
+  }
   for (const surface of surfaces) {
     lines.push("", ...emitSemanticSurfaceReadHelper(surface, names));
   }
@@ -507,6 +510,8 @@ function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKer
   return operations.every((operation) => {
     if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
     if (operation.kind === "store") return operation.target.addressSpace === "local";
+    if (operation.kind === "surface-write") return true;
+    if (operation.kind === "call") return true;
     if (operation.kind === "branch") return semanticWgslFunctionBodyShapeSupported(operation.consequent) && semanticWgslFunctionBodyShapeSupported(operation.alternate);
     if (operation.kind === "loop") return semanticWgslFunctionBodyShapeSupported(operation.body);
     return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
@@ -534,6 +539,7 @@ function semanticWgslCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
+  if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
   return target?.kind === "symbol" &&
@@ -543,6 +549,19 @@ function semanticWgslCallSupported(
     localArraySymbol(ir, target.name) !== undefined;
 }
 
+function semanticWgslVoidFunctionCallSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const fn = ir.functions.find((item) => item.name === operation.callee);
+  if (!fn || fn.returnType !== "void") return false;
+  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
+  return operation.args.length === fn.params.length &&
+    operation.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
+    semanticWgslFunctionBodyShapeSupported(fn.body) &&
+    unsupportedSemanticWgslOperation(fn.body, ir, true) === undefined;
+}
+
 function semanticWgslSurfaceWriteSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-write" }>,
   ir: SemanticKernelIrModule,
@@ -550,7 +569,6 @@ function semanticWgslSurfaceWriteSupported(
   const target = operation.surface;
   return target.kind === "symbol" &&
     target.addressSpace === "surface" &&
-    surfaceSymbols(ir).some((surface) => surface.name === target.name) &&
     semanticWgslExpressionSupported(operation.value, "scalar", ir) &&
     semanticWgslExpressionSupported(operation.xBytes, "scalar", ir) &&
     semanticWgslExpressionSupported(operation.y, "scalar", ir) &&
@@ -761,27 +779,13 @@ function emitSemanticSurfaceWrite(
   }
   const prefix = "  ".repeat(indentLevel);
   const surfaceName = operation.surface.name;
-  const surface = nameFor(surfaceName, names);
   const xBytes = emitSemanticExpressionAs(operation.xBytes, ir, names, "i32");
   const y = emitSemanticExpressionAs(operation.y, ir, names, "i32");
   const z = operation.z ? emitSemanticExpressionAs(operation.z, ir, names, "i32") : "0";
   const value = emitSemanticExpressionAs(operation.value, ir, names, "f32");
-  const width = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceWidthField(surfaceName), names)}`;
-  const height = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceHeightField(surfaceName), names)}`;
-  return [
-    `${prefix}{`,
-    `${prefix}  let bg_x_bytes = ${xBytes};`,
-    `${prefix}  if (bg_x_bytes >= 0 && (bg_x_bytes % 4) == 0) {`,
-    `${prefix}    let bg_x = bg_x_bytes / 4;`,
-    `${prefix}    let bg_y = ${y};`,
-    `${prefix}    let bg_z = ${z};`,
-    `${prefix}    let bg_index = ((bg_z * i32(${height})) + bg_y) * i32(${width}) + bg_x;`,
-    `${prefix}    if (bg_x >= 0 && bg_x < i32(${width}) && bg_y >= 0 && bg_y < i32(${height}) && bg_z >= 0 && bg_index >= 0 && bg_index < i32(arrayLength(&${surface}))) {`,
-    `${prefix}      ${surface}[bg_index] = ${value};`,
-    `${prefix}    }`,
-    `${prefix}  }`,
-    `${prefix}}`,
-  ];
+  const directSurface = surfaceSymbols(ir).find((surface) => surface.name === surfaceName);
+  if (!directSurface) return [`${prefix}${GENERIC_SURFACE_WRITE_HELPER_NAME}(${nameFor(surfaceName, names)}, ${value}, ${xBytes}, ${y}, ${z});`];
+  return emitSemanticSurfaceWriteBody(directSurface, value, xBytes, y, z, names, indentLevel);
 }
 
 function emitSemanticStore(
@@ -819,10 +823,11 @@ function emitSemanticFunction(
   names: ReadonlyMap<string, string>,
 ): readonly string[] {
   const params = fn.params.map((param) => `${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)}`).join(", ");
+  const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
   return [
-    `fn ${nameFor(fn.name, names)}(${params}) -> ${wgslScalar(fn.returnType)} {`,
+    `fn ${nameFor(fn.name, names)}(${params})${returnType} {`,
     ...emitSemanticOperations(fn.body, ir, names, 1, true),
-    `  return ${zeroForType(wgslScalar(fn.returnType))};`,
+    ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslScalar(fn.returnType))};`]),
     "}",
   ];
 }
@@ -901,8 +906,19 @@ function emitSemanticCall(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
 ): readonly string[] {
+  if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names)};`];
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
+}
+
+function emitSemanticVoidFunctionCall(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  const fn = ir.functions.find((item) => item.name === operation.callee);
+  if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${operation.callee}'`, operation.span);
+  return `${nameFor(fn.name, names)}(${operation.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names)).join(", ")})`;
 }
 
 function emitSemanticLocalArrayFill(
@@ -1077,6 +1093,7 @@ function emitSemanticSurfaceRead(
 }
 
 const GENERIC_SURFACE_READ_HELPER_NAME = "bg_sem_surf2dread";
+const GENERIC_SURFACE_WRITE_HELPER_NAME = "bg_sem_surf2dwrite";
 
 function emitSemanticGenericSurfaceReadHelper(
   surfaces: readonly SemanticKernelIrModule["params"][number][],
@@ -1093,6 +1110,52 @@ function emitSemanticGenericSurfaceReadHelper(
   lines.push("  return 0.0;");
   lines.push("}");
   return lines;
+}
+
+function emitSemanticGenericSurfaceWriteHelper(
+  surfaces: readonly SemanticKernelIrModule["params"][number][],
+  names: ReadonlyMap<string, string>,
+): readonly string[] {
+  const lines = [
+    `fn ${GENERIC_SURFACE_WRITE_HELPER_NAME}(surface: u32, value: f32, x_bytes: i32, y: i32, z: i32) {`,
+  ];
+  for (const [index, surface] of surfaces.entries()) {
+    lines.push(`  if (surface == ${index}u) {`);
+    lines.push(...emitSemanticSurfaceWriteBody(surface, "value", "x_bytes", "y", "z", names, 2));
+    lines.push("  }");
+  }
+  lines.push("}");
+  return lines;
+}
+
+function emitSemanticSurfaceWriteBody(
+  surfaceSymbol: SemanticKernelIrModule["params"][number],
+  value: string,
+  xBytes: string,
+  y: string,
+  z: string,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  const surfaceName = surfaceSymbol.name;
+  const surface = nameFor(surfaceName, names);
+  const width = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceWidthField(surfaceName), names)}`;
+  const height = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceHeightField(surfaceName), names)}`;
+  return [
+    `${prefix}{`,
+    `${prefix}  let bg_x_bytes = ${xBytes};`,
+    `${prefix}  if (bg_x_bytes >= 0 && (bg_x_bytes % 4) == 0) {`,
+    `${prefix}    let bg_x = bg_x_bytes / 4;`,
+    `${prefix}    let bg_y = ${y};`,
+    `${prefix}    let bg_z = ${z};`,
+    `${prefix}    let bg_index = ((bg_z * i32(${height})) + bg_y) * i32(${width}) + bg_x;`,
+    `${prefix}    if (bg_x >= 0 && bg_x < i32(${width}) && bg_y >= 0 && bg_y < i32(${height}) && bg_z >= 0 && bg_index >= 0 && bg_index < i32(arrayLength(&${surface}))) {`,
+    `${prefix}      ${surface}[bg_index] = ${value};`,
+    `${prefix}    }`,
+    `${prefix}  }`,
+    `${prefix}}`,
+  ];
 }
 
 function emitSemanticSurfaceReadHelper(
@@ -1441,6 +1504,22 @@ function surfaceHandleForName(name: string, ir: SemanticKernelIrModule): number 
 
 function semanticUsesGenericSurfaceRead(ir: SemanticKernelIrModule): boolean {
   return ir.functions.some((fn) => fn.params.some((param) => param.addressSpace === "surface") && semanticOperationsUseSurfaceParamRead(fn.body, new Set(fn.params.filter((param) => param.addressSpace === "surface").map((param) => param.name))));
+}
+
+function semanticUsesGenericSurfaceWrite(ir: SemanticKernelIrModule): boolean {
+  return ir.functions.some((fn) => fn.params.some((param) => param.addressSpace === "surface") && semanticOperationsUseSurfaceParamWrite(fn.body, new Set(fn.params.filter((param) => param.addressSpace === "surface").map((param) => param.name))));
+}
+
+function semanticOperationsUseSurfaceParamWrite(
+  operations: readonly SemanticKernelIrOperation[],
+  surfaceParams: ReadonlySet<string>,
+): boolean {
+  for (const operation of operations) {
+    if (operation.kind === "surface-write" && operation.surface.kind === "symbol" && surfaceParams.has(operation.surface.name)) return true;
+    if (operation.kind === "branch" && (semanticOperationsUseSurfaceParamWrite(operation.consequent, surfaceParams) || semanticOperationsUseSurfaceParamWrite(operation.alternate, surfaceParams))) return true;
+    if (operation.kind === "loop" && semanticOperationsUseSurfaceParamWrite(operation.body, surfaceParams)) return true;
+  }
+  return false;
 }
 
 function semanticOperationsUseSurfaceParamRead(

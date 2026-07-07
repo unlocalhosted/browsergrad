@@ -417,6 +417,8 @@ function semanticReferenceFunctionBodyShapeSupported(operations: readonly Semant
   return operations.every((operation) => {
     if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
     if (operation.kind === "store") return operation.target.addressSpace === "local";
+    if (operation.kind === "surface-write") return true;
+    if (operation.kind === "call") return true;
     if (operation.kind === "branch") return semanticReferenceFunctionBodyShapeSupported(operation.consequent) && semanticReferenceFunctionBodyShapeSupported(operation.alternate);
     if (operation.kind === "loop") return semanticReferenceFunctionBodyShapeSupported(operation.body);
     return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
@@ -445,6 +447,7 @@ function semanticReferenceCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
+  if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
   return target?.kind === "symbol" &&
@@ -458,6 +461,19 @@ function semanticReferenceCallSupported(
     );
 }
 
+function semanticReferenceVoidFunctionCallSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  if (!fn || fn.returnType !== "void") return false;
+  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
+  return operation.args.length === fn.params.length &&
+    operation.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
+    semanticReferenceFunctionBodyShapeSupported(fn.body) &&
+    unsupportedSemanticReferenceOperation(fn.body, compiled, true) === undefined;
+}
+
 function semanticReferenceSurfaceWriteSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-write" }>,
   compiled: CompiledCudaLiteKernel,
@@ -465,7 +481,6 @@ function semanticReferenceSurfaceWriteSupported(
   const surface = operation.surface;
   return surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
-    compiled.kernelIr.params.some((param) => param.name === surface.name && param.addressSpace === "surface") &&
     semanticReferenceExpressionSupported(operation.value, "scalar", compiled) &&
     semanticReferenceExpressionSupported(operation.xBytes, "scalar", compiled) &&
     semanticReferenceExpressionSupported(operation.y, "scalar", compiled) &&
@@ -863,11 +878,24 @@ function execSemanticCall(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
 ): void {
+  if (semanticReferenceVoidFunctionCallSupported(operation, context.compiled)) {
+    execSemanticVoidFunctionCall(operation, context);
+    return;
+  }
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) {
     execSemanticLocalArrayFill(operation, context);
     return;
   }
   throw semanticReferenceError(`semantic reference does not support call '${operation.callee}'`, operation.span);
+}
+
+function execSemanticVoidFunctionCall(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): void {
+  const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  if (!fn) throw semanticReferenceError(`semantic reference unknown function '${operation.callee}'`, operation.span);
+  runSemanticFunction(fn, operation.args, context, operation.span);
 }
 
 function execSemanticLocalArrayFill(
@@ -1151,12 +1179,25 @@ function evalSemanticFunctionCall(
   const callee = expression.callee.name;
   const fn = context.compiled.kernelIr.functions.find((item) => item.name === callee);
   if (!fn) throw semanticReferenceError(`semantic reference unknown function '${callee}'`, expression.span);
+  const child = runSemanticFunction(fn, expression.args, context, expression.span);
+  if (typeof child.returnValue !== "number") {
+    throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
+  }
+  return child.returnValue;
+}
+
+function runSemanticFunction(
+  fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number],
+  args: readonly SemanticExpression[],
+  context: SemanticReferenceContext,
+  span: SourceSpan,
+): SemanticReferenceContext {
   const locals = new Map<string, SemanticValue>();
   const textures = { ...context.textures };
   const surfaces = { ...context.surfaces };
   for (const [index, param] of fn.params.entries()) {
-    const arg = expression.args[index];
-    if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, expression.span);
+    const arg = args[index];
+    if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, span);
     if (param.addressSpace === "texture") {
       if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticReferenceError(`semantic reference function '${fn.name}' texture argument must be a texture symbol`, arg.span);
       const texture = context.textures[arg.name];
@@ -1191,10 +1232,10 @@ function evalSemanticFunctionCall(
     trace: context.trace,
   };
   const control = execSemanticOperations(fn.body, child);
-  if (control !== "return" || typeof child.returnValue !== "number") {
+  if (fn.returnType !== "void" && control !== "return") {
     throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
   }
-  return child.returnValue;
+  return child;
 }
 
 function semanticMathCallArity(name: string): number {

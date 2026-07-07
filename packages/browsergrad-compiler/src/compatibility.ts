@@ -101,7 +101,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unguarded-write", "safety", "Unguarded pointer write", "native", true, true, "Compiler warning; launch/rubric may enforce bounds discipline."),
   feature("unsupported-constant-memory", "memory", "Constant memory", "unsupported", false, true, "Future readonly binding lowering."),
   feature("unsupported-texture", "texture", "Texture/surface access", "unsupported", false, true, "Scalar direct and texture-helper-param tex2D/tex2DLod paths lower through semantic IR; descriptor, vector, atlas, and advanced texture forms use remaining modeled paths or are unsupported."),
-  feature("unsupported-surface", "texture", "Unsupported surface access", "unsupported", false, true, "Direct scalar surface reads/writes and scalar surface-read helper params lower through semantic IR; vector, write-helper, and advanced surface forms use remaining modeled paths or are unsupported."),
+  feature("unsupported-surface", "texture", "Unsupported surface access", "unsupported", false, true, "Direct scalar surface reads/writes and scalar surface helper params lower through semantic IR; vector and advanced surface forms use remaining modeled paths or are unsupported."),
   feature("unsupported-cooperative-groups", "subgroup", "Cooperative groups", "unsupported", false, true, "Future group semantic IR."),
   feature("unsupported-subgroup", "subgroup", "Unsupported subgroup primitive", "unsupported", false, true, "Subgroup operation requires modeled WebGPU subgroup or scalar fallback semantics."),
   feature("unsupported-dynamic-parallelism", "runtime", "Dynamic parallelism", "unsupported", false, true, "Future device enqueue + host launch loop."),
