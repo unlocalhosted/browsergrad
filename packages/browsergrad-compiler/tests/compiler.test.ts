@@ -7109,9 +7109,19 @@ __global__ void cache_hint(const float* x, float* y) {
       { buffers: { x: new Float32Array([0, 2, 4]), y: new Float32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { x: new Float32Array([0, 2, 4]), y: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
 
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cache-hint-address");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("var value: f32 = x[");
     expect(compiled.wgsl).toContain("y[");
+    expect([...semanticResult.buffers.y as Float32Array]).toEqual([3, 7]);
     expect([...result.buffers.y as Float32Array]).toEqual([3, 7]);
   });
 

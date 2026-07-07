@@ -16,6 +16,7 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
+import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -438,6 +439,20 @@ function lowerStatement(
             span: statement.span,
           };
         }
+        if (statement.expression.kind === "call" && CUDA_CACHE_HINT_STORES.has(expression.callee.name)) {
+          const cacheTarget = cacheHintStoreTarget(statement.expression, scope);
+          const value = expression.args[1];
+          if (cacheTarget && value) {
+            return {
+              kind: "store",
+              target: cacheTarget,
+              value,
+              operator: "=",
+              reads: collectMemoryRefs(value),
+              span: statement.span,
+            };
+          }
+        }
         return {
           kind: "call",
           callee: expression.callee.name,
@@ -554,6 +569,10 @@ function lowerExpression(
     }
     case "call": {
       const args = expression.args.map((arg) => lowerExpression(arg, scope));
+      if (expression.callee.kind === "identifier" && CUDA_CACHE_HINT_LOADS.has(expression.callee.name)) {
+        const load = cacheHintLoadExpression(expression, scope);
+        if (load) return load;
+      }
       if (
         expression.callee.kind === "identifier" &&
         TEXTURE_2D_READ_CALLS.has(expression.callee.name) &&
@@ -703,6 +722,43 @@ function collectDeclaredMemory(operations: readonly SemanticKernelIrOperation[])
     else if (operation.kind === "loop") out.push(...collectDeclaredMemory(operation.body));
   }
   return out;
+}
+
+function cacheHintLoadExpression(
+  expression: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  const pointer = expression.args[0];
+  return pointer === undefined ? undefined : pointerAliasValueExpression(pointer, scope, expression.span);
+}
+
+function cacheHintStoreTarget(
+  expression: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticMemoryRef | undefined {
+  const pointer = expression.args[0];
+  if (pointer === undefined) return undefined;
+  const target = pointerAliasValueExpression(pointer, scope, pointer.span);
+  return target === undefined ? undefined : memoryRefFromExpression(target);
+}
+
+function pointerAliasValueExpression(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticExpression | undefined {
+  const alias = localPointerAliasForInitializer(expression, scope);
+  if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
+  const root = scope.get(alias.pointerRoot);
+  if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;
+  return {
+    kind: "index",
+    target: semanticSymbolExpression(root, span),
+    index: alias.pointerBaseIndices[0]!,
+    ...optionalValueType(root.valueType),
+    addressSpace: root.addressSpace,
+    span,
+  };
 }
 
 function atomicTargetFromCall(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
