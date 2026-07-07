@@ -19,6 +19,7 @@ import type {
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
+import { cudaVectorFieldIndex, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -254,7 +255,8 @@ export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLit
   const constants = analysis.constants.map(symbolForConstant);
   const deviceGlobals = analysis.deviceGlobals.map(symbolForDeviceGlobal);
   const textures = analysis.textures.map(symbolForTexture);
-  const globalScope = new Map([...params, ...constants, ...deviceGlobals, ...textures].map((symbol) => [symbol.name, symbol]));
+  const functionSymbols = analysis.functions.map(symbolForFunctionDeclaration);
+  const globalScope = new Map([...params, ...constants, ...deviceGlobals, ...textures, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
   const functions = analysis.functions.map((fn) => symbolForFunction(fn, globalScope));
   return {
     kind: "cuda-lite-semantic-model",
@@ -272,7 +274,8 @@ export function lowerSemanticModelToKernelIr(
   semantic: CudaLiteSemanticModel,
   options: { readonly workgroupSize?: readonly [number, number, number] } = {},
 ): SemanticKernelIrModule {
-  const scope = new Map(semantic.symbols.map((symbol) => [symbol.name, symbol]));
+  const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
+  const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
   const operations = lowerStatements(analysis.kernel.body, scope);
   const localMemory = collectDeclaredMemory(operations);
   const reachable = collectReachableAnalysisNames(analysis);
@@ -630,12 +633,13 @@ function lowerExpression(
           span: expression.span,
         };
       }
+      const callee = lowerExpression(expression.callee, scope);
       return {
         kind: "call",
-        callee: lowerExpression(expression.callee, scope),
+        callee,
         args,
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
-        ...optionalValueType(expression.templateValueType ?? expressionValueType(args[0])),
+        ...optionalValueType(expression.templateValueType ?? expressionValueType(callee) ?? expressionValueType(args[0])),
         span: expression.span,
       };
     }
@@ -1441,6 +1445,32 @@ function symbolForFunction(
   };
 }
 
+function symbolForFunctionDeclaration(fn: CudaLiteDeviceFunction): CudaLiteSemanticSymbol {
+  return {
+    name: fn.name,
+    kind: "function",
+    valueType: fn.returnType,
+    pointer: false,
+    constant: true,
+    dimensions: [],
+    addressSpace: "function",
+    span: fn.span,
+  };
+}
+
+function symbolForSemanticFunctionDeclaration(fn: CudaLiteSemanticFunction): CudaLiteSemanticSymbol {
+  return {
+    name: fn.name,
+    kind: "function",
+    valueType: fn.returnType,
+    pointer: false,
+    constant: true,
+    dimensions: [],
+    addressSpace: "function",
+    span: fn.span,
+  };
+}
+
 function symbolForFunctionParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
   const symbol = symbolForParam(param);
   if (symbol.addressSpace === "texture" || symbol.addressSpace === "surface") return symbol;
@@ -2005,6 +2035,10 @@ function paramAddressSpace(param: CudaLiteParam): SemanticAddressSpace {
 function memberValueType(object: SemanticExpression, property: string): CudaLiteScalarType | undefined {
   if (property === "x" || property === "y" || property === "z") {
     if (object.kind === "symbol" && (object.name === "threadIdx" || object.name === "blockIdx" || object.name === "blockDim" || object.name === "gridDim")) return "uint";
+  }
+  const objectType = expressionValueType(object);
+  if (isCudaVectorType(objectType) && cudaVectorFieldIndex(objectType, property) !== undefined) {
+    return cudaVectorScalarType(objectType);
   }
   return expressionValueType(object);
 }

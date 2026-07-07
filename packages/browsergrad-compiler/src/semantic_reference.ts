@@ -19,6 +19,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
+import { cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | Vector3 | number[];
 type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas";
@@ -197,9 +198,13 @@ function unsupportedSemanticReferenceOperation(
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
-        if (!semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
+        if (!semanticReferenceValueTypeSupported(operation.target.valueType)) return operation;
         if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init)) return operation;
-        if (operation.target.dimensions.length === 0 && operation.init && !semanticReferenceExpressionSupported(operation.init, "scalar", compiled)) return operation;
+        if (operation.target.dimensions.length === 0) {
+          const vectorTarget = isSemanticReferenceFloatVectorType(operation.target.valueType);
+          if (vectorTarget && !operation.init) return operation;
+          if (operation.init && !semanticReferenceExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", compiled)) return operation;
+        }
         break;
       case "store":
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
@@ -237,7 +242,7 @@ function unsupportedSemanticReferenceOperation(
         if (operation.update && !semanticReferenceExpressionSupported(operation.update, "scalar", compiled)) return operation;
         break;
       case "return":
-        if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "scalar", compiled))) return operation;
+        if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "any", compiled))) return operation;
         break;
       case "barrier":
         if (operation.callee !== "__syncthreads") return operation;
@@ -332,6 +337,10 @@ function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | un
   return valueType === "float" || valueType === "int" || valueType === "uint";
 }
 
+function semanticReferenceValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return semanticReferenceScalarTypeSupported(valueType) || isSemanticReferenceFloatVectorType(valueType);
+}
+
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local" && ref.addressSpace !== "shared") {
     return false;
@@ -393,7 +402,7 @@ function semanticReferenceTextureReadSupported(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return expression.valueType === "float" &&
+  return (expression.valueType === "float" || isSemanticReferenceFloatVectorType(expression.valueType)) &&
     expression.texture.kind === "symbol" &&
     expression.texture.addressSpace === "texture" &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
@@ -424,7 +433,7 @@ function semanticReferenceFunctionCallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const callee = expression.callee.name;
   const fn = compiled.kernelIr.functions.find((item) => item.name === callee);
-  if (!fn || !semanticReferenceScalarTypeSupported(fn.returnType)) return false;
+  if (!fn || !semanticReferenceValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
   if (fn.params.some((param) => param.addressSpace === "local" && !semanticReferenceScalarTypeSupported(param.valueType))) return false;
   if (!semanticReferenceFunctionBodyShapeSupported(fn.body)) return false;
@@ -561,13 +570,14 @@ function semanticReferenceExpressionSupported(
     case "literal":
       return typeof expression.value === "number";
     case "symbol":
+      if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return expression.addressSpace === "uniform" ||
         expression.addressSpace === "local" ||
         expression.addressSpace === "constant" ||
         expression.addressSpace === "device-global" ||
         isBuiltinVectorSymbol(expression.name);
     case "member":
-      return isBuiltinVectorMember(expression);
+      return isBuiltinVectorMember(expression) || semanticReferenceVectorMemberSupported(expression, compiled);
     case "index":
       return expected === "scalar" && semanticReferenceMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
     case "cast":
@@ -597,9 +607,11 @@ function semanticReferenceExpressionSupported(
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         semanticReferenceMathCallSupported(expression);
     case "texture-read":
-      return compiled !== undefined && expected === "scalar" && semanticReferenceTextureReadSupported(expression, compiled);
+      return compiled !== undefined &&
+        (expected === "any" || expression.valueType === "float") &&
+        semanticReferenceTextureReadSupported(expression, compiled);
     case "surface-read":
-      return compiled !== undefined && expected === "scalar" && semanticReferenceSurfaceReadSupported(expression, compiled);
+      return compiled !== undefined && (expected === "scalar" || expected === "any") && semanticReferenceSurfaceReadSupported(expression, compiled);
     case "initializer":
       return false;
   }
@@ -744,6 +756,20 @@ function isBuiltinVectorMember(expression: Extract<SemanticExpression, { kind: "
   return expression.object.kind === "symbol" &&
     isBuiltinVectorSymbol(expression.object.name) &&
     (expression.property === "x" || expression.property === "y" || expression.property === "z");
+}
+
+function semanticReferenceVectorMemberSupported(
+  expression: Extract<SemanticExpression, { kind: "member" }>,
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  const valueType = semanticExpressionValueType(expression.object);
+  return semanticReferenceExpressionSupported(expression.object, "any", compiled) &&
+    isCudaVectorType(valueType) &&
+    cudaVectorFieldIndex(valueType, expression.property) !== undefined;
+}
+
+function semanticExpressionValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
+  return "valueType" in expression ? expression.valueType : undefined;
 }
 
 function execSemanticOperations(
@@ -894,7 +920,7 @@ function semanticDeclareValue(
     }
     return values;
   }
-  return operation.init ? evalNumber(operation.init, context) : 0;
+  return operation.init ? evalSemanticExpression(operation.init, context) : 0;
 }
 
 function execSemanticAtomic(
@@ -1099,18 +1125,20 @@ function evalSemanticSurfaceRead(
 function evalSemanticTextureRead(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
   if (!semanticReferenceTextureReadSupported(expression, context.compiled) || expression.texture.kind !== "symbol") {
-    throw semanticReferenceError("semantic reference supports only direct tex2D<float> reads", expression.span);
+    throw semanticReferenceError("semantic reference supports only direct scalar/vector tex2D reads", expression.span);
   }
   const texture = context.textures[expression.texture.name];
   if (!texture) throw semanticReferenceError(`missing texture input '${expression.texture.name}'`, expression.texture.span);
   const channels = texture.channels ?? 1;
   const descriptor = context.textureDescriptors[expression.texture.name] ?? {};
-  if (descriptor.filterMode === "linear") return evalSemanticLinearTextureRead(texture, descriptor, expression, context, channels);
+  if (descriptor.filterMode === "linear") {
+    return evalSemanticTextureValue(expression.valueType, (lane) => evalSemanticLinearTextureRead(texture, descriptor, expression, context, channels, lane));
+  }
   const x = semanticTextureCoord(evalNumber(expression.x, context), texture.width, descriptor, "x");
   const y = semanticTextureCoord(evalNumber(expression.y, context), texture.height, descriptor, "y");
-  return texture.data[(y * texture.width + x) * channels] ?? 0;
+  return evalSemanticTextureValue(expression.valueType, (lane) => texture.data[(y * texture.width + x) * channels + lane] ?? 0);
 }
 
 function evalSemanticLinearTextureRead(
@@ -1119,16 +1147,29 @@ function evalSemanticLinearTextureRead(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   context: SemanticReferenceContext,
   channels: number,
+  lane = 0,
 ): number {
   const x = semanticLinearTextureAxis(evalNumber(expression.x, context), texture.width, descriptor, "x");
   const y = semanticLinearTextureAxis(evalNumber(expression.y, context), texture.height, descriptor, "y");
-  const v00 = texture.data[(y.i0 * texture.width + x.i0) * channels] ?? 0;
-  const v10 = texture.data[(y.i0 * texture.width + x.i1) * channels] ?? 0;
-  const v01 = texture.data[(y.i1 * texture.width + x.i0) * channels] ?? 0;
-  const v11 = texture.data[(y.i1 * texture.width + x.i1) * channels] ?? 0;
+  const v00 = texture.data[(y.i0 * texture.width + x.i0) * channels + lane] ?? 0;
+  const v10 = texture.data[(y.i0 * texture.width + x.i1) * channels + lane] ?? 0;
+  const v01 = texture.data[(y.i1 * texture.width + x.i0) * channels + lane] ?? 0;
+  const v11 = texture.data[(y.i1 * texture.width + x.i1) * channels + lane] ?? 0;
   const top = v00 + (v10 - v00) * x.alpha;
   const bottom = v01 + (v11 - v01) * x.alpha;
   return top + (bottom - top) * y.alpha;
+}
+
+function evalSemanticTextureValue(
+  valueType: CudaLiteScalarType | undefined,
+  laneValue: (lane: number) => number,
+): SemanticValue {
+  if (!isSemanticReferenceFloatVectorType(valueType)) return laneValue(0);
+  return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) => laneValue(lane));
+}
+
+function isSemanticReferenceFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "float2" || valueType === "float3" || valueType === "float4";
 }
 
 function semanticTextureCoord(
@@ -1307,14 +1348,14 @@ function modfFraction(value: number): number {
 function evalSemanticFunctionCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference function call requires symbol callee", expression.span);
   const callee = expression.callee.name;
   const fn = context.compiled.kernelIr.functions.find((item) => item.name === callee);
   if (!fn) throw semanticReferenceError(`semantic reference unknown function '${callee}'`, expression.span);
   const child = runSemanticFunction(fn, expression.args, context, expression.span);
-  if (typeof child.returnValue !== "number") {
-    throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
+  if (child.returnValue === undefined) {
+    throw semanticReferenceError(`semantic reference function '${fn.name}' did not return value`, fn.span);
   }
   return child.returnValue;
 }
@@ -1556,11 +1597,24 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
 }
 
 function memberValue(value: SemanticValue, property: string, span: SourceSpan): number {
-  if (typeof value === "number" || Array.isArray(value)) throw semanticReferenceError("semantic member target is not a vector", span);
+  if (Array.isArray(value)) {
+    const index = vectorFieldIndex(property);
+    if (index !== undefined) return value[index] ?? 0;
+    throw semanticReferenceError(`unsupported semantic member '${property}'`, span);
+  }
+  if (typeof value === "number") throw semanticReferenceError("semantic member target is not a vector", span);
   if (property === "x") return value.x;
   if (property === "y") return value.y;
   if (property === "z") return value.z;
   throw semanticReferenceError(`unsupported semantic member '${property}'`, span);
+}
+
+function vectorFieldIndex(property: string): number | undefined {
+  if (property === "x" || property === "r" || property === "s0") return 0;
+  if (property === "y" || property === "g" || property === "s1") return 1;
+  if (property === "z" || property === "b" || property === "s2") return 2;
+  if (property === "w" || property === "a" || property === "s3") return 3;
+  return undefined;
 }
 
 function evalUnary(operator: string, value: number): number {

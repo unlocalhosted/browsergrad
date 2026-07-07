@@ -18,6 +18,7 @@ import type {
 import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
+import { cudaVectorFieldIndex, isCudaVectorType } from "./vector_types.js";
 
 export interface SemanticKernelIrWgslOutput {
   readonly wgsl: string;
@@ -35,6 +36,7 @@ interface SemanticTextureDescriptorSignature {
 }
 
 type SemanticTextureDescriptorSpecializations = ReadonlyMap<string, ReadonlyMap<string, SemanticTextureDescriptorSignature>>;
+type SemanticWgslValueType = WgslValueType | "bool" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>";
 
 interface SemanticTextureDescriptorHelper {
   readonly textureName: string;
@@ -347,9 +349,13 @@ function unsupportedSemanticWgslOperation(
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
-        if (!semanticWgslScalarTypeSupported(operation.target.valueType)) return operation;
+        if (!semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
         if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init)) return operation;
-        if (operation.target.dimensions.length === 0 && operation.init && !semanticWgslExpressionSupported(operation.init, "scalar", ir)) return operation;
+        if (operation.target.dimensions.length === 0) {
+          const vectorTarget = isSemanticWgslFloatVectorType(operation.target.valueType);
+          if (vectorTarget && !operation.init) return operation;
+          if (operation.init && !semanticWgslExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", ir)) return operation;
+        }
         break;
       case "store":
         if (!semanticWgslAssignmentOperatorSupported(operation.operator)) return operation;
@@ -403,7 +409,7 @@ function unsupportedSemanticWgslOperation(
         if (operation.callee !== "__syncthreads") return operation;
         break;
       case "return":
-        if (operation.value && (!allowReturnValue || !semanticWgslExpressionSupported(operation.value, "scalar", ir))) return operation;
+        if (operation.value && (!allowReturnValue || !semanticWgslExpressionSupported(operation.value, "any", ir))) return operation;
         break;
       case "break":
       case "continue":
@@ -476,6 +482,10 @@ function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefin
   return valueType === "float" || valueType === "int" || valueType === "uint";
 }
 
+function semanticWgslValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return semanticWgslScalarTypeSupported(valueType) || isSemanticWgslFloatVectorType(valueType);
+}
+
 function semanticWgslAssignmentOperatorSupported(operator: string): boolean {
   return operator === "=" || operator === "+=" || operator === "-=";
 }
@@ -535,6 +545,16 @@ function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir
     expression.kind === "surface-read" && semanticWgslSurfaceReadSupported(expression, ir);
 }
 
+function semanticWgslVectorMemberSupported(
+  expression: Extract<SemanticExpression, { kind: "member" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  const valueType = semanticExpressionValueType(expression.object);
+  return semanticWgslExpressionSupported(expression.object, "any", ir) &&
+    isCudaVectorType(valueType) &&
+    cudaVectorFieldIndex(valueType, expression.property) !== undefined;
+}
+
 function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
   return expression.kind === "initializer" &&
     flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, "scalar"));
@@ -551,7 +571,7 @@ function semanticWgslTextureReadSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   const texture = expression.texture;
-  return expression.valueType === "float" &&
+  return (expression.valueType === "float" || isSemanticWgslFloatVectorType(expression.valueType)) &&
     texture.kind === "symbol" &&
     texture.addressSpace === "texture" &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
@@ -578,7 +598,7 @@ function semanticWgslFunctionCallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const callee = expression.callee.name;
   const fn = ir.functions.find((item) => item.name === callee);
-  if (!fn || !semanticWgslScalarTypeSupported(fn.returnType)) return false;
+  if (!fn || !semanticWgslValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
   if (fn.params.some((param) => param.addressSpace === "local" && !semanticWgslScalarTypeSupported(param.valueType))) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body)) return false;
@@ -902,6 +922,7 @@ function semanticWgslExpressionSupported(
     case "literal":
       return typeof expression.value === "number";
     case "symbol":
+      if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return expression.addressSpace === "uniform" ||
         expression.addressSpace === "local" ||
         expression.addressSpace === "constant" ||
@@ -911,7 +932,8 @@ function semanticWgslExpressionSupported(
     case "member":
       return expression.object.kind === "symbol" &&
         BUILTIN_VECTOR_NAMES.has(expression.object.name) &&
-        (expression.property === "x" || expression.property === "y" || expression.property === "z");
+        (expression.property === "x" || expression.property === "y" || expression.property === "z") ||
+        semanticWgslVectorMemberSupported(expression, ir);
     case "index":
       return expected === "scalar" && semanticWgslMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
     case "cast":
@@ -940,9 +962,11 @@ function semanticWgslExpressionSupported(
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
         semanticWgslMathCallSupported(expression);
     case "texture-read":
-      return ir !== undefined && expected === "scalar" && semanticWgslTextureReadSupported(expression, ir);
+      return ir !== undefined &&
+        (expected === "any" || expression.valueType === "float") &&
+        semanticWgslTextureReadSupported(expression, ir);
     case "surface-read":
-      return ir !== undefined && expected === "scalar" && semanticWgslSurfaceReadSupported(expression, ir);
+      return ir !== undefined && (expected === "scalar" || expected === "any") && semanticWgslSurfaceReadSupported(expression, ir);
     case "initializer":
       return false;
   }
@@ -979,8 +1003,8 @@ function emitSemanticOperation(
           ...emitLocalArrayInit(operation, ir, names, indentLevel, options, textureSpecializations),
         ];
       }
-      const type = wgslScalar(operation.target.valueType);
-      const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations)}` : "";
+      const type = wgslValueType(operation.target.valueType);
+      const init = operation.init ? ` = ${emitSemanticInitExpression(operation.init, operation.target.valueType, ir, names, options, textureSpecializations)}` : "";
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
     }
     case "store":
@@ -1128,11 +1152,11 @@ function emitSemanticFunction(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   const params = fn.params.map((param) => `${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)}`).join(", ");
-  const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
+  const returnType = fn.returnType === "void" ? "" : ` -> ${wgslValueType(fn.returnType)}`;
   return [
     `fn ${nameFor(rawName, names)}(${params})${returnType} {`,
     ...emitSemanticOperations(fn.body, ir, names, 1, true, options, textureSpecializations),
-    ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslScalar(fn.returnType))};`]),
+    ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslValueType(fn.returnType))};`]),
     "}",
   ];
 }
@@ -1538,9 +1562,13 @@ function emitSemanticTextureRead(
   const y = emitSemanticExpressionAs(expression.y, ir, names, "f32", options);
   const texture = nameFor(expression.texture.name, names);
   const descriptor = options.textureDescriptors?.[expression.texture.name];
-  if (descriptor) return `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`;
-  const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
-  return `textureLoad(${texture}, ${coord}, 0).r`;
+  const read = descriptor
+    ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`
+    : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
+  if (expression.valueType === "float2") return `${read}.xy`;
+  if (expression.valueType === "float3") return `${read}.xyz`;
+  if (expression.valueType === "float4") return read;
+  return `${read}.r`;
 }
 
 function emitSemanticTextureDescriptorHelper(
@@ -1552,7 +1580,7 @@ function emitSemanticTextureDescriptorHelper(
   const helper = semanticTextureDescriptorHelperName(textureName, names, descriptor);
   if (descriptor.filterMode === "linear") {
     return [
-      `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> f32 {`,
+      `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> vec4<f32> {`,
       `  let dims = textureDimensions(${texture});`,
       `  let sx = ${semanticTextureScaledCoord("x", "dims.x", descriptor)};`,
       `  let sy = ${semanticTextureScaledCoord("y", "dims.y", descriptor)};`,
@@ -1566,20 +1594,20 @@ function emitSemanticTextureDescriptorHelper(
       `  let x1 = ${semanticTextureIndex("(i32(x0f) + 1)", "dims.x", descriptor, "x")};`,
       `  let y0 = ${semanticTextureIndex("i32(y0f)", "dims.y", descriptor, "y")};`,
       `  let y1 = ${semanticTextureIndex("(i32(y0f) + 1)", "dims.y", descriptor, "y")};`,
-      `  let v00 = textureLoad(${texture}, vec2<i32>(x0, y0), 0).r;`,
-      `  let v10 = textureLoad(${texture}, vec2<i32>(x1, y0), 0).r;`,
-      `  let v01 = textureLoad(${texture}, vec2<i32>(x0, y1), 0).r;`,
-      `  let v11 = textureLoad(${texture}, vec2<i32>(x1, y1), 0).r;`,
+      `  let v00 = textureLoad(${texture}, vec2<i32>(x0, y0), 0);`,
+      `  let v10 = textureLoad(${texture}, vec2<i32>(x1, y0), 0);`,
+      `  let v01 = textureLoad(${texture}, vec2<i32>(x0, y1), 0);`,
+      `  let v11 = textureLoad(${texture}, vec2<i32>(x1, y1), 0);`,
       "  return mix(mix(v00, v10, ax), mix(v01, v11, ax), ay);",
       "}",
     ];
   }
   return [
-    `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> f32 {`,
+    `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> vec4<f32> {`,
     `  let dims = textureDimensions(${texture});`,
     `  let ix = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("x", "dims.x", descriptor)}))`, "dims.x", descriptor, "x")};`,
     `  let iy = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("y", "dims.y", descriptor)}))`, "dims.y", descriptor, "y")};`,
-    `  return textureLoad(${texture}, vec2<i32>(ix, iy), 0).r;`,
+    `  return textureLoad(${texture}, vec2<i32>(ix, iy), 0);`,
     "}",
   ];
 }
@@ -1685,6 +1713,18 @@ function emitSemanticExpressionAs(
   const sourceType = semanticExpressionWgslScalar(expression);
   if (sourceType === targetType) return emitted;
   return `${targetType}(${emitted})`;
+}
+
+function emitSemanticInitExpression(
+  expression: SemanticExpression,
+  valueType: CudaLiteScalarType | undefined,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  if (isSemanticWgslFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
 
 function emitSemanticAtomicCall(
@@ -2262,6 +2302,13 @@ function wgslScalar(valueType: CudaLiteScalarType | undefined): WgslValueType | 
   return "f32";
 }
 
+function wgslValueType(valueType: CudaLiteScalarType | undefined): SemanticWgslValueType {
+  if (valueType === "float2") return "vec2<f32>";
+  if (valueType === "float3") return "vec3<f32>";
+  if (valueType === "float4") return "vec4<f32>";
+  return wgslScalar(valueType);
+}
+
 function wgslValueScalar(valueType: CudaLiteScalarType | undefined): WgslValueType {
   const scalar = wgslScalar(valueType);
   return scalar === "bool" ? "u32" : scalar;
@@ -2317,6 +2364,10 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
   }
 }
 
+function isSemanticWgslFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "float2" || valueType === "float3" || valueType === "float4";
+}
+
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {
   const type = expectedType ?? wgslScalar(valueType);
   if (type === "u32") return `${Math.trunc(value) >>> 0}u`;
@@ -2330,10 +2381,13 @@ function zeroExpression(span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value: 0, valueType: "int", span };
 }
 
-function zeroForType(valueType: WgslValueType | "bool"): string {
+function zeroForType(valueType: SemanticWgslValueType): string {
   if (valueType === "u32") return "0u";
   if (valueType === "i32") return "0";
   if (valueType === "bool") return "false";
+  if (valueType === "vec2<f32>") return "vec2<f32>(0.0)";
+  if (valueType === "vec3<f32>") return "vec3<f32>(0.0)";
+  if (valueType === "vec4<f32>") return "vec4<f32>(0.0)";
   return "0.0";
 }
 

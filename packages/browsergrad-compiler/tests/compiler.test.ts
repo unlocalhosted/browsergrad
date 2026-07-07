@@ -14126,6 +14126,36 @@ __global__ void sample(float *out, uint *bits) {
     expect([...result.buffers.bits as Uint32Array]).toEqual([0x3f8d, 0x400d3f8d]);
   });
 
+  it("lowers float4 texture helper returns through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float4 readPixel(cudaTextureObject_t texSrc, float x) {
+  return tex2D<float4>(texSrc, x + 0.5f, 0.5f);
+}
+__global__ void sample(float *out, cudaTextureObject_t tex) {
+  int x = threadIdx.x;
+  float4 value = readPixel(tex, (float)x);
+  out[x * 4 + 0] = value.x;
+  out[x * 4 + 1] = value.y;
+  out[x * 4 + 2] = value.z;
+  out[x * 4 + 3] = value.w;
+}`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(8) },
+      textures: { tex: { width: 2, height: 1, channels: 4 as const, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [2, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn readPixel(texSrc: texture_2d<f32>, x: f32) -> vec4<f32>");
+    expect(compiled.wgsl).toContain("textureLoad(texSrc");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
   it("passes CUDA texture handles through device helper params", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float sampleAt(cudaTextureObject_t texSrc, float x) {
