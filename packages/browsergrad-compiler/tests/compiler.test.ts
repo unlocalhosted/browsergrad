@@ -10703,6 +10703,39 @@ __global__ void surfaceVectorRead(cudaSurfaceObject_t surf, float *out) {
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
+  it("lowers typed uint4 surface vector reads and writes through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceUintVectorReadWrite(cudaSurfaceObject_t surf, uint4 *out) {
+  uint4 pointerValue;
+  surf2Dread(&pointerValue, surf, 0, 0);
+  uint4 returnValue = surf2Dread<uint4>(surf, 0, 0);
+  uint4 written = make_uint4(11u, 12u, 13u, 14u);
+  surf2Dwrite(written, surf, 0, 0);
+  uint4 afterWrite = surf2Dread<uint4>(surf, 0, 0);
+  out[0] = pointerValue;
+  out[1] = returnValue;
+  out[2] = afterWrite;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(12) },
+      surfaces: { surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("select(vec4<u32>(), vec4<u32>(u32(bg_sem_surf2dread_surf");
+    expect(compiled.wgsl).toContain("surf[bg_index] = f32((written).x);");
+    expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 3, 4, 1, 2, 3, 4, 11, 12, 13, 14]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 2, 3, 4, 1, 2, 3, 4, 11, 12, 13, 14]);
+    expect([...result.buffers.surf as Float32Array]).toEqual([11, 12, 13, 14]);
+    expect([...semanticResult.buffers.surf as Float32Array]).toEqual([11, 12, 13, 14]);
+  });
+
   it("preserves templated vector surf2Dread return type in device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float4 read_surface_vec_return(cudaSurfaceObject_t surfaceArg) {

@@ -579,7 +579,7 @@ function semanticReferenceSurfaceReadSupported(
   return (expression.valueType === "float" ||
       expression.valueType === "uint" ||
       expression.valueType === "int" ||
-      isSemanticReferenceFloatTextureVectorType(expression.valueType)) &&
+      isSemanticReferenceFloatVectorType(expression.valueType)) &&
     surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
     semanticReferenceExpressionSupported(expression.xBytes, "scalar", compiled) &&
@@ -815,7 +815,7 @@ function semanticReferenceSurfaceWriteSupported(
 
 function semanticReferenceSurfaceValueSupported(expression: SemanticExpression): boolean {
   const valueType = semanticExpressionValueType(expression);
-  return !isSemanticReferenceFloatVectorType(valueType) || isSemanticReferenceFloatTextureVectorType(valueType);
+  return !isSemanticReferenceFloatVectorType(valueType) || isCudaVectorType(valueType);
 }
 
 function semanticReferenceSurfaceReadStoreSupported(
@@ -1755,10 +1755,6 @@ function evalSemanticTextureValue(
 
 function isSemanticReferenceFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
   return isCudaVectorType(valueType);
-}
-
-function isSemanticReferenceFloatTextureVectorType(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float2" || valueType === "float3" || valueType === "float4" || valueType === "half2" || valueType === "bf162";
 }
 
 function semanticTextureCoord(

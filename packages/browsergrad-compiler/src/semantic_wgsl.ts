@@ -1157,7 +1157,7 @@ function semanticWgslSurfaceReadSupported(
   return (expression.valueType === "float" ||
       expression.valueType === "uint" ||
       expression.valueType === "int" ||
-      isSemanticWgslFloatTextureVectorType(expression.valueType)) &&
+      isSemanticWgslFloatVectorType(expression.valueType)) &&
     target.kind === "symbol" &&
     target.addressSpace === "surface" &&
     semanticWgslExpressionSupported(expression.xBytes, "scalar", ir) &&
@@ -1568,7 +1568,7 @@ function semanticWgslSurfaceWriteSupported(
 
 function semanticWgslSurfaceValueSupported(expression: SemanticExpression): boolean {
   const valueType = semanticExpressionValueType(expression);
-  return !isSemanticWgslFloatVectorType(valueType) || isSemanticWgslFloatTextureVectorType(valueType);
+  return !isSemanticWgslFloatVectorType(valueType) || isCudaVectorType(valueType);
 }
 
 function semanticWgslSurfaceReadStoreSupported(
@@ -1975,7 +1975,7 @@ function emitSemanticSurfaceVectorWrite(
   const prefix = "  ".repeat(indentLevel);
   const fields = ["x", "y", "z", "w"];
   const laneWrites = Array.from({ length: cudaVectorLaneCount(valueType) }).flatMap((_, lane) => {
-    const laneValue = `(${value}).${fields[lane]}`;
+    const laneValue = semanticSurfaceWriteLaneValue(value, valueType, fields[lane]!);
     const laneXBytes = `(${xBytes} + ${lane * 4})`;
     if (!directSurface) {
       return [`${prefix}${GENERIC_SURFACE_WRITE_HELPER_NAME}(${nameFor(surfaceName, names)}, ${laneValue}, ${laneXBytes}, ${y}, ${z});`];
@@ -1987,6 +1987,11 @@ function emitSemanticSurfaceVectorWrite(
     ...laneWrites.map((line) => `${prefix}  ${line.slice(prefix.length)}`),
     `${prefix}}`,
   ];
+}
+
+function semanticSurfaceWriteLaneValue(value: string, valueType: CudaLiteScalarType | undefined, field: string): string {
+  const laneValue = `(${value}).${field}`;
+  return wgslVectorScalar(valueType) === "f32" ? laneValue : `f32(${laneValue})`;
 }
 
 function emitSemanticStore(
@@ -2916,9 +2921,11 @@ function emitSemanticSurfaceRead(
     ? `${surfaceReadHelperName(surfaceName, names)}(${xBytesExpr}, ${y}, ${z})`
     : `${GENERIC_SURFACE_READ_HELPER_NAME}(${nameFor(surfaceName, names)}, ${xBytesExpr}, ${y}, ${z})`;
   if (isSemanticWgslFloatVectorType(expression.valueType)) {
-    const lanes = Array.from({ length: cudaVectorLaneCount(expression.valueType) }, (_, lane) => `f32(${readAt(`(${xBytes} + ${lane * 4})`)})`);
-    const vector = `vec${lanes.length}<f32>(${lanes.join(", ")})`;
-    return `select(vec${lanes.length}<f32>(), ${vector}, (${xBytes} >= 0 && (${xBytes} % 4) == 0))`;
+    const laneType = wgslVectorScalar(expression.valueType);
+    const lanes = Array.from({ length: cudaVectorLaneCount(expression.valueType) }, (_, lane) => `${laneType}(${readAt(`(${xBytes} + ${lane * 4})`)})`);
+    const vectorType = wgslValueType(expression.valueType);
+    const vector = `${vectorType}(${lanes.join(", ")})`;
+    return `select(${vectorType}(), ${vector}, (${xBytes} >= 0 && (${xBytes} % 4) == 0))`;
   }
   const read = readAt(xBytes);
   if (expression.valueType === "uint") return `u32(${read})`;
@@ -4916,10 +4923,6 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
 
 function isSemanticWgslFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
   return isCudaVectorType(valueType);
-}
-
-function isSemanticWgslFloatTextureVectorType(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float2" || valueType === "float3" || valueType === "float4" || valueType === "half2" || valueType === "bf162";
 }
 
 function semanticMathCallReturnsFloat(name: string): boolean {
