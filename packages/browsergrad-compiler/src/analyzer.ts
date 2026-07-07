@@ -1634,6 +1634,22 @@ function validateInlineAsmStatement(
   if (op?.kind === "globaltimer-u64" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
+  if (op?.kind === "isspacep" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `isspacep.${op.space} inline PTX expects one output operand and one pointer input operand`, statement.span));
+  }
+  if (op?.kind === "isspacep" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int" && outputInfos[0]?.valueType !== "bool") {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `isspacep.${op.space} inline PTX writes an integer predicate output operand`, outputs[0]?.span ?? statement.span));
+  }
+  if (op?.kind === "isspacep") {
+    const input = statement.inputs[0];
+    if (input) {
+      const info = walkExpression(input, scope);
+      if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "array" && info.kind !== "unknown") {
+        asmDiagnostics.push(error("invalid-inline-asm-operands", `isspacep.${op.space} inline PTX expects a pointer input operand`, input.span));
+      }
+    }
+    return;
+  }
   if (op?.kind === "bfind-u32" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one output operand and one input operand", statement.span));
   }

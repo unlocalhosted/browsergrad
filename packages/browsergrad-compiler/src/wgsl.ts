@@ -2235,6 +2235,9 @@ function emitInlineAsmStatement(
     const tick = `((workgroup_id.x * ${context.ir.workgroupSize[0]}u) + u32(${emitLocalLinearRank(context)}))`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, tick, context)}`;
   }
+  if (op?.kind === "isspacep" && statement.inputs.length === 1 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineAsmAddressPredicate(op.space, statement.inputs[0]!, context), context)}`;
+  }
   if (op?.kind === "bfind-u32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
   }
@@ -6190,6 +6193,20 @@ function addressPredicateSpaceForEmit(
   if (context.poolPointerFor(root) || context.externalPoolNames.includes(root)) return "pool";
   if (localArrayForStorageView(root, expression.span, context) || context.localValueTypeFor(root) !== undefined) return "local";
   return undefined;
+}
+
+function emitInlineAsmAddressPredicate(
+  space: "global" | "shared" | "const" | "local",
+  target: CudaLiteExpression,
+  context: EmitContext,
+): string {
+  const actual = addressPredicateSpaceForEmit(target, context);
+  const matches =
+    space === "global" ? actual === "global" :
+      space === "shared" ? actual === "shared" :
+        space === "const" ? actual === "constant" :
+          actual === "local";
+  return matches ? "1u" : "0u";
 }
 
 function emitCall(expression: CudaLiteCallExpression, context: EmitContext): string {

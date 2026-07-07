@@ -2074,6 +2074,25 @@ __global__ void addressSpacePredicates(float *global, int *out) {
     out[3] = __isShared(global);
   }
 }`,
+  ptxIsspacepPredicates: `
+__global__ void ptxIsspacepPredicates(float *global, int *out) {
+  __shared__ float tile[1];
+  float local[1];
+  int g;
+  int s;
+  int l;
+  int sg;
+  asm volatile("isspacep.global %0, %1;" : "=r"(g) : "l"(global));
+  asm volatile("isspacep.shared %0, %1;" : "=r"(s) : "l"(tile));
+  asm volatile("isspacep.local %0, %1;" : "=r"(l) : "l"(local));
+  asm volatile("isspacep.shared %0, %1;" : "=r"(sg) : "l"(global));
+  if (threadIdx.x == 0) {
+    out[0] = g;
+    out[1] = s;
+    out[2] = l;
+    out[3] = sg;
+  }
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -12441,6 +12460,20 @@ const html = String.raw`<!doctype html>
           {
             name: "intrinsics:address-space-predicates",
             source: SOURCES.addressSpacePredicates,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                global: new Float32Array(1),
+                out: new Int32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [1, 1, 1, 0] },
+          },
+          {
+            name: "inline-asm:isspacep",
+            source: SOURCES.ptxIsspacepPredicates,
             options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({

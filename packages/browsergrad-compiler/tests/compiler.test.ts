@@ -4798,6 +4798,38 @@ __global__ void addressPredicates(float *global, int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 0]);
   });
 
+  it("lowers PTX isspacep address predicates as native compile-time constants", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void isspacepPredicates(float *global, int *out) {
+  __shared__ float tile[1];
+  float local[1];
+  int g;
+  int s;
+  int l;
+  int sg;
+  asm volatile("isspacep.global %0, %1;" : "=r"(g) : "l"(global));
+  asm volatile("isspacep.shared %0, %1;" : "=r"(s) : "l"(tile));
+  asm volatile("isspacep.local %0, %1;" : "=r"(l) : "l"(local));
+  asm volatile("isspacep.shared %0, %1;" : "=r"(sg) : "l"(global));
+  if (threadIdx.x == 0) {
+    out[0] = g;
+    out[1] = s;
+    out[2] = l;
+    out[3] = sg;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { global: new Float32Array(1), out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("g = i32(1u)");
+    expect(compiled.wgsl).toContain("sg = i32(0u)");
+    expect([...result.buffers.out as Int32Array]).toEqual([1, 1, 1, 0]);
+  });
+
   it("lowers CUDA warp vote helpers with boolean predicates", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void voteBoolKernel(bool *info, int warp_size) {

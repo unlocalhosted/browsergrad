@@ -4,6 +4,7 @@ export type InlineAsmOp =
   | { readonly kind: "warpid" }
   | { readonly kind: "lanemask-lt" }
   | { readonly kind: "globaltimer-u64" }
+  | { readonly kind: "isspacep"; readonly space: "global" | "shared" | "const" | "local" }
   | { readonly kind: "bfind-u32" }
   | { readonly kind: "u8x4-sad-add" }
   | {
@@ -21,6 +22,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\bmov\.u32\b/u.test(template) && /%%warpid\b/u.test(template)) return { kind: "warpid" };
   if (/\bmov\.u32\b/u.test(template) && /%%lanemask_lt\b/u.test(template)) return { kind: "lanemask-lt" };
   if (/\bmov\.u64\b/u.test(template) && /%globaltimer\b/u.test(template)) return { kind: "globaltimer-u64" };
+  const isspacep = /\bisspacep\.(global|shared|const|local)\b/u.exec(template);
+  if (isspacep) return { kind: "isspacep", space: isspacep[1] as "global" | "shared" | "const" | "local" };
   if (/\bbfind\.u32\b/u.test(template)) return { kind: "bfind-u32" };
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
   if (/\bfma\.rn\.f32\b/u.test(template)) return { kind: "fma-rn-f32" };
@@ -49,6 +52,7 @@ export function inlineAsmSupportedList(): string {
     "warpid",
     "lanemask_lt",
     "globaltimer",
+    "isspacep.{global,shared,const,local}",
     "bfind.u32",
     "vabsdiff4.u32.u32.u32.add",
     "ldmatrix.sync.aligned.x{1,2,4}.m8n8.shared.b16",

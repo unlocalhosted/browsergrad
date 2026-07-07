@@ -828,6 +828,12 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), tick, context);
     return;
   }
+  if (op?.kind === "isspacep") {
+    if (statement.inputs.length !== 1) throw compilerFailure(`isspacep.${op.space} inline asm expects one input`);
+    if (outputs.length !== 1) throw compilerFailure(`isspacep.${op.space} inline asm expects one output operand`);
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmAddressPredicate(op.space, statement.inputs[0]!, context), context);
+    return;
+  }
   if (op?.kind === "bfind-u32") {
     if (statement.inputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one input");
     if (outputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one output operand");
@@ -876,6 +882,18 @@ function execInlineAsm(
   const a = evalNumber(statement.inputs[0]!, context);
   const b = evalNumber(statement.inputs[1]!, context);
   writeLValue(target, current + a * b, context);
+}
+
+function evalInlineAsmAddressPredicate(
+  space: "global" | "shared" | "const" | "local",
+  target: CudaLiteExpression,
+  context: ThreadContext,
+): number {
+  const actual = addressPredicateSpace(target, context);
+  if (space === "global") return actual === "buffer" || actual === "device-global" ? 1 : 0;
+  if (space === "shared") return actual === "shared" ? 1 : 0;
+  if (space === "const") return actual === "constant" ? 1 : 0;
+  return actual === "local" ? 1 : 0;
 }
 
 function execMmaM16N8K16(
