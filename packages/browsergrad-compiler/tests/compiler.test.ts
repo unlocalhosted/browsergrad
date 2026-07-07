@@ -7814,8 +7814,10 @@ __global__ void surfaceLayeredWrite(cudaSurfaceObject_t outputSurf) {
   surf2DLayeredwrite(23.0f, outputSurf, 1 * sizeof(float), 1, 1);
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf(23.0, (1 * 4), i32(1), i32(1))");
-    expect(compiled.wgsl).not.toContain("bg_surf2dwrite_outputSurf(23.0, (1 * 4), i32((1 + 1)), i32(0))");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("let bg_z = 1;");
+    expect(compiled.wgsl).toContain("let bg_index = ((bg_z * i32(bg_uniforms.outputSurf_height)) + bg_y) * i32(bg_uniforms.outputSurf_width) + bg_x;");
+    expect(compiled.wgsl).toContain("outputSurf[bg_index] = 23.0;");
   });
 
   it("lowers cudaSurfaceObject_t surf2DLayeredread to z-linearized layer storage", () => {
@@ -13019,9 +13021,22 @@ __global__ void writeSurface(CUsurfObject surf) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {},
+        surfaces: { surf: { width: 2, height: 1, data: new Float32Array([3, 9]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect(backendIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<storage, read_write> surf: array<f32>;");
     expect([...result.buffers.surf as Float32Array]).toEqual([3, 13]);
+    expect([...semanticResult.buffers.surf as Float32Array]).toEqual([3, 13]);
   });
 
   it("formats diagnostics with source snippets", () => {

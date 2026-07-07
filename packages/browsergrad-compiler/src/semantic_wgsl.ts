@@ -124,10 +124,19 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     for (const param of fn.params) rawNames.add(param.name);
     for (const operation of fn.body) collectOperationNames(operation, rawNames);
   }
+  const surfaces = surfaceSymbols(ir);
+  for (const surface of surfaces) {
+    rawNames.add(surfaceWidthField(surface.name));
+    rawNames.add(surfaceHeightField(surface.name));
+  }
   const names = createWgslNameMap([...rawNames]);
   const uniformParams = [
     ...ir.params.filter((param) => param.addressSpace === "uniform"),
     ...constantMemorySymbols(ir).filter((symbol) => symbol.dimensions.length === 0),
+    ...surfaces.flatMap((surface) => [
+      { name: surfaceWidthField(surface.name), valueType: "uint" as const, span: surface.span },
+      { name: surfaceHeightField(surface.name), valueType: "uint" as const, span: surface.span },
+    ]),
   ];
   const constantBuffers = constantMemorySymbols(ir).filter((symbol) => symbol.dimensions.length > 0);
   const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
@@ -158,6 +167,15 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
       kind: "storage",
       name: global.name,
       valueType: wgslBindingType(global.valueType),
+      access: "read_write",
+      binding: bindings.length,
+    });
+  }
+  for (const surface of surfaces) {
+    bindings.push({
+      kind: "storage",
+      name: surface.name,
+      valueType: "f32",
       access: "read_write",
       binding: bindings.length,
     });
@@ -195,6 +213,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
       ? `atomic<${wgslAtomicScalar(global.valueType)}>`
       : wgslScalar(global.valueType);
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, global.name)}) var<storage, read_write> ${nameFor(global.name, names)}: array<${elementType}>;`);
+  }
+  for (const surface of surfaces) {
+    lines.push(`@group(0) @binding(${bindingIndexFor(bindings, surface.name)}) var<storage, read_write> ${nameFor(surface.name, names)}: array<f32>;`);
   }
   for (const texture of textures) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
@@ -262,6 +283,9 @@ function unsupportedSemanticWgslOperation(
         ) return operation;
         if (!semanticWgslValueExpressionSupported(operation.value, ir)) return operation;
         break;
+      case "surface-write":
+        if (!semanticWgslSurfaceWriteSupported(operation, ir)) return operation;
+        break;
       case "atomic":
         if (!semanticWgslAtomicSupported(operation, ir)) return operation;
         break;
@@ -308,6 +332,7 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
   if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
+  if (param.addressSpace === "surface") return param.valueType === "surface2d";
   return false;
 }
 
@@ -485,6 +510,20 @@ function semanticWgslCallSupported(
     localArraySymbol(ir, target.name) !== undefined;
 }
 
+function semanticWgslSurfaceWriteSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-write" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const target = operation.surface;
+  return target.kind === "symbol" &&
+    target.addressSpace === "surface" &&
+    surfaceSymbols(ir).some((surface) => surface.name === target.name) &&
+    semanticWgslExpressionSupported(operation.value, "scalar", ir) &&
+    semanticWgslExpressionSupported(operation.xBytes, "scalar", ir) &&
+    semanticWgslExpressionSupported(operation.y, "scalar", ir) &&
+    (operation.z === undefined || semanticWgslExpressionSupported(operation.z, "scalar", ir));
+}
+
 function semanticWgslAtomicTargetRootSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (ref.addressSpace === "storage") {
     return ir.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
@@ -584,6 +623,8 @@ function emitSemanticOperation(
     }
     case "store":
       return [`${prefix}${emitSemanticStore(operation, ir, names)};`];
+    case "surface-write":
+      return emitSemanticSurfaceWrite(operation, ir, names, indentLevel);
     case "atomic":
       return [`${prefix}${emitSemanticAtomic(operation, ir, names)};`];
     case "call":
@@ -618,6 +659,40 @@ function emitSemanticOperation(
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
+}
+
+function emitSemanticSurfaceWrite(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-write" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  if (!semanticWgslSurfaceWriteSupported(operation, ir) || operation.surface.kind !== "symbol") {
+    throw semanticWgslError("semantic WGSL supports only direct scalar surf2Dwrite", operation.span);
+  }
+  const prefix = "  ".repeat(indentLevel);
+  const surfaceName = operation.surface.name;
+  const surface = nameFor(surfaceName, names);
+  const xBytes = emitSemanticExpressionAs(operation.xBytes, ir, names, "i32");
+  const y = emitSemanticExpressionAs(operation.y, ir, names, "i32");
+  const z = operation.z ? emitSemanticExpressionAs(operation.z, ir, names, "i32") : "0";
+  const value = emitSemanticExpressionAs(operation.value, ir, names, "f32");
+  const width = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceWidthField(surfaceName), names)}`;
+  const height = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceHeightField(surfaceName), names)}`;
+  return [
+    `${prefix}{`,
+    `${prefix}  let bg_x_bytes = ${xBytes};`,
+    `${prefix}  if (bg_x_bytes >= 0 && (bg_x_bytes % 4) == 0) {`,
+    `${prefix}    let bg_x = bg_x_bytes / 4;`,
+    `${prefix}    let bg_y = ${y};`,
+    `${prefix}    let bg_z = ${z};`,
+    `${prefix}    let bg_index = ((bg_z * i32(${height})) + bg_y) * i32(${width}) + bg_x;`,
+    `${prefix}    if (bg_x >= 0 && bg_x < i32(${width}) && bg_y >= 0 && bg_y < i32(${height}) && bg_z >= 0 && bg_index >= 0 && bg_index < i32(arrayLength(&${surface}))) {`,
+    `${prefix}      ${surface}[bg_index] = ${value};`,
+    `${prefix}    }`,
+    `${prefix}  }`,
+    `${prefix}}`,
+  ];
 }
 
 function emitSemanticStore(
@@ -1172,6 +1247,18 @@ function textureSymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrMo
   return [...byName.values()];
 }
 
+function surfaceSymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["params"][number][] {
+  return ir.params.filter((symbol) => symbol.addressSpace === "surface");
+}
+
+function surfaceWidthField(name: string): string {
+  return `${name}_width`;
+}
+
+function surfaceHeightField(name: string): string {
+  return `${name}_height`;
+}
+
 function localMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
   return ir.memory.filter((symbol) => symbol.kind === "local" && symbol.dimensions.length > 0);
 }
@@ -1516,6 +1603,7 @@ function semanticAtomicStorageNamesFromOperation(operation: SemanticKernelIrOper
   const expressions: SemanticExpression[] = [];
   if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
   if (operation.kind === "store") expressions.push(operation.value, ...operation.target.indices);
+  if (operation.kind === "surface-write") expressions.push(operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
   if (operation.kind === "expression") expressions.push(operation.expression);
   if (operation.kind === "branch") expressions.push(operation.condition);
   if (operation.kind === "loop") {
@@ -1553,6 +1641,7 @@ function semanticAtomicNamesFromOperation(
   const expressions: SemanticExpression[] = [];
   if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
   if (operation.kind === "store") expressions.push(operation.value, ...operation.target.indices);
+  if (operation.kind === "surface-write") expressions.push(operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
   if (operation.kind === "expression") expressions.push(operation.expression);
   if (operation.kind === "branch") expressions.push(operation.condition);
   if (operation.kind === "loop") {

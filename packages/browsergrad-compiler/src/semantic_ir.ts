@@ -189,6 +189,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "cooperative-group-declare"; readonly declaration: CudaLiteCooperativeGroupDecl; readonly span: SourceSpan }
   | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
+  | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
@@ -226,6 +227,7 @@ const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "|
 const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::sync"]);
 const ATOMIC_CALL_PREFIX = "atomic";
 const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
+const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite"]);
 
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
@@ -359,6 +361,17 @@ function lowerStatement(
         }
       }
       if (expression.kind === "call" && expression.callee.kind === "symbol") {
+        if (SURFACE_WRITE_CALLS.has(expression.callee.name) && expression.args.length >= 4) {
+          return {
+            kind: "surface-write",
+            value: expression.args[0]!,
+            surface: expression.args[1]!,
+            xBytes: expression.args[2]!,
+            y: expression.args[3]!,
+            ...(expression.args[4] === undefined ? {} : { z: expression.args[4]! }),
+            span: statement.span,
+          };
+        }
         const target = atomicTargetFromCall(expression);
         if (expression.callee.name.startsWith(ATOMIC_CALL_PREFIX)) {
           return {

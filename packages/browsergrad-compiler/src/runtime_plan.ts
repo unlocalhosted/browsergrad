@@ -233,6 +233,7 @@ function isSemanticOperation(value: SemanticKernelIrOperation | SemanticExpressi
     value.kind === "cooperative-group-declare" ||
     value.kind === "load" ||
     value.kind === "store" ||
+    value.kind === "surface-write" ||
     value.kind === "atomic" ||
     value.kind === "expression" ||
     value.kind === "branch" ||
@@ -256,6 +257,8 @@ function semanticExpressionsForOperation(operation: SemanticKernelIrOperation): 
       return operation.source.indices;
     case "store":
       return [operation.value, ...operation.target.indices, ...operation.reads.flatMap((read) => read.indices)];
+    case "surface-write":
+      return [operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : [])];
     case "atomic":
       return [...operation.args, ...(operation.target?.indices ?? [])];
     case "call":
@@ -303,6 +306,11 @@ function visitSemanticExpression(
     case "call":
       visitSemanticExpression(expression.callee, visit);
       for (const arg of expression.args) visitSemanticExpression(arg, visit);
+      return;
+    case "texture-read":
+      visitSemanticExpression(expression.texture, visit);
+      visitSemanticExpression(expression.x, visit);
+      visitSemanticExpression(expression.y, visit);
       return;
     case "cast":
       visitSemanticExpression(expression.expression, visit);

@@ -65,6 +65,7 @@ interface SemanticReferenceContext {
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly deviceGlobals: Map<string, WgslTypedArray>;
   readonly textures: Readonly<Record<string, WgslTexture2DInput>>;
+  readonly surfaces: Readonly<Record<string, WgslTexture2DInput>>;
   readonly sharedMemory: Map<string, WgslTypedArray>;
   readonly storageOffsets: Map<string, number>;
   readonly scalars: Readonly<Record<string, number>>;
@@ -111,6 +112,7 @@ export function runCompiledKernelSemanticReference(
   const buffers = cloneBuffers(input.buffers);
   const constants = semanticReferenceConstants(compiled, input);
   const deviceGlobals = cloneBuffers(deviceGlobalBufferInputs(compiled, input));
+  const surfaces = cloneSurfaces(input.surfaces ?? {});
   const traces: MutableTrace[] = [];
   const blockDim = vectorFromTuple(launch.blockDim);
   const gridDim = vectorFromTuple(launch.gridDim);
@@ -135,10 +137,11 @@ export function runCompiledKernelSemanticReference(
               blockContexts.push({
                 compiled,
                 buffers,
-            constants,
-            deviceGlobals,
-            textures: input.textures ?? {},
-            sharedMemory,
+                constants,
+                deviceGlobals,
+                textures: input.textures ?? {},
+                surfaces,
+                sharedMemory,
                 storageOffsets: new Map(),
                 scalars,
                 locals: new Map(),
@@ -158,12 +161,15 @@ export function runCompiledKernelSemanticReference(
   }
 
   const readback = input.readback ?? compiled.kernelIr.params
-    .filter((param) => param.addressSpace === "storage" && param.pointer && !param.constant)
+    .filter((param) =>
+      param.addressSpace === "storage" && param.pointer && !param.constant ||
+      param.addressSpace === "surface"
+    )
     .map((param) => param.name)
     .concat(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "device-global").map((symbol) => symbol.name));
   return {
     buffers: Object.fromEntries(readback.map((name) => {
-      const buffer = buffers.get(name) ?? deviceGlobals.get(name);
+      const buffer = buffers.get(name) ?? deviceGlobals.get(name) ?? surfaces[name]?.data;
       if (!buffer) throw semanticReferenceError(`missing readback buffer '${name}'`, compiled.kernelIr.span);
       return [name, buffer];
     })),
@@ -196,6 +202,9 @@ function unsupportedSemanticReferenceOperation(
           !compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
         ) return operation;
         if (!semanticReferenceValueExpressionSupported(operation.value, compiled)) return operation;
+        break;
+      case "surface-write":
+        if (!semanticReferenceSurfaceWriteSupported(operation, compiled)) return operation;
         break;
       case "atomic":
         if (!semanticReferenceAtomicSupported(operation, compiled)) return operation;
@@ -239,6 +248,7 @@ function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr
   if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticReferenceScalarTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
+  if (param.addressSpace === "surface") return param.valueType === "surface2d";
   return false;
 }
 
@@ -420,6 +430,20 @@ function semanticReferenceCallSupported(
     );
 }
 
+function semanticReferenceSurfaceWriteSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-write" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  const surface = operation.surface;
+  return surface.kind === "symbol" &&
+    surface.addressSpace === "surface" &&
+    compiled.kernelIr.params.some((param) => param.name === surface.name && param.addressSpace === "surface") &&
+    semanticReferenceExpressionSupported(operation.value, "scalar", compiled) &&
+    semanticReferenceExpressionSupported(operation.xBytes, "scalar", compiled) &&
+    semanticReferenceExpressionSupported(operation.y, "scalar", compiled) &&
+    (operation.z === undefined || semanticReferenceExpressionSupported(operation.z, "scalar", compiled));
+}
+
 function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (ref.addressSpace === "storage") {
     return compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
@@ -498,6 +522,13 @@ function semanticReferenceOperationsContainUnsupportedCalls(
       return operation.target.indices.some((index) => semanticReferenceExpressionContainsUnsupportedCall(index, compiled)) ||
         semanticReferenceExpressionContainsUnsupportedCall(operation.value, compiled);
     }
+    if (operation.kind === "surface-write") {
+      return semanticReferenceExpressionContainsUnsupportedCall(operation.surface, compiled) ||
+        semanticReferenceExpressionContainsUnsupportedCall(operation.value, compiled) ||
+        semanticReferenceExpressionContainsUnsupportedCall(operation.xBytes, compiled) ||
+        semanticReferenceExpressionContainsUnsupportedCall(operation.y, compiled) ||
+        Boolean(operation.z && semanticReferenceExpressionContainsUnsupportedCall(operation.z, compiled));
+    }
     if (operation.kind === "atomic") return operation.args.some((arg) => semanticReferenceExpressionContainsUnsupportedCall(arg, compiled));
     if (operation.kind === "call") return operation.args.some((arg) => semanticReferenceExpressionContainsUnsupportedCall(arg, compiled));
     if (operation.kind === "expression") return semanticReferenceExpressionContainsUnsupportedCall(operation.expression, compiled);
@@ -532,6 +563,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
   }
   if (expression.kind === "texture-read") {
     return !semanticReferenceTextureReadSupported(expression, compiled) ||
+      semanticReferenceExpressionContainsUnsupportedCall(expression.texture, compiled) ||
       semanticReferenceExpressionContainsUnsupportedCall(expression.x, compiled) ||
       semanticReferenceExpressionContainsUnsupportedCall(expression.y, compiled);
   }
@@ -565,7 +597,7 @@ function semanticReferenceExpressionChildren(expression: SemanticExpression): re
     case "call":
       return expression.args;
     case "texture-read":
-      return [expression.x, expression.y];
+      return [expression.texture, expression.x, expression.y];
   }
 }
 
@@ -620,6 +652,9 @@ function execSemanticOperations(
         }
         writeMemory(operation.target, storeValue(operation, context), context);
         break;
+      case "surface-write":
+        execSemanticSurfaceWrite(operation, context);
+        break;
       case "atomic":
         execSemanticAtomic(operation, context);
         break;
@@ -658,6 +693,27 @@ function execSemanticOperations(
     }
   }
   return "fallthrough";
+}
+
+function execSemanticSurfaceWrite(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-write" }>,
+  context: SemanticReferenceContext,
+): void {
+  if (!semanticReferenceSurfaceWriteSupported(operation, context.compiled) || operation.surface.kind !== "symbol") {
+    throw semanticReferenceError("semantic reference supports only direct scalar surf2Dwrite", operation.span);
+  }
+  const surface = context.surfaces[operation.surface.name];
+  if (!surface) throw semanticReferenceError(`missing surface input '${operation.surface.name}'`, operation.surface.span);
+  const xBytes = Math.trunc(evalNumber(operation.xBytes, context));
+  const aligned = xBytes % 4 === 0;
+  const x = Math.trunc(xBytes / 4);
+  const y = Math.trunc(evalNumber(operation.y, context));
+  const z = operation.z ? Math.trunc(evalNumber(operation.z, context)) : 0;
+  const index = ((z * surface.height) + y) * surface.width + x;
+  const value = evalNumber(operation.value, context);
+  const ok = aligned && xBytes >= 0 && x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index >= 0 && index < surface.data.length;
+  if (ok) surface.data[index] = value;
+  context.trace.writes.push({ name: operation.surface.name, index, value, ok });
 }
 
 function storeValue(
@@ -985,6 +1041,7 @@ function evalSemanticFunctionCall(
     constants: context.constants,
     deviceGlobals: context.deviceGlobals,
     textures: context.textures,
+    surfaces: context.surfaces,
     sharedMemory: context.sharedMemory,
     storageOffsets: new Map(context.storageOffsets),
     scalars: context.scalars,
@@ -1242,6 +1299,8 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       if (input.scalars?.[param.name] === undefined) throw semanticReferenceError(`missing scalar input '${param.name}'`, param.span);
     } else if (param.addressSpace === "texture") {
       if (!input.textures?.[param.name]) throw semanticReferenceError(`missing texture input '${param.name}'`, param.span);
+    } else if (param.addressSpace === "surface") {
+      if (!input.surfaces?.[param.name]) throw semanticReferenceError(`missing surface input '${param.name}'`, param.span);
     } else {
       throw semanticReferenceError(`semantic reference does not support ${param.addressSpace} parameter '${param.name}'`, param.span);
     }
@@ -1332,6 +1391,13 @@ function cloneTypedArray(buffer: WgslTypedArray): WgslTypedArray {
   if (buffer instanceof Int32Array) return new Int32Array(buffer);
   if (buffer instanceof Uint32Array) return new Uint32Array(buffer);
   return new Float32Array(buffer as Float32Array);
+}
+
+function cloneSurfaces(surfaces: NonNullable<CompiledKernelInput["surfaces"]>): Record<string, WgslTexture2DInput> {
+  return Object.fromEntries(Object.entries(surfaces).map(([name, surface]) => [
+    name,
+    { ...surface, data: new Float32Array(surface.data) },
+  ]));
 }
 
 function totalElements(dimensions: readonly number[]): number {

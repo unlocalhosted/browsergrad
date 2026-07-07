@@ -292,6 +292,13 @@ function walkSemanticOperation(
       walkSemanticExpression(operation.value, visitExpression);
       for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
       return;
+    case "surface-write":
+      walkSemanticExpression(operation.surface, visitExpression);
+      walkSemanticExpression(operation.value, visitExpression);
+      walkSemanticExpression(operation.xBytes, visitExpression);
+      walkSemanticExpression(operation.y, visitExpression);
+      if (operation.z) walkSemanticExpression(operation.z, visitExpression);
+      return;
     case "atomic":
     case "call":
       for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
@@ -364,6 +371,11 @@ function walkSemanticExpression(
       walkSemanticExpression(expression.callee, visit);
       for (const arg of expression.args) walkSemanticExpression(arg, visit);
       return;
+    case "texture-read":
+      walkSemanticExpression(expression.texture, visit);
+      walkSemanticExpression(expression.x, visit);
+      walkSemanticExpression(expression.y, visit);
+      return;
     case "cast":
       walkSemanticExpression(expression.expression, visit);
       return;
@@ -406,6 +418,7 @@ function isSemanticKernelIrOperation(
     case "cooperative-group-declare":
     case "load":
     case "store":
+    case "surface-write":
     case "atomic":
     case "expression":
     case "branch":
