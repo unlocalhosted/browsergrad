@@ -20,6 +20,14 @@ import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { emitFp8Helpers } from "./wgsl_support_helpers.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
+import {
+  emitFloatAtomicAddHelper,
+  emitFloatAtomicMaxHelper,
+  emitFloatAtomicMinHelper,
+  emitFloatAtomicSubHelper,
+  floatAtomicHelperName,
+  type WgslAtomicAddressSpace,
+} from "./wgsl_atomic_helpers.js";
 
 export interface SemanticKernelIrWgslOutput {
   readonly wgsl: string;
@@ -517,6 +525,9 @@ export function emitSemanticKernelIrWgsl(
     lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
   lines.push("", ...emitSemanticNumericHelpers());
+  for (const helper of semanticFloatAtomicHelpers(ir.operations)) {
+    lines.push("", ...helper);
+  }
   if (semanticUsesFp8(ir)) {
     lines.push("", ...emitFp8Helpers());
   }
@@ -795,7 +806,11 @@ function semanticWgslAtomicSupported(
   if (!semanticWgslMemoryRefSupported(operation.target)) return false;
   if (operation.target.addressSpace === "storage" && operation.target.indices.length !== 1) return false;
   if (operation.target.fields.length > 0) return false;
-  if (operation.target.valueType !== "uint" && operation.target.valueType !== "int") return false;
+  if (
+    operation.target.valueType !== "uint" &&
+    operation.target.valueType !== "int" &&
+    !(operation.target.valueType === "float" && semanticWgslFloatAtomicCallKind(operation.callee) !== undefined)
+  ) return false;
   if (!semanticWgslAtomicTargetRootSupported(operation.target, ir)) {
     return false;
   }
@@ -1707,10 +1722,66 @@ function emitSemanticAtomic(
   if (operands.length === 0 || operands.some((operand) => operand === undefined)) {
     throw semanticWgslError(`semantic WGSL atomic '${operation.callee}' missing operand`, operation.span);
   }
+  const floatAtomicKind = operation.target.valueType === "float" ? semanticWgslFloatAtomicCallKind(operation.callee) : undefined;
+  if (floatAtomicKind) {
+    const addressSpace = semanticWgslAtomicAddressSpace(operation.target);
+    if (floatAtomicKind === "Exchange") {
+      const value = emitSemanticExpressionAs(operands[0]!, ir, names, "f32", options, textureSpecializations);
+      return `_ = atomicExchange(&${target}, bitcast<u32>(${value}))`;
+    }
+    const value = emitSemanticExpressionAs(operands[0]!, ir, names, "f32", options, textureSpecializations);
+    return `_ = ${floatAtomicHelperName(floatAtomicKind, addressSpace)}(&${target}, ${value})`;
+  }
   const emitted = operands.map((operand) =>
     emitSemanticExpressionAs(operand!, ir, names, wgslAtomicScalar(operation.target!.valueType), options, textureSpecializations)
   );
   return `_ = ${wgslCallee}(&${target}, ${emitted.join(", ")})`;
+}
+
+type SemanticFloatAtomicKind = "Add" | "Sub" | "Min" | "Max" | "Exchange";
+
+function semanticWgslFloatAtomicCallKind(callee: string): SemanticFloatAtomicKind | undefined {
+  if (callee === "atomicAdd" || callee === "atomicAdd_system") return "Add";
+  if (callee === "atomicSub" || callee === "atomicSub_system") return "Sub";
+  if (callee === "atomicMin" || callee === "atomicMin_system") return "Min";
+  if (callee === "atomicMax" || callee === "atomicMax_system" || callee === "atomicMaxFloat") return "Max";
+  if (callee === "atomicExch" || callee === "atomicExch_system") return "Exchange";
+  return undefined;
+}
+
+function semanticWgslAtomicAddressSpace(ref: SemanticMemoryRef): WgslAtomicAddressSpace {
+  return ref.addressSpace === "shared" ? "workgroup" : "storage";
+}
+
+function semanticFloatAtomicHelpers(operations: readonly SemanticKernelIrOperation[]): readonly string[][] {
+  const helperKeys = new Set<string>();
+  collectSemanticFloatAtomicHelpers(operations, helperKeys);
+  return [...helperKeys].flatMap((key) => {
+    const [kind, addressSpace] = key.split(":") as [Exclude<SemanticFloatAtomicKind, "Exchange">, WgslAtomicAddressSpace];
+    if (kind === "Add") return [emitFloatAtomicAddHelper(addressSpace)];
+    if (kind === "Sub") return [emitFloatAtomicSubHelper(addressSpace)];
+    if (kind === "Min") return [emitFloatAtomicMinHelper(addressSpace)];
+    if (kind === "Max") return [emitFloatAtomicMaxHelper(addressSpace)];
+    return [];
+  });
+}
+
+function collectSemanticFloatAtomicHelpers(
+  operations: readonly SemanticKernelIrOperation[],
+  helperKeys: Set<string>,
+): void {
+  for (const operation of operations) {
+    if (operation.kind === "atomic" && operation.target?.valueType === "float") {
+      const kind = semanticWgslFloatAtomicCallKind(operation.callee);
+      if (kind && kind !== "Exchange") helperKeys.add(`${kind}:${semanticWgslAtomicAddressSpace(operation.target)}`);
+    }
+    if (operation.kind === "branch") {
+      collectSemanticFloatAtomicHelpers(operation.consequent, helperKeys);
+      collectSemanticFloatAtomicHelpers(operation.alternate, helperKeys);
+    }
+    if (operation.kind === "loop") collectSemanticFloatAtomicHelpers(operation.body, helperKeys);
+    if (operation.kind === "block") collectSemanticFloatAtomicHelpers(operation.body, helperKeys);
+  }
 }
 
 function emitSemanticCall(
@@ -3359,6 +3430,7 @@ function flattenMemoryRef(expression: SemanticExpression): {
   readonly indices: readonly SemanticExpression[];
 } | undefined {
   if (expression.kind === "symbol") return { base: expression, indices: [] };
+  if (expression.kind === "cast" && expression.pointer) return flattenMemoryRef(expression.expression);
   if (expression.kind !== "index") return undefined;
   const target = flattenMemoryRef(expression.target);
   if (!target) return undefined;

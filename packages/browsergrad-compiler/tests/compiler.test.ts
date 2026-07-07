@@ -16563,9 +16563,18 @@ __global__ void atomic_exchange_assign(float* data, float newValue, int N) {
 __global__ void atomic_exchange_statement(float* x) {
   if (threadIdx.x < 1) { atomicExch(&x[0], 7.5f); }
 }`, { workgroupSize: [1, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { x: new Float32Array([2.5]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("atomicExchange(&x[0], bitcast<u32>(7.5));");
-    expect(compiled.wgsl).not.toContain("bitcast<f32>(atomicExchange(&x[0], bitcast<u32>(7.5)));");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("atomicExchange(&x[0u], bitcast<u32>(7.5));");
+    expect(compiled.wgsl).not.toContain("bitcast<f32>(atomicExchange(&x[0u], bitcast<u32>(7.5)));");
+    expect([...semanticResult.buffers.x as Float32Array]).toEqual([7.5]);
   });
 
   it("supports CUDA system-scope float atomics through CAS-backed WGSL helpers", () => {
@@ -16838,9 +16847,24 @@ __global__ void atomic_vector_read(float* scratch, float4* out) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          scratch: new Float32Array([0, 2, 3, 4]),
+          out: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32");
     expect(compiled.wgsl).toContain("vec4<f32>(bitcast<f32>(atomicLoad(&scratch");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
   it("supports read-modify-write atomics through device pointer helper parameters", () => {

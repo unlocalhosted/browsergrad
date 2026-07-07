@@ -429,13 +429,21 @@ function semanticReferenceAtomicSupported(
   const atomicOp = SEMANTIC_ATOMIC_OPS.get(operation.callee);
   if (!atomicOp) return false;
   if (!operation.target || !semanticReferenceMemoryRefSupported(operation.target)) return false;
-  if (operation.target.valueType !== "uint" && operation.target.valueType !== "int") return false;
+  if (
+    operation.target.valueType !== "uint" &&
+    operation.target.valueType !== "int" &&
+    !(operation.target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp))
+  ) return false;
   if (!semanticReferenceAtomicTargetRootSupported(operation.target, compiled)) {
     return false;
   }
   const expectedArgs = atomicOp === "cas" ? 3 : 2;
   return operation.args.length >= expectedArgs &&
     operation.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+}
+
+function semanticReferenceFloatAtomicOpSupported(atomicOp: SemanticAtomicOp): boolean {
+  return atomicOp === "add" || atomicOp === "sub" || atomicOp === "min" || atomicOp === "max" || atomicOp === "exchange";
 }
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
@@ -2593,6 +2601,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     indices.unshift(target.index);
     target = target.target;
   }
+  if (target.kind === "cast" && target.pointer) target = target.expression;
   if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant" && target.addressSpace !== "device-global" && target.addressSpace !== "local" && target.addressSpace !== "shared")) return undefined;
   return {
     base: target.name,
