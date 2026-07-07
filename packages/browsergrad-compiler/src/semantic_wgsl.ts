@@ -29,10 +29,16 @@ const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 const SEMANTIC_MATH_CALLS = new Map([
   ["sqrt", "sqrt"],
   ["sqrtf", "sqrt"],
+  ["__fsqrt_rn", "sqrt"],
+  ["rsqrt", "inverseSqrt"],
+  ["rsqrtf", "inverseSqrt"],
+  ["__frsqrt_rn", "inverseSqrt"],
   ["exp", "exp"],
   ["expf", "exp"],
+  ["__expf", "exp"],
   ["log", "log"],
   ["logf", "log"],
+  ["__logf", "log"],
   ["fabs", "abs"],
   ["fabsf", "abs"],
   ["abs", "abs"],
@@ -42,8 +48,20 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["ceilf", "ceil"],
   ["sin", "sin"],
   ["sinf", "sin"],
+  ["__sinf", "sin"],
   ["cos", "cos"],
   ["cosf", "cos"],
+  ["__cosf", "cos"],
+  ["tan", "tan"],
+  ["tanf", "tan"],
+  ["__tanf", "tan"],
+  ["atan", "atan"],
+  ["atanf", "atan"],
+  ["atan2", "atan2"],
+  ["atan2f", "atan2"],
+  ["tanh", "tanh"],
+  ["tanhf", "tanh"],
+  ["__tanhf", "tanh"],
   ["fmin", "min"],
   ["fminf", "min"],
   ["min", "min"],
@@ -52,6 +70,11 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["max", "max"],
   ["pow", "pow"],
   ["powf", "pow"],
+  ["__fdividef", "divide"],
+  ["fma", "fma"],
+  ["fmaf", "fma"],
+  ["__fmaf_rn", "fma"],
+  ["lerp", "lerp"],
   ["div_ceil", "div_ceil"],
   ["ceil_div", "div_ceil"],
 ]);
@@ -490,8 +513,8 @@ function semanticWgslExpressionSupported(
     case "sequence":
       return expression.expressions.every((item) => semanticWgslExpressionSupported(item, "scalar", ir));
     case "call":
-      return semanticWgslMathCallSupported(expression) ||
-        (ir !== undefined && semanticWgslFunctionCallSupported(expression, ir));
+      return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
+        semanticWgslMathCallSupported(expression);
     case "initializer":
       return false;
   }
@@ -808,8 +831,8 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names);
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names);
-      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names);
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names);
+      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
@@ -899,6 +922,19 @@ function emitSemanticMathCall(
     const rhs = emitSemanticExpressionAs(right, ir, names, scalar);
     return `(((${lhs} + ${rhs}) - ${scalar === "u32" ? "1u" : "1"}) / ${rhs})`;
   }
+  if (wgslCallee === "divide") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    return `(${emitSemanticExpressionAs(left, ir, names, "f32")} / ${emitSemanticExpressionAs(right, ir, names, "f32")})`;
+  }
+  if (wgslCallee === "lerp") {
+    const [left, right, factor] = expression.args;
+    if (!left || !right || !factor) throw semanticWgslError("lerp expects three operands", expression.span);
+    const start = emitSemanticExpressionAs(left, ir, names, "f32");
+    const end = emitSemanticExpressionAs(right, ir, names, "f32");
+    const amount = emitSemanticExpressionAs(factor, ir, names, "f32");
+    return `fma(${amount}, (${end} - ${start}), ${start})`;
+  }
   return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32")).join(", ")})`;
 }
 
@@ -911,9 +947,17 @@ function semanticMathCallArity(name: string): number {
     name === "max" ||
     name === "pow" ||
     name === "powf" ||
+    name === "__fdividef" ||
     name === "div_ceil" ||
-    name === "ceil_div"
+    name === "ceil_div" ||
+    name === "atan2" ||
+    name === "atan2f"
     ? 2
+    : name === "fma" ||
+      name === "fmaf" ||
+      name === "__fmaf_rn" ||
+      name === "lerp"
+    ? 3
     : 1;
 }
 
@@ -1223,7 +1267,7 @@ function semanticExpressionValueType(expression: SemanticExpression): CudaLiteSc
 function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {
   switch (expression.kind) {
     case "call": {
-      if (semanticWgslMathCallSupported(expression)) return "f32";
+      if (semanticWgslMathCallSupported(expression) && (expression.valueType === undefined || expression.valueType === "float")) return "f32";
       const atomicType = semanticAtomicCallValueType(expression);
       return atomicType ? wgslAtomicScalar(atomicType) : wgslValueScalar(expression.valueType);
     }

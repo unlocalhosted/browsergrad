@@ -44,10 +44,12 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
   ["atomicCAS_system", "cas"],
 ]);
 const SEMANTIC_MATH_CALLS = new Set([
-  "sqrt", "sqrtf", "exp", "expf", "log", "logf", "fabs", "fabsf", "abs",
-  "floor", "floorf", "ceil", "ceilf", "sin", "sinf", "cos", "cosf",
+  "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
+  "exp", "expf", "__expf", "log", "logf", "__logf", "fabs", "fabsf", "abs",
+  "floor", "floorf", "ceil", "ceilf", "sin", "sinf", "__sinf", "cos", "cosf", "__cosf",
+  "tan", "tanf", "__tanf", "atan", "atanf", "atan2", "atan2f", "tanh", "tanhf", "__tanhf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
-  "div_ceil", "ceil_div",
+  "__fdividef", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 
@@ -438,8 +440,8 @@ function semanticReferenceExpressionSupported(
         expression.argument.addressSpace === "local" &&
         (expression.operator === "++" || expression.operator === "--");
     case "call":
-      return semanticReferenceMathCallSupported(expression) ||
-        (compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled));
+      return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
+        semanticReferenceMathCallSupported(expression);
     case "initializer":
       return false;
   }
@@ -720,8 +722,8 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     }
     case "call":
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
-      if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
       if (semanticReferenceFunctionCallSupported(expression, context.compiled)) return evalSemanticFunctionCall(expression, context);
+      if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "initializer":
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
@@ -774,11 +776,17 @@ function evalSemanticMathCall(
   const args = expression.args.map((arg) => evalNumber(arg, context));
   switch (expression.callee.name) {
     case "sqrt":
-    case "sqrtf": return Math.sqrt(args[0] ?? 0);
+    case "sqrtf":
+    case "__fsqrt_rn": return Math.sqrt(args[0] ?? 0);
+    case "rsqrt":
+    case "rsqrtf":
+    case "__frsqrt_rn": return 1 / Math.sqrt(args[0] ?? 0);
     case "exp":
-    case "expf": return Math.exp(args[0] ?? 0);
+    case "expf":
+    case "__expf": return Math.exp(args[0] ?? 0);
     case "log":
-    case "logf": return Math.log(args[0] ?? 0);
+    case "logf":
+    case "__logf": return Math.log(args[0] ?? 0);
     case "fabs":
     case "fabsf":
     case "abs": return Math.abs(args[0] ?? 0);
@@ -787,9 +795,21 @@ function evalSemanticMathCall(
     case "ceil":
     case "ceilf": return Math.ceil(args[0] ?? 0);
     case "sin":
-    case "sinf": return Math.sin(args[0] ?? 0);
+    case "sinf":
+    case "__sinf": return Math.sin(args[0] ?? 0);
     case "cos":
-    case "cosf": return Math.cos(args[0] ?? 0);
+    case "cosf":
+    case "__cosf": return Math.cos(args[0] ?? 0);
+    case "tan":
+    case "tanf":
+    case "__tanf": return Math.tan(args[0] ?? 0);
+    case "atan":
+    case "atanf": return Math.atan(args[0] ?? 0);
+    case "atan2":
+    case "atan2f": return Math.atan2(args[0] ?? 0, args[1] ?? 0);
+    case "tanh":
+    case "tanhf":
+    case "__tanhf": return Math.tanh(args[0] ?? 0);
     case "fmin":
     case "fminf":
     case "min": return Math.min(args[0] ?? 0, args[1] ?? 0);
@@ -798,6 +818,11 @@ function evalSemanticMathCall(
     case "max": return Math.max(args[0] ?? 0, args[1] ?? 0);
     case "pow":
     case "powf": return Math.pow(args[0] ?? 0, args[1] ?? 0);
+    case "__fdividef": return (args[0] ?? 0) / (args[1] ?? 0);
+    case "fma":
+    case "fmaf":
+    case "__fmaf_rn": return (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0);
+    case "lerp": return (args[0] ?? 0) + (args[2] ?? 0) * ((args[1] ?? 0) - (args[0] ?? 0));
     case "div_ceil":
     case "ceil_div": return Math.trunc((Math.trunc(args[0] ?? 0) + Math.trunc(args[1] ?? 1) - 1) / Math.trunc(args[1] ?? 1));
     default:
@@ -850,9 +875,17 @@ function semanticMathCallArity(name: string): number {
     name === "max" ||
     name === "pow" ||
     name === "powf" ||
+    name === "__fdividef" ||
     name === "div_ceil" ||
-    name === "ceil_div"
+    name === "ceil_div" ||
+    name === "atan2" ||
+    name === "atan2f"
     ? 2
+    : name === "fma" ||
+      name === "fmaf" ||
+      name === "__fmaf_rn" ||
+      name === "lerp"
+    ? 3
     : 1;
 }
 

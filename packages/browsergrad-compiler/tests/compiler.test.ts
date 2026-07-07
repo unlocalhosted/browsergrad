@@ -5640,6 +5640,40 @@ __global__ void int_div_ceil(int n, uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 5]);
   });
 
+  it("lowers CUDA math aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_math_aliases(float x, float* out) {
+  if (threadIdx.x == 0) {
+    out[0] = __sinf(x) + __cosf(x) + __tanhf(x);
+    out[1] = rsqrtf(x + 4.0f) + __frsqrt_rn(x + 9.0f) + atan2f(x, 2.0f);
+    out[2] = fmaf(x, 2.0f, 1.0f) + __fdividef(x, 2.0f);
+    out[3] = lerp(2.0f, 6.0f, x);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) }, scalars: { x: 0.25 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) }, scalars: { x: 0.25 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("inverseSqrt((bg_uniforms.x + 4.0))");
+    expect(compiled.wgsl).toContain("atan2(bg_uniforms.x, 2.0)");
+    expect(compiled.wgsl).toContain("fma(bg_uniforms.x, 2.0, 1.0)");
+    expect(compiled.wgsl).toContain("(bg_uniforms.x / 2.0)");
+    expect(compiled.wgsl).toContain("fma(bg_uniforms.x, (6.0 - 2.0), 2.0)");
+    for (let i = 0; i < 4; i++) {
+      expect([...semanticResult.buffers.out as Float32Array][i]).toBeCloseTo([...result.buffers.out as Float32Array][i]!, 5);
+    }
+  });
+
   it("lowers C frexp exponent out params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void frexpKernel(float *out, int *expOut) {
