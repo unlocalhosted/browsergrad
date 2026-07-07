@@ -376,6 +376,12 @@ function walkSemanticExpression(
       walkSemanticExpression(expression.x, visit);
       walkSemanticExpression(expression.y, visit);
       return;
+    case "surface-read":
+      walkSemanticExpression(expression.surface, visit);
+      walkSemanticExpression(expression.xBytes, visit);
+      walkSemanticExpression(expression.y, visit);
+      if (expression.z) walkSemanticExpression(expression.z, visit);
+      return;
     case "cast":
       walkSemanticExpression(expression.expression, visit);
       return;

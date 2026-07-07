@@ -556,6 +556,11 @@ function expressionNeedsParentDispatch(expression: SemanticExpression): boolean 
       return expressionNeedsParentDispatch(expression.texture) ||
         expressionNeedsParentDispatch(expression.x) ||
         expressionNeedsParentDispatch(expression.y);
+    case "surface-read":
+      return expressionNeedsParentDispatch(expression.surface) ||
+        expressionNeedsParentDispatch(expression.xBytes) ||
+        expressionNeedsParentDispatch(expression.y) ||
+        Boolean(expression.z && expressionNeedsParentDispatch(expression.z));
   }
 }
 

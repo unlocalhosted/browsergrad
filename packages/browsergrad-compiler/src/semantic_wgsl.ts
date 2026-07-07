@@ -220,6 +220,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   for (const texture of textures) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
   }
+  for (const surface of surfaces) {
+    lines.push("", ...emitSemanticSurfaceReadHelper(surface, names));
+  }
   for (const shared of sharedMemorySymbols(ir)) {
     lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared, atomicShared.has(shared.name))};`);
   }
@@ -427,7 +430,8 @@ function semanticWgslAtomicSupported(
 function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
   return semanticWgslExpressionSupported(expression, "scalar", ir) ||
     expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression)) ||
-    expression.kind === "texture-read" && semanticWgslTextureReadSupported(expression, ir);
+    expression.kind === "texture-read" && semanticWgslTextureReadSupported(expression, ir) ||
+    expression.kind === "surface-read" && semanticWgslSurfaceReadSupported(expression, ir);
 }
 
 function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
@@ -452,6 +456,20 @@ function semanticWgslTextureReadSupported(
     textureSymbols(ir).some((symbol) => symbol.name === texture.name) &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
     semanticWgslExpressionSupported(expression.y, "scalar", ir);
+}
+
+function semanticWgslSurfaceReadSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "surface-read" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const target = expression.surface;
+  return (expression.valueType === "float" || expression.valueType === "uint" || expression.valueType === "int") &&
+    target.kind === "symbol" &&
+    target.addressSpace === "surface" &&
+    surfaceSymbols(ir).some((surface) => surface.name === target.name) &&
+    semanticWgslExpressionSupported(expression.xBytes, "scalar", ir) &&
+    semanticWgslExpressionSupported(expression.y, "scalar", ir) &&
+    (expression.z === undefined || semanticWgslExpressionSupported(expression.z, "scalar", ir));
 }
 
 function semanticWgslFunctionCallSupported(
@@ -585,6 +603,8 @@ function semanticWgslExpressionSupported(
         semanticWgslMathCallSupported(expression);
     case "texture-read":
       return ir !== undefined && expected === "scalar" && semanticWgslTextureReadSupported(expression, ir);
+    case "surface-read":
+      return ir !== undefined && expected === "scalar" && semanticWgslSurfaceReadSupported(expression, ir);
     case "initializer":
       return false;
   }
@@ -953,9 +973,58 @@ function emitSemanticExpression(
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
     case "texture-read":
       return emitSemanticTextureRead(expression, ir, names);
+    case "surface-read":
+      return emitSemanticSurfaceRead(expression, ir, names);
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
   }
+}
+
+function emitSemanticSurfaceRead(
+  expression: Extract<SemanticExpression, { readonly kind: "surface-read" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (!semanticWgslSurfaceReadSupported(expression, ir) || expression.surface.kind !== "symbol") {
+    throw semanticWgslError("semantic WGSL supports only direct scalar surf2Dread", expression.span);
+  }
+  const surfaceName = expression.surface.name;
+  const xBytes = emitSemanticExpressionAs(expression.xBytes, ir, names, "i32");
+  const y = emitSemanticExpressionAs(expression.y, ir, names, "i32");
+  const z = expression.z ? emitSemanticExpressionAs(expression.z, ir, names, "i32") : "0";
+  const read = `${surfaceReadHelperName(surfaceName, names)}(${xBytes}, ${y}, ${z})`;
+  if (expression.valueType === "uint") return `u32(${read})`;
+  if (expression.valueType === "int") return `i32(${read})`;
+  return read;
+}
+
+function emitSemanticSurfaceReadHelper(
+  surface: SemanticKernelIrModule["params"][number],
+  names: ReadonlyMap<string, string>,
+): readonly string[] {
+  const surfaceName = surface.name;
+  const storage = nameFor(surfaceName, names);
+  const width = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceWidthField(surfaceName), names)}`;
+  const height = `${UNIFORM_PARAMS_NAME}.${nameFor(surfaceHeightField(surfaceName), names)}`;
+  const fn = surfaceReadHelperName(surfaceName, names);
+  return [
+    `fn ${fn}(x_bytes: i32, y: i32, z: i32) -> f32 {`,
+    "  if (x_bytes < 0 || (x_bytes % 4) != 0) {",
+    "    return 0.0;",
+    "  }",
+    "  let x = x_bytes / 4;",
+    `  let width = i32(${width});`,
+    `  let height = i32(${height});`,
+    "  if (x < 0 || x >= width || y < 0 || y >= height || z < 0) {",
+    "    return 0.0;",
+    "  }",
+    "  let index = ((z * height) + y) * width + x;",
+    `  if (index >= 0 && index < i32(arrayLength(&${storage}))) {`,
+    `    return ${storage}[index];`,
+    "  }",
+    "  return 0.0;",
+    "}",
+  ];
 }
 
 function emitSemanticTextureRead(
@@ -1259,6 +1328,10 @@ function surfaceHeightField(name: string): string {
   return `${name}_height`;
 }
 
+function surfaceReadHelperName(name: string, names: ReadonlyMap<string, string>): string {
+  return `bg_sem_surf2dread_${nameFor(name, names)}`;
+}
+
 function localMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
   return ir.memory.filter((symbol) => symbol.kind === "local" && symbol.dimensions.length > 0);
 }
@@ -1477,6 +1550,8 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
     }
     case "texture-read":
       return "f32";
+    case "surface-read":
+      return wgslValueScalar(expression.valueType);
     case "binary": {
       const left = semanticExpressionWgslScalar(expression.left);
       const right = semanticExpressionWgslScalar(expression.right);
@@ -1682,6 +1757,8 @@ function semanticExpressionChildren(expression: SemanticExpression): readonly Se
       return [expression.callee, ...expression.args];
     case "texture-read":
       return [expression.texture, expression.x, expression.y];
+    case "surface-read":
+      return [expression.surface, expression.xBytes, expression.y, ...(expression.z ? [expression.z] : [])];
     case "cast":
       return [expression.expression];
     case "unary":

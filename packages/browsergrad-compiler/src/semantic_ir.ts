@@ -126,6 +126,16 @@ export type SemanticExpression =
       readonly span: SourceSpan;
     }
   | {
+      readonly kind: "surface-read";
+      readonly callee: "surf2Dread" | "surf2DLayeredread";
+      readonly surface: SemanticExpression;
+      readonly xBytes: SemanticExpression;
+      readonly y: SemanticExpression;
+      readonly z?: SemanticExpression;
+      readonly valueType: Exclude<CudaLiteScalarType, "void">;
+      readonly span: SourceSpan;
+    }
+  | {
       readonly kind: "cast";
       readonly valueType: Exclude<CudaLiteScalarType, "void">;
       readonly pointer: boolean;
@@ -228,6 +238,7 @@ const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::
 const ATOMIC_CALL_PREFIX = "atomic";
 const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
 const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite"]);
+const SURFACE_READ_CALLS = new Set(["surf2Dread", "surf2DLayeredread"]);
 
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
@@ -504,6 +515,22 @@ function lowerExpression(
           span: expression.span,
         };
       }
+      if (
+        expression.callee.kind === "identifier" &&
+        SURFACE_READ_CALLS.has(expression.callee.name) &&
+        (args.length === 3 || args.length === 4)
+      ) {
+        return {
+          kind: "surface-read",
+          callee: expression.callee.name as "surf2Dread" | "surf2DLayeredread",
+          surface: args[0]!,
+          xBytes: args[1]!,
+          y: args[2]!,
+          ...(args[3] === undefined ? {} : { z: args[3]! }),
+          valueType: expression.templateValueType ?? "float",
+          span: expression.span,
+        };
+      }
       return {
         kind: "call",
         callee: lowerExpression(expression.callee, scope),
@@ -628,6 +655,12 @@ function collectMemoryRefsInto(expression: SemanticExpression, refs: SemanticMem
       collectMemoryRefsInto(expression.texture, refs);
       collectMemoryRefsInto(expression.x, refs);
       collectMemoryRefsInto(expression.y, refs);
+      return;
+    case "surface-read":
+      collectMemoryRefsInto(expression.surface, refs);
+      collectMemoryRefsInto(expression.xBytes, refs);
+      collectMemoryRefsInto(expression.y, refs);
+      if (expression.z) collectMemoryRefsInto(expression.z, refs);
       return;
     case "cast":
       collectMemoryRefsInto(expression.expression, refs);

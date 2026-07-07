@@ -312,6 +312,12 @@ function visitSemanticExpression(
       visitSemanticExpression(expression.x, visit);
       visitSemanticExpression(expression.y, visit);
       return;
+    case "surface-read":
+      visitSemanticExpression(expression.surface, visit);
+      visitSemanticExpression(expression.xBytes, visit);
+      visitSemanticExpression(expression.y, visit);
+      if (expression.z) visitSemanticExpression(expression.z, visit);
+      return;
     case "cast":
       visitSemanticExpression(expression.expression, visit);
       return;

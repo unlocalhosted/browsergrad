@@ -343,7 +343,8 @@ function semanticReferenceAtomicSupported(
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression)) ||
-    expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled);
+    expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
+    expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
 
 function semanticReferenceLocalArrayInitSupported(expression: SemanticExpression): boolean {
@@ -367,6 +368,20 @@ function semanticReferenceTextureReadSupported(
     (compiled.textureDescriptors?.[expression.texture.name] === undefined) &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled);
+}
+
+function semanticReferenceSurfaceReadSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "surface-read" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  const surface = expression.surface;
+  return (expression.valueType === "float" || expression.valueType === "uint" || expression.valueType === "int") &&
+    surface.kind === "symbol" &&
+    surface.addressSpace === "surface" &&
+    compiled.kernelIr.params.some((param) => param.name === surface.name && param.addressSpace === "surface") &&
+    semanticReferenceExpressionSupported(expression.xBytes, "scalar", compiled) &&
+    semanticReferenceExpressionSupported(expression.y, "scalar", compiled) &&
+    (expression.z === undefined || semanticReferenceExpressionSupported(expression.z, "scalar", compiled));
 }
 
 function semanticReferenceFunctionCallSupported(
@@ -503,6 +518,8 @@ function semanticReferenceExpressionSupported(
         semanticReferenceMathCallSupported(expression);
     case "texture-read":
       return compiled !== undefined && expected === "scalar" && semanticReferenceTextureReadSupported(expression, compiled);
+    case "surface-read":
+      return compiled !== undefined && expected === "scalar" && semanticReferenceSurfaceReadSupported(expression, compiled);
     case "initializer":
       return false;
   }
@@ -567,6 +584,13 @@ function semanticReferenceExpressionContainsUnsupportedCall(
       semanticReferenceExpressionContainsUnsupportedCall(expression.x, compiled) ||
       semanticReferenceExpressionContainsUnsupportedCall(expression.y, compiled);
   }
+  if (expression.kind === "surface-read") {
+    return !semanticReferenceSurfaceReadSupported(expression, compiled) ||
+      semanticReferenceExpressionContainsUnsupportedCall(expression.surface, compiled) ||
+      semanticReferenceExpressionContainsUnsupportedCall(expression.xBytes, compiled) ||
+      semanticReferenceExpressionContainsUnsupportedCall(expression.y, compiled) ||
+      Boolean(expression.z && semanticReferenceExpressionContainsUnsupportedCall(expression.z, compiled));
+  }
   return semanticReferenceExpressionChildren(expression).some((child) => semanticReferenceExpressionContainsUnsupportedCall(child, compiled));
 }
 
@@ -598,6 +622,8 @@ function semanticReferenceExpressionChildren(expression: SemanticExpression): re
       return expression.args;
     case "texture-read":
       return [expression.texture, expression.x, expression.y];
+    case "surface-read":
+      return [expression.surface, expression.xBytes, expression.y, ...(expression.z ? [expression.z] : [])];
   }
 }
 
@@ -901,11 +927,34 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "texture-read":
       return evalSemanticTextureRead(expression, context);
+    case "surface-read":
+      return evalSemanticSurfaceRead(expression, context);
     case "initializer":
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "update":
       return evalUpdate(expression, context);
   }
+}
+
+function evalSemanticSurfaceRead(
+  expression: Extract<SemanticExpression, { readonly kind: "surface-read" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (!semanticReferenceSurfaceReadSupported(expression, context.compiled) || expression.surface.kind !== "symbol") {
+    throw semanticReferenceError("semantic reference supports only direct scalar surf2Dread", expression.span);
+  }
+  const surface = context.surfaces[expression.surface.name];
+  if (!surface) throw semanticReferenceError(`missing surface input '${expression.surface.name}'`, expression.surface.span);
+  const xBytes = Math.trunc(evalNumber(expression.xBytes, context));
+  const aligned = xBytes % 4 === 0;
+  const x = Math.trunc(xBytes / 4);
+  const y = Math.trunc(evalNumber(expression.y, context));
+  const z = expression.z ? Math.trunc(evalNumber(expression.z, context)) : 0;
+  const index = ((z * surface.height) + y) * surface.width + x;
+  const ok = aligned && xBytes >= 0 && x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index >= 0 && index < surface.data.length;
+  const value = ok ? surface.data[index] ?? 0 : 0;
+  context.trace.reads.push({ name: expression.surface.name, index, value, ok });
+  return value;
 }
 
 function evalSemanticTextureRead(
