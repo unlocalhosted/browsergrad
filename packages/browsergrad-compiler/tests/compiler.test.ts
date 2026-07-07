@@ -6549,6 +6549,37 @@ __global__ void remquoKernel(float *out, int *quo) {
     expect([...result.buffers.quo as Int32Array]).toEqual([4, 2, -4]);
   });
 
+  it("lowers statement remquo storage quotient aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticRemquo(int *quo) {
+  int *q = quo + 1;
+  remquof(7.0f, 2.0f, q);
+  remquo(-7.0f, 2.0f, &quo[2]);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { quo: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { quo: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+    expect(compiled.wgsl).not.toContain("var q:");
+    expect(compiled.wgsl).toContain("quo[1u] = 4;");
+    expect(compiled.wgsl).toContain("quo[2u] = -4;");
+    expect([...semanticResult.buffers.quo as Int32Array]).toEqual([0, 4, -4]);
+    expect([...result.buffers.quo as Int32Array]).toEqual([0, 4, -4]);
+  });
+
   it("lowers CUDA nextafter and nexttoward intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void nextafterKernel(float *out) {

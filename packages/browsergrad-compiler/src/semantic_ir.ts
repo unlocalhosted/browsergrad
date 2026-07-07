@@ -444,6 +444,8 @@ function lowerStatement(
           if (sincos) return sincos;
           const modf = semanticModfStore(statement.expression, expression, scope, statement.span);
           if (modf) return modf;
+          const remquo = semanticRemquoStore(statement.expression, expression, scope, statement.span);
+          if (remquo) return remquo;
         }
         if (statement.expression.kind === "call" && CUDA_CACHE_HINT_STORES.has(expression.callee.name)) {
           const cacheTarget = cacheHintStoreTarget(statement.expression, scope);
@@ -771,6 +773,30 @@ function semanticModfStore(
   };
 }
 
+function semanticRemquoStore(
+  source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (expression.callee.kind !== "symbol" || !isRemquoCallName(expression.callee.name)) return undefined;
+  const dividend = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const divisor = expression.args[1] ? staticNumberValue(expression.args[1]) : undefined;
+  const target = source.args[2] === undefined ? undefined : pointerAliasValueExpression(source.args[2], scope, source.args[2].span);
+  if (dividend === undefined || divisor === undefined || divisor === 0 || !target) return undefined;
+  const targetRef = memoryRefFromExpression(target);
+  if (!targetRef) return undefined;
+  const quotient = roundTiesToEvenNumber(dividend / divisor);
+  return {
+    kind: "store",
+    target: targetRef,
+    value: intNumberExpression(quotient, expression.span),
+    operator: "=",
+    reads: [],
+    span,
+  };
+}
+
 function semanticSincosStores(
   source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
@@ -837,16 +863,36 @@ function numberExpression(value: number, span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value, valueType: "float", span };
 }
 
+function intNumberExpression(value: number, span: SourceSpan): SemanticExpression {
+  return { kind: "literal", literalKind: "number", value, valueType: "int", span };
+}
+
 function isFiniteStaticNumberExpression(expression: SemanticExpression): boolean {
+  return staticNumberValue(expression) !== undefined;
+}
+
+function staticNumberValue(expression: SemanticExpression): number | undefined {
   if (
     expression.kind === "literal" &&
     expression.literalKind === "number" &&
     typeof expression.value === "number" &&
     Number.isFinite(expression.value)
   ) {
-    return true;
+    return expression.value;
   }
-  return expression.kind === "unary" && expression.operator === "-" && isFiniteStaticNumberExpression(expression.argument);
+  if (expression.kind === "unary" && expression.operator === "-") {
+    const value = staticNumberValue(expression.argument);
+    return value === undefined ? undefined : -value;
+  }
+  return undefined;
+}
+
+function roundTiesToEvenNumber(value: number): number {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (diff < 0.5) return floor;
+  if (diff > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
 }
 
 function isSincosCallName(name: string): boolean {
@@ -859,6 +905,10 @@ function isSincosPiCallName(name: string): boolean {
 
 function isModfCallName(name: string): boolean {
   return name === "modf" || name === "modff";
+}
+
+function isRemquoCallName(name: string): boolean {
+  return name === "remquo" || name === "remquof";
 }
 
 function pointerAliasValueExpression(
