@@ -17075,9 +17075,20 @@ __global__ void shared_pointer_cast(uint* out) {
       { buffers: { out: new Uint32Array(1) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(true);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("tile[1u] = 9u;");
+    expect(compiled.wgsl).toContain("out[0u] = tile[1u];");
     expect([...result.buffers.out as Uint32Array]).toEqual([9]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([9]);
   });
 
   it("supports CUDA integer atomic exchange and compare-swap", () => {
@@ -17465,12 +17476,21 @@ __global__ void sequence_stmt(float* out) {
       { buffers: { out: new Float32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sequence-expression");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("i = 2;");
     expect(compiled.wgsl).toContain("j = (i + 3);");
     expect(compiled.wgsl).toContain("k = (k + 2);");
     expect([...result.buffers.out as Float32Array]).toEqual([5, 7]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([5, 7]);
   });
 
   it("lowers comma sequence return values in device helpers", () => {

@@ -720,6 +720,7 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
   const shared = sharedMemorySymbols(ir);
   if (shared.length === 0 && !operationsContainBarrier(ir.operations)) return true;
   if (!shared.every((symbol) => symbol.dimensions.length === 1 && (symbol.dimensions[0] ?? 0) > 0)) return false;
+  if (!operationsContainBarrier(ir.operations)) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
   return operationsHaveOnlyTopLevelBarriers(ir.operations);
 }
 
@@ -740,6 +741,18 @@ function operationsHaveOnlyTopLevelBarriers(operations: readonly SemanticKernelI
   );
 }
 
+function operationsHaveNoBarrierOrControlTransfer(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.every((operation) => {
+    if (operation.kind === "barrier" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue") return false;
+    if (operation.kind === "branch") {
+      return operationsHaveNoBarrierOrControlTransfer(operation.consequent) &&
+        operationsHaveNoBarrierOrControlTransfer(operation.alternate);
+    }
+    if (operation.kind === "block" || operation.kind === "loop") return operationsHaveNoBarrierOrControlTransfer(operation.body);
+    return true;
+  });
+}
+
 function semanticWgslRequiredFeaturesSupported(requiredFeatures: readonly string[]): boolean {
   return requiredFeatures.every((feature) => feature === "shader-f16");
 }
@@ -754,6 +767,23 @@ function semanticWgslValueTypeSupported(valueType: CudaLiteScalarType | undefine
 
 function semanticWgslAssignmentOperatorSupported(operator: string): boolean {
   return operator === "=" || operator === "+=" || operator === "-=";
+}
+
+function semanticWgslAssignmentMemoryRefSupported(
+  expression: SemanticExpression,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  const ref = semanticWgslAssignmentMemoryRef(expression, ir);
+  return ref !== undefined &&
+    (ir === undefined ? semanticWgslMemoryRefSupported(ref) : semanticWgslTypedMemoryRefSupported(ref, ir)) &&
+    !isSemanticWgslFloatVectorType(ref.valueType);
+}
+
+function semanticWgslAssignmentMemoryRef(
+  expression: SemanticExpression,
+  _ir?: SemanticKernelIrModule,
+): SemanticMemoryRef | undefined {
+  return expression.kind === "index" ? memoryRefFromIndexExpression(expression) : undefined;
 }
 
 function semanticWgslVectorBinaryOperatorSupported(operator: string): boolean {
@@ -1357,7 +1387,8 @@ function semanticWgslExpressionSupported(
     case "assignment":
       return semanticWgslAssignmentOperatorSupported(expression.operator) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
-          expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) &&
+          expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir) ||
+          semanticWgslAssignmentMemoryRefSupported(expression.target, ir)) &&
         semanticWgslExpressionSupported(expression.value, "scalar", ir);
     case "update":
       return expression.argument.kind === "symbol" &&
@@ -1416,6 +1447,15 @@ function emitSemanticOperation(
         ];
       }
       const type = wgslValueType(operation.target.valueType);
+      if (operation.init?.kind === "sequence") {
+        const sequence = emitSemanticSequenceParts(operation.init, ir, names, indentLevel, options, textureSpecializations);
+        const target = nameFor(operation.target.name, names);
+        return [
+          `${prefix}var ${target}: ${type};`,
+          ...sequence.prefix,
+          `${prefix}${target} = ${emitSemanticExpressionAs(sequence.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations)};`,
+        ];
+      }
       const init = operation.init
         ? ` = ${emitSemanticInitExpression(operation.init, operation.target.valueType, ir, names, options, textureSpecializations)}`
         : isSemanticWgslFloatVectorType(operation.target.valueType)
@@ -1424,7 +1464,7 @@ function emitSemanticOperation(
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
     }
     case "store":
-      return [`${prefix}${emitSemanticStore(operation, ir, names, options, textureSpecializations)};`];
+      return emitSemanticStoreOperation(operation, ir, names, indentLevel, options, textureSpecializations);
     case "surface-write":
       return emitSemanticSurfaceWrite(operation, ir, names, indentLevel, options, textureSpecializations);
     case "surface-read-store":
@@ -1436,6 +1476,7 @@ function emitSemanticOperation(
     case "expression":
       if (isSemanticNoopExpression(operation.expression)) return [];
       if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names, options, textureSpecializations)};`];
+      if (operation.expression.kind === "sequence") return emitSemanticSequenceStatement(operation.expression, ir, names, indentLevel, options, textureSpecializations);
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options, textureSpecializations)};`];
     case "branch": {
       const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names, options)}) {`];
@@ -1496,6 +1537,71 @@ function emitSemanticSurfaceReadStore(
     options,
   );
   return `${nameFor(target.name, names)} = ${value}`;
+}
+
+function emitSemanticStoreOperation(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  if (operation.value.kind !== "sequence") {
+    return [`${prefix}${emitSemanticStore(operation, ir, names, options, textureSpecializations)};`];
+  }
+  const sequence = emitSemanticSequenceParts(operation.value, ir, names, indentLevel, options, textureSpecializations);
+  return [
+    ...sequence.prefix,
+    `${prefix}${emitSemanticStore({ ...operation, value: sequence.value }, ir, names, options, textureSpecializations)};`,
+  ];
+}
+
+function emitSemanticSequenceStatement(
+  expression: Extract<SemanticExpression, { readonly kind: "sequence" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): readonly string[] {
+  const sequence = emitSemanticSequenceParts(expression, ir, names, indentLevel, options, textureSpecializations);
+  return [
+    ...sequence.prefix,
+    ...emitSemanticExpressionStatement(sequence.value, ir, names, indentLevel, options, textureSpecializations),
+  ];
+}
+
+function emitSemanticSequenceParts(
+  expression: Extract<SemanticExpression, { readonly kind: "sequence" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): { readonly prefix: readonly string[]; readonly value: SemanticExpression } {
+  const expressions = expression.expressions.length > 0 ? expression.expressions : [zeroExpression(expression.span)];
+  const value = expressions.at(-1)!;
+  const prefix = expressions.slice(0, -1).flatMap((item) =>
+    emitSemanticExpressionStatement(item, ir, names, indentLevel, options, textureSpecializations)
+  );
+  return { prefix, value };
+}
+
+function emitSemanticExpressionStatement(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): readonly string[] {
+  if (isSemanticNoopExpression(expression)) return [];
+  const prefix = "  ".repeat(indentLevel);
+  if (expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(expression, ir, names, options, textureSpecializations)};`];
+  if (expression.kind === "sequence") return emitSemanticSequenceStatement(expression, ir, names, indentLevel, options, textureSpecializations);
+  return [`${prefix}${emitSemanticExpression(expression, ir, names, options, textureSpecializations)};`];
 }
 
 function semanticWgslSurfaceReadTarget(expression: SemanticExpression): { readonly name: string; readonly valueType?: CudaLiteScalarType } | undefined {
@@ -1660,6 +1766,16 @@ function emitSemanticAssignmentStatement(
     if (expression.operator === "+=") return `${target} += ${value}`;
     if (expression.operator === "-=") return `${target} -= ${value}`;
     return `${target} = ${value}`;
+  }
+  {
+    const ref = semanticWgslAssignmentMemoryRef(expression.target, ir);
+    if (ref) {
+      const target = emitSemanticMemoryRef(ref, ir, names, options);
+      const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(ref.valueType), options, textureSpecializations);
+      if (expression.operator === "+=") return `${target} += ${value}`;
+      if (expression.operator === "-=") return `${target} -= ${value}`;
+      return `${target} = ${value}`;
+    }
   }
   if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
   const target = nameFor(expression.target.name, names);
@@ -1972,7 +2088,10 @@ function emitSemanticExpression(
     case "conditional":
       return `select(${emitSemanticExpression(expression.alternate, ir, names, options, textureSpecializations)}, ${emitSemanticExpression(expression.consequent, ir, names, options, textureSpecializations)}, ${emitTruthiness(expression.condition, ir, names, options)})`;
     case "assignment":
-      if (expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) return `(${emitSemanticAssignmentStatement(expression, ir, names, options, textureSpecializations)})`;
+      if (
+        expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir) ||
+        semanticWgslAssignmentMemoryRefSupported(expression.target, ir)
+      ) return `(${emitSemanticAssignmentStatement(expression, ir, names, options, textureSpecializations)})`;
       if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
       {
         const target = nameFor(expression.target.name, names);

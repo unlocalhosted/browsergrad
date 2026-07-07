@@ -787,7 +787,8 @@ function semanticReferenceExpressionSupported(
     case "assignment":
       return semanticReferenceAssignmentOperatorSupported(expression.operator) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
-          expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, compiled)) &&
+          expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, compiled) ||
+          semanticReferenceAssignmentMemoryRefSupported(expression.target, compiled)) &&
         semanticReferenceExpressionSupported(expression.value, "scalar", compiled);
     case "sequence":
       return expression.expressions.every((item) => semanticReferenceExpressionSupported(item, "scalar", compiled));
@@ -930,6 +931,23 @@ function semanticReferenceExpressionChildren(expression: SemanticExpression): re
 
 function semanticReferenceAssignmentOperatorSupported(operator: string): boolean {
   return operator === "=" || operator === "+=" || operator === "-=";
+}
+
+function semanticReferenceAssignmentMemoryRefSupported(
+  expression: SemanticExpression,
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  const ref = semanticReferenceAssignmentMemoryRef(expression, compiled);
+  return ref !== undefined &&
+    (compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled)) &&
+    !isSemanticReferenceFloatVectorType(ref.valueType);
+}
+
+function semanticReferenceAssignmentMemoryRef(
+  expression: SemanticExpression,
+  _compiled?: CompiledCudaLiteKernel,
+): SemanticMemoryRef | undefined {
+  return expression.kind === "index" ? memoryRefFromIndexExpression(expression) : undefined;
 }
 
 function semanticReferenceVectorBinaryOperatorSupported(operator: string): boolean {
@@ -1342,10 +1360,16 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
         : evalSemanticExpression(expression.alternate, context);
     case "assignment":
       if (!semanticReferenceAssignmentOperatorSupported(expression.operator) ||
-        (expression.target.kind !== "symbol" && (expression.target.kind !== "member" || !semanticReferenceVectorMemberSupported(expression.target, context.compiled)))) {
+        (expression.target.kind !== "symbol" &&
+          (expression.target.kind !== "member" || !semanticReferenceVectorMemberSupported(expression.target, context.compiled)) &&
+          !semanticReferenceAssignmentMemoryRefSupported(expression.target, context.compiled))) {
         throw semanticReferenceError("semantic reference supports only scalar local assignment expressions", expression.span);
       }
       if (expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, context.compiled)) return assignLocalVectorMember(expression, context);
+      {
+        const ref = semanticReferenceAssignmentMemoryRef(expression.target, context.compiled);
+        if (ref) return assignMemoryRef(expression, ref, context);
+      }
       if (expression.target.kind !== "symbol") throw semanticReferenceError("semantic reference assignment requires local symbol target", expression.target.span);
       {
         const right = evalNumber(expression.value, context);
@@ -2394,6 +2418,18 @@ function assignLocalVectorMember(
   const value = expression.operator === "+=" ? left + right : expression.operator === "-=" ? left - right : right;
   current[lane] = value;
   context.locals.set(expression.target.object.name, current);
+  return value;
+}
+
+function assignMemoryRef(
+  expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+): number {
+  const right = evalNumber(expression.value, context);
+  const left = expression.operator === "=" ? 0 : readMemory(ref, context);
+  const value = expression.operator === "+=" ? left + right : expression.operator === "-=" ? left - right : right;
+  writeMemory(ref, value, context);
   return value;
 }
 
