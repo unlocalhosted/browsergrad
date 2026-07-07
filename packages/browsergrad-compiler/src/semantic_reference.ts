@@ -120,7 +120,17 @@ const SEMANTIC_NOOP_CALLS = new Set([
   "__trap",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
-const SEMANTIC_SUBGROUP_CALLS = new Set(["__activemask", "__any_sync", "__all_sync", "__ballot_sync", "__reduce_add_sync"]);
+const SEMANTIC_SUBGROUP_CALLS = new Set([
+  "__activemask",
+  "__any_sync",
+  "__all_sync",
+  "__ballot_sync",
+  "__reduce_add_sync",
+  "__shfl_sync",
+  "__shfl_down_sync",
+  "__shfl_up_sync",
+  "__shfl_xor_sync",
+]);
 
 interface Vector3 {
   readonly x: number;
@@ -489,6 +499,15 @@ function semanticReferenceMathCallSupported(expression: Extract<SemanticExpressi
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return false;
   if (expression.callee.name === "__activemask") return expression.args.length === 0;
+  if (
+    expression.callee.name === "__shfl_sync" ||
+    expression.callee.name === "__shfl_down_sync" ||
+    expression.callee.name === "__shfl_up_sync" ||
+    expression.callee.name === "__shfl_xor_sync"
+  ) {
+    return (expression.args.length === 3 || expression.args.length === 4) &&
+      expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+  }
   return expression.args.length === 2 && semanticReferenceExpressionSupported(expression.args[1]!, "scalar");
 }
 
@@ -1421,6 +1440,17 @@ function evalSemanticSubgroupCall(
     return mask >>> 0;
   }
   if (name === "__reduce_add_sync") return peers.reduce((sum, peer) => sum + evalNumber(value, peer), 0);
+  if (name === "__shfl_sync" || name === "__shfl_down_sync" || name === "__shfl_up_sync" || name === "__shfl_xor_sync") {
+    const index = expression.args[2] ? Math.trunc(evalNumber(expression.args[2], context)) : 0;
+    const width = semanticShuffleWidth(expression.args[3] ? evalNumber(expression.args[3], context) : 32);
+    const rank = semanticLocalLinearRank(context);
+    const lane = rank % width;
+    const base = rank - lane;
+    const targetLane = semanticShuffleTargetLane(name, lane, index, width);
+    const targetRank = base + targetLane;
+    const target = peers.find((peer) => semanticLocalLinearRank(peer) === targetRank) ?? context;
+    return evalNumber(value, target);
+  }
   throw semanticReferenceError(`semantic reference does not support subgroup call '${name}'`, expression.span);
 }
 
@@ -1432,6 +1462,20 @@ function semanticWarpContexts(context: SemanticReferenceContext): readonly Seman
     const peerRank = semanticLocalLinearRank(peer);
     return peerRank >= warpBase && peerRank < warpEnd;
   });
+}
+
+function semanticShuffleWidth(width: number): number {
+  if (!Number.isFinite(width)) return 32;
+  return Math.max(1, Math.min(32, Math.trunc(width)));
+}
+
+function semanticShuffleTargetLane(name: string, lane: number, index: number, width: number): number {
+  const operand = Math.max(0, Math.trunc(index));
+  if (name === "__shfl_sync") return operand % width;
+  if (name === "__shfl_down_sync") return lane + operand < width ? lane + operand : lane;
+  if (name === "__shfl_up_sync") return lane >= operand ? lane - operand : lane;
+  const xorLane = lane ^ operand;
+  return xorLane < width ? xorLane : lane;
 }
 
 function semanticLocalLinearRank(context: SemanticReferenceContext): number {

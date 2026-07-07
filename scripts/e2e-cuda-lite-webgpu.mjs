@@ -2072,6 +2072,24 @@ __global__ void semanticVote(uint *input, uint *out) {
   out[tid * 4 + 2] = __ballot_sync(mask, input[tid]);
   out[tid * 4 + 3] = __reduce_add_sync(mask, input[tid]);
 }`,
+  semanticShuffle: `
+__global__ void semanticShuffle(uint *out) {
+  int tid = threadIdx.x;
+  uint mask = 0xffffffffu;
+  uint value = uint(tid) + 10u;
+  out[tid * 4] = __shfl_sync(mask, value, 2, 4);
+  out[tid * 4 + 1] = __shfl_down_sync(mask, value, 1, 4);
+  out[tid * 4 + 2] = __shfl_up_sync(mask, value, 1, 4);
+  out[tid * 4 + 3] = __shfl_xor_sync(mask, value, 1, 4);
+}`,
+  semanticShuffleFunction: `
+__device__ uint pick_first_lane(uint value) {
+  return __shfl_sync(0xffffffffu, value, 0, 4);
+}
+__global__ void semanticShuffleFunction(uint *out) {
+  uint value = uint(threadIdx.x) + 5u;
+  out[threadIdx.x] = pick_first_lane(value);
+}`,
   syncthreadsPredicates: `
 __global__ void syncthreadsPredicates(int *out) {
   int tid = threadIdx.x;
@@ -12506,6 +12524,34 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2] },
+          },
+          {
+            name: "subgroup:semantic-shuffle",
+            source: SOURCES.semanticShuffle,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [12, 11, 10, 11, 12, 12, 10, 10, 12, 13, 11, 13, 12, 13, 12, 12] },
+          },
+          {
+            name: "subgroup:semantic-shuffle-device-function",
+            source: SOURCES.semanticShuffleFunction,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [5, 5, 5, 5] },
           },
           {
             name: "sync:syncthreads-predicates",

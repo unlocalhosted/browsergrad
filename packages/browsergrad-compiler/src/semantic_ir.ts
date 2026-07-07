@@ -653,7 +653,13 @@ function lowerExpression(
           ? "uint"
           : expression.callee.kind === "identifier" && (expression.callee.name === "__any_sync" || expression.callee.name === "__all_sync" || expression.callee.name === "__ballot_sync")
             ? "uint"
-          : expression.callee.kind === "identifier" && expression.callee.name === "__reduce_add_sync"
+          : expression.callee.kind === "identifier" && (
+              expression.callee.name === "__reduce_add_sync" ||
+              expression.callee.name === "__shfl_sync" ||
+              expression.callee.name === "__shfl_down_sync" ||
+              expression.callee.name === "__shfl_up_sync" ||
+              expression.callee.name === "__shfl_xor_sync"
+            )
             ? expressionValueType(args[1]) ?? "uint"
           : expression.callee.kind === "identifier" && (expression.callee.name === "clock" || expression.callee.name === "clock64")
             ? "uint"

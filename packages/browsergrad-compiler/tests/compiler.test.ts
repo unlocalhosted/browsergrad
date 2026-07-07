@@ -4637,9 +4637,9 @@ __global__ void warpKernel(const float *input, float *output) {
     });
 
     expect(compiled.wgsl).toContain("enable subgroups;");
-    expect(compiled.wgsl).toContain("bg_warp_shuffle_down_float_32(val, 16u, 32u, local_id)");
-    expect(compiled.wgsl).toContain("bg_inline_warpReduceSum_");
-    expect(compiled.wgsl).not.toContain("val = warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_float_32(val, 16u, 32u, local_id)");
+    expect(compiled.wgsl).toContain("fn warpReduceSum(val: f32, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> f32");
+    expect(compiled.wgsl).toContain("val = warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
   });
 
   it("lowers semantic block reductions as subgroup reductions", () => {
@@ -4772,6 +4772,52 @@ __global__ void semanticVoteKernel(uint *input, uint *out) {
       1, 0, 10, 2,
       1, 0, 10, 2,
       1, 0, 10, 2,
+    ]);
+  });
+
+  it("lowers CUDA warp shuffle helpers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticShuffleKernel(uint *out) {
+  int tid = threadIdx.x;
+  uint mask = 0xffffffffu;
+  uint value = uint(tid) + 10u;
+  out[tid * 4] = __shfl_sync(mask, value, 2, 4);
+  out[tid * 4 + 1] = __shfl_down_sync(mask, value, 1, 4);
+  out[tid * 4 + 2] = __shfl_up_sync(mask, value, 1, 4);
+  out[tid * 4 + 3] = __shfl_xor_sync(mask, value, 1, 4);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(16) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(16) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_32");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_32");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_32");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_uint_32");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      12, 11, 10, 11,
+      12, 12, 10, 10,
+      12, 13, 11, 13,
+      12, 13, 12, 12,
+    ]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      12, 11, 10, 11,
+      12, 12, 10, 10,
+      12, 13, 11, 13,
+      12, 13, 12, 12,
     ]);
   });
 
@@ -10218,7 +10264,7 @@ __global__ void surfaceLayeredRead(cudaSurfaceObject_t surf, float *out) {
     expect(canEmitSemanticKernelIrWgsl(helperCompiled.kernelIr)).toBe(true);
     expect(helperCompiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(helperCompiled.wgsl).toContain("fn bg_sem_surf2dread(surface: u32, x_bytes: i32, y: i32, z: i32) -> f32");
-    expect(helperCompiled.wgsl).toContain("read_layer(0u, 1, 1)");
+    expect(helperCompiled.wgsl).toContain("read_layer(0u, 1, 1, local_id, workgroup_id, num_workgroups)");
     expect(helperCompiled.wgsl).toContain("bg_sem_surf2dread(surfaceArg, (1 * 4), row, layer)");
     expect([...helperResult.buffers.out as Float32Array]).toEqual([8]);
     expect([...helperSemanticResult.buffers.out as Float32Array]).toEqual([8]);
@@ -10366,7 +10412,7 @@ __global__ void surfaceVectorHelperRoundtrip(cudaSurfaceObject_t dst, float *out
     expect(compiled.wgsl).toContain("fn bg_sem_surf2dread(surface: u32, x_bytes: i32, y: i32, z: i32) -> f32");
     expect(compiled.wgsl).toContain("fn bg_sem_surf2dwrite(surface: u32, value: f32, x_bytes: i32, y: i32, z: i32)");
     expect(compiled.wgsl).toContain("var value: vec4<f32> = vec4<f32>(f32(1.0), f32(2.0), f32(3.0), f32(4.0));");
-    expect(compiled.wgsl).toContain("write_surface_vec(0u, value)");
+    expect(compiled.wgsl).toContain("write_surface_vec(0u, value, local_id, workgroup_id, num_workgroups)");
     expect(compiled.wgsl).toContain("bg_sem_surf2dwrite(surfaceArg, (value).x, (0 + 0), 0, 0);");
     expect(compiled.wgsl).toContain("bg_sem_surf2dwrite(surfaceArg, (value).w, (0 + 12), 0, 0);");
     expect(compiled.wgsl).toContain("bg_sem_surf2dread(surfaceArg");
@@ -10408,7 +10454,7 @@ __global__ void surfaceHelperWrite(cudaSurfaceObject_t surf) {
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("fn bg_sem_surf2dwrite(surface: u32, value: f32, x_bytes: i32, y: i32, z: i32)");
-    expect(compiled.wgsl).toContain("write_value(0u, 17.0)");
+    expect(compiled.wgsl).toContain("write_value(0u, 17.0, local_id, workgroup_id, num_workgroups)");
     expect(compiled.wgsl).toContain("bg_sem_surf2dwrite(surfaceArg, value, 4, 0, 0);");
     expect([...result.buffers.surf as Float32Array]).toEqual([0, 17]);
     expect([...semanticResult.buffers.surf as Float32Array]).toEqual([0, 17]);
@@ -15236,7 +15282,7 @@ __global__ void sample(float *out, cudaTextureObject_t tex) {
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-    expect(compiled.wgsl).toContain("fn readPixel(texSrc: texture_2d<f32>, x: f32) -> vec4<f32>");
+    expect(compiled.wgsl).toContain("fn readPixel(texSrc: texture_2d<f32>, x: f32, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> vec4<f32>");
     expect(compiled.wgsl).toContain("textureLoad(texSrc");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
