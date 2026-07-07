@@ -131,6 +131,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   }
   const names = createWgslNameMap([...rawNames]);
   const initializedScalarConstants = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length === 0);
+  const initializedConstantArrays = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length > 0);
   const uniformParams = [
     ...ir.params.filter((param) => param.addressSpace === "uniform"),
     ...constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length === 0),
@@ -139,7 +140,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
       { name: surfaceHeightField(surface.name), valueType: "uint" as const, span: surface.span },
     ]),
   ];
-  const constantBuffers = constantMemorySymbols(ir).filter((symbol) => symbol.dimensions.length > 0);
+  const constantBuffers = constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length > 0);
   const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
   const textures = textureSymbols(ir);
   const atomicStorage = semanticAtomicStorageNames(ir.operations);
@@ -223,6 +224,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   }
   for (const constant of initializedScalarConstants) {
     lines.push(`const ${nameFor(constant.name, names)}: ${wgslScalar(constant.valueType)} = ${emitSemanticExpressionAs(constant.init ?? zeroExpression(constant.span), ir, names, wgslValueScalar(constant.valueType))};`);
+  }
+  for (const constant of initializedConstantArrays) {
+    lines.push(emitInitializedConstantArray(constant, ir, names));
   }
   if (semanticUsesGenericSurfaceRead(ir)) {
     lines.push("", ...emitSemanticGenericSurfaceReadHelper(surfaces, names));
@@ -373,9 +377,11 @@ function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memor
   if (symbol.kind === "constant") {
     if (!semanticWgslScalarTypeSupported(symbol.valueType)) return false;
     return !symbol.initialized ||
-      symbol.dimensions.length === 0 &&
-      symbol.init !== undefined &&
-      semanticWgslExpressionSupported(symbol.init, "scalar");
+      symbol.init !== undefined && (
+        symbol.dimensions.length === 0
+          ? semanticWgslExpressionSupported(symbol.init, "scalar")
+          : initializedConstantArraySupported(symbol)
+      );
   }
   if (symbol.kind === "device-global") return semanticWgslScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "texture") return symbol.valueType === "texture2d";
@@ -1612,6 +1618,28 @@ function emitLocalArrayType(symbol: SemanticKernelIrModule["memory"][number]): s
     (element, dimension) => `array<${element}, ${Math.max(1, dimension)}>`,
     wgslScalar(symbol.valueType),
   );
+}
+
+function emitInitializedConstantArray(
+  symbol: SemanticKernelIrModule["memory"][number],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  const elementType = wgslScalar(symbol.valueType);
+  const length = totalElements(symbol.dimensions);
+  const arrayType = `array<${elementType}, ${length}>`;
+  const values = flattenInitializerExpressions(symbol.init ?? zeroExpression(symbol.span))
+    .slice(0, length)
+    .map((value) => emitSemanticExpressionAs(value, ir, names, wgslValueScalar(symbol.valueType)));
+  while (values.length < length) values.push(zeroForType(elementType));
+  return `const ${nameFor(symbol.name, names)}: ${arrayType} = ${arrayType}(${values.join(", ")});`;
+}
+
+function initializedConstantArraySupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
+  if (!symbol.init || symbol.init.kind !== "initializer") return false;
+  return flattenInitializerExpressions(symbol.init)
+    .slice(0, totalElements(symbol.dimensions))
+    .every((value) => semanticWgslExpressionSupported(value, "scalar"));
 }
 
 function emitLocalArrayFill(

@@ -273,9 +273,11 @@ function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["
   if (symbol.kind === "constant") {
     if (!semanticReferenceScalarTypeSupported(symbol.valueType)) return false;
     return !symbol.initialized ||
-      symbol.dimensions.length === 0 &&
-      symbol.init !== undefined &&
-      semanticReferenceExpressionSupported(symbol.init, "scalar");
+      symbol.init !== undefined && (
+        symbol.dimensions.length === 0
+          ? semanticReferenceExpressionSupported(symbol.init, "scalar")
+          : initializedConstantArraySupported(symbol)
+      );
   }
   if (symbol.kind === "device-global") return semanticReferenceScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "texture") return symbol.valueType === "texture2d";
@@ -1579,9 +1581,29 @@ function semanticReferenceConstants(compiled: CompiledCudaLiteKernel, input: Com
     if (value !== undefined) constants.set(constant.name, value);
     else if (constant.initialized && constant.dimensions.length === 0 && constant.init !== undefined) {
       constants.set(constant.name, evalConstantInitNumber(constant.init));
+    } else if (constant.initialized && constant.dimensions.length > 0 && constant.init !== undefined) {
+      constants.set(constant.name, initializedConstantArrayValue(constant));
     }
   }
   return constants;
+}
+
+function initializedConstantArraySupported(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): boolean {
+  if (!symbol.init || symbol.init.kind !== "initializer") return false;
+  return flattenInitializerExpressions(symbol.init)
+    .slice(0, totalElements(symbol.dimensions))
+    .every((value) => semanticReferenceExpressionSupported(value, "scalar"));
+}
+
+function initializedConstantArrayValue(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): WgslTypedArray {
+  const length = totalElements(symbol.dimensions);
+  const array = typedArrayForScalar(symbol.valueType, length);
+  if (!symbol.init) return array;
+  const values = flattenInitializerExpressions(symbol.init)
+    .slice(0, length)
+    .map(evalConstantInitNumber);
+  for (let index = 0; index < values.length; index++) array[index] = values[index] ?? 0;
+  return array;
 }
 
 function evalConstantInitNumber(expression: SemanticExpression): number {

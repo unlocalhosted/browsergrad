@@ -12639,6 +12639,33 @@ __global__ void scaleInitialized(float *x, float *y) {
     expect([...result.buffers.y as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
+  it("embeds initialized CUDA constant arrays through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ int coeffs[3] = {2, 3, 5};
+__global__ void constantArrayInitialized(int *out) {
+  int idx = threadIdx.x;
+  out[idx] = coeffs[idx];
+}`, { workgroupSize: [3, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("const coeffs: array<i32, 3> = array<i32, 3>(2, 3, 5);");
+    expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("coeffs");
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([2, 3, 5]);
+    expect([...result.buffers.out as Int32Array]).toEqual([2, 3, 5]);
+  });
+
   it("accepts const-qualified CUDA constant arrays", () => {
     const compiled = compileCudaLiteKernel(`
 __constant__ const int table[2] = {3, 5};
