@@ -3379,13 +3379,34 @@ function readTextureLane(
 }
 
 function referenceSizeofValue(expression: CudaLiteExpression, context: ThreadContext): number {
-  if (expression.kind === "identifier") return sizeofCudaType(expression.name) ?? sizeofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
+  if (expression.kind === "identifier") {
+    const typeSize = sizeofCudaType(expression.name);
+    if (typeSize !== undefined) return typeSize;
+    const arraySize = referenceArraySizeofValue(expression.name, context);
+    if (arraySize !== undefined) return arraySize;
+    return sizeofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
+  }
   return sizeofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
 }
 
 function referenceAlignofValue(expression: CudaLiteExpression, context: ThreadContext): number {
   if (expression.kind === "identifier") return alignofCudaType(expression.name) ?? alignofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
   return alignofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
+}
+
+function referenceArraySizeofValue(name: string, context: ThreadContext): number | undefined {
+  const local = context.locals.get(name);
+  if (isLocalArray(local)) return local.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(local.valueType) ?? 4);
+  if (isLocalPointerArray(local)) return local.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType("voidptr") ?? 4);
+  const shared = context.shared.get(name);
+  if (shared) return shared.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(shared.valueType) ?? 4);
+  const constantDimensions = context.constantDimensions.get(name);
+  const constantType = context.valueTypes.get(name);
+  if (constantDimensions && constantDimensions.length > 0 && constantType) return constantDimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(constantType) ?? 4);
+  const globalDimensions = context.deviceGlobalDimensions.get(name);
+  const globalType = context.valueTypes.get(name);
+  if (globalDimensions && globalDimensions.length > 0 && globalType) return globalDimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(globalType) ?? 4);
+  return undefined;
 }
 
 function evalFrexp(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {

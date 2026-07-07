@@ -19,6 +19,7 @@ import type {
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
+import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 
 export type SemanticAddressSpace =
@@ -597,6 +598,10 @@ function lowerExpression(
       };
     }
     case "call": {
+      if (expression.callee.kind === "identifier" && (expression.callee.name === "sizeof" || expression.callee.name === "alignof")) {
+        const value = semanticSizeofAlignofValue(expression.callee.name, expression.args[0], scope);
+        if (value !== undefined) return intNumberExpression(value, expression.span);
+      }
       const args = expression.args.map((arg) => lowerExpression(arg, scope));
       if (expression.callee.kind === "identifier" && CUDA_CACHE_HINT_LOADS.has(expression.callee.name)) {
         const load = cacheHintLoadExpression(expression, scope);
@@ -1108,6 +1113,29 @@ function numberExpression(value: number, span: SourceSpan): SemanticExpression {
 
 function intNumberExpression(value: number, span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value, valueType: "int", span };
+}
+
+function semanticSizeofAlignofValue(
+  kind: "sizeof" | "alignof",
+  expression: CudaLiteExpression | undefined,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): number | undefined {
+  if (!expression) return undefined;
+  const layout = kind === "sizeof" ? sizeofCudaType : alignofCudaType;
+  if (expression.kind === "identifier") {
+    const typeLayout = layout(expression.name);
+    if (typeLayout !== undefined) return typeLayout;
+    const symbol = scope.get(expression.name);
+    if (!symbol) return undefined;
+    const elementLayout = layout(symbol.valueType ?? "");
+    if (elementLayout === undefined) return undefined;
+    if (kind === "alignof") return elementLayout;
+    if (symbol.pointer && symbol.dimensions.length === 0) return sizeofCudaType("voidptr") ?? 4;
+    const elements = symbol.dimensions.reduce((product, dimension) => product * dimension, 1);
+    return elementLayout * Math.max(1, elements);
+  }
+  const valueType = expressionValueType(lowerExpression(expression, scope));
+  return valueType === undefined ? undefined : layout(valueType);
 }
 
 function tempScalarSymbol(prefix: string, span: SourceSpan, valueType: CudaLiteScalarType): CudaLiteSemanticSymbol {

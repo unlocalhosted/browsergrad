@@ -6616,7 +6616,13 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
 
 function emitSizeofValue(expression: CudaLiteExpression | undefined, context: EmitContext): number {
   if (!expression) return 4;
-  if (expression.kind === "identifier") return sizeofCudaType(expression.name) ?? sizeofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
+  if (expression.kind === "identifier") {
+    const typeSize = sizeofCudaType(expression.name);
+    if (typeSize !== undefined) return typeSize;
+    const arraySize = emitArraySizeofValue(expression.name, expression.span, context);
+    if (arraySize !== undefined) return arraySize;
+    return sizeofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
+  }
   return sizeofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
 }
 
@@ -6624,6 +6630,18 @@ function emitAlignofValue(expression: CudaLiteExpression | undefined, context: E
   if (!expression) return 4;
   if (expression.kind === "identifier") return alignofCudaType(expression.name) ?? alignofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
   return alignofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
+}
+
+function emitArraySizeofValue(name: string, span: SourceSpan, context: EmitContext): number | undefined {
+  const local = context.localArrayFor(name, span);
+  if (local) return local.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(local.valueType) ?? 4);
+  const shared = sharedDeclarationFor(name, context);
+  if (shared) return shared.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(shared.valueType) ?? 4);
+  const constant = context.ir.constants.find((item) => item.name === name);
+  if (constant && constant.dimensions.length > 0) return constant.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(constant.valueType) ?? 4);
+  const global = context.deviceGlobalFor(name);
+  if (global && global.dimensions.length > 0) return global.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(global.valueType) ?? 4);
+  return undefined;
 }
 
 function inferDeviceFunctionTextureDescriptors(
