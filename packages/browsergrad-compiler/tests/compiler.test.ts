@@ -8543,11 +8543,25 @@ __global__ void half2Add(const half2 *x, half2 *y) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: createWgslFloat16Array([3, 5]),
+          y: createWgslFloat16Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
     expect(compiled.wgsl).toContain("enable f16;");
     expect(compiled.wgsl).toContain("vec2<f16>");
     expect(Array.from(result.buffers.y as ArrayLike<number>)).toEqual([4, 7]);
+    expect(Array.from(semanticResult.buffers.y as ArrayLike<number>)).toEqual([4, 7]);
   });
 
   it("preserves half2 vector arithmetic when writing through device pointer aliases", () => {
@@ -8585,11 +8599,28 @@ __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out, float *scal
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: createWgslFloat16Array([1, 8]),
+          y: createWgslFloat16Array([2, 4]),
+          out: createWgslFloat16Array(4),
+          scalar: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("max(");
     expect(compiled.wgsl).toContain("fma(");
     expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([6, 6, 5, 66]);
     expect([...result.buffers.scalar as Float32Array]).toEqual([37]);
+    expect(Array.from(semanticResult.buffers.out as ArrayLike<number>)).toEqual([6, 6, 5, 66]);
+    expect([...semanticResult.buffers.scalar as Float32Array]).toEqual([37]);
   });
 
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {

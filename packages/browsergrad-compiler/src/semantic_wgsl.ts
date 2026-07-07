@@ -37,7 +37,7 @@ interface SemanticTextureDescriptorSignature {
 }
 
 type SemanticTextureDescriptorSpecializations = ReadonlyMap<string, ReadonlyMap<string, SemanticTextureDescriptorSignature>>;
-type SemanticWgslValueType = WgslValueType | "bool" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>";
+type SemanticWgslValueType = WgslValueType | "bool" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>" | "vec2<f16>";
 
 interface SemanticTextureDescriptorHelper {
   readonly textureName: string;
@@ -49,6 +49,11 @@ const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "grid
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 const SEMANTIC_FP8_CALLS = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
+const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
+  "__hadd2", "__hsub2", "__hmul2", "__hfma2", "__hmin2", "__hmax2",
+  "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
+]);
+const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
 const SEMANTIC_MATH_CALLS = new Map([
   ["sqrt", "sqrt"],
   ["sqrtf", "sqrt"],
@@ -799,7 +804,7 @@ function semanticWgslAtomicSupported(
 function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
   return semanticWgslExpressionSupported(expression, "scalar", ir) ||
     semanticWgslExpressionSupported(expression, "any", ir) && isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression, ir)) ||
-    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression) || semanticWgslVectorConstructorSupported(expression, "any", ir) || semanticWgslVectorAtCallSupported(expression, ir) || semanticWgslVectorLerpCallSupported(expression, ir)) ||
+    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression) || semanticWgslHalf2CallSupported(expression, ir) || semanticWgslVectorConstructorSupported(expression, "any", ir) || semanticWgslVectorAtCallSupported(expression, ir) || semanticWgslVectorLerpCallSupported(expression, ir)) ||
     expression.kind === "texture-read" && semanticWgslTextureReadSupported(expression, ir) ||
     expression.kind === "surface-read" && semanticWgslSurfaceReadSupported(expression, ir);
 }
@@ -929,6 +934,41 @@ function semanticWgslVectorLerpCallSupported(
     semanticWgslExpressionSupported(left, "any", ir) &&
     semanticWgslExpressionSupported(right, "any", ir) &&
     semanticWgslExpressionSupported(amount, "scalar", ir);
+}
+
+function semanticWgslHalf2CallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  if (expression.callee.kind !== "symbol") return false;
+  const name = expression.callee.name;
+  if (!SEMANTIC_HALF2_VECTOR_CALLS.has(name) && !SEMANTIC_HALF2_SCALAR_CALLS.has(name)) return false;
+  if (name === "__hadd2" || name === "__hsub2" || name === "__hmul2" || name === "__hmin2" || name === "__hmax2") {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
+  }
+  if (name === "__hfma2") {
+    return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
+  }
+  if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2float" || name === "__high2float") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir);
+  }
+  if (name === "__uint_as_half2") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticWgslExpressionSupported(arg, "scalar", ir);
+  }
+  if (name === "__float22half2_rn") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg, ir) === "float2" && semanticWgslExpressionSupported(arg, "any", ir);
+  }
+  if (name === "__float2half2_rn") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticWgslExpressionSupported(arg, "scalar", ir);
+  }
+  if (name === "__floats2half2_rn") {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  }
+  return false;
 }
 
 function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -1287,6 +1327,7 @@ function semanticWgslExpressionSupported(
     case "call":
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
         semanticWgslMathCallSupported(expression) ||
+        semanticWgslHalf2CallSupported(expression, ir) ||
         semanticWgslVectorConstructorSupported(expression, expected, ir) ||
         expected === "scalar" && semanticWgslVectorAtCallSupported(expression, ir) ||
         expected === "any" && semanticWgslVectorLerpCallSupported(expression, ir);
@@ -1572,7 +1613,8 @@ function emitSemanticAssignmentStatement(
 ): string {
   if (expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) {
     const target = emitSemanticMember(expression.target, ir, names, options);
-    const value = emitSemanticExpressionAs(expression.value, ir, names, "f32", options, textureSpecializations);
+    const targetType = wgslVectorScalar(semanticExpressionVectorValueType(expression.target.object, ir));
+    const value = emitSemanticExpressionAs(expression.value, ir, names, targetType, options, textureSpecializations);
     if (expression.operator === "+=") return `${target} += ${value}`;
     if (expression.operator === "-=") return `${target} -= ${value}`;
     return `${target} = ${value}`;
@@ -1848,6 +1890,7 @@ function emitSemanticExpression(
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorLerpCallSupported(expression, ir)) return emitSemanticVectorLerpCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslHalf2CallSupported(expression, ir)) return emitSemanticHalf2Call(expression, ir, names, options, textureSpecializations);
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options, textureSpecializations);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
@@ -2276,20 +2319,22 @@ function emitSemanticVectorConstructor(
   if (!isSemanticWgslFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector constructor requires float vector target", expression.span);
   const fields = ["x", "y", "z", "w"];
   const targetLanes = cudaVectorLaneCount(valueType);
+  const targetScalar = wgslVectorScalar(valueType);
+  const targetType = wgslValueType(valueType);
   if (expression.args.length === 1 && !isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.args[0]!, ir))) {
-    const scalar = emitSemanticExpressionAs(expression.args[0]!, ir, names, "f32", options, textureSpecializations);
-    return `vec${targetLanes}<f32>(${Array.from({ length: targetLanes }, () => `f32(${scalar})`).join(", ")})`;
+    const scalar = emitSemanticExpressionAs(expression.args[0]!, ir, names, targetScalar, options, textureSpecializations);
+    return `${targetType}(${Array.from({ length: targetLanes }, () => `${targetScalar}(${scalar})`).join(", ")})`;
   }
   const lanes = expression.args.flatMap((arg) => {
     const argType = semanticExpressionVectorValueType(arg, ir);
     if (isSemanticWgslFloatVectorType(argType)) {
       const value = emitSemanticExpression(arg, ir, names, options, textureSpecializations);
-      return Array.from({ length: cudaVectorLaneCount(argType) }, (_, lane) => `f32((${value}).${fields[lane]})`);
+      return Array.from({ length: cudaVectorLaneCount(argType) }, (_, lane) => `${targetScalar}((${value}).${fields[lane]})`);
     }
-    return [`f32(${emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations)})`];
+    return [`${targetScalar}(${emitSemanticExpressionAs(arg, ir, names, targetScalar, options, textureSpecializations)})`];
   });
-  while (lanes.length < targetLanes) lanes.push("0.0");
-  return `vec${targetLanes}<f32>(${lanes.slice(0, targetLanes).join(", ")})`;
+  while (lanes.length < targetLanes) lanes.push(zeroForType(targetScalar));
+  return `${targetType}(${lanes.slice(0, targetLanes).join(", ")})`;
 }
 
 function emitSemanticVectorAtCall(
@@ -2319,6 +2364,72 @@ function emitSemanticVectorLerpCall(
   const end = emitSemanticExpression(right, ir, names, options, textureSpecializations);
   const factor = emitSemanticVectorOperand(amount, valueType as CudaLiteScalarType, ir, names, options, textureSpecializations);
   return `fma(${factor}, (${end} - ${start}), ${start})`;
+}
+
+function emitSemanticHalf2Call(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL half2 call requires symbol callee", expression.span);
+  const name = expression.callee.name;
+  const emitHalf2 = (arg: SemanticExpression): string => emitSemanticExpression(arg, ir, names, options, textureSpecializations);
+  if (name === "__hadd2" || name === "__hsub2" || name === "__hmul2") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two half2 operands`, expression.span);
+    const operator = name === "__hadd2" ? "+" : name === "__hsub2" ? "-" : "*";
+    return `(${emitHalf2(left)} ${operator} ${emitHalf2(right)})`;
+  }
+  if (name === "__hmin2" || name === "__hmax2") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two half2 operands`, expression.span);
+    return `${name === "__hmin2" ? "min" : "max"}(${emitHalf2(left)}, ${emitHalf2(right)})`;
+  }
+  if (name === "__hfma2") {
+    const [left, right, addend] = expression.args;
+    if (!left || !right || !addend) throw semanticWgslError(`${name} expects three half2 operands`, expression.span);
+    return `fma(${emitHalf2(left)}, ${emitHalf2(right)}, ${emitHalf2(addend)})`;
+  }
+  if (name === "__half22float2") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
+    return `vec2<f32>(${emitHalf2(arg)})`;
+  }
+  if (name === "__float22half2_rn") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one float2 operand`, expression.span);
+    return `vec2<f16>(${emitSemanticExpression(arg, ir, names, options, textureSpecializations)})`;
+  }
+  if (name === "__half2_as_uint") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
+    const emitted = emitHalf2(arg);
+    return `pack2x16float(vec2<f32>(f32((${emitted}).x), f32((${emitted}).y)))`;
+  }
+  if (name === "__uint_as_half2") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one uint operand`, expression.span);
+    return `vec2<f16>(unpack2x16float(${emitSemanticExpressionAs(arg, ir, names, "u32", options, textureSpecializations)}))`;
+  }
+  if (name === "__low2float" || name === "__high2float") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
+    return `f32((${emitHalf2(arg)}).${name === "__low2float" ? "x" : "y"})`;
+  }
+  if (name === "__float2half2_rn") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one scalar operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(arg, ir, names, "f16", options, textureSpecializations);
+    return `vec2<f16>(${emitted}, ${emitted})`;
+  }
+  if (name === "__floats2half2_rn") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two scalar operands`, expression.span);
+    return `vec2<f16>(${emitSemanticExpressionAs(left, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(right, ir, names, "f16", options, textureSpecializations)})`;
+  }
+  throw semanticWgslError(`semantic WGSL does not support half2 call '${name}'`, expression.span);
 }
 
 function emitSemanticFunctionArg(
@@ -3048,8 +3159,9 @@ function emitSemanticVectorOperand(
     return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   }
   const laneCount = cudaVectorLaneCount(valueType);
-  const scalar = emitSemanticExpressionAs(expression, ir, names, "f32", options, textureSpecializations);
-  return `vec${laneCount}<f32>(${Array.from({ length: laneCount }, () => `f32(${scalar})`).join(", ")})`;
+  const vectorScalar = wgslVectorScalar(valueType);
+  const scalar = emitSemanticExpressionAs(expression, ir, names, vectorScalar, options, textureSpecializations);
+  return `vec${laneCount}<${vectorScalar}>(${Array.from({ length: laneCount }, () => `${vectorScalar}(${scalar})`).join(", ")})`;
 }
 
 function semanticBinaryOperandType(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): WgslValueType {
@@ -3126,7 +3238,7 @@ function emitSemanticVectorMemoryRead(
   const base = emitFlatStorageVectorBaseIndex(ref, ir, names, options);
   const storage = nameFor(ref.base, names);
   const laneCount = cudaVectorLaneCount(ref.valueType);
-  return `vec${laneCount}<f32>(${Array.from({ length: laneCount }, (_, lane) => `${storage}[(${base} + ${lane}u)]`).join(", ")})`;
+  return `${wgslValueType(ref.valueType)}(${Array.from({ length: laneCount }, (_, lane) => `${storage}[(${base} + ${lane}u)]`).join(", ")})`;
 }
 
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
@@ -3525,7 +3637,7 @@ function wgslBindingType(valueType: CudaLiteScalarType | undefined): WgslValueTy
 }
 
 function wgslScalar(valueType: CudaLiteScalarType | undefined): WgslValueType | "bool" {
-  if (valueType === "half") return "f16";
+  if (valueType === "half" || valueType === "half2") return "f16";
   if (valueType === "int") return "i32";
   if (valueType === "uint") return "u32";
   if (valueType === "bool") return "bool";
@@ -3536,7 +3648,12 @@ function wgslValueType(valueType: CudaLiteScalarType | undefined): SemanticWgslV
   if (valueType === "float2") return "vec2<f32>";
   if (valueType === "float3") return "vec3<f32>";
   if (valueType === "float4") return "vec4<f32>";
+  if (valueType === "half2") return "vec2<f16>";
   return wgslScalar(valueType);
+}
+
+function wgslVectorScalar(valueType: CudaLiteScalarType | undefined): WgslValueType {
+  return valueType === "half2" ? "f16" : "f32";
 }
 
 function wgslValueScalar(valueType: CudaLiteScalarType | undefined): WgslValueType {
@@ -3574,6 +3691,8 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
   switch (expression.kind) {
     case "call": {
       if (expression.callee.kind === "symbol") {
+        if (expression.callee.name === "__half2_as_uint") return "u32";
+        if (expression.callee.name === "__low2float" || expression.callee.name === "__high2float") return "f32";
         const mathCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
         if (mathCallee && semanticMathCallReturnsFloat(expression.callee.name)) return "f32";
         if (mathCallee === "hadd" && expression.valueType === "half") return "f16";
@@ -3617,7 +3736,7 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
 }
 
 function isSemanticWgslFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float2" || valueType === "float3" || valueType === "float4";
+  return valueType === "float2" || valueType === "float3" || valueType === "float4" || valueType === "half2";
 }
 
 function semanticMathCallReturnsFloat(name: string): boolean {
