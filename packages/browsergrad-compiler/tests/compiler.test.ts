@@ -7000,6 +7000,51 @@ __global__ void mathOutAliases(float *out, int *ints) {
     expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
   });
 
+  it("lowers CUDA math output var initializers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mathOutVarInits(float *out, int *ints) {
+  float *intpart = out + 1;
+  int *expOut = ints + 1;
+  int *quoOut = ints + 2;
+  float frac = modff(-3.75f, intpart);
+  float mantissa = frexpf(9.0f, expOut);
+  float rem = remquof(7.0f, 2.0f, quoOut);
+  out[0] = frac;
+  out[2] = mantissa;
+  out[3] = rem;
+  out[4] = (float)ints[1];
+  out[5] = (float)ints[2];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(6), ints: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(6), ints: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-frexp-exponent");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+    expect(compiled.wgsl).toContain("out[1u] = -3.0;");
+    expect(compiled.wgsl).toContain("var frac: f32 = -0.75;");
+    expect(compiled.wgsl).toContain("ints[1u] = 4;");
+    expect(compiled.wgsl).toContain("var mantissa: f32 = 0.5625;");
+    expect(compiled.wgsl).toContain("ints[2u] = 4;");
+    expect(compiled.wgsl).toContain("var rem: f32 = -1.0;");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+    expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
+  });
+
   it("lets user device functions shadow CUDA math aliases when CUDA source defines them", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float lerp(float a, float b, float t) {
