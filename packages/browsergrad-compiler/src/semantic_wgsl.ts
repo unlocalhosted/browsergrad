@@ -87,6 +87,10 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["truncf", "trunc"],
   ["round", "round_away"],
   ["roundf", "round_away"],
+  ["rint", "round_even"],
+  ["rintf", "round_even"],
+  ["nearbyint", "round_even"],
+  ["nearbyintf", "round_even"],
   ["sin", "sin"],
   ["sinf", "sin"],
   ["__sinf", "sin"],
@@ -2105,6 +2109,7 @@ function emitSemanticMathCall(
     wgslCallee === "sinpi" ||
     wgslCallee === "cospi" ||
     wgslCallee === "round_away" ||
+    wgslCallee === "round_even" ||
     wgslCallee === "sinh" ||
     wgslCallee === "cosh" ||
     wgslCallee === "asinh" ||
@@ -2124,6 +2129,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "sinpi") return `sin(3.141592653589793 * ${emitted})`;
     if (wgslCallee === "cospi") return `cos(3.141592653589793 * ${emitted})`;
     if (wgslCallee === "round_away") return `select(floor(abs(${emitted}) + 0.5), -floor(abs(${emitted}) + 0.5), (${emitted} < 0.0))`;
+    if (wgslCallee === "round_even") return emitRoundEvenWgsl(emitted);
     if (wgslCallee === "sinh") return `(0.5 * (exp(${emitted}) - exp(-${emitted})))`;
     if (wgslCallee === "cosh") return `(0.5 * (exp(${emitted}) + exp(-${emitted})))`;
     if (wgslCallee === "asinh") return `log(${emitted} + sqrt((${emitted} * ${emitted}) + 1.0))`;
@@ -2221,6 +2227,16 @@ function emitSemanticMathCall(
     return `(${x} - f32(${quotient}) * ${y})`;
   }
   return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations)).join(", ")})`;
+}
+
+function emitRoundEvenWgsl(emitted: string): string {
+  const absValue = `abs(${emitted})`;
+  const base = `floor(${absValue})`;
+  const fraction = `(${absValue} - ${base})`;
+  const evenBase = `((${base} - floor(${base} * 0.5) * 2.0) == 0.0)`;
+  const tie = `select((${base} + 1.0), ${base}, ${evenBase})`;
+  const magnitude = `select(select(${base}, (${base} + 1.0), ${fraction} > 0.5), ${tie}, ${fraction} == 0.5)`;
+  return `select(${magnitude}, -${magnitude}, (${emitted} < 0.0))`;
 }
 
 function semanticMathCallArity(name: string): number {
