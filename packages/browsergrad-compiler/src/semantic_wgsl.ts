@@ -220,6 +220,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   for (const texture of textures) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
   }
+  if (semanticUsesGenericSurfaceRead(ir)) {
+    lines.push("", ...emitSemanticGenericSurfaceReadHelper(surfaces, names));
+  }
   for (const surface of surfaces) {
     lines.push("", ...emitSemanticSurfaceReadHelper(surface, names));
   }
@@ -468,7 +471,6 @@ function semanticWgslSurfaceReadSupported(
   return (expression.valueType === "float" || expression.valueType === "uint" || expression.valueType === "int") &&
     target.kind === "symbol" &&
     target.addressSpace === "surface" &&
-    surfaceSymbols(ir).some((surface) => surface.name === target.name) &&
     semanticWgslExpressionSupported(expression.xBytes, "scalar", ir) &&
     semanticWgslExpressionSupported(expression.y, "scalar", ir) &&
     (expression.z === undefined || semanticWgslExpressionSupported(expression.z, "scalar", ir));
@@ -482,7 +484,7 @@ function semanticWgslFunctionCallSupported(
   const callee = expression.callee.name;
   const fn = ir.functions.find((item) => item.name === callee);
   if (!fn || !semanticWgslScalarTypeSupported(fn.returnType)) return false;
-  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture"))) return false;
+  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
   if (fn.params.some((param) => param.addressSpace === "local" && !semanticWgslScalarTypeSupported(param.valueType))) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
@@ -497,6 +499,7 @@ function semanticWgslFunctionArgSupported(
 ): boolean {
   if (!param) return false;
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
+  if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
   return semanticWgslExpressionSupported(arg, "scalar", ir);
 }
 
@@ -826,6 +829,7 @@ function emitSemanticFunction(
 
 function emitSemanticFunctionParamType(param: SemanticKernelIrModule["functions"][number]["params"][number]): string {
   if (param.addressSpace === "texture") return "texture_2d<f32>";
+  if (param.addressSpace === "surface") return "u32";
   return wgslScalar(param.valueType);
 }
 
@@ -1063,10 +1067,32 @@ function emitSemanticSurfaceRead(
   const xBytes = emitSemanticExpressionAs(expression.xBytes, ir, names, "i32");
   const y = emitSemanticExpressionAs(expression.y, ir, names, "i32");
   const z = expression.z ? emitSemanticExpressionAs(expression.z, ir, names, "i32") : "0";
-  const read = `${surfaceReadHelperName(surfaceName, names)}(${xBytes}, ${y}, ${z})`;
+  const directSurface = surfaceSymbols(ir).some((surface) => surface.name === surfaceName);
+  const read = directSurface
+    ? `${surfaceReadHelperName(surfaceName, names)}(${xBytes}, ${y}, ${z})`
+    : `${GENERIC_SURFACE_READ_HELPER_NAME}(${nameFor(surfaceName, names)}, ${xBytes}, ${y}, ${z})`;
   if (expression.valueType === "uint") return `u32(${read})`;
   if (expression.valueType === "int") return `i32(${read})`;
   return read;
+}
+
+const GENERIC_SURFACE_READ_HELPER_NAME = "bg_sem_surf2dread";
+
+function emitSemanticGenericSurfaceReadHelper(
+  surfaces: readonly SemanticKernelIrModule["params"][number][],
+  names: ReadonlyMap<string, string>,
+): readonly string[] {
+  const lines = [
+    `fn ${GENERIC_SURFACE_READ_HELPER_NAME}(surface: u32, x_bytes: i32, y: i32, z: i32) -> f32 {`,
+  ];
+  for (const [index, surface] of surfaces.entries()) {
+    lines.push(`  if (surface == ${index}u) {`);
+    lines.push(`    return ${surfaceReadHelperName(surface.name, names)}(x_bytes, y, z);`);
+    lines.push("  }");
+  }
+  lines.push("  return 0.0;");
+  lines.push("}");
+  return lines;
 }
 
 function emitSemanticSurfaceReadHelper(
@@ -1135,6 +1161,12 @@ function emitSemanticFunctionArg(
   if (param?.addressSpace === "texture") {
     if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticWgslError("semantic WGSL texture helper argument must be a texture symbol", arg.span);
     return nameFor(arg.name, names);
+  }
+  if (param?.addressSpace === "surface") {
+    if (arg.kind !== "symbol" || arg.addressSpace !== "surface") throw semanticWgslError("semantic WGSL surface helper argument must be a surface symbol", arg.span);
+    const handle = surfaceHandleForName(arg.name, ir);
+    if (handle === undefined) throw semanticWgslError(`unknown surface '${arg.name}'`, arg.span);
+    return `${handle}u`;
   }
   return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType));
 }
@@ -1400,6 +1432,48 @@ function textureSymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrMo
 
 function surfaceSymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["params"][number][] {
   return ir.params.filter((symbol) => symbol.addressSpace === "surface");
+}
+
+function surfaceHandleForName(name: string, ir: SemanticKernelIrModule): number | undefined {
+  const index = surfaceSymbols(ir).findIndex((surface) => surface.name === name);
+  return index < 0 ? undefined : index;
+}
+
+function semanticUsesGenericSurfaceRead(ir: SemanticKernelIrModule): boolean {
+  return ir.functions.some((fn) => fn.params.some((param) => param.addressSpace === "surface") && semanticOperationsUseSurfaceParamRead(fn.body, new Set(fn.params.filter((param) => param.addressSpace === "surface").map((param) => param.name))));
+}
+
+function semanticOperationsUseSurfaceParamRead(
+  operations: readonly SemanticKernelIrOperation[],
+  surfaceParams: ReadonlySet<string>,
+): boolean {
+  for (const operation of operations) {
+    if (operation.kind === "return" && operation.value && semanticExpressionUsesSurfaceParamRead(operation.value, surfaceParams)) return true;
+    if (operation.kind === "expression" && semanticExpressionUsesSurfaceParamRead(operation.expression, surfaceParams)) return true;
+    if (operation.kind === "declare" && operation.init && semanticExpressionUsesSurfaceParamRead(operation.init, surfaceParams)) return true;
+    if (operation.kind === "store" && semanticExpressionUsesSurfaceParamRead(operation.value, surfaceParams)) return true;
+    if (operation.kind === "branch" && (semanticOperationsUseSurfaceParamRead(operation.consequent, surfaceParams) || semanticOperationsUseSurfaceParamRead(operation.alternate, surfaceParams))) return true;
+    if (operation.kind === "loop" && semanticOperationsUseSurfaceParamRead(operation.body, surfaceParams)) return true;
+  }
+  return false;
+}
+
+function semanticExpressionUsesSurfaceParamRead(
+  expression: SemanticExpression,
+  surfaceParams: ReadonlySet<string>,
+): boolean {
+  if (expression.kind === "surface-read") return expression.surface.kind === "symbol" && surfaceParams.has(expression.surface.name);
+  if (expression.kind === "call") return expression.args.some((arg) => semanticExpressionUsesSurfaceParamRead(arg, surfaceParams));
+  if (expression.kind === "member") return semanticExpressionUsesSurfaceParamRead(expression.object, surfaceParams);
+  if (expression.kind === "index") return semanticExpressionUsesSurfaceParamRead(expression.target, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.index, surfaceParams);
+  if (expression.kind === "cast") return semanticExpressionUsesSurfaceParamRead(expression.expression, surfaceParams);
+  if (expression.kind === "unary" || expression.kind === "update") return semanticExpressionUsesSurfaceParamRead(expression.argument, surfaceParams);
+  if (expression.kind === "binary") return semanticExpressionUsesSurfaceParamRead(expression.left, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.right, surfaceParams);
+  if (expression.kind === "conditional") return semanticExpressionUsesSurfaceParamRead(expression.condition, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.consequent, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.alternate, surfaceParams);
+  if (expression.kind === "assignment") return semanticExpressionUsesSurfaceParamRead(expression.target, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.value, surfaceParams);
+  if (expression.kind === "initializer") return expression.elements.some((item) => semanticExpressionUsesSurfaceParamRead(item, surfaceParams));
+  if (expression.kind === "sequence") return expression.expressions.some((item) => semanticExpressionUsesSurfaceParamRead(item, surfaceParams));
+  return false;
 }
 
 function surfaceWidthField(name: string): string {

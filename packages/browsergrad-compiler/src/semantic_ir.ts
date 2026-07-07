@@ -853,7 +853,7 @@ function symbolForFunction(
 
 function symbolForFunctionParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
   const symbol = symbolForParam(param);
-  if (symbol.addressSpace === "texture") return symbol;
+  if (symbol.addressSpace === "texture" || symbol.addressSpace === "surface") return symbol;
   if (symbol.pointer) return symbol;
   return { ...symbol, addressSpace: "local" };
 }

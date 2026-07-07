@@ -381,7 +381,6 @@ function semanticReferenceSurfaceReadSupported(
   return (expression.valueType === "float" || expression.valueType === "uint" || expression.valueType === "int") &&
     surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
-    compiled.kernelIr.params.some((param) => param.name === surface.name && param.addressSpace === "surface") &&
     semanticReferenceExpressionSupported(expression.xBytes, "scalar", compiled) &&
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled) &&
     (expression.z === undefined || semanticReferenceExpressionSupported(expression.z, "scalar", compiled));
@@ -395,7 +394,7 @@ function semanticReferenceFunctionCallSupported(
   const callee = expression.callee.name;
   const fn = compiled.kernelIr.functions.find((item) => item.name === callee);
   if (!fn || !semanticReferenceScalarTypeSupported(fn.returnType)) return false;
-  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture"))) return false;
+  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
   if (fn.params.some((param) => param.addressSpace === "local" && !semanticReferenceScalarTypeSupported(param.valueType))) return false;
   if (!semanticReferenceFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
@@ -410,6 +409,7 @@ function semanticReferenceFunctionArgSupported(
 ): boolean {
   if (!param) return false;
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
+  if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
   return semanticReferenceExpressionSupported(arg, "scalar", compiled);
 }
 
@@ -1153,6 +1153,7 @@ function evalSemanticFunctionCall(
   if (!fn) throw semanticReferenceError(`semantic reference unknown function '${callee}'`, expression.span);
   const locals = new Map<string, SemanticValue>();
   const textures = { ...context.textures };
+  const surfaces = { ...context.surfaces };
   for (const [index, param] of fn.params.entries()) {
     const arg = expression.args[index];
     if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, expression.span);
@@ -1163,6 +1164,13 @@ function evalSemanticFunctionCall(
       textures[param.name] = texture;
       continue;
     }
+    if (param.addressSpace === "surface") {
+      if (arg.kind !== "symbol" || arg.addressSpace !== "surface") throw semanticReferenceError(`semantic reference function '${fn.name}' surface argument must be a surface symbol`, arg.span);
+      const surface = context.surfaces[arg.name];
+      if (!surface) throw semanticReferenceError(`missing surface input '${arg.name}'`, arg.span);
+      surfaces[param.name] = surface;
+      continue;
+    }
     locals.set(param.name, evalNumber(arg, context));
   }
   const child: SemanticReferenceContext = {
@@ -1171,7 +1179,7 @@ function evalSemanticFunctionCall(
     constants: context.constants,
     deviceGlobals: context.deviceGlobals,
     textures,
-    surfaces: context.surfaces,
+    surfaces,
     sharedMemory: context.sharedMemory,
     storageOffsets: new Map(context.storageOffsets),
     scalars: context.scalars,
