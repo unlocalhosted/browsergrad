@@ -129,6 +129,22 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["cbrtf", "cbrt"],
   ["rcbrt", "rcbrt"],
   ["rcbrtf", "rcbrt"],
+  ["ldexp", "ldexp"],
+  ["ldexpf", "ldexp"],
+  ["scalbn", "ldexp"],
+  ["scalbnf", "ldexp"],
+  ["scalbln", "ldexp"],
+  ["scalblnf", "ldexp"],
+  ["fmod", "fmod"],
+  ["fmodf", "fmod"],
+  ["remainder", "remainder"],
+  ["remainderf", "remainder"],
+  ["logb", "logb"],
+  ["logbf", "logb"],
+  ["ilogb", "ilogb"],
+  ["ilogbf", "ilogb"],
+  ["fdim", "fdim"],
+  ["fdimf", "fdim"],
   ["fmin", "min"],
   ["fminf", "min"],
   ["min", "min"],
@@ -352,6 +368,7 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticTextureDescriptorHelpers(options, textureSpecializations, names)) {
     lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
+  lines.push("", ...emitSemanticNumericHelpers());
   for (const constant of initializedScalarConstants) {
     lines.push(emitInitializedScalarConstant(constant, ir, names, options));
   }
@@ -1864,6 +1881,35 @@ function emitSemanticTextureDescriptorHelper(
   ];
 }
 
+function emitSemanticNumericHelpers(): readonly string[] {
+  return [
+    "fn bg_semantic_round_even_f32(value: f32) -> f32 {",
+    "  if (value != value || abs(value) > 3.4028234663852886e38) { return value; }",
+    "  let lower = floor(value);",
+    "  let diff = value - lower;",
+    "  if (diff < 0.5) { return lower; }",
+    "  if (diff > 0.5) { return lower + 1.0; }",
+    "  let half_lower = floor(lower * 0.5);",
+    "  return select(lower + 1.0, lower, (half_lower * 2.0) == lower);",
+    "}",
+    "fn bg_semantic_remainder_f32(x: f32, y: f32) -> f32 {",
+    "  return x - bg_semantic_round_even_f32(x / y) * y;",
+    "}",
+    "fn bg_semantic_logb_f32(value: f32) -> f32 {",
+    "  if (value != value) { return value; }",
+    "  let runtime_zero = select(0.0, value, false);",
+    "  if (value == 0.0) { return -1.0 / runtime_zero; }",
+    "  if (abs(value) > 3.4028234663852886e38) { return 1.0 / runtime_zero; }",
+    "  return floor(log2(abs(value)));",
+    "}",
+    "fn bg_semantic_ilogb_i32(value: f32) -> i32 {",
+    "  if (value != value || abs(value) > 3.4028234663852886e38) { return 2147483647; }",
+    "  if (value == 0.0) { return -2147483648; }",
+    "  return i32(floor(log2(abs(value))));",
+    "}",
+  ];
+}
+
 function semanticTextureDescriptorHelperName(
   textureName: string,
   names: ReadonlyMap<string, string>,
@@ -2101,6 +2147,22 @@ function emitSemanticMathCall(
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     return `(${emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations)} / ${emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations)})`;
   }
+  if (wgslCallee === "ldexp") {
+    const [value, exponent] = expression.args;
+    if (!value || !exponent) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
+    const scale = emitSemanticExpressionAs(exponent, ir, names, "i32", options, textureSpecializations);
+    return `(${emitted} * exp2(f32(${scale})))`;
+  }
+  if (wgslCallee === "fmod" || wgslCallee === "remainder" || wgslCallee === "fdim") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const lhs = emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations);
+    if (wgslCallee === "fmod") return `(${lhs} - trunc(${lhs} / ${rhs}) * ${rhs})`;
+    if (wgslCallee === "remainder") return `bg_semantic_remainder_f32(${lhs}, ${rhs})`;
+    return `max((${lhs} - ${rhs}), 0.0)`;
+  }
   if (
     wgslCallee === "exp10" ||
     wgslCallee === "expm1" ||
@@ -2110,6 +2172,8 @@ function emitSemanticMathCall(
     wgslCallee === "cospi" ||
     wgslCallee === "round_away" ||
     wgslCallee === "round_even" ||
+    wgslCallee === "logb" ||
+    wgslCallee === "ilogb" ||
     wgslCallee === "sinh" ||
     wgslCallee === "cosh" ||
     wgslCallee === "asinh" ||
@@ -2130,6 +2194,8 @@ function emitSemanticMathCall(
     if (wgslCallee === "cospi") return `cos(3.141592653589793 * ${emitted})`;
     if (wgslCallee === "round_away") return `select(floor(abs(${emitted}) + 0.5), -floor(abs(${emitted}) + 0.5), (${emitted} < 0.0))`;
     if (wgslCallee === "round_even") return emitRoundEvenWgsl(emitted);
+    if (wgslCallee === "logb") return `bg_semantic_logb_f32(${emitted})`;
+    if (wgslCallee === "ilogb") return `bg_semantic_ilogb_i32(${emitted})`;
     if (wgslCallee === "sinh") return `(0.5 * (exp(${emitted}) - exp(-${emitted})))`;
     if (wgslCallee === "cosh") return `(0.5 * (exp(${emitted}) + exp(-${emitted})))`;
     if (wgslCallee === "asinh") return `log(${emitted} + sqrt((${emitted} * ${emitted}) + 1.0))`;
@@ -2230,13 +2296,7 @@ function emitSemanticMathCall(
 }
 
 function emitRoundEvenWgsl(emitted: string): string {
-  const absValue = `abs(${emitted})`;
-  const base = `floor(${absValue})`;
-  const fraction = `(${absValue} - ${base})`;
-  const evenBase = `((${base} - floor(${base} * 0.5) * 2.0) == 0.0)`;
-  const tie = `select((${base} + 1.0), ${base}, ${evenBase})`;
-  const magnitude = `select(select(${base}, (${base} + 1.0), ${fraction} > 0.5), ${tie}, ${fraction} == 0.5)`;
-  return `select(${magnitude}, -${magnitude}, (${emitted} < 0.0))`;
+  return `bg_semantic_round_even_f32(${emitted})`;
 }
 
 function semanticMathCallArity(name: string): number {
@@ -2268,6 +2328,18 @@ function semanticMathCallArity(name: string): number {
     name === "isunordered" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
+    name === "ldexp" ||
+    name === "ldexpf" ||
+    name === "scalbn" ||
+    name === "scalbnf" ||
+    name === "scalbln" ||
+    name === "scalblnf" ||
+    name === "fmod" ||
+    name === "fmodf" ||
+    name === "remainder" ||
+    name === "remainderf" ||
+    name === "fdim" ||
+    name === "fdimf" ||
     name === "__bg_remquo_quotient" ||
     name === "__bg_remquo_remainder" ||
     name === "atan2" ||

@@ -55,6 +55,8 @@ const SEMANTIC_MATH_CALLS = new Set([
   "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf", "atan", "atanf", "atan2", "atan2f",
   "sinh", "sinhf", "cosh", "coshf", "tanh", "tanhf", "__tanhf", "asinh", "asinhf", "acosh", "acoshf", "atanh", "atanhf",
   "cbrt", "cbrtf", "rcbrt", "rcbrtf", "__frcp_rn",
+  "ldexp", "ldexpf", "scalbn", "scalbnf", "scalbln", "scalblnf",
+  "fmod", "fmodf", "remainder", "remainderf", "logb", "logbf", "ilogb", "ilogbf", "fdim", "fdimf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -1494,6 +1496,22 @@ function evalSemanticMathCall(
     case "cbrtf": return Math.cbrt(args[0] ?? 0);
     case "rcbrt":
     case "rcbrtf": return 1 / Math.cbrt(args[0] ?? 0);
+    case "ldexp":
+    case "ldexpf":
+    case "scalbn":
+    case "scalbnf":
+    case "scalbln":
+    case "scalblnf": return (args[0] ?? 0) * (2 ** Math.trunc(args[1] ?? 0));
+    case "fmod":
+    case "fmodf": return (args[0] ?? 0) - Math.trunc((args[0] ?? 0) / (args[1] ?? 0)) * (args[1] ?? 0);
+    case "remainder":
+    case "remainderf": return (args[0] ?? 0) - roundTiesToEvenNumber((args[0] ?? 0) / (args[1] ?? 0)) * (args[1] ?? 0);
+    case "logb":
+    case "logbf": return evalLogb(args[0] ?? 0);
+    case "ilogb":
+    case "ilogbf": return evalIlogb(args[0] ?? 0);
+    case "fdim":
+    case "fdimf": return Math.max((args[0] ?? 0) - (args[1] ?? 0), 0);
     case "fmin":
     case "fminf":
     case "min": return Math.min(args[0] ?? 0, args[1] ?? 0);
@@ -1592,6 +1610,19 @@ function roundAwayFromZero(value: number): number {
   if (!Number.isFinite(value)) return value;
   const magnitude = Math.floor(Math.abs(value) + 0.5);
   return value < 0 || Object.is(value, -0) ? -magnitude : magnitude;
+}
+
+function evalLogb(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (value === 0) return -Infinity;
+  if (!Number.isFinite(value)) return Infinity;
+  return Math.floor(Math.log2(Math.abs(value)));
+}
+
+function evalIlogb(value: number): number {
+  if (Number.isNaN(value) || !Number.isFinite(value)) return 2147483647;
+  if (value === 0) return -2147483648;
+  return Math.floor(Math.log2(Math.abs(value))) | 0;
 }
 
 function modfIntpart(value: number): number {
@@ -1768,6 +1799,18 @@ function semanticMathCallArity(name: string): number {
     name === "isunordered" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
+    name === "ldexp" ||
+    name === "ldexpf" ||
+    name === "scalbn" ||
+    name === "scalbnf" ||
+    name === "scalbln" ||
+    name === "scalblnf" ||
+    name === "fmod" ||
+    name === "fmodf" ||
+    name === "remainder" ||
+    name === "remainderf" ||
+    name === "fdim" ||
+    name === "fdimf" ||
     name === "__bg_remquo_quotient" ||
     name === "__bg_remquo_remainder" ||
     name === "atan2" ||

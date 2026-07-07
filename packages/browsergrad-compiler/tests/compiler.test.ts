@@ -6706,10 +6706,63 @@ __global__ void semantic_round_even_math(float *x, float *out) {
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-    expect(compiled.wgsl).toContain("select(select(floor(abs(value)), (floor(abs(value)) + 1.0)");
-    expect(compiled.wgsl).toContain("select(select(floor(abs((value + 1.0))), (floor(abs((value + 1.0))) + 1.0)");
+    expect(compiled.wgsl).toContain("fn bg_semantic_round_even_f32");
+    expect(compiled.wgsl).toContain("bg_semantic_round_even_f32(value)");
+    expect(compiled.wgsl).toContain("bg_semantic_round_even_f32((value + 1.0))");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
     expect([...result.buffers.out as Float32Array]).toEqual(expected);
+  });
+
+  it("lowers CUDA scalar decomposition math through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_scalar_decomposition(float *x, float *out) {
+  int idx = threadIdx.x;
+  float value = x[idx];
+  out[idx] =
+    ldexpf(value, 2) +
+    scalbnf(value, 1) +
+    scalblnf(value, 3) +
+    fmodf(value, 2.0f) +
+    remainderf(value, 2.0f) +
+    logbf(fabsf(value) + 1.0f) +
+    ilogbf(fabsf(value) + 1.0f) +
+    fdimf(value, -0.5f);
+}`, { workgroupSize: [2, 1, 1] });
+    const input = new Float32Array([-1.25, 0.6]);
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const expected = [...input].map((value) =>
+      (value * 4) +
+      (value * 2) +
+      (value * 8) +
+      (value - Math.trunc(value / 2) * 2) +
+      (value - roundEven(value / 2) * 2) +
+      Math.floor(Math.log2(Math.abs(value) + 1)) +
+      Math.floor(Math.log2(Math.abs(value) + 1)) +
+      Math.max(value - -0.5, 0)
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("(value * exp2(f32(2)))");
+    expect(compiled.wgsl).toContain("(value - trunc(value / 2.0) * 2.0)");
+    expect(compiled.wgsl).toContain("bg_semantic_remainder_f32(value, 2.0)");
+    expect(compiled.wgsl).toContain("bg_semantic_logb_f32((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("bg_semantic_ilogb_i32((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("max((value - -(0.5)), 0.0)");
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
   it("lowers unordered CUDA float predicates without treating them as unsupported calls", () => {
@@ -6844,9 +6897,9 @@ __global__ void rounding(float *x, float *out) {
     );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(compiled.wgsl).toContain("fn bg_round_even_f32(");
-    expect(compiled.wgsl).toContain("fn bg_remainder(");
-    expect(compiled.wgsl).toContain("fn bg_ilogb(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_round_even_f32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_remainder_f32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_ilogb_i32(");
     expect([...result.buffers.out as Float32Array]).toEqual([...input].map((value) =>
       roundEven(value) + roundEven(value) + (value - roundEven(value / 2) * 2) +
       Math.floor(Math.log2(Math.abs(value))) + Math.floor(Math.log2(Math.abs(value))),
