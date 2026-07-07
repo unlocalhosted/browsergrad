@@ -7938,20 +7938,35 @@ __global__ void inverse_distribution_math(float *out) {
       { buffers: { out: new Float32Array(6) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
     const out = [...result.buffers.out as Float32Array];
+    const semanticOut = [...semanticResult.buffers.out as Float32Array];
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(compiled.wgsl).toContain("fn bg_erfinv_f32(");
-    expect(compiled.wgsl).toContain("fn bg_normcdfinv_f32(");
-    expect(compiled.wgsl).toContain("bg_erfinv_f32(f32(0.8427008))");
-    expect(compiled.wgsl).toContain("bg_erfinv_f32(1.0 - f32(0.1572992))");
-    expect(compiled.wgsl).toContain("bg_normcdfinv_f32(f32(0.841344746))");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_semantic_erfinv_f32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_normcdfinv_f32(");
+    expect(compiled.wgsl).toContain("bg_semantic_erfinv_f32(0.8427008)");
+    expect(compiled.wgsl).toContain("bg_semantic_erfinv_f32(1.0 - 0.1572992)");
+    expect(compiled.wgsl).toContain("bg_semantic_normcdfinv_f32(0.841344746)");
     expect(out[0]).toBeCloseTo(1, 4);
     expect(out[1]).toBeCloseTo(-1, 4);
     expect(out[2]).toBeCloseTo(1, 4);
     expect(out[3]).toBeCloseTo(1, 4);
     expect(out[4]).toBeCloseTo(-1, 4);
     expect(out[5]).toBeCloseTo(0.8413447, 4);
+    expect(semanticOut[0]).toBeCloseTo(1, 4);
+    expect(semanticOut[1]).toBeCloseTo(-1, 4);
+    expect(semanticOut[2]).toBeCloseTo(1, 4);
+    expect(semanticOut[3]).toBeCloseTo(1, 4);
+    expect(semanticOut[4]).toBeCloseTo(-1, 4);
+    expect(semanticOut[5]).toBeCloseTo(0.8413447, 4);
   });
 
   it("recognizes CUDA/C numeric named constants", () => {

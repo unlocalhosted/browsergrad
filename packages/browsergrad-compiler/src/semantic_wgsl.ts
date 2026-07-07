@@ -71,8 +71,14 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["erfcf", "erfc"],
   ["erfcx", "erfcx"],
   ["erfcxf", "erfcx"],
+  ["erfinv", "erfinv"],
+  ["erfinvf", "erfinv"],
+  ["erfcinv", "erfcinv"],
+  ["erfcinvf", "erfcinv"],
   ["normcdf", "normcdf"],
   ["normcdff", "normcdf"],
+  ["normcdfinv", "normcdfinv"],
+  ["normcdfinvf", "normcdfinv"],
   ["tgamma", "tgamma"],
   ["tgammaf", "tgamma"],
   ["lgamma", "lgamma"],
@@ -1985,6 +1991,25 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "  let polynomial = (((((1.061405429 * t) - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;",
     "  return select(-1.0, 1.0, value >= 0.0) * (1.0 - (polynomial * exp(-(magnitude * magnitude))));",
     "}",
+    "fn bg_semantic_erfinv_f32(value: f32) -> f32 {",
+    "  if (value != value) { return value; }",
+    "  if (value <= -1.0) { return select(bg_semantic_runtime_nan_f32(value), -bg_semantic_runtime_inf_f32(value), value == -1.0); }",
+    "  if (value >= 1.0) { return select(bg_semantic_runtime_nan_f32(value), bg_semantic_runtime_inf_f32(value), value == 1.0); }",
+    "  if (value == 0.0) { return 0.0; }",
+    "  let a = 0.147;",
+    "  let l = log(1.0 - value * value);",
+    "  let first = (2.0 / (3.141592653589793 * a)) + (l * 0.5);",
+    "  var y = select(-1.0, 1.0, value >= 0.0) * sqrt(sqrt(first * first - l / a) - first);",
+    "  y -= (bg_semantic_erf_f32(y) - value) / (1.1283791670955126 * exp(-(y * y)));",
+    "  y -= (bg_semantic_erf_f32(y) - value) / (1.1283791670955126 * exp(-(y * y)));",
+    "  return y;",
+    "}",
+    "fn bg_semantic_normcdfinv_f32(value: f32) -> f32 {",
+    "  if (value != value) { return value; }",
+    "  if (value <= 0.0) { return select(bg_semantic_runtime_nan_f32(value), -bg_semantic_runtime_inf_f32(value), value == 0.0); }",
+    "  if (value >= 1.0) { return select(bg_semantic_runtime_nan_f32(value), bg_semantic_runtime_inf_f32(value), value == 1.0); }",
+    "  return 1.4142135623730951 * bg_semantic_erfinv_f32(2.0 * value - 1.0);",
+    "}",
     "fn bg_semantic_tgamma_core_f32(value: f32) -> f32 {",
     "  let z = value - 1.0;",
     "  var x = 0.9999999999998099;",
@@ -2301,7 +2326,10 @@ function emitSemanticMathCall(
     wgslCallee === "erf" ||
     wgslCallee === "erfc" ||
     wgslCallee === "erfcx" ||
+    wgslCallee === "erfinv" ||
+    wgslCallee === "erfcinv" ||
     wgslCallee === "normcdf" ||
+    wgslCallee === "normcdfinv" ||
     wgslCallee === "tgamma" ||
     wgslCallee === "lgamma" ||
     wgslCallee === "log10" ||
@@ -2330,7 +2358,10 @@ function emitSemanticMathCall(
     if (wgslCallee === "erf") return `bg_semantic_erf_f32(${emitted})`;
     if (wgslCallee === "erfc") return `(1.0 - bg_semantic_erf_f32(${emitted}))`;
     if (wgslCallee === "erfcx") return `(exp(${emitted} * ${emitted}) * (1.0 - bg_semantic_erf_f32(${emitted})))`;
+    if (wgslCallee === "erfinv") return `bg_semantic_erfinv_f32(${emitted})`;
+    if (wgslCallee === "erfcinv") return `bg_semantic_erfinv_f32(1.0 - ${emitted})`;
     if (wgslCallee === "normcdf") return `(0.5 * (1.0 + bg_semantic_erf_f32((${emitted} * 0.7071067811865476))))`;
+    if (wgslCallee === "normcdfinv") return `bg_semantic_normcdfinv_f32(${emitted})`;
     if (wgslCallee === "tgamma") return `bg_semantic_tgamma_f32(${emitted})`;
     if (wgslCallee === "lgamma") return `bg_semantic_lgamma_f32(${emitted})`;
     if (wgslCallee === "log10") return `(log(${emitted}) / 2.302585092994046)`;

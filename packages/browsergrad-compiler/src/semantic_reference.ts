@@ -48,7 +48,8 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
 const SEMANTIC_MATH_CALLS = new Set([
   "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
   "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
-  "erf", "erff", "erfc", "erfcf", "erfcx", "erfcxf", "normcdf", "normcdff", "tgamma", "tgammaf", "lgamma", "lgammaf",
+  "erf", "erff", "erfc", "erfcf", "erfcx", "erfcxf", "erfinv", "erfinvf", "erfcinv", "erfcinvf",
+  "normcdf", "normcdff", "normcdfinv", "normcdfinvf", "tgamma", "tgammaf", "lgamma", "lgammaf",
   "log", "logf", "__logf", "log2", "log2f", "__log2f", "log10", "log10f", "__log10f", "log1p", "log1pf",
   "fabs", "fabsf", "abs",
   "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "round", "roundf", "rint", "rintf", "nearbyint", "nearbyintf",
@@ -1446,8 +1447,14 @@ function evalSemanticMathCall(
     case "erfcf": return 1 - evalSemanticErf(args[0] ?? 0);
     case "erfcx":
     case "erfcxf": return Math.exp((args[0] ?? 0) * (args[0] ?? 0)) * (1 - evalSemanticErf(args[0] ?? 0));
+    case "erfinv":
+    case "erfinvf": return evalSemanticErfinv(args[0] ?? 0);
+    case "erfcinv":
+    case "erfcinvf": return evalSemanticErfinv(1 - (args[0] ?? 0));
     case "normcdf":
     case "normcdff": return 0.5 * (1 + evalSemanticErf((args[0] ?? 0) * Math.SQRT1_2));
+    case "normcdfinv":
+    case "normcdfinvf": return evalSemanticNormcdfinv(args[0] ?? 0);
     case "tgamma":
     case "tgammaf": return evalSemanticGamma(args[0] ?? 0);
     case "lgamma":
@@ -1675,6 +1682,30 @@ function evalSemanticErf(value: number): number {
   const t = 1 / (1 + 0.3275911 * magnitude);
   const polynomial = (((((1.061405429 * t) - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
   return sign * (1 - polynomial * Math.exp(-magnitude * magnitude));
+}
+
+function evalSemanticErfinv(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (value === -1) return Number.NEGATIVE_INFINITY;
+  if (value === 1) return Number.POSITIVE_INFINITY;
+  if (value < -1 || value > 1) return NaN;
+  if (value === 0) return 0;
+  const a = 0.147;
+  const log = Math.log(1 - value * value);
+  const first = (2 / (Math.PI * a)) + (log / 2);
+  let estimate = Math.sign(value) * Math.sqrt(Math.sqrt(first * first - log / a) - first);
+  for (let i = 0; i < 2; i++) {
+    estimate -= (evalSemanticErf(estimate) - value) / (1.1283791670955126 * Math.exp(-estimate * estimate));
+  }
+  return estimate;
+}
+
+function evalSemanticNormcdfinv(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (value === 0) return Number.NEGATIVE_INFINITY;
+  if (value === 1) return Number.POSITIVE_INFINITY;
+  if (value < 0 || value > 1) return NaN;
+  return Math.SQRT2 * evalSemanticErfinv(2 * value - 1);
 }
 
 const SEMANTIC_LANCZOS_COEFFICIENTS = [
