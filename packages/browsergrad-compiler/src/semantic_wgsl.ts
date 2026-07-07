@@ -178,7 +178,7 @@ export function emitSemanticKernelIrWgsl(
   const initializedConstantArrays = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length > 0);
   const uniformParams = [
     ...ir.params.filter((param) => param.addressSpace === "uniform"),
-    ...constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length === 0),
+    ...constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length === 0 && !isSemanticWgslFloatVectorType(symbol.valueType)),
     ...surfaces.flatMap((surface) => [
       { name: surfaceWidthField(surface.name), valueType: "uint" as const, span: surface.span },
       { name: surfaceHeightField(surface.name), valueType: "uint" as const, span: surface.span },
@@ -189,7 +189,7 @@ export function emitSemanticKernelIrWgsl(
         : []
     ),
   ];
-  const constantBuffers = constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length > 0);
+  const constantBuffers = constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && (symbol.dimensions.length > 0 || isSemanticWgslFloatVectorType(symbol.valueType)));
   const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
   const textures = textureSymbols(ir);
   const atomicStorage = semanticAtomicStorageNames(ir.operations);
@@ -275,7 +275,7 @@ export function emitSemanticKernelIrWgsl(
     lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
   for (const constant of initializedScalarConstants) {
-    lines.push(`const ${nameFor(constant.name, names)}: ${wgslScalar(constant.valueType)} = ${emitSemanticExpressionAs(constant.init ?? zeroExpression(constant.span), ir, names, wgslValueScalar(constant.valueType), options)};`);
+    lines.push(emitInitializedScalarConstant(constant, ir, names, options));
   }
   for (const constant of initializedConstantArrays) {
     lines.push(emitInitializedConstantArray(constant, ir, names));
@@ -440,11 +440,13 @@ function operationsContainDeclare(operations: readonly SemanticKernelIrOperation
 function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
   if (symbol.kind === "constant") {
-    if (!semanticWgslScalarTypeSupported(symbol.valueType)) return false;
+    if (!semanticWgslValueTypeSupported(symbol.valueType)) return false;
     return !symbol.initialized ||
       symbol.init !== undefined && (
         symbol.dimensions.length === 0
-          ? semanticWgslExpressionSupported(symbol.init, "scalar")
+          ? isSemanticWgslFloatVectorType(symbol.valueType)
+            ? initializedVectorConstantSupported(symbol)
+            : semanticWgslExpressionSupported(symbol.init, "scalar")
           : initializedConstantArraySupported(symbol)
       );
   }
@@ -487,6 +489,10 @@ function semanticWgslValueTypeSupported(valueType: CudaLiteScalarType | undefine
 
 function semanticWgslAssignmentOperatorSupported(operator: string): boolean {
   return operator === "=" || operator === "+=" || operator === "-=";
+}
+
+function semanticWgslVectorBinaryOperatorSupported(operator: string): boolean {
+  return operator === "+" || operator === "-" || operator === "*" || operator === "/";
 }
 
 function semanticWgslLoopInitSupported(
@@ -540,7 +546,7 @@ function semanticWgslAtomicSupported(
 function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
   return semanticWgslExpressionSupported(expression, "scalar", ir) ||
     semanticWgslExpressionSupported(expression, "any", ir) && isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression, ir)) ||
-    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression) || semanticWgslVectorConstructorSupported(expression, "any", ir)) ||
+    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression) || semanticWgslVectorConstructorSupported(expression, "any", ir) || semanticWgslVectorAtCallSupported(expression, ir)) ||
     expression.kind === "texture-read" && semanticWgslTextureReadSupported(expression, ir) ||
     expression.kind === "surface-read" && semanticWgslSurfaceReadSupported(expression, ir);
 }
@@ -640,6 +646,20 @@ function semanticWgslVectorConstructorSupported(
   return isSemanticWgslFloatVectorType(valueType) &&
     expression.args.length > 0 &&
     expression.args.every((arg) => semanticWgslExpressionSupported(arg, "any", ir));
+}
+
+function semanticWgslVectorAtCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  return expression.callee.kind === "symbol" &&
+    expression.callee.name === "vec_at" &&
+    expression.args.length === 2 &&
+    expression.args[0] !== undefined &&
+    expression.args[1] !== undefined &&
+    isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression.args[0], ir)) &&
+    semanticWgslExpressionSupported(expression.args[0], "any", ir) &&
+    semanticWgslExpressionSupported(expression.args[1], "scalar", ir);
 }
 
 function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -969,6 +989,10 @@ function semanticWgslExpressionSupported(
     case "unary":
       return expression.operator !== "*" && expression.operator !== "&" && semanticWgslExpressionSupported(expression.argument, "scalar", ir);
     case "binary":
+      if (expected === "any" && isSemanticWgslFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
+        return semanticWgslExpressionSupported(expression.left, "any", ir) &&
+          semanticWgslExpressionSupported(expression.right, "any", ir);
+      }
       return semanticWgslExpressionSupported(expression.left, "scalar", ir) &&
         semanticWgslExpressionSupported(expression.right, "scalar", ir);
     case "conditional":
@@ -989,7 +1013,8 @@ function semanticWgslExpressionSupported(
     case "call":
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
         semanticWgslMathCallSupported(expression) ||
-        semanticWgslVectorConstructorSupported(expression, expected, ir);
+        semanticWgslVectorConstructorSupported(expression, expected, ir) ||
+        expected === "scalar" && semanticWgslVectorAtCallSupported(expression, ir);
     case "texture-read":
       return ir !== undefined &&
         (expected === "any" || expression.valueType === "float") &&
@@ -1476,7 +1501,21 @@ function emitSemanticExpression(
       return emitNumberLiteral(expression.value, expression.valueType);
     case "symbol":
       if (expression.addressSpace === "uniform") return `${UNIFORM_PARAMS_NAME}.${nameFor(expression.name, names)}`;
-      if (expression.addressSpace === "constant") return `${UNIFORM_PARAMS_NAME}.${nameFor(expression.name, names)}`;
+      if (expression.addressSpace === "constant") {
+        const constant = constantMemorySymbols(ir).find((symbol) => symbol.name === expression.name);
+        if (constant?.initialized) return nameFor(expression.name, names);
+        if (isSemanticWgslFloatVectorType(expression.valueType)) {
+          return emitSemanticVectorMemoryRead({
+            base: expression.name,
+            addressSpace: "constant",
+            valueType: expression.valueType as CudaLiteScalarType,
+            indices: [zeroExpression(expression.span)],
+            fields: [],
+            span: expression.span,
+          }, ir, names, options);
+        }
+        return `${UNIFORM_PARAMS_NAME}.${nameFor(expression.name, names)}`;
+      }
       if (expression.addressSpace === "device-global") {
         const ref = `${nameFor(expression.name, names)}[0u]`;
         return semanticAtomicDeviceGlobalNames(ir.operations).has(expression.name) ? `atomicLoad(&${ref})` : ref;
@@ -1531,6 +1570,7 @@ function emitSemanticExpression(
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options, textureSpecializations);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
@@ -1799,6 +1839,18 @@ function emitSemanticVectorConstructor(
   return `vec${targetLanes}<f32>(${lanes.slice(0, targetLanes).join(", ")})`;
 }
 
+function emitSemanticVectorAtCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  const [target, index] = expression.args;
+  if (!target || !index) throw semanticWgslError("semantic WGSL vec_at requires vector and index", expression.span);
+  return `${emitSemanticExpression(target, ir, names, options, textureSpecializations)}[${emitSemanticExpressionAs(index, ir, names, "u32", options, textureSpecializations)}]`;
+}
+
 function emitSemanticFunctionArg(
   arg: SemanticExpression,
   param: SemanticKernelIrModule["functions"][number]["params"][number] | undefined,
@@ -1869,6 +1921,24 @@ function emitSemanticInitExpression(
 ): string {
   if (isSemanticWgslFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
+}
+
+function emitInitializedScalarConstant(
+  symbol: SemanticKernelIrModule["memory"][number],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): string {
+  if (isSemanticWgslFloatVectorType(symbol.valueType) && symbol.init) {
+    const laneCount = cudaVectorLaneCount(symbol.valueType);
+    const valueType = wgslValueType(symbol.valueType);
+    const values = semanticVectorConstantInitExpressions(symbol.init)
+      .slice(0, laneCount)
+      .map((value) => emitSemanticExpressionAs(value, ir, names, "f32", options));
+    while (values.length < laneCount) values.push("0.0");
+    return `const ${nameFor(symbol.name, names)}: ${valueType} = ${valueType}(${values.join(", ")});`;
+  }
+  return `const ${nameFor(symbol.name, names)}: ${wgslValueType(symbol.valueType)} = ${emitSemanticInitExpression(symbol.init ?? zeroExpression(symbol.span), symbol.valueType, ir, names, options)};`;
 }
 
 function emitSemanticAtomicCall(
@@ -2030,10 +2100,30 @@ function emitSemanticBinary(
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return `(${emitTruthiness(expression.left, ir, names, options)} ${expression.operator} ${emitTruthiness(expression.right, ir, names, options)})`;
   }
+  if (isSemanticWgslFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
+    const valueType = expression.valueType as CudaLiteScalarType;
+    return `(${emitSemanticVectorOperand(expression.left, valueType, ir, names, options, textureSpecializations)} ${expression.operator} ${emitSemanticVectorOperand(expression.right, valueType, ir, names, options, textureSpecializations)})`;
+  }
   const operandType = semanticBinaryOperandType(expression);
   const left = emitSemanticExpressionAs(expression.left, ir, names, operandType, options, textureSpecializations);
   const right = emitSemanticExpressionAs(expression.right, ir, names, operandType, options, textureSpecializations);
   return `(${left} ${expression.operator} ${right})`;
+}
+
+function emitSemanticVectorOperand(
+  expression: SemanticExpression,
+  valueType: CudaLiteScalarType,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  if (isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression, ir))) {
+    return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  }
+  const laneCount = cudaVectorLaneCount(valueType);
+  const scalar = emitSemanticExpressionAs(expression, ir, names, "f32", options, textureSpecializations);
+  return `vec${laneCount}<f32>(${Array.from({ length: laneCount }, () => `f32(${scalar})`).join(", ")})`;
 }
 
 function semanticBinaryOperandType(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): WgslValueType {
@@ -2269,6 +2359,24 @@ function initializedConstantArraySupported(symbol: SemanticKernelIrModule["memor
   return flattenInitializerExpressions(symbol.init)
     .slice(0, totalElements(symbol.dimensions))
     .every((value) => semanticWgslExpressionSupported(value, "scalar"));
+}
+
+function initializedVectorConstantSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
+  if (!symbol.init) return false;
+  if (symbol.init.kind !== "initializer" && !semanticVectorConstantInitCallSupported(symbol.init)) return false;
+  return semanticVectorConstantInitExpressions(symbol.init)
+    .slice(0, cudaVectorLaneCount(symbol.valueType))
+    .every((value) => semanticWgslExpressionSupported(value, "scalar"));
+}
+
+function semanticVectorConstantInitCallSupported(expression: SemanticExpression): boolean {
+  return expression.kind === "call" && semanticWgslVectorConstructorSupported(expression, "any");
+}
+
+function semanticVectorConstantInitExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
+  if (expression.kind === "initializer") return flattenInitializerExpressions(expression);
+  if (expression.kind === "call" && semanticVectorConstantInitCallSupported(expression)) return expression.args;
+  return [expression];
 }
 
 function emitLocalArrayFill(

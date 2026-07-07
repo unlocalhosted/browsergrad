@@ -13888,10 +13888,22 @@ __global__ void apply(float *out) {
       },
       { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        constants: { collider: new Float32Array([10, 20, 30]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("var<storage, read> collider: array<f32, 3>;");
-    expect(compiled.wgsl).toContain("vec3<f32>(collider[(u32(0u) * 3u) + 0u]");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<storage, read> collider: array<f32>;");
+    expect(compiled.wgsl).toContain("vec3<f32>(collider[");
     expect(compiled.wgsl).not.toContain("bg_uniforms.collider");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([11, 22, 33]);
     expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33]);
   });
 
@@ -13906,8 +13918,17 @@ __global__ void vector_const(float *out) {
       { buffers: { out: new Float32Array(1) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("const metric: vec3<f32> = vec3<f32>(1.0, 2.0, 3.0)");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([6]);
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });
 
