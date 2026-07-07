@@ -238,6 +238,7 @@ export interface SemanticKernelIrModule {
 
 const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
+const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::sync"]);
 const ATOMIC_CALL_PREFIX = "atomic";
 const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
@@ -1047,7 +1048,7 @@ function localPointerAliasComparisonExpression(
   expression: Extract<CudaLiteExpression, { readonly kind: "binary" }>,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): SemanticExpression | undefined {
-  if (expression.operator !== "==" && expression.operator !== "!=") return undefined;
+  if (!POINTER_ORDER_OPERATORS.has(expression.operator)) return undefined;
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
   if (!left || !right || left.root !== right.root) return undefined;
