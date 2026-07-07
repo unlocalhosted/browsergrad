@@ -4723,6 +4723,49 @@ __global__ void voteKernel(uint *input, uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
   });
 
+  it("lowers CUDA activemask to native WebGPU subgroup ballot", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void activeMaskKernel(uint *out) {
+  uint mask = __activemask();
+  out[threadIdx.x] = mask;
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(32) } },
+      { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("// browsergrad-semantic-wgsl: direct semantic IR emission");
+    expect(compiled.wgsl).toContain("enable subgroups;");
+    expect(compiled.wgsl).toContain("subgroupBallot(true).x");
+    expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-subgroup");
+    expect([...result.buffers.out as Uint32Array]).toEqual(new Array(32).fill(0xffffffff));
+  });
+
+  it("runs CUDA activemask scalar subgroup fallback in reference mode", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void activeMaskScalar(uint *out) {
+  out[0] = __activemask();
+}`, {
+      features: { subgroups: true },
+      subgroupMode: "scalar",
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("out[0] = u32(1u)");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1]);
+  });
+
   it("lowers CUDA warp vote helpers with boolean predicates", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void voteBoolKernel(bool *info, int warp_size) {

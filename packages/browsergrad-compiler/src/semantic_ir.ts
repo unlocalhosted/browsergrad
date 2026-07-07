@@ -644,7 +644,9 @@ function lowerExpression(
         callee,
         args,
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
-        ...optionalValueType(expression.templateValueType ?? expressionValueType(callee) ?? expressionValueType(args[0])),
+        ...optionalValueType(expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
+          ? "uint"
+          : expression.templateValueType ?? expressionValueType(callee) ?? expressionValueType(args[0])),
         span: expression.span,
       };
     }

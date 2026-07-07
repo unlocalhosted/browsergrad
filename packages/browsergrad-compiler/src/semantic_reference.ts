@@ -453,7 +453,7 @@ function semanticReferenceFloatAtomicOpSupported(atomicOp: SemanticAtomicOp): bo
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -467,6 +467,12 @@ function semanticReferenceMathCallSupported(expression: Extract<SemanticExpressi
   if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
   const arity = semanticMathCallArity(expression.callee.name);
   return expression.args.length === arity && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+}
+
+function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
+  return expression.callee.kind === "symbol" &&
+    expression.callee.name === "__activemask" &&
+    expression.args.length === 0;
 }
 
 function semanticReferenceTextureReadSupported(
@@ -802,6 +808,7 @@ function semanticReferenceExpressionSupported(
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
+        semanticReferenceSubgroupCallSupported(expression) ||
         semanticReferenceMathCallSupported(expression) ||
         semanticReferenceHalf2CallSupported(expression, compiled) ||
         semanticReferenceBf162CallSupported(expression, compiled) ||
@@ -876,6 +883,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
   if (expression.kind === "call") {
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
       semanticReferenceFunctionCallSupported(expression, compiled) ||
+      semanticReferenceSubgroupCallSupported(expression) ||
       semanticReferenceMathCallSupported(expression) ||
       semanticReferenceHalf2CallSupported(expression, compiled) ||
       semanticReferenceBf162CallSupported(expression, compiled) ||
@@ -1334,6 +1342,21 @@ function evalNumber(expression: SemanticExpression, context: SemanticReferenceCo
   return value;
 }
 
+function semanticReferenceActiveMask(context: SemanticReferenceContext): number {
+  if (context.compiled.subgroupMode === "scalar") return 1;
+  const blockSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
+  const rank = context.threadIdx.x +
+    context.threadIdx.y * context.blockDim.x +
+    context.threadIdx.z * context.blockDim.x * context.blockDim.y;
+  const warpBase = Math.floor(rank / 32) * 32;
+  const warpEnd = Math.min(warpBase + 32, blockSize);
+  let mask = 0;
+  for (let thread = warpBase; thread < warpEnd; thread++) {
+    mask |= 1 << (thread - warpBase);
+  }
+  return mask >>> 0;
+}
+
 function evalSemanticExpression(expression: SemanticExpression, context: SemanticReferenceContext): SemanticValue {
   switch (expression.kind) {
     case "literal":
@@ -1391,6 +1414,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     }
     case "call":
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
+      if (semanticReferenceSubgroupCallSupported(expression)) return semanticReferenceActiveMask(context);
       if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);
       if (semanticReferenceVectorAtCallSupported(expression, context.compiled)) return evalSemanticVectorAtCall(expression, context);
       if (semanticReferenceVectorLerpCallSupported(expression, context.compiled)) return evalSemanticVectorLerpCall(expression, context);

@@ -114,6 +114,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
   ["__shfl_xor_sync", [3, 4]],
+  ["__activemask", [0, 0]],
   ["__any_sync", [2, 2]],
   ["__all_sync", [2, 2]],
   ["__ballot_sync", [2, 2]],
@@ -676,7 +677,7 @@ export function analyzeCudaLite(
     diagnostics.push(error("missing-feature-shader-f16", "half requires WebGPU shader-f16 support", kernel.span));
   }
   if (requiredFeatures.has("subgroups") && !options.features?.subgroups) {
-    diagnostics.push(error("missing-feature-subgroups", "bg_subgroup_add requires WebGPU subgroups support", kernel.span));
+    diagnostics.push(error("missing-feature-subgroups", "subgroup primitive requires WebGPU subgroups support", kernel.span));
   }
   if (options.features?.compatibility && requiredFeatures.has("subgroups")) {
     diagnostics.push(error("compatibility-mode-subgroups", "subgroups are disabled in WebGPU compatibility mode", kernel.span));
@@ -1979,6 +1980,10 @@ function validateCallExpression(
       kind: "scalar",
       valueType: intrinsic.returnType === "argument1" ? argumentValueType : intrinsic.returnType,
     };
+  }
+  if (callName === "__activemask") {
+    requiredFeatures.add("subgroups");
+    return { kind: "scalar", valueType: "uint" };
   }
   if (isShuffleBuiltin(callName) || isVoteBuiltin(callName)) {
     requiredFeatures.add("subgroups");

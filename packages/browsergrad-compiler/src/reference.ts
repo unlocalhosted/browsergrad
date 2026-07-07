@@ -196,7 +196,7 @@ interface MutableTrace {
 
 type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
-type CollectiveOp = "sum" | "max" | "min" | "any" | "all" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
+type CollectiveOp = "sum" | "max" | "min" | "any" | "all" | "activemask" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
 interface CollectiveYield {
   readonly kind: "collective";
   readonly op: CollectiveOp;
@@ -504,6 +504,10 @@ function collectiveResultValues(group: {
       const sourceThread = sourceLane >= 0 && sourceLane < width ? base + sourceLane : thread;
       return valuesByThread.get(sourceThread) ?? group.values[index]!;
     });
+  }
+  if (group.op === "activemask") {
+    const mask = group.threads.reduce((bits, thread) => bits | (1 << (thread % 32)), 0);
+    return group.threads.map(() => mask >>> 0);
   }
   const value = reduceCollectiveValues(group.op, group.values, group.deviceOp, group.context);
   return group.threads.map(() => value);
@@ -1087,6 +1091,14 @@ function collectiveCall(expression: CudaLiteExpression, context: ThreadContext):
   const name = expressionName(expression.callee);
   const op = collectiveOpForCall(name);
   if (!op) return undefined;
+  if (op === "activemask") {
+    return {
+      kind: "collective",
+      op,
+      value: 1,
+      groupKey: `warp:${Math.floor(localLinearRank(context) / 32)}`,
+    };
+  }
   const value = collectiveValueExpression(name, expression.args);
   if (!value) return undefined;
   return {
@@ -1230,6 +1242,8 @@ function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined
       return "any";
     case "__all_sync":
       return "all";
+    case "__activemask":
+      return "activemask";
     default:
       return undefined;
   }
@@ -3175,6 +3189,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__shfl_up_sync":
     case "__shfl_xor_sync":
       return args[1] ?? 0;
+    case "__activemask":
+      return 1;
     case "__any_sync":
     case "__all_sync":
       return truthy(args[1] ?? 0) ? 1 : 0;

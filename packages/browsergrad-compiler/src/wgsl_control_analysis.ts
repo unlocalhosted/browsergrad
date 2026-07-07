@@ -206,6 +206,7 @@ export function isSubgroupCallName(name: string): boolean {
     name.startsWith("warp_reduce") ||
     name.startsWith("warpReduce") ||
     name.startsWith("__shfl") ||
+    name === "__activemask" ||
     name.startsWith("__reduce") ||
     name === "cg::reduce" ||
     name === "cooperative_groups::reduce";

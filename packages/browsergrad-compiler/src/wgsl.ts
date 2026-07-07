@@ -243,7 +243,7 @@ export function emitKernelIrWgsl(
     throw featureError("missing-feature-shader-f16", "half requires WebGPU shader-f16 support", ir.span);
   }
   if (subgroupMode === "native" && ir.requiredFeatures.includes("subgroups") && !options.features?.subgroups) {
-    throw featureError("missing-feature-subgroups", "bg_subgroup_add requires WebGPU subgroups support", ir.span);
+    throw featureError("missing-feature-subgroups", "subgroup primitive requires WebGPU subgroups support", ir.span);
   }
 
   const context = contextWithDeviceFunctionTextureDescriptors(createEmitContext(ir, options));
@@ -5621,6 +5621,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (cuComplexReturnType !== undefined) return cuComplexReturnType;
     if (name === "subgroupAny" || name === "subgroupAll") return "bool";
     if (name === "subgroupBallot") return "uint";
+    if (name === "__activemask") return "uint";
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
     if (expression.callee.kind === "member" && expression.callee.property === "ballot") return "uint";
     if (name !== undefined && isTextureReadCall(name)) return expression.templateValueType ?? "float";
@@ -6413,6 +6414,9 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "__shfl_xor_sync":
       if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return emitScalarWarpShuffleCall("xor", expression, context, cooperativeCallbacks(context));
+    case "__activemask":
+      if (context.subgroupMode === "scalar") return "1u";
+      return "subgroupBallot(true).x";
     case "__any_sync": {
       const predicate = expression.args[1] ? emitTruthinessExpression(expression.args[1], context) : "false";
       if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;

@@ -507,6 +507,7 @@ export function emitSemanticKernelIrWgsl(
 
   const lines: string[] = ["// browsergrad-semantic-wgsl: direct semantic IR emission"];
   if (ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
+  if (ir.requiredFeatures.includes("subgroups")) lines.push("enable subgroups;");
   for (const param of ir.params.filter((item) => item.addressSpace === "storage")) {
     const access = param.constant ? "read" : "read_write";
     const elementType = atomicStorage.has(param.name)
@@ -765,7 +766,7 @@ function operationsHaveNoBarrierOrControlTransfer(operations: readonly SemanticK
 }
 
 function semanticWgslRequiredFeaturesSupported(requiredFeatures: readonly string[]): boolean {
-  return requiredFeatures.every((feature) => feature === "shader-f16");
+  return requiredFeatures.every((feature) => feature === "shader-f16" || feature === "subgroups");
 }
 
 function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -973,6 +974,7 @@ function semanticWgslScalarCallSupported(
   if (fn && isSemanticWgslFloatVectorType(fn.returnType)) return false;
   return semanticWgslFunctionCallSupported(expression, ir) ||
     semanticWgslAtomicCallSupported(expression, ir) ||
+    semanticWgslSubgroupCallSupported(expression, ir) ||
     semanticWgslMathCallSupported(expression) ||
     SEMANTIC_HALF2_SCALAR_CALLS.has(callee) && semanticWgslHalf2CallSupported(expression, ir) ||
     SEMANTIC_BF162_SCALAR_CALLS.has(callee) && semanticWgslBf162CallSupported(expression, ir) ||
@@ -1009,6 +1011,16 @@ function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
   const arity = semanticMathCallArity(expression.callee.name);
   return expression.args.length === arity && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
+}
+
+function semanticWgslSubgroupCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  return expression.callee.kind === "symbol" &&
+    expression.callee.name === "__activemask" &&
+    expression.args.length === 0 &&
+    ir?.requiredFeatures.includes("subgroups") === true;
 }
 
 function semanticWgslTextureReadSupported(
@@ -1520,6 +1532,7 @@ function semanticWgslExpressionSupported(
       return expression.expressions.every((item) => semanticWgslExpressionSupported(item, "scalar", ir));
     case "call":
       return ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
+        semanticWgslSubgroupCallSupported(expression, ir) ||
         semanticWgslMathCallSupported(expression) ||
         semanticWgslHalf2CallSupported(expression, ir) ||
         semanticWgslBf162CallSupported(expression, ir) ||
@@ -2328,6 +2341,7 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslSubgroupCallSupported(expression, ir)) return "subgroupBallot(true).x";
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorLerpCallSupported(expression, ir)) return emitSemanticVectorLerpCall(expression, ir, names, options, textureSpecializations);
