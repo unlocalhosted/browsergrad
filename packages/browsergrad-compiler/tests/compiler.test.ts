@@ -704,6 +704,105 @@ __global__ void storageParamAddressOfIndex(float* out, const float* input) {
     expect([...result.buffers.out as Float32Array]).toEqual([0, 11]);
   });
 
+  it("lowers same-root storage pointer comparisons through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void storagePointerCompare(uint* out, const float* input) {
+  const float* a = &input[1];
+  const float* b = &input[3];
+  out[0] = a == b ? 1u : 0u;
+  out[1] = a != b ? 1u : 0u;
+  out[2] = a < b ? 1u : 0u;
+  out[3] = b >= a ? 1u : 0u;
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Uint32Array(4),
+        input: new Float32Array([3, 5, 7, 11]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-pointer-comparison");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var a:");
+    expect(compiled.wgsl).not.toContain("var b:");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1, 1, 1]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 1, 1]);
+  });
+
+  it("lowers nullable storage pointer conditionals through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nullableStoragePointer(uint* out, const uint* input, int pick) {
+  const uint* maybe = pick != 0 ? &input[1] : NULL;
+  out[0] = maybe != NULL ? 1u : 0u;
+  out[1] = maybe == nullptr ? 1u : 0u;
+  if (maybe != NULL) {
+    out[2] = maybe[0];
+  }
+}
+`, { workgroupSize: [1, 1, 1] });
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const nonNullInput = {
+      buffers: {
+        out: new Uint32Array(3),
+        input: new Uint32Array([5, 13]),
+      },
+      scalars: { pick: 1 },
+    };
+    const nullInput = {
+      buffers: {
+        out: new Uint32Array(3),
+        input: new Uint32Array([5, 13]),
+      },
+      scalars: { pick: 0 },
+    };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, nonNullInput, launch);
+    const result = runCompiledKernelReference(compiled, nonNullInput, launch);
+    const nullResult = runCompiledKernelSemanticReference(compiled, nullInput, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-conditional");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-pointer-comparison");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var maybe:");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 0, 13]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 13]);
+    expect([...nullResult.buffers.out as Uint32Array]).toEqual([0, 1, 0]);
+  });
+
+  it("lowers same-root storage pointer differences through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void storagePointerDifference(int* out, const float* input) {
+  const float* base = input;
+  const float* shifted = &input[3];
+  out[0] = shifted - base;
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Int32Array(1),
+        input: new Float32Array([3, 5, 7, 11]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-difference");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var shifted:");
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([3]);
+    expect([...result.buffers.out as Int32Array]).toEqual([3]);
+  });
+
   it("lowers address-of dereferenced storage pointer aliases through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void storagePointerAddressOfDeref(float* out, const float* input) {
