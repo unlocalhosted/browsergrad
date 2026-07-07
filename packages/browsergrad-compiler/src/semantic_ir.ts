@@ -872,6 +872,15 @@ function localPointerAliasForInitializer(
 ): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices"> | undefined {
   if (!expression) return undefined;
   if (expression.kind === "cast" && expression.pointer) return localPointerAliasForInitializer(expression.expression, scope);
+  if (expression.kind === "identifier") {
+    const root = scope.get(expression.name);
+    if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
+    return {
+      pointerRoot: root.name,
+      pointerAddressSpace: root.addressSpace,
+      pointerBaseIndices: [zeroExpression(expression.span)],
+    };
+  }
   if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
   const ref = localPointerAliasRoot(expression.argument, scope);
   if (!ref || ref.root.addressSpace !== "local" || ref.root.dimensions.length !== 1) return undefined;

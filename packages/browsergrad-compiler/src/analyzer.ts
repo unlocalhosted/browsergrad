@@ -1489,6 +1489,7 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
   }
   if (expression.kind !== "identifier") return undefined;
   const symbol = lookupSymbol(expression.name, scope, expression.span);
+  if (symbol?.kind === "local" && (symbol.dimensions?.length ?? 0) > 0) return symbol.valueType;
   if (symbol?.kind === "shared" || symbol?.kind === "device-global") return symbol.valueType;
   return symbol?.pointer ? symbol.valueType : undefined;
 }
