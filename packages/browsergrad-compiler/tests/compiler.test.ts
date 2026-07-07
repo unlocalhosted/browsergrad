@@ -1722,8 +1722,8 @@ __global__ void vector_pointer_difference(uint4 *out, int *summary) {
   summary[0] = left - right;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(\(\(i32\(.+\) - i32\(.+\)\) \/ 4\)\);/u);
-    expect(compiled.wgsl).not.toMatch(/summary\[0\] = i32\(\(i32\(.+\) - i32\(.+\)\)\);/u);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("summary[0u] = 2;");
   });
 
   it("evaluates side-effecting vector pointer-array difference indices once", () => {
@@ -1753,8 +1753,8 @@ __global__ void scalar_view_vector_pointer_difference(uint4 *out, int *summary) 
   summary[0] = left - right;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(\(i32\(.+\) - i32\(.+\)\)\);/u);
-    expect(compiled.wgsl).not.toMatch(/summary\[0\] = i32\(\(\(i32\(.+\) - i32\(.+\)\) \/ 4\)\);/u);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("summary[0u] = 1;");
   });
 
   it("scales inline cast pointer differences over byte roots", () => {
@@ -2604,6 +2604,43 @@ __global__ void vectorLocalFill(float4* out) {
     expect(compiled.wgsl).toContain("regs[fill_regs_0] = vec4<f32>");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
+  });
+
+  it("lowers integer vector fixed local arrays through semantic IR", () => {
+    const intCompiled = compileCudaLiteKernel(`
+__global__ void intVectorLocalArray(int4* out) {
+  int tid = threadIdx.x;
+  int4 vals[2] = { make_int4(1, 2, 3, 4), make_int4(5, 6, 7, 8) };
+  out[tid] = vals[tid];
+}
+`, { workgroupSize: [2, 1, 1] });
+    const uintCompiled = compileCudaLiteKernel(`
+__global__ void uintVectorLocalArray(uint4* out) {
+  int tid = threadIdx.x;
+  uint4 vals[2] = make_uint4(1u + (uint)tid, 2u, 3u, 4u);
+  out[tid] = vals[tid];
+}
+`, { workgroupSize: [2, 1, 1] });
+
+    const intSemantic = runCompiledKernelSemanticReference(
+      intCompiled,
+      { buffers: { out: new Int32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const uintSemantic = runCompiledKernelSemanticReference(
+      uintCompiled,
+      { buffers: { out: new Uint32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(intCompiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(intCompiled.kernelIr)).toBe(true);
+    expect(intCompiled.wgsl).toContain("var vals: array<vec4<i32>, 2>;");
+    expect([...intSemantic.buffers.out as Int32Array]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(canRunCompiledKernelSemanticReference(uintCompiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(uintCompiled.kernelIr)).toBe(true);
+    expect(uintCompiled.wgsl).toContain("var vals: array<vec4<u32>, 2>;");
+    expect([...uintSemantic.buffers.out as Uint32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
   });
 
   it("fills fixed local arrays through semantic reference and WGSL", () => {
@@ -8813,7 +8850,7 @@ __global__ void vector_convert(uint4 *input, float4 *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<f32>(f32(raw.x), f32(raw.y), f32(raw.z), f32(raw.w))");
+    expect(compiled.wgsl).toContain("vec4<f32>(f32((raw).x), f32((raw).y), f32((raw).z), f32((raw).w))");
     expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 11]);
   });
 
@@ -8911,7 +8948,7 @@ __global__ void byte_vectors(int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<u32>(1u, 2u, 3u, 4u)");
+    expect(compiled.wgsl).toContain("vec4<u32>(u32(1u), u32(2u), u32(3u), u32(4u))");
     expect(compiled.wgsl).toContain("rgbToInt(f32(color.z), f32(color.y), f32(color.x)");
     expect([...result.buffers.out as Int32Array]).toEqual([6]);
   });

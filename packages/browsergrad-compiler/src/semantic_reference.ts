@@ -26,7 +26,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | Vector3 | number[];
 type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas" | "inc" | "dec";
@@ -180,6 +180,7 @@ export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLite
     semanticReferenceTextureDescriptorsSupported(compiled) &&
     semanticReferenceSharedShapeSupported(compiled) &&
     unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled) === undefined &&
+    !semanticReferenceOperationsContainUnsupportedCallableSignatures(compiled.kernelIr.operations, compiled) &&
     !semanticReferenceOperationsContainUnsupportedCalls(compiled.kernelIr.operations, compiled) &&
     compiled.kernelIr.functions.every((fn) => !semanticReferenceOperationsContainUnsupportedCalls(fn.body, compiled));
 }
@@ -368,6 +369,30 @@ function operationsContainDeclare(operations: readonly SemanticKernelIrOperation
   );
 }
 
+function semanticReferenceOperationsContainUnsupportedCallableSignatures(
+  operations: readonly SemanticKernelIrOperation[],
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  for (const operation of operations) {
+    if (operation.kind === "call") {
+      const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+      if (fn && fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) {
+        return true;
+      }
+    } else if (operation.kind === "branch") {
+      if (
+        semanticReferenceOperationsContainUnsupportedCallableSignatures(operation.consequent, compiled) ||
+        semanticReferenceOperationsContainUnsupportedCallableSignatures(operation.alternate, compiled)
+      ) return true;
+    } else if (operation.kind === "loop") {
+      if (semanticReferenceOperationsContainUnsupportedCallableSignatures(operation.body, compiled)) return true;
+    } else if (operation.kind === "block") {
+      if (semanticReferenceOperationsContainUnsupportedCallableSignatures(operation.body, compiled)) return true;
+    }
+  }
+  return false;
+}
+
 function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): boolean {
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
   if (symbol.kind === "constant") {
@@ -535,7 +560,7 @@ function semanticReferenceTextureReadSupported(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return (expression.valueType === "float" || isSemanticReferenceFloatVectorType(expression.valueType)) &&
+  return (expression.valueType === "float" || isSemanticReferenceFloatTextureVectorType(expression.valueType)) &&
     expression.texture.kind === "symbol" &&
     expression.texture.addressSpace === "texture" &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
@@ -554,7 +579,7 @@ function semanticReferenceSurfaceReadSupported(
   return (expression.valueType === "float" ||
       expression.valueType === "uint" ||
       expression.valueType === "int" ||
-      isSemanticReferenceFloatVectorType(expression.valueType)) &&
+      isSemanticReferenceFloatTextureVectorType(expression.valueType)) &&
     surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
     semanticReferenceExpressionSupported(expression.xBytes, "scalar", compiled) &&
@@ -781,10 +806,16 @@ function semanticReferenceSurfaceWriteSupported(
   const surface = operation.surface;
   return surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
+    semanticReferenceSurfaceValueSupported(operation.value) &&
     semanticReferenceExpressionSupported(operation.value, "any", compiled) &&
     semanticReferenceExpressionSupported(operation.xBytes, "scalar", compiled) &&
     semanticReferenceExpressionSupported(operation.y, "scalar", compiled) &&
     (operation.z === undefined || semanticReferenceExpressionSupported(operation.z, "scalar", compiled));
+}
+
+function semanticReferenceSurfaceValueSupported(expression: SemanticExpression): boolean {
+  const valueType = semanticExpressionValueType(expression);
+  return !isSemanticReferenceFloatVectorType(valueType) || isSemanticReferenceFloatTextureVectorType(valueType);
 }
 
 function semanticReferenceSurfaceReadStoreSupported(
@@ -1723,6 +1754,10 @@ function evalSemanticTextureValue(
 }
 
 function isSemanticReferenceFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
+  return isCudaVectorType(valueType);
+}
+
+function isSemanticReferenceFloatTextureVectorType(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float2" || valueType === "float3" || valueType === "float4" || valueType === "half2" || valueType === "bf162";
 }
 
@@ -2480,7 +2515,7 @@ function evalSemanticVectorConstructor(
   context: SemanticReferenceContext,
 ): SemanticValue {
   const valueType = expression.callee.kind === "symbol" ? cudaVectorConstructorType(expression.callee.name) : undefined;
-  if (!isSemanticReferenceFloatVectorType(valueType)) throw semanticReferenceError("semantic reference vector constructor requires float vector target", expression.span);
+  if (!isSemanticReferenceFloatVectorType(valueType)) throw semanticReferenceError("semantic reference vector constructor requires vector target", expression.span);
   const targetLanes = cudaVectorLaneCount(valueType);
   const values = expression.args.map((arg) => evalSemanticExpression(arg, context));
   if (values.length === 1 && typeof values[0] === "number") return Array.from({ length: targetLanes }, () => values[0] as number);
@@ -3175,20 +3210,21 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
   for (const param of compiled.kernelIr.params) {
     if (param.addressSpace === "storage") {
       const buffer = input.buffers[param.name];
+      const valueType = semanticStorageScalarType(param.valueType);
       if (!buffer) throw semanticReferenceError(`missing buffer input '${param.name}'`, param.span);
-      if (param.valueType === "float" && !(buffer instanceof Float32Array)) {
+      if (valueType === "float" && !(buffer instanceof Float32Array)) {
         throw semanticReferenceError(`buffer '${param.name}' expects Float32Array`, param.span);
       }
-      if (param.valueType === "int" && !(buffer instanceof Int32Array)) {
+      if (valueType === "int" && !(buffer instanceof Int32Array)) {
         throw semanticReferenceError(`buffer '${param.name}' expects Int32Array`, param.span);
       }
-      if (param.valueType === "uint" && !(buffer instanceof Uint32Array)) {
+      if (valueType === "uint" && !(buffer instanceof Uint32Array)) {
         throw semanticReferenceError(`buffer '${param.name}' expects Uint32Array`, param.span);
       }
-      if (param.valueType === "half" && !isWgslFloat16Array(buffer)) {
+      if (valueType === "half" && !isWgslFloat16Array(buffer)) {
         throw semanticReferenceError(`buffer '${param.name}' expects Float16Array`, param.span);
       }
-      if (param.valueType === "bf16" && !(buffer instanceof Float32Array)) {
+      if (valueType === "bf16" && !(buffer instanceof Float32Array)) {
         throw semanticReferenceError(`buffer '${param.name}' expects Float32Array`, param.span);
       }
     } else if (param.addressSpace === "uniform") {
@@ -3215,6 +3251,10 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       throw semanticReferenceError(`constant '${constant.name}' expects typed array`, constant.span);
     }
   }
+}
+
+function semanticStorageScalarType(valueType: CudaLiteScalarType | undefined): CudaLiteScalarType | undefined {
+  return isCudaVectorType(valueType) ? cudaVectorScalarType(valueType) : valueType;
 }
 
 function runSemanticBlockPhases(

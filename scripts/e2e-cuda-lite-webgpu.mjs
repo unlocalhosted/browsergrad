@@ -1432,6 +1432,18 @@ __global__ void localVectorArrayFill(float4 *out) {
   fill_1D_regs<float4, 2>(regs, make_float4(1.0f + (float)tid, 2.0f, 3.0f, 4.0f));
   out[tid] = make_float4(regs[tid].x, regs[tid][1], regs[tid].z, regs[tid].w);
 }`,
+  localIntVectorArray: `
+__global__ void localIntVectorArray(int4 *out) {
+  int tid = threadIdx.x;
+  int4 vals[2] = { make_int4(1, 2, 3, 4), make_int4(5, 6, 7, 8) };
+  out[tid] = vals[tid];
+}`,
+  localUintVectorArray: `
+__global__ void localUintVectorArray(uint4 *out) {
+  int tid = threadIdx.x;
+  uint4 vals[2] = make_uint4(1u + (uint)tid, 2u, 3u, 4u);
+  out[tid] = vals[tid];
+}`,
   sharedVectorHelper: `
 __device__ float4 load_shared_float4(float4 *tile, int index) {
   return tile[index];
@@ -11643,6 +11655,32 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 2, 2, 3, 4] },
+          },
+          {
+            name: "storage:local-int-vector-array",
+            source: SOURCES.localIntVectorArray,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+          },
+          {
+            name: "storage:local-uint-vector-array",
+            source: SOURCES.localUintVectorArray,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 2, 3, 4, 2, 2, 3, 4] },
           },
           {
             name: "storage:shared-vector-helper",

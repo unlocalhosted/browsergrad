@@ -20,7 +20,7 @@ import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { emitFp8Helpers } from "./wgsl_support_helpers.js";
-import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import {
   emitFloatAtomicAddHelper,
   emitFloatAtomicMaxHelper,
@@ -48,7 +48,19 @@ interface SemanticTextureDescriptorSignature {
 }
 
 type SemanticTextureDescriptorSpecializations = ReadonlyMap<string, ReadonlyMap<string, SemanticTextureDescriptorSignature>>;
-type SemanticWgslValueType = WgslValueType | "bool" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>" | "vec2<f16>";
+type SemanticWgslValueType =
+  | WgslValueType
+  | "bool"
+  | "vec2<f32>"
+  | "vec3<f32>"
+  | "vec4<f32>"
+  | "vec2<f16>"
+  | "vec2<i32>"
+  | "vec3<i32>"
+  | "vec4<i32>"
+  | "vec2<u32>"
+  | "vec3<u32>"
+  | "vec4<u32>";
 
 interface SemanticTextureDescriptorHelper {
   readonly textureName: string;
@@ -1130,7 +1142,7 @@ function semanticWgslTextureReadSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   const texture = expression.texture;
-  return (expression.valueType === "float" || isSemanticWgslFloatVectorType(expression.valueType)) &&
+  return (expression.valueType === "float" || isSemanticWgslFloatTextureVectorType(expression.valueType)) &&
     texture.kind === "symbol" &&
     texture.addressSpace === "texture" &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
@@ -1145,7 +1157,7 @@ function semanticWgslSurfaceReadSupported(
   return (expression.valueType === "float" ||
       expression.valueType === "uint" ||
       expression.valueType === "int" ||
-      isSemanticWgslFloatVectorType(expression.valueType)) &&
+      isSemanticWgslFloatTextureVectorType(expression.valueType)) &&
     target.kind === "symbol" &&
     target.addressSpace === "surface" &&
     semanticWgslExpressionSupported(expression.xBytes, "scalar", ir) &&
@@ -1547,10 +1559,16 @@ function semanticWgslSurfaceWriteSupported(
   const target = operation.surface;
   return target.kind === "symbol" &&
     target.addressSpace === "surface" &&
+    semanticWgslSurfaceValueSupported(operation.value) &&
     semanticWgslExpressionSupported(operation.value, "any", ir) &&
     semanticWgslExpressionSupported(operation.xBytes, "scalar", ir) &&
     semanticWgslExpressionSupported(operation.y, "scalar", ir) &&
     (operation.z === undefined || semanticWgslExpressionSupported(operation.z, "scalar", ir));
+}
+
+function semanticWgslSurfaceValueSupported(expression: SemanticExpression): boolean {
+  const valueType = semanticExpressionValueType(expression);
+  return !isSemanticWgslFloatVectorType(valueType) || isSemanticWgslFloatTextureVectorType(valueType);
 }
 
 function semanticWgslSurfaceReadStoreSupported(
@@ -3294,7 +3312,7 @@ function emitSemanticVectorConstructor(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   const valueType = expression.callee.kind === "symbol" ? cudaVectorConstructorType(expression.callee.name) : undefined;
-  if (!isSemanticWgslFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector constructor requires float vector target", expression.span);
+  if (!isSemanticWgslFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector constructor requires vector target", expression.span);
   const fields = ["x", "y", "z", "w"];
   const targetLanes = cudaVectorLaneCount(valueType);
   const targetScalar = wgslVectorScalar(valueType);
@@ -4776,8 +4794,10 @@ function wgslBindingType(valueType: CudaLiteScalarType | undefined): WgslValueTy
 
 function wgslScalar(valueType: CudaLiteScalarType | undefined): WgslValueType | "bool" {
   if (valueType === "half" || valueType === "half2") return "f16";
-  if (valueType === "int") return "i32";
-  if (valueType === "uint") return "u32";
+  const scalarType = isCudaVectorType(valueType) ? cudaVectorScalarType(valueType) : valueType;
+  if (scalarType === "int") return "i32";
+  if (scalarType === "uint") return "u32";
+  if (scalarType === "half") return "f16";
   if (valueType === "bool") return "bool";
   return "f32";
 }
@@ -4788,11 +4808,20 @@ function wgslValueType(valueType: CudaLiteScalarType | undefined): SemanticWgslV
   if (valueType === "float4") return "vec4<f32>";
   if (valueType === "half2") return "vec2<f16>";
   if (valueType === "bf162") return "vec2<f32>";
+  if (valueType === "int2") return "vec2<i32>";
+  if (valueType === "int3") return "vec3<i32>";
+  if (valueType === "int4") return "vec4<i32>";
+  if (valueType === "uint2") return "vec2<u32>";
+  if (valueType === "uint3") return "vec3<u32>";
+  if (valueType === "uint4") return "vec4<u32>";
   return wgslScalar(valueType);
 }
 
 function wgslVectorScalar(valueType: CudaLiteScalarType | undefined): WgslValueType {
-  return valueType === "half2" ? "f16" : "f32";
+  if (valueType === "half2") return "f16";
+  if (valueType === "int2" || valueType === "int3" || valueType === "int4") return "i32";
+  if (valueType === "uint2" || valueType === "uint3" || valueType === "uint4") return "u32";
+  return "f32";
 }
 
 function wgslValueScalar(valueType: CudaLiteScalarType | undefined): WgslValueType {
@@ -4877,6 +4906,10 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
 }
 
 function isSemanticWgslFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
+  return isCudaVectorType(valueType);
+}
+
+function isSemanticWgslFloatTextureVectorType(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float2" || valueType === "float3" || valueType === "float4" || valueType === "half2" || valueType === "bf162";
 }
 
@@ -4924,6 +4957,12 @@ function zeroForType(valueType: SemanticWgslValueType): string {
   if (valueType === "vec2<f32>") return "vec2<f32>(0.0)";
   if (valueType === "vec3<f32>") return "vec3<f32>(0.0)";
   if (valueType === "vec4<f32>") return "vec4<f32>(0.0)";
+  if (valueType === "vec2<i32>") return "vec2<i32>(0)";
+  if (valueType === "vec3<i32>") return "vec3<i32>(0)";
+  if (valueType === "vec4<i32>") return "vec4<i32>(0)";
+  if (valueType === "vec2<u32>") return "vec2<u32>(0u)";
+  if (valueType === "vec3<u32>") return "vec3<u32>(0u)";
+  if (valueType === "vec4<u32>") return "vec4<u32>(0u)";
   return "0.0";
 }
 

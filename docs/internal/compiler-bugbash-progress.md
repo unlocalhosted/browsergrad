@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-07T23:26:46Z
+Last updated: 2026-07-07T23:39:25Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails after nested local pointer-param lowering; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Vector `fill_*D_regs` over fixed local arrays now lowers through semantic IR/reference/WGSL/WebGPU |
+| Active work item | Integer vector fixed local arrays now lower through semantic IR/reference/WGSL/WebGPU |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- integer vector local arrays: `int2/3/4` and `uint2/3/4` now use typed semantic vector values for fixed local arrays, local initializers, local fills, storage ABI validation, and WGSL `vecN<i32/u32>` declarations while keeping typed texture/surface vector reads on their existing modeled path until semantic texture/surface helpers support integer lanes; exact real WebGPU fixtures `storage:local-int-vector-array` and `storage:local-uint-vector-array` passed with pinned outputs and max diff `0`; typecheck passed, lint passed, compiler unit `624/0`, local-array focused unit `17/0`, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
 - vector local-array fill: `fill_1D_regs<float4, N>` now fills modeled fixed local vector arrays through semantic IR instead of falling back to the private AST-shaped path; semantic reference deep-copies vector fill values, semantic WGSL emits vector assignments into `array<vecN<f32>, N>`, and exact real WebGPU fixture `storage:local-vector-array-fill` passed as `single-dispatch` with pinned output and max diff `0`; typecheck passed, lint passed, compiler unit `623/0`, local-array focused unit `16/0`, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
 - semantic host-dynamic parent planning: WebGPU host-dynamic launch planning now decides whether the parent dispatch is needed from `CompiledCudaLiteKernel.kernelIr.operations`, not private backend-IR statements, preserving host-lifted DevicePool safety while shrinking another backend bridge dependency; typecheck passed, lint passed, compiler unit `544/0`, build passed, focused WebGPU planning/runtime tests passed, runtime WebGPU slice `25/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` passed with skips `0`
 - semantic runtime readiness planning: `createCudaRuntimePlan()` now scans `CompiledCudaLiteKernel.kernelIr.operations` for device launches, host-managed runtime noops, runtime copies, and grid sync, so runtime orchestration readiness no longer depends on private backend-IR WeakMap metadata; detached compiled-object regression proves the public semantic contract is enough; WebGPU run/prepare launch validation now uses `compiled.kernelIr.workgroupSize`; typecheck passed, lint passed, compiler unit `544/0`, build passed, runtime WebGPU slice `25/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
