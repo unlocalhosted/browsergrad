@@ -199,6 +199,40 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__uint2float_rz", "uint_to_float"],
   ["__uint2float_ru", "uint_to_float"],
   ["__uint2float_rd", "uint_to_float"],
+  ["wmma::__float_to_tf32", "tf32"],
+  ["__clz", "clz"],
+  ["__clzll", "clzll"],
+  ["__ffs", "ffs"],
+  ["__ffsll", "ffs"],
+  ["__popc", "popc"],
+  ["__popcll", "popc"],
+  ["__brev", "brev"],
+  ["__brevll", "brev"],
+  ["__mul24", "mul24"],
+  ["__umul24", "umul24"],
+  ["__mulhi", "mulhi"],
+  ["__umulhi", "umulhi"],
+  ["__mul64hi", "mulhi"],
+  ["__umul64hi", "umulhi"],
+  ["__byte_perm", "byte_perm"],
+  ["__funnelshift_l", "funnelshift_l"],
+  ["__funnelshift_lc", "funnelshift_lc"],
+  ["__funnelshift_r", "funnelshift_r"],
+  ["__funnelshift_rc", "funnelshift_rc"],
+  ["__rhadd", "rhadd"],
+  ["__uhadd", "uhadd"],
+  ["__urhadd", "urhadd"],
+  ["__hadd", "hadd"],
+  ["__float_as_int", "float_as_int"],
+  ["__float_as_uint", "float_as_uint"],
+  ["__sad", "sad"],
+  ["__usad", "usad"],
+  ["__usad4", "usad4"],
+  ["IMAD", "imad"],
+  ["UMUL", "umul"],
+  ["UMAD", "umad"],
+  ["umin", "umin"],
+  ["assert", "assert"],
   ["fmin", "min"],
   ["fminf", "min"],
   ["min", "min"],
@@ -233,6 +267,7 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["isnan", "isnan"],
   ["isnanf", "isnan"],
   ["__isnanf", "isnan"],
+  ["isNan", "isnan"],
   ["signbit", "signbit"],
   ["signbitf", "signbit"],
   ["isnormal", "isnormal"],
@@ -507,7 +542,7 @@ function unsupportedSemanticWgslOperation(
         break;
       case "store":
         if (!semanticWgslAssignmentOperatorSupported(operation.operator)) return operation;
-        if (!semanticWgslMemoryRefSupported(operation.target) && !semanticWgslStorageOffsetStoreSupported(operation, ir)) return operation;
+        if (!semanticWgslTypedMemoryRefSupported(operation.target, ir) && !semanticWgslStorageOffsetStoreSupported(operation, ir)) return operation;
         if (
           operation.target.addressSpace === "storage" &&
           !ir.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
@@ -660,6 +695,13 @@ function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
+}
+
+function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  if (!semanticWgslMemoryRefSupported(ref)) return false;
+  if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
+  const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
+  return symbol === undefined || symbol.valueType === ref.valueType;
 }
 
 function semanticWgslStorageOffsetStoreSupported(
@@ -1053,6 +1095,7 @@ function semanticWgslCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
+  if (operation.callee === "assert") return operation.args.length === 1 && semanticWgslExpressionSupported(operation.args[0]!, "scalar", ir);
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -1146,9 +1189,13 @@ function semanticWgslExpressionSupported(
     case "index":
       if (semanticWgslVectorIndexSupported(expression, ir)) return true;
       if (expected === "any" && isSemanticWgslFloatVectorType(expression.valueType)) {
-        return semanticWgslMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
+        const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
+        return ir === undefined ? semanticWgslMemoryRefSupported(ref) : semanticWgslTypedMemoryRefSupported(ref, ir);
       }
-      return expected === "scalar" && semanticWgslMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
+      {
+        const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
+        return expected === "scalar" && (ir === undefined ? semanticWgslMemoryRefSupported(ref) : semanticWgslTypedMemoryRefSupported(ref, ir));
+      }
     case "cast":
       return !expression.pointer && semanticWgslExpressionSupported(expression.expression, "scalar", ir);
     case "unary":
@@ -1543,6 +1590,7 @@ function emitSemanticCall(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
+  if (operation.callee === "assert") return [];
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
@@ -2056,6 +2104,58 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "  }",
     "  return bg_semantic_lgamma_core_f32(value);",
     "}",
+    "fn bg_semantic_umulhi_u32(x: u32, y: u32) -> u32 {",
+    "  let x_lo = x & 0xffffu;",
+    "  let x_hi = x >> 16u;",
+    "  let y_lo = y & 0xffffu;",
+    "  let y_hi = y >> 16u;",
+    "  let lo_carry = (((x_lo * y_lo) >> 16u) + ((x_lo * y_hi) & 0xffffu) + ((x_hi * y_lo) & 0xffffu)) >> 16u;",
+    "  return (x_hi * y_hi) + ((x_lo * y_hi) >> 16u) + ((x_hi * y_lo) >> 16u) + lo_carry;",
+    "}",
+    "fn bg_semantic_mulhi_i32(x: i32, y: i32) -> i32 {",
+    "  return i32(bg_semantic_umulhi_u32(u32(x), u32(y))) - select(0, y, x < 0) - select(0, x, y < 0);",
+    "}",
+    "fn bg_semantic_byte_perm_u32(x: u32, y: u32, selector: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var lane = 0u; lane < 4u; lane = lane + 1u) {",
+    "    let source = (selector >> (lane * 4u)) & 0x7u;",
+    "    let input = select(x, y, source >= 4u);",
+    "    let byte = (input >> ((source & 0x3u) * 8u)) & 0xffu;",
+    "    out = out | (byte << (lane * 8u));",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_funnelshift_l_u32(lo: u32, hi: u32, shift: u32) -> u32 {",
+    "  let s = shift & 31u;",
+    "  if (s == 0u) { return lo; }",
+    "  return (lo << s) | (hi >> (32u - s));",
+    "}",
+    "fn bg_semantic_funnelshift_lc_u32(lo: u32, hi: u32, shift: u32) -> u32 {",
+    "  let s = min(shift, 32u);",
+    "  if (s == 0u) { return lo; }",
+    "  if (s == 32u) { return hi; }",
+    "  return (lo << s) | (hi >> (32u - s));",
+    "}",
+    "fn bg_semantic_funnelshift_r_u32(lo: u32, hi: u32, shift: u32) -> u32 {",
+    "  let s = shift & 31u;",
+    "  if (s == 0u) { return lo; }",
+    "  return (lo >> s) | (hi << (32u - s));",
+    "}",
+    "fn bg_semantic_funnelshift_rc_u32(lo: u32, hi: u32, shift: u32) -> u32 {",
+    "  let s = min(shift, 32u);",
+    "  if (s == 0u) { return lo; }",
+    "  if (s == 32u) { return hi; }",
+    "  return (lo >> s) | (hi << (32u - s));",
+    "}",
+    "fn bg_semantic_usad4_u32(a: u32, b: u32, c: u32) -> u32 {",
+    "  var out = c;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left = (a >> shift) & 0xffu;",
+    "    let right = (b >> shift) & 0xffu;",
+    "    out = out + max(left, right) - min(left, right);",
+    "  }",
+    "  return out;",
+    "}",
   ];
 }
 
@@ -2284,6 +2384,114 @@ function emitSemanticMathCall(
     const lhs = emitSemanticExpressionAs(left, ir, names, scalar, options, textureSpecializations);
     const rhs = emitSemanticExpressionAs(right, ir, names, scalar, options, textureSpecializations);
     return `(((${lhs} + ${rhs}) - ${scalar === "u32" ? "1u" : "1"}) / ${rhs})`;
+  }
+  if (wgslCallee === "assert") return "0";
+  if (wgslCallee === "tf32") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    return emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
+  }
+  if (wgslCallee === "float_as_int" || wgslCallee === "float_as_uint") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
+    return wgslCallee === "float_as_int" ? `bitcast<i32>(${emitted})` : `bitcast<u32>(${emitted})`;
+  }
+  if (wgslCallee === "clz" || wgslCallee === "clzll" || wgslCallee === "ffs" || wgslCallee === "popc" || wgslCallee === "brev") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations);
+    if (wgslCallee === "clz") return `i32(countLeadingZeros(${emitted}))`;
+    if (wgslCallee === "clzll") return `(i32(countLeadingZeros(${emitted})) + 32)`;
+    if (wgslCallee === "ffs") return `select(0, (i32(countTrailingZeros(${emitted})) + 1), (${emitted} != 0u))`;
+    if (wgslCallee === "popc") return `i32(countOneBits(${emitted}))`;
+    return `reverseBits(${emitted})`;
+  }
+  if (
+    wgslCallee === "mul24" ||
+    wgslCallee === "umul24" ||
+    wgslCallee === "mulhi" ||
+    wgslCallee === "umulhi" ||
+    wgslCallee === "rhadd" ||
+    wgslCallee === "uhadd" ||
+    wgslCallee === "urhadd" ||
+    wgslCallee === "hadd" ||
+    wgslCallee === "umul" ||
+    wgslCallee === "umin"
+  ) {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    if (wgslCallee === "mul24") {
+      const lhs = emitSemanticExpressionAs(left, ir, names, "i32", options, textureSpecializations);
+      const rhs = emitSemanticExpressionAs(right, ir, names, "i32", options, textureSpecializations);
+      return `(${lhs} * ${rhs})`;
+    }
+    if (wgslCallee === "umul24" || wgslCallee === "umul") {
+      const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
+      const rhs = emitSemanticExpressionAs(right, ir, names, "u32", options, textureSpecializations);
+      return `(${lhs} * ${rhs})`;
+    }
+    if (wgslCallee === "mulhi") {
+      const lhs = emitSemanticExpressionAs(left, ir, names, "i32", options, textureSpecializations);
+      const rhs = emitSemanticExpressionAs(right, ir, names, "i32", options, textureSpecializations);
+      return `bg_semantic_mulhi_i32(${lhs}, ${rhs})`;
+    }
+    if (wgslCallee === "umulhi") {
+      const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
+      const rhs = emitSemanticExpressionAs(right, ir, names, "u32", options, textureSpecializations);
+      return `bg_semantic_umulhi_u32(${lhs}, ${rhs})`;
+    }
+    if (wgslCallee === "umin") {
+      const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
+      const rhs = emitSemanticExpressionAs(right, ir, names, "u32", options, textureSpecializations);
+      return `min(${lhs}, ${rhs})`;
+    }
+    const scalar = wgslCallee === "uhadd" || wgslCallee === "urhadd" ? "u32" : "i32";
+    const lhs = emitSemanticExpressionAs(left, ir, names, scalar, options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, scalar, options, textureSpecializations);
+    if (wgslCallee === "rhadd") return `((${lhs} | ${rhs}) - ((${lhs} ^ ${rhs}) >> 1u))`;
+    if (wgslCallee === "hadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
+    if (wgslCallee === "uhadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
+    return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u) + ((${lhs} ^ ${rhs}) & 1u))`;
+  }
+  if (wgslCallee === "imad" || wgslCallee === "umad" || wgslCallee === "sad" || wgslCallee === "usad" || wgslCallee === "usad4" || wgslCallee === "byte_perm" || wgslCallee.startsWith("funnelshift_")) {
+    const [first, second, third] = expression.args;
+    if (!first || !second || (!third && wgslCallee !== "usad4")) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
+    if (wgslCallee === "imad") {
+      const a = emitSemanticExpressionAs(first, ir, names, "i32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "i32", options, textureSpecializations);
+      const c = emitSemanticExpressionAs(third!, ir, names, "i32", options, textureSpecializations);
+      return `((${a} * ${b}) + ${c})`;
+    }
+    if (wgslCallee === "umad") {
+      const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
+      const c = emitSemanticExpressionAs(third!, ir, names, "u32", options, textureSpecializations);
+      return `((${a} * ${b}) + ${c})`;
+    }
+    if (wgslCallee === "sad") {
+      const a = emitSemanticExpressionAs(first, ir, names, "i32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "i32", options, textureSpecializations);
+      const c = emitSemanticExpressionAs(third!, ir, names, "u32", options, textureSpecializations);
+      return `(select((u32(${b}) - u32(${a})), (u32(${a}) - u32(${b})), (${a} >= ${b})) + ${c})`;
+    }
+    if (wgslCallee === "usad") {
+      const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
+      const c = emitSemanticExpressionAs(third!, ir, names, "u32", options, textureSpecializations);
+      return `(max(${a}, ${b}) - min(${a}, ${b}) + ${c})`;
+    }
+    if (wgslCallee === "usad4") {
+      const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
+      const c = third ? emitSemanticExpressionAs(third, ir, names, "u32", options, textureSpecializations) : "0u";
+      return `bg_semantic_usad4_u32(${a}, ${b}, ${c})`;
+    }
+    const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
+    const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
+    const c = emitSemanticExpressionAs(third!, ir, names, "u32", options, textureSpecializations);
+    if (wgslCallee === "byte_perm") return `bg_semantic_byte_perm_u32(${a}, ${b}, ${c})`;
+    return `bg_semantic_${wgslCallee}_u32(${a}, ${b}, ${c})`;
   }
   if (wgslCallee === "add" || wgslCallee === "sub" || wgslCallee === "mul") {
     const [left, right] = expression.args;
@@ -2542,14 +2750,36 @@ function semanticMathCallArity(name: string): number {
     name === "__bg_remquo_quotient" ||
     name === "__bg_remquo_remainder" ||
     name === "atan2" ||
-    name === "atan2f"
+    name === "atan2f" ||
+    name === "__mul24" ||
+    name === "__umul24" ||
+    name === "__mulhi" ||
+    name === "__umulhi" ||
+    name === "__mul64hi" ||
+    name === "__umul64hi" ||
+    name === "__rhadd" ||
+    name === "__uhadd" ||
+    name === "__urhadd" ||
+    name === "__hadd" ||
+    name === "UMUL" ||
+    name === "umin"
     ? 2
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||
       name === "lerp" ||
       name === "norm3df" ||
-      name === "rnorm3df"
+      name === "rnorm3df" ||
+      name === "__byte_perm" ||
+      name === "__funnelshift_l" ||
+      name === "__funnelshift_lc" ||
+      name === "__funnelshift_r" ||
+      name === "__funnelshift_rc" ||
+      name === "__sad" ||
+      name === "__usad" ||
+      name === "__usad4" ||
+      name === "IMAD" ||
+      name === "UMAD"
     ? 3
     : name === "norm4df" ||
       name === "rnorm4df"

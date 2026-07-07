@@ -7798,25 +7798,33 @@ __global__ void intIntrinsics(int *x, uint *out) {
       { buffers: { x: new Int32Array([5]), out: new Uint32Array(31) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { x: new Int32Array([5]), out: new Uint32Array(31) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("countLeadingZeros");
     expect(compiled.wgsl).toContain("countTrailingZeros");
-    expect(compiled.wgsl).toContain("reverseBits(u32(0x01234567u))");
-    expect(compiled.wgsl).toContain("select((u32(7) - u32((-20))), (u32((-20)) - u32(7)), (i32((-20)) >= i32(7))) + u32(3u)");
-    expect(compiled.wgsl).toContain("max(u32(2u), u32(9u)) - min(u32(2u), u32(9u)) + u32(5u)");
-    expect(compiled.wgsl).toContain("select(0, i32(3), (i32((-2000000000)) < 0))");
-    expect(compiled.wgsl).toContain("u32(0xfedcba98u) >> 16u");
-    expect(compiled.wgsl).toContain("u32(0x5410u) >> 4u");
-    expect(compiled.wgsl).toContain("i32((-7)) | i32(2)");
-    expect(compiled.wgsl).toContain("u32(0xffffffffu) & u32(1u)");
-    expect(compiled.wgsl).toContain("u32(0xffffffffu) & u32(2u)");
-    expect(compiled.wgsl).toContain("(i32((-7)) & i32(2)) + ((i32((-7)) ^ i32(2)) >> 1u)");
-    expect(compiled.wgsl).toContain("fn bg_funnelshift_l(");
-    expect(compiled.wgsl).toContain("bg_funnelshift_rc(u32(0x11223344u), u32(0x55667788u), u32(32u))");
-    expect(compiled.wgsl).toContain("countLeadingZeros(u32(0x10u))) + 32");
-    expect(compiled.wgsl).toContain("countOneBits(u32(0xf0f0u))");
-    expect(compiled.wgsl).toContain("min(u32(7u), u32(3u))");
-    expect(compiled.wgsl).toContain("assert omitted");
+    expect(compiled.wgsl).toContain("reverseBits(19088743u)");
+    expect(compiled.wgsl).toContain("select((u32(7) - u32(-(20))), (u32(-(20)) - u32(7)), (-(20) >= 7)) + 3u");
+    expect(compiled.wgsl).toContain("max(2u, 9u) - min(2u, 9u) + 5u");
+    expect(compiled.wgsl).toContain("fn bg_semantic_umulhi_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_byte_perm_u32(");
+    expect(compiled.wgsl).toContain("(-(7) | 2) - ((-(7) ^ 2) >> 1u)");
+    expect(compiled.wgsl).toContain("4294967295u & 1u");
+    expect(compiled.wgsl).toContain("4294967295u & 2u");
+    expect(compiled.wgsl).toContain("(-(7) & 2) + ((-(7) ^ 2) >> 1u)");
+    expect(compiled.wgsl).toContain("fn bg_semantic_funnelshift_l_u32(");
+    expect(compiled.wgsl).toContain("bg_semantic_funnelshift_rc_u32(287454020u, 1432778632u, 32u)");
+    expect(compiled.wgsl).toContain("countLeadingZeros(16u)) + 32");
+    expect(compiled.wgsl).toContain("countOneBits(61680u)");
+    expect(compiled.wgsl).toContain("min(7u, 3u)");
+    expect(compiled.wgsl).not.toContain("assert omitted");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44, 40, 0xe6a2c480, 30, 12, 0xfffffffe, 304062474, 0x66772233, 0xfffffffe, 2147483648, 2147483649, 0xfffffffd, 0x22334455, 0x55667788, 0x88112233, 0x55667788, 59, 5, 8, 0x0f000000, 0xfffffffe, 304062474]);
     expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44, 40, 0xe6a2c480, 30, 12, 0xfffffffe, 304062474, 0x66772233, 0xfffffffe, 2147483648, 2147483649, 0xfffffffd, 0x22334455, 0x55667788, 0x88112233, 0x55667788, 59, 5, 8, 0x0f000000, 0xfffffffe, 304062474]);
   });
 
@@ -7842,10 +7850,28 @@ __global__ void bitcast_intrinsics(float *x, uint *bits, int *signed_bits, float
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: input,
+          bits: new Uint32Array(1),
+          signed_bits: new Int32Array(1),
+          roundtrip: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("bitcast<u32>(f32(value))");
-    expect(compiled.wgsl).toContain("bitcast<i32>(f32(value))");
-    expect(compiled.wgsl).toContain("bitcast<f32>(u32(bits[0]))");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bitcast<u32>(value)");
+    expect(compiled.wgsl).toContain("bitcast<i32>(value)");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&bits[0u]))");
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0xc0600000]);
+    expect([...semanticResult.buffers.signed_bits as Int32Array]).toEqual([-1067450368]);
+    expect([...semanticResult.buffers.roundtrip as Float32Array]).toEqual([-3.5, -3.5]);
     expect([...result.buffers.bits as Uint32Array]).toEqual([0xc0600000]);
     expect([...result.buffers.signed_bits as Int32Array]).toEqual([-1067450368]);
     expect([...result.buffers.roundtrip as Float32Array]).toEqual([-3.5, -3.5]);

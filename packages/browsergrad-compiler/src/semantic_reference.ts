@@ -66,6 +66,12 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__float2uint_rn", "__float2uint_rz", "__float2uint_ru", "__float2uint_rd",
   "__int2float_rn", "__int2float_rz", "__int2float_ru", "__int2float_rd",
   "__uint2float_rn", "__uint2float_rz", "__uint2float_ru", "__uint2float_rd",
+  "wmma::__float_to_tf32", "isNan",
+  "__clz", "__clzll", "__ffs", "__ffsll", "__popc", "__popcll", "__brev", "__brevll",
+  "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
+  "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
+  "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
+  "__sad", "__usad", "__usad4", "IMAD", "UMUL", "UMAD", "umin", "assert",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -228,7 +234,7 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "store":
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
-        if (!semanticReferenceMemoryRefSupported(operation.target) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) return operation;
+        if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) return operation;
         if (
           operation.target.addressSpace === "storage" &&
           !compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
@@ -370,6 +376,13 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
+}
+
+function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  if (!semanticReferenceMemoryRefSupported(ref)) return false;
+  if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
+  const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
+  return symbol === undefined || symbol.valueType === ref.valueType;
 }
 
 function semanticReferenceStorageOffsetStoreSupported(
@@ -563,6 +576,7 @@ function semanticReferenceCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
+  if (operation.callee === "assert") return operation.args.length === 1 && semanticReferenceExpressionSupported(operation.args[0]!, "scalar", compiled);
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -656,9 +670,13 @@ function semanticReferenceExpressionSupported(
     case "index":
       if (semanticReferenceVectorIndexSupported(expression, compiled)) return true;
       if (expected === "any" && isSemanticReferenceFloatVectorType(expression.valueType)) {
-        return semanticReferenceMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
+        const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
+        return compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled);
       }
-      return expected === "scalar" && semanticReferenceMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
+      {
+        const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
+        return expected === "scalar" && (compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled));
+      }
     case "cast":
       return !expression.pointer && semanticReferenceExpressionSupported(expression.expression, "scalar", compiled);
     case "unary":
@@ -1077,6 +1095,10 @@ function execSemanticCall(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
 ): void {
+  if (operation.callee === "assert") {
+    if (operation.args[0]) evalNumber(operation.args[0], context);
+    return;
+  }
   if (semanticReferenceVoidFunctionCallSupported(operation, context.compiled)) {
     execSemanticVoidFunctionCall(operation, context);
     return;
@@ -1575,6 +1597,40 @@ function evalSemanticMathCall(
     case "__uint2float_rz":
     case "__uint2float_ru":
     case "__uint2float_rd": return Math.trunc(args[0] ?? 0) >>> 0;
+    case "wmma::__float_to_tf32": return args[0] ?? 0;
+    case "__clz": return Math.clz32(args[0] ?? 0);
+    case "__clzll": return Math.clz32(args[0] ?? 0) + 32;
+    case "__ffs": return evalSemanticFfs(args[0] ?? 0);
+    case "__ffsll": return evalSemanticFfs(args[0] ?? 0);
+    case "__popc": return popCount32(args[0] ?? 0);
+    case "__popcll": return popCount32(args[0] ?? 0);
+    case "__brev": return reverseBits32(args[0] ?? 0);
+    case "__brevll": return reverseBits32(args[0] ?? 0);
+    case "__mul24": return Math.imul(args[0] ?? 0, args[1] ?? 0);
+    case "__umul24": return Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0;
+    case "__mulhi":
+    case "__mul64hi": return signedMulHi32(args[0] ?? 0, args[1] ?? 0);
+    case "__umulhi":
+    case "__umul64hi": return unsignedMulHi32(args[0] ?? 0, args[1] ?? 0);
+    case "__byte_perm": return bytePerm(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+    case "__funnelshift_l": return funnelShiftLeft(args[0] ?? 0, args[1] ?? 0, Math.trunc(args[2] ?? 0) & 31);
+    case "__funnelshift_lc": return funnelShiftLeft(args[0] ?? 0, args[1] ?? 0, Math.max(0, Math.min(32, Math.trunc(args[2] ?? 0))));
+    case "__funnelshift_r": return funnelShiftRight(args[0] ?? 0, args[1] ?? 0, Math.trunc(args[2] ?? 0) & 31);
+    case "__funnelshift_rc": return funnelShiftRight(args[0] ?? 0, args[1] ?? 0, Math.max(0, Math.min(32, Math.trunc(args[2] ?? 0))));
+    case "__rhadd": return roundedSignedAverage(args[0] ?? 0, args[1] ?? 0);
+    case "__uhadd": return unsignedAverage(args[0] ?? 0, args[1] ?? 0);
+    case "__urhadd": return roundedUnsignedAverage(args[0] ?? 0, args[1] ?? 0);
+    case "__hadd": return signedAverage(args[0] ?? 0, args[1] ?? 0);
+    case "__float_as_int": return float32ToUintBits(args[0] ?? 0) | 0;
+    case "__float_as_uint": return float32ToUintBits(args[0] ?? 0) >>> 0;
+    case "__sad": return (Math.abs((Math.trunc(args[0] ?? 0) | 0) - (Math.trunc(args[1] ?? 0) | 0)) + (Math.trunc(args[2] ?? 0) >>> 0)) >>> 0;
+    case "__usad": return (Math.abs((Math.trunc(args[0] ?? 0) >>> 0) - (Math.trunc(args[1] ?? 0) >>> 0)) + (Math.trunc(args[2] ?? 0) >>> 0)) >>> 0;
+    case "__usad4": return u8x4SadAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+    case "IMAD": return (Math.imul(args[0] ?? 0, args[1] ?? 0) + (Math.trunc(args[2] ?? 0) | 0)) | 0;
+    case "UMUL": return Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0;
+    case "UMAD": return (Math.imul(args[0] ?? 0, args[1] ?? 0) + (Math.trunc(args[2] ?? 0) >>> 0)) >>> 0;
+    case "umin": return Math.min(Math.trunc(args[0] ?? 0) >>> 0, Math.trunc(args[1] ?? 0) >>> 0) >>> 0;
+    case "assert": return 0;
     case "fmin":
     case "fminf":
     case "min": return Math.min(args[0] ?? 0, args[1] ?? 0);
@@ -1608,7 +1664,8 @@ function evalSemanticMathCall(
     case "__finitef": return Number.isFinite(args[0] ?? 0) ? 1 : 0;
     case "isnan":
     case "isnanf":
-    case "__isnanf": return Number.isNaN(args[0] ?? 0) ? 1 : 0;
+    case "__isnanf":
+    case "isNan": return Number.isNaN(args[0] ?? 0) ? 1 : 0;
     case "signbit":
     case "signbitf": return Math.sign(args[0] ?? 0) < 0 || Object.is(args[0] ?? 0, -0) ? 1 : 0;
     case "isnormal": {
@@ -1672,6 +1729,104 @@ function evalNextafter(x: number, y: number): number {
     ? (x < y ? bits + 1 : bits - 1)
     : (x < y ? bits - 1 : bits + 1);
   return uintBitsToFloat32(bits >>> 0);
+}
+
+function evalSemanticFfs(value: number): number {
+  const bits = Math.trunc(value) >>> 0;
+  return bits === 0 ? 0 : 32 - Math.clz32(bits & -bits);
+}
+
+function popCount32(value: number): number {
+  let bits = Math.trunc(value) >>> 0;
+  bits -= (bits >>> 1) & 0x55555555;
+  bits = (bits & 0x33333333) + ((bits >>> 2) & 0x33333333);
+  return (((bits + (bits >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+function reverseBits32(value: number): number {
+  let bits = Math.trunc(value) >>> 0;
+  bits = ((bits >>> 1) & 0x55555555) | ((bits & 0x55555555) << 1);
+  bits = ((bits >>> 2) & 0x33333333) | ((bits & 0x33333333) << 2);
+  bits = ((bits >>> 4) & 0x0f0f0f0f) | ((bits & 0x0f0f0f0f) << 4);
+  bits = ((bits >>> 8) & 0x00ff00ff) | ((bits & 0x00ff00ff) << 8);
+  return ((bits >>> 16) | (bits << 16)) >>> 0;
+}
+
+function signedMulHi32(xValue: number, yValue: number): number {
+  const x = BigInt(Math.trunc(xValue) | 0);
+  const y = BigInt(Math.trunc(yValue) | 0);
+  return Number((x * y) >> 32n) | 0;
+}
+
+function unsignedMulHi32(xValue: number, yValue: number): number {
+  const x = BigInt(Math.trunc(xValue) >>> 0);
+  const y = BigInt(Math.trunc(yValue) >>> 0);
+  return Number((x * y) >> 32n) >>> 0;
+}
+
+function bytePerm(xValue: number, yValue: number, selectorValue: number): number {
+  const x = Math.trunc(xValue) >>> 0;
+  const y = Math.trunc(yValue) >>> 0;
+  const selector = Math.trunc(selectorValue) >>> 0;
+  let out = 0;
+  for (let lane = 0; lane < 4; lane++) {
+    const source = (selector >>> (lane * 4)) & 0x7;
+    const input = source < 4 ? x : y;
+    out |= ((input >>> ((source & 3) * 8)) & 0xff) << (lane * 8);
+  }
+  return out >>> 0;
+}
+
+function funnelShiftLeft(loValue: number, hiValue: number, shiftValue: number): number {
+  const lo = Math.trunc(loValue) >>> 0;
+  const hi = Math.trunc(hiValue) >>> 0;
+  const shift = Math.trunc(shiftValue);
+  if (shift <= 0) return lo;
+  if (shift >= 32) return hi;
+  return ((lo << shift) | (hi >>> (32 - shift))) >>> 0;
+}
+
+function funnelShiftRight(loValue: number, hiValue: number, shiftValue: number): number {
+  const lo = Math.trunc(loValue) >>> 0;
+  const hi = Math.trunc(hiValue) >>> 0;
+  const shift = Math.trunc(shiftValue);
+  if (shift <= 0) return lo;
+  if (shift >= 32) return hi;
+  return ((lo >>> shift) | (hi << (32 - shift))) >>> 0;
+}
+
+function roundedSignedAverage(xValue: number, yValue: number): number {
+  const x = BigInt(Math.trunc(xValue) | 0);
+  const y = BigInt(Math.trunc(yValue) | 0);
+  return Number((x + y + 1n) >> 1n) | 0;
+}
+
+function signedAverage(xValue: number, yValue: number): number {
+  const x = BigInt(Math.trunc(xValue) | 0);
+  const y = BigInt(Math.trunc(yValue) | 0);
+  return Number((x + y) >> 1n) | 0;
+}
+
+function unsignedAverage(xValue: number, yValue: number): number {
+  const x = Math.trunc(xValue) >>> 0;
+  const y = Math.trunc(yValue) >>> 0;
+  return ((x & y) + ((x ^ y) >>> 1)) >>> 0;
+}
+
+function roundedUnsignedAverage(xValue: number, yValue: number): number {
+  const x = Math.trunc(xValue) >>> 0;
+  const y = Math.trunc(yValue) >>> 0;
+  return ((x & y) + ((x ^ y) >>> 1) + ((x ^ y) & 1)) >>> 0;
+}
+
+function u8x4SadAdd(aValue: number, bValue: number, addValue = 0): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  let out = Math.trunc(addValue) >>> 0;
+  for (let lane = 0; lane < 4; lane++) {
+    out = (out + Math.abs(((a >>> (lane * 8)) & 0xff) - ((b >>> (lane * 8)) & 0xff))) >>> 0;
+  }
+  return out;
 }
 
 function evalSemanticErf(value: number): number {
@@ -1969,14 +2124,36 @@ function semanticMathCallArity(name: string): number {
     name === "__bg_remquo_quotient" ||
     name === "__bg_remquo_remainder" ||
     name === "atan2" ||
-    name === "atan2f"
+    name === "atan2f" ||
+    name === "__mul24" ||
+    name === "__umul24" ||
+    name === "__mulhi" ||
+    name === "__umulhi" ||
+    name === "__mul64hi" ||
+    name === "__umul64hi" ||
+    name === "__rhadd" ||
+    name === "__uhadd" ||
+    name === "__urhadd" ||
+    name === "__hadd" ||
+    name === "UMUL" ||
+    name === "umin"
     ? 2
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||
       name === "lerp" ||
       name === "norm3df" ||
-      name === "rnorm3df"
+      name === "rnorm3df" ||
+      name === "__byte_perm" ||
+      name === "__funnelshift_l" ||
+      name === "__funnelshift_lc" ||
+      name === "__funnelshift_r" ||
+      name === "__funnelshift_rc" ||
+      name === "__sad" ||
+      name === "__usad" ||
+      name === "__usad4" ||
+      name === "IMAD" ||
+      name === "UMAD"
     ? 3
     : name === "norm4df" ||
       name === "rnorm4df"
