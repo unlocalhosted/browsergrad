@@ -421,7 +421,7 @@ function unsupportedSemanticWgslOperation(
 }
 
 function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][number]): boolean {
-  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslScalarTypeSupported(param.valueType);
+  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslValueTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
@@ -539,7 +539,8 @@ function semanticWgslAtomicSupported(
 
 function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
   return semanticWgslExpressionSupported(expression, "scalar", ir) ||
-    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression)) ||
+    semanticWgslExpressionSupported(expression, "any", ir) && isSemanticWgslFloatVectorType(semanticExpressionVectorValueType(expression, ir)) ||
+    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression) || semanticWgslVectorConstructorSupported(expression, "any", ir)) ||
     expression.kind === "texture-read" && semanticWgslTextureReadSupported(expression, ir) ||
     expression.kind === "surface-read" && semanticWgslSurfaceReadSupported(expression, ir);
 }
@@ -959,6 +960,9 @@ function semanticWgslExpressionSupported(
         semanticWgslVectorMemberSupported(expression, ir);
     case "index":
       if (semanticWgslVectorIndexSupported(expression, ir)) return true;
+      if (expected === "any" && isSemanticWgslFloatVectorType(expression.valueType)) {
+        return semanticWgslMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
+      }
       return expected === "scalar" && semanticWgslMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
     case "cast":
       return !expression.pointer && semanticWgslExpressionSupported(expression.expression, "scalar", ir);
@@ -1206,11 +1210,33 @@ function emitSemanticStore(
     const atomicValue = emitSemanticExpressionAs(operation.value, ir, names, wgslAtomicScalar(operation.target.valueType), options, textureSpecializations);
     return `atomicStore(&${target}, ${atomicValue})`;
   }
+  if (isSemanticWgslFloatVectorType(operation.target.valueType)) {
+    if (operation.operator !== "=") throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
+    return emitSemanticVectorMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
+  }
   const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
   if (operation.operator === "=") return `${target} = ${value}`;
   if (operation.operator === "+=") return `${target} = (${target} + ${value})`;
   if (operation.operator === "-=") return `${target} = (${target} - ${value})`;
   throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function emitSemanticVectorMemoryWrite(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): readonly string[] {
+  const valueType = operation.target.valueType;
+  if (!isSemanticWgslFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector write requires vector target", operation.span);
+  const value = emitSemanticExpression(operation.value, ir, names, options, textureSpecializations);
+  const base = emitFlatStorageVectorBaseIndex(operation.target, ir, names, options);
+  const target = nameFor(operation.target.base, names);
+  const fields = ["x", "y", "z", "w"];
+  return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
+    `${target}[(${base} + ${lane}u)] = (${value}).${fields[lane]}`
+  );
 }
 
 function emitSemanticFunction(
@@ -1462,6 +1488,7 @@ function emitSemanticExpression(
       }
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) {
+        if (isSemanticWgslFloatVectorType(ref.valueType)) return emitSemanticVectorMemoryRead(ref, ir, names, options);
         const memoryRef = emitSemanticMemoryRef(ref, ir, names, options);
         if (
           semanticAtomicStorageNames(ir.operations).has(ref.base) ||
@@ -2059,6 +2086,19 @@ function emitSemanticMemoryRef(
   throw semanticWgslError(`semantic WGSL does not support ${ref.addressSpace} memory refs`, ref.span);
 }
 
+function emitSemanticVectorMemoryRead(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): string {
+  if (!isSemanticWgslFloatVectorType(ref.valueType)) throw semanticWgslError("semantic WGSL vector read requires vector memory type", ref.span);
+  const base = emitFlatStorageVectorBaseIndex(ref, ir, names, options);
+  const storage = nameFor(ref.base, names);
+  const laneCount = cudaVectorLaneCount(ref.valueType);
+  return `vec${laneCount}<f32>(${Array.from({ length: laneCount }, (_, lane) => `${storage}[(${base} + ${lane}u)]`).join(", ")})`;
+}
+
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
   const flattened = flattenMemoryRef(expression);
   if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared" && flattened.base.addressSpace !== "constant" && flattened.base.addressSpace !== "device-global" && flattened.base.addressSpace !== "local")) return undefined;
@@ -2278,6 +2318,19 @@ function emitFlatStorageIndex(
   }
   const expression = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
   return `u32(${expression})`;
+}
+
+function emitFlatStorageVectorBaseIndex(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): string {
+  const base = emitFlatStorageIndex({ ...ref, valueType: "float" }, ir, names, options);
+  const root = ir.params.find((param) => param.name === ref.base) ?? ir.memory.find((symbol) => symbol.name === ref.base);
+  const valueType = root?.valueType;
+  const stride = isSemanticWgslFloatVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
+  return stride === 1 ? base : `(${base} * ${stride}u)`;
 }
 
 function emitFlatSharedIndex(

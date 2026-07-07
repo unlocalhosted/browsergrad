@@ -7551,6 +7551,47 @@ __global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z
     expect([...result.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
   });
 
+  it("lowers CUDA float4 storage elements through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vectorStorageSemantic(const float4* x, float4* y, int n) {
+  int i = threadIdx.x;
+  if (i < n) {
+    float4 value = x[i];
+    y[i] = make_float4(value.x + 1.0f, value.y + 2.0f, value.z + 3.0f, value.w + 4.0f);
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+          y: new Float32Array(8),
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+          y: new Float32Array(8),
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var value: vec4<f32> = vec4<f32>(x[((u32(i) * 4u) + 0u)], x[((u32(i) * 4u) + 1u)], x[((u32(i) * 4u) + 2u)], x[((u32(i) * 4u) + 3u)]);");
+    expect(compiled.wgsl).toContain("y[((u32(i) * 4u) + 3u)] = (vec4<f32>(f32((value.x + 1.0)), f32((value.y + 2.0)), f32((value.z + 3.0)), f32((value.w + 4.0)))).w;");
+    expect([...result.buffers.y as Float32Array]).toEqual([2, 4, 6, 8, 6, 8, 10, 12]);
+    expect([...semanticResult.buffers.y as Float32Array]).toEqual([2, 4, 6, 8, 6, 8, 10, 12]);
+  });
+
   it("keeps dynamic local vector lane reads scalar inside casts", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __global__ void reduce_add_sum_kernel(float* dst, const float* src, size_t n, size_t m) {
@@ -7692,9 +7733,18 @@ __global__ void vector_convert(float4 *input, float3 *out) {
       { buffers: { input: new Float32Array([1, 2, 3, 4]), out: new Float32Array(3) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Float32Array([1, 2, 3, 4]), out: new Float32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("vec3<f32>(f32(value.x), f32(value.y), f32(value.z))");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("vec3<f32>(f32((value).x), f32((value).y), f32((value).z))");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3]);
   });
 
   it("supports CUDA vector conversion constructors across scalar families", () => {
@@ -7724,9 +7774,18 @@ __global__ void pack(float4 *out) {
       { buffers: { out: new Float32Array(4) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("vec4<f32>(f32(xyz.x), f32(xyz.y), f32(xyz.z), f32(7.0))");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("vec4<f32>(f32((xyz).x), f32((xyz).y), f32((xyz).z), f32(7.0))");
     expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 5, 7]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([2, 3, 5, 7]);
   });
 
   it("lowers CUDA helper_math vector operations", () => {
@@ -8135,7 +8194,8 @@ __global__ void chainedVectorAlias(const float *inp, float *out, int row) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<f32>(f32(inp[");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("vec4<f32>(inp[");
     expect(compiled.wgsl).not.toContain("x_vec[");
     expect(compiled.wgsl).not.toContain("x[");
     expect([...result.buffers.out as Float32Array]).toEqual([130]);

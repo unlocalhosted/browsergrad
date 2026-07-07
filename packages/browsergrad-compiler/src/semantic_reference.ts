@@ -263,7 +263,7 @@ function unsupportedSemanticReferenceOperation(
 }
 
 function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr"]["params"][number]): boolean {
-  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticReferenceScalarTypeSupported(param.valueType);
+  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticReferenceValueTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
@@ -381,7 +381,8 @@ function semanticReferenceAtomicSupported(
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression)) ||
+    semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression) || semanticReferenceVectorConstructorSupported(expression, "any", compiled)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -603,6 +604,9 @@ function semanticReferenceExpressionSupported(
       return isBuiltinVectorMember(expression) || semanticReferenceVectorMemberSupported(expression, compiled);
     case "index":
       if (semanticReferenceVectorIndexSupported(expression, compiled)) return true;
+      if (expected === "any" && isSemanticReferenceFloatVectorType(expression.valueType)) {
+        return semanticReferenceMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
+      }
       return expected === "scalar" && semanticReferenceMemoryRefSupported(memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span));
     case "cast":
       return !expression.pointer && semanticReferenceExpressionSupported(expression.expression, "scalar", compiled);
@@ -815,7 +819,7 @@ function execSemanticOperations(
           context.storageOffsets.set(operation.target.base, operation.operator === "-=" ? current - delta : current + delta);
           break;
         }
-        writeMemory(operation.target, storeValue(operation, context), context);
+        writeMemoryValue(operation.target, storeValueExpression(operation, context), context);
         break;
       case "surface-write":
         execSemanticSurfaceWrite(operation, context);
@@ -954,10 +958,14 @@ function writeSemanticSurfaceLane(
   context.trace.writes.push({ name: surfaceName, index, value, ok });
 }
 
-function storeValue(
+function storeValueExpression(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
+  if (isSemanticReferenceFloatVectorType(operation.target.valueType)) {
+    if (operation.operator !== "=") throw semanticReferenceError("semantic reference supports only direct vector assignment", operation.span);
+    return evalSemanticExpression(operation.value, context);
+  }
   const right = evalNumber(operation.value, context);
   if (operation.operator === "=") return right;
   const left = readMemory(operation.target, context);
@@ -1303,7 +1311,7 @@ function evalUpdate(
   return expression.prefix ? next : oldValue;
 }
 
-function readIndexExpression(expression: Extract<SemanticExpression, { kind: "index" }>, context: SemanticReferenceContext): number {
+function readIndexExpression(expression: Extract<SemanticExpression, { kind: "index" }>, context: SemanticReferenceContext): SemanticValue {
   if (semanticReferenceVectorIndexSupported(expression, context.compiled)) {
     const value = evalSemanticExpression(expression.target, context);
     if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector index target is not a vector", expression.target.span);
@@ -1312,6 +1320,7 @@ function readIndexExpression(expression: Extract<SemanticExpression, { kind: "in
   }
   const ref = memoryRefFromIndexExpression(expression);
   if (!ref) throw semanticReferenceError("semantic reference supports only direct storage indexing", expression.span);
+  if (isSemanticReferenceFloatVectorType(ref.valueType)) return readVectorMemory(ref, context);
   return readMemory(ref, context);
 }
 
@@ -1640,6 +1649,52 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   const ok = index >= 0 && index < buffer.length;
   if (ok) buffer[index] = value;
   context.trace.writes.push({ name: ref.base, index, value, ok });
+}
+
+function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number[] {
+  if (!isSemanticReferenceFloatVectorType(ref.valueType)) throw semanticReferenceError("semantic reference vector read requires vector memory type", ref.span);
+  const laneCount = cudaVectorLaneCount(ref.valueType);
+  const base = flatIndex(ref, context) * semanticReferenceVectorStorageStride(ref, context);
+  const buffer = ref.addressSpace === "constant"
+    ? context.constants.get(ref.base)
+    : ref.addressSpace === "device-global"
+    ? context.deviceGlobals.get(ref.base)
+    : context.buffers.get(ref.base);
+  if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+  return Array.from({ length: laneCount }, (_, lane) => {
+    const index = base + lane;
+    const ok = index >= 0 && index < buffer.length;
+    const value = ok ? Number(buffer[index]) : 0;
+    context.trace.reads.push({ name: ref.base, index, value, ok });
+    return value;
+  });
+}
+
+function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context: SemanticReferenceContext): void {
+  if (!isSemanticReferenceFloatVectorType(ref.valueType)) {
+    if (typeof value !== "number") throw semanticReferenceError("semantic reference scalar write received vector value", ref.span);
+    writeMemory(ref, value, context);
+    return;
+  }
+  if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector write received scalar value", ref.span);
+  const laneCount = cudaVectorLaneCount(ref.valueType);
+  const base = flatIndex(ref, context) * semanticReferenceVectorStorageStride(ref, context);
+  const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
+  if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+  for (let lane = 0; lane < laneCount; lane++) {
+    const index = base + lane;
+    const laneValue = value[lane] ?? 0;
+    const ok = index >= 0 && index < buffer.length;
+    if (ok) buffer[index] = laneValue;
+    context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
+  }
+}
+
+function semanticReferenceVectorStorageStride(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  const root = context.compiled.kernelIr.params.find((param) => param.name === ref.base) ??
+    context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
+  const valueType = root?.valueType;
+  return isSemanticReferenceFloatVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
 }
 
 function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {

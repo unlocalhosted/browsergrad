@@ -19,7 +19,7 @@ import type {
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
-import { cudaVectorFieldIndex, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -1806,7 +1806,11 @@ function localPointerAliasIndexExpression(
   const root = scope.get(symbol.pointerRoot);
   if (!root) return undefined;
   const target = semanticSymbolExpression(root, expression.target.span);
-  const index = addIndexExpressions(symbol.pointerBaseIndices[0]!, lowerExpression(expression.index, scope), expression.index.span);
+  const index = addIndexExpressions(
+    symbol.pointerBaseIndices[0]!,
+    pointerAliasElementOffset(symbol.valueType, root.valueType, lowerExpression(expression.index, scope), expression.index.span),
+    expression.index.span,
+  );
   return {
     kind: "index",
     target,
@@ -1815,6 +1819,20 @@ function localPointerAliasIndexExpression(
     addressSpace: root.addressSpace,
     span: expression.span,
   };
+}
+
+function pointerAliasElementOffset(
+  aliasType: CudaLiteScalarType | undefined,
+  rootType: CudaLiteScalarType | undefined,
+  index: SemanticExpression,
+  span: SourceSpan,
+): SemanticExpression {
+  return aliasType !== undefined &&
+      rootType !== undefined &&
+      isCudaVectorType(aliasType) &&
+      !isCudaVectorType(rootType)
+    ? multiplyIndexExpression(index, cudaVectorLaneCount(aliasType), span)
+    : index;
 }
 
 function localPointerAliasDerefExpression(
@@ -2057,7 +2075,9 @@ function expressionValueType(expression: SemanticExpression | undefined): CudaLi
 
 function indexedValueType(target: SemanticExpression): CudaLiteScalarType | undefined {
   const targetType = expressionValueType(target);
-  return targetType !== undefined && isCudaVectorType(targetType) ? cudaVectorScalarType(targetType) : targetType;
+  return expressionAddressSpace(target) === "local" && targetType !== undefined && isCudaVectorType(targetType)
+    ? cudaVectorScalarType(targetType)
+    : targetType;
 }
 
 function optionalValueType(valueType: CudaLiteScalarType | undefined): { readonly valueType?: CudaLiteScalarType } {
