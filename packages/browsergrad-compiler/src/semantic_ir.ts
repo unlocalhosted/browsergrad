@@ -588,6 +588,8 @@ function lowerExpression(
       return { kind: "unary", operator: expression.operator, argument, ...optionalValueType(expression.operator === "&" ? "voidptr" : expressionValueType(argument)), span: expression.span };
     }
     case "binary": {
+      const pointerComparison = localPointerAliasComparisonExpression(expression, scope);
+      if (pointerComparison) return pointerComparison;
       const left = lowerExpression(expression.left, scope);
       const right = lowerExpression(expression.right, scope);
       return { kind: "binary", operator: expression.operator, left, right, ...optionalValueType(COMPARISON_OPERATORS.has(expression.operator) ? "bool" : expressionValueType(left) ?? expressionValueType(right)), span: expression.span };
@@ -1026,6 +1028,34 @@ function localPointerAliasDerefExpression(
     addressSpace: root.addressSpace,
     span,
   };
+}
+
+function localPointerAliasComparisonExpression(
+  expression: Extract<CudaLiteExpression, { readonly kind: "binary" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  if (expression.operator !== "==" && expression.operator !== "!=") return undefined;
+  const left = localPointerAliasScalarIndex(expression.left, scope);
+  const right = localPointerAliasScalarIndex(expression.right, scope);
+  if (!left || !right || left.root !== right.root) return undefined;
+  return {
+    kind: "binary",
+    operator: expression.operator,
+    left: left.index,
+    right: right.index,
+    valueType: "bool",
+    span: expression.span,
+  };
+}
+
+function localPointerAliasScalarIndex(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): { readonly root: string; readonly index: SemanticExpression } | undefined {
+  if (expression.kind !== "identifier") return undefined;
+  const symbol = scope.get(expression.name);
+  if (!symbol?.pointerRoot || symbol.pointerAddressSpace !== "local" || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
+  return { root: symbol.pointerRoot, index: symbol.pointerBaseIndices[0]! };
 }
 
 function semanticSymbolExpression(symbol: CudaLiteSemanticSymbol, span: SourceSpan): Extract<SemanticExpression, { readonly kind: "symbol" }> {
