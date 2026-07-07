@@ -76,6 +76,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__half_as_ushort", "__ushort_as_half",
   "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
   "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
+  "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
   "hrsqrt", "__hneg", "__hsub", "__hmul", "__hdiv", "__hfma", "hexp", "__hmin", "__hmax",
   "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle",
   "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__int2bfloat16_rn", "__uint2bfloat16_rn",
@@ -1628,6 +1629,8 @@ function evalSemanticMathCall(
     case "__half2uint_rz": return Math.trunc(args[0] ?? 0) >>> 0;
     case "__half2uint_ru": return Math.ceil(args[0] ?? 0) >>> 0;
     case "__half2uint_rd": return Math.floor(args[0] ?? 0) >>> 0;
+    case "__nv_cvt_fp8_to_halfraw": return roundSemanticHalf(semanticFp8ToFloat32(args[0] ?? 0, args[1] ?? 0));
+    case "__nv_cvt_float_to_fp8": return semanticFloat32ToFp8(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
     case "hrsqrt": return roundSemanticHalf(1 / Math.sqrt(args[0] ?? 0));
     case "__hneg": return roundSemanticHalf(-(args[0] ?? 0));
     case "__hsub": return expression.valueType === "bf16"
@@ -1808,6 +1811,78 @@ function roundSemanticBfloat16(value: number): number {
 
 function bfloat16BitsToFloat32(bits: number): number {
   return uintBitsToFloat32((Math.trunc(bits) & 0xffff) << 16);
+}
+
+function semanticFp8ToFloat32(bits: number, mode: number): number {
+  const value = Math.trunc(bits) & 0xff;
+  const sign = (value & 0x80) === 0 ? 1 : -1;
+  if ((Math.trunc(mode) >>> 0) === 1) return semanticFp8E5M2ToFloat32(value, sign);
+  return semanticFp8E4M3ToFloat32(value, sign);
+}
+
+function semanticFp8E4M3ToFloat32(value: number, sign: number): number {
+  const exponent = (value >>> 3) & 0x0f;
+  const mantissa = value & 0x07;
+  if (exponent === 0 && mantissa === 0) return sign < 0 ? -0 : 0;
+  if (exponent === 0) return sign * mantissa * 2 ** -9;
+  if (exponent === 0x0f && mantissa === 0x07) return Number.NaN;
+  return sign * (1 + mantissa / 8) * 2 ** (exponent - 7);
+}
+
+function semanticFp8E5M2ToFloat32(value: number, sign: number): number {
+  const exponent = (value >>> 2) & 0x1f;
+  const mantissa = value & 0x03;
+  if (exponent === 0 && mantissa === 0) return sign < 0 ? -0 : 0;
+  if (exponent === 0) return sign * mantissa * 2 ** -16;
+  if (exponent === 0x1f) return mantissa === 0 ? sign * Infinity : Number.NaN;
+  return sign * (1 + mantissa / 4) * 2 ** (exponent - 15);
+}
+
+function semanticFloat32ToFp8(value: number, saturate: number, mode: number): number {
+  return (Math.trunc(mode) >>> 0) === 1
+    ? semanticFloat32ToFp8Format(value, saturate, { mantissaBits: 2, bias: 15, maxExponent: 30, maxMantissa: 3, nanBits: 0x7f, infBits: 0x7c })
+    : semanticFloat32ToFp8Format(value, saturate, { mantissaBits: 3, bias: 7, maxExponent: 15, maxMantissa: 6, nanBits: 0x7f });
+}
+
+function semanticFloat32ToFp8Format(
+  value: number,
+  saturate: number,
+  format: {
+    readonly mantissaBits: number;
+    readonly bias: number;
+    readonly maxExponent: number;
+    readonly maxMantissa: number;
+    readonly nanBits: number;
+    readonly infBits?: number;
+  },
+): number {
+  if (Number.isNaN(value)) return format.nanBits;
+  const signBit = Object.is(value, -0) || value < 0 ? 0x80 : 0;
+  let magnitude = Math.abs(value);
+  if (magnitude === 0) return signBit;
+  const mantissaScale = 1 << format.mantissaBits;
+  const maxFinite = (1 + format.maxMantissa / mantissaScale) * 2 ** (format.maxExponent - format.bias);
+  if (magnitude > maxFinite) {
+    if ((Math.trunc(saturate) >>> 0) === 1) magnitude = maxFinite;
+    else return signBit | (format.infBits ?? format.nanBits);
+  }
+  const rawExponent = Math.floor(Math.log2(magnitude));
+  let exponent = rawExponent + format.bias;
+  if (exponent <= 0) {
+    const mantissa = Math.max(0, Math.min(format.maxMantissa, roundTiesToEvenNumber(magnitude / 2 ** (1 - format.bias) * mantissaScale)));
+    return signBit | mantissa;
+  }
+  let mantissa = roundTiesToEvenNumber((magnitude / 2 ** rawExponent - 1) * mantissaScale);
+  if (mantissa === mantissaScale) {
+    exponent++;
+    mantissa = 0;
+  }
+  if (exponent > format.maxExponent || (exponent === format.maxExponent && mantissa > format.maxMantissa)) {
+    if ((Math.trunc(saturate) >>> 0) !== 1) return signBit | (format.infBits ?? format.nanBits);
+    exponent = format.maxExponent;
+    mantissa = format.maxMantissa;
+  }
+  return signBit | (exponent << format.mantissaBits) | mantissa;
 }
 
 function evalNextafter(x: number, y: number): number {
@@ -2192,6 +2267,7 @@ function semanticMathCallArity(name: string): number {
     name === "__hge" ||
     name === "__hlt" ||
     name === "__hle" ||
+    name === "__nv_cvt_fp8_to_halfraw" ||
     name === "copysign" ||
     name === "copysignf" ||
     name === "isgreater" ||
@@ -2254,6 +2330,7 @@ function semanticMathCallArity(name: string): number {
       name === "__sad" ||
       name === "__usad" ||
       name === "__usad4" ||
+      name === "__nv_cvt_float_to_fp8" ||
       name === "IMAD" ||
       name === "UMAD"
     ? 3

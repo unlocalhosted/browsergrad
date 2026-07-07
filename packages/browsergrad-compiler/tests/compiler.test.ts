@@ -16027,12 +16027,30 @@ __global__ void fp8_convert(const uint* input, half* output, uint* encoded, int*
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: new Uint32Array([0x3c]),
+          output: createWgslFloat16Array(1),
+          encoded: new Uint32Array(1),
+          as_int: new Int32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("fn bg_fp8_to_f32");
     expect(compiled.wgsl).toContain("fn bg_f32_to_fp8");
     expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([1.5]);
     expect([...result.buffers.encoded as Uint32Array]).toEqual([0x3c]);
     expect([...result.buffers.as_int as Int32Array]).toEqual([1]);
+    expect(Array.from(semanticResult.buffers.output as Iterable<number>)).toEqual([1.5]);
+    expect([...semanticResult.buffers.encoded as Uint32Array]).toEqual([0x3c]);
+    expect([...semanticResult.buffers.as_int as Int32Array]).toEqual([1]);
   });
 
   it("lowers CUDA bf16 values as rounded f32 browser storage", () => {
