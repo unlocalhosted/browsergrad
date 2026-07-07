@@ -16367,10 +16367,19 @@ __global__ void bitwise_not_and_trap(int* out) {
       { buffers: { out: new Int32Array(1) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...result.buffers.out as Int32Array]).toEqual([-4]);
-    expect(compiled.wgsl).toContain("~(4 - 1)");
-    expect(compiled.wgsl).toContain("out[0] = i32((~(4 - 1)))");
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([-4]);
+    expect(compiled.wgsl).toContain("~((4 - 1))");
+    expect(compiled.wgsl).toContain("out[0u] = ~((4 - 1));");
     expect(compiled.wgsl).not.toContain("\n    0;\n");
   });
 

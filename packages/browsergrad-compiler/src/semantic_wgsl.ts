@@ -56,6 +56,7 @@ const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
+const SEMANTIC_NOOP_CALLS = new Set(["__trap"]);
 const SEMANTIC_MATH_CALLS = new Map([
   ["sqrt", "sqrt"],
   ["sqrtf", "sqrt"],
@@ -1221,6 +1222,7 @@ function semanticWgslCallSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (operation.callee === "assert") return operation.args.length === 1 && semanticWgslExpressionSupported(operation.args[0]!, "scalar", ir);
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.length === 0;
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -1720,6 +1722,7 @@ function emitSemanticCall(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   if (operation.callee === "assert") return [];
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return [];
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);

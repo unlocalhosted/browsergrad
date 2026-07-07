@@ -108,6 +108,7 @@ const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
+const SEMANTIC_NOOP_CALLS = new Set(["__trap"]);
 
 interface Vector3 {
   readonly x: number;
@@ -657,6 +658,7 @@ function semanticReferenceCallSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (operation.callee === "assert") return operation.args.length === 1 && semanticReferenceExpressionSupported(operation.args[0]!, "scalar", compiled);
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.length === 0;
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -1192,6 +1194,7 @@ function execSemanticCall(
     if (operation.args[0]) evalNumber(operation.args[0], context);
     return;
   }
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return;
   if (semanticReferenceVoidFunctionCallSupported(operation, context.compiled)) {
     execSemanticVoidFunctionCall(operation, context);
     return;
