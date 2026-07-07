@@ -737,15 +737,18 @@ function semanticReferenceCallSupported(
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
+  const symbol = target?.kind === "symbol"
+    ? compiled.kernelIr.memory.find((item) =>
+      item.kind === "local" &&
+      item.name === target.name &&
+      item.dimensions.length > 0
+    )
+    : undefined;
   return target?.kind === "symbol" &&
     target.addressSpace === "local" &&
+    symbol !== undefined &&
     value !== undefined &&
-    semanticReferenceExpressionSupported(value, "scalar", compiled) &&
-    compiled.kernelIr.memory.some((symbol) =>
-      symbol.kind === "local" &&
-      symbol.name === target.name &&
-      symbol.dimensions.length > 0
-    );
+    semanticReferenceExpressionSupported(value, isSemanticReferenceFloatVectorType(symbol.valueType) ? "any" : "scalar", compiled);
 }
 
 function semanticReferencePrintfSupported(
@@ -1342,11 +1345,18 @@ function execSemanticLocalArrayFill(
 ): void {
   const [target, valueExpression] = operation.args;
   if (target?.kind !== "symbol" || target.addressSpace !== "local" || valueExpression === undefined) {
-    throw semanticReferenceError(`${operation.callee} expects local array and scalar value`, operation.span);
+    throw semanticReferenceError(`${operation.callee} expects local array and fill value`, operation.span);
   }
   const local = context.locals.get(target.name);
   if (!Array.isArray(local)) throw semanticReferenceError(`${operation.callee} expects fixed local array '${target.name}'`, target.span);
-  local.fill(evalNumber(valueExpression, context));
+  const symbol = context.compiled.kernelIr.memory.find((item) => item.kind === "local" && item.name === target.name);
+  const localValues = local as SemanticValue[];
+  const value = isSemanticReferenceFloatVectorType(symbol?.valueType)
+    ? evalSemanticExpression(valueExpression, context)
+    : evalNumber(valueExpression, context);
+  for (let index = 0; index < localValues.length; index++) {
+    localValues[index] = Array.isArray(value) ? [...value] : value;
+  }
 }
 
 function semanticAtomicValue(

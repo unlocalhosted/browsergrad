@@ -2577,6 +2577,35 @@ __global__ void vectorLocalArrayInit(float4* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
   });
 
+  it("fills vector fixed local arrays through semantic reference and WGSL", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vectorLocalFill(float4* out) {
+  int tid = threadIdx.x;
+  float4 regs[2];
+  fill_1D_regs<float4, 2>(regs, make_float4(1.0f + (float)tid, 2.0f, 3.0f, 4.0f));
+  out[tid] = make_float4(regs[tid].x, regs[tid][1], regs[tid].z, regs[tid].w);
+}
+`, { workgroupSize: [2, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-array-fill");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("regs[fill_regs_0] = vec4<f32>");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
+  });
+
   it("fills fixed local arrays through semantic reference and WGSL", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void localFill(float* out) {

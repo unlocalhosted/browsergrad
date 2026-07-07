@@ -1509,11 +1509,12 @@ function semanticWgslCallSupported(
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
+  const symbol = target?.kind === "symbol" ? localArraySymbol(ir, target.name) : undefined;
   return target?.kind === "symbol" &&
     target.addressSpace === "local" &&
+    symbol !== undefined &&
     value !== undefined &&
-    semanticWgslExpressionSupported(value, "scalar", ir) &&
-    localArraySymbol(ir, target.name) !== undefined;
+    semanticWgslExpressionSupported(value, isSemanticWgslFloatVectorType(symbol.valueType) ? "any" : "scalar", ir);
 }
 
 function semanticWgslPrintfSupported(
@@ -2686,14 +2687,17 @@ function emitSemanticLocalArrayFill(
 ): readonly string[] {
   const [target, valueExpression] = operation.args;
   if (target?.kind !== "symbol" || target.addressSpace !== "local" || valueExpression === undefined) {
-    throw semanticWgslError(`${operation.callee} expects local array and scalar value`, operation.span);
+    throw semanticWgslError(`${operation.callee} expects local array and fill value`, operation.span);
   }
   const symbol = localArraySymbol(ir, target.name);
   if (!symbol) throw semanticWgslError(`${operation.callee} expects fixed local array '${target.name}'`, target.span);
+  const value = isSemanticWgslFloatVectorType(symbol.valueType)
+    ? emitSemanticExpression(valueExpression, ir, names, options, textureSpecializations)
+    : emitSemanticExpressionAs(valueExpression, ir, names, wgslValueScalar(symbol.valueType), options, textureSpecializations);
   return emitLocalArrayFill(
     nameFor(target.name, names),
     symbol.dimensions,
-    emitSemanticExpressionAs(valueExpression, ir, names, wgslValueScalar(symbol.valueType), options, textureSpecializations),
+    value,
     indentLevel,
   );
 }
