@@ -100,6 +100,10 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__fsub_rn", "sub"],
   ["__fmul_rn", "mul"],
   ["__fdiv_rn", "divide"],
+  ["__builtin_inff", "builtin_inf"],
+  ["__builtin_huge_valf", "builtin_inf"],
+  ["__uint_as_float", "uint_as_float"],
+  ["__int_as_float", "int_as_float"],
   ["__saturatef", "saturate"],
   ["copysign", "copysign"],
   ["copysignf", "copysign"],
@@ -2052,6 +2056,13 @@ function emitSemanticMathCall(
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     return `(${emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations)} / ${emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations)})`;
   }
+  if (wgslCallee === "builtin_inf") return "bitcast<f32>(0x7f800000u)";
+  if (wgslCallee === "uint_as_float" || wgslCallee === "int_as_float") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const scalar = wgslCallee === "uint_as_float" ? "u32" : "i32";
+    return `bitcast<f32>(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
+  }
   if (wgslCallee === "saturate") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError("__saturatef expects one operand", expression.span);
@@ -2135,7 +2146,10 @@ function emitSemanticMathCall(
 }
 
 function semanticMathCallArity(name: string): number {
-  return name === "fmin" ||
+  return name === "__builtin_inff" ||
+    name === "__builtin_huge_valf"
+    ? 0
+    : name === "fmin" ||
     name === "fminf" ||
     name === "min" ||
     name === "fmax" ||
@@ -2751,6 +2765,7 @@ function semanticExpressionVectorValueType(
 function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {
   switch (expression.kind) {
     case "call": {
+      if (expression.callee.kind === "symbol" && SEMANTIC_MATH_CALLS.get(expression.callee.name) && semanticMathCallReturnsFloat(expression.callee.name)) return "f32";
       if (semanticWgslMathCallSupported(expression) && (expression.valueType === undefined || expression.valueType === "float")) return "f32";
       const atomicType = semanticAtomicCallValueType(expression);
       return atomicType ? wgslAtomicScalar(atomicType) : wgslValueScalar(expression.valueType);
@@ -2786,6 +2801,11 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
 
 function isSemanticWgslFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float2" || valueType === "float3" || valueType === "float4";
+}
+
+function semanticMathCallReturnsFloat(name: string): boolean {
+  const callee = SEMANTIC_MATH_CALLS.get(name);
+  return callee === "builtin_inf" || callee === "uint_as_float" || callee === "int_as_float";
 }
 
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {

@@ -6604,6 +6604,48 @@ __global__ void semantic_float_predicates(float *x, float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1]);
   });
 
+  it("lowers CUDA float bitcast intrinsics through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_float_bitcasts(uint *bits, int *signedBits, float *out) {
+  out[0] = __uint_as_float(bits[0]);
+  out[1] = __int_as_float(signedBits[0]);
+  out[2] = __builtin_inff();
+  out[3] = __builtin_huge_valf();
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        bits: new Uint32Array([0x3f800000]),
+        signedBits: new Int32Array([-1082130432]),
+        out: new Float32Array(4),
+      },
+    };
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      input,
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          bits: new Uint32Array([0x3f800000]),
+          signedBits: new Int32Array([-1082130432]),
+          out: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&bits[0u]))");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&signedBits[0u]))");
+    expect(compiled.wgsl).toContain("bitcast<f32>(0x7f800000u)");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, -1, Infinity, Infinity]);
+    expect([...result.buffers.out as Float32Array]).toEqual([1, -1, Infinity, Infinity]);
+  });
+
   it("uses round-to-even semantics for rint, nearbyint, and remainder", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void rounding(float *x, float *out) {

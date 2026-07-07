@@ -52,6 +52,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "tan", "tanf", "__tanf", "atan", "atanf", "atan2", "atan2f", "tanh", "tanhf", "__tanhf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
+  "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
   "__saturatef", "copysign", "copysignf", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
   "isinf", "isinff", "__isinff", "isfinite", "isfinitef", "finite", "finitef", "__finitef",
   "isnan", "isnanf", "__isnanf", "signbit", "signbitf", "isnormal",
@@ -1459,6 +1460,10 @@ function evalSemanticMathCall(
     case "__fadd_rn": return (args[0] ?? 0) + (args[1] ?? 0);
     case "__fsub_rn": return (args[0] ?? 0) - (args[1] ?? 0);
     case "__fmul_rn": return (args[0] ?? 0) * (args[1] ?? 0);
+    case "__builtin_inff":
+    case "__builtin_huge_valf": return Infinity;
+    case "__uint_as_float":
+    case "__int_as_float": return uintBitsToFloat32(args[0] ?? 0);
     case "__saturatef": return Math.min(1, Math.max(0, args[0] ?? 0));
     case "copysign":
     case "copysignf": return Math.sign(args[1] ?? 0) < 0 || Object.is(args[1] ?? 0, -0) ? -Math.abs(args[0] ?? 0) : Math.abs(args[0] ?? 0);
@@ -1511,6 +1516,13 @@ function frexpExponent(value: number): number {
 
 function orderedCompare(left: number, right: number, compare: (left: number, right: number) => boolean): number {
   return !Number.isNaN(left) && !Number.isNaN(right) && compare(left, right) ? 1 : 0;
+}
+
+function uintBitsToFloat32(bits: number): number {
+  const buffer = new ArrayBuffer(4);
+  const view = new DataView(buffer);
+  view.setUint32(0, Math.trunc(bits) >>> 0, true);
+  return view.getFloat32(0, true);
 }
 
 function frexpMantissa(value: number): number {
@@ -1672,7 +1684,10 @@ function runSemanticFunction(
 }
 
 function semanticMathCallArity(name: string): number {
-  return name === "fmin" ||
+  return name === "__builtin_inff" ||
+    name === "__builtin_huge_valf"
+    ? 0
+    : name === "fmin" ||
     name === "fminf" ||
     name === "min" ||
     name === "fmax" ||
