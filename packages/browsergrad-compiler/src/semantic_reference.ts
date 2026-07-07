@@ -51,7 +51,8 @@ const SEMANTIC_MATH_CALLS = new Set([
   "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "sin", "sinf", "__sinf", "cos", "cosf", "__cosf",
   "tan", "tanf", "__tanf", "atan", "atanf", "atan2", "atan2f", "tanh", "tanhf", "__tanhf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
-  "__fdividef", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
+  "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
+  "__saturatef", "copysign", "copysignf", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
   "__bg_modf_intpart", "__bg_modf_fraction",
   "__bg_frexp_exponent", "__bg_frexp_mantissa",
   "__bg_remquo_quotient", "__bg_remquo_remainder",
@@ -1430,8 +1431,17 @@ function evalSemanticMathCall(
     case "fmaxf":
     case "max": return Math.max(args[0] ?? 0, args[1] ?? 0);
     case "pow":
-    case "powf": return Math.pow(args[0] ?? 0, args[1] ?? 0);
-    case "__fdividef": return (args[0] ?? 0) / (args[1] ?? 0);
+    case "powf":
+    case "__powf": return Math.pow(args[0] ?? 0, args[1] ?? 0);
+    case "__fdividef":
+    case "fdividef":
+    case "__fdiv_rn": return (args[0] ?? 0) / (args[1] ?? 0);
+    case "__fadd_rn": return (args[0] ?? 0) + (args[1] ?? 0);
+    case "__fsub_rn": return (args[0] ?? 0) - (args[1] ?? 0);
+    case "__fmul_rn": return (args[0] ?? 0) * (args[1] ?? 0);
+    case "__saturatef": return Math.min(1, Math.max(0, args[0] ?? 0));
+    case "copysign":
+    case "copysignf": return Math.sign(args[1] ?? 0) < 0 || Object.is(args[1] ?? 0, -0) ? -Math.abs(args[0] ?? 0) : Math.abs(args[0] ?? 0);
     case "fma":
     case "fmaf":
     case "__fmaf_rn": return (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0);
@@ -1607,7 +1617,15 @@ function semanticMathCallArity(name: string): number {
     name === "max" ||
     name === "pow" ||
     name === "powf" ||
+    name === "__powf" ||
     name === "__fdividef" ||
+    name === "fdividef" ||
+    name === "__fadd_rn" ||
+    name === "__fsub_rn" ||
+    name === "__fmul_rn" ||
+    name === "__fdiv_rn" ||
+    name === "copysign" ||
+    name === "copysignf" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
     name === "__bg_remquo_quotient" ||

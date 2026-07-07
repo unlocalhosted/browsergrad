@@ -93,7 +93,16 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["max", "max"],
   ["pow", "pow"],
   ["powf", "pow"],
+  ["__powf", "pow"],
   ["__fdividef", "divide"],
+  ["fdividef", "divide"],
+  ["__fadd_rn", "add"],
+  ["__fsub_rn", "sub"],
+  ["__fmul_rn", "mul"],
+  ["__fdiv_rn", "divide"],
+  ["__saturatef", "saturate"],
+  ["copysign", "copysign"],
+  ["copysignf", "copysign"],
   ["fma", "fma"],
   ["fmaf", "fma"],
   ["__fmaf_rn", "fma"],
@@ -1979,10 +1988,28 @@ function emitSemanticMathCall(
     const rhs = emitSemanticExpressionAs(right, ir, names, scalar, options, textureSpecializations);
     return `(((${lhs} + ${rhs}) - ${scalar === "u32" ? "1u" : "1"}) / ${rhs})`;
   }
+  if (wgslCallee === "add" || wgslCallee === "sub" || wgslCallee === "mul") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const operator = wgslCallee === "add" ? "+" : wgslCallee === "sub" ? "-" : "*";
+    return `(${emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations)} ${operator} ${emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations)})`;
+  }
   if (wgslCallee === "divide") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     return `(${emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations)} / ${emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations)})`;
+  }
+  if (wgslCallee === "saturate") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError("__saturatef expects one operand", expression.span);
+    return `clamp(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)}, 0.0, 1.0)`;
+  }
+  if (wgslCallee === "copysign") {
+    const [magnitude, sign] = expression.args;
+    if (!magnitude || !sign) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const lhs = emitSemanticExpressionAs(magnitude, ir, names, "f32", options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(sign, ir, names, "f32", options, textureSpecializations);
+    return `select(abs(${lhs}), -abs(${lhs}), ((bitcast<u32>(${rhs}) & 0x80000000u) != 0u))`;
   }
   if (wgslCallee === "lerp") {
     const [left, right, factor] = expression.args;
@@ -2034,7 +2061,15 @@ function semanticMathCallArity(name: string): number {
     name === "max" ||
     name === "pow" ||
     name === "powf" ||
+    name === "__powf" ||
     name === "__fdividef" ||
+    name === "fdividef" ||
+    name === "__fadd_rn" ||
+    name === "__fsub_rn" ||
+    name === "__fmul_rn" ||
+    name === "__fdiv_rn" ||
+    name === "copysign" ||
+    name === "copysignf" ||
     name === "div_ceil" ||
     name === "ceil_div" ||
     name === "__bg_remquo_quotient" ||

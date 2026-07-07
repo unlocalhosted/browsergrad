@@ -6475,6 +6475,60 @@ __global__ void mathy(float *x, float *out) {
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
+  it("lowers CUDA special float intrinsics through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_float_ops(float *x, float *out) {
+  int idx = threadIdx.x;
+  float value = x[idx];
+  out[idx] =
+    __saturatef(value) +
+    __powf(fabsf(value), 3.0f) +
+    fdividef(value, 4.0f) +
+    __fdividef(value, 2.0f) +
+    __fadd_rn(value, 2.0f) +
+    __fsub_rn(value, 2.0f) +
+    __fmul_rn(value, 2.0f) +
+    __fdiv_rn(value, 2.0f) +
+    copysignf(value, -0.0f);
+}`, { workgroupSize: [2, 1, 1] });
+    const input = new Float32Array([-1.25, 0.6]);
+    const runInput = { buffers: { x: input, out: new Float32Array(2) } };
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      runInput,
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const expected = [...input].map((value) =>
+      Math.min(1, Math.max(0, value)) +
+      Math.pow(Math.abs(value), 3) +
+      (value / 4) +
+      (value / 2) +
+      (value + 2) +
+      (value - 2) +
+      (value * 2) +
+      (value / 2) -
+      Math.abs(value)
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("clamp(value, 0.0, 1.0)");
+    expect(compiled.wgsl).toContain("pow(abs(value), 3.0)");
+    expect(compiled.wgsl).toContain("(value / 4.0)");
+    expect(compiled.wgsl).toContain("(value + 2.0)");
+    expect(compiled.wgsl).toContain("select(abs(value), -abs(value)");
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+  });
+
   it("lowers unordered CUDA float predicates without treating them as unsupported calls", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void float_predicates(float *out) {
