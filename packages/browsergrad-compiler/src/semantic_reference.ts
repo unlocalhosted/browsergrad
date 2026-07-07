@@ -278,7 +278,7 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "shared" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
-  if (ref.addressSpace === "constant" && ref.indices.length !== 1) return false;
+  if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
 }
 
@@ -1006,6 +1006,12 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
     const offset = context.storageOffsets.get(ref.base) ?? 0;
     if (ref.indices.length === 0) return offset;
     return offset + ref.indices.reduce((sum, index) => sum + Math.trunc(evalNumber(index, context)), 0);
+  }
+  if (ref.addressSpace === "constant") {
+    const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === "constant");
+    if (symbol?.dimensions.length && ref.indices.length === symbol.dimensions.length) {
+      return flatIndexForDimensions(symbol.dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
+    }
   }
   if (ref.indices.length !== 1) throw semanticReferenceError("semantic reference supports only 1D constant indexing", ref.span);
   return Math.trunc(evalNumber(ref.indices[0]!, context));

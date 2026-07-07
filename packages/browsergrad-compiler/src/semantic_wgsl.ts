@@ -349,7 +349,7 @@ function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local") return false;
   if (ref.fields.length > 0) return false;
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
-  if (ref.addressSpace === "constant" && ref.indices.length !== 1) return false;
+  if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
 }
@@ -1036,8 +1036,9 @@ function emitSemanticMemoryRef(
     return `${nameFor(ref.base, names)}[${emitFlatStorageIndex(ref, ir, names)}]`;
   }
   if (ref.addressSpace === "constant") {
-    if (ref.indices.length !== 1) throw semanticWgslError("semantic WGSL supports 1D constant refs only", ref.span);
-    return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
+    const symbol = constantMemorySymbols(ir).find((item) => item.name === ref.base);
+    if (!symbol) throw semanticWgslError(`unknown constant memory '${ref.base}'`, ref.span);
+    return `${nameFor(ref.base, names)}[${emitFlatConstantIndex(symbol, ref.indices, ir, names, ref.span)}]`;
   }
   if (ref.addressSpace === "device-global") {
     const symbol = deviceGlobalMemorySymbols(ir).find((item) => item.name === ref.base);
@@ -1205,6 +1206,28 @@ function emitFlatDeviceGlobalIndex(
   }
   if (indices.length !== symbol.dimensions.length) {
     throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
+  }
+  const terms = indices.map((index, offset) => {
+    const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
+    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
+  });
+  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+}
+
+function emitFlatConstantIndex(
+  symbol: SemanticKernelIrModule["memory"][number],
+  indices: readonly SemanticExpression[],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  span: SourceSpan,
+): string {
+  if (symbol.dimensions.length === 0) {
+    if (indices.length !== 1) throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
+    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32");
+  }
+  if (indices.length !== symbol.dimensions.length) {
+    throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
   }
   const terms = indices.map((index, offset) => {
     const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);

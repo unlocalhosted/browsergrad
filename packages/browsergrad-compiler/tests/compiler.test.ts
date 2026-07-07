@@ -12053,6 +12053,40 @@ __global__ void apply(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
   });
 
+  it("flattens multidimensional CUDA constant arrays through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ uint table[2][3];
+__global__ void constant_matrix(uint *out) {
+  int row = threadIdx.y;
+  int col = threadIdx.x;
+  out[row * 3 + col] = table[row][col];
+}`, { workgroupSize: [3, 2, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(6) },
+        constants: { table: new Uint32Array([3, 5, 7, 11, 13, 17]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 2, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(6) },
+        constants: { table: new Uint32Array([3, 5, 7, 11, 13, 17]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 2, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<storage, read> table: array<u32>");
+    expect(compiled.wgsl).toContain("* 3u");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([3, 5, 7, 11, 13, 17]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([3, 5, 7, 11, 13, 17]);
+  });
+
   it("casts signed local initializers from unsigned arithmetic in WGSL", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ int edge(unsigned char left, unsigned char right) {
