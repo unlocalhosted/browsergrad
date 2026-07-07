@@ -7079,9 +7079,14 @@ __global__ void nextafterKernel(float *out) {
   out[1] = nextafterf(1.0f, 0.0f);
   out[2] = nextafterf(0.0f, -1.0f);
   out[3] = nexttoward(-1.0f, 0.0f);
-  out[4] = nextafterf(INFINITY, 0.0f);
+  out[4] = nextafterf(__builtin_inff(), 0.0f);
 }
 `, { workgroupSize: [1, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(5) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
     const result = runCompiledKernelReference(
       compiled,
       { buffers: { out: new Float32Array(5) } },
@@ -7089,15 +7094,20 @@ __global__ void nextafterKernel(float *out) {
     );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(compiled.wgsl).toContain("fn bg_nextafter(");
-    expect(compiled.wgsl).toContain("bg_nextafter(f32(1.0), f32(2.0))");
-    expect([...result.buffers.out as Float32Array]).toEqual([
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_semantic_nextafter_f32(");
+    expect(compiled.wgsl).toContain("bg_semantic_nextafter_f32(1.0, 2.0)");
+    const expected = [
       nextafterApprox(1, 2),
       nextafterApprox(1, 0),
       nextafterApprox(0, -1),
       nextafterApprox(-1, 0),
       nextafterApprox(Infinity, 0),
-    ]);
+    ];
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
+    expect([...result.buffers.out as Float32Array]).toEqual(expected);
   });
 
   it("lowers C math aliases used in CUDA snippets", () => {

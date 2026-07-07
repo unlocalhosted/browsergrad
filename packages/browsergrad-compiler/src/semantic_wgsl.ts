@@ -145,6 +145,10 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["ilogbf", "ilogb"],
   ["fdim", "fdim"],
   ["fdimf", "fdim"],
+  ["nextafter", "nextafter"],
+  ["nextafterf", "nextafter"],
+  ["nexttoward", "nextafter"],
+  ["nexttowardf", "nextafter"],
   ["hypot", "hypot"],
   ["hypotf", "hypot"],
   ["rhypot", "rhypot"],
@@ -1939,6 +1943,20 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "  if (value == 0.0) { return -2147483648; }",
     "  return i32(floor(log2(abs(value))));",
     "}",
+    "fn bg_semantic_nextafter_f32(x: f32, y: f32) -> f32 {",
+    "  if (x != x || y != y) { return x + y; }",
+    "  if (x == y) { return y; }",
+    "  if (x == 0.0) {",
+    "    return bitcast<f32>(select(0x00000001u, 0x80000001u, (bitcast<u32>(y) & 0x80000000u) != 0u));",
+    "  }",
+    "  var bits = bitcast<u32>(x);",
+    "  if (x > 0.0) {",
+    "    bits = select(bits - 1u, bits + 1u, x < y);",
+    "  } else {",
+    "    bits = select(bits + 1u, bits - 1u, x < y);",
+    "  }",
+    "  return bitcast<f32>(bits);",
+    "}",
   ];
 }
 
@@ -2186,13 +2204,14 @@ function emitSemanticMathCall(
     const scale = emitSemanticExpressionAs(exponent, ir, names, "i32", options, textureSpecializations);
     return `(${emitted} * exp2(f32(${scale})))`;
   }
-  if (wgslCallee === "fmod" || wgslCallee === "remainder" || wgslCallee === "fdim") {
+  if (wgslCallee === "fmod" || wgslCallee === "remainder" || wgslCallee === "fdim" || wgslCallee === "nextafter") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     const lhs = emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations);
     const rhs = emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations);
     if (wgslCallee === "fmod") return `(${lhs} - trunc(${lhs} / ${rhs}) * ${rhs})`;
     if (wgslCallee === "remainder") return `bg_semantic_remainder_f32(${lhs}, ${rhs})`;
+    if (wgslCallee === "nextafter") return `bg_semantic_nextafter_f32(${lhs}, ${rhs})`;
     return `max((${lhs} - ${rhs}), 0.0)`;
   }
   if (wgslCallee === "hypot" || wgslCallee === "rhypot" || wgslCallee === "norm" || wgslCallee === "rnorm") {
@@ -2395,6 +2414,10 @@ function semanticMathCallArity(name: string): number {
     name === "remainderf" ||
     name === "fdim" ||
     name === "fdimf" ||
+    name === "nextafter" ||
+    name === "nextafterf" ||
+    name === "nexttoward" ||
+    name === "nexttowardf" ||
     name === "hypot" ||
     name === "hypotf" ||
     name === "rhypot" ||

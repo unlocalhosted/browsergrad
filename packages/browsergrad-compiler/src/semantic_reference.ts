@@ -57,6 +57,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "cbrt", "cbrtf", "rcbrt", "rcbrtf", "__frcp_rn",
   "ldexp", "ldexpf", "scalbn", "scalbnf", "scalbln", "scalblnf",
   "fmod", "fmodf", "remainder", "remainderf", "logb", "logbf", "ilogb", "ilogbf", "fdim", "fdimf",
+  "nextafter", "nextafterf", "nexttoward", "nexttowardf",
   "hypot", "hypotf", "rhypot", "rhypotf", "norm3df", "norm4df", "rnorm3df", "rnorm4df",
   "lrint", "lrintf", "llrint", "llrintf", "lround", "lroundf", "llround", "llroundf",
   "__float2int_rn", "__float2int_rz", "__float2int_ru", "__float2int_rd",
@@ -1518,6 +1519,10 @@ function evalSemanticMathCall(
     case "ilogbf": return evalIlogb(args[0] ?? 0);
     case "fdim":
     case "fdimf": return Math.max((args[0] ?? 0) - (args[1] ?? 0), 0);
+    case "nextafter":
+    case "nextafterf":
+    case "nexttoward":
+    case "nexttowardf": return evalNextafter(args[0] ?? 0, args[1] ?? 0);
     case "hypot":
     case "hypotf": return Math.hypot(args[0] ?? 0, args[1] ?? 0);
     case "rhypot":
@@ -1629,6 +1634,24 @@ function uintBitsToFloat32(bits: number): number {
   const view = new DataView(buffer);
   view.setUint32(0, Math.trunc(bits) >>> 0, true);
   return view.getFloat32(0, true);
+}
+
+function float32ToUintBits(value: number): number {
+  const buffer = new ArrayBuffer(4);
+  const view = new DataView(buffer);
+  view.setFloat32(0, value, true);
+  return view.getUint32(0, true);
+}
+
+function evalNextafter(x: number, y: number): number {
+  if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+  if (Object.is(x, y) || x === y) return y;
+  if (x === 0) return uintBitsToFloat32((y < 0 || Object.is(y, -0)) ? 0x80000001 : 0x00000001);
+  let bits = float32ToUintBits(x);
+  bits = x > 0
+    ? (x < y ? bits + 1 : bits - 1)
+    : (x < y ? bits - 1 : bits + 1);
+  return uintBitsToFloat32(bits >>> 0);
 }
 
 function frexpMantissa(value: number): number {
@@ -1849,6 +1872,10 @@ function semanticMathCallArity(name: string): number {
     name === "remainderf" ||
     name === "fdim" ||
     name === "fdimf" ||
+    name === "nextafter" ||
+    name === "nextafterf" ||
+    name === "nexttoward" ||
+    name === "nexttowardf" ||
     name === "hypot" ||
     name === "hypotf" ||
     name === "rhypot" ||
