@@ -106,6 +106,8 @@ const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
+const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
+const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
 
 interface Vector3 {
   readonly x: number;
@@ -438,7 +440,7 @@ function semanticReferenceAtomicSupported(
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -594,6 +596,27 @@ function semanticReferenceHalf2CallSupported(
   }
   if (name === "__floats2half2_rn") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  }
+  return false;
+}
+
+function semanticReferenceBf162CallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.callee.kind !== "symbol") return false;
+  const name = expression.callee.name;
+  if (!SEMANTIC_BF162_VECTOR_CALLS.has(name) && !SEMANTIC_BF162_SCALAR_CALLS.has(name)) return false;
+  if (name === "__halves2bfloat162") {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  }
+  if (name === "__uint_as_bfloat162" || name === "__uint_as_nv_bfloat162") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticReferenceExpressionSupported(arg, "scalar", compiled);
+  }
+  if (name === "__bfloat162_as_uint" || name === "__nv_bfloat162_as_uint") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
   }
   return false;
 }
@@ -765,6 +788,7 @@ function semanticReferenceExpressionSupported(
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         semanticReferenceMathCallSupported(expression) ||
         semanticReferenceHalf2CallSupported(expression, compiled) ||
+        semanticReferenceBf162CallSupported(expression, compiled) ||
         semanticReferenceVectorConstructorSupported(expression, expected, compiled) ||
         expected === "scalar" && semanticReferenceVectorAtCallSupported(expression, compiled) ||
         expected === "any" && semanticReferenceVectorLerpCallSupported(expression, compiled);
@@ -838,6 +862,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
       semanticReferenceFunctionCallSupported(expression, compiled) ||
       semanticReferenceMathCallSupported(expression) ||
       semanticReferenceHalf2CallSupported(expression, compiled) ||
+      semanticReferenceBf162CallSupported(expression, compiled) ||
       semanticReferenceVectorConstructorSupported(expression, "any", compiled) ||
       semanticReferenceVectorAtCallSupported(expression, compiled) ||
       semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
@@ -944,6 +969,7 @@ function semanticExpressionValueType(expression: SemanticExpression): CudaLiteSc
 
 function semanticExpressionVectorValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
   if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    if (SEMANTIC_BF162_VECTOR_CALLS.has(expression.callee.name)) return "bf162";
     return cudaVectorConstructorType(expression.callee.name) ?? semanticExpressionValueType(expression);
   }
   return semanticExpressionValueType(expression);
@@ -1326,6 +1352,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (semanticReferenceVectorAtCallSupported(expression, context.compiled)) return evalSemanticVectorAtCall(expression, context);
       if (semanticReferenceVectorLerpCallSupported(expression, context.compiled)) return evalSemanticVectorLerpCall(expression, context);
       if (semanticReferenceHalf2CallSupported(expression, context.compiled)) return evalSemanticHalf2Call(expression, context);
+      if (semanticReferenceBf162CallSupported(expression, context.compiled)) return evalSemanticBf162Call(expression, context);
       if (semanticReferenceFunctionCallSupported(expression, context.compiled)) return evalSemanticFunctionCall(expression, context);
       if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
@@ -1423,7 +1450,7 @@ function evalSemanticTextureValue(
 }
 
 function isSemanticReferenceFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float2" || valueType === "float3" || valueType === "float4" || valueType === "half2";
+  return valueType === "float2" || valueType === "float3" || valueType === "float4" || valueType === "half2" || valueType === "bf162";
 }
 
 function semanticTextureCoord(
@@ -2268,6 +2295,38 @@ function evalSemanticHalf2Call(
   }
   if (name === "__floats2half2_rn") return [roundSemanticHalf(scalarArg(0)), roundSemanticHalf(scalarArg(1))];
   throw semanticReferenceError(`semantic reference does not support half2 call '${name}'`, expression.span);
+}
+
+function evalSemanticBf162Call(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): SemanticValue {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference bf162 call requires symbol callee", expression.span);
+  const name = expression.callee.name;
+  const vectorArg = (index: number): number[] => {
+    const arg = expression.args[index];
+    if (!arg) throw semanticReferenceError(`${name} missing bf162 operand`, expression.span);
+    const value = evalSemanticExpression(arg, context);
+    if (!Array.isArray(value)) throw semanticReferenceError(`${name} expects bf162 operand`, arg.span);
+    return [value[0] ?? 0, value[1] ?? 0];
+  };
+  const scalarArg = (index: number): number => {
+    const arg = expression.args[index];
+    if (!arg) throw semanticReferenceError(`${name} missing scalar operand`, expression.span);
+    return evalNumber(arg, context);
+  };
+  if (name === "__halves2bfloat162") return [roundSemanticBfloat16(scalarArg(0)), roundSemanticBfloat16(scalarArg(1))];
+  if (name === "__bfloat162_as_uint" || name === "__nv_bfloat162_as_uint") {
+    const value = vectorArg(0);
+    const low = (float32ToUintBits(roundSemanticBfloat16(value[0] ?? 0)) >>> 16) & 0xffff;
+    const high = float32ToUintBits(roundSemanticBfloat16(value[1] ?? 0)) & 0xffff0000;
+    return (high | low) >>> 0;
+  }
+  if (name === "__uint_as_bfloat162" || name === "__uint_as_nv_bfloat162") {
+    const bits = Math.trunc(scalarArg(0)) >>> 0;
+    return [bfloat16BitsToFloat32(bits & 0xffff), bfloat16BitsToFloat32(bits >>> 16)];
+  }
+  throw semanticReferenceError(`semantic reference does not support bf162 call '${name}'`, expression.span);
 }
 
 function assignLocalVectorMember(

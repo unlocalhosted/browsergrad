@@ -16118,17 +16118,38 @@ __global__ void bf16_convert(const __nv_bfloat16* input, __nv_bfloat16* output, 
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([1.5]),
+          output: new Float32Array(4),
+          as_float: new Float32Array(1),
+          bits: new Uint32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.wgsl).toContain("vec2<f32>");
-    expect(compiled.wgsl).toContain("((bitcast<u32>(f32(output[1])) >> 16u) & 0xffffu)");
-    expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>((u32(0x40003fc0u) & 0x0000ffffu) << 16u), bitcast<f32>(u32(0x40003fc0u) & 0xffff0000u))");
+    expect(compiled.wgsl).toContain("((bitcast<u32>(f32(output[1u])) >> 16u) & 0xffffu)");
+    expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>((1073758144u & 0x0000ffffu) << 16u), bitcast<f32>(1073758144u & 0xffff0000u))");
     expect([...result.buffers.output as Float32Array][0]).toBeCloseTo(1.6015625);
     expect([...result.buffers.output as Float32Array][1]).toBeCloseTo(1.5);
     expect([...result.buffers.output as Float32Array][2]).toBeCloseTo(1.5);
     expect([...result.buffers.output as Float32Array][3]).toBeCloseTo(2);
     expect([...result.buffers.as_float as Float32Array][0]).toBeCloseTo(1.6015625);
     expect([...result.buffers.bits as Uint32Array]).toEqual([0x3fc0, 0x4000, 0x40003fc0, 0x40403f80]);
+    expect([...semanticResult.buffers.output as Float32Array][0]).toBeCloseTo(1.6015625);
+    expect([...semanticResult.buffers.output as Float32Array][1]).toBeCloseTo(1.5);
+    expect([...semanticResult.buffers.output as Float32Array][2]).toBeCloseTo(1.5);
+    expect([...semanticResult.buffers.output as Float32Array][3]).toBeCloseTo(2);
+    expect([...semanticResult.buffers.as_float as Float32Array][0]).toBeCloseTo(1.6015625);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3fc0, 0x4000, 0x40003fc0, 0x40403f80]);
   });
 
   it("lowers CUDA bf16 integer conversion rounding modes", () => {
