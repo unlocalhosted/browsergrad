@@ -50,7 +50,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
   "log", "logf", "__logf", "log2", "log2f", "__log2f", "log10", "log10f", "__log10f", "log1p", "log1pf",
   "fabs", "fabsf", "abs",
-  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf",
+  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "round", "roundf",
   "sin", "sinf", "__sinf", "sinpi", "sinpif", "cos", "cosf", "__cosf", "cospi", "cospif",
   "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf", "atan", "atanf", "atan2", "atan2f",
   "sinh", "sinhf", "cosh", "coshf", "tanh", "tanhf", "__tanhf", "asinh", "asinhf", "acosh", "acoshf", "atanh", "atanhf",
@@ -1450,6 +1450,8 @@ function evalSemanticMathCall(
     case "ceilf": return Math.ceil(args[0] ?? 0);
     case "trunc":
     case "truncf": return Math.trunc(args[0] ?? 0);
+    case "round":
+    case "roundf": return roundAwayFromZero(args[0] ?? 0);
     case "sin":
     case "sinf":
     case "__sinf": return Math.sin(args[0] ?? 0);
@@ -1580,6 +1582,12 @@ function roundTiesToEvenNumber(value: number): number {
   if (diff < 0.5) return floor;
   if (diff > 0.5) return floor + 1;
   return floor % 2 === 0 ? floor : floor + 1;
+}
+
+function roundAwayFromZero(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  const magnitude = Math.floor(Math.abs(value) + 0.5);
+  return value < 0 || Object.is(value, -0) ? -magnitude : magnitude;
 }
 
 function modfIntpart(value: number): number {

@@ -85,6 +85,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["ceilf", "ceil"],
   ["trunc", "trunc"],
   ["truncf", "trunc"],
+  ["round", "round_away"],
+  ["roundf", "round_away"],
   ["sin", "sin"],
   ["sinf", "sin"],
   ["__sinf", "sin"],
@@ -2102,6 +2104,7 @@ function emitSemanticMathCall(
     wgslCallee === "log1p" ||
     wgslCallee === "sinpi" ||
     wgslCallee === "cospi" ||
+    wgslCallee === "round_away" ||
     wgslCallee === "sinh" ||
     wgslCallee === "cosh" ||
     wgslCallee === "asinh" ||
@@ -2120,6 +2123,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "log1p") return `log(1.0 + ${emitted})`;
     if (wgslCallee === "sinpi") return `sin(3.141592653589793 * ${emitted})`;
     if (wgslCallee === "cospi") return `cos(3.141592653589793 * ${emitted})`;
+    if (wgslCallee === "round_away") return `select(floor(abs(${emitted}) + 0.5), -floor(abs(${emitted}) + 0.5), (${emitted} < 0.0))`;
     if (wgslCallee === "sinh") return `(0.5 * (exp(${emitted}) - exp(-${emitted})))`;
     if (wgslCallee === "cosh") return `(0.5 * (exp(${emitted}) + exp(-${emitted})))`;
     if (wgslCallee === "asinh") return `log(${emitted} + sqrt((${emitted} * ${emitted}) + 1.0))`;

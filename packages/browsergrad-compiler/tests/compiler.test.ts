@@ -6653,6 +6653,36 @@ __global__ void semantic_hyperbolic_math(float *x, float *out) {
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
+  it("lowers CUDA round-away intrinsics through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_round_math(float *x, float *out) {
+  int idx = threadIdx.x;
+  float value = x[idx];
+  out[idx] = roundf(value) + round(value + 0.25f);
+}`, { workgroupSize: [2, 1, 1] });
+    const input = new Float32Array([-1.5, 2.5]);
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const roundAway = (value: number) => (value < 0 ? -Math.floor(Math.abs(value) + 0.5) : Math.floor(value + 0.5));
+    const expected = [...input].map((value) => roundAway(value) + roundAway(value + 0.25));
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("select(floor(abs(value) + 0.5), -floor(abs(value) + 0.5), (value < 0.0))");
+    expect(compiled.wgsl).toContain("select(floor(abs((value + 0.25)) + 0.5), -floor(abs((value + 0.25)) + 0.5), ((value + 0.25) < 0.0))");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
+    expect([...result.buffers.out as Float32Array]).toEqual(expected);
+  });
+
   it("lowers unordered CUDA float predicates without treating them as unsupported calls", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void float_predicates(float *out) {
