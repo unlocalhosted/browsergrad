@@ -15917,7 +15917,9 @@ __global__ void sample(uint4 *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("bg_tex2d_uint4_texRef");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("vec4<u32>(u32((textureLoad(texRef");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_uint4_texRef");
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 3, 255]);
   });
 

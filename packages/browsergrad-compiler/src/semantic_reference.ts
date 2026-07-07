@@ -560,7 +560,7 @@ function semanticReferenceTextureReadSupported(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return (expression.valueType === "float" || isSemanticReferenceFloatTextureVectorType(expression.valueType)) &&
+  return (expression.valueType === "float" || isSemanticReferenceFloatVectorType(expression.valueType)) &&
     expression.texture.kind === "symbol" &&
     expression.texture.addressSpace === "texture" &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&

@@ -1142,7 +1142,7 @@ function semanticWgslTextureReadSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   const texture = expression.texture;
-  return (expression.valueType === "float" || isSemanticWgslFloatTextureVectorType(expression.valueType)) &&
+  return (expression.valueType === "float" || isSemanticWgslFloatVectorType(expression.valueType)) &&
     texture.kind === "symbol" &&
     texture.addressSpace === "texture" &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
@@ -3037,10 +3037,19 @@ function emitSemanticTextureRead(
   const read = descriptor
     ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`
     : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
-  if (expression.valueType === "float2") return `${read}.xy`;
-  if (expression.valueType === "float3") return `${read}.xyz`;
-  if (expression.valueType === "float4") return read;
+  if (isSemanticWgslFloatVectorType(expression.valueType)) return emitSemanticTextureVectorRead(read, expression.valueType);
   return `${read}.r`;
+}
+
+function emitSemanticTextureVectorRead(read: string, valueType: CudaLiteScalarType): string {
+  if (valueType === "float2") return `${read}.xy`;
+  if (valueType === "float3") return `${read}.xyz`;
+  if (valueType === "float4") return read;
+  const laneCount = cudaVectorLaneCount(valueType);
+  const vectorType = wgslValueType(valueType);
+  const scalarType = wgslVectorScalar(valueType);
+  const fields = ["x", "y", "z", "w"];
+  return `${vectorType}(${Array.from({ length: laneCount }, (_, lane) => `${scalarType}((${read}).${fields[lane]})`).join(", ")})`;
 }
 
 function emitSemanticTextureDescriptorHelper(
