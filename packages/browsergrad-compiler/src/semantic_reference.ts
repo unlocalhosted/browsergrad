@@ -697,6 +697,7 @@ function semanticReferenceCallSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (operation.callee === "assert") return operation.args.length === 1 && semanticReferenceExpressionSupported(operation.args[0]!, "scalar", compiled);
+  if (operation.callee === "printf") return semanticReferencePrintfSupported(operation, compiled);
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
@@ -710,6 +711,16 @@ function semanticReferenceCallSupported(
       symbol.name === target.name &&
       symbol.dimensions.length > 0
     );
+}
+
+function semanticReferencePrintfSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  const [format, ...args] = operation.args;
+  return format?.kind === "literal" &&
+    format.literalKind === "string" &&
+    args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
 }
 
 function semanticReferenceVoidFunctionCallSupported(
@@ -1257,6 +1268,7 @@ function execSemanticCall(
     if (operation.args[0]) evalNumber(operation.args[0], context);
     return;
   }
+  if (operation.callee === "printf") return;
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return;
   if (semanticReferenceVoidFunctionCallSupported(operation, context.compiled)) {
     execSemanticVoidFunctionCall(operation, context);

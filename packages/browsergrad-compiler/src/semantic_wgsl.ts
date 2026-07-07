@@ -1425,6 +1425,7 @@ function semanticWgslCallSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (operation.callee === "assert") return operation.args.length === 1 && semanticWgslExpressionSupported(operation.args[0]!, "scalar", ir);
+  if (operation.callee === "printf") return semanticWgslPrintfSupported(operation, ir);
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
@@ -1434,6 +1435,16 @@ function semanticWgslCallSupported(
     value !== undefined &&
     semanticWgslExpressionSupported(value, "scalar", ir) &&
     localArraySymbol(ir, target.name) !== undefined;
+}
+
+function semanticWgslPrintfSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const [format, ...args] = operation.args;
+  return format?.kind === "literal" &&
+    format.literalKind === "string" &&
+    args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
 }
 
 function semanticWgslVoidFunctionCallSupported(
@@ -2171,6 +2182,7 @@ function emitSemanticCall(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   if (operation.callee === "assert") return [];
+  if (operation.callee === "printf") return [];
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return [];
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);

@@ -4466,7 +4466,10 @@ __global__ void hello() {
 }`, { workgroupSize: [1, 1, 1] });
 
     expect(compiled.wgslProgram.bindings).toEqual([]);
-    expect(compiled.wgsl).toContain("printf omitted");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("printf omitted");
   });
 
   it("parses adjacent C string literals in stdout-only calls", () => {
@@ -4476,7 +4479,10 @@ __global__ void hello() {
          "world\\n", threadIdx.x);
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("printf omitted");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("printf omitted");
   });
 
   it("accepts printf pointer and local array arguments as no-op debug output", () => {
