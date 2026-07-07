@@ -11731,6 +11731,35 @@ __global__ void sharedScalar(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([9]);
   });
 
+  it("runs top-level shared integer atomics through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semantic_shared_atomic(uint *out) {
+  __shared__ uint counter[1];
+  counter[0] = 1u;
+  out[0] = atomicAdd(&counter[0], 2u);
+  out[1] = counter[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<workgroup> counter: array<atomic<u32>, 1>;");
+    expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 2u)");
+    expect(compiled.wgsl).toContain("atomicLoad(&counter[0u])");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 3]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 3]);
+  });
+
   it("supports CAS-backed float atomics in shared memory", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sharedFloatAtomic(float *out) {

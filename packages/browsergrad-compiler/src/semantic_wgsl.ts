@@ -133,6 +133,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
   const atomicStorage = semanticAtomicStorageNames(ir.operations);
   const atomicDeviceGlobals = semanticAtomicDeviceGlobalNames(ir.operations);
+  const atomicShared = semanticAtomicSharedNames(ir.operations);
   const bindings: WgslKernelBindingInput[] = ir.params
     .filter((param) => param.addressSpace === "storage")
     .map((param, binding) => ({
@@ -187,7 +188,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, global.name)}) var<storage, read_write> ${nameFor(global.name, names)}: array<${elementType}>;`);
   }
   for (const shared of sharedMemorySymbols(ir)) {
-    lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared)};`);
+    lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared, atomicShared.has(shared.name))};`);
   }
   if (uniformParams.length > 0) {
     lines.push("struct Params {");
@@ -371,7 +372,7 @@ function semanticWgslAtomicSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (!WGSL_ATOMIC_CALLEES.has(operation.callee)) return false;
-  if (!operation.target || (operation.target.addressSpace !== "storage" && operation.target.addressSpace !== "device-global")) return false;
+  if (!operation.target || (operation.target.addressSpace !== "storage" && operation.target.addressSpace !== "device-global" && operation.target.addressSpace !== "shared")) return false;
   if (!semanticWgslMemoryRefSupported(operation.target)) return false;
   if (operation.target.addressSpace === "storage" && operation.target.indices.length !== 1) return false;
   if (operation.target.fields.length > 0) return false;
@@ -432,7 +433,7 @@ function semanticWgslAtomicCallSupported(
 ): boolean {
   if (expression.callee.kind !== "symbol" || !WGSL_ATOMIC_CALLEES.has(expression.callee.name)) return false;
   const target = semanticAtomicCallTarget(expression);
-  if (!target || (target.addressSpace !== "storage" && target.addressSpace !== "device-global")) return false;
+  if (!target || (target.addressSpace !== "storage" && target.addressSpace !== "device-global" && target.addressSpace !== "shared")) return false;
   if (!semanticWgslMemoryRefSupported(target)) return false;
   if (target.addressSpace === "storage" && target.indices.length !== 1) return false;
   if (target.fields.length > 0) return false;
@@ -462,6 +463,9 @@ function semanticWgslAtomicTargetRootSupported(ref: SemanticMemoryRef, ir: Seman
   }
   if (ref.addressSpace === "device-global") {
     return ir.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "device-global");
+  }
+  if (ref.addressSpace === "shared") {
+    return ir.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "shared");
   }
   return false;
 }
@@ -597,7 +601,11 @@ function emitSemanticStore(
     return operation.operator === "-=" ? `${offset} = (${offset} - ${value})` : `${offset} = (${offset} + ${value})`;
   }
   const target = emitSemanticMemoryRef(operation.target, ir, names);
-  if (semanticAtomicStorageNames(ir.operations).has(operation.target.base) || semanticAtomicDeviceGlobalNames(ir.operations).has(operation.target.base)) {
+  if (
+    semanticAtomicStorageNames(ir.operations).has(operation.target.base) ||
+    semanticAtomicDeviceGlobalNames(ir.operations).has(operation.target.base) ||
+    semanticAtomicSharedNames(ir.operations).has(operation.target.base)
+  ) {
     if (operation.operator !== "=") {
       throw semanticWgslError(`semantic WGSL does not support atomic storage assignment '${operation.operator}'`, operation.span);
     }
@@ -793,6 +801,9 @@ function emitSemanticExpression(
         const ref = `${nameFor(expression.name, names)}[0u]`;
         return semanticAtomicDeviceGlobalNames(ir.operations).has(expression.name) ? `atomicLoad(&${ref})` : ref;
       }
+      if (expression.addressSpace === "shared" && semanticAtomicSharedNames(ir.operations).has(expression.name)) {
+        return `atomicLoad(&${nameFor(expression.name, names)})`;
+      }
       return nameFor(expression.name, names);
     case "member":
       return emitSemanticMember(expression, ir, names);
@@ -800,7 +811,11 @@ function emitSemanticExpression(
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) {
         const memoryRef = emitSemanticMemoryRef(ref, ir, names);
-        if (semanticAtomicStorageNames(ir.operations).has(ref.base) || semanticAtomicDeviceGlobalNames(ir.operations).has(ref.base)) return `atomicLoad(&${memoryRef})`;
+        if (
+          semanticAtomicStorageNames(ir.operations).has(ref.base) ||
+          semanticAtomicDeviceGlobalNames(ir.operations).has(ref.base) ||
+          semanticAtomicSharedNames(ir.operations).has(ref.base)
+        ) return `atomicLoad(&${memoryRef})`;
         return memoryRef;
       }
       throw semanticWgslError("semantic WGSL does not support index target", expression.span);
@@ -1054,6 +1069,10 @@ function emitSemanticMemoryRef(
   if (ref.addressSpace === "shared") {
     const shared = sharedMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
     if (!shared) throw semanticWgslError(`unknown shared memory '${ref.base}'`, ref.span);
+    if (shared.dimensions.length === 0) {
+      if (ref.indices.length !== 0) throw semanticWgslError(`shared memory '${ref.base}' index rank mismatch`, ref.span);
+      return nameFor(ref.base, names);
+    }
     return `${nameFor(ref.base, names)}[${emitFlatSharedIndex(shared, ref.indices, ir, names)}]`;
   }
   throw semanticWgslError(`semantic WGSL does not support ${ref.addressSpace} memory refs`, ref.span);
@@ -1133,8 +1152,10 @@ function emitLocalArrayFill(
   return lines;
 }
 
-function emitSharedType(symbol: SemanticKernelIrModule["memory"][number]): string {
-  return `array<${wgslScalar(symbol.valueType)}, ${Math.max(1, totalElements(symbol.dimensions))}>`;
+function emitSharedType(symbol: SemanticKernelIrModule["memory"][number], atomic: boolean): string {
+  const element = atomic ? `atomic<${wgslAtomicScalar(symbol.valueType)}>` : wgslScalar(symbol.valueType);
+  if (symbol.dimensions.length === 0) return element;
+  return `array<${element}, ${Math.max(1, totalElements(symbol.dimensions))}>`;
 }
 
 function totalElements(dimensions: readonly number[]): number {
@@ -1411,6 +1432,30 @@ function semanticAtomicDeviceGlobalNames(operations: readonly SemanticKernelIrOp
   return names;
 }
 
+function semanticAtomicSharedNames(operations: readonly SemanticKernelIrOperation[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const operation of operations) {
+    if (operation.kind === "atomic" && operation.target?.addressSpace === "shared") {
+      names.add(operation.target.base);
+    }
+    for (const name of semanticAtomicNamesFromOperation(operation, "shared")) names.add(name);
+    if (operation.kind === "branch") {
+      for (const name of semanticAtomicSharedNames(operation.consequent)) names.add(name);
+      for (const name of semanticAtomicSharedNames(operation.alternate)) names.add(name);
+    }
+    if (operation.kind === "loop") {
+      if (operation.init && isSemanticKernelIrOperation(operation.init)) {
+        for (const name of semanticAtomicSharedNames([operation.init])) names.add(name);
+      }
+      for (const name of semanticAtomicSharedNames(operation.body)) names.add(name);
+    }
+    if (operation.kind === "block") {
+      for (const name of semanticAtomicSharedNames(operation.body)) names.add(name);
+    }
+  }
+  return names;
+}
+
 function semanticAtomicStorageNamesFromOperation(operation: SemanticKernelIrOperation): ReadonlySet<string> {
   const expressions: SemanticExpression[] = [];
   if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
@@ -1447,7 +1492,7 @@ function semanticAtomicDeviceGlobalNamesFromOperation(operation: SemanticKernelI
 
 function semanticAtomicNamesFromOperation(
   operation: SemanticKernelIrOperation,
-  addressSpace: "storage" | "device-global",
+  addressSpace: "storage" | "device-global" | "shared",
 ): ReadonlySet<string> {
   const expressions: SemanticExpression[] = [];
   if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
@@ -1468,7 +1513,7 @@ function semanticAtomicNamesFromOperation(
 
 function semanticAtomicNamesFromExpression(
   expression: SemanticExpression,
-  addressSpace: "storage" | "device-global",
+  addressSpace: "storage" | "device-global" | "shared",
 ): ReadonlySet<string> {
   const names = new Set<string>();
   const target = expression.kind === "call" ? semanticAtomicCallTarget(expression) : undefined;
@@ -1514,10 +1559,15 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
   if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
     return memoryRefFromIndexExpression(firstArg.argument);
   }
-  if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "symbol" && firstArg.argument.addressSpace === "device-global") {
+  if (
+    firstArg.kind === "unary" &&
+    firstArg.operator === "&" &&
+    firstArg.argument.kind === "symbol" &&
+    (firstArg.argument.addressSpace === "device-global" || firstArg.argument.addressSpace === "shared")
+  ) {
     return {
       base: firstArg.argument.name,
-      addressSpace: "device-global",
+      addressSpace: firstArg.argument.addressSpace,
       ...(firstArg.argument.valueType === undefined ? {} : { valueType: firstArg.argument.valueType }),
       indices: [],
       fields: [],

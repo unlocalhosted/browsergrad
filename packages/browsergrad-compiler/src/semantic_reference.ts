@@ -276,7 +276,6 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   }
   if (ref.fields.length > 0) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
-  if (ref.addressSpace === "shared" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
@@ -393,6 +392,9 @@ function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, comp
   }
   if (ref.addressSpace === "device-global") {
     return compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "device-global");
+  }
+  if (ref.addressSpace === "shared") {
+    return compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "shared");
   }
   return false;
 }
@@ -894,10 +896,15 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
   if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
     return memoryRefFromIndexExpression(firstArg.argument);
   }
-  if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "symbol" && firstArg.argument.addressSpace === "device-global") {
+  if (
+    firstArg.kind === "unary" &&
+    firstArg.operator === "&" &&
+    firstArg.argument.kind === "symbol" &&
+    (firstArg.argument.addressSpace === "device-global" || firstArg.argument.addressSpace === "shared")
+  ) {
     return {
       base: firstArg.argument.name,
-      addressSpace: "device-global",
+      addressSpace: firstArg.argument.addressSpace,
       ...(firstArg.argument.valueType === undefined ? {} : { valueType: firstArg.argument.valueType }),
       indices: [],
       fields: [],
