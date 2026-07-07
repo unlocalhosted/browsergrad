@@ -3004,6 +3004,45 @@ __global__ void localPointerNullCompare(uint *out) {
     expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 0]);
   });
 
+  it("lowers nullable local pointer conditionals through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nullableLocalPointerConditional(uint *out, int pick) {
+  uint values[2];
+  values[0] = 4u;
+  values[1] = 9u;
+  uint *p = pick != 0 ? values : NULL;
+  out[0] = p != NULL ? 1u : 0u;
+  out[1] = p == nullptr ? 1u : 0u;
+  if (p != NULL) {
+    out[2] = p[1];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(3) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(3) }, scalars: { pick: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const nullResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(3) }, scalars: { pick: 0 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-pointer-conditional");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("var p:");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 9]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 0, 9]);
+    expect([...nullResult.buffers.out as Uint32Array]).toEqual([0, 1, 0]);
+  });
+
   it("lowers local pointer alias ordering comparisons through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void localPointerOrder(uint *out) {

@@ -47,6 +47,7 @@ export interface CudaLiteSemanticSymbol {
   readonly pointerRoot?: string;
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
+  readonly pointerValid?: SemanticExpression;
   readonly constant?: boolean;
   readonly initialized?: boolean;
   readonly init?: SemanticExpression;
@@ -906,7 +907,7 @@ function symbolForVar(
 function localPointerAliasForInitializer(
   expression: CudaLiteExpression | undefined,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
-): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices"> | undefined {
+): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices" | "pointerValid"> | undefined {
   if (!expression) return undefined;
   if (expression.kind === "cast" && expression.pointer) return localPointerAliasForInitializer(expression.expression, scope);
   if (expression.kind === "call" && localPointerIdentityCallName(expression.callee)) {
@@ -915,6 +916,18 @@ function localPointerAliasForInitializer(
   if (expression.kind === "conditional") {
     const consequent = localPointerAliasForInitializer(expression.consequent, scope);
     const alternate = localPointerAliasForInitializer(expression.alternate, scope);
+    const condition = lowerExpression(expression.condition, scope);
+    const consequentNull = isNullPointerLiteral(expression.consequent);
+    const alternateNull = isNullPointerLiteral(expression.alternate);
+    const nonNull = consequent ?? alternate;
+    if ((consequentNull || alternateNull) && nonNull?.pointerRoot && nonNull.pointerAddressSpace === "local" && nonNull.pointerBaseIndices?.length === 1) {
+      return {
+        pointerRoot: nonNull.pointerRoot,
+        pointerAddressSpace: nonNull.pointerAddressSpace,
+        pointerBaseIndices: nonNull.pointerBaseIndices,
+        pointerValid: consequentNull ? negateExpression(condition, expression.span) : condition,
+      };
+    }
     if (!consequent || !alternate) return undefined;
     const root = consequent.pointerRoot;
     const addressSpace = consequent.pointerAddressSpace;
@@ -933,7 +946,7 @@ function localPointerAliasForInitializer(
       pointerAddressSpace: addressSpace,
       pointerBaseIndices: [{
         kind: "conditional",
-        condition: lowerExpression(expression.condition, scope),
+        condition,
         consequent: consequent.pointerBaseIndices[0]!,
         alternate: alternate.pointerBaseIndices[0]!,
         valueType: "int",
@@ -1234,8 +1247,8 @@ function localPointerAliasComparisonExpression(
   if (expression.operator === "==" || expression.operator === "!=") {
     const leftAlias = localPointerAliasScalarIndex(expression.left, scope);
     const rightAlias = localPointerAliasScalarIndex(expression.right, scope);
-    if (leftAlias && isNullPointerLiteral(expression.right)) return booleanExpression(expression.operator === "!=", expression.span);
-    if (rightAlias && isNullPointerLiteral(expression.left)) return booleanExpression(expression.operator === "!=", expression.span);
+    if (leftAlias && isNullPointerLiteral(expression.right)) return pointerNullComparisonExpression(leftAlias.valid, expression.operator, expression.span);
+    if (rightAlias && isNullPointerLiteral(expression.left)) return pointerNullComparisonExpression(rightAlias.valid, expression.operator, expression.span);
   }
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
@@ -1253,11 +1266,11 @@ function localPointerAliasComparisonExpression(
 function localPointerAliasScalarIndex(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
-): { readonly root: string; readonly index: SemanticExpression } | undefined {
+): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression } | undefined {
   if (expression.kind !== "identifier") return undefined;
   const symbol = scope.get(expression.name);
   if (!symbol?.pointerRoot || symbol.pointerAddressSpace !== "local" || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
-  return { root: symbol.pointerRoot, index: symbol.pointerBaseIndices[0]! };
+  return { root: symbol.pointerRoot, index: symbol.pointerBaseIndices[0]!, ...(symbol.pointerValid === undefined ? {} : { valid: symbol.pointerValid }) };
 }
 
 function semanticSymbolExpression(symbol: CudaLiteSemanticSymbol, span: SourceSpan): Extract<SemanticExpression, { readonly kind: "symbol" }> {
@@ -1336,6 +1349,22 @@ function booleanExpression(value: boolean, span: SourceSpan): SemanticExpression
     operator: value ? "==" : "!=",
     left: zero,
     right: zero,
+    valueType: "bool",
+    span,
+  };
+}
+
+function pointerNullComparisonExpression(valid: SemanticExpression | undefined, operator: string, span: SourceSpan): SemanticExpression {
+  if (!valid) return booleanExpression(operator === "!=", span);
+  return operator === "!=" ? valid : negateExpression(valid, span);
+}
+
+function negateExpression(expression: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "binary",
+    operator: "==",
+    left: expression,
+    right: zeroExpression(span),
     valueType: "bool",
     span,
   };
