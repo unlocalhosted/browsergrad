@@ -250,11 +250,26 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
 }
 
 function operationsHaveOnlyTopLevelSharedBarriers(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.every((operation) =>
-    operation.kind !== "branch" &&
-    operation.kind !== "loop" &&
-    operation.kind !== "block"
-  );
+  return operations.every((operation) => {
+    if (operation.kind === "branch") {
+      return operationsHaveNoBarrierOrControlTransfer(operation.consequent) &&
+        operationsHaveNoBarrierOrControlTransfer(operation.alternate);
+    }
+    if (operation.kind === "block") return operationsHaveNoBarrierOrControlTransfer(operation.body);
+    return operation.kind !== "loop";
+  });
+}
+
+function operationsHaveNoBarrierOrControlTransfer(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.every((operation) => {
+    if (operation.kind === "barrier" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue") return false;
+    if (operation.kind === "branch") {
+      return operationsHaveNoBarrierOrControlTransfer(operation.consequent) &&
+        operationsHaveNoBarrierOrControlTransfer(operation.alternate);
+    }
+    if (operation.kind === "block" || operation.kind === "loop") return operationsHaveNoBarrierOrControlTransfer(operation.body);
+    return true;
+  });
 }
 
 function semanticReferenceLoopInitSupported(
@@ -993,11 +1008,9 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
   if (ref.addressSpace === "local" || ref.addressSpace === "shared") {
     const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
     if (!symbol) throw semanticReferenceError(`unknown ${ref.addressSpace} array '${ref.base}'`, ref.span);
-    if (ref.addressSpace === "shared" && symbol.dimensions.length === 0 && ref.indices.length === 1) {
-      return Math.trunc(evalNumber(ref.indices[0]!, context));
-    }
-    if (ref.indices.length !== symbol.dimensions.length) throw semanticReferenceError(`${ref.addressSpace} array '${ref.base}' index rank mismatch`, ref.span);
-    return flatIndexForDimensions(symbol.dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
+    const dimensions = ref.addressSpace === "shared" ? semanticReferenceSharedDimensions(context.compiled, symbol) : symbol.dimensions;
+    if (ref.indices.length !== dimensions.length) throw semanticReferenceError(`${ref.addressSpace} array '${ref.base}' index rank mismatch`, ref.span);
+    return flatIndexForDimensions(dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
   }
   if (ref.addressSpace === "device-global") {
     const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === "device-global");
@@ -1037,6 +1050,8 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   if (typeof constant === "number") return constant;
   const global = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "device-global");
   if (global && global.dimensions.length === 0) return readMemory({ base: name, addressSpace: "device-global", indices: [], fields: [], span }, context);
+  const shared = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "shared");
+  if (shared && shared.dimensions.length === 0) return readMemory({ base: name, addressSpace: "shared", indices: [], fields: [], span }, context);
   const storageParam = context.compiled.kernelIr.params.find((param) => param.name === name && param.addressSpace === "storage");
   if (storageParam) return context.buffers.has(name) ? 1 : 0;
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);
@@ -1153,10 +1168,19 @@ function semanticReferenceSharedMemory(compiled: CompiledCudaLiteKernel): Map<st
   for (const symbol of compiled.kernelIr.memory.filter((item) => item.kind === "shared")) {
     out.set(
       symbol.name,
-      typedArrayForScalar(symbol.valueType, compiled.dynamicSharedMemory?.[symbol.name] ?? totalElements(symbol.dimensions)),
+      typedArrayForScalar(symbol.valueType, totalElements(semanticReferenceSharedDimensions(compiled, symbol))),
     );
   }
   return out;
+}
+
+function semanticReferenceSharedDimensions(
+  compiled: CompiledCudaLiteKernel,
+  symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number],
+): readonly number[] {
+  const dynamicLeading = compiled.dynamicSharedMemory?.[symbol.name];
+  if (dynamicLeading === undefined) return symbol.dimensions;
+  return [dynamicLeading, ...symbol.dimensions];
 }
 
 function semanticReferenceConstants(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): Map<string, number | WgslTypedArray> {
