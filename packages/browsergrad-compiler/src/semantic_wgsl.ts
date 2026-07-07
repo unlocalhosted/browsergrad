@@ -1501,7 +1501,7 @@ function emitSemanticOperation(
     case "return":
       if (operation.value) {
         if (!allowReturnValue) throw semanticWgslError("semantic WGSL supports kernel return without value only", operation.span);
-        return [`${prefix}return ${emitSemanticExpression(operation.value, ir, names, options, textureSpecializations)};`];
+        return emitSemanticReturnValue(operation.value, ir, names, indentLevel, options, textureSpecializations);
       }
       return [`${prefix}return;`];
     case "break":
@@ -1602,6 +1602,44 @@ function emitSemanticExpressionStatement(
   if (expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(expression, ir, names, options, textureSpecializations)};`];
   if (expression.kind === "sequence") return emitSemanticSequenceStatement(expression, ir, names, indentLevel, options, textureSpecializations);
   return [`${prefix}${emitSemanticExpression(expression, ir, names, options, textureSpecializations)};`];
+}
+
+function emitSemanticReturnValue(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  if (expression.kind === "sequence") {
+    const sequence = emitSemanticSequenceParts(expression, ir, names, indentLevel, options, textureSpecializations);
+    return [
+      ...sequence.prefix,
+      ...emitSemanticReturnValue(sequence.value, ir, names, indentLevel, options, textureSpecializations),
+    ];
+  }
+  if (expression.kind === "assignment") {
+    const lines = emitSemanticExpressionStatement(expression, ir, names, indentLevel, options, textureSpecializations);
+    return [...lines, `${prefix}return ${emitSemanticAssignmentResult(expression, ir, names, options)};`];
+  }
+  return [`${prefix}return ${emitSemanticExpression(expression, ir, names, options, textureSpecializations)};`];
+}
+
+function emitSemanticAssignmentResult(
+  expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): string {
+  if (expression.target.kind === "symbol") return nameFor(expression.target.name, names);
+  if (expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) {
+    return emitSemanticMember(expression.target, ir, names, options);
+  }
+  const ref = semanticWgslAssignmentMemoryRef(expression.target, ir);
+  if (ref) return emitSemanticMemoryRef(ref, ir, names, options);
+  throw semanticWgslError("semantic WGSL cannot return assignment result", expression.span);
 }
 
 function semanticWgslSurfaceReadTarget(expression: SemanticExpression): { readonly name: string; readonly valueType?: CudaLiteScalarType } | undefined {

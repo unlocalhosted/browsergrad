@@ -17516,11 +17516,23 @@ __global__ void sequence_return_kernel(int* out) {
       { buffers: { out: new Int32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sequence-expression");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("local += 2;");
     expect(compiled.wgsl).toContain("return (local * 3);");
-    expect(compiled.wgsl).toContain("return (local = (local + 4));");
+    expect(compiled.wgsl).toContain("local += 3;");
+    expect(compiled.wgsl).toContain("local = (local + 4);");
+    expect(compiled.wgsl).toContain("return local;");
     expect([...result.buffers.out as Int32Array]).toEqual([18, 12]);
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([18, 12]);
   });
 
   it("keeps unrelated same-type storage non-atomic for helper pointer atomics", () => {
