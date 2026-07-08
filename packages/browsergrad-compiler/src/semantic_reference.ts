@@ -408,10 +408,17 @@ function unsupportedSemanticReferenceOperation(
       case "inline-asm":
         {
           const asm = classifyInlineAsm(operation.statement.template);
-          if (asm?.kind !== "cp-async-fence") return operation;
-          if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
+          const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
+          if (asm?.kind === "cp-async-fence") {
+            if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || outputs.length !== 0) return operation;
+            break;
+          }
+          if (asm?.kind === "membar") {
+            if (operation.statement.inputs.length !== 0 || outputs.length !== 0) return operation;
+            break;
+          }
+          return operation;
         }
-        break;
       case "break":
       case "continue":
         break;
@@ -1424,7 +1431,10 @@ function execSemanticOperations(
       case "inline-asm":
         {
           const asm = classifyInlineAsm(operation.statement.template);
-          if (asm?.kind !== "cp-async-fence" || operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0)) {
+          const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
+          const cpAsyncFenceSupported = asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && outputs.length === 0;
+          const membarSupported = asm?.kind === "membar" && operation.statement.inputs.length === 0 && outputs.length === 0;
+          if (!cpAsyncFenceSupported && !membarSupported) {
             throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
           }
         }

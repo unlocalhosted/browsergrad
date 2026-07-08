@@ -14,6 +14,7 @@ export const runtimeScopeCases = [
   "runtime:unreachable-grid-sync-compat-diagnostics",
   "runtime:unreachable-feature-asm-compat-diagnostics",
   "intrinsic:inline-asm-cp-async-fence",
+  "intrinsic:inline-asm-membar-fence",
   "runtime:unreachable-texture-surface-compat-diagnostics",
   "runtime:unreachable-constant-binding",
   "runtime:unreachable-device-global-binding",

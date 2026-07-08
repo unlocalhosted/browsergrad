@@ -11529,6 +11529,27 @@ __global__ void cpAsyncFenceAsm(float *out, float *in) {
     expect([...result.buffers.out as Float32Array]).toEqual([3, 5]);
   });
 
+  it("lowers inline PTX membar fences as native WebGPU storage barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void membarAsm(float *out, float *in) {
+  asm volatile("membar.cta;\\n" ::);
+  asm volatile("membar.gl;\\n" ::);
+  asm volatile("membar.sys;\\n" ::);
+  out[threadIdx.x] = in[threadIdx.x] + 1.0f;
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2), in: new Float32Array([6, 8]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("storageBarrier();");
+    expect([...result.buffers.out as Float32Array]).toEqual([7, 9]);
+  });
+
   it("parses inline PTX clobber sections as an unsupported semantic gap", () => {
     expect(() => compileCudaLiteKernel(`
 __global__ void clobberAsm(float *out, float *in) {

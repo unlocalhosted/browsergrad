@@ -2266,6 +2266,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "cp-async-fence" && statement.inputs.length <= (op.fence === "wait_group" ? 1 : 0) && outputs.length === 0) {
     return `// cp.async inline asm fence omitted`;
   }
+  if (op?.kind === "membar" && statement.inputs.length === 0 && outputs.length === 0) {
+    return `storageBarrier();`;
+  }
   if (op?.kind === "mma-m16n8k16") {
     return emitMmaM16N8K16Statement(statement, outputs, op.accumulator, context);
   }

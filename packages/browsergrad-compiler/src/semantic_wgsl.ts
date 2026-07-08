@@ -967,10 +967,17 @@ function unsupportedSemanticWgslOperation(
       case "inline-asm":
         {
           const asm = classifyInlineAsm(operation.statement.template);
-          if (asm?.kind !== "cp-async-fence") return operation;
-          if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
+          const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
+          if (asm?.kind === "cp-async-fence") {
+            if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || outputs.length !== 0) return operation;
+            break;
+          }
+          if (asm?.kind === "membar") {
+            if (operation.statement.inputs.length !== 0 || outputs.length !== 0) return operation;
+            break;
+          }
+          return operation;
         }
-        break;
       case "return":
         if (operation.value && (!allowReturnValue || !semanticWgslExpressionSupported(operation.value, "any", ir))) return operation;
         break;
@@ -2307,7 +2314,9 @@ function emitSemanticOperation(
     case "inline-asm":
       {
         const asm = classifyInlineAsm(operation.statement.template);
-        if (asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0)) return [`${prefix}// cp.async inline asm fence omitted`];
+        const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
+        if (asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && outputs.length === 0) return [`${prefix}// cp.async inline asm fence omitted`];
+        if (asm?.kind === "membar" && operation.statement.inputs.length === 0 && outputs.length === 0) return [`${prefix}storageBarrier();`];
       }
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
     case "return":

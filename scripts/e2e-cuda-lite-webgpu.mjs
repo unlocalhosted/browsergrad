@@ -402,6 +402,13 @@ __global__ void inlineAsmCpAsyncFence(float *out, float *in) {
   asm volatile("cp.async.wait_all;\\n" ::);
   out[threadIdx.x] = in[threadIdx.x] + 1.0f;
 }`,
+  inlineAsmMembarFence: `
+__global__ void inlineAsmMembarFence(float *out, float *in) {
+  asm volatile("membar.cta;\\n" ::);
+  asm volatile("membar.gl;\\n" ::);
+  asm volatile("membar.sys;\\n" ::);
+  out[threadIdx.x] = in[threadIdx.x] + 1.0f;
+}`,
   unreachableTextureSurfaceCompatDiagnostics: `
 texture<float, cudaTextureType2D, cudaReadModeElementType> tex;
 
@@ -10366,6 +10373,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [3, 5] },
+          },
+          {
+            name: "intrinsic:inline-asm-membar-fence",
+            source: SOURCES.inlineAsmMembarFence,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+                in: new Float32Array([6, 8]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [7, 9] },
           },
           {
             name: "runtime:unreachable-texture-surface-compat-diagnostics",

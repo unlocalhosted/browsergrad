@@ -1724,6 +1724,9 @@ function validateInlineAsmStatement(
       validateScalarOperand(walkExpression(input, scope), input.span, asmDiagnostics);
     }
   }
+  if (op?.kind === "membar" && (outputs.length !== 0 || statement.inputs.length !== 0)) {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `membar.${op.scope} inline PTX expects no output or input operands`, statement.span));
+  }
   if (op?.kind === "ldmatrix") {
     if (outputs.length !== op.matrices || statement.inputs.length !== 1) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `ldmatrix.x${op.matrices} inline PTX expects ${op.matrices} output operand(s) and one shared-address input operand`, statement.span));
