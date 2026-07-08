@@ -233,6 +233,23 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [128, 128] },
   },
   {
+    sourceKey: "corpusCuda120ParentReductionKernelRecursiveDynamicLaunch",
+    caseName: "corpus:cuda-120:parentReductionKernel_recursive_dynamic_launch",
+    corpusId: "cuda-120",
+    relativePath: "daily-updates/day-56-Progress-Checkpoint.md",
+    kernelName: "parentReductionKernel",
+    workgroupSize: [1, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    input: {
+      buffers: {
+        data: { type: "Uint32Array", data: Array.from({ length: 257 }, () => 1) },
+      },
+      scalars: { N: 257 },
+    },
+    output: "data",
+    expectedOutput: { type: "Uint32Array", data: [512, ...Array.from({ length: 256 }, () => 1)] },
+  },
+  {
     sourceKey: "corpusCudaSamplesVectorAdd",
     caseName: "corpus:cuda-samples:vectorAdd",
     corpusId: "cuda-samples",
