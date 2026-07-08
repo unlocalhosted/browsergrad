@@ -1151,6 +1151,7 @@ function semanticWgslTextureReadSupported(
 
 function semanticWgslTextureValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float" ||
+    valueType === "bf16" ||
     valueType === "uint" ||
     valueType === "int" ||
     valueType === "uchar" ||
@@ -1683,7 +1684,7 @@ function semanticWgslExpressionSupported(
         expected === "any" && semanticWgslVectorLerpCallSupported(expression, ir);
     case "texture-read":
       return ir !== undefined &&
-        (expected === "any" || expression.valueType === "float") &&
+        (expected === "any" || semanticWgslTextureValueTypeSupported(expression.valueType)) &&
         semanticWgslTextureReadSupported(expression, ir);
     case "surface-read":
       return ir !== undefined && (expected === "scalar" || expected === "any") && semanticWgslSurfaceReadSupported(expression, ir);
@@ -3053,6 +3054,7 @@ function emitSemanticTextureRead(
     ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`
     : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
   if (isSemanticWgslFloatVectorType(expression.valueType)) return emitSemanticTextureVectorRead(read, expression.valueType);
+  if (expression.valueType === "bf16") return wgslRoundBfloat16(`${read}.r`);
   if (expression.valueType === "uint" || expression.valueType === "uchar") return `u32(${read}.r)`;
   if (expression.valueType === "int") return `i32(${read}.r)`;
   return `${read}.r`;
@@ -3062,6 +3064,7 @@ function emitSemanticTextureVectorRead(read: string, valueType: CudaLiteScalarTy
   if (valueType === "float2") return `${read}.xy`;
   if (valueType === "float3") return `${read}.xyz`;
   if (valueType === "float4") return read;
+  if (valueType === "bf162") return `vec2<f32>(${wgslRoundBfloat16(`${read}.x`)}, ${wgslRoundBfloat16(`${read}.y`)})`;
   const laneCount = cudaVectorLaneCount(valueType);
   const vectorType = wgslValueType(valueType);
   const scalarType = wgslVectorScalar(valueType);

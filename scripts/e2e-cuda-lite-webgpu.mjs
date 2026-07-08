@@ -5875,6 +5875,17 @@ __global__ void textureUcharScalar(uint *out) {
   int x = threadIdx.x;
   out[x] = tex2D<unsigned char>(texRef, (float)x + 0.5f, 0.5f);
 }`,
+  textureBf16ScalarVector: `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void textureBf16ScalarVector(float *out, uint *bits) {
+  __nv_bfloat16 scalar = tex2D<__nv_bfloat16>(texRef, 0.5f, 0.5f);
+  __nv_bfloat162 pair = tex2D<__nv_bfloat162>(texRef, 0.5f, 0.5f);
+  out[0] = __bfloat162float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  bits[0] = __bfloat16_as_ushort(scalar);
+  bits[1] = __bfloat162_as_uint(pair);
+}`,
   textureObjectUint4HelperRead: `
 __device__ uint4 read_uint4_tex(cudaTextureObject_t texArg) {
   return tex2D<uint4>(texArg, 0.5f, 0.5f);
@@ -15792,6 +15803,28 @@ const html = String.raw`<!doctype html>
             }),
             output: "scalarOut",
             expectedOutput: { type: "Float32Array", data: [5, 33, 41, 21] },
+          },
+          {
+            name: "texture:bf16-scalar-vector-read",
+            source: SOURCES.textureBf16ScalarVector,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(3),
+                bits: new Uint32Array(2),
+              },
+              textures: {
+                texRef: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([1.1, 2.2, 3.3, 4.4]),
+                },
+              },
+            }),
+            output: "bits",
+            expectedOutput: { type: "Uint32Array", data: [0x3f8d, 0x400d3f8d] },
           },
           {
             name: "texture:uchar-scalar-read",

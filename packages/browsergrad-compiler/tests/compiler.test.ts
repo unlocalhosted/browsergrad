@@ -15510,15 +15510,34 @@ __global__ void sample(float *out, uint *bits) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          out: new Float32Array(3),
+          bits: new Uint32Array(2),
+        },
+        textures: { texRef: { width: 1, height: 1, data: new Float32Array([1.1, 2.2, 3.3, 4.4]), channels: 4 } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-texture");
-    expect(compiled.wgsl).toContain("bg_tex2d_bf16_texRef");
-    expect(compiled.wgsl).toContain("bg_tex2d_bf162_texRef");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bitcast<f32>((bitcast<u32>(f32(textureLoad(texRef");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_bf16_texRef");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_bf162_texRef");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.1015625);
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.1015625);
     expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.203125);
     expect([...result.buffers.bits as Uint32Array]).toEqual([0x3f8d, 0x400d3f8d]);
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(1.1015625);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(1.1015625);
+    expect([...semanticResult.buffers.out as Float32Array][2]).toBeCloseTo(2.203125);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3f8d, 0x400d3f8d]);
   });
 
   it("lowers float4 texture helper returns through semantic IR", () => {

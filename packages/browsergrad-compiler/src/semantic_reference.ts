@@ -569,6 +569,7 @@ function semanticReferenceTextureReadSupported(
 
 function semanticReferenceTextureValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float" ||
+    valueType === "bf16" ||
     valueType === "uint" ||
     valueType === "int" ||
     valueType === "uchar" ||
@@ -927,7 +928,7 @@ function semanticReferenceExpressionSupported(
         expected === "any" && semanticReferenceVectorLerpCallSupported(expression, compiled);
     case "texture-read":
       return compiled !== undefined &&
-        (expected === "any" || expression.valueType === "float") &&
+        (expected === "any" || semanticReferenceTextureValueTypeSupported(expression.valueType)) &&
         semanticReferenceTextureReadSupported(expression, compiled);
     case "surface-read":
       return compiled !== undefined && (expected === "scalar" || expected === "any") && semanticReferenceSurfaceReadSupported(expression, compiled);
@@ -1757,8 +1758,12 @@ function evalSemanticTextureValue(
   valueType: CudaLiteScalarType | undefined,
   laneValue: (lane: number) => number,
 ): SemanticValue {
+  if (valueType === "bf16") return roundSemanticBfloat16(laneValue(0));
   if (!isSemanticReferenceFloatVectorType(valueType)) return laneValue(0);
-  return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) => laneValue(lane));
+  return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) => {
+    const value = laneValue(lane);
+    return valueType === "bf162" ? roundSemanticBfloat16(value) : value;
+  });
 }
 
 function isSemanticReferenceFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
