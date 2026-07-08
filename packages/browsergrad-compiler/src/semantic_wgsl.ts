@@ -114,7 +114,7 @@ const SEMANTIC_HALF_CONVERSION_CALLS = new Set([
   "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
 ]);
 const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
-  "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd",
+  "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd", "__double2bfloat16",
   "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
   "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
   "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
@@ -511,6 +511,7 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__float2bfloat16_rz", "float_to_bf16_rz"],
   ["__float2bfloat16_ru", "float_to_bf16_ru"],
   ["__float2bfloat16_rd", "float_to_bf16_rd"],
+  ["__double2bfloat16", "double_to_bf16"],
   ["__int2bfloat16_rn", "int_to_bf16"],
   ["__int2bfloat16_rz", "int_to_bf16_rz"],
   ["__int2bfloat16_ru", "int_to_bf16_ru"],
@@ -5604,6 +5605,7 @@ function emitSemanticMathCall(
   if (
     wgslCallee === "bf16_to_float" ||
     wgslCallee === "to_bf16" ||
+    wgslCallee === "double_to_bf16" ||
     wgslCallee === "int_to_bf16" ||
     wgslCallee === "uint_to_bf16" ||
     wgslCallee === "bf16_as_short" ||
@@ -5615,6 +5617,7 @@ function emitSemanticMathCall(
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
     if (wgslCallee === "bf16_to_float") return `f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
     if (wgslCallee === "to_bf16") return wgslRoundBfloat16(emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations));
+    if (wgslCallee === "double_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`);
     if (wgslCallee === "int_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)})`);
     if (wgslCallee === "uint_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)})`);
     if (wgslCallee === "bf16_as_short") return `((bitcast<i32>(((bitcast<u32>(f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})) >> 16u) & 0xffffu) << 16u)) >> 16)`;
@@ -5693,11 +5696,12 @@ function emitSemanticMathCall(
       : `floor(${emitted})`;
     return wgslCallee.startsWith("half_to_uint_") || wgslCallee.startsWith("half_to_ushort_") ? `u32(max(${rounded}, 0.0))` : `i32(${rounded})`;
   }
-  if (wgslCallee === "bf16_to_float" || wgslCallee === "to_bf16" || wgslCallee === "int_to_bf16" || wgslCallee === "uint_to_bf16" || wgslCallee === "bf16_as_ushort" || wgslCallee === "ushort_as_bf16") {
+  if (wgslCallee === "bf16_to_float" || wgslCallee === "to_bf16" || wgslCallee === "double_to_bf16" || wgslCallee === "int_to_bf16" || wgslCallee === "uint_to_bf16" || wgslCallee === "bf16_as_ushort" || wgslCallee === "ushort_as_bf16") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
     if (wgslCallee === "bf16_to_float") return `f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
     if (wgslCallee === "to_bf16") return wgslRoundBfloat16(emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations));
+    if (wgslCallee === "double_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`);
     if (wgslCallee === "int_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)})`);
     if (wgslCallee === "uint_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)})`);
     if (wgslCallee === "bf16_as_ushort") return `((bitcast<u32>(f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})) >> 16u) & 0xffffu)`;

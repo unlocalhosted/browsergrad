@@ -19164,6 +19164,33 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     expect([...semanticResult.buffers.signedBits as Int32Array]).toEqual([-16512, 2, 1, 2, 1, -2, -1, -1, -2, -1, -127]);
   });
 
+  it("lowers CUDA double to bf16 only through explicit f32 compatibility mode", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16DoubleCompat(float *out, double d) {
+  if (threadIdx.x < 1) {
+    out[0] = __bfloat162float(__double2bfloat16(d));
+  }
+}`, { f64Mode: "f32", workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      scalars: { d: 257 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("f64-lowered-to-f32");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
+    expect([...result.buffers.out as Float32Array]).toEqual([256]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([256]);
+    expect(() => compileCudaLiteKernel(`
+__global__ void bf16DoubleStrict(float *out) {
+  double d = 257.0;
+  out[0] = __bfloat162float(__double2bfloat16(d));
+}`, { workgroupSize: [1, 1, 1] })).toThrow(/unsupported-f64/u);
+  });
+
   it("lowers CUDA bf162 lane and vector conversion aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void bf162Move(float *out, uint *bits) {

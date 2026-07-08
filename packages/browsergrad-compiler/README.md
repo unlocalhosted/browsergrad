@@ -145,6 +145,7 @@ reference/WGSL path and can run in explicit f32 compatibility mode when
 `shader-f16` is unavailable.
 Scalar bf16 helpers use browser-native f32 storage with explicit bf16 bits:
 `__float2bfloat16`, `__float2bfloat16_rn` / `_rz` / `_ru` / `_rd`,
+`__double2bfloat16` in explicit `f64Mode: "f32"` compatibility mode,
 `__int2bfloat16_*`, `__uint2bfloat16_*`, `__short2bfloat16_*`,
 `__ushort2bfloat16_*`, `__bfloat16_as_short`,
 `__bfloat16_as_ushort`, `__short_as_bfloat16`, and

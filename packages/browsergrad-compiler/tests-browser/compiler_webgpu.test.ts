@@ -2898,6 +2898,25 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     expect([...actual.buffers.signedBits as Int32Array]).toEqual([-16512, 2, 1, 2, 1, -2, -1, -1, -2, -1, -127]);
   });
 
+  it("runs double to bf16 through f32 compatibility mode on real WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16DoubleCompat(float *out, double d) {
+  if (threadIdx.x < 1) {
+    out[0] = __bfloat162float(__double2bfloat16(d));
+  }
+}`, { f64Mode: "f32", workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      scalars: { d: 257 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("f64-lowered-to-f32");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...actual.buffers.out as Float32Array]).toEqual([256]);
+  });
+
   it("runs scalar bf16 arithmetic and predicates on real WebGPU", async () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void bf16ScalarAliases(const __nv_bfloat16 *input, const float *seed, __nv_bfloat16 *output, uint *flags) {

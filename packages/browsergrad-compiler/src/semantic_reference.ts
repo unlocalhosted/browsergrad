@@ -101,7 +101,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
   "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu", "hexp", "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
   "__hisnan", "__hisinf", "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle", "__hequ", "__hneu", "__hgtu", "__hgeu", "__hltu", "__hleu",
-  "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd",
+  "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd", "__double2bfloat16",
   "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
   "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
   "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
@@ -2785,6 +2785,7 @@ function evalSemanticMathCall(
     case "__float2bfloat16_rz": return roundFloat32ToBfloat16(args[0] ?? 0, "rz");
     case "__float2bfloat16_ru": return roundFloat32ToBfloat16(args[0] ?? 0, "ru");
     case "__float2bfloat16_rd": return roundFloat32ToBfloat16(args[0] ?? 0, "rd");
+    case "__double2bfloat16": return roundSemanticBfloat16(args[0] ?? 0);
     case "__int2bfloat16_rn": return roundSemanticBfloat16(Math.trunc(args[0] ?? 0) | 0);
     case "__int2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rz");
     case "__int2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "ru");

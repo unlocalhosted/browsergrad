@@ -569,6 +569,7 @@ const BF16_INTRINSICS = [
   intrinsic("__float2bfloat16_rz", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(args[0] ?? 0, "rz"), (args) => wgslRoundBfloat16(args[0] ?? "0", "rz")),
   intrinsic("__float2bfloat16_ru", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(args[0] ?? 0, "ru"), (args) => wgslRoundBfloat16(args[0] ?? "0", "ru")),
   intrinsic("__float2bfloat16_rd", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(args[0] ?? 0, "rd"), (args) => wgslRoundBfloat16(args[0] ?? "0", "rd")),
+  intrinsic("__double2bfloat16", [1, 1], "bf16", (args) => roundBfloat16(args[0] ?? 0), (args) => wgslRoundBfloat16(`f32(${args[0] ?? "0"})`)),
   intrinsic("__int2bfloat16_rn", [1, 1], "bf16", (args) => roundBfloat16(Math.trunc(args[0] ?? 0)), (args) => wgslRoundBfloat16(`f32(i32(${args[0] ?? "0"}))`)),
   intrinsic("__int2bfloat16_rz", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rz"), (args) => wgslRoundBfloat16(`f32(i32(${args[0] ?? "0"}))`, "rz")),
   intrinsic("__int2bfloat16_ru", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "ru"), (args) => wgslRoundBfloat16(`f32(i32(${args[0] ?? "0"}))`, "ru")),

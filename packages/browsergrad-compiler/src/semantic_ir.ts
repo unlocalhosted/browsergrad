@@ -2552,6 +2552,7 @@ function isBfloat16ToBfloat16Name(name: string): boolean {
     name === "__float2bfloat16_rz" ||
     name === "__float2bfloat16_ru" ||
     name === "__float2bfloat16_rd" ||
+    name === "__double2bfloat16" ||
     name === "__int2bfloat16_rn" ||
     name === "__int2bfloat16_rz" ||
     name === "__int2bfloat16_ru" ||
