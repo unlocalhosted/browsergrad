@@ -3416,6 +3416,14 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }
   if (isHalf2Intrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    if (isHalf2UnaryIntrinsic(name)) {
+      const op = half2UnaryIntrinsicOperator(name);
+      return {
+        kind: "cuda-vector",
+        valueType: "half2",
+        lanes: left.lanes.map((value) => roundHalf(op(value ?? 0))),
+      };
+    }
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
     const addend = name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat"
       ? valueAsCudaVector(evalExpression(expression.args[2]!, context), "half2")
@@ -3606,7 +3614,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
 }
 
 function isHalf2Intrinsic(name: string | undefined): boolean {
-  return name === "__hadd2" ||
+  return isHalf2UnaryIntrinsic(name) ||
+    name === "__hadd2" ||
     name === "__hadd2_rn" ||
     name === "__hadd2_sat" ||
     name === "__hsub2" ||
@@ -3620,6 +3629,17 @@ function isHalf2Intrinsic(name: string | undefined): boolean {
     name === "__hfma2_sat" ||
     name === "__hmin2" ||
     name === "__hmax2";
+}
+
+function isHalf2UnaryIntrinsic(name: string | undefined): boolean {
+  return name === "__habs2" ||
+    name === "__hceil2" ||
+    name === "__hfloor2" ||
+    name === "__hneg2" ||
+    name === "__hrcp2" ||
+    name === "__hrsqrt2" ||
+    name === "__hsqrt2" ||
+    name === "__htrunc2";
 }
 
 function signedAverage(xValue: number, yValue: number): number {
@@ -3704,6 +3724,29 @@ function half2IntrinsicOperator(name: string | undefined): (left: number, right:
       return Math.max;
     default:
       throw compilerFailure(`unsupported half2 intrinsic '${name ?? "<expr>"}'`);
+  }
+}
+
+function half2UnaryIntrinsicOperator(name: string | undefined): (value: number) => number {
+  switch (name) {
+    case "__habs2":
+      return Math.abs;
+    case "__hceil2":
+      return Math.ceil;
+    case "__hfloor2":
+      return Math.floor;
+    case "__hneg2":
+      return (value) => -value;
+    case "__hrcp2":
+      return (value) => 1 / value;
+    case "__hrsqrt2":
+      return (value) => 1 / Math.sqrt(value);
+    case "__hsqrt2":
+      return Math.sqrt;
+    case "__htrunc2":
+      return Math.trunc;
+    default:
+      throw compilerFailure(`unsupported half2 unary intrinsic '${name ?? "<expr>"}'`);
   }
 }
 

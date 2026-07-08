@@ -107,6 +107,7 @@ const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 const SEMANTIC_FP8_CALLS = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
+  "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
   "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2",
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
@@ -1729,6 +1730,10 @@ function semanticWgslHalf2CallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const name = expression.callee.name;
   if (!SEMANTIC_HALF2_VECTOR_CALLS.has(name) && !SEMANTIC_HALF2_SCALAR_CALLS.has(name)) return false;
+  if (isSemanticHalf2UnaryCall(name)) {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir);
+  }
   if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
   }
@@ -4493,6 +4498,11 @@ function emitSemanticHalf2Call(
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL half2 call requires symbol callee", expression.span);
   const name = expression.callee.name;
   const emitHalf2 = (arg: SemanticExpression): string => emitSemanticExpression(arg, ir, names, options, textureSpecializations);
+  if (isSemanticHalf2UnaryCall(name)) {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
+    return emitSemanticHalf2UnaryCall(name, emitHalf2(arg));
+  }
   if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${name} expects two half2 operands`, expression.span);
@@ -4549,6 +4559,31 @@ function emitSemanticHalf2Call(
     return `vec2<f16>(${emitSemanticExpressionAs(left, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(right, ir, names, "f16", options, textureSpecializations)})`;
   }
   throw semanticWgslError(`semantic WGSL does not support half2 call '${name}'`, expression.span);
+}
+
+function isSemanticHalf2UnaryCall(name: string): boolean {
+  return name === "__habs2" ||
+    name === "__hceil2" ||
+    name === "__hfloor2" ||
+    name === "__hneg2" ||
+    name === "__hrcp2" ||
+    name === "__hrsqrt2" ||
+    name === "__hsqrt2" ||
+    name === "__htrunc2";
+}
+
+function emitSemanticHalf2UnaryCall(name: string, value: string): string {
+  switch (name) {
+    case "__habs2": return `abs(${value})`;
+    case "__hceil2": return `vec2<f16>(ceil(vec2<f32>(${value})))`;
+    case "__hfloor2": return `vec2<f16>(floor(vec2<f32>(${value})))`;
+    case "__hneg2": return `(-${value})`;
+    case "__hrcp2": return `vec2<f16>(vec2<f32>(1.0) / vec2<f32>(${value}))`;
+    case "__hrsqrt2": return `vec2<f16>(inverseSqrt(vec2<f32>(${value})))`;
+    case "__hsqrt2": return `vec2<f16>(sqrt(vec2<f32>(${value})))`;
+    case "__htrunc2": return `vec2<f16>(trunc(vec2<f32>(${value})))`;
+    default: return value;
+  }
 }
 
 function emitSemanticBf162Call(

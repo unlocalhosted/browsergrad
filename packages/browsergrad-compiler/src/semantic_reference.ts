@@ -126,6 +126,7 @@ const SEMANTIC_MATH_CALLS = new Set([
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
+  "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
   "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2",
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
@@ -843,6 +844,10 @@ function semanticReferenceHalf2CallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const name = expression.callee.name;
   if (!SEMANTIC_HALF2_VECTOR_CALLS.has(name) && !SEMANTIC_HALF2_SCALAR_CALLS.has(name)) return false;
+  if (isSemanticHalf2UnaryCall(name)) {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled);
+  }
   if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
@@ -3498,6 +3503,10 @@ function evalSemanticHalf2Call(
     if (!arg) throw semanticReferenceError(`${name} missing scalar operand`, expression.span);
     return evalNumber(arg, context);
   };
+  if (isSemanticHalf2UnaryCall(name)) {
+    const value = half2Arg(0);
+    return value.map((lane) => roundSemanticHalf(evalSemanticHalf2UnaryLane(name, lane)));
+  }
   if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
     const left = half2Arg(0);
     const right = half2Arg(1);
@@ -3543,6 +3552,31 @@ function evalSemanticHalf2Call(
   }
   if (name === "__floats2half2_rn") return [roundSemanticHalf(scalarArg(0)), roundSemanticHalf(scalarArg(1))];
   throw semanticReferenceError(`semantic reference does not support half2 call '${name}'`, expression.span);
+}
+
+function isSemanticHalf2UnaryCall(name: string): boolean {
+  return name === "__habs2" ||
+    name === "__hceil2" ||
+    name === "__hfloor2" ||
+    name === "__hneg2" ||
+    name === "__hrcp2" ||
+    name === "__hrsqrt2" ||
+    name === "__hsqrt2" ||
+    name === "__htrunc2";
+}
+
+function evalSemanticHalf2UnaryLane(name: string, value: number): number {
+  switch (name) {
+    case "__habs2": return Math.abs(value);
+    case "__hceil2": return Math.ceil(value);
+    case "__hfloor2": return Math.floor(value);
+    case "__hneg2": return -value;
+    case "__hrcp2": return 1 / value;
+    case "__hrsqrt2": return 1 / Math.sqrt(value);
+    case "__hsqrt2": return Math.sqrt(value);
+    case "__htrunc2": return Math.trunc(value);
+    default: return value;
+  }
 }
 
 function evalSemanticBf162Call(

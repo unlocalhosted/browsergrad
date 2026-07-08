@@ -2482,6 +2482,41 @@ __global__ void halfUnary(half* x) {
     expect([...actual.buffers.x as Float32Array]).toEqual([1.5, 2, 1, -1, 0.5, 0.5, 2]);
   });
 
+  it("runs half2 unary math aliases through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void half2Unary(half2* x, half2* out) {
+  if (threadIdx.x < 1) {
+    half2 signedPair = x[0];
+    half2 positivePair = x[1];
+    out[0] = __habs2(signedPair);
+    out[1] = __hceil2(signedPair);
+    out[2] = __hfloor2(signedPair);
+    out[3] = __hneg2(signedPair);
+    out[4] = __hrcp2(positivePair);
+    out[5] = __hrsqrt2(positivePair);
+    out[6] = __hsqrt2(positivePair);
+    out[7] = __htrunc2(signedPair);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      f16Mode: "f32",
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        x: new Float32Array([-1.5, 1.25, 4, 16]),
+        out: new Float32Array(16),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...actual.buffers.out as Float32Array]).toEqual([1.5, 1.25, -1, 2, -2, 1, 1.5, -1.25, 0.25, 0.0625, 0.5, 0.25, 2, 4, -1, 1]);
+  });
+
   it("updates prepared half scalar uniforms in f32 compatibility mode", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

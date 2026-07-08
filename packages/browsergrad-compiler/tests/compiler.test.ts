@@ -10131,6 +10131,41 @@ __global__ void halfSat(const half *x, const half2 *v, half *out, half2 *vecOut)
     expect(Array.from(semanticResult.buffers.vecOut as Iterable<number>)).toEqual([1, 1, 0, 0.75, 1, 0.1875, 0.5, 1]);
   });
 
+  it("lowers CUDA half2 unary math aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half2Unary(const half2 *input, half2 *out) {
+  half2 signedPair = input[0];
+  half2 positivePair = input[1];
+  out[0] = __habs2(signedPair);
+  out[1] = __hceil2(signedPair);
+  out[2] = __hfloor2(signedPair);
+  out[3] = __hneg2(signedPair);
+  out[4] = __hrcp2(positivePair);
+  out[5] = __hrsqrt2(positivePair);
+  out[6] = __hsqrt2(positivePair);
+  out[7] = __htrunc2(signedPair);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        input: createWgslFloat16Array([-1.5, 1.25, 4, 16]),
+        out: createWgslFloat16Array(16),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const expected = [1.5, 1.25, -1, 2, -2, 1, 1.5, -1.25, 0.25, 0.0625, 0.5, 0.25, 2, 4, -1, 1];
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("sqrt(vec2<f32>");
+    expect(compiled.wgsl).toContain("trunc(vec2<f32>");
+    expect(Array.from(result.buffers.out as Iterable<number>)).toEqual(expected);
+    expect(Array.from(semanticResult.buffers.out as Iterable<number>)).toEqual(expected);
+  });
+
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void intrinsic_pack(half2 *h, float2 *f, float *out, uint *bits) {
