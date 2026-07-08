@@ -215,7 +215,7 @@ export function emitPointerStorageRead(
     const storageScalar = atomicStorageScalarType(param.valueType);
     const bitcastType = bitcastStorageViewType(storageScalar, viewType);
     const loaded = `atomicLoad(&${access})`;
-    if (storageScalar === "float" || storageScalar === "double") {
+    if (storageScalar === "float" || storageScalar === "double" || storageScalar === "bf16") {
       if (viewType === "uint") return loaded;
       if (viewType === "int") return `bitcast<i32>(${loaded})`;
       return `bitcast<f32>(${loaded})`;
@@ -255,7 +255,7 @@ export function emitPointerStorageWrite(
     ? `${access} = bitcast<${bitcastType}>(${value})`
     : `${access} = ${value}`;
   const storageScalar = atomicStorageScalarType(param.valueType);
-  if (storageScalar === "float" || storageScalar === "double") {
+  if (storageScalar === "float" || storageScalar === "double" || storageScalar === "bf16") {
     return `atomicStore(&${access}, ${emitStorageCarrierAsU32(value, viewType)})`;
   }
   const atomicBitcastType = bitcastStorageViewType(viewType, storageScalar);
@@ -288,7 +288,7 @@ export function emitDeviceGlobalPointerRead(
     const storageScalar = atomicStorageScalarType(global.valueType);
     const bitcastType = bitcastStorageViewType(storageScalar, viewType);
     const loaded = `atomicLoad(&${access})`;
-    if (storageScalar === "float" || storageScalar === "double") {
+    if (storageScalar === "float" || storageScalar === "double" || storageScalar === "bf16") {
       if (viewType === "uint") return loaded;
       if (viewType === "int") return `bitcast<i32>(${loaded})`;
       return `bitcast<f32>(${loaded})`;
@@ -325,7 +325,7 @@ export function emitDeviceGlobalPointerWrite(
     ? `${access} = bitcast<${bitcastType}>(${value})`
     : `${access} = ${value}`;
   const storageScalar = atomicStorageScalarType(global.valueType);
-  if (storageScalar === "float" || storageScalar === "double") return `atomicStore(&${access}, ${emitStorageCarrierAsU32(value, viewType)})`;
+  if (storageScalar === "float" || storageScalar === "double" || storageScalar === "bf16") return `atomicStore(&${access}, ${emitStorageCarrierAsU32(value, viewType)})`;
   const atomicBitcastType = bitcastStorageViewType(viewType, storageScalar);
   return storageScalar !== viewType && atomicBitcastType
     ? `atomicStore(&${access}, bitcast<${atomicBitcastType}>(${value}))`
@@ -371,7 +371,7 @@ export function emitSharedPointerRead(
     const storageScalar = atomicStorageScalarType(shared.valueType);
     const bitcastType = bitcastStorageViewType(storageScalar, viewType);
     const loaded = `atomicLoad(&${access})`;
-    if (storageScalar === "float" || storageScalar === "double") {
+    if (storageScalar === "float" || storageScalar === "double" || storageScalar === "bf16") {
       if (viewType === "uint") return loaded;
       if (viewType === "int") return `bitcast<i32>(${loaded})`;
       return `bitcast<f32>(${loaded})`;
@@ -406,7 +406,7 @@ export function emitSharedPointerWrite(
     ? `${access} = bitcast<${bitcastType}>(${value})`
     : `${access} = ${value}`;
   const storageScalar = atomicStorageScalarType(shared.valueType);
-  if (storageScalar === "float" || storageScalar === "double") {
+  if (storageScalar === "float" || storageScalar === "double" || storageScalar === "bf16") {
     return `atomicStore(&${access}, ${emitStorageCarrierAsU32(value, viewType)})`;
   }
   const atomicBitcastType = bitcastStorageViewType(viewType, storageScalar);

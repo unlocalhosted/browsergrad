@@ -79,8 +79,20 @@ export function deviceGlobalStorageElementType(global: CudaLiteDeviceGlobal, ir:
 
 function atomicStorageElementType(valueType: CudaLiteScalarType): string {
   const scalar = cudaVectorScalarType(valueType) ?? valueType;
-  if (scalar === "float" || scalar === "double") return "atomic<u32>";
+  if (scalar === "float" || scalar === "double" || scalar === "bf16") return "atomic<u32>";
   return `atomic<${wgslScalar(scalar)}>`;
+}
+
+export function usesBfloatAtomicAdd(ir: KernelIrModule): boolean {
+  return hasAtomicStorageBfloat(ir) &&
+    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
+}
+
+export function usesSharedBfloatAtomicAdd(ir: KernelIrModule): boolean {
+  return hasAtomicSharedBfloat(ir) &&
+    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
 }
 
 export function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
@@ -138,6 +150,19 @@ function hasAtomicSharedFloat(ir: KernelIrModule): boolean {
 function hasAtomicStorageFloat(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && isFloatAtomicStorageType(param.valueType) && ir.atomicParams.includes(param.name)) ||
     ir.deviceGlobals.some((global) => isFloatAtomicStorageType(global.valueType) && ir.atomicDeviceGlobals.includes(global.name));
+}
+
+function hasAtomicSharedBfloat(ir: KernelIrModule): boolean {
+  return ir.sharedDeclarations.some((shared) => isBfloatAtomicStorageType(shared.valueType) && ir.atomicShared.includes(shared.name));
+}
+
+function hasAtomicStorageBfloat(ir: KernelIrModule): boolean {
+  return ir.params.some((param) => param.pointer && isBfloatAtomicStorageType(param.valueType) && ir.atomicParams.includes(param.name)) ||
+    ir.deviceGlobals.some((global) => isBfloatAtomicStorageType(global.valueType) && ir.atomicDeviceGlobals.includes(global.name));
+}
+
+function isBfloatAtomicStorageType(valueType: CudaLiteScalarType): boolean {
+  return (cudaVectorScalarType(valueType) ?? valueType) === "bf16";
 }
 
 function isFloatAtomicStorageType(valueType: CudaLiteScalarType): boolean {

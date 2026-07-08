@@ -3536,12 +3536,12 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       if (mode === "value" && param?.valueType === "bool") return `(${access} != 0u)`;
       if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
         const loaded = `atomicLoad(&${access})`;
-        return param.valueType === "float" || param.valueType === "double" ? `bitcast<f32>(${loaded})` : loaded;
+        return param.valueType === "float" || param.valueType === "double" || param.valueType === "bf16" ? `bitcast<f32>(${loaded})` : loaded;
       }
       if (mode === "value" && root && context.isAtomicShared(root)) {
         const shared = sharedDeclarationFor(root, context);
         const loaded = `atomicLoad(&${access})`;
-        return shared?.valueType === "float" || shared?.valueType === "double" ? `bitcast<f32>(${loaded})` : loaded;
+        return shared?.valueType === "float" || shared?.valueType === "double" || shared?.valueType === "bf16" ? `bitcast<f32>(${loaded})` : loaded;
       }
       return access;
     }
@@ -5497,7 +5497,7 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
       const access = `${context.nameFor(expression.name)}[${index}]`;
       if (context.ir.atomicParams.includes(param.name)) {
         const loaded = `atomicLoad(&${access})`;
-        return param.valueType === "float" || param.valueType === "double" ? `bitcast<f32>(${loaded})` : loaded;
+        return param.valueType === "float" || param.valueType === "double" || param.valueType === "bf16" ? `bitcast<f32>(${loaded})` : loaded;
       }
       return emitPointerStorageRead(param, index, context.ir, context);
     }
@@ -7475,7 +7475,10 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
     const value = emitExpression(expression.right, context);
     const target = emitExpression(expression.left, context, "lvalue");
     const shared = sharedDeclarationFor(root, context);
-    if (shared?.valueType === "float" || shared?.valueType === "double") {
+    if (shared?.valueType === "bf16") {
+      if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
+      if (expression.operator === "+=") return `bg_atomicAdd_bf16_workgroup(&${target}, ${value})`;
+    } else if (shared?.valueType === "float" || shared?.valueType === "double") {
       if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
       if (expression.operator === "+=") return `bg_atomicAdd_f32_workgroup(&${target}, ${value})`;
       if (expression.operator === "-=") return `bg_atomicSub_f32_workgroup(&${target}, ${value})`;
@@ -7488,7 +7491,10 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (param && context.ir.atomicParams.includes(param.name)) {
     const value = emitExpression(expression.right, context);
     const target = emitExpression(expression.left, context, "lvalue");
-    if (param.valueType === "float" || param.valueType === "double") {
+    if (param.valueType === "bf16") {
+      if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
+      if (expression.operator === "+=") return `bg_atomicAdd_bf16(&${target}, ${value})`;
+    } else if (param.valueType === "float" || param.valueType === "double") {
       if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
       if (expression.operator === "+=") return `bg_atomicAdd_f32(&${target}, ${value})`;
       if (expression.operator === "-=") return `bg_atomicSub_f32(&${target}, ${value})`;
@@ -7500,7 +7506,10 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (global && context.ir.atomicDeviceGlobals.includes(global.name)) {
     const value = emitExpression(expression.right, context);
     const target = emitExpression(expression.left, context, "lvalue");
-    if (global.valueType === "float" || global.valueType === "double") {
+    if (global.valueType === "bf16") {
+      if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
+      if (expression.operator === "+=") return `bg_atomicAdd_bf16(&${target}, ${value})`;
+    } else if (global.valueType === "float" || global.valueType === "double") {
       if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
       if (expression.operator === "+=") return `bg_atomicAdd_f32(&${target}, ${value})`;
       if (expression.operator === "-=") return `bg_atomicSub_f32(&${target}, ${value})`;
@@ -7566,7 +7575,7 @@ function emitDirectStorageScalarAssignment(
     const current = emitExpressionAsStorageElementValueType(expression.left, valueType, context);
     const right = emitExpressionAsStorageElementValueType(expression.right, valueType, context);
     if ((param && context.ir.atomicParams.includes(param.name)) || (global && context.ir.atomicDeviceGlobals.includes(global.name))) {
-      const atomicRight = valueType === "float" || valueType === "double"
+      const atomicRight = valueType === "float" || valueType === "double" || valueType === "bf16"
         ? emitStorageCarrierAsU32(right, valueType)
         : right;
       if (expression.operator === "=") return `atomicStore(&${target}, ${atomicRight})`;
@@ -7574,7 +7583,7 @@ function emitDirectStorageScalarAssignment(
       const value = op === "<<" || op === ">>"
         ? `(${current} ${op} ${emitExpressionAsWgslScalar(expression.right, "u32", context)})`
         : `(${current} ${op} ${right})`;
-      const atomicValue = valueType === "float" || valueType === "double"
+      const atomicValue = valueType === "float" || valueType === "double" || valueType === "bf16"
         ? emitStorageCarrierAsU32(value, valueType)
         : value;
       return `atomicStore(&${target}, ${atomicValue})`;

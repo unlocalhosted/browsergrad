@@ -6,6 +6,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectKernelLaunchCallees } from "./ast_queries.js";
+import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
 import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
@@ -3030,7 +3031,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     return { kind: "pool-pointer", poolName, byteOffset: oldOffset };
   }
   if (name === "atomicAdd" || name === "atomicAdd_system") {
-    return evalAtomicReadModifyWrite(expression, context, (current, value) => current + value);
+    return evalAtomicReadModifyWrite(expression, context, (current, value, lvalue) =>
+      lvalue.valueType === "bf16" ? roundFloat32ToBfloat16(current + value, "rn") : current + value
+    );
   }
   if (name === "atomicSub" || name === "atomicSub_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current - value);
@@ -4740,14 +4743,14 @@ function cooperativeGroupArgumentValue(
 function evalAtomicReadModifyWrite(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: ThreadContext,
-  op: (current: number, value: number) => number,
+  op: (current: number, value: number, lvalue: LValue) => number,
 ): number {
   const first = expression.args[0];
   if (!first) throw compilerFailure("atomic operation expects target");
   const lvalue = resolveAtomicTarget(first, context);
   const current = valueAsNumber(readLValue(lvalue, context), lvalue.name);
   const value = evalNumber(expression.args[1]!, context);
-  writeLValue(lvalue, op(current, value), context);
+  writeLValue(lvalue, op(current, value, lvalue), context);
   return current;
 }
 

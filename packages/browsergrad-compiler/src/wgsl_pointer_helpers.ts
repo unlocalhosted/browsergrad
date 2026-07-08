@@ -6,6 +6,7 @@ import {
   isCudaVectorType,
 } from "./vector_types.js";
 import {
+  bfloatAtomicAddHelperName,
   floatAtomicHelperName,
   intViewAtomicCasHelperName,
   intViewAtomicHelperName,
@@ -457,8 +458,8 @@ function pointerHelperCanonicalType(type: CudaLiteScalarType): CudaLiteScalarTyp
   return type === "double" ? "float" : type;
 }
 
-export function isDevicePointerAtomicAddType(type: CudaLiteScalarType): type is "float" | "double" | "int" | "uint" {
-  return type === "float" || type === "double" || type === "int" || type === "uint";
+export function isDevicePointerAtomicAddType(type: CudaLiteScalarType): type is "float" | "double" | "bf16" | "int" | "uint" {
+  return type === "float" || type === "double" || type === "bf16" || type === "int" || type === "uint";
 }
 
 export function isDevicePointerAtomicSubType(type: CudaLiteScalarType): type is "float" | "double" | "int" | "uint" {
@@ -541,7 +542,7 @@ function usesDevicePointerAtomicCas(ir: KernelIrModule): boolean {
 }
 
 function emitDevicePointerAtomicAddHelper(
-  type: "float" | "double" | "int" | "uint",
+  type: "float" | "double" | "bf16" | "int" | "uint",
   ir: KernelIrModule,
   context: WgslPointerHelperContext,
 ): string[] {
@@ -829,7 +830,8 @@ function emitDevicePointerAtomicCasHelper(type: "float" | "double" | "int" | "ui
   return lines;
 }
 
-function emitAtomicAddAtAddress(type: "float" | "double" | "int" | "uint", target: PointerHelperAtomicTarget, value: string): string {
+function emitAtomicAddAtAddress(type: "float" | "double" | "bf16" | "int" | "uint", target: PointerHelperAtomicTarget, value: string): string {
+  if (type === "bf16") return `${bfloatAtomicAddHelperName(target.addressSpace)}(${target.address}, ${value})`;
   if (type === "float" || type === "double") return `${floatAtomicHelperName("Add", target.addressSpace)}(${target.address}, ${value})`;
   if (usesIntViewAtomicHelper(type, target)) return `${intViewAtomicHelperName("Add", target.addressSpace)}(${target.address}, ${value})`;
   return `atomicAdd(${target.address}, ${value})`;
@@ -931,6 +933,7 @@ function isPointerHelperPackedByteAtomicStorage(helperType: CudaLiteScalarType, 
 
 function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
   if (helperType === storageType) return true;
+  if (helperType === "bf16" && storageType === "bf16") return true;
   if (helperType === "float" && storageType === "double") return true;
   if (isCudaVectorType(storageType) && helperType === cudaVectorScalarType(storageType)) return true;
   return isCudaVectorType(helperType) && cudaVectorScalarType(helperType) === storageType;
@@ -968,7 +971,7 @@ export function pointerWriteHelperName(type: CudaLiteScalarType): string {
   return `bg_ptr_write_${pointerHelperTypeName(type)}`;
 }
 
-export function pointerAtomicAddHelperName(type: "float" | "double" | "int" | "uint"): string {
+export function pointerAtomicAddHelperName(type: "float" | "double" | "bf16" | "int" | "uint"): string {
   return `bg_ptr_atomicAdd_${pointerHelperTypeName(type)}`;
 }
 

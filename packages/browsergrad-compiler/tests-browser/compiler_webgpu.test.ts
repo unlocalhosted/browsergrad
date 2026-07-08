@@ -1668,6 +1668,36 @@ __global__ void atomic_sum(const float* input, float* result) {
     expect([...actual.buffers.result as Float32Array][0]).toBeCloseTo(13.75);
   });
 
+  it("runs compiled bf16 atomicAdd through native WebGPU CAS storage", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void bf16_atomic_sum(const __nv_bfloat16 *input, __nv_bfloat16 *result) {
+  int idx = threadIdx.x;
+  __shared__ __nv_bfloat16 shared[1];
+  if (idx == 0) {
+    result[0] = __float2bfloat16(1.5f);
+  }
+  __syncthreads();
+  if (idx < 2) {
+    atomicAdd(&result[0], input[idx]);
+    atomicAdd(&shared[0], input[idx]);
+  }
+  __syncthreads();
+  if (idx == 0) { result[1] = shared[0]; }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        input: new Float32Array([0.5, 0.25]),
+        result: new Float32Array([0, 0]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.result as Float32Array]).toEqual([2.25, 0.75]);
+  });
+
   it("runs compiled float atomicExch through WebGPU bitcast atomics", async () => {
     if (!deviceCheck.available) return;
     const source = `

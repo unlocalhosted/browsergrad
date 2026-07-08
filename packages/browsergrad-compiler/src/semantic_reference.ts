@@ -672,7 +672,8 @@ function semanticReferenceAtomicSupported(
   if (
     operation.target.valueType !== "uint" &&
     operation.target.valueType !== "int" &&
-    !(operation.target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp))
+    !(operation.target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp)) &&
+    !(operation.target.valueType === "bf16" && atomicOp === "add")
   ) return false;
   if (!semanticReferenceAtomicTargetRootSupported(operation.target, compiled)) {
     return false;
@@ -1041,6 +1042,7 @@ function semanticReferencePointerFunctionOperationSupported(
   operation: SemanticKernelIrOperation,
   pointerParams: ReadonlySet<string>,
 ): boolean {
+  if (operation.kind === "atomic") return operation.target !== undefined && pointerParams.has(operation.target.base);
   if (operation.kind === "store") return pointerParams.has(operation.target.base) && operation.target.fields.length > 0;
   if (operation.kind === "return" && operation.value) return semanticReferencePointerFunctionExpressionSupported(operation.value, pointerParams);
   if (operation.kind === "expression" && operation.expression.kind === "update") {
@@ -1072,7 +1074,8 @@ function semanticReferenceAtomicCallSupported(
   if (
     target.valueType !== "uint" &&
     target.valueType !== "int" &&
-    !(target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp))
+    !(target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp)) &&
+    !(target.valueType === "bf16" && atomicOp === "add")
   ) return false;
   if (!semanticReferenceAtomicTargetRootSupported(target, compiled)) {
     return false;
@@ -1802,6 +1805,11 @@ function execSemanticCall(
     execSemanticVoidFunctionCall(operation, context);
     return;
   }
+  const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  if (fn?.returnType === "void" && operation.args.length === fn.params.length) {
+    runSemanticFunction(fn, operation.args, context, operation.span);
+    return;
+  }
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) {
     execSemanticLocalArrayFill(operation, context);
     return;
@@ -2006,7 +2014,7 @@ function semanticAtomicValue(
   context: SemanticReferenceContext,
 ): number {
   switch (atomicOp) {
-    case "add": return oldValue + value;
+    case "add": return semanticAtomicTargetType(operation) === "bf16" ? roundFloat32ToBfloat16(oldValue + value, "rn") : oldValue + value;
     case "sub": return oldValue - value;
     case "min": return Math.min(oldValue, value);
     case "max": return Math.max(oldValue, value);
@@ -2031,6 +2039,14 @@ function semanticAtomicValue(
       return matches ? evalNumber(replacement, context) : oldValue;
     }
   }
+}
+
+function semanticAtomicTargetType(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }> | Extract<SemanticExpression, { readonly kind: "call" }>,
+): CudaLiteScalarType | undefined {
+  return operation.kind === "atomic"
+    ? operation.target?.valueType
+    : semanticAtomicCallTarget(operation)?.valueType;
 }
 
 const semanticF32Scratch = new Float32Array(1);

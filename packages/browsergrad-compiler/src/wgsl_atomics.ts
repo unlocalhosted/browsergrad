@@ -1,6 +1,7 @@
 import { rootIdentifier } from "./analyzer.js";
 import { cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import {
+  bfloatAtomicAddHelperName,
   floatAtomicHelperName,
   intViewAtomicCasHelperName,
   intViewAtomicHelperName,
@@ -95,6 +96,9 @@ export function emitAtomicCall(
     }
     if (wgslName === "atomicDec") {
       return `${integerAtomicLoopHelperName("Dec", atomicTarget)}(${atomicTarget.address}, u32(${valueExpression}))`;
+    }
+    if (wgslName === "atomicAdd" && atomicTarget.valueType === "bf16") {
+      return `${bfloatAtomicAddHelperName(atomicTarget.addressSpace)}(${atomicTarget.address}, ${valueExpression})`;
     }
     if (wgslName === "atomicAdd" && (atomicTarget.valueType === "float" || atomicTarget.valueType === "double")) {
       return `${floatAtomicHelperName("Add", atomicTarget.addressSpace)}(${atomicTarget.address}, ${valueExpression})`;

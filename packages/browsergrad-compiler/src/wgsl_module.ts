@@ -15,6 +15,7 @@ import {
   irUsesSubgroups,
   storageElementType,
   usesAtomicIncDec,
+  usesBfloatAtomicAdd,
   usesBfloatConversionIntrinsics,
   usesCuComplexRobustMath,
   usesCurand,
@@ -33,6 +34,7 @@ import {
   usesRoundingMathIntrinsics,
   usesIntViewAtomicStorage,
   usesSharedFloatAtomicAdd,
+  usesSharedBfloatAtomicAdd,
   usesSharedFloatAtomicMax,
   usesSharedFloatAtomicMin,
   usesSharedFloatAtomicSub,
@@ -40,7 +42,7 @@ import {
   usesSpecialFloatNamedConstants,
   wgslUniformScalar,
 } from "./wgsl_feature_usage.js";
-import { emitIntegerAtomicLoopHelpers, emitFloatAtomicAddHelper, emitFloatAtomicMaxHelper, emitFloatAtomicMinHelper, emitFloatAtomicSubHelper, emitIntViewAtomicHelpers } from "./wgsl_atomic_helpers.js";
+import { emitBfloatAtomicAddHelper, emitIntegerAtomicLoopHelpers, emitFloatAtomicAddHelper, emitFloatAtomicMaxHelper, emitFloatAtomicMinHelper, emitFloatAtomicSubHelper, emitIntViewAtomicHelpers } from "./wgsl_atomic_helpers.js";
 import { UNIFORM_PARAMS_NAME, type EmitContext } from "./wgsl_context.js";
 import { wgslScalar } from "./wgsl_storage.js";
 import {
@@ -180,6 +182,8 @@ function appendKernelModuleSupportHelpers(
   for (const pool of ir.params.filter(isDevicePoolParam)) lines.push("", ...emitPoolHelper(pool.name, context));
   for (const poolName of context.externalPoolNames) lines.push("", ...emitPoolHelper(poolName, context));
   for (const allocator of context.rawPoolAllocators) lines.push("", ...emitRawPoolHelper(allocator));
+  if (usesBfloatAtomicAdd(ir)) lines.push("", ...emitBfloatAtomicAddHelper("storage"));
+  if (usesSharedBfloatAtomicAdd(ir)) lines.push("", ...emitBfloatAtomicAddHelper("workgroup"));
   if (usesFloatAtomicAdd(ir)) lines.push("", ...emitFloatAtomicAddHelper("storage"));
   if (usesSharedFloatAtomicAdd(ir)) lines.push("", ...emitFloatAtomicAddHelper("workgroup"));
   if (usesFloatAtomicSub(ir)) lines.push("", ...emitFloatAtomicSubHelper("storage"));

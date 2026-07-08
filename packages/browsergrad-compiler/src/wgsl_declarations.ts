@@ -31,13 +31,13 @@ export type WgslExpressionEmitter = (expression: CudaLiteExpression) => string;
 export function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): string {
   if (ir.atomicShared.includes(statement.name) && isCudaVectorType(statement.valueType)) {
     const scalar = cudaVectorScalarType(statement.valueType) ?? "uint";
-    const element = scalar === "float" ? "atomic<u32>" : `atomic<${wgslScalar(scalar)}>`;
+    const element = scalar === "float" || scalar === "bf16" ? "atomic<u32>" : `atomic<${wgslScalar(scalar)}>`;
     const lanes = cudaVectorLaneCount(statement.valueType);
     const total = statement.dimensions.reduce((product, dimension) => product * dimension, 1) * lanes;
     return `array<${element}, ${total}>`;
   }
   let type = ir.atomicShared.includes(statement.name)
-    ? `atomic<${statement.valueType === "float" ? "u32" : wgslScalar(statement.valueType)}>`
+    ? `atomic<${statement.valueType === "float" || statement.valueType === "bf16" ? "u32" : wgslScalar(statement.valueType)}>`
     : wgslScalar(statement.valueType);
   if (statement.valueType === "uchar" && statement.dimensions.length > 0) {
     const totalBytes = statement.dimensions.reduce((product, item) => product * item, 1);

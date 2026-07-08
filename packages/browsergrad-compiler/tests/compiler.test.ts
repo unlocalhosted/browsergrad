@@ -19545,6 +19545,53 @@ __global__ void atomic_sum(double* result) {
     expect([...result.buffers.result as Float32Array]).toEqual([3]);
   });
 
+  it("supports CUDA bf16 atomicAdd through CAS-backed native WebGPU storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16_atomic_sum(const __nv_bfloat16 *input, __nv_bfloat16 *result) {
+  int idx = threadIdx.x;
+  __shared__ __nv_bfloat16 shared[1];
+  if (idx == 0) {
+    result[0] = __float2bfloat16(1.5f);
+  }
+  __syncthreads();
+  if (idx < 2) {
+    atomicAdd(&result[0], input[idx]);
+    atomicAdd(&shared[0], input[idx]);
+  }
+  __syncthreads();
+  if (idx == 0) { result[1] = shared[0]; }
+}`, { workgroupSize: [2, 1, 1] });
+    const reference = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([0.5, 0.25]),
+          result: new Float32Array([0, 0]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const semanticReference = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([0.5, 0.25]),
+          result: new Float32Array([0, 0]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-atomic-f32");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-atomic-target");
+    expect(compiled.wgsl).toContain("var<storage, read_write> result: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("fn bg_atomicAdd_bf16");
+    expect(compiled.wgsl).toContain("fn bg_atomicAdd_bf16_workgroup");
+    expect([...reference.buffers.result as Float32Array]).toEqual([2.25, 0.75]);
+    expect([...semanticReference.buffers.result as Float32Array]).toEqual([2.25, 0.75]);
+  });
+
   it("supports CUDA float atomicExch through u32 bitcasts", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_exchange(float* x, float* out) {

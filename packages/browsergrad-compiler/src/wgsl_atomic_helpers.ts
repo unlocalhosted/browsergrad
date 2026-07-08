@@ -14,6 +14,10 @@ export function floatAtomicHelperName(kind: "Add" | "Sub" | "Min" | "Max", addre
   return addressSpace === "storage" ? `bg_atomic${kind}_f32` : `bg_atomic${kind}_f32_workgroup`;
 }
 
+export function bfloatAtomicAddHelperName(addressSpace: WgslAtomicAddressSpace): string {
+  return addressSpace === "storage" ? "bg_atomicAdd_bf16" : "bg_atomicAdd_bf16_workgroup";
+}
+
 export function integerAtomicLoopHelperName(kind: "Inc" | "Dec", target: WgslIntegerAtomicLoopTarget): string {
   if ((target.storageValueType === "float" || target.storageValueType === "double") && target.valueType === "uint") {
     return `bg_atomic${kind}_${target.addressSpace}_f32_as_u32`;
@@ -69,6 +73,25 @@ export function emitFloatAtomicAddHelper(addressSpace: WgslAtomicAddressSpace): 
     "    let old_value = bitcast<f32>(old_bits);",
     "    let new_bits = bitcast<u32>(old_value + value);",
     "    let result = atomicCompareExchangeWeak(ptr_value, old_bits, new_bits);",
+    "    if (result.exchanged) {",
+    "      return old_value;",
+    "    }",
+    "    old_bits = result.old_value;",
+    "  }",
+    "}",
+  ];
+}
+
+export function emitBfloatAtomicAddHelper(addressSpace: WgslAtomicAddressSpace): string[] {
+  const name = bfloatAtomicAddHelperName(addressSpace);
+  return [
+    `fn ${name}(ptr_value: ${atomicPointerType(addressSpace, "u32")}, value: f32) -> f32 {`,
+    "  var old_bits = atomicLoad(ptr_value);",
+    "  loop {",
+    "    let old_value = bitcast<f32>(old_bits);",
+    "    let sum_bits = bitcast<u32>(old_value + value);",
+    "    let rounded_bits = select(((sum_bits + 0x7fffu + ((sum_bits >> 16u) & 1u)) >> 16u) << 16u, sum_bits & 0xffff0000u, (sum_bits & 0x7f800000u) == 0x7f800000u);",
+    "    let result = atomicCompareExchangeWeak(ptr_value, old_bits, rounded_bits);",
     "    if (result.exchanged) {",
     "      return old_value;",
     "    }",
