@@ -13575,6 +13575,21 @@ __global__ void thread_aliases(uint *limits, int *status) {
     expect([...result.buffers.status as Int32Array]).toEqual([0, 0]);
   });
 
+  it("rejects nested CUDA runtime query side effects before lowering can drop writes", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__global__ void nested_runtime_query(uint *out) {
+  if (threadIdx.x < 1) {
+    size_t limit = 99u;
+    out[0] = (uint)cudaThreadGetLimit(&limit, cudaLimitPrintfFifoSize) + limit;
+  }
+}`));
+
+    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
+      code: "side-effect-expression",
+      message: expect.stringContaining("side-effecting CUDA runtime calls"),
+    }));
+  });
+
   it("models cudaMemGetInfo over size_t outputs", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void runtime_mem_info(uint *out) {

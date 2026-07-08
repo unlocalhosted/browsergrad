@@ -515,7 +515,7 @@ export function analyzeCudaLite(
           }
             if (statement.init) {
               const allowPointerInitializerAssignment = statement.pointer && statement.init.kind === "assignment";
-              validateSideEffectPlacement(statement.init, allowPointerInitializerAssignment, diagnostics, statement.init.kind === "sequence");
+              validateSideEffectPlacement(statement.init, allowPointerInitializerAssignment, diagnostics, statement.init.kind === "sequence", statement.init.kind === "call");
             }
           break;
         case "dim3":
@@ -583,7 +583,7 @@ export function analyzeCudaLite(
             }
             break;
           } else {
-            validateSideEffectPlacement(statement.expression, true, diagnostics);
+            validateSideEffectPlacement(statement.expression, true, diagnostics, false, expressionIsCall(statement.expression));
             validateExpressionStatement(statement.expression, params, guardDepth, diagnostics);
           }
           walkExpression(statement.expression, scope);
@@ -614,14 +614,14 @@ export function analyzeCudaLite(
               if (statement.init.pointer) validatePointerInitializerExpression(statement.init.init, loopScope, diagnostics, walkExpression);
               else walkExpression(statement.init.init, loopScope);
             }
-            if (statement.init.init) validateSideEffectPlacement(statement.init.init, false, diagnostics);
+            if (statement.init.init) validateSideEffectPlacement(statement.init.init, false, diagnostics, statement.init.init.kind === "sequence", statement.init.init.kind === "call");
           } else if (statement.init) {
-            validateSideEffectPlacement(statement.init, true, diagnostics);
+            validateSideEffectPlacement(statement.init, true, diagnostics, false, statement.init.kind === "call");
             walkExpression(statement.init, loopScope);
           }
           if (statement.condition) validateSideEffectPlacement(statement.condition, false, diagnostics);
           if (statement.condition) walkExpression(statement.condition, loopScope);
-          if (statement.update) validateSideEffectPlacement(statement.update, true, diagnostics);
+          if (statement.update) validateSideEffectPlacement(statement.update, true, diagnostics, false, statement.update.kind === "call");
           if (statement.update) walkExpression(statement.update, loopScope);
           const divergent = statement.condition ? expressionIsDivergent(statement.condition, params) : false;
           walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, loopNames);
@@ -4706,9 +4706,10 @@ function validateSideEffectPlacement(
   allowRootSideEffect: boolean,
   diagnostics: CudaLiteDiagnostic[],
   allowRootSequenceSideEffects = false,
+  allowRootCallSideEffects = false,
 ): void {
   if (allowRootSequenceSideEffects && expression.kind === "sequence") {
-    validateSideEffectPlacement(expression, true, diagnostics);
+    validateSideEffectPlacement(expression, true, diagnostics, false, allowRootCallSideEffects);
     return;
   }
   if (allowRootSideEffect && expression.kind === "assignment") {
@@ -4720,6 +4721,13 @@ function validateSideEffectPlacement(
       diagnostics.push(error(
         "side-effect-expression",
         "assignments and ++/-- must be standalone statements or for-loop clauses",
+        node.span,
+      ));
+    }
+    if (node.kind === "call" && isSideEffectingCudaRuntimeCallName(expressionName(node.callee)) && !(allowRootCallSideEffects && root)) {
+      diagnostics.push(error(
+        "side-effect-expression",
+        "side-effecting CUDA runtime calls must be standalone statements, variable initializers, assignment RHS, or for-loop clauses",
         node.span,
       ));
     }
@@ -4750,11 +4758,53 @@ function validateAssignmentStatementSideEffects(
     visitNoSideEffect(cursor.left);
     if (cursor.right.kind !== "assignment") {
       if (cursor.right.kind === "sequence") validateSideEffectPlacement(cursor.right, true, diagnostics);
-      else visitNoSideEffect(cursor.right);
+      else validateSideEffectPlacement(cursor.right, false, diagnostics, false, cursor.right.kind === "call");
       return;
     }
     cursor = cursor.right;
   }
+}
+
+function expressionIsCall(expression: CudaLiteExpression): boolean {
+  return expression.kind === "call";
+}
+
+function isSideEffectingCudaRuntimeCallName(name: string | undefined): boolean {
+  return name !== undefined && (
+    isCudaIntegerRuntimeQueryCall(name) ||
+    name === "cudaEventElapsedTime" ||
+    name === "cudaGraphSetConditional" ||
+    isCudaRuntimeCopyCall(name) ||
+    isHostManagedRuntimeNoopCall(name)
+  );
+}
+
+function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
+  return callName === "cudaGetDevice" ||
+    callName === "cudaGetDeviceCount" ||
+    callName === "cudaDeviceGetAttribute" ||
+    callName === "cudaDeviceGetLimit" ||
+    callName === "cudaThreadGetLimit" ||
+    callName === "cudaDeviceCanAccessPeer" ||
+    callName === "cudaGetDeviceFlags" ||
+    callName === "cudaMemGetInfo" ||
+    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    callName === "cudaOccupancyMaxPotentialBlockSize" ||
+    callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    callName === "cudaDeviceGetCacheConfig" ||
+    callName === "cudaDeviceGetSharedMemConfig" ||
+    callName === "cudaThreadGetCacheConfig" ||
+    callName === "cudaThreadExchangeStreamCaptureMode" ||
+    callName === "cudaDeviceGetStreamPriorityRange" ||
+    callName === "cudaStreamGetDevice" ||
+    callName === "cudaStreamGetFlags" ||
+    callName === "cudaStreamGetId" ||
+    callName === "cudaStreamGetPriority" ||
+    callName === "cudaStreamIsCapturing" ||
+    callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaRuntimeGetVersion" ||
+    callName === "cudaDriverGetVersion";
 }
 
 function validateBarrierStatement(
