@@ -2683,13 +2683,25 @@ function evalSemanticMathCall(
     case "__habs": return expression.valueType === "bf16"
       ? roundSemanticBfloat16(Math.abs(args[0] ?? 0))
       : roundSemanticHalf(Math.abs(args[0] ?? 0));
-    case "__hceil": return roundSemanticHalf(Math.ceil(args[0] ?? 0));
-    case "__hfloor": return roundSemanticHalf(Math.floor(args[0] ?? 0));
-    case "__hrcp": return roundSemanticHalf(1 / (args[0] ?? 0));
+    case "__hceil": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.ceil(args[0] ?? 0))
+      : roundSemanticHalf(Math.ceil(args[0] ?? 0));
+    case "__hfloor": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.floor(args[0] ?? 0))
+      : roundSemanticHalf(Math.floor(args[0] ?? 0));
+    case "__hrcp": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(1 / (args[0] ?? 0))
+      : roundSemanticHalf(1 / (args[0] ?? 0));
     case "__hrsqrt":
-    case "hrsqrt": return roundSemanticHalf(1 / Math.sqrt(args[0] ?? 0));
-    case "__hsqrt": return roundSemanticHalf(Math.sqrt(args[0] ?? 0));
-    case "__htrunc": return roundSemanticHalf(Math.trunc(args[0] ?? 0));
+    case "hrsqrt": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(1 / Math.sqrt(args[0] ?? 0))
+      : roundSemanticHalf(1 / Math.sqrt(args[0] ?? 0));
+    case "__hsqrt": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.sqrt(args[0] ?? 0))
+      : roundSemanticHalf(Math.sqrt(args[0] ?? 0));
+    case "__htrunc": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.trunc(args[0] ?? 0))
+      : roundSemanticHalf(Math.trunc(args[0] ?? 0));
     case "__hneg": return expression.valueType === "bf16"
       ? roundSemanticBfloat16(-(args[0] ?? 0))
       : roundSemanticHalf(-(args[0] ?? 0));
@@ -2727,7 +2739,9 @@ function evalSemanticMathCall(
     case "__hfma_relu": return expression.valueType === "bf16"
       ? reluSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0))
       : roundSemanticHalf(Math.max((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), 0));
-    case "hexp": return roundSemanticHalf(Math.exp(args[0] ?? 0));
+    case "hexp": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.exp(args[0] ?? 0))
+      : roundSemanticHalf(Math.exp(args[0] ?? 0));
     case "__hmin": return expression.valueType === "bf16"
       ? roundSemanticBfloat16(Math.min(args[0] ?? 0, args[1] ?? 0))
       : roundSemanticHalf(Math.min(args[0] ?? 0, args[1] ?? 0));

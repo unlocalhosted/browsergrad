@@ -18641,6 +18641,8 @@ __global__ void bf16_scalar_ops(const __nv_bfloat16* input, const float* seed, _
   __nv_bfloat16 b = input[1];
   __nv_bfloat16 nanValue = __float2bfloat16(seed[0]);
   __nv_bfloat16 infValue = __float2bfloat16(seed[1]);
+  __nv_bfloat16 c = __float2bfloat16(-1.75f);
+  __nv_bfloat16 d = __float2bfloat16(4.0f);
   output[0] = __hadd(a, b);
   output[1] = __hsub(a, b);
   output[2] = __hmul(a, b);
@@ -18656,6 +18658,15 @@ __global__ void bf16_scalar_ops(const __nv_bfloat16* input, const float* seed, _
   output[12] = __hfma_relu(__float2bfloat16(0.5f), __float2bfloat16(1.0f), __float2bfloat16(-2.0f));
   output[13] = __hmin_nan(nanValue, b);
   output[14] = __hmax_nan(a, nanValue);
+  output[15] = __habs(c);
+  output[16] = __hceil(__float2bfloat16(1.25f));
+  output[17] = __hfloor(__float2bfloat16(1.75f));
+  output[18] = __htrunc(c);
+  output[19] = __hrcp(a);
+  output[20] = __hrsqrt(d);
+  output[21] = __hsqrt(d);
+  output[22] = __hneg(b);
+  output[23] = hexp(__float2bfloat16(0.0f));
   if (__heq(a, __float2bfloat16(2.0f))) { flags[0] = 1u; }
   if (__hne(a, b)) { flags[1] = 1u; }
   if (__hgt(a, b)) { flags[2] = 1u; }
@@ -18675,7 +18686,7 @@ __global__ void bf16_scalar_ops(const __nv_bfloat16* input, const float* seed, _
       buffers: {
         input: new Float32Array([2, 0.5]),
         seed: new Float32Array([Number.NaN, Number.POSITIVE_INFINITY]),
-        output: new Float32Array(15),
+        output: new Float32Array(24),
         flags: new Uint32Array(14),
       },
     };
@@ -18690,7 +18701,7 @@ __global__ void bf16_scalar_ops(const __nv_bfloat16* input, const float* seed, _
         buffers: {
           input: new Float32Array([2, 0.5]),
           seed: new Float32Array([Number.NaN, Number.POSITIVE_INFINITY]),
-          output: new Float32Array(15),
+          output: new Float32Array(24),
           flags: new Uint32Array(14),
         },
       },
@@ -18704,8 +18715,8 @@ __global__ void bf16_scalar_ops(const __nv_bfloat16* input, const float* seed, _
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode(f32((a + b)), 0u)");
     expect(compiled.wgsl).toContain("fma(a, b, bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(1.0), 0u) << 16u))");
-    expect([...result.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2, 2.5, 1, 0, 1, 1, 0, Number.NaN, Number.NaN]);
-    expect([...semanticResult.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2, 2.5, 1, 0, 1, 1, 0, Number.NaN, Number.NaN]);
+    expect([...result.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2, 2.5, 1, 0, 1, 1, 0, Number.NaN, Number.NaN, 1.75, 2, 1, -1, 0.5, 0.5, 2, -0.5, 1]);
+    expect([...semanticResult.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2, 2.5, 1, 0, 1, 1, 0, Number.NaN, Number.NaN, 1.75, 2, 1, -1, 0.5, 0.5, 2, -0.5, 1]);
     expect([...result.buffers.flags as Uint32Array]).toEqual(Array.from({ length: 14 }, () => 1));
     expect([...semanticResult.buffers.flags as Uint32Array]).toEqual(Array.from({ length: 14 }, () => 1));
   });

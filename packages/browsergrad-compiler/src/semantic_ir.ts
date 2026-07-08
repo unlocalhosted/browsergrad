@@ -2587,7 +2587,15 @@ function isBfloat16ToUnsignedIntegerName(name: string): boolean {
 
 function isBfloat16ScalarArithmeticName(name: string): boolean {
   return name === "__habs" ||
+    name === "__hceil" ||
+    name === "__hfloor" ||
+    name === "__hrcp" ||
+    name === "__hrsqrt" ||
+    name === "hrsqrt" ||
+    name === "__hsqrt" ||
+    name === "__htrunc" ||
     name === "__hneg" ||
+    name === "hexp" ||
     name === "__hadd" ||
     name === "__hadd_rn" ||
     name === "__hadd_sat" ||

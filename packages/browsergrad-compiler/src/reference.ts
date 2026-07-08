@@ -3787,7 +3787,15 @@ function evalBfloat16ScalarCall(
   const c = args[2] ?? 0;
   switch (name) {
     case "__habs": return roundBfloat16(Math.abs(a));
+    case "__hceil": return roundBfloat16(Math.ceil(a));
+    case "__hfloor": return roundBfloat16(Math.floor(a));
+    case "__hrcp": return roundBfloat16(1 / a);
+    case "__hrsqrt":
+    case "hrsqrt": return roundBfloat16(1 / Math.sqrt(a));
+    case "__hsqrt": return roundBfloat16(Math.sqrt(a));
+    case "__htrunc": return roundBfloat16(Math.trunc(a));
     case "__hneg": return roundBfloat16(-a);
+    case "hexp": return roundBfloat16(Math.exp(a));
     case "__hadd":
     case "__hadd_rn": return roundBfloat16(a + b);
     case "__hadd_sat": return saturateBfloat16(a + b);

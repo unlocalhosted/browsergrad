@@ -119,7 +119,8 @@ const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
   "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
   "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
   "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
-  "__habs", "__hneg", "__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat",
+  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "hexp",
+  "__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat",
   "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu",
   "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
   "__halves2bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
@@ -5674,6 +5675,13 @@ function emitSemanticMathCall(
     if (expression.valueType === "bf16") {
       const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
       if (wgslCallee === "half_abs") return wgslRoundBfloat16(`abs(${emitted})`);
+      if (wgslCallee === "half_ceil") return wgslRoundBfloat16(`ceil(${emitted})`);
+      if (wgslCallee === "half_floor") return wgslRoundBfloat16(`floor(${emitted})`);
+      if (wgslCallee === "half_rcp") return wgslRoundBfloat16(`(1.0 / ${emitted})`);
+      if (wgslCallee === "half_rsqrt") return wgslRoundBfloat16(`inverseSqrt(${emitted})`);
+      if (wgslCallee === "half_sqrt") return wgslRoundBfloat16(`sqrt(${emitted})`);
+      if (wgslCallee === "half_trunc") return wgslRoundBfloat16(`trunc(${emitted})`);
+      if (wgslCallee === "half_exp") return wgslRoundBfloat16(`exp(${emitted})`);
       if (wgslCallee === "half_neg") return wgslRoundBfloat16(`(-${emitted})`);
     }
     const emitted = emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations);
