@@ -3568,7 +3568,10 @@ function emitExpressionStatement(expression: CudaLiteExpression, context: EmitCo
   const source = emitExpression(expression, context);
   if (expression.kind === "call") {
     const name = expressionName(expression.callee);
-    if (isAtomicCasCallName(name)) return `_ = ${source.replace(/\.old_value$/u, "")}`;
+    if (isAtomicCasCallName(name)) {
+      const floatCas = source.match(/^bitcast<f32>\((atomicCompareExchangeWeak\(.*\))\.old_value\)$/u);
+      return `_ = ${floatCas ? floatCas[1] : source.replace(/\.old_value$/u, "")}`;
+    }
     if (isAtomicExchangeCallName(name)) return `_ = ${source.replace(/^bitcast<f32>\((atomicExchange\(.*\))\)$/u, "$1")}`;
     if (isAtomicReturnCallName(name)) return `_ = ${source}`;
   }

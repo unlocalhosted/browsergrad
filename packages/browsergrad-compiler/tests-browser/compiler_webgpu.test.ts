@@ -1698,13 +1698,15 @@ __global__ void atomic_float_system(float* x, float* out) {
     out[2] = atomicMin_system(&x[0], 2.0f);
     out[3] = atomicMax_system(&x[0], 4.0f);
     out[4] = atomicExch_system(&x[0], 6.0f);
+    out[5] = atomicCAS_system(&x[0], 6.0f, 8.0f);
+    out[6] = atomicCAS_system(&x[0], 6.0f, 9.0f);
   }
 }`;
     const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
     const input = {
       buffers: {
         x: new Float32Array([2]),
-        out: new Float32Array(5),
+        out: new Float32Array(7),
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };

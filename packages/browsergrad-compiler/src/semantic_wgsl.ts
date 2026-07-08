@@ -10,6 +10,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
+import { walkSemanticOperations } from "./semantic_ir.js";
 import type {
   CudaLiteDiagnostic,
   CudaLiteTextureDescriptor,
@@ -1918,7 +1919,11 @@ function semanticWgslAtomicCallSupported(
   if (!semanticWgslMemoryRefSupported(target)) return false;
   if (target.addressSpace === "storage" && target.indices.length !== 1) return false;
   if (target.fields.length > 0) return false;
-  if (target.valueType !== "uint" && target.valueType !== "int") return false;
+  if (
+    target.valueType !== "uint" &&
+    target.valueType !== "int" &&
+    !(target.valueType === "float" && semanticWgslFloatAtomicCallKind(expression.callee.name) !== undefined)
+  ) return false;
   if (!semanticWgslAtomicTargetRootSupported(target, ir)) return false;
   const expectedArgs = expression.callee.name === "atomicCAS" || expression.callee.name === "atomicCAS_system" ? 3 : 2;
   return expression.args.length >= expectedArgs &&
@@ -2773,6 +2778,11 @@ function emitSemanticAtomic(
       const value = emitSemanticExpressionAs(operands[0]!, ir, names, "f32", options, textureSpecializations);
       return `_ = atomicExchange(&${target}, bitcast<u32>(${value}))`;
     }
+    if (floatAtomicKind === "CompareExchange") {
+      const compare = emitSemanticExpressionAs(operands[0]!, ir, names, "f32", options, textureSpecializations);
+      const value = emitSemanticExpressionAs(operands[1]!, ir, names, "f32", options, textureSpecializations);
+      return `_ = atomicCompareExchangeWeak(&${target}, bitcast<u32>(${compare}), bitcast<u32>(${value}))`;
+    }
     const value = emitSemanticExpressionAs(operands[0]!, ir, names, "f32", options, textureSpecializations);
     return `_ = ${floatAtomicHelperName(floatAtomicKind, addressSpace)}(&${target}, ${value})`;
   }
@@ -2782,7 +2792,7 @@ function emitSemanticAtomic(
   return `_ = ${wgslCallee}(&${target}, ${emitted.join(", ")})`;
 }
 
-type SemanticFloatAtomicKind = "Add" | "Sub" | "Min" | "Max" | "Exchange";
+type SemanticFloatAtomicKind = "Add" | "Sub" | "Min" | "Max" | "Exchange" | "CompareExchange";
 
 function semanticWgslFloatAtomicCallKind(callee: string): SemanticFloatAtomicKind | undefined {
   if (callee === "atomicAdd" || callee === "atomicAdd_system") return "Add";
@@ -2790,6 +2800,7 @@ function semanticWgslFloatAtomicCallKind(callee: string): SemanticFloatAtomicKin
   if (callee === "atomicMin" || callee === "atomicMin_system") return "Min";
   if (callee === "atomicMax" || callee === "atomicMax_system" || callee === "atomicMaxFloat") return "Max";
   if (callee === "atomicExch" || callee === "atomicExch_system") return "Exchange";
+  if (callee === "atomicCAS" || callee === "atomicCAS_system") return "CompareExchange";
   return undefined;
 }
 
@@ -2838,8 +2849,17 @@ function semanticExpressionUsesIntegerLoopAtomic(expression: SemanticExpression)
 function semanticFloatAtomicHelpers(operations: readonly SemanticKernelIrOperation[]): readonly string[][] {
   const helperKeys = new Set<string>();
   collectSemanticFloatAtomicHelpers(operations, helperKeys);
+  walkSemanticOperations(operations, (expression) => {
+    if (expression.kind !== "call" || expression.callee.kind !== "symbol") return;
+    const target = semanticAtomicCallTarget(expression);
+    if (target?.valueType !== "float") return;
+    const kind = semanticWgslFloatAtomicCallKind(expression.callee.name);
+    if (kind && kind !== "Exchange" && kind !== "CompareExchange") {
+      helperKeys.add(`${kind}:${semanticWgslAtomicAddressSpace(target)}`);
+    }
+  });
   return [...helperKeys].flatMap((key) => {
-    const [kind, addressSpace] = key.split(":") as [Exclude<SemanticFloatAtomicKind, "Exchange">, WgslAtomicAddressSpace];
+    const [kind, addressSpace] = key.split(":") as [Exclude<SemanticFloatAtomicKind, "Exchange" | "CompareExchange">, WgslAtomicAddressSpace];
     if (kind === "Add") return [emitFloatAtomicAddHelper(addressSpace)];
     if (kind === "Sub") return [emitFloatAtomicSubHelper(addressSpace)];
     if (kind === "Min") return [emitFloatAtomicMinHelper(addressSpace)];
@@ -2855,7 +2875,7 @@ function collectSemanticFloatAtomicHelpers(
   for (const operation of operations) {
     if (operation.kind === "atomic" && operation.target?.valueType === "float") {
       const kind = semanticWgslFloatAtomicCallKind(operation.callee);
-      if (kind && kind !== "Exchange") helperKeys.add(`${kind}:${semanticWgslAtomicAddressSpace(operation.target)}`);
+      if (kind && kind !== "Exchange" && kind !== "CompareExchange") helperKeys.add(`${kind}:${semanticWgslAtomicAddressSpace(operation.target)}`);
     }
     if (operation.kind === "branch") {
       collectSemanticFloatAtomicHelpers(operation.consequent, helperKeys);
@@ -4700,6 +4720,24 @@ function emitSemanticAtomicCall(
     const [limit] = operands;
     if (!limit) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing limit`, expression.span);
     return `${semanticIntegerLoopAtomicHelperName(loopAtomicKind, target, ir)}(&${memoryRef}, ${emitSemanticExpressionAs(limit, ir, names, "u32", options, textureSpecializations)})`;
+  }
+  const floatAtomicKind = target.valueType === "float" ? semanticWgslFloatAtomicCallKind(expression.callee.name) : undefined;
+  if (floatAtomicKind) {
+    if (floatAtomicKind === "Exchange") {
+      const [value] = operands;
+      if (!value) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing value`, expression.span);
+      return `bitcast<f32>(atomicExchange(&${memoryRef}, bitcast<u32>(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})))`;
+    }
+    if (floatAtomicKind === "CompareExchange") {
+      const [compare, value] = operands;
+      if (!compare || !value) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing operand`, expression.span);
+      const emittedCompare = emitSemanticExpressionAs(compare, ir, names, "f32", options, textureSpecializations);
+      const emittedValue = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
+      return `bitcast<f32>(atomicCompareExchangeWeak(&${memoryRef}, bitcast<u32>(${emittedCompare}), bitcast<u32>(${emittedValue})).old_value)`;
+    }
+    const [value] = operands;
+    if (!value) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing value`, expression.span);
+    return `${floatAtomicHelperName(floatAtomicKind, semanticWgslAtomicAddressSpace(target))}(&${memoryRef}, ${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
   }
   const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType), options, textureSpecializations));
   const call = `${wgslCallee}(&${memoryRef}, ${emitted.join(", ")})`;

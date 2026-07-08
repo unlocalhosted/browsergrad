@@ -4207,7 +4207,7 @@ __global__ void bad(const float* x) {
 
 const unsupportedF32Atomic = parseCudaLite(`
 __global__ void bad(float* x) {
-  if (threadIdx.x < 1) { atomicCAS(&x[0], 0, 1); }
+  if (threadIdx.x < 1) { atomicAnd(&x[0], 1); }
 }`);
     const atomicAnalysis = analyzeCudaLite(unsupportedF32Atomic);
     expect(atomicAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-atomic-f32");
@@ -4359,7 +4359,7 @@ __global__ void exactLaunch(float* x) {
   it("classifies CUDA compatibility gaps by semantic feature", () => {
     const unsupported = analyzeCudaLite(parseCudaLite(`
 __global__ void unsupported(float* x) {
-  if (threadIdx.x < 1) { atomicCAS(&x[0], 0, 1); }
+  if (threadIdx.x < 1) { atomicAnd(&x[0], 1); }
 }`));
     const plan = createCudaLoweringPlan(unsupported.diagnostics);
 
@@ -18663,9 +18663,42 @@ __global__ void atomic_exchange(float* x, float* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("bitcast<f32>(atomicExchange(&x[0], bitcast<u32>(7.5)))");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicExchange(&x[0u], bitcast<u32>(7.5)))");
     expect([...result.buffers.x as Float32Array]).toEqual([7.5]);
     expect([...result.buffers.out as Float32Array]).toEqual([2.5]);
+  });
+
+  it("supports CUDA float atomicCAS through u32 bitcasts", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_cas_float(float* x, float* out) {
+  if (threadIdx.x < 1) {
+    out[0] = atomicCAS(&x[0], 2.5f, 7.5f);
+    out[1] = x[0];
+    out[2] = atomicCAS(&x[0], 2.5f, 9.5f);
+    out[3] = x[0];
+    atomicCAS(&x[0], 7.5f, 11.5f);
+    out[4] = x[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2.5]),
+          out: new Float32Array(5),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-atomic-f32");
+    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak");
+    expect(compiled.wgsl).toContain("bitcast<u32>(2.5)");
+    expect(compiled.wgsl).toContain("bitcast<u32>(7.5)");
+    expect([...result.buffers.x as Float32Array]).toEqual([11.5]);
+    expect([...result.buffers.out as Float32Array]).toEqual([2.5, 7.5, 7.5, 7.5, 11.5]);
   });
 
   it("stores computed float values back into atomic float storage with u32 carriers", () => {
@@ -18724,6 +18757,8 @@ __global__ void atomic_float_system(float* x, float* out) {
     out[2] = atomicMin_system(&x[0], 2.0f);
     out[3] = atomicMax_system(&x[0], 4.0f);
     out[4] = atomicExch_system(&x[0], 6.0f);
+    out[5] = atomicCAS_system(&x[0], 6.0f, 8.0f);
+    out[6] = atomicCAS_system(&x[0], 6.0f, 9.0f);
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -18731,19 +18766,20 @@ __global__ void atomic_float_system(float* x, float* out) {
       {
         buffers: {
           x: new Float32Array([2]),
-          out: new Float32Array(5),
+          out: new Float32Array(7),
         },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("bg_atomicAdd_f32(&x[0], 1.5)");
-    expect(compiled.wgsl).toContain("bg_atomicSub_f32(&x[0], 0.5)");
-    expect(compiled.wgsl).toContain("bg_atomicMin_f32(&x[0], 2.0)");
-    expect(compiled.wgsl).toContain("bg_atomicMax_f32(&x[0], 4.0)");
-    expect(compiled.wgsl).toContain("bitcast<f32>(atomicExchange(&x[0], bitcast<u32>(6.0)))");
-    expect([...result.buffers.x as Float32Array]).toEqual([6]);
-    expect([...result.buffers.out as Float32Array]).toEqual([2, 3.5, 3, 2, 4]);
+    expect(compiled.wgsl).toContain("bg_atomicAdd_f32(&x[0u], 1.5)");
+    expect(compiled.wgsl).toContain("bg_atomicSub_f32(&x[0u], 0.5)");
+    expect(compiled.wgsl).toContain("bg_atomicMin_f32(&x[0u], 2.0)");
+    expect(compiled.wgsl).toContain("bg_atomicMax_f32(&x[0u], 4.0)");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicExchange(&x[0u], bitcast<u32>(6.0)))");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicCompareExchangeWeak(&x[0u], bitcast<u32>(6.0), bitcast<u32>(8.0)).old_value)");
+    expect([...result.buffers.x as Float32Array]).toEqual([8]);
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3.5, 3, 2, 4, 6, 8]);
   });
 
   it("supports CUDA pointer-form atomicAdd on integer buffers", () => {

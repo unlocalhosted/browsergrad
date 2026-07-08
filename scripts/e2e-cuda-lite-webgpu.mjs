@@ -3738,6 +3738,8 @@ __global__ void systemFloatAtomics(float *x, float *out) {
     out[2] = atomicMin_system(&x[0], 2.0f);
     out[3] = atomicMax_system(&x[0], 4.0f);
     out[4] = atomicExch_system(&x[0], 6.0f);
+    out[5] = atomicCAS_system(&x[0], 6.0f, 8.0f);
+    out[6] = atomicCAS_system(&x[0], 6.0f, 9.0f);
   }
 }`,
   vectorLaneAtomic: `
@@ -14364,11 +14366,11 @@ const html = String.raw`<!doctype html>
             input: () => ({
               buffers: {
                 x: new Float32Array([2]),
-                out: new Float32Array(5),
+                out: new Float32Array(7),
               },
             }),
             output: "out",
-            expectedOutput: { type: "Float32Array", data: [2, 3.5, 3, 2, 4] },
+            expectedOutput: { type: "Float32Array", data: [2, 3.5, 3, 2, 4, 6, 8] },
           },
           {
             name: "atomic:vector-lane-helper",

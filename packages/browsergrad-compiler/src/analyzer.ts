@@ -3589,7 +3589,7 @@ function validateAtomicBuiltin(
       if ((targetType === "float" || targetType === "double") && isSupportedFloatAtomic(callName)) {
         atomicShared.add(storageSymbol.name);
       } else if (targetType === "half" || targetType === "bool" || targetType === "complex64" || targetType === "float" || targetType === "double") {
-        diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets and CAS-backed float add/sub/min/max/exch in CUDA-lite", targetExpression.span));
+        diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets and CAS-backed float add/sub/min/max/exch/cas in CUDA-lite", targetExpression.span));
       } else {
         atomicShared.add(storageSymbol.name);
       }
@@ -3597,7 +3597,7 @@ function validateAtomicBuiltin(
       if ((targetType === "float" || targetType === "double") && isSupportedFloatAtomic(callName)) {
         atomicDeviceGlobals.add(storageSymbol.name);
       } else if (targetType === "half" || targetType === "bool" || targetType === "complex64" || targetType === "float" || targetType === "double") {
-        diagnostics.push(error("unsupported-atomic-target", "device global atomics support int/uint targets and CAS-backed float add/sub/min/max/exch in CUDA-lite", targetExpression.span));
+        diagnostics.push(error("unsupported-atomic-target", "device global atomics support int/uint targets and CAS-backed float add/sub/min/max/exch/cas in CUDA-lite", targetExpression.span));
       } else {
         atomicDeviceGlobals.add(storageSymbol.name);
       }
@@ -3608,7 +3608,7 @@ function validateAtomicBuiltin(
       if (targetType && isSupportedDevicePointerAtomic(callName, targetType)) {
         // Exact storage roots for helper pointer atomics are marked after validation.
       } else {
-        diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} through device pointer supports int/uint read-modify-write atomics including inc/dec and CAS-backed float add/sub/min/max/exch in CUDA-lite`, targetExpression.span));
+        diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} through device pointer supports int/uint read-modify-write atomics including inc/dec and CAS-backed float add/sub/min/max/exch/cas in CUDA-lite`, targetExpression.span));
       }
     } else if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} target must resolve to storage or shared memory`, targetExpression.span));
@@ -3623,7 +3623,9 @@ function validateAtomicBuiltin(
       callName === "atomicMax_system" ||
       callName === "atomicMaxFloat" ||
       callName === "atomicExch" ||
-      callName === "atomicExch_system"
+      callName === "atomicExch_system" ||
+      callName === "atomicCAS" ||
+      callName === "atomicCAS_system"
     )) {
       atomicParams.add(param.name);
       if (param.constant) {
@@ -3951,7 +3953,9 @@ function isSupportedFloatAtomic(callName: string | undefined): boolean {
     callName === "atomicMax_system" ||
     callName === "atomicMaxFloat" ||
     callName === "atomicExch" ||
-    callName === "atomicExch_system";
+    callName === "atomicExch_system" ||
+    callName === "atomicCAS" ||
+    callName === "atomicCAS_system";
 }
 
 function isSupportedDevicePointerAtomic(
@@ -3964,6 +3968,7 @@ function isSupportedDevicePointerAtomic(
   if (callName === "atomicMin" || callName === "atomicMin_system") return true;
   if (callName === "atomicMax" || callName === "atomicMax_system" || callName === "atomicMaxFloat") return true;
   if (callName === "atomicExch" || callName === "atomicExch_system") return true;
+  if (callName === "atomicCAS" || callName === "atomicCAS_system") return true;
   if (targetType === "int" || targetType === "uint") {
     return callName === "atomicAnd" ||
       callName === "atomicAnd_system" ||

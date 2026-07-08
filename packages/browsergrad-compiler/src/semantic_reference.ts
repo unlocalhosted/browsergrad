@@ -593,7 +593,7 @@ function semanticReferenceAtomicSupported(
 }
 
 function semanticReferenceFloatAtomicOpSupported(atomicOp: SemanticAtomicOp): boolean {
-  return atomicOp === "add" || atomicOp === "sub" || atomicOp === "min" || atomicOp === "max" || atomicOp === "exchange";
+  return atomicOp === "add" || atomicOp === "sub" || atomicOp === "min" || atomicOp === "max" || atomicOp === "exchange" || atomicOp === "cas";
 }
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
@@ -912,7 +912,11 @@ function semanticReferenceAtomicCallSupported(
   if (!atomicOp) return false;
   const target = semanticAtomicCallTarget(expression);
   if (!target || !semanticReferenceMemoryRefSupported(target)) return false;
-  if (target.valueType !== "uint" && target.valueType !== "int") return false;
+  if (
+    target.valueType !== "uint" &&
+    target.valueType !== "int" &&
+    !(target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp))
+  ) return false;
   if (!semanticReferenceAtomicTargetRootSupported(target, compiled)) {
     return false;
   }
@@ -1807,9 +1811,23 @@ function semanticAtomicValue(
         ? operation.callee
         : operation.callee.kind === "symbol" ? operation.callee.name : "<expr>";
       if (!replacement) throw semanticReferenceError(`semantic reference atomic '${callee}' missing replacement`, operation.span);
-      return oldValue === value ? evalNumber(replacement, context) : oldValue;
+      const targetType = operation.kind === "atomic"
+        ? operation.target?.valueType
+        : semanticAtomicCallTarget(operation)?.valueType;
+      const matches = targetType === "float" || targetType === "double"
+        ? semanticBitsFromFloat(oldValue) === semanticBitsFromFloat(value)
+        : oldValue === value;
+      return matches ? evalNumber(replacement, context) : oldValue;
     }
   }
+}
+
+const semanticF32Scratch = new Float32Array(1);
+const semanticU32Scratch = new Uint32Array(semanticF32Scratch.buffer);
+
+function semanticBitsFromFloat(value: number): number {
+  semanticF32Scratch[0] = value;
+  return semanticU32Scratch[0] ?? 0;
 }
 
 function execSemanticLoop(

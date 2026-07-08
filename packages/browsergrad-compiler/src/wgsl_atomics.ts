@@ -142,6 +142,9 @@ export function emitAtomicCasCall(
     if (atomicTarget.valueType === "int" && atomicTarget.storageScalar === "u32") {
       return `${intViewAtomicCasHelperName(atomicTarget.addressSpace)}(${atomicTarget.address}, ${compareExpression}, ${valueExpression})`;
     }
+    if (atomicTarget.valueType === "float" || atomicTarget.valueType === "double") {
+      return `bitcast<f32>(atomicCompareExchangeWeak(${atomicTarget.address}, bitcast<u32>(${compareExpression}), bitcast<u32>(${valueExpression})).old_value)`;
+    }
     return `atomicCompareExchangeWeak(${atomicTarget.address}, ${compareExpression}, ${valueExpression}).old_value`;
   }
   const pointerAtomic = emitDevicePointerAtomicCasCall(target, compare, value, context, callbacks);

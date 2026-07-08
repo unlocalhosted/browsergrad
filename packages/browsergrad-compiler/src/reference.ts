@@ -3039,7 +3039,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const current = valueAsNumber(readLValue(lvalue, context), lvalue.name);
     const compare = evalNumber(expression.args[1]!, context);
     const value = evalNumber(expression.args[2]!, context);
-    if (Math.trunc(current) === Math.trunc(compare)) writeLValue(lvalue, value, context);
+    const matches = lvalue.valueType === "float" || lvalue.valueType === "double"
+      ? bitsFromFloat(current) === bitsFromFloat(compare)
+      : Math.trunc(current) === Math.trunc(compare);
+    if (matches) writeLValue(lvalue, value, context);
     return current;
   }
   if (name !== undefined && isTextureReadCall(name)) {

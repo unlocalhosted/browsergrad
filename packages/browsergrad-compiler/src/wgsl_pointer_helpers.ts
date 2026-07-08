@@ -481,8 +481,8 @@ export function isDevicePointerAtomicExchangeType(type: CudaLiteScalarType): typ
   return type === "float" || type === "int" || type === "uint";
 }
 
-export function isDevicePointerAtomicCasType(type: CudaLiteScalarType): type is "int" | "uint" {
-  return type === "int" || type === "uint";
+export function isDevicePointerAtomicCasType(type: CudaLiteScalarType): type is "float" | "double" | "int" | "uint" {
+  return type === "float" || type === "double" || type === "int" || type === "uint";
 }
 
 function usesDevicePointerAtomicAdd(ir: KernelIrModule): boolean {
@@ -785,7 +785,7 @@ function emitDevicePointerAtomicExchangeHelper(
   return lines;
 }
 
-function emitDevicePointerAtomicCasHelper(type: "int" | "uint", ir: KernelIrModule, context: WgslPointerHelperContext): string[] {
+function emitDevicePointerAtomicCasHelper(type: "float" | "double" | "int" | "uint", ir: KernelIrModule, context: WgslPointerHelperContext): string[] {
   const scalar = wgslScalar(type);
   const lines = [
     `fn ${pointerAtomicCasHelperName(type)}(buffer: u32, index: u32, compare: ${scalar}, value: ${scalar}) -> ${scalar} {`,
@@ -855,7 +855,8 @@ function emitAtomicExchangeAtAddress(type: "float" | "int" | "uint", target: Poi
   return `atomicExchange(${target.address}, ${value})`;
 }
 
-function emitAtomicCasAtAddress(type: "int" | "uint", target: PointerHelperAtomicTarget, compare: string, value: string): string {
+function emitAtomicCasAtAddress(type: "float" | "double" | "int" | "uint", target: PointerHelperAtomicTarget, compare: string, value: string): string {
+  if (type === "float" || type === "double") return `bitcast<f32>(atomicCompareExchangeWeak(${target.address}, bitcast<u32>(${compare}), bitcast<u32>(${value})).old_value)`;
   if (usesIntViewAtomicHelper(type, target)) return `${intViewAtomicCasHelperName(target.addressSpace)}(${target.address}, ${compare}, ${value})`;
   return `atomicCompareExchangeWeak(${target.address}, ${compare}, ${value}).old_value`;
 }
@@ -983,7 +984,7 @@ export function pointerAtomicExchangeHelperName(type: "float" | "int" | "uint"):
   return `bg_ptr_atomicExchange_${pointerHelperTypeName(type)}`;
 }
 
-export function pointerAtomicCasHelperName(type: "int" | "uint"): string {
+export function pointerAtomicCasHelperName(type: "float" | "double" | "int" | "uint"): string {
   return `bg_ptr_atomicCompareExchange_${pointerHelperTypeName(type)}`;
 }
 
