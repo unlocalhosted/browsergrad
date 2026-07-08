@@ -417,6 +417,10 @@ function unsupportedSemanticReferenceOperation(
             if (operation.statement.inputs.length !== 0 || outputs.length !== 0) return operation;
             break;
           }
+          if (asm?.kind === "bar-sync") {
+            if (operation.statement.inputs.length !== (asm.operand === "input0" ? 1 : 0) || outputs.length !== 0) return operation;
+            break;
+          }
           return operation;
         }
       case "break":
@@ -1434,7 +1438,8 @@ function execSemanticOperations(
           const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
           const cpAsyncFenceSupported = asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && outputs.length === 0;
           const membarSupported = asm?.kind === "membar" && operation.statement.inputs.length === 0 && outputs.length === 0;
-          if (!cpAsyncFenceSupported && !membarSupported) {
+          const barSyncSupported = asm?.kind === "bar-sync" && operation.statement.inputs.length === (asm.operand === "input0" ? 1 : 0) && outputs.length === 0;
+          if (!cpAsyncFenceSupported && !membarSupported && !barSyncSupported) {
             throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
           }
         }

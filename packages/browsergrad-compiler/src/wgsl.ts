@@ -2269,6 +2269,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "membar" && statement.inputs.length === 0 && outputs.length === 0) {
     return `storageBarrier();`;
   }
+  if (op?.kind === "bar-sync" && statement.inputs.length === (op.operand === "input0" ? 1 : 0) && outputs.length === 0) {
+    return `workgroupBarrier();`;
+  }
   if (op?.kind === "mma-m16n8k16") {
     return emitMmaM16N8K16Statement(statement, outputs, op.accumulator, context);
   }

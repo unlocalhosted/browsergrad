@@ -742,7 +742,14 @@ function* execStatements(
         execKernelLaunch(statement, context);
         break;
       case "asm":
-        execInlineAsm(statement, context);
+        if (classifyInlineAsm(statement.template)?.kind === "bar-sync") {
+          const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+          if (outputs.length !== 0 || statement.inputs.length > 1) throw compilerFailure("bar.sync inline asm operand mismatch");
+          for (const input of statement.inputs) evalNumber(input, context);
+          yield "barrier";
+        } else {
+          execInlineAsm(statement, context);
+        }
         break;
       case "expr":
         if (execCpAsyncStatement(statement.expression, context)) {
@@ -911,6 +918,14 @@ function execInlineAsm(
     if (statement.inputs.length !== 0 || outputs.length !== 0) {
       throw compilerFailure(`membar.${op.scope} inline asm expects no operands`);
     }
+    return;
+  }
+  if (op?.kind === "bar-sync") {
+    const expectedInputs = op.operand === "input0" ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs || outputs.length !== 0) {
+      throw compilerFailure("bar.sync inline asm operand mismatch");
+    }
+    for (const input of statement.inputs) evalNumber(input, context);
     return;
   }
   if (op?.kind === "mma-m16n8k16") {

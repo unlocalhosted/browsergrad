@@ -585,6 +585,9 @@ export function analyzeCudaLite(
           break;
         case "asm":
           validateInlineAsmStatement(statement, scope, diagnostics, walkExpression, activeStatementsReachable);
+          if (isInlineAsmBarrier(statement) && divergentDepth > 0) {
+            diagnostics.push(error("divergent-barrier", "bar.sync inline PTX cannot appear in divergent control flow", statement.span));
+          }
           break;
         case "expr":
           if (isBarrierCall(statement.expression)) {
@@ -1726,6 +1729,13 @@ function validateInlineAsmStatement(
   }
   if (op?.kind === "membar" && (outputs.length !== 0 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `membar.${op.scope} inline PTX expects no output or input operands`, statement.span));
+  }
+  if (op?.kind === "bar-sync") {
+    const expectedInputs = op.operand === "input0" ? 1 : 0;
+    if (outputs.length !== 0 || statement.inputs.length !== expectedInputs) {
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `bar.sync inline PTX expects no output operands and ${expectedInputs} input operand(s)`, statement.span));
+    }
+    for (const input of statement.inputs) validateScalarOperand(walkExpression(input, scope), input.span, asmDiagnostics);
   }
   if (op?.kind === "ldmatrix") {
     if (outputs.length !== op.matrices || statement.inputs.length !== 1) {
@@ -5019,6 +5029,10 @@ function isBarrierCall(expression: CudaLiteExpression): expression is Extract<Cu
   return name === "__syncthreads" || name === "__syncwarp";
 }
 
+function isInlineAsmBarrier(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { kind: "asm" }> {
+  return statement.kind === "asm" && classifyInlineAsm(statement.template)?.kind === "bar-sync";
+}
+
 function validateDivergentReturnsBeforeBarriers(
   statements: readonly CudaLiteStatement[],
   params: ReadonlyMap<string, CudaLiteParam>,
@@ -5057,6 +5071,8 @@ function validateDivergentReturnsBeforeBarriers(
         return { containsBarrier: visitBlock(statement.body, divergentDepth, barrierLater, continueBarrierLater) };
       case "expr":
         return { containsBarrier: isBarrierCall(statement.expression) };
+      case "asm":
+        return { containsBarrier: isInlineAsmBarrier(statement) };
       case "return":
         if (divergentDepth > 0 && barrierLater) {
           diagnostics.push(warning(

@@ -976,6 +976,10 @@ function unsupportedSemanticWgslOperation(
             if (operation.statement.inputs.length !== 0 || outputs.length !== 0) return operation;
             break;
           }
+          if (asm?.kind === "bar-sync") {
+            if (operation.statement.inputs.length !== (asm.operand === "input0" ? 1 : 0) || outputs.length !== 0) return operation;
+            break;
+          }
           return operation;
         }
       case "return":
@@ -2317,6 +2321,7 @@ function emitSemanticOperation(
         const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
         if (asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && outputs.length === 0) return [`${prefix}// cp.async inline asm fence omitted`];
         if (asm?.kind === "membar" && operation.statement.inputs.length === 0 && outputs.length === 0) return [`${prefix}storageBarrier();`];
+        if (asm?.kind === "bar-sync" && operation.statement.inputs.length === (asm.operand === "input0" ? 1 : 0) && outputs.length === 0) return [`${prefix}workgroupBarrier();`];
       }
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
     case "return":

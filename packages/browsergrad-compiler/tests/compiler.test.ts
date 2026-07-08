@@ -11550,6 +11550,39 @@ __global__ void membarAsm(float *out, float *in) {
     expect([...result.buffers.out as Float32Array]).toEqual([7, 9]);
   });
 
+  it("lowers inline PTX bar.sync as native WebGPU workgroup barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void barSyncAsm(float *out, float *in) {
+  int barrier = 0;
+  asm volatile("bar.sync 0;\\n" ::);
+  asm volatile("bar.sync %0;\\n" :: "r"(barrier));
+  out[threadIdx.x] = in[threadIdx.x] + 1.0f;
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2), in: new Float32Array([10, 12]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect([...result.buffers.out as Float32Array]).toEqual([11, 13]);
+  });
+
+  it("rejects divergent inline PTX bar.sync barriers", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__global__ void divergentBarSync(float *out) {
+  if (threadIdx.x == 0) {
+    asm volatile("bar.sync 0;\\n" ::);
+  }
+  out[threadIdx.x] = 1.0f;
+}`));
+
+    expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-barrier");
+  });
+
   it("parses inline PTX clobber sections as an unsupported semantic gap", () => {
     expect(() => compileCudaLiteKernel(`
 __global__ void clobberAsm(float *out, float *in) {
