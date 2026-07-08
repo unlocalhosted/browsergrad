@@ -157,7 +157,10 @@ Vector bf16 helpers `__bfloat1622float2`, `__float22bfloat162_rn`,
 storage path with explicit bf16 rounding. BF162 arithmetic aliases
 `__hadd2`, `__hsub2`, `__hmul2`, `__h2div`, `__hfma2`, `__hfma2_relu`,
 `__hfma2_sat`, `__hcmadd`, `__habs2`, and `__hneg2` lower through semantic
-reference/WGSL with lane-wise bf16 rounding.
+reference/WGSL with lane-wise bf16 rounding. BF162 min/max and comparison
+aliases include `__hmin2`, `__hmax2`, `__hmin2_nan`, `__hmax2_nan`,
+ordered/unordered vector comparisons, mask comparisons, bool reductions, and
+`__hisnan2`.
 CUDA/C named constants such as `INFINITY`, `NAN`, `FLT_MAX`, `M_PI`,
 `cudaMemcpyDeviceToDevice`, and stream/event flag values lower through the same
 analyzer, CPU-reference, and WGSL path.

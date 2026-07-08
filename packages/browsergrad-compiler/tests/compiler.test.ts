@@ -19220,6 +19220,86 @@ __global__ void bf162Math(float *out, uint *bits) {
     expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3fe04080, 0xc1204098]);
   });
 
+  it("lowers CUDA bf162 comparison and minmax aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf162Compare(const float *seed, float *out, uint *mask, uint *flags) {
+  if (threadIdx.x < 1) {
+    float nanValue = seed[0];
+    __nv_bfloat162 x = __floats2bfloat162_rn(1.0f, 2.0f);
+    __nv_bfloat162 y = __floats2bfloat162_rn(1.0f, 3.0f);
+    __nv_bfloat162 nx = __floats2bfloat162_rn(nanValue, 2.0f);
+    __nv_bfloat162 ny = __floats2bfloat162_rn(1.0f, nanValue);
+    __nv_bfloat162 eq = __heq2(x, y);
+    __nv_bfloat162 ne = __hne2(x, y);
+    __nv_bfloat162 gt = __hgt2(y, x);
+    __nv_bfloat162 ge = __hge2(x, y);
+    __nv_bfloat162 lt = __hlt2(x, y);
+    __nv_bfloat162 le = __hle2(x, y);
+    __nv_bfloat162 unord = __hequ2(nx, ny);
+    __nv_bfloat162 isnx = __hisnan2(nx);
+    __nv_bfloat162 isny = __hisnan2(ny);
+    __nv_bfloat162 mn = __hmin2(x, y);
+    __nv_bfloat162 mx = __hmax2(x, y);
+    __nv_bfloat162 nmn = __hmin2_nan(nx, ny);
+    __nv_bfloat162 nmx = __hmax2_nan(nx, ny);
+    __nv_bfloat162 nmnFlags = __hisnan2(nmn);
+    __nv_bfloat162 nmxFlags = __hisnan2(nmx);
+    out[0] = eq.x;
+    out[1] = eq.y;
+    out[2] = ne.x;
+    out[3] = ne.y;
+    out[4] = gt.x;
+    out[5] = gt.y;
+    out[6] = ge.x;
+    out[7] = ge.y;
+    out[8] = lt.x;
+    out[9] = lt.y;
+    out[10] = le.x;
+    out[11] = le.y;
+    out[12] = unord.x;
+    out[13] = unord.y;
+    out[14] = isnx.x;
+    out[15] = isnx.y;
+    out[16] = isny.x;
+    out[17] = isny.y;
+    out[18] = mn.x;
+    out[19] = mn.y;
+    out[20] = mx.x;
+    out[21] = mx.y;
+    out[22] = nmnFlags.x;
+    out[23] = nmnFlags.y;
+    out[24] = nmxFlags.x;
+    out[25] = nmxFlags.y;
+    mask[0] = __heq2_mask(x, y);
+    mask[1] = __hne2_mask(x, y);
+    mask[2] = __hgt2_mask(y, x);
+    mask[3] = __hge2_mask(x, y);
+    mask[4] = __hequ2_mask(nx, ny);
+    mask[5] = __hgtu2_mask(nx, ny);
+    if (__hbeq2(x, y)) { flags[0] = 1u; }
+    if (__hbne2(x, y)) { flags[1] = 1u; }
+    if (__hble2(x, y)) { flags[2] = 1u; }
+    if (__hbequ2(nx, ny)) { flags[3] = 1u; }
+    if (__hbgtu2(nx, ny)) { flags[4] = 1u; }
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { seed: new Float32Array([Number.NaN]), out: new Float32Array(26), mask: new Uint32Array(6), flags: new Uint32Array(5) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 2, 1, 3, 1, 1, 1, 1]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 2, 1, 3, 1, 1, 1, 1]);
+    expect([...result.buffers.mask as Uint32Array]).toEqual([0x0000ffff, 0xffff0000, 0xffff0000, 0x0000ffff, 0xffffffff, 0xffffffff]);
+    expect([...semanticResult.buffers.mask as Uint32Array]).toEqual([0x0000ffff, 0xffff0000, 0xffff0000, 0x0000ffff, 0xffffffff, 0xffffffff]);
+    expect([...result.buffers.flags as Uint32Array]).toEqual([0, 0, 1, 1, 1]);
+    expect([...semanticResult.buffers.flags as Uint32Array]).toEqual([0, 0, 1, 1, 1]);
+  });
+
   it("lowers scalar CUDA half unary math aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void half_unary(const half* input, half* output) {

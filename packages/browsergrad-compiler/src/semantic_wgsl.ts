@@ -119,7 +119,10 @@ const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
   "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
   "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
   "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
-  "__halves2bfloat162",
+  "__halves2bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
+  "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat",
+  "__hmul2", "__hmul2_rn", "__hmul2_sat", "__h2div", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
+  "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
 ]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
@@ -142,15 +145,32 @@ const SEMANTIC_BF162_BINARY_VECTOR_CALLS = new Set([
 const SEMANTIC_BF162_TERNARY_VECTOR_CALLS = new Set([
   "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
 ]);
+const SEMANTIC_BF162_MINMAX_VECTOR_CALLS = new Set(["__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan"]);
+const SEMANTIC_BF162_VECTOR_COMPARISON_CALLS = new Set([
+  "__hisnan2", "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2",
+  "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
+]);
+const SEMANTIC_BF162_MASK_COMPARISON_CALLS = new Set([
+  "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask",
+  "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
+]);
+const SEMANTIC_BF162_BOOL_COMPARISON_CALLS = new Set([
+  "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2",
+  "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
+]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set([
   ...SEMANTIC_BF162_UNARY_VECTOR_CALLS,
   ...SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   ...SEMANTIC_BF162_TERNARY_VECTOR_CALLS,
+  ...SEMANTIC_BF162_MINMAX_VECTOR_CALLS,
+  ...SEMANTIC_BF162_VECTOR_COMPARISON_CALLS,
   "__bfloat1622float2", "__bfloat162bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
   "__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162",
   "__low2bfloat162", "__high2bfloat162", "__lows2bfloat162", "__highs2bfloat162", "__lowhigh2highlow",
 ]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set([
+  ...SEMANTIC_BF162_MASK_COMPARISON_CALLS,
+  ...SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
   "__bfloat162_as_uint", "__nv_bfloat162_as_uint",
   "__low2bfloat16", "__high2bfloat16", "__low2float", "__high2float",
 ]);
@@ -1893,6 +1913,16 @@ function semanticWgslBf162CallSupported(
   }
   if (SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name)) {
     return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir));
+  }
+  if (SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name)) {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir));
+  }
+  if (SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name)) {
+    const arity = name === "__hisnan2" ? 1 : 2;
+    return expression.args.length === arity && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir));
+  }
+  if (SEMANTIC_BF162_MASK_COMPARISON_CALLS.has(name) || SEMANTIC_BF162_BOOL_COMPARISON_CALLS.has(name)) {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir));
   }
   if (name === "__bfloat1622float2") {
     const [arg] = expression.args;
@@ -4856,6 +4886,30 @@ function emitSemanticHalf2IsNanPredicate(value: string): string {
   return `((${bits} & vec2<u32>(0x7fffffffu)) > vec2<u32>(0x7f800000u))`;
 }
 
+function emitSemanticBf162ComparisonPredicate(name: string, left: string, right: string): string {
+  const normalized = name.replace(/_mask$/u, "").replace(/^__hb/u, "__h");
+  const ordered = `!(${emitSemanticBf162IsNanPredicate(left)} | ${emitSemanticBf162IsNanPredicate(right)})`;
+  const unordered = `(${emitSemanticBf162IsNanPredicate(left)} | ${emitSemanticBf162IsNanPredicate(right)})`;
+  const op = normalized === "__heq2" || normalized === "__hequ2"
+    ? "=="
+    : normalized === "__hne2" || normalized === "__hneu2"
+      ? "!="
+      : normalized === "__hgt2" || normalized === "__hgtu2"
+        ? ">"
+        : normalized === "__hge2" || normalized === "__hgeu2"
+          ? ">="
+          : normalized === "__hlt2" || normalized === "__hltu2"
+            ? "<"
+            : "<=";
+  const base = `((${left}) ${op} (${right}))`;
+  return normalized.includes("u2") ? `(${unordered} | ${base})` : `(${ordered} & ${base})`;
+}
+
+function emitSemanticBf162IsNanPredicate(value: string): string {
+  const bits = `bitcast<vec2<u32>>(vec2<f32>(${value}))`;
+  return `((${bits} & vec2<u32>(0x7fffffffu)) > vec2<u32>(0x7f800000u))`;
+}
+
 function emitSemanticHalfIsNanPredicate(value: string): string {
   return `((bitcast<u32>(f32(${value})) & 0x7fffffffu) > 0x7f800000u)`;
 }
@@ -4866,6 +4920,11 @@ function emitSemanticHalfNanMinMax(op: "min" | "max", left: string, right: strin
 
 function emitSemanticHalf2NanMinMax(op: "min" | "max", left: string, right: string): string {
   return `select(${op}(${left}, ${right}), (${left} + ${right}), ${emitSemanticHalf2IsNanPredicate(left)} | ${emitSemanticHalf2IsNanPredicate(right)})`;
+}
+
+function emitSemanticBf162NanMinMax(op: "min" | "max", left: string, right: string): string {
+  const value = `select(${op}(${left}, ${right}), (${left} + ${right}), ${emitSemanticBf162IsNanPredicate(left)} | ${emitSemanticBf162IsNanPredicate(right)})`;
+  return `vec2<f32>(${wgslRoundBfloat16(`(${value}).x`)}, ${wgslRoundBfloat16(`(${value}).y`)})`;
 }
 
 function emitSemanticBf162Call(
@@ -4909,6 +4968,32 @@ function emitSemanticBf162Call(
     if (name === "__hfma2_sat") return wgslSaturateBf162(value);
     if (name === "__hfma2_relu") return wgslReluBf162(value);
     return value;
+  }
+  if (SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name)) {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two bf162 operands`, expression.span);
+    const lhs = emitBf162(left);
+    const rhs = emitBf162(right);
+    if (name === "__hmin2_nan" || name === "__hmax2_nan") return emitSemanticBf162NanMinMax(name === "__hmin2_nan" ? "min" : "max", lhs, rhs);
+    const op = name === "__hmin2" ? "min" : "max";
+    return `vec2<f32>(${wgslRoundBfloat16(`${op}((${lhs}).x, (${rhs}).x)`)}, ${wgslRoundBfloat16(`${op}((${lhs}).y, (${rhs}).y)`)})`;
+  }
+  if (SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name)) {
+    const [left, right] = expression.args;
+    if (!left) throw semanticWgslError(`${name} expects bf162 operand`, expression.span);
+    if (name === "__hisnan2") {
+      const value = emitBf162(left);
+      return `select(vec2<f32>(0.0), vec2<f32>(1.0), ${emitSemanticBf162IsNanPredicate(value)})`;
+    }
+    if (!right) throw semanticWgslError(`${name} expects two bf162 operands`, expression.span);
+    return `select(vec2<f32>(0.0), vec2<f32>(1.0), ${emitSemanticBf162ComparisonPredicate(name, emitBf162(left), emitBf162(right))})`;
+  }
+  if (SEMANTIC_BF162_MASK_COMPARISON_CALLS.has(name) || SEMANTIC_BF162_BOOL_COMPARISON_CALLS.has(name)) {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two bf162 operands`, expression.span);
+    const predicate = emitSemanticBf162ComparisonPredicate(name, emitBf162(left), emitBf162(right));
+    if (SEMANTIC_BF162_BOOL_COMPARISON_CALLS.has(name)) return `all(${predicate})`;
+    return `((select(0u, 0xffffu, (${predicate}).x)) | (select(0u, 0xffff0000u, (${predicate}).y)))`;
   }
   if (name === "__bfloat1622float2") {
     const [arg] = expression.args;
@@ -6834,6 +6919,7 @@ function semanticExpressionUsesHalfConversion(expression: SemanticExpression): b
 
 function semanticOperationsUseBfloatHelper(operations: readonly SemanticKernelIrOperation[]): boolean {
   for (const operation of operations) {
+    if (operation.kind === "declare" && (operation.target.valueType === "bf16" || operation.target.valueType === "bf162")) return true;
     if (semanticOperationExpressions(operation).some(semanticExpressionUsesBfloatHelper)) return true;
     if (operation.kind === "branch" && (semanticOperationsUseBfloatHelper(operation.consequent) || semanticOperationsUseBfloatHelper(operation.alternate))) return true;
     if (operation.kind === "loop" && semanticOperationsUseBfloatHelper(operation.body)) return true;
@@ -7286,7 +7372,9 @@ function isSemanticBf162OverloadedVectorCall(name: string): boolean {
   return name === "__lowhigh2highlow" ||
     SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name) ||
     SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name) ||
-    SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name);
+    SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name);
 }
 
 function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {

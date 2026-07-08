@@ -162,15 +162,32 @@ const SEMANTIC_BF162_BINARY_VECTOR_CALLS = new Set([
 const SEMANTIC_BF162_TERNARY_VECTOR_CALLS = new Set([
   "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
 ]);
+const SEMANTIC_BF162_MINMAX_VECTOR_CALLS = new Set(["__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan"]);
+const SEMANTIC_BF162_VECTOR_COMPARISON_CALLS = new Set([
+  "__hisnan2", "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2",
+  "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
+]);
+const SEMANTIC_BF162_MASK_COMPARISON_CALLS = new Set([
+  "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask",
+  "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
+]);
+const SEMANTIC_BF162_BOOL_COMPARISON_CALLS = new Set([
+  "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2",
+  "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
+]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set([
   ...SEMANTIC_BF162_UNARY_VECTOR_CALLS,
   ...SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   ...SEMANTIC_BF162_TERNARY_VECTOR_CALLS,
+  ...SEMANTIC_BF162_MINMAX_VECTOR_CALLS,
+  ...SEMANTIC_BF162_VECTOR_COMPARISON_CALLS,
   "__bfloat1622float2", "__bfloat162bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
   "__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162",
   "__low2bfloat162", "__high2bfloat162", "__lows2bfloat162", "__highs2bfloat162", "__lowhigh2highlow",
 ]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set([
+  ...SEMANTIC_BF162_MASK_COMPARISON_CALLS,
+  ...SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
   "__bfloat162_as_uint", "__nv_bfloat162_as_uint",
   "__low2bfloat16", "__high2bfloat16", "__low2float", "__high2float",
 ]);
@@ -947,6 +964,16 @@ function semanticReferenceBf162CallSupported(
   if (SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name)) {
     return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
+  if (SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name)) {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
+  }
+  if (SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name)) {
+    const arity = name === "__hisnan2" ? 1 : 2;
+    return expression.args.length === arity && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
+  }
+  if (SEMANTIC_BF162_MASK_COMPARISON_CALLS.has(name) || SEMANTIC_BF162_BOOL_COMPARISON_CALLS.has(name)) {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
+  }
   if (name === "__bfloat1622float2") {
     const [arg] = expression.args;
     return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
@@ -1479,7 +1506,9 @@ function isSemanticBf162OverloadedVectorCall(name: string): boolean {
   return name === "__lowhigh2highlow" ||
     SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name) ||
     SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name) ||
-    SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name);
+    SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name);
 }
 
 function execSemanticOperations(
@@ -3899,6 +3928,29 @@ function evalSemanticBf162Call(
       if (name === "__hfma2_relu") return reluSemanticBfloat16(value);
       return roundSemanticBfloat16(value);
     });
+  }
+  if (SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name)) {
+    const left = vectorArg(0);
+    const right = vectorArg(1);
+    return [0, 1].map((lane) => {
+      const lhs = left[lane] ?? 0;
+      const rhs = right[lane] ?? 0;
+      if (name === "__hmin2" || name === "__hmin2_nan") return roundSemanticBfloat16(Math.min(lhs, rhs));
+      return roundSemanticBfloat16(Math.max(lhs, rhs));
+    });
+  }
+  if (SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name)) {
+    if (name === "__hisnan2") return vectorArg(0).map((lane) => roundSemanticBfloat16(Number.isNaN(lane) ? 1 : 0));
+    const left = vectorArg(0);
+    const right = vectorArg(1);
+    return semanticHalf2ComparisonLanes(name, left, right).map((lane) => roundSemanticBfloat16(lane ? 1 : 0));
+  }
+  if (SEMANTIC_BF162_MASK_COMPARISON_CALLS.has(name) || SEMANTIC_BF162_BOOL_COMPARISON_CALLS.has(name)) {
+    const left = vectorArg(0);
+    const right = vectorArg(1);
+    const lanes = semanticHalf2ComparisonLanes(name, left, right);
+    if (SEMANTIC_BF162_BOOL_COMPARISON_CALLS.has(name)) return lanes.every(Boolean) ? 1 : 0;
+    return ((lanes[0] ? 0xffff : 0) | (lanes[1] ? 0xffff0000 : 0)) >>> 0;
   }
   if (name === "__bfloat1622float2") return vectorArg(0);
   if (name === "__float22bfloat162_rn") return vectorArg(0).map(roundSemanticBfloat16);

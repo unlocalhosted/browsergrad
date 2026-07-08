@@ -2178,11 +2178,11 @@ function vectorExpressionType(
     if (name === "curand_normal2" || name === "curand_log_normal2") return "float2";
     if (name === "curand_uniform4" || name === "curand_normal4" || name === "curand_log_normal4") return "float4";
     if (name === "curand_poisson4") return "uint4";
-    if (isBf162VectorArithmeticIntrinsic(name)) {
+    if (isBf162VectorIntrinsic(name)) {
       const firstArgType = expression.args[0] ? vectorExpressionType(expression.args[0], context) : undefined;
       if (firstArgType === "bf162") return "bf162";
       if (firstArgType === "half2") return "half2";
-      if (!isHalf2VectorIntrinsic(name)) return "bf162";
+      if (isBf162OnlyVectorIntrinsic(name)) return "bf162";
     }
     if (isHalf2VectorIntrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
     if (name === "__half22float2") return "float2";
@@ -3420,10 +3420,63 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ],
     };
   }
-  if (isBf162VectorArithmeticIntrinsic(name)) {
+  if (name === "__bfloat1622float2") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "bf162");
+    return { kind: "cuda-vector", valueType: "float2", lanes: value.lanes };
+  }
+  if (name === "__float22bfloat162_rn") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "float2");
+    return { kind: "cuda-vector", valueType: "bf162", lanes: value.lanes.map((lane) => roundBfloat16(lane ?? 0)) };
+  }
+  if (name === "__bfloat162bfloat162" || name === "__float2bfloat162_rn") {
+    const value = roundBfloat16(evalNumber(expression.args[0]!, context));
+    return { kind: "cuda-vector", valueType: "bf162", lanes: [value, value] };
+  }
+  if (name === "__floats2bfloat162_rn") {
+    return { kind: "cuda-vector", valueType: "bf162", lanes: [roundBfloat16(evalNumber(expression.args[0]!, context)), roundBfloat16(evalNumber(expression.args[1]!, context))] };
+  }
+  if (name === "__low2bfloat16" || name === "__high2bfloat16") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "bf162");
+    return roundBfloat16(value.lanes[name === "__low2bfloat16" ? 0 : 1] ?? 0);
+  }
+  if (name === "__low2bfloat162" || name === "__high2bfloat162") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "bf162");
+    const lane = roundBfloat16(value.lanes[name === "__low2bfloat162" ? 0 : 1] ?? 0);
+    return { kind: "cuda-vector", valueType: "bf162", lanes: [lane, lane] };
+  }
+  if (name === "__lows2bfloat162" || name === "__highs2bfloat162") {
+    const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "bf162");
+    const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "bf162");
+    const lane = name === "__lows2bfloat162" ? 0 : 1;
+    return { kind: "cuda-vector", valueType: "bf162", lanes: [roundBfloat16(left.lanes[lane] ?? 0), roundBfloat16(right.lanes[lane] ?? 0)] };
+  }
+  if (name === "__lowhigh2highlow") {
+    const value = evalExpression(expression.args[0]!, context);
+    if (isCudaVectorValue(value) && value.valueType === "bf162") {
+      return { kind: "cuda-vector", valueType: "bf162", lanes: [roundBfloat16(value.lanes[1] ?? 0), roundBfloat16(value.lanes[0] ?? 0)] };
+    }
+  }
+  if (name === "__low2float" || name === "__high2float") {
+    const value = evalExpression(expression.args[0]!, context);
+    if (isCudaVectorValue(value) && value.valueType === "bf162") return value.lanes[name === "__low2float" ? 0 : 1] ?? 0;
+  }
+  if (isBf162VectorIntrinsic(name) || isBf162ComparisonMaskIntrinsic(name) || isBf162BooleanComparisonIntrinsic(name)) {
     const leftValue = evalExpression(expression.args[0]!, context);
     if (isCudaVectorValue(leftValue) && leftValue.valueType === "bf162") {
       const left = leftValue;
+      if (isBf162ComparisonMaskIntrinsic(name) || isBf162BooleanComparisonIntrinsic(name)) {
+        const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "bf162");
+        const lanes = half2ComparisonLanes(name, left.lanes, right.lanes);
+        if (isBf162BooleanComparisonIntrinsic(name)) return lanes.every(Boolean) ? 1 : 0;
+        return ((lanes[0] ? 0xffff : 0) | (lanes[1] ? 0xffff0000 : 0)) >>> 0;
+      }
+      if (isBf162VectorComparisonIntrinsic(name)) {
+        if (name === "__hisnan2") {
+          return { kind: "cuda-vector", valueType: "bf162", lanes: left.lanes.map((value) => roundBfloat16(Number.isNaN(value ?? 0) ? 1 : 0)) };
+        }
+        const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "bf162");
+        return { kind: "cuda-vector", valueType: "bf162", lanes: half2ComparisonLanes(name, left.lanes, right.lanes).map((value) => roundBfloat16(value ? 1 : 0)) };
+      }
       if (name === "__habs2" || name === "__hneg2") {
         return {
           kind: "cuda-vector",
@@ -3432,6 +3485,18 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         };
       }
       const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "bf162");
+      if (isBf162MinMaxIntrinsic(name)) {
+        return {
+          kind: "cuda-vector",
+          valueType: "bf162",
+          lanes: left.lanes.map((value, index) => {
+            const lhs = value ?? 0;
+            const rhs = right.lanes[index] ?? 0;
+            if (name === "__hmin2" || name === "__hmin2_nan") return roundBfloat16(Math.min(lhs, rhs));
+            return roundBfloat16(Math.max(lhs, rhs));
+          }),
+        };
+      }
       if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat" || name === "__hfma2_relu" || name === "__hcmadd") {
         const addend = valueAsCudaVector(evalExpression(expression.args[2]!, context), "bf162");
         if (name === "__hcmadd") {
@@ -3466,7 +3531,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         }),
       };
     }
-    if (!isHalf2VectorIntrinsic(name)) throw compilerFailure(`unsupported bf162 intrinsic '${name ?? "<expr>"}'`);
+    if (isBf162OnlyVectorIntrinsic(name)) throw compilerFailure(`unsupported bf162 intrinsic '${name ?? "<expr>"}'`);
   }
   if (isHalf2BooleanComparisonIntrinsic(name) || isHalf2ComparisonMaskIntrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
@@ -3747,6 +3812,35 @@ function isBf162VectorArithmeticIntrinsic(name: string | undefined): boolean {
     name === "__hfma2_sat" ||
     name === "__hfma2_relu" ||
     name === "__hcmadd";
+}
+
+function isBf162VectorIntrinsic(name: string | undefined): boolean {
+  return isBf162VectorArithmeticIntrinsic(name) ||
+    isBf162VectorComparisonIntrinsic(name) ||
+    isBf162MinMaxIntrinsic(name);
+}
+
+function isBf162MinMaxIntrinsic(name: string | undefined): boolean {
+  return name === "__hmin2" ||
+    name === "__hmax2" ||
+    name === "__hmin2_nan" ||
+    name === "__hmax2_nan";
+}
+
+function isBf162VectorComparisonIntrinsic(name: string | undefined): boolean {
+  return name === "__hisnan2" || isHalf2VectorComparisonIntrinsic(name);
+}
+
+function isBf162ComparisonMaskIntrinsic(name: string | undefined): boolean {
+  return isHalf2ComparisonMaskIntrinsic(name);
+}
+
+function isBf162BooleanComparisonIntrinsic(name: string | undefined): boolean {
+  return isHalf2BooleanComparisonIntrinsic(name);
+}
+
+function isBf162OnlyVectorIntrinsic(name: string | undefined): boolean {
+  return name === "__h2div" || name === "__hfma2_relu" || name === "__hcmadd";
 }
 
 function isHalf2UnaryIntrinsic(name: string | undefined): boolean {
