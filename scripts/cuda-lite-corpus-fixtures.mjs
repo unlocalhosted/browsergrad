@@ -76,6 +76,25 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
+    sourceKey: "corpusCuda120CooperativeReductionKernel",
+    caseName: "corpus:cuda-120:cooperativeReductionKernel_grid_sync",
+    corpusId: "cuda-120",
+    relativePath: "daily-updates/day-65-Collaborative-Grouping-Techniques.md",
+    kernelName: "cooperativeReductionKernel",
+    workgroupSize: [4, 1, 1],
+    options: { dynamicSharedMemory: { sdata: 16 } },
+    launch: { gridDim: [2, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        input: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+        output: { type: "Float32Array", length: 2 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "output",
+    expectedOutput: { type: "Float32Array", data: [36, 26] },
+  },
+  {
     sourceKey: "corpusCuda120CoalescedAccess",
     caseName: "corpus:cuda-120:coalescedAccess",
     corpusId: "cuda-120",

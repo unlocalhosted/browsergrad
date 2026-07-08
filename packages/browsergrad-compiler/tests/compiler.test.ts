@@ -1585,7 +1585,9 @@ __global__ void vector_lane_offset(float* out, const float* inp) {
   write_lane_offset(writeView, idx, value.x + value.w);
 }`, { workgroupSize: [2, 1, 1] });
 
-    expect(compiled.wgsl).toContain("write_lane_offset(0u, u32((i32(out_base) + 4)), idx");
+    expect(compiled.wgsl).toContain("write_lane_offset(0u, 4u, idx");
+    expect(compiled.wgsl).not.toContain("write_lane_offset(0u, u32((i32(out_base) + 4)), idx");
+    expect(compiled.wgsl).toContain("case 0u: { out[(index + 0u)] = (value).x;");
     expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(out_buffer, (out_base + (u32(idx) * 4u))");
   });
 

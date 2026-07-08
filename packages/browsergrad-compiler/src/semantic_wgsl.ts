@@ -1206,6 +1206,7 @@ function semanticPointerStorageCompatible(pointerType: CudaLiteScalarType, stora
   if (storageType === undefined) return false;
   return pointerType === storageType ||
     isCudaVectorType(storageType) && cudaVectorScalarType(storageType) === pointerType ||
+    isCudaVectorType(pointerType) && cudaVectorScalarType(pointerType) === storageType ||
     isCudaVectorType(pointerType) && cudaVectorScalarType(pointerType) === cudaVectorScalarType(storageType);
 }
 
@@ -4514,13 +4515,28 @@ function emitSemanticPointerArgBaseIndex(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  const root = ir.params.find((param) => param.name === ref.base) ?? ir.memory.find((symbol) => symbol.name === ref.base);
+  const paramRoot = ir.params.find((param) => param.name === ref.base && param.addressSpace === "storage");
+  if (paramRoot) return emitSemanticRootStoragePointerArgBaseIndex(ref, paramRoot, ir, names, options);
+  const root = ir.memory.find((symbol) => symbol.name === ref.base);
   const valueType = root?.valueType;
   if (isSemanticWgslFloatVectorType(valueType)) {
     const vectorType = valueType as CudaLiteScalarType;
     return emitFlatStorageVectorBaseIndex({ ...ref, containerValueType: vectorType }, ir, names, options);
   }
   return emitFlatStorageIndex(ref, ir, names, options);
+}
+
+function emitSemanticRootStoragePointerArgBaseIndex(
+  ref: SemanticMemoryRef,
+  root: SemanticKernelIrModule["params"][number],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): string {
+  if (!isSemanticWgslFloatVectorType(root.valueType)) return emitSemanticRootStorageIndex(ref, ir, names, options);
+  const base = emitSemanticRootStorageIndex({ ...ref, valueType: "float" }, ir, names, options);
+  const stride = cudaVectorLaneCount(root.valueType);
+  return stride === 1 ? base : `(${base} * ${stride}u)`;
 }
 
 function emitSemanticUpdate(
@@ -6208,6 +6224,22 @@ function emitFlatStorageIndex(
   if (hasOffset) {
     terms.unshift(nameFor(storageOffsetSymbol(ref.base), names));
   }
+  const expression = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  return `u32(${expression})`;
+}
+
+function emitSemanticRootStorageIndex(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): string {
+  const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options).has(ref.base);
+  if (!hasOffset && ref.indices.length === 1) {
+    return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
+  }
+  const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32", options));
+  if (hasOffset) terms.unshift(nameFor(storageOffsetSymbol(ref.base), names));
   const expression = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
   return `u32(${expression})`;
 }
