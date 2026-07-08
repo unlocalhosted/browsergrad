@@ -230,6 +230,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["curand_log_normal2", [3, 3]],
   ["curand_log_normal_double", [3, 3]],
   ["curand_poisson", [2, 2]],
+  ["skipahead", [2, 2]],
   ["make_cuComplex", [2, 2]],
   ["make_cuFloatComplex", [2, 2]],
   ["cuCrealf", [1, 1]],
@@ -2166,6 +2167,18 @@ function validateCallExpression(
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     for (const arg of expression.args.slice(1)) {
       validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    }
+    return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "skipahead") {
+    const count = expression.args[0];
+    if (count) validateScalarOperand(walkExpression(count, scope), count.span, diagnostics);
+    const state = expression.args[1];
+    if (state) {
+      const info = walkExpression(state, scope);
+      if (info.kind !== "address") {
+        diagnostics.push(error("curand-state-address", "skipahead expects a state address as its second argument", state.span));
+      }
     }
     return { kind: "scalar", valueType: "uint" };
   }

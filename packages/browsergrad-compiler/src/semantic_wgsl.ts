@@ -123,6 +123,7 @@ const SEMANTIC_CURAND_CALLS = new Set([
   "curand_log_normal2",
   "curand_log_normal_double",
   "curand_poisson",
+  "skipahead",
 ]);
 const SEMANTIC_CURAND_VECTOR_CALLS = new Set(["curand_normal2", "curand_log_normal2"]);
 const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
@@ -1160,6 +1161,11 @@ function semanticWgslCurandCallSupported(
       semanticCurandStateAddressSpace(expression.args[0]!) !== undefined &&
       semanticWgslExpressionSupported(expression.args[1]!, "scalar", ir);
   }
+  if (expression.callee.name === "skipahead") {
+    return expression.args.length === 2 &&
+      semanticWgslExpressionSupported(expression.args[0]!, "scalar", ir) &&
+      semanticCurandStateAddressSpace(expression.args[1]!) !== undefined;
+  }
   if (SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(expression.callee.name)) {
     return expression.args.length === 3 &&
       semanticCurandStateAddressSpace(expression.args[0]!) !== undefined &&
@@ -1590,6 +1596,15 @@ function semanticWgslCallSupported(
   if (operation.callee === "printf") return semanticWgslPrintfSupported(operation, ir);
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
   if (operation.callee === "curand_init") {
+    return semanticWgslCurandCallSupported({
+      kind: "call",
+      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      args: operation.args,
+      valueType: "uint",
+      span: operation.span,
+    }, ir);
+  }
+  if (operation.callee === "skipahead") {
     return semanticWgslCurandCallSupported({
       kind: "call",
       callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
@@ -2764,6 +2779,15 @@ function emitSemanticCall(
   if (operation.callee === "printf") return [];
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return [];
   if (operation.callee === "curand_init") return [`${"  ".repeat(indentLevel)}${emitSemanticCurandInit(operation, ir, names, options, textureSpecializations)};`];
+  if (operation.callee === "skipahead") {
+    return [`${"  ".repeat(indentLevel)}${emitSemanticCurandCall({
+      kind: "call",
+      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      args: operation.args,
+      valueType: "uint",
+      span: operation.span,
+    }, ir, names, options, textureSpecializations)};`];
+  }
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
@@ -2841,6 +2865,13 @@ function emitSemanticCurandCall(
       reads: [],
       span: expression.span,
     }, ir, names, options, textureSpecializations);
+  }
+  if (expression.callee.name === "skipahead") {
+    const pointer = semanticCurandStatePointer(expression.args[1], ir, names, options);
+    if (!pointer) throw semanticWgslError("skipahead expects a modeled state address", expression.span);
+    const suffix = pointer.addressSpace === "storage" ? "_storage" : pointer.addressSpace === "workgroup" ? "_workgroup" : "";
+    const count = emitSemanticExpressionAs(expression.args[0]!, ir, names, "u32", options, textureSpecializations);
+    return `bg_curand_skipahead${suffix}(${count}, ${pointer.expression})`;
   }
   const pointer = semanticCurandStatePointer(expression.args[0], ir, names, options);
   if (!pointer) throw semanticWgslError(`${expression.callee.name} expects a modeled state address`, expression.span);

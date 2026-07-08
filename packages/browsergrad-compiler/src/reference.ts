@@ -3103,6 +3103,14 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(lvalue, next, context);
     return next;
   }
+  if (name === "skipahead") {
+    const state = expression.args[1];
+    if (!state) throw compilerFailure("skipahead expects state address");
+    const lvalue = resolveAddressArgument(state, context);
+    const count = evalNumber(expression.args[0]!, context) >>> 0;
+    writeLValue(lvalue, curandAdvance(valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0, count), context);
+    return 0;
+  }
   if (name === "curand_normal" || name === "curand_normal_double") {
     const state = expression.args[0];
     if (!state) throw compilerFailure(`${name} expects state address`);
@@ -4072,6 +4080,24 @@ function withLocalScope(lvalue: LValue, context: ThreadContext): LValue {
 
 function curandNext(state: number): number {
   return (Math.imul(state >>> 0, 1664525) + 1013904223) >>> 0;
+}
+
+function curandAdvance(state: number, count: number): number {
+  let accMult = 1;
+  let accPlus = 0;
+  let curMult = 1664525;
+  let curPlus = 1013904223;
+  let delta = count >>> 0;
+  while (delta > 0) {
+    if ((delta & 1) !== 0) {
+      accMult = Math.imul(accMult, curMult) >>> 0;
+      accPlus = (Math.imul(accPlus, curMult) + curPlus) >>> 0;
+    }
+    curPlus = Math.imul((curMult + 1) >>> 0, curPlus) >>> 0;
+    curMult = Math.imul(curMult, curMult) >>> 0;
+    delta >>>= 1;
+  }
+  return (Math.imul(accMult, state >>> 0) + accPlus) >>> 0;
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {

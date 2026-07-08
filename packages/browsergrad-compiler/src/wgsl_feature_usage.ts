@@ -206,6 +206,7 @@ export function usesCurand(ir: KernelIrModule): boolean {
     "curand_log_normal2",
     "curand_log_normal_double",
     "curand_poisson",
+    "skipahead",
   ]);
   return statementsUseCall(ir.body, curandCalls) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, curandCalls));

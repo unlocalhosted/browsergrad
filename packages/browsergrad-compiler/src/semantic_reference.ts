@@ -134,6 +134,7 @@ const SEMANTIC_CURAND_CALLS = new Set([
   "curand_log_normal2",
   "curand_log_normal_double",
   "curand_poisson",
+  "skipahead",
 ]);
 const SEMANTIC_CURAND_VECTOR_CALLS = new Set(["curand_normal2", "curand_log_normal2"]);
 const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
@@ -583,6 +584,11 @@ function semanticReferenceCurandCallSupported(
       semanticCurandState(expression.args[0]!) !== undefined &&
       semanticReferenceExpressionSupported(expression.args[1]!, "scalar", compiled);
   }
+  if (expression.callee.name === "skipahead") {
+    return expression.args.length === 2 &&
+      semanticReferenceExpressionSupported(expression.args[0]!, "scalar", compiled) &&
+      semanticCurandState(expression.args[1]!) !== undefined;
+  }
   if (SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(expression.callee.name)) {
     return expression.args.length === 3 &&
       semanticCurandState(expression.args[0]!) !== undefined &&
@@ -830,6 +836,15 @@ function semanticReferenceCallSupported(
   if (operation.callee === "printf") return semanticReferencePrintfSupported(operation, compiled);
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
   if (operation.callee === "curand_init") {
+    return semanticReferenceCurandCallSupported({
+      kind: "call",
+      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      args: operation.args,
+      valueType: "uint",
+      span: operation.span,
+    }, compiled);
+  }
+  if (operation.callee === "skipahead") {
     return semanticReferenceCurandCallSupported({
       kind: "call",
       callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
@@ -1438,6 +1453,16 @@ function execSemanticCall(
     execSemanticCurandInit(operation, context);
     return;
   }
+  if (operation.callee === "skipahead") {
+    evalSemanticExpression({
+      kind: "call",
+      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      args: operation.args,
+      valueType: "uint",
+      span: operation.span,
+    }, context);
+    return;
+  }
   if (semanticReferenceVoidFunctionCallSupported(operation, context.compiled)) {
     execSemanticVoidFunctionCall(operation, context);
     return;
@@ -1495,6 +1520,13 @@ function evalSemanticCurandCall(
   context: SemanticReferenceContext,
 ): SemanticValue {
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic cuRAND call requires symbol callee", expression.span);
+  if (expression.callee.name === "skipahead") {
+    const state = semanticCurandState(expression.args[1]);
+    if (!state) throw semanticReferenceError("skipahead expects state address", expression.span);
+    const count = evalNumber(expression.args[0]!, context) >>> 0;
+    semanticCurandStateWrite(state, curandAdvance(semanticCurandStateRead(state, context) >>> 0, count), context);
+    return 0;
+  }
   const state = semanticCurandState(expression.args[0]);
   if (!state) throw semanticReferenceError(`${expression.callee.name} expects state address`, expression.span);
   if (expression.callee.name === "curand_uniform" || expression.callee.name === "curand_uniform_double") {
@@ -2423,6 +2455,24 @@ function float32ToUintBits(value: number): number {
 
 function curandNext(state: number): number {
   return (Math.imul(state >>> 0, 1664525) + 1013904223) >>> 0;
+}
+
+function curandAdvance(state: number, count: number): number {
+  let accMult = 1;
+  let accPlus = 0;
+  let curMult = 1664525;
+  let curPlus = 1013904223;
+  let delta = count >>> 0;
+  while (delta > 0) {
+    if ((delta & 1) !== 0) {
+      accMult = Math.imul(accMult, curMult) >>> 0;
+      accPlus = (Math.imul(accPlus, curMult) + curPlus) >>> 0;
+    }
+    curPlus = Math.imul((curMult + 1) >>> 0, curPlus) >>> 0;
+    curMult = Math.imul(curMult, curMult) >>> 0;
+    delta >>>= 1;
+  }
+  return (Math.imul(accMult, state >>> 0) + accPlus) >>> 0;
 }
 
 function roundSemanticHalf(value: number): number {

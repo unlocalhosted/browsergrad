@@ -9997,6 +9997,33 @@ __global__ void curandPoissonKernel(unsigned int *out, unsigned int seed) {
     expect([...result.buffers.out as Uint32Array].every((value) => value > 0)).toBe(true);
   });
 
+  it("lowers CUDA cuRAND skipahead through semantic IR", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void curandSkipaheadKernel(unsigned int *out, unsigned int seed) {
+  curandState_t a;
+  curandState_t b;
+  curand_init(seed, threadIdx.x, 0, &a);
+  curand_init(seed, threadIdx.x, 0, &b);
+  unsigned int discarded0 = curand(&a);
+  unsigned int discarded1 = curand(&a);
+  skipahead(2, &b);
+  unsigned int nextA = curand(&a);
+  unsigned int nextB = curand(&b);
+  out[threadIdx.x] = nextA ^ nextB ^ discarded0 ^ discarded1;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) }, scalars: { seed: 9753 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_curand_advance(state: u32, count: u32) -> u32");
+    expect(compiled.wgsl).toContain("bg_curand_skipahead(2u, &b)");
+    expect(JSON.stringify(compiled.kernelIr)).toContain("skipahead");
+    expect([...result.buffers.out as Uint32Array].some((value) => value !== 0)).toBe(true);
+  });
+
   it("lowers cuRAND calls against storage-backed state arrays", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {

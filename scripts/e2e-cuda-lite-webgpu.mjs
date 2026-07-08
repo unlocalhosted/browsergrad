@@ -1899,6 +1899,19 @@ __global__ void curandPoissonState(curandState_t *states, unsigned int *out, uns
   unsigned int large = curand_poisson(&states[tid], 72.0f);
   out[tid] = small + large;
 }`,
+  curandSkipaheadState: `
+__global__ void curandSkipaheadState(curandState_t *states, unsigned int *out, unsigned int seed) {
+  unsigned int tid = threadIdx.x;
+  curandState_t local;
+  curand_init(seed, tid, 0, &local);
+  curand_init(seed, tid, 0, &states[tid]);
+  unsigned int discarded0 = curand(&local);
+  unsigned int discarded1 = curand(&local);
+  skipahead(2, &states[tid]);
+  unsigned int nextLocal = curand(&local);
+  unsigned int nextStorage = curand(&states[tid]);
+  out[tid] = nextLocal ^ nextStorage ^ discarded0 ^ discarded1;
+}`,
   fp8ConvertHelpers: `
 __global__ void fp8ConvertHelpers(const uint* input, half* output, uint* encoded, int* as_int) {
   if (threadIdx.x == 0) {
@@ -12430,6 +12443,24 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [69, 92, 71, 66],
+            },
+          },
+          {
+            name: "helpers:curand-skipahead-state",
+            source: SOURCES.curandSkipaheadState,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                states: new Uint32Array(4),
+                out: new Uint32Array(4),
+              },
+              scalars: { seed: 9753 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [3169702043, 1216244613, 2662019215, 2787520901],
             },
           },
           {

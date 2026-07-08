@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-08T07:10:00Z
+Last updated: 2026-07-08T07:24:00Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails after nested local pointer-param lowering; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | cuRAND Poisson draws now run through semantic IR/reference/WGSL |
+| Active work item | cuRAND skipahead now runs through semantic IR/reference/WGSL |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- cuRAND skipahead: `skipahead(n, &state)` now lowers through semantic IR/reference/WGSL for modeled local/shared/storage `curandState_t`, using native WebGPU logarithmic jump-ahead over the deterministic browser RNG state instead of O(n) GPU loops or unsupported-call fallback; changed-fast passed typecheck, lint, compiler unit `638/0`, WGSL module unit `16/0`, selected pointer/storage WebGPU `125/0/0`, fixture metadata test, bugbash status test, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; exact native WebGPU fixture `helpers:curand-skipahead-state` passed `1/0/0` with pinned expected output and max diff `0`
 - cuRAND Poisson draws: `curand_poisson` now lowers through semantic IR/reference/WGSL for modeled local/shared/storage `curandState_t`, using bounded small-lambda native WebGPU sampling and large-lambda deterministic normal approximation instead of unsupported-call fallback; changed-fast passed typecheck, lint, compiler unit `637/0`, WGSL module unit `16/0`, selected pointer/storage WebGPU `125/0/0`, fixture metadata test, bugbash status test, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; exact native WebGPU fixture `helpers:curand-poisson-state` passed `1/0/0` with pinned expected output and max diff `0`
 - cuRAND vector-pair draws: `curand_normal2` and `curand_log_normal2` now lower as `float2` values through semantic IR/reference/WGSL for modeled local/shared/storage `curandState_t`; the log-normal semantic support predicate now validates its mean/stddev operands explicitly instead of falling back to the older emitter path; changed-fast passed typecheck, lint, compiler unit `636/0`, WGSL module unit `16/0`, selected pointer/storage WebGPU `125/0/0`, fixture metadata test, bugbash status test, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; exact native WebGPU fixture `helpers:curand-pair-state` passed `1/0/0` with pinned expected output and max diff `0.000473`
 - raw cuRAND u32 draws: `curand(&state)` now lowers through the deterministic cuRAND semantic IR/reference/WGSL island for modeled local/shared/storage `curandState_t`, returning native `u32` values while preserving state advancement; changed-fast passed typecheck, lint, compiler unit `635/0`, WGSL module unit `16/0`, selected pointer/storage WebGPU `125/0/0`, fixture metadata test, bugbash status test, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; exact native WebGPU fixture `helpers:curand-raw-state` passed `1/0/0` with pinned expected output and max diff `0`
