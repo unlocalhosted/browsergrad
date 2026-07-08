@@ -11861,7 +11861,7 @@ __global__ void selected(float *x) {
     expect(compiled.wgsl).not.toContain("unused_divergent_barrier");
   });
 
-  it("parses device-side kernel launches as a runtime compatibility gap", () => {
+  it("parses device-side kernel launches as host-orchestrated WebGPU lowering", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void child(float *x) { if (threadIdx.x < 1) { x[0] = 1.0f; } }
 __global__ void parent(float *x) {
@@ -11874,7 +11874,8 @@ __global__ void parent(float *x) {
 }`), { kernelName: "parent" });
 
     expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-dynamic-parallelism",
+      code: "cuda-dynamic-launch-host-orchestration",
+      severity: "warning",
     }));
   });
 
@@ -12176,8 +12177,10 @@ __global__ void parent(float *x) {
     );
 
     expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(false);
+    expect(compiled.loweringPlan.requiresGpuPolyfill).toBe(true);
+    expect(compiled.loweringPlan.unsupported).toEqual([]);
     expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-dynamic-parallelism",
+      code: "cuda-dynamic-launch-host-orchestration",
       severity: "warning",
     }));
     expect([...result.buffers.x as Float32Array]).toEqual([2, 3]);

@@ -674,6 +674,7 @@ function createReferenceOnlyRuntimePlan(
   blockers: readonly CudaWebGpuExecutionBlocker[],
 ): CudaWebGpuExecutionPlan | undefined {
   const diagnostic = compiled.diagnostics.find((item) =>
+    item.code === "cuda-dynamic-launch-host-orchestration" ||
     item.code === "unsupported-dynamic-parallelism" ||
     item.code === "unsupported-cuda-runtime" ||
     item.code === "unsupported-cooperative-groups"
@@ -718,6 +719,7 @@ function referenceRuntimeDiagnostics(
   message: string,
 ): readonly CudaLiteDiagnostic[] {
   const diagnostic = compiled.diagnostics.find((item) =>
+    item.code === "cuda-dynamic-launch-host-orchestration" ||
     item.code === "unsupported-dynamic-parallelism" ||
     item.code === "unsupported-cuda-runtime" ||
     item.code === "unsupported-cooperative-groups"

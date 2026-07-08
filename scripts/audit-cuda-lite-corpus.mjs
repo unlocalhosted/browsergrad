@@ -271,13 +271,24 @@ function mentionsIdentifier(source, name) {
 function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) {
   const source = sourceFromAuditContext(rawKernel, kernels, kernelName, context);
   try {
-    compileCudaLiteKernel(source, {
+    const compiled = compileCudaLiteKernel(source, {
       kernelName,
       features: { "shader-f16": true, subgroups: true },
       f64Mode: "f32",
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
     });
+    const hostOrchestratedDiagnostic = hostOrchestratedDiagnosticFor(compiled);
+    if (hostOrchestratedDiagnostic) {
+      return {
+        ok: false,
+        source,
+        error: {
+          name: "CudaHostOrchestrationRequired",
+          diagnostics: [hostOrchestratedDiagnostic],
+        },
+      };
+    }
     return { ok: true, source };
   } catch (error) {
     return { ok: false, source, error };
@@ -346,17 +357,34 @@ function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kerne
   if (templateArgs.length === 0) return compileKernelFromAuditContext(rawKernel, kernels, kernelName, context);
   const source = sourceFromAuditContext(rawKernel, kernels, kernelName, context, templateArgs);
   try {
-    compileCudaLiteKernel(source, {
+    const compiled = compileCudaLiteKernel(source, {
       kernelName,
       features: { "shader-f16": true, subgroups: true },
       f64Mode: "f32",
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
     });
+    const hostOrchestratedDiagnostic = hostOrchestratedDiagnosticFor(compiled);
+    if (hostOrchestratedDiagnostic) {
+      return {
+        ok: false,
+        source,
+        error: {
+          name: "CudaHostOrchestrationRequired",
+          diagnostics: [hostOrchestratedDiagnostic],
+        },
+      };
+    }
     return { ok: true, source };
   } catch (error) {
     return { ok: false, source, error };
   }
+}
+
+function hostOrchestratedDiagnosticFor(compiled) {
+  if (compiled.loweringPlan?.canDirectLowerToWgsl !== false) return undefined;
+  if (compiled.loweringPlan?.requiresGpuPolyfill !== true) return undefined;
+  return compiled.diagnostics.find((diagnostic) => describeCudaDiagnostic(diagnostic).lowering === "gpu-polyfill");
 }
 
 function shouldRetryWithReverseContext(error) {

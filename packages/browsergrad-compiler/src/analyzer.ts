@@ -561,11 +561,11 @@ export function analyzeCudaLite(
           if (activeStatementsReachable) {
             diagnostics.push({
               ...error(
-                "unsupported-dynamic-parallelism",
-                `device-side kernel launch '${statement.callee}<<<...>>>' requires explicit runtime orchestration in CUDA-lite`,
+                "cuda-dynamic-launch-host-orchestration",
+                `device-side kernel launch '${statement.callee}<<<...>>>' requires WebGPU host-orchestrated child dispatch`,
                 statement.span,
               ),
-              severity: options.referenceDynamicParallelism ? "warning" : "error",
+              severity: "warning",
             });
           }
           for (const arg of statement.grid) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
