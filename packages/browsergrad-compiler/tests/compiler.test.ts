@@ -9935,6 +9935,27 @@ __global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {
     expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
   });
 
+  it("lowers cuRAND calls against shared-memory state arrays", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void sharedRNG(float *out, unsigned int seed) {
+  __shared__ curandState_t states[4];
+  unsigned int tid = threadIdx.x;
+  curand_init(seed, tid, 0, &states[tid]);
+  out[tid] = curand_uniform(&states[tid]) + curand_normal(&states[tid]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) }, scalars: { seed: 1234 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<workgroup> states: array<u32, 4>;");
+    expect(compiled.wgsl).toContain("fn bg_curand_init_workgroup");
+    expect(compiled.wgsl).toContain("bg_curand_init_workgroup(bg_uniforms.seed, tid, 0u, &states[tid])");
+    expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
+  });
+
   it("supports cufftComplex buffers as interleaved complex64 values", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void magnitudeKernel(cufftComplex *data, float *mag, int N) {

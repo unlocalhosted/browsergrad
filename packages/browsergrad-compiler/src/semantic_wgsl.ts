@@ -2776,7 +2776,7 @@ function emitSemanticCurandInit(
   const state = operation.args[3];
   const pointer = semanticCurandStatePointer(state, ir, names, options);
   if (!pointer || operation.args.length !== 4) throw semanticWgslError("curand_init expects a modeled state address", operation.span);
-  const suffix = pointer.addressSpace === "storage" ? "_storage" : "";
+  const suffix = pointer.addressSpace === "storage" ? "_storage" : pointer.addressSpace === "workgroup" ? "_workgroup" : "";
   const seed = emitSemanticExpressionAs(operation.args[0]!, ir, names, "u32", options, textureSpecializations);
   const sequence = emitSemanticExpressionAs(operation.args[1]!, ir, names, "u32", options, textureSpecializations);
   const offset = emitSemanticExpressionAs(operation.args[2]!, ir, names, "u32", options, textureSpecializations);
@@ -2802,7 +2802,7 @@ function emitSemanticCurandCall(
   }
   const pointer = semanticCurandStatePointer(expression.args[0], ir, names, options);
   if (!pointer) throw semanticWgslError(`${expression.callee.name} expects a modeled state address`, expression.span);
-  const suffix = pointer.addressSpace === "storage" ? "_storage" : "";
+  const suffix = pointer.addressSpace === "storage" ? "_storage" : pointer.addressSpace === "workgroup" ? "_workgroup" : "";
   if (expression.callee.name === "curand_uniform" || expression.callee.name === "curand_uniform_double") {
     return `bg_curand_uniform${suffix}(${pointer.expression})`;
   }
@@ -4511,7 +4511,7 @@ function emitSemanticVectorMemoryRead(
   }).join(", ")})`;
 }
 
-function semanticCurandStateAddressSpace(expression: SemanticExpression | undefined): "function" | "storage" | undefined {
+function semanticCurandStateAddressSpace(expression: SemanticExpression | undefined): "function" | "storage" | "workgroup" | undefined {
   if (!expression || expression.kind !== "unary" || expression.operator !== "&") return undefined;
   const target = expression.argument;
   if (target.kind === "symbol" && target.addressSpace === "local") return "function";
@@ -4519,6 +4519,7 @@ function semanticCurandStateAddressSpace(expression: SemanticExpression | undefi
   const ref = memoryRefFromIndexExpression(target);
   if (!ref) return undefined;
   if (ref.addressSpace === "local") return "function";
+  if (ref.addressSpace === "shared") return "workgroup";
   if (ref.addressSpace === "storage" || ref.addressSpace === "device-global") return "storage";
   return undefined;
 }
@@ -4528,7 +4529,7 @@ function semanticCurandStatePointer(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
-): { readonly addressSpace: "function" | "storage"; readonly expression: string } | undefined {
+): { readonly addressSpace: "function" | "storage" | "workgroup"; readonly expression: string } | undefined {
   const addressSpace = semanticCurandStateAddressSpace(expression);
   if (!addressSpace || !expression || expression.kind !== "unary" || expression.operator !== "&") return undefined;
   if (expression.argument.kind === "symbol") {

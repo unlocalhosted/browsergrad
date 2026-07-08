@@ -1862,6 +1862,13 @@ __global__ void curandStorageState(curandState_t *states, float *out, unsigned i
   curand_init(seed, tid, 0, &states[tid]);
   out[tid] = curand_uniform(&states[tid]) + curand_normal(&states[tid]);
 }`,
+  curandSharedState: `
+__global__ void curandSharedState(float *out, unsigned int seed) {
+  __shared__ curandState_t states[4];
+  unsigned int tid = threadIdx.x;
+  curand_init(seed, tid, 0, &states[tid]);
+  out[tid] = curand_uniform(&states[tid]) + curand_normal(&states[tid]);
+}`,
   fp8ConvertHelpers: `
 __global__ void fp8ConvertHelpers(const uint* input, half* output, uint* encoded, int* as_int) {
   if (threadIdx.x == 0) {
@@ -12272,6 +12279,29 @@ const html = String.raw`<!doctype html>
             input: () => ({
               buffers: {
                 states: new Uint32Array(4),
+                out: new Float32Array(4),
+              },
+              scalars: { seed: 1234 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                -0.7953461408615112,
+                0.977499783039093,
+                0.5716087818145752,
+                1.7168734073638916,
+              ],
+            },
+            tolerance: 0.001,
+          },
+          {
+            name: "helpers:curand-shared-state",
+            source: SOURCES.curandSharedState,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
                 out: new Float32Array(4),
               },
               scalars: { seed: 1234 },
