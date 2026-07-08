@@ -97,10 +97,10 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
   "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
   "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
-  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
+  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
   "__vcmpeq2", "__vcmpne2", "__vcmpges2", "__vcmpgeu2", "__vcmpgts2", "__vcmpgtu2", "__vcmples2", "__vcmpleu2", "__vcmplts2", "__vcmpltu2",
   "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
-  "__vadd4", "__vsub4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
+  "__vadd4", "__vsub4", "__vabs4", "__vabsss4", "__vneg4", "__vnegss4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vabsdiffs4", "__vsads4", "__vsadu4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
   "__vcmpeq4", "__vcmpne4", "__vcmpges4", "__vcmpgeu4", "__vcmpgts4", "__vcmpgtu4", "__vcmples4", "__vcmpleu4", "__vcmplts4", "__vcmpltu4",
   "__vseteq4", "__vsetne4", "__vsetges4", "__vsetgeu4", "__vsetgts4", "__vsetgtu4", "__vsetles4", "__vsetleu4", "__vsetlts4", "__vsetltu4",
   "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
@@ -2431,11 +2431,18 @@ function evalSemanticMathCall(
     case "__usad4": return u8x4SadAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
     case "__vadd2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
+    case "__vabs2": return packedUnary(args[0] ?? 0, 16, true, (a) => Math.abs(a));
+    case "__vabsss2": return packedUnary(args[0] ?? 0, 16, true, (a) => Math.min(32767, Math.abs(a)));
+    case "__vneg2": return packedUnary(args[0] ?? 0, 16, true, (a) => -a);
+    case "__vnegss2": return packedUnary(args[0] ?? 0, 16, true, (a) => Math.min(32767, Math.max(-32768, -a)));
     case "__vaddss2": return i16x2SaturatingBinary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsubss2": return i16x2SaturatingBinary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
     case "__vaddus2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.min(0xffff, a + b));
     case "__vsubus2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.max(0, a - b));
     case "__vabsdiffu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
+    case "__vabsdiffs2": return i16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
+    case "__vsads2": return packedSad(args[0] ?? 0, args[1] ?? 0, 16, true);
+    case "__vsadu2": return packedSad(args[0] ?? 0, args[1] ?? 0, 16, false);
     case "__vavgu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__vminu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
@@ -2463,11 +2470,18 @@ function evalSemanticMathCall(
     case "__vsetltu2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a < b);
     case "__vadd4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
+    case "__vabs4": return packedUnary(args[0] ?? 0, 8, true, (a) => Math.abs(a));
+    case "__vabsss4": return packedUnary(args[0] ?? 0, 8, true, (a) => Math.min(127, Math.abs(a)));
+    case "__vneg4": return packedUnary(args[0] ?? 0, 8, true, (a) => -a);
+    case "__vnegss4": return packedUnary(args[0] ?? 0, 8, true, (a) => Math.min(127, Math.max(-128, -a)));
     case "__vaddss4": return i8x4SaturatingBinary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsubss4": return i8x4SaturatingBinary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
     case "__vaddus4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.min(0xff, a + b));
     case "__vsubus4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.max(0, a - b));
     case "__vabsdiffu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
+    case "__vabsdiffs4": return i8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
+    case "__vsads4": return packedSad(args[0] ?? 0, args[1] ?? 0, 8, true);
+    case "__vsadu4": return packedSad(args[0] ?? 0, args[1] ?? 0, 8, false);
     case "__vavgu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__vminu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
@@ -2886,6 +2900,33 @@ function i16x2Binary(aValue: number, bValue: number, op: (a: number, b: number) 
     const shift = lane * 16;
     const laneValue = op(signExtend16((a >>> shift) & 0xffff), signExtend16((b >>> shift) & 0xffff)) & 0xffff;
     out = (out | (laneValue << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function packedUnary(value: number, laneWidth: 8 | 16, signed: boolean, op: (a: number) => number): number {
+  const input = Math.trunc(value) >>> 0;
+  const mask = laneWidth === 8 ? 0xff : 0xffff;
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += laneWidth) {
+    const bits = (input >>> shift) & mask;
+    const lane = signed ? laneWidth === 8 ? signExtend8(bits) : signExtend16(bits) : bits;
+    out = (out | ((op(lane) & mask) << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function packedSad(aValue: number, bValue: number, laneWidth: 8 | 16, signed: boolean): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const mask = laneWidth === 8 ? 0xff : 0xffff;
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += laneWidth) {
+    const leftBits = (a >>> shift) & mask;
+    const rightBits = (b >>> shift) & mask;
+    const left = signed ? laneWidth === 8 ? signExtend8(leftBits) : signExtend16(leftBits) : leftBits;
+    const right = signed ? laneWidth === 8 ? signExtend8(rightBits) : signExtend16(rightBits) : rightBits;
+    out += Math.abs(left - right);
   }
   return out >>> 0;
 }
@@ -3459,6 +3500,9 @@ function semanticMathCallArity(name: string): number {
     name === "__vaddus2" ||
     name === "__vsubus2" ||
     name === "__vabsdiffu2" ||
+    name === "__vabsdiffs2" ||
+    name === "__vsads2" ||
+    name === "__vsadu2" ||
     name === "__vavgu2" ||
     name === "__vminu2" ||
     name === "__vmaxu2" ||
@@ -3491,6 +3535,9 @@ function semanticMathCallArity(name: string): number {
     name === "__vaddus4" ||
     name === "__vsubus4" ||
     name === "__vabsdiffu4" ||
+    name === "__vabsdiffs4" ||
+    name === "__vsads4" ||
+    name === "__vsadu4" ||
     name === "__vavgu4" ||
     name === "__vminu4" ||
     name === "__vmaxu4" ||

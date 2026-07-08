@@ -414,11 +414,18 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__usad4", "usad4"],
   ["__vadd2", "vadd2"],
   ["__vsub2", "vsub2"],
+  ["__vabs2", "vabs2"],
+  ["__vabsss2", "vabsss2"],
+  ["__vneg2", "vneg2"],
+  ["__vnegss2", "vnegss2"],
   ["__vaddss2", "vaddss2"],
   ["__vsubss2", "vsubss2"],
   ["__vaddus2", "vaddus2"],
   ["__vsubus2", "vsubus2"],
   ["__vabsdiffu2", "vabsdiffu2"],
+  ["__vabsdiffs2", "vabsdiffs2"],
+  ["__vsads2", "vsads2"],
+  ["__vsadu2", "vsadu2"],
   ["__vavgu2", "vavgu2"],
   ["__vminu2", "vminu2"],
   ["__vmaxu2", "vmaxu2"],
@@ -446,11 +453,18 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__vsetltu2", "vsetltu2"],
   ["__vadd4", "vadd4"],
   ["__vsub4", "vsub4"],
+  ["__vabs4", "vabs4"],
+  ["__vabsss4", "vabsss4"],
+  ["__vneg4", "vneg4"],
+  ["__vnegss4", "vnegss4"],
   ["__vaddss4", "vaddss4"],
   ["__vsubss4", "vsubss4"],
   ["__vaddus4", "vaddus4"],
   ["__vsubus4", "vsubus4"],
   ["__vabsdiffu4", "vabsdiffu4"],
+  ["__vabsdiffs4", "vabsdiffs4"],
+  ["__vsads4", "vsads4"],
+  ["__vsadu4", "vsadu4"],
   ["__vavgu4", "vavgu4"],
   ["__vminu4", "vminu4"],
   ["__vmaxu4", "vmaxu4"],
@@ -4488,6 +4502,27 @@ function emitSemanticMathCall(
     if (wgslCallee === "uhadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
     return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u) + ((${lhs} ^ ${rhs}) & 1u))`;
   }
+  if (wgslCallee === "vabs2" || wgslCallee === "vabsss2" || wgslCallee === "vneg2" || wgslCallee === "vnegss2" || wgslCallee === "vabs4" || wgslCallee === "vabsss4" || wgslCallee === "vneg4" || wgslCallee === "vnegss4") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations);
+    const laneWidth = wgslCallee.endsWith("2") ? 16 : 8;
+    const op =
+      wgslCallee.startsWith("vabsss") ? "sat_abs" :
+      wgslCallee.startsWith("vabs") ? "abs" :
+      wgslCallee.startsWith("vnegss") ? "sat_neg" :
+      "neg";
+    return emitSemanticVPackedUnaryExpression(emitted, laneWidth, op);
+  }
+  if (wgslCallee === "vabsdiffs2" || wgslCallee === "vabsdiffs4" || wgslCallee === "vsads2" || wgslCallee === "vsadu2" || wgslCallee === "vsads4" || wgslCallee === "vsadu4") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, "u32", options, textureSpecializations);
+    const laneWidth = wgslCallee.endsWith("2") ? 16 : 8;
+    if (wgslCallee.startsWith("vabsdiffs")) return emitSemanticVPackedAbsDiffExpression(lhs, rhs, laneWidth);
+    return emitSemanticVPackedSadExpression(lhs, rhs, laneWidth, wgslCallee.startsWith("vsads"));
+  }
   if (wgslCallee === "vadd2" || wgslCallee === "vsub2" || wgslCallee === "vaddss2" || wgslCallee === "vsubss2" || wgslCallee === "vaddus2" || wgslCallee === "vsubus2" || wgslCallee === "vabsdiffu2" || wgslCallee === "vavgu2" || wgslCallee === "vminu2" || wgslCallee === "vmaxu2" || wgslCallee === "vmins2" || wgslCallee === "vmaxs2" || wgslCallee === "vadd4" || wgslCallee === "vsub4" || wgslCallee === "vaddss4" || wgslCallee === "vsubss4" || wgslCallee === "vaddus4" || wgslCallee === "vsubus4" || wgslCallee === "vabsdiffu4" || wgslCallee === "vavgu4" || wgslCallee === "vminu4" || wgslCallee === "vmaxu4" || wgslCallee === "vmins4" || wgslCallee === "vmaxs4") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
@@ -4824,6 +4859,62 @@ function emitSemanticVCompareExpression(lhs: string, rhs: string, laneWidth: 8 |
   return `(${lanes.join(" | ")})`;
 }
 
+function emitSemanticVPackedUnaryExpression(value: string, laneWidth: 8 | 16, op: "abs" | "sat_abs" | "neg" | "sat_neg"): string {
+  const laneCount = 32 / laneWidth;
+  const mask = laneWidth === 8 ? "0xffu" : "0xffffu";
+  const signBit = laneWidth === 8 ? "0x80u" : "0x8000u";
+  const signSub = laneWidth === 8 ? "256" : "65536";
+  const minValue = laneWidth === 8 ? "-128" : "-32768";
+  const maxValue = laneWidth === 8 ? "127" : "32767";
+  const lanes: string[] = [];
+  for (let lane = 0; lane < laneCount; lane++) {
+    const shift = `${lane * laneWidth}u`;
+    const bits = `((${value} >> ${shift}) & ${mask})`;
+    const signed = `(i32(${bits}) - select(0, ${signSub}, ${bits} >= ${signBit}))`;
+    const result =
+      op === "abs" ? `abs(${signed})` :
+      op === "sat_abs" ? `min(${maxValue}, abs(${signed}))` :
+      op === "neg" ? `(-${signed})` :
+      `clamp(-${signed}, ${minValue}, ${maxValue})`;
+    lanes.push(`((u32(${result}) & ${mask}) << ${shift})`);
+  }
+  return `(${lanes.join(" | ")})`;
+}
+
+function emitSemanticVPackedAbsDiffExpression(lhs: string, rhs: string, laneWidth: 8 | 16): string {
+  const laneCount = 32 / laneWidth;
+  const mask = laneWidth === 8 ? "0xffu" : "0xffffu";
+  const signBit = laneWidth === 8 ? "0x80u" : "0x8000u";
+  const signSub = laneWidth === 8 ? "256" : "65536";
+  const lanes: string[] = [];
+  for (let lane = 0; lane < laneCount; lane++) {
+    const shift = `${lane * laneWidth}u`;
+    const leftBits = `((${lhs} >> ${shift}) & ${mask})`;
+    const rightBits = `((${rhs} >> ${shift}) & ${mask})`;
+    const left = `(i32(${leftBits}) - select(0, ${signSub}, ${leftBits} >= ${signBit}))`;
+    const right = `(i32(${rightBits}) - select(0, ${signSub}, ${rightBits} >= ${signBit}))`;
+    lanes.push(`((u32(abs(${left} - ${right})) & ${mask}) << ${shift})`);
+  }
+  return `(${lanes.join(" | ")})`;
+}
+
+function emitSemanticVPackedSadExpression(lhs: string, rhs: string, laneWidth: 8 | 16, signed: boolean): string {
+  const laneCount = 32 / laneWidth;
+  const mask = laneWidth === 8 ? "0xffu" : "0xffffu";
+  const signBit = laneWidth === 8 ? "0x80u" : "0x8000u";
+  const signSub = laneWidth === 8 ? "256" : "65536";
+  const lanes: string[] = [];
+  for (let lane = 0; lane < laneCount; lane++) {
+    const shift = `${lane * laneWidth}u`;
+    const leftBits = `((${lhs} >> ${shift}) & ${mask})`;
+    const rightBits = `((${rhs} >> ${shift}) & ${mask})`;
+    const left = signed ? `(i32(${leftBits}) - select(0, ${signSub}, ${leftBits} >= ${signBit}))` : `i32(${leftBits})`;
+    const right = signed ? `(i32(${rightBits}) - select(0, ${signSub}, ${rightBits} >= ${signBit}))` : `i32(${rightBits})`;
+    lanes.push(`u32(abs(${left} - ${right}))`);
+  }
+  return `(${lanes.join(" + ")})`;
+}
+
 function emitRoundEvenWgsl(emitted: string): string {
   return `bg_semantic_round_even_f32(${emitted})`;
 }
@@ -4916,6 +5007,9 @@ function semanticMathCallArity(name: string): number {
     name === "__vaddus2" ||
     name === "__vsubus2" ||
     name === "__vabsdiffu2" ||
+    name === "__vabsdiffs2" ||
+    name === "__vsads2" ||
+    name === "__vsadu2" ||
     name === "__vavgu2" ||
     name === "__vminu2" ||
     name === "__vmaxu2" ||
@@ -4948,6 +5042,9 @@ function semanticMathCallArity(name: string): number {
     name === "__vaddus4" ||
     name === "__vsubus4" ||
     name === "__vabsdiffu4" ||
+    name === "__vabsdiffs4" ||
+    name === "__vsads4" ||
+    name === "__vsadu4" ||
     name === "__vavgu4" ||
     name === "__vminu4" ||
     name === "__vmaxu4" ||

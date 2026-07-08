@@ -8849,6 +8849,52 @@ __global__ void packed_simd_vcmp(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
   });
 
+  it("lowers CUDA packed SIMD absolute and SAD intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void packed_simd_abs_sad(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x8180017fu;
+  uint a2 = 0x80017fffu;
+  uint b2 = 0x7fff8000u;
+  out[0] = __vabs4(a4);
+  out[1] = __vabsss4(a4);
+  out[2] = __vneg4(a4);
+  out[3] = __vnegss4(a4);
+  out[4] = __vabsdiffs4(a4, b4);
+  out[5] = __vsads4(a4, b4);
+  out[6] = __vsadu4(a4, b4);
+  out[7] = __vabs2(a2);
+  out[8] = __vabsss2(a2);
+  out[9] = __vneg2(a2);
+  out[10] = __vnegss2(a2);
+  out[11] = __vabsdiffs2(a2, b2);
+  out[12] = __vsads2(a2, b2);
+  out[13] = __vsadu2(a2, b2);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(14) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(14) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("select(0, 256");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      0x7f800101, 0x7f7f0101, 0x818001ff, 0x817f01ff,
+      0xfe00027e, 0x0000017e, 0x0000017e,
+      0x7fff7fff, 0x7fff7fff, 0x7fff8001, 0x7fff8001,
+      0xfffeffff, 0x0001fffd, 0x00000003,
+    ]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {

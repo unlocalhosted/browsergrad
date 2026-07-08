@@ -2288,6 +2288,27 @@ __global__ void simdVCompareIntrinsic(uint *out) {
   out[18] = __vcmplts2(a2, b2);
   out[19] = __vcmpltu2(a2, b2);
 }`,
+  simdAbsSadIntrinsic: `
+__global__ void simdAbsSadIntrinsic(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x8180017fu;
+  uint a2 = 0x80017fffu;
+  uint b2 = 0x7fff8000u;
+  out[0] = __vabs4(a4);
+  out[1] = __vabsss4(a4);
+  out[2] = __vneg4(a4);
+  out[3] = __vnegss4(a4);
+  out[4] = __vabsdiffs4(a4, b4);
+  out[5] = __vsads4(a4, b4);
+  out[6] = __vsadu4(a4, b4);
+  out[7] = __vabs2(a2);
+  out[8] = __vabsss2(a2);
+  out[9] = __vneg2(a2);
+  out[10] = __vnegss2(a2);
+  out[11] = __vabsdiffs2(a2, b2);
+  out[12] = __vsads2(a2, b2);
+  out[13] = __vsadu2(a2, b2);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -13041,6 +13062,27 @@ const html = String.raw`<!doctype html>
                 0xff00ff00, 0x00ffffff, 0x00ff00ff, 0x0000ffff, 0x000000ff,
                 0x00000000, 0xffffffff, 0x0000ffff, 0xffff0000, 0x0000ffff,
                 0xffff0000, 0xffff0000, 0x0000ffff, 0xffff0000, 0x0000ffff,
+              ],
+            },
+          },
+          {
+            name: "intrinsic:simd-abs-sad",
+            source: SOURCES.simdAbsSadIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(14),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                0x7f800101, 0x7f7f0101, 0x818001ff, 0x817f01ff,
+                0xfe00027e, 0x0000017e, 0x0000017e,
+                0x7fff7fff, 0x7fff7fff, 0x7fff8001, 0x7fff8001,
+                0xfffeffff, 0x0001fffd, 0x00000003,
               ],
             },
           },
