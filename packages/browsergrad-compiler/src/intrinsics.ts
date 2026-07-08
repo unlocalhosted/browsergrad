@@ -295,6 +295,16 @@ const INTEGER_INTRINSICS = [
   intrinsic("__vmaxu2", [2, 2], "uint", (args) => evalU16x2Binary(args, Math.max), (args) => emitU16x2Binary(args, (a, b) => `max(${a}, ${b})`)),
   intrinsic("__vmins2", [2, 2], "uint", (args) => evalI16x2Binary(args, Math.min), (args) => emitI16x2Binary(args, (a, b) => `min(${a}, ${b})`)),
   intrinsic("__vmaxs2", [2, 2], "uint", (args) => evalI16x2Binary(args, Math.max), (args) => emitI16x2Binary(args, (a, b) => `max(${a}, ${b})`)),
+  intrinsic("__vcmpeq2", [2, 2], "uint", (args) => evalVCompare(args, 16, false, (a, b) => a === b), (args) => emitVCompare(args, 16, false, "==")),
+  intrinsic("__vcmpne2", [2, 2], "uint", (args) => evalVCompare(args, 16, false, (a, b) => a !== b), (args) => emitVCompare(args, 16, false, "!=")),
+  intrinsic("__vcmpges2", [2, 2], "uint", (args) => evalVCompare(args, 16, true, (a, b) => a >= b), (args) => emitVCompare(args, 16, true, ">=")),
+  intrinsic("__vcmpgeu2", [2, 2], "uint", (args) => evalVCompare(args, 16, false, (a, b) => a >= b), (args) => emitVCompare(args, 16, false, ">=")),
+  intrinsic("__vcmpgts2", [2, 2], "uint", (args) => evalVCompare(args, 16, true, (a, b) => a > b), (args) => emitVCompare(args, 16, true, ">")),
+  intrinsic("__vcmpgtu2", [2, 2], "uint", (args) => evalVCompare(args, 16, false, (a, b) => a > b), (args) => emitVCompare(args, 16, false, ">")),
+  intrinsic("__vcmples2", [2, 2], "uint", (args) => evalVCompare(args, 16, true, (a, b) => a <= b), (args) => emitVCompare(args, 16, true, "<=")),
+  intrinsic("__vcmpleu2", [2, 2], "uint", (args) => evalVCompare(args, 16, false, (a, b) => a <= b), (args) => emitVCompare(args, 16, false, "<=")),
+  intrinsic("__vcmplts2", [2, 2], "uint", (args) => evalVCompare(args, 16, true, (a, b) => a < b), (args) => emitVCompare(args, 16, true, "<")),
+  intrinsic("__vcmpltu2", [2, 2], "uint", (args) => evalVCompare(args, 16, false, (a, b) => a < b), (args) => emitVCompare(args, 16, false, "<")),
   intrinsic("__vseteq2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a === b), (args) => emitVSet(args, 16, false, "==")),
   intrinsic("__vsetne2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a !== b), (args) => emitVSet(args, 16, false, "!=")),
   intrinsic("__vsetges2", [2, 2], "uint", (args) => evalVSet(args, 16, true, (a, b) => a >= b), (args) => emitVSet(args, 16, true, ">=")),
@@ -317,6 +327,16 @@ const INTEGER_INTRINSICS = [
   intrinsic("__vmaxu4", [2, 2], "uint", (args) => evalU8x4Binary(args, Math.max), (args) => emitU8x4Binary(args, (a, b) => `max(${a}, ${b})`)),
   intrinsic("__vmins4", [2, 2], "uint", (args) => evalI8x4Binary(args, Math.min), (args) => emitI8x4Binary(args, (a, b) => `min(${a}, ${b})`)),
   intrinsic("__vmaxs4", [2, 2], "uint", (args) => evalI8x4Binary(args, Math.max), (args) => emitI8x4Binary(args, (a, b) => `max(${a}, ${b})`)),
+  intrinsic("__vcmpeq4", [2, 2], "uint", (args) => evalVCompare(args, 8, false, (a, b) => a === b), (args) => emitVCompare(args, 8, false, "==")),
+  intrinsic("__vcmpne4", [2, 2], "uint", (args) => evalVCompare(args, 8, false, (a, b) => a !== b), (args) => emitVCompare(args, 8, false, "!=")),
+  intrinsic("__vcmpges4", [2, 2], "uint", (args) => evalVCompare(args, 8, true, (a, b) => a >= b), (args) => emitVCompare(args, 8, true, ">=")),
+  intrinsic("__vcmpgeu4", [2, 2], "uint", (args) => evalVCompare(args, 8, false, (a, b) => a >= b), (args) => emitVCompare(args, 8, false, ">=")),
+  intrinsic("__vcmpgts4", [2, 2], "uint", (args) => evalVCompare(args, 8, true, (a, b) => a > b), (args) => emitVCompare(args, 8, true, ">")),
+  intrinsic("__vcmpgtu4", [2, 2], "uint", (args) => evalVCompare(args, 8, false, (a, b) => a > b), (args) => emitVCompare(args, 8, false, ">")),
+  intrinsic("__vcmples4", [2, 2], "uint", (args) => evalVCompare(args, 8, true, (a, b) => a <= b), (args) => emitVCompare(args, 8, true, "<=")),
+  intrinsic("__vcmpleu4", [2, 2], "uint", (args) => evalVCompare(args, 8, false, (a, b) => a <= b), (args) => emitVCompare(args, 8, false, "<=")),
+  intrinsic("__vcmplts4", [2, 2], "uint", (args) => evalVCompare(args, 8, true, (a, b) => a < b), (args) => emitVCompare(args, 8, true, "<")),
+  intrinsic("__vcmpltu4", [2, 2], "uint", (args) => evalVCompare(args, 8, false, (a, b) => a < b), (args) => emitVCompare(args, 8, false, "<")),
   intrinsic("__vseteq4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a === b), (args) => emitVSet(args, 8, false, "==")),
   intrinsic("__vsetne4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a !== b), (args) => emitVSet(args, 8, false, "!=")),
   intrinsic("__vsetges4", [2, 2], "uint", (args) => evalVSet(args, 8, true, (a, b) => a >= b), (args) => emitVSet(args, 8, true, ">=")),
@@ -954,6 +974,21 @@ function evalVSet(args: readonly number[], laneWidth: 8 | 16, signed: boolean, o
   return 1;
 }
 
+function evalVCompare(args: readonly number[], laneWidth: 8 | 16, signed: boolean, op: (a: number, b: number) => boolean): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  const mask = laneWidth === 8 ? 0xff : 0xffff;
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += laneWidth) {
+    const leftBits = (a >>> shift) & mask;
+    const rightBits = (b >>> shift) & mask;
+    const left = signed ? laneWidth === 8 ? signExtend8(leftBits) : signExtend16(leftBits) : leftBits;
+    const right = signed ? laneWidth === 8 ? signExtend8(rightBits) : signExtend16(rightBits) : rightBits;
+    if (op(left, right)) out |= mask << shift;
+  }
+  return out >>> 0;
+}
+
 function emitVSet(args: readonly string[], laneWidth: 8 | 16, signed: boolean, operator: string): string {
   const a = `u32(${args[0] ?? "0"})`;
   const b = `u32(${args[1] ?? "0"})`;
@@ -969,6 +1004,23 @@ function emitVSet(args: readonly string[], laneWidth: 8 | 16, signed: boolean, o
     return `(${left} ${operator} ${right})`;
   });
   return `select(0u, 1u, ${conditions.join(" && ")})`;
+}
+
+function emitVCompare(args: readonly string[], laneWidth: 8 | 16, signed: boolean, operator: string): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const mask = laneWidth === 8 ? "0xffu" : "0xffffu";
+  const signBit = laneWidth === 8 ? "0x80u" : "0x8000u";
+  const signSub = laneWidth === 8 ? "256" : "65536";
+  const lanes = Array.from({ length: 32 / laneWidth }, (_, lane) => {
+    const shift = lane * laneWidth;
+    const leftBits = `((${a} >> ${shift}u) & ${mask})`;
+    const rightBits = `((${b} >> ${shift}u) & ${mask})`;
+    const left = signed ? `(i32(${leftBits}) - select(0, ${signSub}, ${leftBits} >= ${signBit}))` : leftBits;
+    const right = signed ? `(i32(${rightBits}) - select(0, ${signSub}, ${rightBits} >= ${signBit}))` : rightBits;
+    return `(select(0u, ${mask}, (${left} ${operator} ${right})) << ${shift}u)`;
+  });
+  return `(${lanes.join(" | ")})`;
 }
 
 function evalI8x4SaturatingBinary(args: readonly number[], op: (a: number, b: number) => number): number {

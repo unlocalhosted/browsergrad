@@ -98,8 +98,10 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
   "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
   "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
+  "__vcmpeq2", "__vcmpne2", "__vcmpges2", "__vcmpgeu2", "__vcmpgts2", "__vcmpgtu2", "__vcmples2", "__vcmpleu2", "__vcmplts2", "__vcmpltu2",
   "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
   "__vadd4", "__vsub4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
+  "__vcmpeq4", "__vcmpne4", "__vcmpges4", "__vcmpgeu4", "__vcmpgts4", "__vcmpgtu4", "__vcmples4", "__vcmpleu4", "__vcmplts4", "__vcmpltu4",
   "__vseteq4", "__vsetne4", "__vsetges4", "__vsetgeu4", "__vsetgts4", "__vsetgtu4", "__vsetles4", "__vsetleu4", "__vsetlts4", "__vsetltu4",
   "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
@@ -2439,6 +2441,16 @@ function evalSemanticMathCall(
     case "__vmaxu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
     case "__vmins2": return i16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxs2": return i16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
+    case "__vcmpeq2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a === b);
+    case "__vcmpne2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a !== b);
+    case "__vcmpges2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a >= b);
+    case "__vcmpgeu2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a >= b);
+    case "__vcmpgts2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a > b);
+    case "__vcmpgtu2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a > b);
+    case "__vcmples2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a <= b);
+    case "__vcmpleu2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a <= b);
+    case "__vcmplts2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a < b);
+    case "__vcmpltu2": return vcompare(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a < b);
     case "__vseteq2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a === b);
     case "__vsetne2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a !== b);
     case "__vsetges2": return vset(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a >= b);
@@ -2461,6 +2473,16 @@ function evalSemanticMathCall(
     case "__vmaxu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
     case "__vmins4": return i8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxs4": return i8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
+    case "__vcmpeq4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a === b);
+    case "__vcmpne4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a !== b);
+    case "__vcmpges4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a >= b);
+    case "__vcmpgeu4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a >= b);
+    case "__vcmpgts4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a > b);
+    case "__vcmpgtu4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a > b);
+    case "__vcmples4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a <= b);
+    case "__vcmpleu4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a <= b);
+    case "__vcmplts4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a < b);
+    case "__vcmpltu4": return vcompare(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a < b);
     case "__vseteq4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a === b);
     case "__vsetne4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a !== b);
     case "__vsetges4": return vset(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a >= b);
@@ -2880,6 +2902,21 @@ function vset(aValue: number, bValue: number, laneWidth: 8 | 16, signed: boolean
     if (!op(left, right)) return 0;
   }
   return 1;
+}
+
+function vcompare(aValue: number, bValue: number, laneWidth: 8 | 16, signed: boolean, op: (a: number, b: number) => boolean): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const mask = laneWidth === 8 ? 0xff : 0xffff;
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += laneWidth) {
+    const leftBits = (a >>> shift) & mask;
+    const rightBits = (b >>> shift) & mask;
+    const left = signed ? laneWidth === 8 ? signExtend8(leftBits) : signExtend16(leftBits) : leftBits;
+    const right = signed ? laneWidth === 8 ? signExtend8(rightBits) : signExtend16(rightBits) : rightBits;
+    if (op(left, right)) out |= mask << shift;
+  }
+  return out >>> 0;
 }
 
 function i8x4SaturatingBinary(aValue: number, bValue: number, op: (a: number, b: number) => number): number {
@@ -3427,6 +3464,16 @@ function semanticMathCallArity(name: string): number {
     name === "__vmaxu2" ||
     name === "__vmins2" ||
     name === "__vmaxs2" ||
+    name === "__vcmpeq2" ||
+    name === "__vcmpne2" ||
+    name === "__vcmpges2" ||
+    name === "__vcmpgeu2" ||
+    name === "__vcmpgts2" ||
+    name === "__vcmpgtu2" ||
+    name === "__vcmples2" ||
+    name === "__vcmpleu2" ||
+    name === "__vcmplts2" ||
+    name === "__vcmpltu2" ||
     name === "__vseteq2" ||
     name === "__vsetne2" ||
     name === "__vsetges2" ||
@@ -3449,6 +3496,16 @@ function semanticMathCallArity(name: string): number {
     name === "__vmaxu4" ||
     name === "__vmins4" ||
     name === "__vmaxs4" ||
+    name === "__vcmpeq4" ||
+    name === "__vcmpne4" ||
+    name === "__vcmpges4" ||
+    name === "__vcmpgeu4" ||
+    name === "__vcmpgts4" ||
+    name === "__vcmpgtu4" ||
+    name === "__vcmples4" ||
+    name === "__vcmpleu4" ||
+    name === "__vcmplts4" ||
+    name === "__vcmpltu4" ||
     name === "__vseteq4" ||
     name === "__vsetne4" ||
     name === "__vsetges4" ||

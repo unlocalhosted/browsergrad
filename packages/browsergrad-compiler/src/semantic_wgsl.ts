@@ -424,6 +424,16 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__vmaxu2", "vmaxu2"],
   ["__vmins2", "vmins2"],
   ["__vmaxs2", "vmaxs2"],
+  ["__vcmpeq2", "vcmpeq2"],
+  ["__vcmpne2", "vcmpne2"],
+  ["__vcmpges2", "vcmpges2"],
+  ["__vcmpgeu2", "vcmpgeu2"],
+  ["__vcmpgts2", "vcmpgts2"],
+  ["__vcmpgtu2", "vcmpgtu2"],
+  ["__vcmples2", "vcmples2"],
+  ["__vcmpleu2", "vcmpleu2"],
+  ["__vcmplts2", "vcmplts2"],
+  ["__vcmpltu2", "vcmpltu2"],
   ["__vseteq2", "vseteq2"],
   ["__vsetne2", "vsetne2"],
   ["__vsetges2", "vsetges2"],
@@ -446,6 +456,16 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__vmaxu4", "vmaxu4"],
   ["__vmins4", "vmins4"],
   ["__vmaxs4", "vmaxs4"],
+  ["__vcmpeq4", "vcmpeq4"],
+  ["__vcmpne4", "vcmpne4"],
+  ["__vcmpges4", "vcmpges4"],
+  ["__vcmpgeu4", "vcmpgeu4"],
+  ["__vcmpgts4", "vcmpgts4"],
+  ["__vcmpgtu4", "vcmpgtu4"],
+  ["__vcmples4", "vcmples4"],
+  ["__vcmpleu4", "vcmpleu4"],
+  ["__vcmplts4", "vcmplts4"],
+  ["__vcmpltu4", "vcmpltu4"],
   ["__vseteq4", "vseteq4"],
   ["__vsetne4", "vsetne4"],
   ["__vsetges4", "vsetges4"],
@@ -4492,6 +4512,23 @@ function emitSemanticMathCall(
       "<";
     return emitSemanticVSetExpression(lhs, rhs, laneWidth, signed, operator);
   }
+  if (wgslCallee.startsWith("vcmp")) {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, "u32", options, textureSpecializations);
+    const laneWidth = wgslCallee.endsWith("2") ? 16 : 8;
+    const opName = wgslCallee.slice(4, -1);
+    const signed = opName.endsWith("s");
+    const operator =
+      opName === "eq" ? "==" :
+      opName === "ne" ? "!=" :
+      opName.startsWith("ge") ? ">=" :
+      opName.startsWith("gt") ? ">" :
+      opName.startsWith("le") ? "<=" :
+      "<";
+    return emitSemanticVCompareExpression(lhs, rhs, laneWidth, signed, operator);
+  }
   if (wgslCallee === "imad" || wgslCallee === "umad" || wgslCallee === "sad" || wgslCallee === "usad" || wgslCallee === "usad4" || wgslCallee === "dp4a" || wgslCallee === "dp2a_lo" || wgslCallee === "dp2a_hi" || wgslCallee === "byte_perm" || wgslCallee.startsWith("funnelshift_")) {
     const [first, second, third] = expression.args;
     if (!first || !second || (!third && wgslCallee !== "usad4")) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
@@ -4770,6 +4807,23 @@ function emitSemanticVSetExpression(lhs: string, rhs: string, laneWidth: 8 | 16,
   return `select(0u, 1u, ${comparisons.join(" && ")})`;
 }
 
+function emitSemanticVCompareExpression(lhs: string, rhs: string, laneWidth: 8 | 16, signed: boolean, operator: string): string {
+  const laneCount = 32 / laneWidth;
+  const mask = laneWidth === 8 ? "0xffu" : "0xffffu";
+  const signBit = laneWidth === 8 ? "0x80u" : "0x8000u";
+  const signSub = laneWidth === 8 ? "256" : "65536";
+  const lanes: string[] = [];
+  for (let lane = 0; lane < laneCount; lane++) {
+    const shift = `${lane * laneWidth}u`;
+    const leftBits = `((${lhs} >> ${shift}) & ${mask})`;
+    const rightBits = `((${rhs} >> ${shift}) & ${mask})`;
+    const left = signed ? `(i32(${leftBits}) - select(0, ${signSub}, ${leftBits} >= ${signBit}))` : leftBits;
+    const right = signed ? `(i32(${rightBits}) - select(0, ${signSub}, ${rightBits} >= ${signBit}))` : rightBits;
+    lanes.push(`(select(0u, ${mask}, (${left} ${operator} ${right})) << ${shift})`);
+  }
+  return `(${lanes.join(" | ")})`;
+}
+
 function emitRoundEvenWgsl(emitted: string): string {
   return `bg_semantic_round_even_f32(${emitted})`;
 }
@@ -4867,6 +4921,16 @@ function semanticMathCallArity(name: string): number {
     name === "__vmaxu2" ||
     name === "__vmins2" ||
     name === "__vmaxs2" ||
+    name === "__vcmpeq2" ||
+    name === "__vcmpne2" ||
+    name === "__vcmpges2" ||
+    name === "__vcmpgeu2" ||
+    name === "__vcmpgts2" ||
+    name === "__vcmpgtu2" ||
+    name === "__vcmples2" ||
+    name === "__vcmpleu2" ||
+    name === "__vcmplts2" ||
+    name === "__vcmpltu2" ||
     name === "__vseteq2" ||
     name === "__vsetne2" ||
     name === "__vsetges2" ||
@@ -4889,6 +4953,16 @@ function semanticMathCallArity(name: string): number {
     name === "__vmaxu4" ||
     name === "__vmins4" ||
     name === "__vmaxs4" ||
+    name === "__vcmpeq4" ||
+    name === "__vcmpne4" ||
+    name === "__vcmpges4" ||
+    name === "__vcmpgeu4" ||
+    name === "__vcmpgts4" ||
+    name === "__vcmpgtu4" ||
+    name === "__vcmples4" ||
+    name === "__vcmpleu4" ||
+    name === "__vcmplts4" ||
+    name === "__vcmpltu4" ||
     name === "__vseteq4" ||
     name === "__vsetne4" ||
     name === "__vsetges4" ||

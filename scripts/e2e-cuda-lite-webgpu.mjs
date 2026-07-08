@@ -2261,6 +2261,33 @@ __global__ void simdVSetIntrinsic(uint *out) {
   out[22] = __vsetgts2(lo2s, hi2s);
   out[23] = __vsetltu2(hi2u, lo2u);
 }`,
+  simdVCompareIntrinsic: `
+__global__ void simdVCompareIntrinsic(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x0180017fu;
+  uint a2 = 0xffff7fffu;
+  uint b2 = 0x00018000u;
+  out[0] = __vcmpeq4(a4, b4);
+  out[1] = __vcmpne4(a4, b4);
+  out[2] = __vcmpges4(a4, b4);
+  out[3] = __vcmpgeu4(a4, b4);
+  out[4] = __vcmpgts4(a4, b4);
+  out[5] = __vcmpgtu4(a4, b4);
+  out[6] = __vcmples4(a4, b4);
+  out[7] = __vcmpleu4(a4, b4);
+  out[8] = __vcmplts4(a4, b4);
+  out[9] = __vcmpltu4(a4, b4);
+  out[10] = __vcmpeq2(a2, b2);
+  out[11] = __vcmpne2(a2, b2);
+  out[12] = __vcmpges2(a2, b2);
+  out[13] = __vcmpgeu2(a2, b2);
+  out[14] = __vcmpgts2(a2, b2);
+  out[15] = __vcmpgtu2(a2, b2);
+  out[16] = __vcmples2(a2, b2);
+  out[17] = __vcmpleu2(a2, b2);
+  out[18] = __vcmplts2(a2, b2);
+  out[19] = __vcmpltu2(a2, b2);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12993,6 +13020,27 @@ const html = String.raw`<!doctype html>
               data: [
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+              ],
+            },
+          },
+          {
+            name: "intrinsic:simd-vcmp",
+            source: SOURCES.simdVCompareIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(20),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                0x00ff0000, 0xff00ffff, 0xffff0000, 0xffffff00, 0xff000000,
+                0xff00ff00, 0x00ffffff, 0x00ff00ff, 0x0000ffff, 0x000000ff,
+                0x00000000, 0xffffffff, 0x0000ffff, 0xffff0000, 0x0000ffff,
+                0xffff0000, 0xffff0000, 0x0000ffff, 0xffff0000, 0x0000ffff,
               ],
             },
           },
