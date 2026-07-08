@@ -11351,6 +11351,30 @@ __global__ void laneMaskLt(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 3, 7]);
   });
 
+  it("lowers single-percent inline PTX special register aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void singlePercentSpecialRegs(uint *out) {
+  int idx = threadIdx.x;
+  unsigned int lane;
+  unsigned int warp;
+  unsigned int mask;
+  asm volatile("mov.u32 %0, %laneid;" : "=r"(lane));
+  asm volatile("mov.u32 %0, %warpid;" : "=r"(warp));
+  asm volatile("mov.u32 %0, %lanemask_lt;" : "=r"(mask));
+  out[idx] = lane;
+  out[idx + 4] = warp;
+  out[idx + 8] = mask;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(12) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3, 0, 0, 0, 0, 0, 1, 3, 7]);
+  });
+
   it("lowers output-only inline PTX globaltimer statements deterministically", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned long long read_clock() {

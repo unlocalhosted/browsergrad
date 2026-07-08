@@ -21,9 +21,9 @@ export type InlineAsmOp =
   };
 
 export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
-  if (/\bmov\.u32\b/u.test(template) && /%%laneid\b/u.test(template)) return { kind: "laneid" };
-  if (/\bmov\.u32\b/u.test(template) && /%%warpid\b/u.test(template)) return { kind: "warpid" };
-  if (/\bmov\.u32\b/u.test(template) && /%%lanemask_lt\b/u.test(template)) return { kind: "lanemask-lt" };
+  if (/\bmov\.u32\b/u.test(template) && /%{1,2}laneid\b/u.test(template)) return { kind: "laneid" };
+  if (/\bmov\.u32\b/u.test(template) && /%{1,2}warpid\b/u.test(template)) return { kind: "warpid" };
+  if (/\bmov\.u32\b/u.test(template) && /%{1,2}lanemask_lt\b/u.test(template)) return { kind: "lanemask-lt" };
   if (/\bmov\.u64\b/u.test(template) && /%globaltimer\b/u.test(template)) return { kind: "globaltimer-u64" };
   const isspacep = /\bisspacep\.(global|shared|const|local)\b/u.exec(template);
   if (isspacep) return { kind: "isspacep", space: isspacep[1] as "global" | "shared" | "const" | "local" };

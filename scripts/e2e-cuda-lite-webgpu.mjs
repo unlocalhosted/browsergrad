@@ -2587,6 +2587,19 @@ __global__ void inlineAsmWarpId(uint *out) {
   asm volatile("mov.u32 %0, %%warpid;" : "=r"(warp));
   out[threadIdx.x] = warp;
 }`,
+  inlineAsmSinglePercentSpecialRegs: `
+__global__ void inlineAsmSinglePercentSpecialRegs(uint *out) {
+  int idx = threadIdx.x;
+  unsigned int lane;
+  unsigned int warp;
+  unsigned int mask;
+  asm volatile("mov.u32 %0, %laneid;" : "=r"(lane));
+  asm volatile("mov.u32 %0, %warpid;" : "=r"(warp));
+  asm volatile("mov.u32 %0, %lanemask_lt;" : "=r"(mask));
+  out[idx] = lane;
+  out[idx + 4] = warp;
+  out[idx + 8] = mask;
+}`,
   complexMagnitude: `
 __global__ void complexMagnitude(cufftComplex *data, float *mag, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -13825,6 +13838,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [...new Array(32).fill(0), ...new Array(32).fill(1)] },
+          },
+          {
+            name: "inline-asm:special-reg-single-percent",
+            source: SOURCES.inlineAsmSinglePercentSpecialRegs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(12),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 1, 2, 3, 0, 0, 0, 0, 0, 1, 3, 7] },
           },
           {
             name: "compat:double-f32-mode-atomic",
