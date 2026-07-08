@@ -100,6 +100,9 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__sad", "__usad", "__usad4",
   "__viaddmax_s32", "__viaddmax_s32_relu", "__viaddmin_s32", "__viaddmin_s32_relu", "__viaddmax_u32", "__viaddmin_u32",
   "__viaddmax_s16x2", "__viaddmax_s16x2_relu", "__viaddmin_s16x2", "__viaddmin_s16x2_relu", "__viaddmax_u16x2", "__viaddmin_u16x2",
+  "__vimax_s32_relu", "__vimin_s32_relu", "__vimax_s16x2_relu", "__vimin_s16x2_relu",
+  "__vimax3_s32", "__vimax3_s32_relu", "__vimin3_s32", "__vimin3_s32_relu", "__vimax3_u32", "__vimin3_u32",
+  "__vimax3_s16x2", "__vimax3_s16x2_relu", "__vimin3_s16x2", "__vimin3_s16x2_relu", "__vimax3_u16x2", "__vimin3_u16x2",
   "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vhaddu2", "__vavgs2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
   "__vcmpeq2", "__vcmpne2", "__vcmpges2", "__vcmpgeu2", "__vcmpgts2", "__vcmpgtu2", "__vcmples2", "__vcmpleu2", "__vcmplts2", "__vcmpltu2",
   "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
@@ -2444,6 +2447,22 @@ function evalSemanticMathCall(
     case "__viaddmin_s16x2_relu": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "min", true);
     case "__viaddmax_u16x2": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, false, "max", false);
     case "__viaddmin_u16x2": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, false, "min", false);
+    case "__vimax_s32_relu": return viMinMaxScalar(args, true, "max", true);
+    case "__vimin_s32_relu": return viMinMaxScalar(args, true, "min", true);
+    case "__vimax_s16x2_relu": return viMinMax16x2(args, true, "max", true);
+    case "__vimin_s16x2_relu": return viMinMax16x2(args, true, "min", true);
+    case "__vimax3_s32": return viMinMaxScalar(args, true, "max", false);
+    case "__vimax3_s32_relu": return viMinMaxScalar(args, true, "max", true);
+    case "__vimin3_s32": return viMinMaxScalar(args, true, "min", false);
+    case "__vimin3_s32_relu": return viMinMaxScalar(args, true, "min", true);
+    case "__vimax3_u32": return viMinMaxScalar(args, false, "max", false);
+    case "__vimin3_u32": return viMinMaxScalar(args, false, "min", false);
+    case "__vimax3_s16x2": return viMinMax16x2(args, true, "max", false);
+    case "__vimax3_s16x2_relu": return viMinMax16x2(args, true, "max", true);
+    case "__vimin3_s16x2": return viMinMax16x2(args, true, "min", false);
+    case "__vimin3_s16x2_relu": return viMinMax16x2(args, true, "min", true);
+    case "__vimax3_u16x2": return viMinMax16x2(args, false, "max", false);
+    case "__vimin3_u16x2": return viMinMax16x2(args, false, "min", false);
     case "__vadd2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
     case "__vabs2": return packedUnary(args[0] ?? 0, 16, true, (a) => Math.abs(a));
@@ -2946,6 +2965,28 @@ function viadd16x2(aValue: number, bValue: number, cValue: number, signed: boole
     const right = signed ? signExtend16(rightBits) : rightBits;
     const cmp = signed ? signExtend16(cmpBits) : cmpBits;
     const selected = choose === "max" ? Math.max(left + right, cmp) : Math.min(left + right, cmp);
+    const value = relu ? Math.max(selected, 0) : selected;
+    out = (out | ((value & 0xffff) << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function viMinMaxScalar(values: readonly number[], signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const operands = values.map((value) => signed ? Math.trunc(value) | 0 : Math.trunc(value) >>> 0);
+  const selected = choose === "max" ? Math.max(...operands) : Math.min(...operands);
+  const value = relu ? Math.max(selected, 0) : selected;
+  return signed ? value | 0 : value >>> 0;
+}
+
+function viMinMax16x2(values: readonly number[], signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const operands = values.map((value) => Math.trunc(value) >>> 0);
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += 16) {
+    const lanes = operands.map((operand) => {
+      const bits = (operand >>> shift) & 0xffff;
+      return signed ? signExtend16(bits) : bits;
+    });
+    const selected = choose === "max" ? Math.max(...lanes) : Math.min(...lanes);
     const value = relu ? Math.max(selected, 0) : selected;
     out = (out | ((value & 0xffff) << shift)) >>> 0;
   }
@@ -3615,6 +3656,10 @@ function semanticMathCallArity(name: string): number {
     name === "__vsetleu4" ||
     name === "__vsetlts4" ||
     name === "__vsetltu4" ||
+    name === "__vimax_s32_relu" ||
+    name === "__vimin_s32_relu" ||
+    name === "__vimax_s16x2_relu" ||
+    name === "__vimin_s16x2_relu" ||
     name === "UMUL" ||
     name === "umin"
     ? 2
@@ -3645,6 +3690,18 @@ function semanticMathCallArity(name: string): number {
       name === "__viaddmin_s16x2_relu" ||
       name === "__viaddmax_u16x2" ||
       name === "__viaddmin_u16x2" ||
+      name === "__vimax3_s32" ||
+      name === "__vimax3_s32_relu" ||
+      name === "__vimin3_s32" ||
+      name === "__vimin3_s32_relu" ||
+      name === "__vimax3_u32" ||
+      name === "__vimin3_u32" ||
+      name === "__vimax3_s16x2" ||
+      name === "__vimax3_s16x2_relu" ||
+      name === "__vimin3_s16x2" ||
+      name === "__vimin3_s16x2_relu" ||
+      name === "__vimax3_u16x2" ||
+      name === "__vimin3_u16x2" ||
       name === "__dp4a" ||
       name === "__dp2a_lo" ||
       name === "__dp2a_hi" ||

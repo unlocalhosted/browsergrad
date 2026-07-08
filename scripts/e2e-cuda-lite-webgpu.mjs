@@ -2338,6 +2338,28 @@ __global__ void viaddMinMaxIntrinsic(uint *out) {
   out[10] = __viaddmax_u16x2(a, b, c);
   out[11] = __viaddmin_u16x2(a, b, c);
 }`,
+  viminmaxRelu3Intrinsic: `
+__global__ void viminmaxRelu3Intrinsic(uint *out) {
+  uint a = 0xfffe8005u;
+  uint b = 0x00030004u;
+  uint c = 0x0007fff6u;
+  out[0] = uint(__vimax_s32_relu(-7, 3));
+  out[1] = uint(__vimin_s32_relu(-7, 3));
+  out[2] = __vimax_s16x2_relu(a, c);
+  out[3] = __vimin_s16x2_relu(a, c);
+  out[4] = uint(__vimax3_s32(-7, 3, 2));
+  out[5] = uint(__vimax3_s32_relu(-7, -3, -2));
+  out[6] = uint(__vimin3_s32(7, -3, 2));
+  out[7] = uint(__vimin3_s32_relu(7, -3, 2));
+  out[8] = __vimax3_u32(10u, 5u, 12u);
+  out[9] = __vimin3_u32(10u, 5u, 12u);
+  out[10] = __vimax3_s16x2(a, b, c);
+  out[11] = __vimax3_s16x2_relu(a, b, c);
+  out[12] = __vimin3_s16x2(a, b, c);
+  out[13] = __vimin3_s16x2_relu(a, b, c);
+  out[14] = __vimax3_u16x2(a, b, c);
+  out[15] = __vimin3_u16x2(a, b, c);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -13148,6 +13170,27 @@ const html = String.raw`<!doctype html>
                 0x00000004, 0x00000000, 0x00000004, 0x00000000,
                 0x0000000f, 0x0000000f, 0x0008fffc, 0x00080000,
                 0x0007fffb, 0x00070000, 0x0008fffb, 0x0007fffc,
+              ],
+            },
+          },
+          {
+            name: "intrinsic:viminmax-relu3",
+            source: SOURCES.viminmaxRelu3Intrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                0x00000003, 0x00000000, 0x00070000, 0x00000000,
+                0x00000003, 0x00000000, 0xfffffffd, 0x00000000,
+                0x0000000c, 0x00000005, 0x00070004, 0x00070004,
+                0xfffe8005, 0x00000000, 0xfffefff6, 0x00030004,
               ],
             },
           },

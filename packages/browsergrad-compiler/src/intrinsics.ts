@@ -295,6 +295,22 @@ const INTEGER_INTRINSICS = [
   intrinsic("__viaddmin_s16x2_relu", [3, 3], "uint", (args) => evalViadd16x2(args, true, "min", true), (args) => emitViadd16x2(args, true, "min", true)),
   intrinsic("__viaddmax_u16x2", [3, 3], "uint", (args) => evalViadd16x2(args, false, "max", false), (args) => emitViadd16x2(args, false, "max", false)),
   intrinsic("__viaddmin_u16x2", [3, 3], "uint", (args) => evalViadd16x2(args, false, "min", false), (args) => emitViadd16x2(args, false, "min", false)),
+  intrinsic("__vimax_s32_relu", [2, 2], "int", (args) => evalViMinMaxScalar(args, true, "max", true), (args) => emitViMinMaxScalar(args, true, "max", true)),
+  intrinsic("__vimin_s32_relu", [2, 2], "int", (args) => evalViMinMaxScalar(args, true, "min", true), (args) => emitViMinMaxScalar(args, true, "min", true)),
+  intrinsic("__vimax_s16x2_relu", [2, 2], "uint", (args) => evalViMinMax16x2(args, true, "max", true), (args) => emitViMinMax16x2(args, true, "max", true)),
+  intrinsic("__vimin_s16x2_relu", [2, 2], "uint", (args) => evalViMinMax16x2(args, true, "min", true), (args) => emitViMinMax16x2(args, true, "min", true)),
+  intrinsic("__vimax3_s32", [3, 3], "int", (args) => evalViMinMaxScalar(args, true, "max", false), (args) => emitViMinMaxScalar(args, true, "max", false)),
+  intrinsic("__vimax3_s32_relu", [3, 3], "int", (args) => evalViMinMaxScalar(args, true, "max", true), (args) => emitViMinMaxScalar(args, true, "max", true)),
+  intrinsic("__vimin3_s32", [3, 3], "int", (args) => evalViMinMaxScalar(args, true, "min", false), (args) => emitViMinMaxScalar(args, true, "min", false)),
+  intrinsic("__vimin3_s32_relu", [3, 3], "int", (args) => evalViMinMaxScalar(args, true, "min", true), (args) => emitViMinMaxScalar(args, true, "min", true)),
+  intrinsic("__vimax3_u32", [3, 3], "uint", (args) => evalViMinMaxScalar(args, false, "max", false), (args) => emitViMinMaxScalar(args, false, "max", false)),
+  intrinsic("__vimin3_u32", [3, 3], "uint", (args) => evalViMinMaxScalar(args, false, "min", false), (args) => emitViMinMaxScalar(args, false, "min", false)),
+  intrinsic("__vimax3_s16x2", [3, 3], "uint", (args) => evalViMinMax16x2(args, true, "max", false), (args) => emitViMinMax16x2(args, true, "max", false)),
+  intrinsic("__vimax3_s16x2_relu", [3, 3], "uint", (args) => evalViMinMax16x2(args, true, "max", true), (args) => emitViMinMax16x2(args, true, "max", true)),
+  intrinsic("__vimin3_s16x2", [3, 3], "uint", (args) => evalViMinMax16x2(args, true, "min", false), (args) => emitViMinMax16x2(args, true, "min", false)),
+  intrinsic("__vimin3_s16x2_relu", [3, 3], "uint", (args) => evalViMinMax16x2(args, true, "min", true), (args) => emitViMinMax16x2(args, true, "min", true)),
+  intrinsic("__vimax3_u16x2", [3, 3], "uint", (args) => evalViMinMax16x2(args, false, "max", false), (args) => emitViMinMax16x2(args, false, "max", false)),
+  intrinsic("__vimin3_u16x2", [3, 3], "uint", (args) => evalViMinMax16x2(args, false, "min", false), (args) => emitViMinMax16x2(args, false, "min", false)),
   intrinsic("__vadd2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => a + b), (args) => emitU16x2Binary(args, (a, b) => `((${a} + ${b}) & 0xffffu)`)),
   intrinsic("__vsub2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => a - b), (args) => emitU16x2Binary(args, (a, b) => `((${a} - ${b}) & 0xffffu)`)),
   intrinsic("__vabs2", [1, 1], "uint", (args) => evalPackedUnary(args, 16, true, (a) => Math.abs(a)), (args) => emitPackedUnary(args, 16, true, "abs")),
@@ -1232,6 +1248,49 @@ function emitViadd16x2(args: readonly string[], signed: boolean, choose: "max" |
     const right = signed ? `(i32(${rightBits}) - select(0, 65536, ${rightBits} >= 0x8000u))` : `i32(${rightBits})`;
     const cmp = signed ? `(i32(${cmpBits}) - select(0, 65536, ${cmpBits} >= 0x8000u))` : `i32(${cmpBits})`;
     const selected = `${choose}((${left} + ${right}), ${cmp})`;
+    const value = relu ? `max(${selected}, 0)` : selected;
+    return `((u32(${value}) & 0xffffu) << ${shift}u)`;
+  });
+  return `(${lanes.join(" | ")})`;
+}
+
+function evalViMinMaxScalar(args: readonly number[], signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const values = args.map((arg) => signed ? Math.trunc(arg) | 0 : Math.trunc(arg) >>> 0);
+  const selected = choose === "max" ? Math.max(...values) : Math.min(...values);
+  const value = relu ? Math.max(selected, 0) : selected;
+  return signed ? value | 0 : value >>> 0;
+}
+
+function emitViMinMaxScalar(args: readonly string[], signed: boolean, choose: "max" | "min", relu: boolean): string {
+  const scalar = signed ? "i32" : "u32";
+  const values = args.map((arg) => `${scalar}(${arg})`);
+  const selected = values.slice(1).reduce((acc, value) => `${choose}(${acc}, ${value})`, values[0] ?? `${scalar}(0)`);
+  return relu ? `max(${selected}, 0)` : selected;
+}
+
+function evalViMinMax16x2(args: readonly number[], signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const inputs = args.map((arg) => Math.trunc(arg) >>> 0);
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += 16) {
+    const values = inputs.map((input) => {
+      const bits = (input >>> shift) & 0xffff;
+      return signed ? signExtend16(bits) : bits;
+    });
+    const selected = choose === "max" ? Math.max(...values) : Math.min(...values);
+    const value = relu ? Math.max(selected, 0) : selected;
+    out = (out | ((value & 0xffff) << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function emitViMinMax16x2(args: readonly string[], signed: boolean, choose: "max" | "min", relu: boolean): string {
+  const inputs = args.map((arg) => `u32(${arg})`);
+  const lanes = [0, 16].map((shift) => {
+    const values = inputs.map((input) => {
+      const bits = `((${input} >> ${shift}u) & 0xffffu)`;
+      return signed ? `(i32(${bits}) - select(0, 65536, ${bits} >= 0x8000u))` : `i32(${bits})`;
+    });
+    const selected = values.slice(1).reduce((acc, value) => `${choose}(${acc}, ${value})`, values[0] ?? "0");
     const value = relu ? `max(${selected}, 0)` : selected;
     return `((u32(${value}) & 0xffffu) << ${shift}u)`;
   });

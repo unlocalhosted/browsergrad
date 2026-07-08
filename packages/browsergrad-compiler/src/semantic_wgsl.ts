@@ -424,6 +424,22 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__viaddmin_s16x2_relu", "viaddmin_s16x2_relu"],
   ["__viaddmax_u16x2", "viaddmax_u16x2"],
   ["__viaddmin_u16x2", "viaddmin_u16x2"],
+  ["__vimax_s32_relu", "vimax_s32_relu"],
+  ["__vimin_s32_relu", "vimin_s32_relu"],
+  ["__vimax_s16x2_relu", "vimax_s16x2_relu"],
+  ["__vimin_s16x2_relu", "vimin_s16x2_relu"],
+  ["__vimax3_s32", "vimax3_s32"],
+  ["__vimax3_s32_relu", "vimax3_s32_relu"],
+  ["__vimin3_s32", "vimin3_s32"],
+  ["__vimin3_s32_relu", "vimin3_s32_relu"],
+  ["__vimax3_u32", "vimax3_u32"],
+  ["__vimin3_u32", "vimin3_u32"],
+  ["__vimax3_s16x2", "vimax3_s16x2"],
+  ["__vimax3_s16x2_relu", "vimax3_s16x2_relu"],
+  ["__vimin3_s16x2", "vimin3_s16x2"],
+  ["__vimin3_s16x2_relu", "vimin3_s16x2_relu"],
+  ["__vimax3_u16x2", "vimax3_u16x2"],
+  ["__vimin3_u16x2", "vimin3_u16x2"],
   ["__vadd2", "vadd2"],
   ["__vsub2", "vsub2"],
   ["__vabs2", "vabs2"],
@@ -4536,6 +4552,18 @@ function emitSemanticMathCall(
     const selected = `${choose}((${a} + ${b}), ${c})`;
     return relu ? `max(${selected}, 0)` : selected;
   }
+  if (wgslCallee.startsWith("vimax") || wgslCallee.startsWith("vimin")) {
+    const choose: "max" | "min" = wgslCallee.startsWith("vimax") ? "max" : "min";
+    const relu = wgslCallee.endsWith("_relu");
+    if (wgslCallee.includes("16x2")) {
+      const args = expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "u32", options, textureSpecializations));
+      return emitSemanticViMinMax16x2Expression(args, wgslCallee.includes("_s16x2"), choose, relu);
+    }
+    const scalar = wgslCallee.includes("_s32") ? "i32" : "u32";
+    const args = expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, scalar, options, textureSpecializations));
+    const selected = args.slice(1).reduce((acc, arg) => `${choose}(${acc}, ${arg})`, args[0] ?? `${scalar}(0)`);
+    return relu ? `max(${selected}, 0)` : selected;
+  }
   if (wgslCallee === "vabs2" || wgslCallee === "vabsss2" || wgslCallee === "vneg2" || wgslCallee === "vnegss2" || wgslCallee === "vabs4" || wgslCallee === "vabsss4" || wgslCallee === "vneg4" || wgslCallee === "vnegss4") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
@@ -4993,6 +5021,20 @@ function emitSemanticViadd16x2Expression(lhs: string, rhs: string, cmpValue: str
   return `(${lanes.join(" | ")})`;
 }
 
+function emitSemanticViMinMax16x2Expression(inputs: readonly string[], signed: boolean, choose: "max" | "min", relu: boolean): string {
+  const lanes: string[] = [];
+  for (const shift of ["0u", "16u"]) {
+    const values = inputs.map((input) => {
+      const bits = `((${input} >> ${shift}) & 0xffffu)`;
+      return signed ? `(i32(${bits}) - select(0, 65536, ${bits} >= 0x8000u))` : `i32(${bits})`;
+    });
+    const selected = values.slice(1).reduce((acc, value) => `${choose}(${acc}, ${value})`, values[0] ?? "0");
+    const value = relu ? `max(${selected}, 0)` : selected;
+    lanes.push(`((u32(${value}) & 0xffffu) << ${shift})`);
+  }
+  return `(${lanes.join(" | ")})`;
+}
+
 function emitRoundEvenWgsl(emitted: string): string {
   return `bg_semantic_round_even_f32(${emitted})`;
 }
@@ -5152,6 +5194,10 @@ function semanticMathCallArity(name: string): number {
     name === "__vsetleu4" ||
     name === "__vsetlts4" ||
     name === "__vsetltu4" ||
+    name === "__vimax_s32_relu" ||
+    name === "__vimin_s32_relu" ||
+    name === "__vimax_s16x2_relu" ||
+    name === "__vimin_s16x2_relu" ||
     name === "UMUL" ||
     name === "umin"
     ? 2
@@ -5182,6 +5228,18 @@ function semanticMathCallArity(name: string): number {
       name === "__viaddmin_s16x2_relu" ||
       name === "__viaddmax_u16x2" ||
       name === "__viaddmin_u16x2" ||
+      name === "__vimax3_s32" ||
+      name === "__vimax3_s32_relu" ||
+      name === "__vimin3_s32" ||
+      name === "__vimin3_s32_relu" ||
+      name === "__vimax3_u32" ||
+      name === "__vimin3_u32" ||
+      name === "__vimax3_s16x2" ||
+      name === "__vimax3_s16x2_relu" ||
+      name === "__vimin3_s16x2" ||
+      name === "__vimin3_s16x2_relu" ||
+      name === "__vimax3_u16x2" ||
+      name === "__vimin3_u16x2" ||
       name === "__dp4a" ||
       name === "__dp2a_lo" ||
       name === "__dp2a_hi" ||

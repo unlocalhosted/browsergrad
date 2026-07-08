@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-08T07:40:00Z
+Last updated: 2026-07-08T08:05:00Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails after nested local pointer-param lowering; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | cuRAND Philox vector4 draws now run through semantic IR/reference/WGSL |
+| Active work item | CUDA SIMD `vimax`/`vimin` relu and tri-minmax intrinsics now run through semantic IR/reference/WGSL |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -1513,7 +1513,7 @@ Probe these with fail-first real WebGPU fixtures:
   - 1D/2D host/device/default copies, peer copies, symbol copies including byte-granular counts/offsets, and byte-pattern `cudaMemset`/`cudaMemsetAsync`/`cudaMemset2D`/`cudaMemset2DAsync` fills are now modeled through reference plus native WebGPU host-copy/fill planning; keep widening remaining runtime calls only when they have explicit host orchestration semantics or clear diagnostics
 - CUDA library/helper family:
   - `cufftComplex`/`float2` pointwise helpers and `cuComplex`/`cuFloatComplex` helper builtins are now native reference/WGSL/WebGPU capabilities with pinned complex fixtures; `cuCabsf`/`cuCdivf` now use scaled formulas for large finite values instead of overflow-prone WGSL `length`/naive denominator math; `cuCfmaf` now has native complex fused multiply-add lowering; keep widening library-adjacent helpers as vertical slices with analyzer contracts, reference semantics, WGSL lowering, and exact real WebGPU output fixtures
-  - `__dp4a` plus `__dp2a_lo`/`__dp2a_hi` signed and unsigned packed integer dot-add overloads plus packed halfword/byte SIMD add/sub/saturating-add/saturating-sub/absdiff/avg/min/max/set/compare/abs/neg/SAD/viadd intrinsics now lower through semantic IR/reference/WGSL to native WebGPU scalar integer ops with exact real WebGPU fixtures `intrinsic:dp4a`, `intrinsic:dp2a`, `intrinsic:simd-byte`, `intrinsic:simd-halfword`, `intrinsic:simd-unsigned-saturated`, `intrinsic:simd-signed-saturated`, `intrinsic:simd-minmax`, `intrinsic:simd-vset`, `intrinsic:simd-vcmp`, `intrinsic:simd-abs-sad`, `intrinsic:simd-avg`, and `intrinsic:viadd-minmax`; keep widening integer/library intrinsics with signedness-aware semantics, not blind name-only lowering
+  - `__dp4a` plus `__dp2a_lo`/`__dp2a_hi` signed and unsigned packed integer dot-add overloads plus packed halfword/byte SIMD add/sub/saturating-add/saturating-sub/absdiff/avg/min/max/set/compare/abs/neg/SAD/viadd/vimax/vimin intrinsics now lower through semantic IR/reference/WGSL to native WebGPU scalar integer ops with exact real WebGPU fixtures `intrinsic:dp4a`, `intrinsic:dp2a`, `intrinsic:simd-byte`, `intrinsic:simd-halfword`, `intrinsic:simd-unsigned-saturated`, `intrinsic:simd-signed-saturated`, `intrinsic:simd-minmax`, `intrinsic:simd-vset`, `intrinsic:simd-vcmp`, `intrinsic:simd-abs-sad`, `intrinsic:simd-avg`, `intrinsic:viadd-minmax`, and `intrinsic:viminmax-relu3`; keep widening integer/library intrinsics with signedness-aware semantics, not blind name-only lowering
 - Subgroup family:
   - legacy CUDA warp vote aliases `__any`, `__all`, and `__ballot` now lower through semantic IR/reference/WGSL to native WebGPU subgroup predicates/ballot with exact real WebGPU fixture `subgroup:legacy-vote`; keep widening subgroup coverage only with reference parity plus native fixture proof
   - legacy CUDA warp shuffle aliases `__shfl`, `__shfl_down`, `__shfl_up`, and `__shfl_xor` now lower through semantic IR/reference/WGSL to native WebGPU workgroup-memory shuffle helpers with exact real WebGPU fixture `subgroup:legacy-shuffle`; keep widening subgroup coverage only with reference parity plus native fixture proof
