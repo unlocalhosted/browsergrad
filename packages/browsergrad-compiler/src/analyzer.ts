@@ -2040,10 +2040,12 @@ function validateCallExpression(
     }
     return { kind: "scalar", valueType: "int" };
   }
-  if (isBfloat16ScalarArithmetic(callName)) {
+  if (isBfloat16ScalarArithmetic(callName) || isBfloat16ScalarPredicate(callName)) {
     const infos = expression.args.map((arg) => walkExpression(arg, scope));
     for (const [index, info] of infos.entries()) validateScalarOperand(info, expression.args[index]!.span, diagnostics);
-    if (infos.some((info) => info.valueType === "bf16")) return { kind: "scalar", valueType: "bf16" };
+    if (infos.some((info) => info.valueType === "bf16")) {
+      return { kind: "scalar", valueType: isBfloat16ScalarPredicate(callName) ? callName === "__hisinf" ? "int" : "uint" : "bf16" };
+    }
   }
   if (isBf162VectorIntrinsic(callName) || isBf162ComparisonMaskIntrinsic(callName) || isBf162BooleanComparisonIntrinsic(callName) || isHalf2VectorIntrinsic(callName) || isHalf2ComparisonMaskIntrinsic(callName) || isHalf2BooleanComparisonIntrinsic(callName)) {
     const infos = expression.args.map((arg) => walkExpression(arg, scope));
@@ -2917,13 +2919,44 @@ function isHalf2BooleanComparisonIntrinsic(name: string): boolean {
 }
 
 function isBfloat16ScalarArithmetic(name: string): boolean {
-  return name === "__hadd" ||
+  return name === "__habs" ||
+    name === "__hneg" ||
+    name === "__hadd" ||
+    name === "__hadd_rn" ||
+    name === "__hadd_sat" ||
     name === "__hsub" ||
+    name === "__hsub_rn" ||
+    name === "__hsub_sat" ||
     name === "__hmul" ||
+    name === "__hmul_rn" ||
+    name === "__hmul_sat" ||
     name === "__hdiv" ||
+    name === "__hdiv_rn" ||
     name === "__hfma" ||
+    name === "__hfma_rn" ||
+    name === "__hfma_sat" ||
+    name === "__hfma_relu" ||
     name === "__hmin" ||
-    name === "__hmax";
+    name === "__hmax" ||
+    name === "__hmin_nan" ||
+    name === "__hmax_nan";
+}
+
+function isBfloat16ScalarPredicate(name: string): boolean {
+  return name === "__hisnan" ||
+    name === "__hisinf" ||
+    name === "__heq" ||
+    name === "__hne" ||
+    name === "__hgt" ||
+    name === "__hge" ||
+    name === "__hlt" ||
+    name === "__hle" ||
+    name === "__hequ" ||
+    name === "__hneu" ||
+    name === "__hgtu" ||
+    name === "__hgeu" ||
+    name === "__hltu" ||
+    name === "__hleu";
 }
 
 function isFillRegsBuiltin(name: string): boolean {

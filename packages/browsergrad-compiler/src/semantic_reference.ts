@@ -99,7 +99,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
   "__half2ushort_rn", "__half2ushort_rz", "__half2ushort_ru", "__half2ushort_rd",
   "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
-  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "hexp", "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
+  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu", "hexp", "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
   "__hisnan", "__hisinf", "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle", "__hequ", "__hneu", "__hgtu", "__hgeu", "__hltu", "__hleu",
   "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd",
   "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
@@ -2680,7 +2680,9 @@ function evalSemanticMathCall(
     case "__half2ushort_rd": return (Math.floor(args[0] ?? 0) & 0xffff) >>> 0;
     case "__nv_cvt_fp8_to_halfraw": return roundSemanticHalf(semanticFp8ToFloat32(args[0] ?? 0, args[1] ?? 0));
     case "__nv_cvt_float_to_fp8": return semanticFloat32ToFp8(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
-    case "__habs": return roundSemanticHalf(Math.abs(args[0] ?? 0));
+    case "__habs": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.abs(args[0] ?? 0))
+      : roundSemanticHalf(Math.abs(args[0] ?? 0));
     case "__hceil": return roundSemanticHalf(Math.ceil(args[0] ?? 0));
     case "__hfloor": return roundSemanticHalf(Math.floor(args[0] ?? 0));
     case "__hrcp": return roundSemanticHalf(1 / (args[0] ?? 0));
@@ -2688,19 +2690,29 @@ function evalSemanticMathCall(
     case "hrsqrt": return roundSemanticHalf(1 / Math.sqrt(args[0] ?? 0));
     case "__hsqrt": return roundSemanticHalf(Math.sqrt(args[0] ?? 0));
     case "__htrunc": return roundSemanticHalf(Math.trunc(args[0] ?? 0));
-    case "__hneg": return roundSemanticHalf(-(args[0] ?? 0));
-    case "__hadd_rn": return roundSemanticHalf((args[0] ?? 0) + (args[1] ?? 0));
-    case "__hadd_sat": return saturateSemanticHalf((args[0] ?? 0) + (args[1] ?? 0));
+    case "__hneg": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(-(args[0] ?? 0))
+      : roundSemanticHalf(-(args[0] ?? 0));
+    case "__hadd_rn": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16((args[0] ?? 0) + (args[1] ?? 0))
+      : roundSemanticHalf((args[0] ?? 0) + (args[1] ?? 0));
+    case "__hadd_sat": return expression.valueType === "bf16"
+      ? saturateSemanticBfloat16((args[0] ?? 0) + (args[1] ?? 0))
+      : saturateSemanticHalf((args[0] ?? 0) + (args[1] ?? 0));
     case "__hsub":
     case "__hsub_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) - (args[1] ?? 0))
       : roundSemanticHalf((args[0] ?? 0) - (args[1] ?? 0));
-    case "__hsub_sat": return saturateSemanticHalf((args[0] ?? 0) - (args[1] ?? 0));
+    case "__hsub_sat": return expression.valueType === "bf16"
+      ? saturateSemanticBfloat16((args[0] ?? 0) - (args[1] ?? 0))
+      : saturateSemanticHalf((args[0] ?? 0) - (args[1] ?? 0));
     case "__hmul":
     case "__hmul_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0))
       : roundSemanticHalf((args[0] ?? 0) * (args[1] ?? 0));
-    case "__hmul_sat": return saturateSemanticHalf((args[0] ?? 0) * (args[1] ?? 0));
+    case "__hmul_sat": return expression.valueType === "bf16"
+      ? saturateSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0))
+      : saturateSemanticHalf((args[0] ?? 0) * (args[1] ?? 0));
     case "__hdiv":
     case "__hdiv_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) / (args[1] ?? 0))
@@ -2709,7 +2721,12 @@ function evalSemanticMathCall(
     case "__hfma_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0))
       : roundSemanticHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0));
-    case "__hfma_sat": return saturateSemanticHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0));
+    case "__hfma_sat": return expression.valueType === "bf16"
+      ? saturateSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0))
+      : saturateSemanticHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0));
+    case "__hfma_relu": return expression.valueType === "bf16"
+      ? reluSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0))
+      : roundSemanticHalf(Math.max((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), 0));
     case "hexp": return roundSemanticHalf(Math.exp(args[0] ?? 0));
     case "__hmin": return expression.valueType === "bf16"
       ? roundSemanticBfloat16(Math.min(args[0] ?? 0, args[1] ?? 0))
@@ -2717,8 +2734,12 @@ function evalSemanticMathCall(
     case "__hmax": return expression.valueType === "bf16"
       ? roundSemanticBfloat16(Math.max(args[0] ?? 0, args[1] ?? 0))
       : roundSemanticHalf(Math.max(args[0] ?? 0, args[1] ?? 0));
-    case "__hmin_nan": return roundSemanticHalf(Math.min(args[0] ?? 0, args[1] ?? 0));
-    case "__hmax_nan": return roundSemanticHalf(Math.max(args[0] ?? 0, args[1] ?? 0));
+    case "__hmin_nan": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.min(args[0] ?? 0, args[1] ?? 0))
+      : roundSemanticHalf(Math.min(args[0] ?? 0, args[1] ?? 0));
+    case "__hmax_nan": return expression.valueType === "bf16"
+      ? roundSemanticBfloat16(Math.max(args[0] ?? 0, args[1] ?? 0))
+      : roundSemanticHalf(Math.max(args[0] ?? 0, args[1] ?? 0));
     case "__hisnan": return Number.isNaN(args[0] ?? 0) ? 1 : 0;
     case "__hisinf": {
       const value = args[0] ?? 0;
@@ -4337,6 +4358,7 @@ function semanticMathCallArity(name: string): number {
       name === "__hfma" ||
       name === "__hfma_rn" ||
       name === "__hfma_sat" ||
+      name === "__hfma_relu" ||
       name === "lerp" ||
       name === "norm3df" ||
       name === "rnorm3df" ||

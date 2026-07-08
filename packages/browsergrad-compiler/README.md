@@ -149,6 +149,11 @@ Scalar bf16 helpers use browser-native f32 storage with explicit bf16 bits:
 `__ushort2bfloat16_*`, `__bfloat16_as_short`,
 `__bfloat16_as_ushort`, `__short_as_bfloat16`, and
 `__ushort_as_bfloat16` lower through semantic reference/WGSL and real WebGPU.
+Scalar bf16 arithmetic and predicate aliases, including `__hadd_rn`,
+`__hadd_sat`, `__hsub_sat`, `__hmul_sat`, `__hfma_sat`, `__hfma_relu`,
+`__hmin_nan`, `__hmax_nan`, ordered/unordered comparisons, `__hisnan`, and
+`__hisinf`, also lower through the native f32-backed bf16 path without
+requiring `shader-f16`.
 Vector bf16 helpers `__bfloat1622float2`, `__float22bfloat162_rn`,
 `__float2bfloat162_rn`, `__floats2bfloat162_rn`,
 `__bfloat162bfloat162`, `__low2bfloat16`, `__high2bfloat16`,

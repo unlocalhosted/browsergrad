@@ -2882,6 +2882,60 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     expect([...actual.buffers.signedBits as Int32Array]).toEqual([-16512]);
   });
 
+  it("runs scalar bf16 arithmetic and predicates on real WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16ScalarAliases(const __nv_bfloat16 *input, const float *seed, __nv_bfloat16 *output, uint *flags) {
+  if (threadIdx.x < 1) {
+    __nv_bfloat16 a = input[0];
+    __nv_bfloat16 b = input[1];
+    __nv_bfloat16 nanValue = __float2bfloat16(seed[0]);
+    __nv_bfloat16 infValue = __float2bfloat16(seed[1]);
+    output[0] = __hadd(a, b);
+    output[1] = __hsub(a, b);
+    output[2] = __hmul(a, b);
+    output[3] = __hdiv(a, b);
+    output[4] = __hfma(a, b, __float2bfloat16(1.0f));
+    output[5] = __hmin(a, b);
+    output[6] = __hmax(a, b);
+    output[7] = __hadd_rn(a, b);
+    output[8] = __hadd_sat(__float2bfloat16(0.75f), __float2bfloat16(0.5f));
+    output[9] = __hsub_sat(__float2bfloat16(0.5f), __float2bfloat16(0.75f));
+    output[10] = __hmul_sat(__float2bfloat16(0.75f), __float2bfloat16(2.0f));
+    output[11] = __hfma_sat(__float2bfloat16(0.75f), __float2bfloat16(2.0f), __float2bfloat16(-0.25f));
+    output[12] = __hfma_relu(__float2bfloat16(0.5f), __float2bfloat16(1.0f), __float2bfloat16(-2.0f));
+    output[13] = __hmin_nan(nanValue, b);
+    output[14] = __hmax_nan(a, nanValue);
+    if (__heq(a, __float2bfloat16(2.0f))) { flags[0] = 1u; }
+    if (__hne(a, b)) { flags[1] = 1u; }
+    if (__hgt(a, b)) { flags[2] = 1u; }
+    if (__hge(a, a)) { flags[3] = 1u; }
+    if (__hlt(b, a)) { flags[4] = 1u; }
+    if (__hle(b, b)) { flags[5] = 1u; }
+    if (__hequ(nanValue, b)) { flags[6] = 1u; }
+    if (__hneu(nanValue, b)) { flags[7] = 1u; }
+    if (__hgtu(nanValue, b)) { flags[8] = 1u; }
+    if (__hgeu(nanValue, b)) { flags[9] = 1u; }
+    if (__hltu(nanValue, b)) { flags[10] = 1u; }
+    if (__hleu(nanValue, b)) { flags[11] = 1u; }
+    if (__hisnan(nanValue)) { flags[12] = 1u; }
+    if (__hisinf(infValue)) { flags[13] = 1u; }
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, {
+      buffers: {
+        input: new Float32Array([2, 0.5]),
+        seed: new Float32Array([Number.NaN, Number.POSITIVE_INFINITY]),
+        output: new Float32Array(15),
+        flags: new Uint32Array(14),
+      },
+    }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("missing-feature-shader-f16");
+    expect([...actual.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2, 2.5, 1, 0, 1, 1, 0, Number.NaN, Number.NaN]);
+    expect([...actual.buffers.flags as Uint32Array]).toEqual(Array.from({ length: 14 }, () => 1));
+  });
+
   it("runs bf162 lane and vector conversion aliases on real WebGPU", async () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void bf162Move(float *out, uint *bits) {

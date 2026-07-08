@@ -2523,6 +2523,15 @@ function expressionValueType(expression: SemanticExpression | undefined): CudaLi
 
 function semanticIntrinsicReturnType(name: string | undefined, args: readonly SemanticExpression[]): CudaLiteScalarType | undefined {
   if (name === undefined) return undefined;
+  if (isBfloat16ToBfloat16Name(name)) return "bf16";
+  if (name === "__bfloat162float") return "float";
+  if (name === "__bfloat16_as_short") return "int";
+  if (name === "__bfloat16_as_ushort" || name === "__nv_bfloat16_as_ushort") return "uint";
+  if (isBfloat16ToSignedIntegerName(name)) return "int";
+  if (isBfloat16ToUnsignedIntegerName(name)) return "uint";
+  if (isBfloat16ScalarArithmeticName(name) && args.some((arg) => expressionValueType(arg) === "bf16")) return "bf16";
+  if (name === "__hisinf" && args.some((arg) => expressionValueType(arg) === "bf16")) return "int";
+  if (isBfloat16ScalarPredicateName(name) && args.some((arg) => expressionValueType(arg) === "bf16")) return "uint";
   if (name === "__hisnan2" ||
     name === "__heq2" || name === "__hne2" || name === "__hgt2" || name === "__hge2" || name === "__hlt2" || name === "__hle2" ||
     name === "__hequ2" || name === "__hneu2" || name === "__hgtu2" || name === "__hgeu2" || name === "__hltu2" || name === "__hleu2") return "half2";
@@ -2534,6 +2543,87 @@ function semanticIntrinsicReturnType(name: string | undefined, args: readonly Se
   if (name === "__halves2half2" || name === "__half2half2" || name === "__low2half2" || name === "__high2half2" || name === "__lows2half2" || name === "__highs2half2" || name === "__lowhigh2highlow") return "half2";
   void args;
   return undefined;
+}
+
+function isBfloat16ToBfloat16Name(name: string): boolean {
+  return name === "__float2bfloat16" ||
+    name === "__float2bfloat16_rn" ||
+    name === "__float2bfloat16_rz" ||
+    name === "__float2bfloat16_ru" ||
+    name === "__float2bfloat16_rd" ||
+    name === "__int2bfloat16_rn" ||
+    name === "__int2bfloat16_rz" ||
+    name === "__int2bfloat16_ru" ||
+    name === "__int2bfloat16_rd" ||
+    name === "__uint2bfloat16_rn" ||
+    name === "__uint2bfloat16_rz" ||
+    name === "__uint2bfloat16_ru" ||
+    name === "__uint2bfloat16_rd" ||
+    name === "__short2bfloat16_rn" ||
+    name === "__short2bfloat16_rz" ||
+    name === "__short2bfloat16_ru" ||
+    name === "__short2bfloat16_rd" ||
+    name === "__ushort2bfloat16_rn" ||
+    name === "__ushort2bfloat16_rz" ||
+    name === "__ushort2bfloat16_ru" ||
+    name === "__ushort2bfloat16_rd" ||
+    name === "__short_as_bfloat16" ||
+    name === "__ushort_as_bfloat16";
+}
+
+function isBfloat16ToSignedIntegerName(name: string): boolean {
+  return name === "__bfloat162int_rn" ||
+    name === "__bfloat162int_rz" ||
+    name === "__bfloat162int_ru" ||
+    name === "__bfloat162int_rd";
+}
+
+function isBfloat16ToUnsignedIntegerName(name: string): boolean {
+  return name === "__bfloat162uint_rn" ||
+    name === "__bfloat162uint_rz" ||
+    name === "__bfloat162uint_ru" ||
+    name === "__bfloat162uint_rd";
+}
+
+function isBfloat16ScalarArithmeticName(name: string): boolean {
+  return name === "__habs" ||
+    name === "__hneg" ||
+    name === "__hadd" ||
+    name === "__hadd_rn" ||
+    name === "__hadd_sat" ||
+    name === "__hsub" ||
+    name === "__hsub_rn" ||
+    name === "__hsub_sat" ||
+    name === "__hmul" ||
+    name === "__hmul_rn" ||
+    name === "__hmul_sat" ||
+    name === "__hdiv" ||
+    name === "__hdiv_rn" ||
+    name === "__hfma" ||
+    name === "__hfma_rn" ||
+    name === "__hfma_sat" ||
+    name === "__hfma_relu" ||
+    name === "__hmin" ||
+    name === "__hmax" ||
+    name === "__hmin_nan" ||
+    name === "__hmax_nan";
+}
+
+function isBfloat16ScalarPredicateName(name: string): boolean {
+  return name === "__hisnan" ||
+    name === "__hisinf" ||
+    name === "__heq" ||
+    name === "__hne" ||
+    name === "__hgt" ||
+    name === "__hge" ||
+    name === "__hlt" ||
+    name === "__hle" ||
+    name === "__hequ" ||
+    name === "__hneu" ||
+    name === "__hgtu" ||
+    name === "__hgeu" ||
+    name === "__hltu" ||
+    name === "__hleu";
 }
 
 function indexedValueType(target: SemanticExpression): CudaLiteScalarType | undefined {

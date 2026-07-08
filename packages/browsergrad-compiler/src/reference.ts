@@ -3673,6 +3673,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   })) {
     return signedAverage(args[0] ?? 0, args[1] ?? 0);
   }
+  const bfloat16Scalar = evalBfloat16ScalarCall(name, expression, args, context);
+  if (bfloat16Scalar !== undefined) return bfloat16Scalar;
   if (name === "__dp4a") {
     return expressionValueType(expression, context) === "uint"
       ? evalU8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0)
@@ -3771,6 +3773,60 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
   }
+}
+
+function evalBfloat16ScalarCall(
+  name: string | undefined,
+  expression: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  args: readonly number[],
+  context: ThreadContext,
+): number | undefined {
+  if (!name || !expression.args.some((arg) => expressionValueType(arg, context) === "bf16")) return undefined;
+  const a = args[0] ?? 0;
+  const b = args[1] ?? 0;
+  const c = args[2] ?? 0;
+  switch (name) {
+    case "__habs": return roundBfloat16(Math.abs(a));
+    case "__hneg": return roundBfloat16(-a);
+    case "__hadd":
+    case "__hadd_rn": return roundBfloat16(a + b);
+    case "__hadd_sat": return saturateBfloat16(a + b);
+    case "__hsub":
+    case "__hsub_rn": return roundBfloat16(a - b);
+    case "__hsub_sat": return saturateBfloat16(a - b);
+    case "__hmul":
+    case "__hmul_rn": return roundBfloat16(a * b);
+    case "__hmul_sat": return saturateBfloat16(a * b);
+    case "__hdiv":
+    case "__hdiv_rn": return roundBfloat16(a / b);
+    case "__hfma":
+    case "__hfma_rn": return roundBfloat16(a * b + c);
+    case "__hfma_sat": return saturateBfloat16(a * b + c);
+    case "__hfma_relu": return reluBfloat16(a * b + c);
+    case "__hmin":
+    case "__hmin_nan": return roundBfloat16(Math.min(a, b));
+    case "__hmax":
+    case "__hmax_nan": return roundBfloat16(Math.max(a, b));
+    case "__hisnan": return Number.isNaN(a) ? 1 : 0;
+    case "__hisinf": return a === Infinity ? 1 : a === -Infinity ? -1 : 0;
+    case "__heq": return a === b ? 1 : 0;
+    case "__hne": return a !== b ? 1 : 0;
+    case "__hgt": return a > b ? 1 : 0;
+    case "__hge": return a >= b ? 1 : 0;
+    case "__hlt": return a < b ? 1 : 0;
+    case "__hle": return a <= b ? 1 : 0;
+    case "__hequ": return unorderedBfloatCompare(a, b, (left, right) => left === right);
+    case "__hneu": return unorderedBfloatCompare(a, b, (left, right) => left !== right);
+    case "__hgtu": return unorderedBfloatCompare(a, b, (left, right) => left > right);
+    case "__hgeu": return unorderedBfloatCompare(a, b, (left, right) => left >= right);
+    case "__hltu": return unorderedBfloatCompare(a, b, (left, right) => left < right);
+    case "__hleu": return unorderedBfloatCompare(a, b, (left, right) => left <= right);
+    default: return undefined;
+  }
+}
+
+function unorderedBfloatCompare(left: number, right: number, compare: (left: number, right: number) => boolean): number {
+  return Number.isNaN(left) || Number.isNaN(right) || compare(left, right) ? 1 : 0;
 }
 
 function isHalf2VectorIntrinsic(name: string | undefined): boolean {

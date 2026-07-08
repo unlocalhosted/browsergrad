@@ -492,6 +492,7 @@ const HALF_INTRINSICS = [
   intrinsic("__hfma", [3, 3], "half", (args) => roundHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0)), (args) => `fma(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hfma_rn", [3, 3], "half", (args) => roundHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0)), (args) => `fma(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hfma_sat", [3, 3], "half", (args) => saturateHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0)), (args) => emitHalfSaturate(`fma(${args.join(", ")})`), HALF_FEATURES),
+  intrinsic("__hfma_relu", [3, 3], "half", (args) => roundHalf(Math.max((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), 0)), (args) => `max(fma(${args.join(", ")}), f16(0.0))`, HALF_FEATURES),
   intrinsic("hexp", [1, 1], "half", (args) => roundHalf(Math.exp(args[0] ?? 0)), (args) => `f16(exp(f32(${args[0] ?? "0"})))`, HALF_FEATURES),
   intrinsic("__hmin", [2, 2], "half", (args) => roundHalf(Math.min(args[0] ?? 0, args[1] ?? 0)), (args) => `min(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hmax", [2, 2], "half", (args) => roundHalf(Math.max(args[0] ?? 0, args[1] ?? 0)), (args) => `max(${args.join(", ")})`, HALF_FEATURES),
