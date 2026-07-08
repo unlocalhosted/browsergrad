@@ -214,6 +214,25 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
   },
   {
+    sourceKey: "corpusCuda120ParentKernelDynamicLaunch",
+    caseName: "corpus:cuda-120:parentKernel_dynamic_launch",
+    corpusId: "cuda-120",
+    relativePath: "daily-updates/day-39-Dynamic-Parallelism.md",
+    kernelName: "parentKernel",
+    workgroupSize: [2, 1, 1],
+    options: { f64Mode: "f32" },
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        data: { type: "Float32Array", data: Array.from({ length: 256 }, () => 1) },
+        results: { type: "Float32Array", length: 2 },
+      },
+      scalars: { totalLen: 256 },
+    },
+    output: "results",
+    expectedOutput: { type: "Float32Array", data: [128, 128] },
+  },
+  {
     sourceKey: "corpusCudaSamplesVectorAdd",
     caseName: "corpus:cuda-samples:vectorAdd",
     corpusId: "cuda-samples",
