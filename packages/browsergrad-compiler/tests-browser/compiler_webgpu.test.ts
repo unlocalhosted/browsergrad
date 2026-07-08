@@ -2861,6 +2861,10 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     out[13] = __bfloat162float(__ushort2bfloat16_ru(257u));
     out[14] = __bfloat162float(__ushort2bfloat16_rd(257u));
     out[15] = __bfloat162float(__ushort_as_bfloat16(0x4000u));
+    out[16] = __bfloat162float(__ll2bfloat16_rn((long long)257));
+    out[17] = __bfloat162float(__ll2bfloat16_rd((long long)-257));
+    out[18] = __bfloat162float(__ull2bfloat16_ru((unsigned long long)257u));
+    out[19] = __bfloat162float(__ull2bfloat16_rd((unsigned long long)257u));
     bits[0] = __bfloat16_as_ushort(prn);
     bits[1] = __bfloat16_as_ushort(__ushort_as_bfloat16(0x3f80u));
     bits[2] = __bfloat162ushort_rn(__float2bfloat16_rn(1.5f));
@@ -2869,6 +2873,10 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     bits[5] = __bfloat162ushort_rd(__float2bfloat16_rn(1.5f));
     bits[6] = __bfloat162uchar_rz(__float2bfloat16_rn(255.0f));
     bits[7] = __bfloat162uchar_rz(__float2bfloat16_rn(257.0f));
+    bits[8] = __bfloat162ull_rn(__float2bfloat16_rn(1.5f));
+    bits[9] = __bfloat162ull_rz(__float2bfloat16_rn(1.5f));
+    bits[10] = __bfloat162ull_ru(__float2bfloat16_rn(1.5f));
+    bits[11] = __bfloat162ull_rd(__float2bfloat16_rn(1.5f));
     signedBits[0] = __bfloat16_as_short(__short_as_bfloat16(0xbf80));
     signedBits[1] = __bfloat162short_rn(__float2bfloat16_rn(1.5f));
     signedBits[2] = __bfloat162short_rz(__float2bfloat16_rn(1.5f));
@@ -2880,22 +2888,30 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     signedBits[8] = __bfloat162short_rd(__float2bfloat16_rn(-1.5f));
     signedBits[9] = __bfloat162char_rz(__float2bfloat16_rn(255.0f));
     signedBits[10] = __bfloat162char_rz(__float2bfloat16_rn(129.0f));
+    signedBits[11] = __bfloat162ll_rn(__float2bfloat16_rn(1.5f));
+    signedBits[12] = __bfloat162ll_rz(__float2bfloat16_rn(1.5f));
+    signedBits[13] = __bfloat162ll_ru(__float2bfloat16_rn(1.5f));
+    signedBits[14] = __bfloat162ll_rd(__float2bfloat16_rn(1.5f));
+    signedBits[15] = __bfloat162ll_rn(__float2bfloat16_rn(-1.5f));
+    signedBits[16] = __bfloat162ll_rz(__float2bfloat16_rn(-1.5f));
+    signedBits[17] = __bfloat162ll_ru(__float2bfloat16_rn(-1.5f));
+    signedBits[18] = __bfloat162ll_rd(__float2bfloat16_rn(-1.5f));
   }
 }`, { workgroupSize: [1, 1, 1] });
     const input = {
       buffers: {
-        out: new Float32Array(16),
-        bits: new Uint32Array(8),
-        signedBits: new Int32Array(11),
+        out: new Float32Array(20),
+        bits: new Uint32Array(12),
+        signedBits: new Int32Array(19),
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect([...actual.buffers.out as Float32Array]).toEqual([256, 256, 258, 256, -256, -256, -256, -258, 258, -258, 258, -1, -258, 258, 256, 2]);
-    expect([...actual.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80, 2, 1, 2, 1, 255, 0]);
-    expect([...actual.buffers.signedBits as Int32Array]).toEqual([-16512, 2, 1, 2, 1, -2, -1, -1, -2, -1, -127]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([256, 256, 258, 256, -256, -256, -256, -258, 258, -258, 258, -1, -258, 258, 256, 2, 256, -258, 258, 256]);
+    expect([...actual.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80, 2, 1, 2, 1, 255, 0, 2, 1, 2, 1]);
+    expect([...actual.buffers.signedBits as Int32Array]).toEqual([-16512, 2, 1, 2, 1, -2, -1, -1, -2, -1, -127, 2, 1, 2, 1, -2, -1, -1, -2]);
   });
 
   it("runs double to bf16 through f32 compatibility mode on real WebGPU", async () => {

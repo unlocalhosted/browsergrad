@@ -146,14 +146,17 @@ reference/WGSL path and can run in explicit f32 compatibility mode when
 Scalar bf16 helpers use browser-native f32 storage with explicit bf16 bits:
 `__float2bfloat16`, `__float2bfloat16_rn` / `_rz` / `_ru` / `_rd`,
 `__double2bfloat16` in explicit `f64Mode: "f32"` compatibility mode,
-`__int2bfloat16_*`, `__uint2bfloat16_*`, `__short2bfloat16_*`,
+`__int2bfloat16_*`, `__uint2bfloat16_*`, `__ll2bfloat16_*`,
+`__ull2bfloat16_*`, `__short2bfloat16_*`,
 `__ushort2bfloat16_*`, `__bfloat16_as_short`,
 `__bfloat16_as_ushort`, `__short_as_bfloat16`, and
 `__ushort_as_bfloat16` lower through semantic reference/WGSL and real WebGPU.
-Scalar bf16-to-integer helpers `__bfloat162short_*`,
-`__bfloat162ushort_*`, `__bfloat162char_rz`, and
-`__bfloat162uchar_rz` preserve explicit CUDA narrow integer rounding and
-8-bit/16-bit wrap/sign-extension semantics on the same browser-native path.
+Scalar bf16-to-integer helpers `__bfloat162ll_*`,
+`__bfloat162ull_*`, `__bfloat162short_*`, `__bfloat162ushort_*`,
+`__bfloat162char_rz`, and `__bfloat162uchar_rz` preserve explicit CUDA
+integer rounding and 8-bit/16-bit wrap/sign-extension semantics on the same
+browser-native path. The `ll`/`ull` spellings follow BrowserGrad's current
+32-bit WebGPU integer ABI; true 64-bit integer arithmetic remains unsupported.
 Scalar bf16 unary math, arithmetic, and predicate aliases, including `__habs`,
 `__hceil`, `__hfloor`, `__hrcp`, `__hrsqrt`, `__hsqrt`, `__htrunc`, `__hneg`,
 `hexp`, `__hadd_rn`, `__hadd_sat`, `__hsub_sat`, `__hmul_sat`, `__hfma_sat`,

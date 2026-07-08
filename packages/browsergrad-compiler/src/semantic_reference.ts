@@ -103,12 +103,16 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__hisnan", "__hisinf", "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle", "__hequ", "__hneu", "__hgtu", "__hgeu", "__hltu", "__hleu",
   "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd", "__double2bfloat16",
   "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
+  "__ll2bfloat16_rn", "__ll2bfloat16_rz", "__ll2bfloat16_ru", "__ll2bfloat16_rd",
   "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
+  "__ull2bfloat16_rn", "__ull2bfloat16_rz", "__ull2bfloat16_ru", "__ull2bfloat16_rd",
   "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
   "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
   "__bfloat16_as_short", "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__short_as_bfloat16", "__ushort_as_bfloat16",
   "__bfloat162int_rn", "__bfloat162int_rz", "__bfloat162int_ru", "__bfloat162int_rd",
+  "__bfloat162ll_rn", "__bfloat162ll_rz", "__bfloat162ll_ru", "__bfloat162ll_rd",
   "__bfloat162uint_rn", "__bfloat162uint_rz", "__bfloat162uint_ru", "__bfloat162uint_rd",
+  "__bfloat162ull_rn", "__bfloat162ull_rz", "__bfloat162ull_ru", "__bfloat162ull_rd",
   "__bfloat162short_rn", "__bfloat162short_rz", "__bfloat162short_ru", "__bfloat162short_rd",
   "__bfloat162ushort_rn", "__bfloat162ushort_rz", "__bfloat162ushort_ru", "__bfloat162ushort_rd",
   "__bfloat162char_rz", "__bfloat162uchar_rz",
@@ -2790,10 +2794,18 @@ function evalSemanticMathCall(
     case "__int2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rz");
     case "__int2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "ru");
     case "__int2bfloat16_rd": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rd");
+    case "__ll2bfloat16_rn": return roundSemanticBfloat16(Math.trunc(args[0] ?? 0) | 0);
+    case "__ll2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rz");
+    case "__ll2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "ru");
+    case "__ll2bfloat16_rd": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rd");
     case "__uint2bfloat16_rn": return roundSemanticBfloat16(Math.trunc(args[0] ?? 0) >>> 0);
     case "__uint2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rz");
     case "__uint2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "ru");
     case "__uint2bfloat16_rd": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rd");
+    case "__ull2bfloat16_rn": return roundSemanticBfloat16(Math.trunc(args[0] ?? 0) >>> 0);
+    case "__ull2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rz");
+    case "__ull2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "ru");
+    case "__ull2bfloat16_rd": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rd");
     case "__short2bfloat16_rn": return roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rn");
     case "__short2bfloat16_rz": return roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rz");
     case "__short2bfloat16_ru": return roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "ru");
@@ -2811,10 +2823,18 @@ function evalSemanticMathCall(
     case "__bfloat162int_rz": return Math.trunc(args[0] ?? 0) | 0;
     case "__bfloat162int_ru": return Math.ceil(args[0] ?? 0) | 0;
     case "__bfloat162int_rd": return Math.floor(args[0] ?? 0) | 0;
+    case "__bfloat162ll_rn": return roundTiesToEvenNumber(args[0] ?? 0) | 0;
+    case "__bfloat162ll_rz": return Math.trunc(args[0] ?? 0) | 0;
+    case "__bfloat162ll_ru": return Math.ceil(args[0] ?? 0) | 0;
+    case "__bfloat162ll_rd": return Math.floor(args[0] ?? 0) | 0;
     case "__bfloat162uint_rn": return roundTiesToEvenNumber(args[0] ?? 0) >>> 0;
     case "__bfloat162uint_rz": return Math.trunc(args[0] ?? 0) >>> 0;
     case "__bfloat162uint_ru": return Math.ceil(args[0] ?? 0) >>> 0;
     case "__bfloat162uint_rd": return Math.floor(args[0] ?? 0) >>> 0;
+    case "__bfloat162ull_rn": return roundTiesToEvenNumber(args[0] ?? 0) >>> 0;
+    case "__bfloat162ull_rz": return Math.trunc(args[0] ?? 0) >>> 0;
+    case "__bfloat162ull_ru": return Math.ceil(args[0] ?? 0) >>> 0;
+    case "__bfloat162ull_rd": return Math.floor(args[0] ?? 0) >>> 0;
     case "__bfloat162short_rn": return signExtend16(roundTiesToEvenNumber(args[0] ?? 0));
     case "__bfloat162short_rz": return signExtend16(Math.trunc(args[0] ?? 0));
     case "__bfloat162short_ru": return signExtend16(Math.ceil(args[0] ?? 0));

@@ -2557,10 +2557,18 @@ function isBfloat16ToBfloat16Name(name: string): boolean {
     name === "__int2bfloat16_rz" ||
     name === "__int2bfloat16_ru" ||
     name === "__int2bfloat16_rd" ||
+    name === "__ll2bfloat16_rn" ||
+    name === "__ll2bfloat16_rz" ||
+    name === "__ll2bfloat16_ru" ||
+    name === "__ll2bfloat16_rd" ||
     name === "__uint2bfloat16_rn" ||
     name === "__uint2bfloat16_rz" ||
     name === "__uint2bfloat16_ru" ||
     name === "__uint2bfloat16_rd" ||
+    name === "__ull2bfloat16_rn" ||
+    name === "__ull2bfloat16_rz" ||
+    name === "__ull2bfloat16_ru" ||
+    name === "__ull2bfloat16_rd" ||
     name === "__short2bfloat16_rn" ||
     name === "__short2bfloat16_rz" ||
     name === "__short2bfloat16_ru" ||
@@ -2578,6 +2586,10 @@ function isBfloat16ToSignedIntegerName(name: string): boolean {
     name === "__bfloat162int_rz" ||
     name === "__bfloat162int_ru" ||
     name === "__bfloat162int_rd" ||
+    name === "__bfloat162ll_rn" ||
+    name === "__bfloat162ll_rz" ||
+    name === "__bfloat162ll_ru" ||
+    name === "__bfloat162ll_rd" ||
     name === "__bfloat162short_rn" ||
     name === "__bfloat162short_rz" ||
     name === "__bfloat162short_ru" ||
@@ -2590,6 +2602,10 @@ function isBfloat16ToUnsignedIntegerName(name: string): boolean {
     name === "__bfloat162uint_rz" ||
     name === "__bfloat162uint_ru" ||
     name === "__bfloat162uint_rd" ||
+    name === "__bfloat162ull_rn" ||
+    name === "__bfloat162ull_rz" ||
+    name === "__bfloat162ull_ru" ||
+    name === "__bfloat162ull_rd" ||
     name === "__bfloat162ushort_rn" ||
     name === "__bfloat162ushort_rz" ||
     name === "__bfloat162ushort_ru" ||
