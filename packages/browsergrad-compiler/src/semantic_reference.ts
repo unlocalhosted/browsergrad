@@ -560,11 +560,19 @@ function semanticReferenceTextureReadSupported(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return (expression.valueType === "float" || isSemanticReferenceFloatVectorType(expression.valueType)) &&
+  return semanticReferenceTextureValueTypeSupported(expression.valueType) &&
     expression.texture.kind === "symbol" &&
     expression.texture.addressSpace === "texture" &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled);
+}
+
+function semanticReferenceTextureValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "float" ||
+    valueType === "uint" ||
+    valueType === "int" ||
+    valueType === "uchar" ||
+    isSemanticReferenceFloatVectorType(valueType);
 }
 
 function semanticReferenceTextureDescriptorsSupported(_compiled: CompiledCudaLiteKernel): boolean {

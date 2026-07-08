@@ -15469,9 +15469,22 @@ __global__ void sample(uint *out) {
       },
       { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(3) },
+        textures: { texRef: { width: 3, height: 1, data: new Float32Array([2, 127, 255]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("bg_tex2d_uchar_texRef");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("u32(textureLoad(texRef");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_uchar_texRef");
     expect([...result.buffers.out as Uint32Array]).toEqual([2, 127, 255]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([2, 127, 255]);
   });
 
   it("lowers templated bf16 and bf162 tex2D reads with native WebGPU f32 storage", () => {

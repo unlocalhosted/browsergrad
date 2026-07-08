@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-07T23:54:20Z
+Last updated: 2026-07-07T23:59:27Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails after nested local pointer-param lowering; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Typed CUDA surface vector reads/writes now lower through semantic IR/reference/WGSL/WebGPU |
+| Active work item | Typed scalar CUDA texture reads now lower through semantic IR/reference/WGSL/WebGPU |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- typed scalar texture reads: direct `tex2D<unsigned char>` now stays on semantic IR/reference/WGSL instead of falling back to modeled texture helper emission; WGSL emits native `textureLoad` plus `u32(...)` lane cast for the scalar read; exact real WebGPU fixture `texture:uchar-scalar-read` passed as `single-dispatch` with pinned output and max diff `0`; typecheck passed, lint passed, focused compiler unit `1/0`, compiler unit `625/0`, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
 - typed surface vector reads/writes: direct `surf2Dread<uint4>` pointer/return forms and `surf2Dwrite(uint4)` now stay on semantic IR/reference/WGSL instead of falling back to modeled surface helper emission; WGSL emits native surface storage helpers with typed `vecN<i32/u32>` lane casts on reads and `f32(...)` lane stores for the current surface backing representation; exact real WebGPU fixtures `surface:uint4-vector-unaligned-byte-offset`, `surface:int4-vector-unaligned-byte-offset`, `surface:layered-int4-vector-unaligned-byte-offset`, and `surface:uint4-vector-active-lane-return` passed as `single-dispatch` with pinned outputs and max diff `0`; typecheck passed, lint passed, focused compiler unit `1/0`, compiler unit `625/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
 - typed texture vector reads: `tex2D<uchar4>`/`tex2D<uint4>` direct texture reads now stay on semantic IR/reference/WGSL instead of falling back to modeled texture helper emission; WGSL emits native `textureLoad` plus typed integer vector lane casts, exact real WebGPU fixtures `texture:uchar4-read` and `texture:object-uint4-helper-read` passed as `single-dispatch` with pinned outputs and max diff `0`; typecheck passed, lint passed, focused compiler unit `1/0`, compiler unit `624/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
 - integer vector local arrays: `int2/3/4` and `uint2/3/4` now use typed semantic vector values for fixed local arrays, local initializers, local fills, storage ABI validation, and WGSL `vecN<i32/u32>` declarations; exact real WebGPU fixtures `storage:local-int-vector-array` and `storage:local-uint-vector-array` passed with pinned outputs and max diff `0`; typecheck passed, lint passed, compiler unit `624/0`, local-array focused unit `17/0`, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`

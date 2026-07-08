@@ -5869,6 +5869,12 @@ texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
 __global__ void textureUchar4(uint4 *out) {
   out[0] = tex2D<uchar4>(texRef, 0.5f, 0.5f);
 }`,
+  textureUcharScalar: `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void textureUcharScalar(uint *out) {
+  int x = threadIdx.x;
+  out[x] = tex2D<unsigned char>(texRef, (float)x + 0.5f, 0.5f);
+}`,
   textureObjectUint4HelperRead: `
 __device__ uint4 read_uint4_tex(cudaTextureObject_t texArg) {
   return tex2D<uint4>(texArg, 0.5f, 0.5f);
@@ -15776,6 +15782,26 @@ const html = String.raw`<!doctype html>
             }),
             output: "scalarOut",
             expectedOutput: { type: "Float32Array", data: [5, 33, 41, 21] },
+          },
+          {
+            name: "texture:uchar-scalar-read",
+            source: SOURCES.textureUcharScalar,
+            options: { workgroupSize: [3, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(3),
+              },
+              textures: {
+                texRef: {
+                  width: 3,
+                  height: 1,
+                  data: new Float32Array([2, 127, 255]),
+                },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [2, 127, 255] },
           },
           {
             name: "texture:uchar4-read",

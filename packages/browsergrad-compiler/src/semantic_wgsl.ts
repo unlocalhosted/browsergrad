@@ -1142,11 +1142,19 @@ function semanticWgslTextureReadSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   const texture = expression.texture;
-  return (expression.valueType === "float" || isSemanticWgslFloatVectorType(expression.valueType)) &&
+  return semanticWgslTextureValueTypeSupported(expression.valueType) &&
     texture.kind === "symbol" &&
     texture.addressSpace === "texture" &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
     semanticWgslExpressionSupported(expression.y, "scalar", ir);
+}
+
+function semanticWgslTextureValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "float" ||
+    valueType === "uint" ||
+    valueType === "int" ||
+    valueType === "uchar" ||
+    isSemanticWgslFloatVectorType(valueType);
 }
 
 function semanticWgslSurfaceReadSupported(
@@ -3045,6 +3053,8 @@ function emitSemanticTextureRead(
     ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`
     : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
   if (isSemanticWgslFloatVectorType(expression.valueType)) return emitSemanticTextureVectorRead(read, expression.valueType);
+  if (expression.valueType === "uint" || expression.valueType === "uchar") return `u32(${read}.r)`;
+  if (expression.valueType === "int") return `i32(${read}.r)`;
   return `${read}.r`;
 }
 
