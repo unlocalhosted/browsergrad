@@ -387,6 +387,24 @@ describe("CUDA-lite compiler", () => {
     });
   });
 
+  it("uses semantic kernel IR for fallback reference input validation", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void fallback_validate(float* x) {
+  __shared__ float tile[1];
+  if (threadIdx.x < 1) { tile[0] = 2.0f; }
+  __syncthreads();
+  if (threadIdx.x < 1) { x[0] = tile[0]; }
+}`, { workgroupSize: [1, 1, 1] });
+
+    (compiled.analysis.kernel as unknown as { params: unknown[] }).params = [];
+
+    expect(() => runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Uint32Array([0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    )).toThrow("buffer 'x' expects Float32Array");
+  });
+
   it("runs SAXPY through the semantic CPU reference path", () => {
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
     const input = {

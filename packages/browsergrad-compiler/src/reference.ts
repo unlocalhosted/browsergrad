@@ -5,7 +5,7 @@ import {
   isWgslFloat16Array,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
-import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
+import { collectKernelLaunchCallees } from "./ast_queries.js";
 import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
@@ -15,6 +15,12 @@ import {
   canRunCompiledKernelSemanticReference,
   runCompiledKernelSemanticReference,
 } from "./semantic_reference.js";
+import type {
+  CudaLiteSemanticSymbol,
+  SemanticExpression,
+  SemanticKernelIrModule,
+  SemanticKernelIrOperation,
+} from "./semantic_ir.js";
 import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
@@ -223,7 +229,7 @@ export function runCompiledKernelReference(
   }
   const backendIr = referenceKernelIrFor(compiled);
   validateCudaKernelLaunch(launch, backendIr.workgroupSize);
-  validateInputs(input, backendIr);
+  validateInputs(input, compiled.kernelIr);
   const buffers = cloneBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
   for (const constant of backendIr.constants) {
@@ -272,7 +278,7 @@ export function runCompiledKernelReference(
     [
       ...backendIr.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name),
       ...backendIr.deviceGlobals.map((global) => global.name),
-      ...collectExternalDevicePoolNames(backendIr.body),
+      ...collectExternalDevicePoolNames(compiled.kernelIr.operations),
     ];
   const result: Record<string, WgslTypedArray> = {};
   for (const name of readback) {
@@ -5973,9 +5979,9 @@ function freezeTrace(trace: MutableTrace): KernelThreadTrace {
 
 function validateInputs(
   input: CompiledKernelInput,
-  backendIr: KernelIrModule,
+  kernelIr: SemanticKernelIrModule,
 ): void {
-  for (const param of backendIr.params) {
+  for (const param of kernelIr.params) {
     if (param.valueType === "texture2d") {
       const texture = input.textures?.[param.name];
       if (!texture) throw compilerFailure(`missing texture input '${param.name}'`);
@@ -5991,64 +5997,273 @@ function validateInputs(
     } else if (param.pointer) {
       const buffer = input.buffers[param.name];
       if (!buffer) throw compilerFailure(`missing buffer input '${param.name}'`);
-      const scalarType = cudaVectorScalarType(param.valueType);
-      if ((param.valueType === "int" || scalarType === "int") && !(buffer instanceof Int32Array)) {
+      const valueType = semanticSymbolValueType(param);
+      const scalarType = cudaVectorScalarType(valueType);
+      if ((valueType === "int" || scalarType === "int") && !(buffer instanceof Int32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Int32Array`);
       }
-      if ((param.valueType === "uint" || scalarType === "uint") && !(buffer instanceof Uint32Array)) {
+      if ((valueType === "uint" || scalarType === "uint") && !(buffer instanceof Uint32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
       }
-      if ((param.valueType === "float" || param.valueType === "double" || param.valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(buffer instanceof Float32Array)) {
+      if ((valueType === "float" || valueType === "double" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(buffer instanceof Float32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
       }
-      if ((param.valueType === "half" || scalarType === "half") && !isWgslFloat16Array(buffer)) {
+      if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(buffer)) {
         throw compilerFailure(`buffer '${param.name}' expects Float16Array`);
       }
-      if (param.valueType === "bool" && !(buffer instanceof Uint32Array)) {
+      if (valueType === "bool" && !(buffer instanceof Uint32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
       }
-      if (param.valueType === "complex64" && !(buffer instanceof Float32Array)) {
+      if (valueType === "complex64" && !(buffer instanceof Float32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects interleaved Float32Array`);
       }
     } else if (input.scalars?.[param.name] === undefined) {
       throw compilerFailure(`missing scalar input '${param.name}'`);
     }
   }
-  for (const constant of backendIr.constants) {
-    if (constant.init !== undefined) continue;
+  for (const constant of kernelIr.memory.filter((symbol) => symbol.kind === "constant")) {
+    if (constant.initialized) continue;
     const value = input.constants?.[constant.name];
     if (value === undefined) throw compilerFailure(`missing constant input '${constant.name}'`);
-    if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType)) {
+    const valueType = semanticSymbolValueType(constant);
+    if (constant.dimensions.length === 0 && isCudaVectorType(valueType)) {
       if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);
-      validateTypedConstant(constant.name, constant.valueType, value);
-      const expected = cudaVectorLaneCount(constant.valueType);
+      validateTypedConstant(constant.name, valueType, value);
+      const expected = cudaVectorLaneCount(valueType);
       if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
     } else if (constant.dimensions.length === 0) {
       if (typeof value !== "number") throw compilerFailure(`constant '${constant.name}' expects number`);
     } else {
       if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);
-      validateTypedConstant(constant.name, constant.valueType, value);
+      validateTypedConstant(constant.name, valueType, value);
       const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
       if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
     }
   }
-  for (const global of backendIr.deviceGlobals) {
+  for (const global of kernelIr.memory.filter((symbol) => symbol.kind === "device-global")) {
     const value = input.deviceGlobals?.[global.name];
     if (value === undefined) continue;
-    validateTypedDeviceGlobal(global.name, global.valueType, value);
+    validateTypedDeviceGlobal(global.name, semanticSymbolValueType(global), value);
     const expected = global.dimensions.length === 0 ? 1 : global.dimensions.reduce((product, dimension) => product * dimension, 1);
     if (value.length < expected) throw compilerFailure(`device global '${global.name}' expects at least ${expected} elements`);
   }
-  for (const texture of backendIr.textures) {
+  for (const texture of kernelIr.memory.filter((symbol) => symbol.kind === "texture")) {
     const value = input.textures?.[texture.name];
     if (!value) throw compilerFailure(`missing texture input '${texture.name}'`);
     validateSurfaceInput(`texture ${texture.name}`, value);
   }
-  for (const poolName of collectExternalDevicePoolNames(backendIr.body)) {
+  for (const poolName of collectExternalDevicePoolNames(kernelIr.operations)) {
     const pool = input.memoryPools?.[poolName];
     if (!pool) throw compilerFailure(`missing memory pool input '${poolName}'`);
     validateMemoryPoolInput(poolName, pool);
   }
+}
+
+function semanticSymbolValueType(symbol: CudaLiteSemanticSymbol): Exclude<CudaLiteScalarType, "void"> {
+  if (symbol.valueType === undefined || symbol.valueType === "void") throw compilerFailure(`semantic symbol '${symbol.name}' has no value type`);
+  return symbol.valueType;
+}
+
+function collectExternalDevicePoolNames(operations: readonly SemanticKernelIrOperation[]): readonly string[] {
+  const out = new Set<string>();
+  walkSemanticOperations(operations, (expression) => {
+    if (expression.kind !== "call") return;
+    const callName = expressionNameForSemantic(expression.callee);
+    if (callName !== "deviceAllocate" && callName !== "streamOrderedAllocate") return;
+    const pool = expression.args[0];
+    if (pool?.kind !== "unary" || pool.operator !== "&" || pool.argument.kind !== "symbol") return;
+    out.add(pool.argument.name);
+  });
+  return [...out];
+}
+
+function walkSemanticOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  for (const operation of operations) walkSemanticOperation(operation, visitExpression);
+}
+
+function walkSemanticOperation(
+  operation: SemanticKernelIrOperation,
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  switch (operation.kind) {
+    case "declare":
+      if (operation.init) walkSemanticExpression(operation.init, visitExpression);
+      return;
+    case "dim3-declare":
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "load":
+      walkSemanticMemoryRef(operation.source, visitExpression);
+      return;
+    case "store":
+      walkSemanticMemoryRef(operation.target, visitExpression);
+      walkSemanticExpression(operation.value, visitExpression);
+      for (const ref of operation.reads) walkSemanticMemoryRef(ref, visitExpression);
+      return;
+    case "surface-write":
+      walkSemanticExpression(operation.surface, visitExpression);
+      walkSemanticExpression(operation.value, visitExpression);
+      walkSemanticExpression(operation.xBytes, visitExpression);
+      walkSemanticExpression(operation.y, visitExpression);
+      if (operation.z) walkSemanticExpression(operation.z, visitExpression);
+      return;
+    case "surface-read-store":
+      walkSemanticExpression(operation.target, visitExpression);
+      walkSemanticExpression(operation.surface, visitExpression);
+      walkSemanticExpression(operation.xBytes, visitExpression);
+      walkSemanticExpression(operation.y, visitExpression);
+      if (operation.z) walkSemanticExpression(operation.z, visitExpression);
+      return;
+    case "atomic":
+      if (operation.target) walkSemanticMemoryRef(operation.target, visitExpression);
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "call":
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      for (const ref of operation.reads) walkSemanticMemoryRef(ref, visitExpression);
+      return;
+    case "expression":
+      walkSemanticExpression(operation.expression, visitExpression);
+      return;
+    case "branch":
+      walkSemanticExpression(operation.condition, visitExpression);
+      walkSemanticOperations(operation.consequent, visitExpression);
+      walkSemanticOperations(operation.alternate, visitExpression);
+      return;
+    case "loop":
+      if (operation.init) {
+        if ("kind" in operation.init && isSemanticKernelIrOperationKind(operation.init.kind)) {
+          walkSemanticOperation(operation.init as SemanticKernelIrOperation, visitExpression);
+        } else {
+          walkSemanticExpression(operation.init as SemanticExpression, visitExpression);
+        }
+      }
+      if (operation.condition) walkSemanticExpression(operation.condition, visitExpression);
+      if (operation.update) walkSemanticExpression(operation.update, visitExpression);
+      walkSemanticOperations(operation.body, visitExpression);
+      return;
+    case "device-launch":
+      for (const arg of [...operation.launch.grid, ...operation.launch.block, ...operation.launch.args]) {
+        walkSemanticExpression(arg, visitExpression);
+      }
+      return;
+    case "block":
+      walkSemanticOperations(operation.body, visitExpression);
+      return;
+    case "cooperative-group-declare":
+    case "barrier":
+    case "fence":
+    case "inline-asm":
+    case "return":
+    case "continue":
+    case "break":
+      if (operation.kind === "return" && operation.value) walkSemanticExpression(operation.value, visitExpression);
+      return;
+  }
+}
+
+function walkSemanticMemoryRef(
+  ref: { readonly indices: readonly SemanticExpression[] },
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  for (const index of ref.indices) walkSemanticExpression(index, visitExpression);
+}
+
+function walkSemanticExpression(
+  expression: SemanticExpression,
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  visitExpression(expression);
+  switch (expression.kind) {
+    case "member":
+      walkSemanticExpression(expression.object, visitExpression);
+      return;
+    case "index":
+      walkSemanticExpression(expression.target, visitExpression);
+      walkSemanticExpression(expression.index, visitExpression);
+      return;
+    case "call":
+      walkSemanticExpression(expression.callee, visitExpression);
+      for (const arg of expression.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "texture-read":
+      walkSemanticExpression(expression.texture, visitExpression);
+      walkSemanticExpression(expression.x, visitExpression);
+      walkSemanticExpression(expression.y, visitExpression);
+      return;
+    case "surface-read":
+      walkSemanticExpression(expression.surface, visitExpression);
+      walkSemanticExpression(expression.xBytes, visitExpression);
+      walkSemanticExpression(expression.y, visitExpression);
+      if (expression.z) walkSemanticExpression(expression.z, visitExpression);
+      return;
+    case "cast":
+      walkSemanticExpression(expression.expression, visitExpression);
+      return;
+    case "unary":
+      walkSemanticExpression(expression.argument, visitExpression);
+      return;
+    case "binary":
+      walkSemanticExpression(expression.left, visitExpression);
+      walkSemanticExpression(expression.right, visitExpression);
+      return;
+    case "conditional":
+      walkSemanticExpression(expression.condition, visitExpression);
+      walkSemanticExpression(expression.consequent, visitExpression);
+      walkSemanticExpression(expression.alternate, visitExpression);
+      return;
+    case "assignment":
+      walkSemanticExpression(expression.target, visitExpression);
+      walkSemanticExpression(expression.value, visitExpression);
+      return;
+    case "update":
+      walkSemanticExpression(expression.argument, visitExpression);
+      return;
+    case "initializer":
+      for (const element of expression.elements) walkSemanticExpression(element, visitExpression);
+      return;
+    case "sequence":
+      for (const item of expression.expressions) walkSemanticExpression(item, visitExpression);
+      return;
+    case "literal":
+    case "symbol":
+      return;
+  }
+}
+
+function expressionNameForSemantic(expression: SemanticExpression): string | undefined {
+  if (expression.kind === "symbol") return expression.name;
+  if (expression.kind === "member") {
+    const objectName = expressionNameForSemantic(expression.object);
+    return objectName ? `${objectName}.${expression.property}` : expression.property;
+  }
+  return undefined;
+}
+
+function isSemanticKernelIrOperationKind(kind: string): kind is SemanticKernelIrOperation["kind"] {
+  return kind === "declare" ||
+    kind === "dim3-declare" ||
+    kind === "cooperative-group-declare" ||
+    kind === "load" ||
+    kind === "store" ||
+    kind === "surface-write" ||
+    kind === "surface-read-store" ||
+    kind === "atomic" ||
+    kind === "call" ||
+    kind === "expression" ||
+    kind === "branch" ||
+    kind === "loop" ||
+    kind === "barrier" ||
+    kind === "fence" ||
+    kind === "device-launch" ||
+    kind === "inline-asm" ||
+    kind === "return" ||
+    kind === "continue" ||
+    kind === "break" ||
+    kind === "block";
 }
 
 function validateSurfaceInput(name: string, value: { readonly width: number; readonly height: number; readonly data: Float32Array }): void {
