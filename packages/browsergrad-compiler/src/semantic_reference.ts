@@ -587,6 +587,8 @@ function semanticReferenceSurfaceReadSupported(
 ): boolean {
   const surface = expression.surface;
   return (expression.valueType === "float" ||
+      expression.valueType === "half" ||
+      expression.valueType === "bf16" ||
       expression.valueType === "uint" ||
       expression.valueType === "int" ||
       isSemanticReferenceFloatVectorType(expression.valueType)) &&
@@ -832,7 +834,8 @@ function semanticReferenceSurfaceReadStoreSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return semanticReferenceSurfaceReadTarget(operation.target) !== undefined &&
+  const target = semanticReferenceSurfaceReadTarget(operation.target);
+  return target !== undefined &&
     semanticReferenceSurfaceReadSupported(
       {
         kind: "surface-read",
@@ -841,7 +844,7 @@ function semanticReferenceSurfaceReadStoreSupported(
         xBytes: operation.xBytes,
         y: operation.y,
         ...(operation.z === undefined ? {} : { z: operation.z }),
-        valueType: operation.valueType === "uint" || operation.valueType === "int" ? operation.valueType : "float",
+        valueType: semanticSurfaceReadValueType(operation.valueType ?? target.valueType),
         span: operation.span,
       },
       compiled,
@@ -1695,9 +1698,16 @@ function evalSemanticSurfaceRead(
   const y = Math.trunc(evalNumber(expression.y, context));
   const z = expression.z ? Math.trunc(evalNumber(expression.z, context)) : 0;
   if (isSemanticReferenceFloatVectorType(expression.valueType)) {
-    return Array.from({ length: cudaVectorLaneCount(expression.valueType) }, (_, lane) => evalSemanticSurfaceLane(surface, surfaceName, xBytes + lane * 4, y, z, context));
+    return Array.from({ length: cudaVectorLaneCount(expression.valueType) }, (_, lane) => {
+      const value = evalSemanticSurfaceLane(surface, surfaceName, xBytes + lane * 4, y, z, context);
+      if (expression.valueType === "half2") return roundSemanticHalf(value);
+      return expression.valueType === "bf162" ? roundSemanticBfloat16(value) : value;
+    });
   }
-  return evalSemanticSurfaceLane(surface, surfaceName, xBytes, y, z, context);
+  const value = evalSemanticSurfaceLane(surface, surfaceName, xBytes, y, z, context);
+  if (expression.valueType === "half") return roundSemanticHalf(value);
+  if (expression.valueType === "bf16") return roundSemanticBfloat16(value);
+  return value;
 }
 
 function evalSemanticSurfaceLane(

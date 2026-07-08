@@ -3656,6 +3656,23 @@ __global__ void surfaceUint4VectorUnalignedByteOffset(uint *out, cudaSurfaceObje
   out[6] = surf2Dread<unsigned int>(surf, 2 * sizeof(float), 0);
   out[7] = surf2Dread<unsigned int>(surf, 3 * sizeof(float), 0);
 }`,
+  surfaceHalfScalarVectorReadWrite: `
+__global__ void surfaceHalfScalarVectorReadWrite(float *out, uint *bits, cudaSurfaceObject_t surf) {
+  half scalar = surf2Dread<half>(surf, 0, 0);
+  half2 pair;
+  surf2Dread(&pair, surf, 0, 0);
+  half2 written = __floats2half2_rn(5.5f, 6.5f);
+  surf2Dwrite(written, surf, 0, 0);
+  half2 after = surf2Dread<half2>(surf, 0, 0);
+  out[0] = __half2float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  out[3] = after.x;
+  out[4] = after.y;
+  bits[0] = __half_as_ushort(scalar);
+  bits[1] = __half2_as_uint(pair);
+  bits[2] = __half2_as_uint(after);
+}`,
   surfaceInt4VectorUnalignedByteOffset: `
 __global__ void surfaceInt4VectorUnalignedByteOffset(int *out, cudaSurfaceObject_t surf) {
   int4 pointerValue = make_int4(99, 99, 99, 99);
@@ -13779,6 +13796,24 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:half-scalar-vector-read-write",
+            source: SOURCES.surfaceHalfScalarVectorReadWrite,
+            options: { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] },
+            requiredFeatures: ["shader-f16"],
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(5),
+                bits: new Uint32Array(3),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([1.1, 2.2]) },
+              },
+            }),
+            output: "bits",
+            expectedOutput: { type: "Uint32Array", data: [0x3c66, 0x40663c66, 0x46804580] },
           },
           {
             name: "surface:int4-vector-unaligned-byte-offset",

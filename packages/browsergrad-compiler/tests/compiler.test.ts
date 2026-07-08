@@ -10754,6 +10754,51 @@ __global__ void surfaceUintVectorReadWrite(cudaSurfaceObject_t surf, uint4 *out)
     expect([...semanticResult.buffers.surf as Float32Array]).toEqual([11, 12, 13, 14]);
   });
 
+  it("lowers half and half2 surface reads and writes with shader-f16", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceHalfReadWrite(cudaSurfaceObject_t surf, float *out, uint *bits) {
+  half scalar = surf2Dread<half>(surf, 0, 0);
+  half2 pair;
+  surf2Dread(&pair, surf, 0, 0);
+  half2 written = __floats2half2_rn(5.5f, 6.5f);
+  surf2Dwrite(written, surf, 0, 0);
+  half2 after = surf2Dread<half2>(surf, 0, 0);
+  out[0] = __half2float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  out[3] = after.x;
+  out[4] = after.y;
+  bits[0] = __half_as_ushort(scalar);
+  bits[1] = __half2_as_uint(pair);
+  bits[2] = __half2_as_uint(after);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(5),
+        bits: new Uint32Array(3),
+      },
+      surfaces: { surf: { width: 2, height: 1, data: new Float32Array([1.1, 2.2]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("enable f16;");
+    expect(compiled.wgsl).toContain("f16(bg_sem_surf2dread_surf(0, 0, 0))");
+    expect(compiled.wgsl).toContain("vec2<f16>(f16(bg_sem_surf2dread_surf((0 + 0), 0, 0)), f16(bg_sem_surf2dread_surf((0 + 4), 0, 0)))");
+    expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
+    expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
+    expect([...result.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66, 0x46804580]);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66, 0x46804580]);
+    expect([...result.buffers.surf as Float32Array]).toEqual([5.5, 6.5]);
+    expect([...semanticResult.buffers.surf as Float32Array]).toEqual([5.5, 6.5]);
+  });
+
   it("preserves templated vector surf2Dread return type in device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float4 read_surface_vec_return(cudaSurfaceObject_t surfaceArg) {

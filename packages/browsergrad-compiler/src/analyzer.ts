@@ -2090,6 +2090,7 @@ function validateCallExpression(
   }
   if (callName === "surf1Dread" || callName === "surf2Dread" || callName === "surf2DLayeredread" || callName === "surf3Dread") {
     validateSurf2DRead(expression, callName, scope, diagnostics, walkExpression, compatibilityDiagnosticsReachable);
+    if (requiresShaderF16(expression.templateValueType)) requiredFeatures.add("shader-f16");
     const returnForm = callName === "surf1Dread"
       ? expression.args.length <= 2
       : callName === "surf2DLayeredread" || callName === "surf3Dread" ? expression.args.length <= 4 : expression.args.length <= 3;
