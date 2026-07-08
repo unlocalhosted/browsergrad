@@ -2932,6 +2932,10 @@ function emitSemanticSurfaceRead(
   const readAt = (xBytesExpr: string): string => directSurface
     ? `${surfaceReadHelperName(surfaceName, names)}(${xBytesExpr}, ${y}, ${z})`
     : `${GENERIC_SURFACE_READ_HELPER_NAME}(${nameFor(surfaceName, names)}, ${xBytesExpr}, ${y}, ${z})`;
+  if (expression.valueType === "bf162") {
+    const vector = `vec2<f32>(${wgslRoundBfloat16(readAt(`(${xBytes} + 0)`))}, ${wgslRoundBfloat16(readAt(`(${xBytes} + 4)`))})`;
+    return `select(vec2<f32>(), ${vector}, (${xBytes} >= 0 && (${xBytes} % 4) == 0))`;
+  }
   if (isSemanticWgslFloatVectorType(expression.valueType)) {
     const laneType = wgslVectorScalar(expression.valueType);
     const lanes = Array.from({ length: cudaVectorLaneCount(expression.valueType) }, (_, lane) => `${laneType}(${readAt(`(${xBytes} + ${lane * 4})`)})`);

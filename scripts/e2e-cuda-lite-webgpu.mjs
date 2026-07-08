@@ -3673,6 +3673,23 @@ __global__ void surfaceHalfScalarVectorReadWrite(float *out, uint *bits, cudaSur
   bits[1] = __half2_as_uint(pair);
   bits[2] = __half2_as_uint(after);
 }`,
+  surfaceBf16ScalarVectorReadWrite: `
+__global__ void surfaceBf16ScalarVectorReadWrite(float *out, uint *bits, cudaSurfaceObject_t surf) {
+  __nv_bfloat16 scalar = surf2Dread<__nv_bfloat16>(surf, 0, 0);
+  __nv_bfloat162 pair;
+  surf2Dread(&pair, surf, 0, 0);
+  __nv_bfloat162 written = __halves2bfloat162(5.5f, 6.5f);
+  surf2Dwrite(written, surf, 0, 0);
+  __nv_bfloat162 after = surf2Dread<__nv_bfloat162>(surf, 0, 0);
+  out[0] = __bfloat162float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  out[3] = after.x;
+  out[4] = after.y;
+  bits[0] = __bfloat16_as_ushort(scalar);
+  bits[1] = __bfloat162_as_uint(pair);
+  bits[2] = __bfloat162_as_uint(after);
+}`,
   surfaceInt4VectorUnalignedByteOffset: `
 __global__ void surfaceInt4VectorUnalignedByteOffset(int *out, cudaSurfaceObject_t surf) {
   int4 pointerValue = make_int4(99, 99, 99, 99);
@@ -13814,6 +13831,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "bits",
             expectedOutput: { type: "Uint32Array", data: [0x3c66, 0x40663c66, 0x46804580] },
+          },
+          {
+            name: "surface:bf16-scalar-vector-read-write",
+            source: SOURCES.surfaceBf16ScalarVectorReadWrite,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(5),
+                bits: new Uint32Array(3),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([1.1, 2.2]) },
+              },
+            }),
+            output: "bits",
+            expectedOutput: { type: "Uint32Array", data: [0x3f8d, 0x400d3f8d, 0x40d040b0] },
           },
           {
             name: "surface:int4-vector-unaligned-byte-offset",

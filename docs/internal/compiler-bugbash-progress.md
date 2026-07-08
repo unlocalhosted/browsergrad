@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-08T04:07:45Z
+Last updated: 2026-07-08T05:29:32Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails after nested local pointer-param lowering; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | half/half2 CUDA surface reads/writes now lower through semantic IR/reference/WGSL and require native WebGPU `shader-f16` |
+| Active work item | bf16/bf162 CUDA surface reads/writes now lower through semantic IR/reference/WGSL/WebGPU |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- bf16/bf162 surface reads/writes: `surf2Dread<__nv_bfloat16>`, pointer-form `surf2Dread(&__nv_bfloat162, ...)`, return-form `surf2Dread<__nv_bfloat162>`, and `surf2Dwrite(__nv_bfloat162, ...)` now stay on semantic IR/reference/WGSL instead of falling back to modeled surface helper emission; reference and WGSL both round surface lanes to bf16 before bitcasts, no `shader-f16` feature is required, and exact WebGPU fixture `surface:bf16-scalar-vector-read-write` passed as `single-dispatch` with pinned output and max diff `0`; typecheck passed, lint passed, focused compiler unit `1/0`, compiler unit `630/0`, fixture metadata test passed, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
 - half/half2 surface reads/writes: `surf2Dread<half>`, pointer-form `surf2Dread(&half2, ...)`, return-form `surf2Dread<half2>`, and `surf2Dwrite(half2, ...)` now stay on semantic IR/reference/WGSL instead of falling back to modeled surface helper emission; analyzer marks `shader-f16`, reference rounds surface lanes through half precision, WGSL emits native `f16(bg_sem_surf2dread_...)` and `vec2<f16>` casts, and exact WebGPU fixture `surface:half-scalar-vector-read-write` is registered with `requiredFeatures: ["shader-f16"]`; typecheck passed, lint passed, focused compiler unit `1/0`, compiler unit `629/0`, fixture metadata test passed, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; local headless WebGPU truthfully reports `missing-features:shader-f16` for the exact fixture rather than simulating via f32
 - half/half2 texture reads: direct `tex2D<half>` and `tex2D<half2>` now stay on semantic IR/reference/WGSL instead of falling back to modeled texture helper emission; reference rounds f32 texture lanes through half precision, WGSL emits native `f16(textureLoad(...))` and `vec2<f16>` lane conversion, and high-level WebGPU run/prepare APIs now reject missing native device features before pipeline creation; typecheck passed, lint passed, focused compiler units `2/0`, compiler unit `628/0`, fixture metadata test passed, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; exact WebGPU fixture `texture:half-scalar-vector-read` is registered with `requiredFeatures: ["shader-f16"]` and local headless WebGPU truthfully reports `missing-features:shader-f16` rather than simulating via f32
 - bf16/bf162 texture reads: direct `tex2D<__nv_bfloat16>` and `tex2D<__nv_bfloat162>` now stay on semantic IR/reference/WGSL instead of falling back to modeled texture helper emission; reference and WGSL both round f32 texture lanes into browser-native bf16-as-f32 storage with exact bitcasts for `__bfloat16_as_ushort`/`__bfloat162_as_uint`; exact real WebGPU fixture `texture:bf16-scalar-vector-read` passed as `single-dispatch` with pinned output and max diff `0`; typecheck passed, lint passed, focused compiler unit `1/0`, compiler unit `626/0`, fixture metadata test passed, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`
