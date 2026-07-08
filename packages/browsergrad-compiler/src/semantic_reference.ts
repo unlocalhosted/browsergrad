@@ -87,8 +87,8 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
   "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
   "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
-  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "hexp", "__hmin", "__hmax",
-  "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle",
+  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "hexp", "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
+  "__hisnan", "__hisinf", "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle", "__hequ", "__hneu", "__hgtu", "__hgeu", "__hltu", "__hleu",
   "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__int2bfloat16_rn", "__uint2bfloat16_rn",
   "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__ushort_as_bfloat16",
   "__bfloat162int_rn", "__bfloat162int_rz", "__bfloat162int_ru", "__bfloat162int_rd",
@@ -2569,12 +2569,25 @@ function evalSemanticMathCall(
     case "__hmax": return expression.valueType === "bf16"
       ? roundSemanticBfloat16(Math.max(args[0] ?? 0, args[1] ?? 0))
       : roundSemanticHalf(Math.max(args[0] ?? 0, args[1] ?? 0));
+    case "__hmin_nan": return roundSemanticHalf(Math.min(args[0] ?? 0, args[1] ?? 0));
+    case "__hmax_nan": return roundSemanticHalf(Math.max(args[0] ?? 0, args[1] ?? 0));
+    case "__hisnan": return Number.isNaN(args[0] ?? 0) ? 1 : 0;
+    case "__hisinf": {
+      const value = args[0] ?? 0;
+      return value === Infinity ? 1 : value === -Infinity ? -1 : 0;
+    }
     case "__heq": return (args[0] ?? 0) === (args[1] ?? 0) ? 1 : 0;
     case "__hne": return (args[0] ?? 0) !== (args[1] ?? 0) ? 1 : 0;
     case "__hgt": return (args[0] ?? 0) > (args[1] ?? 0) ? 1 : 0;
     case "__hge": return (args[0] ?? 0) >= (args[1] ?? 0) ? 1 : 0;
     case "__hlt": return (args[0] ?? 0) < (args[1] ?? 0) ? 1 : 0;
     case "__hle": return (args[0] ?? 0) <= (args[1] ?? 0) ? 1 : 0;
+    case "__hequ": return unorderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left === right);
+    case "__hneu": return unorderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left !== right);
+    case "__hgtu": return unorderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left > right);
+    case "__hgeu": return unorderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left >= right);
+    case "__hltu": return unorderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left < right);
+    case "__hleu": return unorderedCompare(args[0] ?? 0, args[1] ?? 0, (left, right) => left <= right);
     case "__bfloat162float": return args[0] ?? 0;
     case "__float2bfloat16":
     case "__float2bfloat16_rn": return roundSemanticBfloat16(args[0] ?? 0);
@@ -2831,6 +2844,10 @@ function frexpExponent(value: number): number {
 
 function orderedCompare(left: number, right: number, compare: (left: number, right: number) => boolean): number {
   return !Number.isNaN(left) && !Number.isNaN(right) && compare(left, right) ? 1 : 0;
+}
+
+function unorderedCompare(left: number, right: number, compare: (left: number, right: number) => boolean): number {
+  return Number.isNaN(left) || Number.isNaN(right) || compare(left, right) ? 1 : 0;
 }
 
 function uintBitsToFloat32(bits: number): number {
@@ -3891,12 +3908,20 @@ function semanticMathCallArity(name: string): number {
     name === "__hdiv_rn" ||
     name === "__hmin" ||
     name === "__hmax" ||
+    name === "__hmin_nan" ||
+    name === "__hmax_nan" ||
     name === "__heq" ||
     name === "__hne" ||
     name === "__hgt" ||
     name === "__hge" ||
     name === "__hlt" ||
     name === "__hle" ||
+    name === "__hequ" ||
+    name === "__hneu" ||
+    name === "__hgtu" ||
+    name === "__hgeu" ||
+    name === "__hltu" ||
+    name === "__hleu" ||
     name === "__nv_cvt_fp8_to_halfraw" ||
     name === "copysign" ||
     name === "copysignf" ||
@@ -4033,6 +4058,9 @@ function semanticMathCallArity(name: string): number {
     name === "UMUL" ||
     name === "umin"
     ? 2
+    : name === "__hisnan" ||
+    name === "__hisinf"
+    ? 1
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||

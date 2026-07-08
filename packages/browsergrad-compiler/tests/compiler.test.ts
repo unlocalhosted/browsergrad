@@ -18892,6 +18892,54 @@ __global__ void half_ops(const __half* input, half* output, int* flags) {
     expect([...semanticResult.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1]);
   });
 
+  it("lowers scalar CUDA half unordered comparison and NaN predicates", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_unordered(const half* input, half* output, int* flags) {
+  half finite = input[0];
+  half lower = input[1];
+  half nanv = input[2];
+  half pinf = input[3];
+  half ninf = input[4];
+  output[0] = __hmin_nan(finite, nanv);
+  output[1] = __hmax_nan(nanv, lower);
+  if (__hequ(nanv, finite)) { flags[0] = 1; }
+  if (__hneu(nanv, finite)) { flags[1] = 1; }
+  if (__hgtu(nanv, finite)) { flags[2] = 1; }
+  if (__hgeu(nanv, finite)) { flags[3] = 1; }
+  if (__hltu(nanv, finite)) { flags[4] = 1; }
+  if (__hleu(nanv, finite)) { flags[5] = 1; }
+  if (__hgt(finite, lower)) { flags[6] = 1; }
+  if (__hisnan(nanv)) { flags[7] = 1; }
+  flags[8] = __hisinf(pinf);
+  flags[9] = __hisinf(ninf);
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        input: createWgslFloat16Array([2, 1, NaN, Infinity, -Infinity]),
+        output: createWgslFloat16Array(2),
+        flags: new Int32Array(10),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const output = Array.from(result.buffers.output as Iterable<number>);
+    const semanticOutput = Array.from(semanticResult.buffers.output as Iterable<number>);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(Number.isNaN(output[0])).toBe(true);
+    expect(Number.isNaN(output[1])).toBe(true);
+    expect([...result.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, -1]);
+    expect(Number.isNaN(semanticOutput[0])).toBe(true);
+    expect(Number.isNaN(semanticOutput[1])).toBe(true);
+    expect([...semanticResult.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, -1]);
+  });
+
   it("lowers scalar CUDA half unary math aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void half_unary(const half* input, half* output) {

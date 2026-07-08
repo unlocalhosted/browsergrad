@@ -127,8 +127,10 @@ Common CUDA float math helpers lower natively in both WGSL and CPU reference:
 `assert(expr)` is accepted as a no-op runtime check in browser kernels.
 Scalar half helpers lower behind `shader-f16`: `__half2float`, `__float2half`,
 `hexp`, `__hadd`, `__hsub`, `__hmul`, `__hdiv`, `__hneg`, `__hfma`,
-`__hmin`, `__hmax`, `__heq`, `__hne`, `__hgt`, `__hge`, `__hlt`, and
-`__hle`.
+`__hmin`, `__hmax`, NaN-propagating `__hmin_nan` / `__hmax_nan`,
+`__hisnan`, `__hisinf`, ordered comparisons `__heq` / `__hne` / `__hgt` /
+`__hge` / `__hlt` / `__hle`, and unordered comparisons `__hequ` / `__hneu` /
+`__hgtu` / `__hgeu` / `__hltu` / `__hleu`.
 Half2 helpers include arithmetic, unary math, ordered/unordered comparison
 vectors, comparison masks, boolean reductions, `__hisnan2`, and
 NaN-propagating `__hmin2_nan` / `__hmax2_nan`; these lower through the same

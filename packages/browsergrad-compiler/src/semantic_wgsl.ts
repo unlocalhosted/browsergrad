@@ -391,12 +391,22 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["hexp", "half_exp"],
   ["__hmin", "half_min"],
   ["__hmax", "half_max"],
+  ["__hmin_nan", "half_min_nan"],
+  ["__hmax_nan", "half_max_nan"],
+  ["__hisnan", "half_isnan"],
+  ["__hisinf", "half_isinf"],
   ["__heq", "half_eq"],
   ["__hne", "half_ne"],
   ["__hgt", "half_gt"],
   ["__hge", "half_ge"],
   ["__hlt", "half_lt"],
   ["__hle", "half_le"],
+  ["__hequ", "half_equ"],
+  ["__hneu", "half_neu"],
+  ["__hgtu", "half_gtu"],
+  ["__hgeu", "half_geu"],
+  ["__hltu", "half_ltu"],
+  ["__hleu", "half_leu"],
   ["__bfloat162float", "bf16_to_float"],
   ["__float2bfloat16", "to_bf16"],
   ["__float2bfloat16_rn", "to_bf16"],
@@ -4686,6 +4696,14 @@ function emitSemanticHalf2IsNanPredicate(value: string): string {
   return `((${bits} & vec2<u32>(0x7fffffffu)) > vec2<u32>(0x7f800000u))`;
 }
 
+function emitSemanticHalfIsNanPredicate(value: string): string {
+  return `((bitcast<u32>(f32(${value})) & 0x7fffffffu) > 0x7f800000u)`;
+}
+
+function emitSemanticHalfNanMinMax(op: "min" | "max", left: string, right: string): string {
+  return `select(${op}(${left}, ${right}), (${left} + ${right}), ${emitSemanticHalfIsNanPredicate(left)} || ${emitSemanticHalfIsNanPredicate(right)})`;
+}
+
 function emitSemanticHalf2NanMinMax(op: "min" | "max", left: string, right: string): string {
   return `select(${op}(${left}, ${right}), (${left} + ${right}), ${emitSemanticHalf2IsNanPredicate(left)} | ${emitSemanticHalf2IsNanPredicate(right)})`;
 }
@@ -5262,7 +5280,14 @@ function emitSemanticMathCall(
     const value = `fma(${emitSemanticExpressionAs(first, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(second, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(third, ir, names, "f16", options, textureSpecializations)})`;
     return wgslCallee === "half_fma_sat" ? wgslSaturateHalf(value) : value;
   }
-  if (wgslCallee === "half_add" || wgslCallee === "half_add_sat" || wgslCallee === "half_sub" || wgslCallee === "half_sub_sat" || wgslCallee === "half_mul" || wgslCallee === "half_mul_sat" || wgslCallee === "half_div" || wgslCallee === "half_min" || wgslCallee === "half_max" || wgslCallee === "half_eq" || wgslCallee === "half_ne" || wgslCallee === "half_gt" || wgslCallee === "half_ge" || wgslCallee === "half_lt" || wgslCallee === "half_le") {
+  if (wgslCallee === "half_isnan" || wgslCallee === "half_isinf") {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations);
+    if (wgslCallee === "half_isnan") return `select(0u, 1u, ${emitSemanticHalfIsNanPredicate(emitted)})`;
+    return `select(0, select(-1, 1, ((bitcast<u32>(f32(${emitted})) & 0x80000000u) == 0u)), ((bitcast<u32>(f32(${emitted})) & 0x7fffffffu) == 0x7f800000u))`;
+  }
+  if (wgslCallee === "half_add" || wgslCallee === "half_add_sat" || wgslCallee === "half_sub" || wgslCallee === "half_sub_sat" || wgslCallee === "half_mul" || wgslCallee === "half_mul_sat" || wgslCallee === "half_div" || wgslCallee === "half_min" || wgslCallee === "half_max" || wgslCallee === "half_min_nan" || wgslCallee === "half_max_nan" || wgslCallee === "half_eq" || wgslCallee === "half_ne" || wgslCallee === "half_gt" || wgslCallee === "half_ge" || wgslCallee === "half_lt" || wgslCallee === "half_le" || wgslCallee === "half_equ" || wgslCallee === "half_neu" || wgslCallee === "half_gtu" || wgslCallee === "half_geu" || wgslCallee === "half_ltu" || wgslCallee === "half_leu") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     if (expression.valueType === "bf16") {
@@ -5286,14 +5311,20 @@ function emitSemanticMathCall(
     if (wgslCallee === "half_div") return `(${lhs} / ${rhs})`;
     if (wgslCallee === "half_min") return `min(${lhs}, ${rhs})`;
     if (wgslCallee === "half_max") return `max(${lhs}, ${rhs})`;
+    if (wgslCallee === "half_min_nan") return emitSemanticHalfNanMinMax("min", lhs, rhs);
+    if (wgslCallee === "half_max_nan") return emitSemanticHalfNanMinMax("max", lhs, rhs);
     const operator =
-      wgslCallee === "half_eq" ? "==" :
-      wgslCallee === "half_ne" ? "!=" :
-      wgslCallee === "half_gt" ? ">" :
-      wgslCallee === "half_ge" ? ">=" :
-      wgslCallee === "half_lt" ? "<" :
+      wgslCallee === "half_eq" || wgslCallee === "half_equ" ? "==" :
+      wgslCallee === "half_ne" || wgslCallee === "half_neu" ? "!=" :
+      wgslCallee === "half_gt" || wgslCallee === "half_gtu" ? ">" :
+      wgslCallee === "half_ge" || wgslCallee === "half_geu" ? ">=" :
+      wgslCallee === "half_lt" || wgslCallee === "half_ltu" ? "<" :
       "<=";
-    return `select(0u, 1u, (${lhs} ${operator} ${rhs}))`;
+    const comparison = `(${lhs} ${operator} ${rhs})`;
+    const predicate = wgslCallee.endsWith("u")
+      ? `(${emitSemanticHalfIsNanPredicate(lhs)} || ${emitSemanticHalfIsNanPredicate(rhs)} || ${comparison})`
+      : comparison;
+    return `select(0u, 1u, ${predicate})`;
   }
   if (wgslCallee === "clz" || wgslCallee === "clzll" || wgslCallee === "ffs" || wgslCallee === "popc" || wgslCallee === "brev") {
     const [value] = expression.args;
@@ -5915,12 +5946,20 @@ function semanticMathCallArity(name: string): number {
     name === "__hdiv_rn" ||
     name === "__hmin" ||
     name === "__hmax" ||
+    name === "__hmin_nan" ||
+    name === "__hmax_nan" ||
     name === "__heq" ||
     name === "__hne" ||
     name === "__hgt" ||
     name === "__hge" ||
     name === "__hlt" ||
     name === "__hle" ||
+    name === "__hequ" ||
+    name === "__hneu" ||
+    name === "__hgtu" ||
+    name === "__hgeu" ||
+    name === "__hltu" ||
+    name === "__hleu" ||
     name === "__nv_cvt_fp8_to_halfraw" ||
     name === "copysign" ||
     name === "copysignf" ||
@@ -6057,6 +6096,9 @@ function semanticMathCallArity(name: string): number {
     name === "UMUL" ||
     name === "umin"
     ? 2
+    : name === "__hisnan" ||
+    name === "__hisinf"
+    ? 1
     : name === "fma" ||
       name === "fmaf" ||
       name === "__fmaf_rn" ||
@@ -6941,7 +6983,9 @@ function semanticMathCallReturnsHalf(callee: string): boolean {
     callee === "half_fma_sat" ||
     callee === "half_exp" ||
     callee === "half_min" ||
-    callee === "half_max";
+    callee === "half_max" ||
+    callee === "half_min_nan" ||
+    callee === "half_max_nan";
 }
 
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {

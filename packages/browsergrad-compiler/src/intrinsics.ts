@@ -461,12 +461,25 @@ const HALF_INTRINSICS = [
   intrinsic("hexp", [1, 1], "half", (args) => roundHalf(Math.exp(args[0] ?? 0)), (args) => `f16(exp(f32(${args[0] ?? "0"})))`, HALF_FEATURES),
   intrinsic("__hmin", [2, 2], "half", (args) => roundHalf(Math.min(args[0] ?? 0, args[1] ?? 0)), (args) => `min(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hmax", [2, 2], "half", (args) => roundHalf(Math.max(args[0] ?? 0, args[1] ?? 0)), (args) => `max(${args.join(", ")})`, HALF_FEATURES),
+  intrinsic("__hmin_nan", [2, 2], "half", (args) => roundHalf(Math.min(args[0] ?? 0, args[1] ?? 0)), (args) => emitHalfNanMinMax("min", args), HALF_FEATURES),
+  intrinsic("__hmax_nan", [2, 2], "half", (args) => roundHalf(Math.max(args[0] ?? 0, args[1] ?? 0)), (args) => emitHalfNanMinMax("max", args), HALF_FEATURES),
+  intrinsic("__hisnan", [1, 1], "bool", (args) => Number.isNaN(args[0] ?? 0) ? 1 : 0, (args) => emitHalfIsNanPredicate(args[0] ?? "0"), HALF_FEATURES),
+  intrinsic("__hisinf", [1, 1], "int", (args) => {
+    const value = args[0] ?? 0;
+    return value === Infinity ? 1 : value === -Infinity ? -1 : 0;
+  }, (args) => `select(0, select(-1, 1, ((bitcast<u32>(f32(${args[0] ?? "0"})) & 0x80000000u) == 0u)), ((bitcast<u32>(f32(${args[0] ?? "0"})) & 0x7fffffffu) == 0x7f800000u))`, HALF_FEATURES),
   intrinsic("__heq", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a === b), (args) => `(${args[0] ?? "0"} == ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hne", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a !== b), (args) => `(!(((${args[0] ?? "0"}) != (${args[0] ?? "0"})) || ((${args[1] ?? "0"}) != (${args[1] ?? "0"})) || (${args[0] ?? "0"} == ${args[1] ?? "0"})))`, HALF_FEATURES),
   intrinsic("__hgt", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a > b), (args) => `(${args[0] ?? "0"} > ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hge", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a >= b), (args) => `(${args[0] ?? "0"} >= ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hlt", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a < b), (args) => `(${args[0] ?? "0"} < ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hle", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a <= b), (args) => `(${args[0] ?? "0"} <= ${args[1] ?? "0"})`, HALF_FEATURES),
+  intrinsic("__hequ", [2, 2], "bool", (args) => unorderedCompare(args, (a, b) => a === b), (args) => emitHalfUnorderedCompare(args, "=="), HALF_FEATURES),
+  intrinsic("__hneu", [2, 2], "bool", (args) => unorderedCompare(args, (a, b) => a !== b), (args) => emitHalfUnorderedCompare(args, "!="), HALF_FEATURES),
+  intrinsic("__hgtu", [2, 2], "bool", (args) => unorderedCompare(args, (a, b) => a > b), (args) => emitHalfUnorderedCompare(args, ">"), HALF_FEATURES),
+  intrinsic("__hgeu", [2, 2], "bool", (args) => unorderedCompare(args, (a, b) => a >= b), (args) => emitHalfUnorderedCompare(args, ">="), HALF_FEATURES),
+  intrinsic("__hltu", [2, 2], "bool", (args) => unorderedCompare(args, (a, b) => a < b), (args) => emitHalfUnorderedCompare(args, "<"), HALF_FEATURES),
+  intrinsic("__hleu", [2, 2], "bool", (args) => unorderedCompare(args, (a, b) => a <= b), (args) => emitHalfUnorderedCompare(args, "<="), HALF_FEATURES),
   intrinsic("__habs2", [1, 1], "half2", () => 0, (args) => `abs(${args[0] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__hceil2", [1, 1], "half2", () => 0, (args) => `vec2<f16>(ceil(vec2<f32>(${args[0] ?? "vec2<f16>()"})))`, HALF_FEATURES),
   intrinsic("__hfloor2", [1, 1], "half2", () => 0, (args) => `vec2<f16>(floor(vec2<f32>(${args[0] ?? "vec2<f16>()"})))`, HALF_FEATURES),
@@ -614,6 +627,12 @@ function orderedCompare(args: readonly number[], compare: (a: number, b: number)
   return !Number.isNaN(a) && !Number.isNaN(b) && compare(a, b) ? 1 : 0;
 }
 
+function unorderedCompare(args: readonly number[], compare: (a: number, b: number) => boolean): number {
+  const a = args[0] ?? 0;
+  const b = args[1] ?? 0;
+  return Number.isNaN(a) || Number.isNaN(b) || compare(a, b) ? 1 : 0;
+}
+
 function evalSignbit(args: readonly number[]): number {
   const value = args[0] ?? 0;
   return value < 0 || Object.is(value, -0) ? 1 : 0;
@@ -627,6 +646,22 @@ function emitOrderedCompare(args: readonly string[], operator: ">" | ">=" | "<" 
   const a = args[0] ?? "0";
   const b = args[1] ?? "0";
   return `(!(((${a}) != (${a})) || ((${b}) != (${b}))) && ((${a}) ${operator} (${b})))`;
+}
+
+function emitHalfIsNanPredicate(value: string): string {
+  return `((bitcast<u32>(f32(${value})) & 0x7fffffffu) > 0x7f800000u)`;
+}
+
+function emitHalfUnorderedCompare(args: readonly string[], operator: "==" | "!=" | ">" | ">=" | "<" | "<="): string {
+  const a = args[0] ?? "0";
+  const b = args[1] ?? "0";
+  return `(${emitHalfIsNanPredicate(a)} || ${emitHalfIsNanPredicate(b)} || ((${a}) ${operator} (${b})))`;
+}
+
+function emitHalfNanMinMax(op: "min" | "max", args: readonly string[]): string {
+  const left = args[0] ?? "0";
+  const right = args[1] ?? "0";
+  return `select(${op}(${left}, ${right}), (${left} + ${right}), ${emitHalfIsNanPredicate(left)} || ${emitHalfIsNanPredicate(right)})`;
 }
 
 function emitHalf2Comparison(name: string, args: readonly string[]): string {

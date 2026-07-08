@@ -2700,6 +2700,45 @@ __global__ void doubleCompat(double* result, double* out, double a) {
     expect([...actual.buffers.out as Float32Array]).toEqual([2.75, 3.75]);
   });
 
+  it("runs scalar half unordered comparison and NaN predicates in f32 compatibility mode on real WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void halfUnordered(const half* input, half* output, int* flags) {
+  half finite = input[0];
+  half lower = input[1];
+  half nanv = input[2];
+  half pinf = input[3];
+  half ninf = input[4];
+  output[0] = __hmin_nan(finite, nanv);
+  output[1] = __hmax_nan(nanv, lower);
+  if (__hequ(nanv, finite)) { flags[0] = 1; }
+  if (__hneu(nanv, finite)) { flags[1] = 1; }
+  if (__hgtu(nanv, finite)) { flags[2] = 1; }
+  if (__hgeu(nanv, finite)) { flags[3] = 1; }
+  if (__hltu(nanv, finite)) { flags[4] = 1; }
+  if (__hleu(nanv, finite)) { flags[5] = 1; }
+  if (__hgt(finite, lower)) { flags[6] = 1; }
+  if (__hisnan(nanv)) { flags[7] = 1; }
+  flags[8] = __hisinf(pinf);
+  flags[9] = __hisinf(ninf);
+}`, { workgroupSize: [1, 1, 1], f16Mode: "f32" });
+    const input = {
+      buffers: {
+        input: new Float32Array([2, 1, NaN, Infinity, -Infinity]),
+        output: new Float32Array(2),
+        flags: new Int32Array(10),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const output = Array.from(actual.buffers.output as Float32Array);
+
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(Number.isNaN(output[0])).toBe(true);
+    expect(Number.isNaN(output[1])).toBe(true);
+    expect([...actual.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, -1]);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });
