@@ -4720,7 +4720,8 @@ function cudaIntegerRuntimeQueryTargetValueType(callName: string | undefined): C
     callName === "cudaThreadGetLimit" ||
     callName === "cudaGetDeviceFlags" ||
     callName === "cudaStreamGetFlags" ||
-    callName === "cudaStreamGetId"
+    callName === "cudaStreamGetId" ||
+    callName === "cudaStreamEndCapture"
     ? "uint"
     : "int";
 }
@@ -4732,7 +4733,8 @@ function cudaIntegerRuntimeQueryTarget(expression: Extract<CudaLiteExpression, {
     callName === "cudaStreamGetPriority" ||
     callName === "cudaStreamGetDevice" ||
     callName === "cudaStreamGetId" ||
-    callName === "cudaStreamIsCapturing"
+    callName === "cudaStreamIsCapturing" ||
+    callName === "cudaStreamEndCapture"
   ) return expression.args[1];
   return expression.args[0];
 }
@@ -4872,6 +4874,7 @@ function isCudaIntegerRuntimeQueryCall(name: string | undefined): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamEndCapture" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion";
 }
@@ -6495,6 +6498,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "cudaStreamGetPriority":
     case "cudaStreamIsCapturing":
     case "cudaStreamGetCaptureInfo":
+    case "cudaStreamBeginCapture":
+    case "cudaStreamEndCapture":
+    case "cudaStreamUpdateCaptureDependencies":
+    case "cudaGraphDestroy":
     case "cudaStreamQuery":
     case "cudaStreamSynchronize":
     case "cudaStreamWaitEvent":
@@ -8221,6 +8228,10 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaMemAdvise" ||
     name === "cudaMemPrefetchAsync" ||
     name === "cudaStreamAttachMemAsync" ||
+    name === "cudaStreamBeginCapture" ||
+    name === "cudaStreamEndCapture" ||
+    name === "cudaStreamUpdateCaptureDependencies" ||
+    name === "cudaGraphDestroy" ||
     name === "cudaStreamCreate" ||
     name === "cudaStreamCreateWithFlags" ||
     name === "cudaStreamCreateWithPriority" ||

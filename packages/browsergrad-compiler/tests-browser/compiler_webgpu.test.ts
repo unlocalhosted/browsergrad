@@ -979,6 +979,41 @@ __global__ void syncOnly(float *x) {
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
 
+  it("runs CUDA stream capture graph lifecycle no-ops on WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void stream_capture_graph(uint *graphOut, int *statusOut) {
+  cudaStream_t stream;
+  cudaGraph_t graph = 9u;
+  if (threadIdx.x < 1) {
+    cudaStreamCreate(&stream);
+    int begin = cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed);
+    int update = cudaStreamUpdateCaptureDependencies(stream, NULL, 0, 0);
+    int end = cudaStreamEndCapture(stream, &graph);
+    int destroy = cudaGraphDestroy(graph);
+    cudaStreamDestroy(stream);
+    graphOut[0] = graph;
+    statusOut[0] = begin + update + end + destroy;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        graphOut: new Uint32Array([99]),
+        statusOut: new Int32Array([-1]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.graphOut as Uint32Array]).toEqual([...expected.buffers.graphOut as Uint32Array]);
+    expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
+  });
+
   it("runs host-lifted cudaMemcpyPeerAsync through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `

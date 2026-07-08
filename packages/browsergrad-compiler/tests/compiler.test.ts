@@ -14041,6 +14041,40 @@ __global__ void stream_queries(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([0]);
   });
 
+  it("models CUDA stream capture graph lifecycle calls as host-managed no-ops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void stream_capture_graph(uint *graphOut, int *statusOut) {
+  cudaStream_t stream;
+  cudaGraph_t graph = 9u;
+  if (threadIdx.x < 1) {
+    cudaStreamCreate(&stream);
+    int begin = cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed);
+    int update = cudaStreamUpdateCaptureDependencies(stream, NULL, 0, 0);
+    int end = cudaStreamEndCapture(stream, &graph);
+    int destroy = cudaGraphDestroy(graph);
+    cudaStreamDestroy(stream);
+    graphOut[0] = graph;
+    statusOut[0] = begin + update + end + destroy;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { graphOut: new Uint32Array([99]), statusOut: new Int32Array([-1]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var begin: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var update: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var end: i32 = 0;");
+    expect(compiled.wgsl).toContain("graph = 0;");
+    expect(compiled.wgsl).toContain("var destroy: i32 = i32(0);");
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { graphOut: new Uint32Array([99]), statusOut: new Int32Array([-1]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.graphOut as Uint32Array]).toEqual([0]);
+    expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);
+  });
+
   it("treats CUDA unified-memory advice and prefetch calls as WebGPU-safe no-ops", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void unified_memory_hints(float *x, int n) {

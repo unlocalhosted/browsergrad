@@ -2951,6 +2951,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamEndCapture" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion") {
     if (name === "cudaMemGetInfo") {
@@ -2989,6 +2990,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         if (!target || isNullPointerLiteral(target)) continue;
         writeLValue(resolvePointerArgument(target, context), 0, context);
       }
+      return 0;
+    }
+    if (name === "cudaStreamEndCapture") {
+      const target = expression.args[1];
+      if (target && !isNullPointerLiteral(target)) writeLValue(resolvePointerArgument(target, context), 0, context);
       return 0;
     }
     if (name === "cudaThreadExchangeStreamCaptureMode") {
@@ -4234,6 +4240,10 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaMemAdvise" ||
     name === "cudaMemPrefetchAsync" ||
     name === "cudaStreamAttachMemAsync" ||
+    name === "cudaStreamBeginCapture" ||
+    name === "cudaStreamEndCapture" ||
+    name === "cudaStreamUpdateCaptureDependencies" ||
+    name === "cudaGraphDestroy" ||
     name === "cudaStreamCreate" ||
     name === "cudaStreamCreateWithFlags" ||
     name === "cudaStreamCreateWithPriority" ||

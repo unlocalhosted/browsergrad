@@ -118,6 +118,10 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemAdvise", [4, 4]],
   ["cudaMemPrefetchAsync", [3, 4]],
   ["cudaStreamAttachMemAsync", [2, 4]],
+  ["cudaStreamBeginCapture", [2, 2]],
+  ["cudaStreamEndCapture", [2, 2]],
+  ["cudaStreamUpdateCaptureDependencies", [4, 4]],
+  ["cudaGraphDestroy", [1, 1]],
   ["cudaMemset", [3, 3]],
   ["cudaMemsetAsync", [4, 4]],
   ["cudaMemset2D", [5, 5]],
@@ -2573,6 +2577,14 @@ function validateCudaIntegerRuntimeQuery(
     }
     return;
   }
+  if (callName === "cudaStreamEndCapture") {
+    validateScalarOperand(walkExpression(target, scope), target.span, diagnostics);
+    const graphTarget = expression.args[1];
+    if (graphTarget && !isNullPointerExpression(graphTarget)) {
+      validateRuntimeQueryPointerTarget(callName, graphTarget, "uint", scope, diagnostics, walkExpression);
+    }
+    return;
+  }
   if (callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags") {
     validateRuntimeQueryPointerTarget(callName, target, "int", scope, diagnostics, walkExpression);
     for (const arg of expression.args.slice(2)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
@@ -3172,6 +3184,10 @@ function isHostManagedRuntimeNoopCall(callName: string): boolean {
     callName === "cudaMemAdvise" ||
     callName === "cudaMemPrefetchAsync" ||
     callName === "cudaStreamAttachMemAsync" ||
+    callName === "cudaStreamBeginCapture" ||
+    callName === "cudaStreamEndCapture" ||
+    callName === "cudaStreamUpdateCaptureDependencies" ||
+    callName === "cudaGraphDestroy" ||
     callName === "cudaStreamCreate" ||
     callName === "cudaStreamCreateWithFlags" ||
     callName === "cudaStreamCreateWithPriority" ||
@@ -5164,6 +5180,7 @@ function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
     callName === "cudaStreamGetPriority" ||
     callName === "cudaStreamIsCapturing" ||
     callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaStreamEndCapture" ||
     callName === "cudaRuntimeGetVersion" ||
     callName === "cudaDriverGetVersion";
 }
