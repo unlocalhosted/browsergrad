@@ -115,30 +115,46 @@ const SEMANTIC_CURAND_CALLS = new Set([
   "curand_init",
   "curand",
   "curand_uniform",
+  "curand_uniform4",
   "curand_uniform_double",
   "curand_normal",
   "curand_normal2",
+  "curand_normal4",
   "curand_normal_double",
   "curand_log_normal",
   "curand_log_normal2",
+  "curand_log_normal4",
   "curand_log_normal_double",
   "curand_poisson",
+  "curand_poisson4",
   "skipahead",
 ]);
-const SEMANTIC_CURAND_VECTOR_CALLS = new Set(["curand_normal2", "curand_log_normal2"]);
+const SEMANTIC_CURAND_VECTOR_RETURN_TYPES = new Map<string, CudaLiteScalarType>([
+  ["curand_uniform4", "float4"],
+  ["curand_normal2", "float2"],
+  ["curand_normal4", "float4"],
+  ["curand_log_normal2", "float2"],
+  ["curand_log_normal4", "float4"],
+  ["curand_poisson4", "uint4"],
+]);
+const SEMANTIC_CURAND_VECTOR_CALLS = new Set(SEMANTIC_CURAND_VECTOR_RETURN_TYPES.keys());
 const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
   "curand",
   "curand_uniform",
+  "curand_uniform4",
   "curand_uniform_double",
   "curand_normal",
   "curand_normal2",
+  "curand_normal4",
   "curand_normal_double",
 ]);
 const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
   "curand_log_normal",
   "curand_log_normal2",
+  "curand_log_normal4",
   "curand_log_normal_double",
   "curand_poisson",
+  "curand_poisson4",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
@@ -1156,7 +1172,7 @@ function semanticWgslCurandCallSupported(
   if (SEMANTIC_CURAND_STATE_ONLY_CALLS.has(expression.callee.name)) {
     return expression.args.length === 1 && semanticCurandStateAddressSpace(expression.args[0]!) !== undefined;
   }
-  if (expression.callee.name === "curand_poisson") {
+  if (expression.callee.name === "curand_poisson" || expression.callee.name === "curand_poisson4") {
     return expression.args.length === 2 &&
       semanticCurandStateAddressSpace(expression.args[0]!) !== undefined &&
       semanticWgslExpressionSupported(expression.args[1]!, "scalar", ir);
@@ -2882,11 +2898,17 @@ function emitSemanticCurandCall(
   if (expression.callee.name === "curand_uniform" || expression.callee.name === "curand_uniform_double") {
     return `bg_curand_uniform${suffix}(${pointer.expression})`;
   }
+  if (expression.callee.name === "curand_uniform4") {
+    return `bg_curand_uniform4${suffix}(${pointer.expression})`;
+  }
   if (expression.callee.name === "curand_normal" || expression.callee.name === "curand_normal_double") {
     return `bg_curand_normal${suffix}(${pointer.expression})`;
   }
   if (expression.callee.name === "curand_normal2") {
     return `bg_curand_normal2${suffix}(${pointer.expression})`;
+  }
+  if (expression.callee.name === "curand_normal4") {
+    return `bg_curand_normal4${suffix}(${pointer.expression})`;
   }
   if (expression.callee.name === "curand_log_normal" || expression.callee.name === "curand_log_normal_double") {
     const mean = emitSemanticExpressionAs(expression.args[1]!, ir, names, "f32", options, textureSpecializations);
@@ -2898,9 +2920,18 @@ function emitSemanticCurandCall(
     const stddev = emitSemanticExpressionAs(expression.args[2]!, ir, names, "f32", options, textureSpecializations);
     return `bg_curand_log_normal2${suffix}(${pointer.expression}, ${mean}, ${stddev})`;
   }
+  if (expression.callee.name === "curand_log_normal4") {
+    const mean = emitSemanticExpressionAs(expression.args[1]!, ir, names, "f32", options, textureSpecializations);
+    const stddev = emitSemanticExpressionAs(expression.args[2]!, ir, names, "f32", options, textureSpecializations);
+    return `bg_curand_log_normal4${suffix}(${pointer.expression}, ${mean}, ${stddev})`;
+  }
   if (expression.callee.name === "curand_poisson") {
     const lambda = emitSemanticExpressionAs(expression.args[1]!, ir, names, "f32", options, textureSpecializations);
     return `bg_curand_poisson${suffix}(${pointer.expression}, ${lambda})`;
+  }
+  if (expression.callee.name === "curand_poisson4") {
+    const lambda = emitSemanticExpressionAs(expression.args[1]!, ir, names, "f32", options, textureSpecializations);
+    return `bg_curand_poisson4${suffix}(${pointer.expression}, ${lambda})`;
   }
   throw semanticWgslError(`semantic WGSL does not support cuRAND call '${expression.callee.name}'`, expression.span);
 }
@@ -5110,7 +5141,8 @@ function semanticExpressionVectorValueType(
 ): CudaLiteScalarType | undefined {
   if (expression.kind === "call" && expression.callee.kind === "symbol") {
     const calleeName = expression.callee.name;
-    if (SEMANTIC_CURAND_VECTOR_CALLS.has(calleeName)) return "float2";
+    const curandVectorType = SEMANTIC_CURAND_VECTOR_RETURN_TYPES.get(calleeName);
+    if (curandVectorType) return curandVectorType;
     if (SEMANTIC_BF162_VECTOR_CALLS.has(calleeName)) return "bf162";
     return cudaVectorConstructorType(calleeName) ?? ir?.functions.find((fn) => fn.name === calleeName)?.returnType ?? semanticExpressionValueType(expression);
   }

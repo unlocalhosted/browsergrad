@@ -6656,6 +6656,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_uniform_storage" : "bg_curand_uniform";
       return `${helper}(${args[0] ?? "&state"})`;
     }
+    case "curand_uniform4": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_uniform4_storage" : "bg_curand_uniform4";
+      return `${helper}(${args[0] ?? "&state"})`;
+    }
     case "curand": {
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_storage" : "bg_curand";
       return `${helper}(${args[0] ?? "&state"})`;
@@ -6673,6 +6677,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_normal2_storage" : "bg_curand_normal2";
       return `${helper}(${args[0] ?? "&state"})`;
     }
+    case "curand_normal4": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_normal4_storage" : "bg_curand_normal4";
+      return `${helper}(${args[0] ?? "&state"})`;
+    }
     case "curand_log_normal":
     case "curand_log_normal_double": {
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_log_normal_storage" : "bg_curand_log_normal";
@@ -6682,8 +6690,16 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_log_normal2_storage" : "bg_curand_log_normal2";
       return `${helper}(${args[0] ?? "&state"}, f32(${args[1] ?? "0"}), f32(${args[2] ?? "1"}))`;
     }
+    case "curand_log_normal4": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_log_normal4_storage" : "bg_curand_log_normal4";
+      return `${helper}(${args[0] ?? "&state"}, f32(${args[1] ?? "0"}), f32(${args[2] ?? "1"}))`;
+    }
     case "curand_poisson": {
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_poisson_storage" : "bg_curand_poisson";
+      return `${helper}(${args[0] ?? "&state"}, f32(${args[1] ?? "0"}))`;
+    }
+    case "curand_poisson4": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_poisson4_storage" : "bg_curand_poisson4";
       return `${helper}(${args[0] ?? "&state"}, f32(${args[1] ?? "0"}))`;
     }
     case "atomicAdd":

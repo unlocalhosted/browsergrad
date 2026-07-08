@@ -2091,6 +2091,8 @@ function vectorExpressionType(
       return expression.templateValueType;
     }
     if (name === "curand_normal2" || name === "curand_log_normal2") return "float2";
+    if (name === "curand_uniform4" || name === "curand_normal4" || name === "curand_log_normal4") return "float4";
+    if (name === "curand_poisson4") return "uint4";
     if (isHalf2Intrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
     if (name === "__half22float2") return "float2";
   }
@@ -3095,6 +3097,19 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(lvalue, next, context);
     return (next + 1) * 2.3283064365386963e-10;
   }
+  if (name === "curand_uniform4") {
+    const state = expression.args[0];
+    if (!state) throw compilerFailure(`${name} expects state address`);
+    const lvalue = resolveAddressArgument(state, context);
+    let current = valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0;
+    const lanes: number[] = [];
+    for (let lane = 0; lane < 4; lane++) {
+      current = curandNext(current);
+      lanes.push((current + 1) * 2.3283064365386963e-10);
+    }
+    writeLValue(lvalue, current, context);
+    return { kind: "cuda-vector", valueType: "float4", lanes };
+  }
   if (name === "curand") {
     const state = expression.args[0];
     if (!state) throw compilerFailure("curand expects state address");
@@ -3135,6 +3150,17 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const angle = 6.283185307179586 * u2;
     return { kind: "cuda-vector", valueType: "float2", lanes: [radius * Math.cos(angle), radius * Math.sin(angle)] };
   }
+  if (name === "curand_normal4") {
+    const state = expression.args[0];
+    if (!state) throw compilerFailure(`${name} expects state address`);
+    const lvalue = resolveAddressArgument(state, context);
+    const first = curandNext(valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0);
+    const second = curandNext(first);
+    const third = curandNext(second);
+    const fourth = curandNext(third);
+    writeLValue(lvalue, fourth, context);
+    return { kind: "cuda-vector", valueType: "float4", lanes: [...curandNormalPair(first, second), ...curandNormalPair(third, fourth)] };
+  }
   if (name === "curand_log_normal" || name === "curand_log_normal_double") {
     const state = expression.args[0];
     if (!state) throw compilerFailure(`${name} expects state address`);
@@ -3169,33 +3195,44 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ],
     };
   }
-  if (name === "curand_poisson") {
+  if (name === "curand_log_normal4") {
     const state = expression.args[0];
     if (!state) throw compilerFailure(`${name} expects state address`);
     const lvalue = resolveAddressArgument(state, context);
-    let current = valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0;
-    const lambda = Math.fround(Math.max(0, evalNumber(expression.args[1]!, context)));
-    if (lambda <= 0) return 0;
-    if (lambda < 64) {
-      const limit = Math.fround(Math.exp(Math.fround(-lambda)));
-      let product = Math.fround(1);
-      let count = 0;
-      while (count < 512 && product > limit) {
-        current = curandNext(current);
-        product = Math.fround(product * Math.fround(Math.fround(current + 1) * Math.fround(2.3283064365386963e-10)));
-        count++;
-      }
-      writeLValue(lvalue, current, context);
-      return Math.max(0, count - 1) >>> 0;
-    }
-    const first = curandNext(current);
+    const first = curandNext(valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0);
     const second = curandNext(first);
-    writeLValue(lvalue, second, context);
-    const u1 = Math.fround(Math.max(Math.fround(Math.fround(first + 1) * Math.fround(2.3283064365386963e-10)), Math.fround(1.1754943508222875e-38)));
-    const u2 = Math.fround(Math.fround(second + 1) * Math.fround(2.3283064365386963e-10));
-    const normal = Math.fround(Math.fround(Math.sqrt(Math.fround(Math.fround(-2) * Math.fround(Math.log(u1))))) * Math.fround(Math.cos(Math.fround(Math.fround(6.283185307179586) * u2))));
-    const value = Math.fround(lambda + Math.fround(Math.fround(Math.sqrt(lambda)) * normal));
-    return Math.max(0, Math.floor(Math.fround(value + Math.fround(0.5)))) >>> 0;
+    const third = curandNext(second);
+    const fourth = curandNext(third);
+    writeLValue(lvalue, fourth, context);
+    const mean = evalNumber(expression.args[1]!, context);
+    const stddev = evalNumber(expression.args[2]!, context);
+    return {
+      kind: "cuda-vector",
+      valueType: "float4",
+      lanes: [...curandNormalPair(first, second), ...curandNormalPair(third, fourth)]
+        .map((normal) => Math.exp(mean + stddev * normal)),
+    };
+  }
+  if (name === "curand_poisson" || name === "curand_poisson4") {
+    const state = expression.args[0];
+    if (!state) throw compilerFailure(`${name} expects state address`);
+    const lvalue = resolveAddressArgument(state, context);
+    const start = valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0;
+    const lambda = Math.fround(Math.max(0, evalNumber(expression.args[1]!, context)));
+    if (name === "curand_poisson") {
+      const [value, current] = curandPoissonDraw(start, lambda);
+      writeLValue(lvalue, current, context);
+      return value;
+    }
+    let current = start;
+    const lanes: number[] = [];
+    for (let lane = 0; lane < 4; lane++) {
+      const [value, next] = curandPoissonDraw(current, lambda);
+      lanes.push(value);
+      current = next;
+    }
+    writeLValue(lvalue, current, context);
+    return { kind: "cuda-vector", valueType: "uint4", lanes };
   }
   if (name !== undefined && CUDA_CACHE_HINT_LOADS.has(name)) {
     const target = expression.args[0];
@@ -4098,6 +4135,37 @@ function curandAdvance(state: number, count: number): number {
     delta >>>= 1;
   }
   return (Math.imul(accMult, state >>> 0) + accPlus) >>> 0;
+}
+
+function curandNormalPair(first: number, second: number): [number, number] {
+  const u1 = Math.max((first + 1) * 2.3283064365386963e-10, 1.1754943508222875e-38);
+  const u2 = (second + 1) * 2.3283064365386963e-10;
+  const radius = Math.sqrt(-2 * Math.log(u1));
+  const angle = 6.283185307179586 * u2;
+  return [radius * Math.cos(angle), radius * Math.sin(angle)];
+}
+
+function curandPoissonDraw(state: number, lambda: number): [number, number] {
+  if (lambda <= 0) return [0, state >>> 0];
+  if (lambda < 64) {
+    const limit = Math.fround(Math.exp(Math.fround(-lambda)));
+    let product = Math.fround(1);
+    let count = 0;
+    let current = state >>> 0;
+    while (count < 512 && product > limit) {
+      current = curandNext(current);
+      product = Math.fround(product * Math.fround(Math.fround(current + 1) * Math.fround(2.3283064365386963e-10)));
+      count++;
+    }
+    return [Math.max(0, count - 1) >>> 0, current];
+  }
+  const first = curandNext(state);
+  const second = curandNext(first);
+  const u1 = Math.fround(Math.max(Math.fround(Math.fround(first + 1) * Math.fround(2.3283064365386963e-10)), Math.fround(1.1754943508222875e-38)));
+  const u2 = Math.fround(Math.fround(second + 1) * Math.fround(2.3283064365386963e-10));
+  const normal = Math.fround(Math.fround(Math.sqrt(Math.fround(Math.fround(-2) * Math.fround(Math.log(u1))))) * Math.fround(Math.cos(Math.fround(Math.fround(6.283185307179586) * u2))));
+  const value = Math.fround(lambda + Math.fround(Math.fround(Math.sqrt(lambda)) * normal));
+  return [Math.max(0, Math.floor(Math.fround(value + Math.fround(0.5)))) >>> 0, second];
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {

@@ -42,6 +42,7 @@ const TYPE_SIZE_BYTES = new Map<string, number>([
   ["clock_t", 4],
   ["curandState", 4],
   ["curandState_t", 4],
+  ["curandStatePhilox4_32_10_t", 4],
   ["curandStateSobol32", 4],
   ["curandStateSobol32_t", 4],
   ["curandStateSobol64", 4],

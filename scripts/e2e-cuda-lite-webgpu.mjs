@@ -1912,6 +1912,17 @@ __global__ void curandSkipaheadState(curandState_t *states, unsigned int *out, u
   unsigned int nextStorage = curand(&states[tid]);
   out[tid] = nextLocal ^ nextStorage ^ discarded0 ^ discarded1;
 }`,
+  curandPhilox4State: `
+__global__ void curandPhilox4State(curandStatePhilox4_32_10_t *states, float *out, unsigned int *ints, unsigned int seed) {
+  unsigned int tid = threadIdx.x;
+  curand_init(seed, tid, 0, &states[tid]);
+  float4 uni = curand_uniform4(&states[tid]);
+  float4 normal = curand_normal4(&states[tid]);
+  float4 logn = curand_log_normal4(&states[tid], 0.2f, 0.4f);
+  uint4 pois = curand_poisson4(&states[tid], 4.0f);
+  ints[tid] = pois.x + pois.y + pois.z + pois.w;
+  out[tid] = uni.x + uni.y + uni.z + uni.w + normal.x + normal.y + normal.z + normal.w + logn.x + logn.y + logn.z + logn.w + (float)ints[tid];
+}`,
   fp8ConvertHelpers: `
 __global__ void fp8ConvertHelpers(const uint* input, half* output, uint* encoded, int* as_int) {
   if (threadIdx.x == 0) {
@@ -12462,6 +12473,31 @@ const html = String.raw`<!doctype html>
               type: "Uint32Array",
               data: [3169702043, 1216244613, 2662019215, 2787520901],
             },
+          },
+          {
+            name: "helpers:curand-philox4-state",
+            source: SOURCES.curandPhilox4State,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                states: new Uint32Array(4),
+                out: new Float32Array(4),
+                ints: new Uint32Array(4),
+              },
+              scalars: { seed: 24680 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                20.094032287597656,
+                21.9383544921875,
+                18.56330394744873,
+                17.054378509521484,
+              ],
+            },
+            tolerance: 0.001,
           },
           {
             name: "helpers:fp8-convert",

@@ -198,14 +198,18 @@ export function usesCurand(ir: KernelIrModule): boolean {
     "curand_init",
     "curand",
     "curand_uniform",
+    "curand_uniform4",
     "curand_uniform_double",
     "curand_normal",
     "curand_normal2",
+    "curand_normal4",
     "curand_normal_double",
     "curand_log_normal",
     "curand_log_normal2",
+    "curand_log_normal4",
     "curand_log_normal_double",
     "curand_poisson",
+    "curand_poisson4",
     "skipahead",
   ]);
   return statementsUseCall(ir.body, curandCalls) ||

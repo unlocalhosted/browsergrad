@@ -370,6 +370,7 @@ function normalizeAliasType(sourceType: string | undefined, defines: ReadonlyMap
     type === "size_type" ||
     type === "curandState" ||
     type === "curandState_t" ||
+    type === "curandStatePhilox4_32_10_t" ||
     type === "curandStateSobol32" ||
     type === "curandStateSobol32_t" ||
     type === "curandStateSobol64" ||

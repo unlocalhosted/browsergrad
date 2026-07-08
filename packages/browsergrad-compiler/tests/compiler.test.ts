@@ -10024,6 +10024,32 @@ __global__ void curandSkipaheadKernel(unsigned int *out, unsigned int seed) {
     expect([...result.buffers.out as Uint32Array].some((value) => value !== 0)).toBe(true);
   });
 
+  it("lowers CUDA Philox cuRAND vector4 draws through semantic IR", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void curandPhilox4Kernel(float *out, unsigned int *ints, unsigned int seed) {
+  curandStatePhilox4_32_10_t state;
+  curand_init(seed, threadIdx.x, 0, &state);
+  float4 uni = curand_uniform4(&state);
+  float4 normal = curand_normal4(&state);
+  float4 logn = curand_log_normal4(&state, 0.2f, 0.4f);
+  uint4 pois = curand_poisson4(&state, 4.0f);
+  ints[threadIdx.x] = pois.x + pois.y + pois.z + pois.w;
+  out[threadIdx.x] = uni.x + uni.y + uni.z + uni.w + normal.x + normal.y + normal.z + normal.w + logn.x + logn.y + logn.z + logn.w + (float)ints[threadIdx.x];
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ints: new Uint32Array(4) }, scalars: { seed: 24680 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_curand_uniform4(state: ptr<function, u32>) -> vec4<f32>");
+    expect(compiled.wgsl).toContain("fn bg_curand_poisson4(state: ptr<function, u32>, lambda: f32) -> vec4<u32>");
+    expect(JSON.stringify(compiled.kernelIr)).toContain("curand_uniform4");
+    expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
+    expect([...result.buffers.ints as Uint32Array].every((value) => value > 0)).toBe(true);
+  });
+
   it("lowers cuRAND calls against storage-backed state arrays", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {

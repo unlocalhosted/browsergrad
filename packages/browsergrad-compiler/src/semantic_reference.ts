@@ -126,30 +126,45 @@ const SEMANTIC_CURAND_CALLS = new Set([
   "curand_init",
   "curand",
   "curand_uniform",
+  "curand_uniform4",
   "curand_uniform_double",
   "curand_normal",
   "curand_normal2",
+  "curand_normal4",
   "curand_normal_double",
   "curand_log_normal",
   "curand_log_normal2",
+  "curand_log_normal4",
   "curand_log_normal_double",
   "curand_poisson",
+  "curand_poisson4",
   "skipahead",
 ]);
-const SEMANTIC_CURAND_VECTOR_CALLS = new Set(["curand_normal2", "curand_log_normal2"]);
+const SEMANTIC_CURAND_VECTOR_RETURN_TYPES = new Map<string, CudaLiteScalarType>([
+  ["curand_uniform4", "float4"],
+  ["curand_normal2", "float2"],
+  ["curand_normal4", "float4"],
+  ["curand_log_normal2", "float2"],
+  ["curand_log_normal4", "float4"],
+  ["curand_poisson4", "uint4"],
+]);
 const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
   "curand",
   "curand_uniform",
+  "curand_uniform4",
   "curand_uniform_double",
   "curand_normal",
   "curand_normal2",
+  "curand_normal4",
   "curand_normal_double",
 ]);
 const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
   "curand_log_normal",
   "curand_log_normal2",
+  "curand_log_normal4",
   "curand_log_normal_double",
   "curand_poisson",
+  "curand_poisson4",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
@@ -579,7 +594,7 @@ function semanticReferenceCurandCallSupported(
   if (SEMANTIC_CURAND_STATE_ONLY_CALLS.has(expression.callee.name)) {
     return expression.args.length === 1 && semanticCurandState(expression.args[0]!) !== undefined;
   }
-  if (expression.callee.name === "curand_poisson") {
+  if (expression.callee.name === "curand_poisson" || expression.callee.name === "curand_poisson4") {
     return expression.args.length === 2 &&
       semanticCurandState(expression.args[0]!) !== undefined &&
       semanticReferenceExpressionSupported(expression.args[1]!, "scalar", compiled);
@@ -1211,7 +1226,8 @@ function semanticExpressionValueType(expression: SemanticExpression): CudaLiteSc
 
 function semanticExpressionVectorValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
   if (expression.kind === "call" && expression.callee.kind === "symbol") {
-    if (SEMANTIC_CURAND_VECTOR_CALLS.has(expression.callee.name)) return "float2";
+    const curandVectorType = SEMANTIC_CURAND_VECTOR_RETURN_TYPES.get(expression.callee.name);
+    if (curandVectorType) return curandVectorType;
     if (SEMANTIC_BF162_VECTOR_CALLS.has(expression.callee.name)) return "bf162";
     return cudaVectorConstructorType(expression.callee.name) ?? semanticExpressionValueType(expression);
   }
@@ -1534,6 +1550,16 @@ function evalSemanticCurandCall(
     semanticCurandStateWrite(state, next, context);
     return (next + 1) * 2.3283064365386963e-10;
   }
+  if (expression.callee.name === "curand_uniform4") {
+    let current = semanticCurandStateRead(state, context) >>> 0;
+    const lanes: number[] = [];
+    for (let lane = 0; lane < 4; lane++) {
+      current = curandNext(current);
+      lanes.push((current + 1) * 2.3283064365386963e-10);
+    }
+    semanticCurandStateWrite(state, current, context);
+    return lanes;
+  }
   if (expression.callee.name === "curand") {
     const next = curandNext(semanticCurandStateRead(state, context) >>> 0);
     semanticCurandStateWrite(state, next, context);
@@ -1556,6 +1582,16 @@ function evalSemanticCurandCall(
     const radius = Math.sqrt(-2 * Math.log(u1));
     const angle = 2 * Math.PI * u2;
     return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  }
+  if (expression.callee.name === "curand_normal4") {
+    const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
+    const second = curandNext(first);
+    const third = curandNext(second);
+    const fourth = curandNext(third);
+    semanticCurandStateWrite(state, fourth, context);
+    const a = curandNormalPair(first, second);
+    const b = curandNormalPair(third, fourth);
+    return [...a, ...b];
   }
   if (expression.callee.name === "curand_log_normal" || expression.callee.name === "curand_log_normal_double") {
     const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
@@ -1581,30 +1617,34 @@ function evalSemanticCurandCall(
       Math.exp(mean + stddev * radius * Math.sin(angle)),
     ];
   }
-  if (expression.callee.name === "curand_poisson") {
-    let current = semanticCurandStateRead(state, context) >>> 0;
-    const lambda = Math.fround(Math.max(0, evalNumber(expression.args[1]!, context)));
-    if (lambda <= 0) return 0;
-    if (lambda < 64) {
-      const limit = Math.fround(Math.exp(Math.fround(-lambda)));
-      let product = Math.fround(1);
-      let count = 0;
-      while (count < 512 && product > limit) {
-        current = curandNext(current);
-        product = Math.fround(product * Math.fround(Math.fround(current + 1) * Math.fround(2.3283064365386963e-10)));
-        count++;
-      }
-      semanticCurandStateWrite(state, current, context);
-      return Math.max(0, count - 1) >>> 0;
-    }
-    const first = curandNext(current);
+  if (expression.callee.name === "curand_log_normal4") {
+    const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
     const second = curandNext(first);
-    semanticCurandStateWrite(state, second, context);
-    const u1 = Math.fround(Math.max(Math.fround(Math.fround(first + 1) * Math.fround(2.3283064365386963e-10)), Math.fround(1.1754943508222875e-38)));
-    const u2 = Math.fround(Math.fround(second + 1) * Math.fround(2.3283064365386963e-10));
-    const normal = Math.fround(Math.fround(Math.sqrt(Math.fround(Math.fround(-2) * Math.fround(Math.log(u1))))) * Math.fround(Math.cos(Math.fround(Math.fround(2 * Math.PI) * u2))));
-    const value = Math.fround(lambda + Math.fround(Math.fround(Math.sqrt(lambda)) * normal));
-    return Math.max(0, Math.floor(Math.fround(value + Math.fround(0.5)))) >>> 0;
+    const third = curandNext(second);
+    const fourth = curandNext(third);
+    semanticCurandStateWrite(state, fourth, context);
+    const mean = evalNumber(expression.args[1]!, context);
+    const stddev = evalNumber(expression.args[2]!, context);
+    return [...curandNormalPair(first, second), ...curandNormalPair(third, fourth)]
+      .map((normal) => Math.exp(mean + stddev * normal));
+  }
+  if (expression.callee.name === "curand_poisson" || expression.callee.name === "curand_poisson4") {
+    const start = semanticCurandStateRead(state, context) >>> 0;
+    const lambda = Math.fround(Math.max(0, evalNumber(expression.args[1]!, context)));
+    if (expression.callee.name === "curand_poisson") {
+      const [value, current] = curandPoissonDraw(start, lambda);
+      semanticCurandStateWrite(state, current, context);
+      return value;
+    }
+    let current = start;
+    const values: number[] = [];
+    for (let lane = 0; lane < 4; lane++) {
+      const [value, next] = curandPoissonDraw(current, lambda);
+      values.push(value);
+      current = next;
+    }
+    semanticCurandStateWrite(state, current, context);
+    return values;
   }
   throw semanticReferenceError(`semantic reference does not support cuRAND call '${expression.callee.name}'`, expression.span);
 }
@@ -2473,6 +2513,37 @@ function curandAdvance(state: number, count: number): number {
     delta >>>= 1;
   }
   return (Math.imul(accMult, state >>> 0) + accPlus) >>> 0;
+}
+
+function curandNormalPair(first: number, second: number): [number, number] {
+  const u1 = Math.max((first + 1) * 2.3283064365386963e-10, 1.1754943508222875e-38);
+  const u2 = (second + 1) * 2.3283064365386963e-10;
+  const radius = Math.sqrt(-2 * Math.log(u1));
+  const angle = 2 * Math.PI * u2;
+  return [radius * Math.cos(angle), radius * Math.sin(angle)];
+}
+
+function curandPoissonDraw(state: number, lambda: number): [number, number] {
+  if (lambda <= 0) return [0, state >>> 0];
+  if (lambda < 64) {
+    const limit = Math.fround(Math.exp(Math.fround(-lambda)));
+    let product = Math.fround(1);
+    let count = 0;
+    let current = state >>> 0;
+    while (count < 512 && product > limit) {
+      current = curandNext(current);
+      product = Math.fround(product * Math.fround(Math.fround(current + 1) * Math.fround(2.3283064365386963e-10)));
+      count++;
+    }
+    return [Math.max(0, count - 1) >>> 0, current];
+  }
+  const first = curandNext(state);
+  const second = curandNext(first);
+  const u1 = Math.fround(Math.max(Math.fround(Math.fround(first + 1) * Math.fround(2.3283064365386963e-10)), Math.fround(1.1754943508222875e-38)));
+  const u2 = Math.fround(Math.fround(second + 1) * Math.fround(2.3283064365386963e-10));
+  const normal = Math.fround(Math.fround(Math.sqrt(Math.fround(Math.fround(-2) * Math.fround(Math.log(u1))))) * Math.fround(Math.cos(Math.fround(Math.fround(2 * Math.PI) * u2))));
+  const value = Math.fround(lambda + Math.fround(Math.fround(Math.sqrt(lambda)) * normal));
+  return [Math.max(0, Math.floor(Math.fround(value + Math.fround(0.5)))) >>> 0, second];
 }
 
 function roundSemanticHalf(value: number): number {

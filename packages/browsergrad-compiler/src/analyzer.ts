@@ -222,14 +222,18 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["curand_init", [4, 4]],
   ["curand", [1, 1]],
   ["curand_uniform", [1, 1]],
+  ["curand_uniform4", [1, 1]],
   ["curand_uniform_double", [1, 1]],
   ["curand_normal", [1, 1]],
   ["curand_normal2", [1, 1]],
+  ["curand_normal4", [1, 1]],
   ["curand_normal_double", [1, 1]],
   ["curand_log_normal", [3, 3]],
   ["curand_log_normal2", [3, 3]],
+  ["curand_log_normal4", [3, 3]],
   ["curand_log_normal_double", [3, 3]],
   ["curand_poisson", [2, 2]],
+  ["curand_poisson4", [2, 2]],
   ["skipahead", [2, 2]],
   ["make_cuComplex", [2, 2]],
   ["make_cuFloatComplex", [2, 2]],
@@ -2138,16 +2142,20 @@ function validateCallExpression(
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "uint" };
   }
+  if (callName === "curand_uniform4" || callName === "curand_normal4") {
+    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
+    return { kind: "vector", valueType: "float4" };
+  }
   if (callName === "curand_normal2") {
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     return { kind: "vector", valueType: "float2" };
   }
-  if (callName === "curand_log_normal2") {
+  if (callName === "curand_log_normal2" || callName === "curand_log_normal4") {
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     for (const arg of expression.args.slice(1)) {
       validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     }
-    return { kind: "vector", valueType: "float2" };
+    return { kind: "vector", valueType: callName === "curand_log_normal2" ? "float2" : "float4" };
   }
   if (
     callName === "curand_uniform" ||
@@ -2169,6 +2177,13 @@ function validateCallExpression(
       validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     }
     return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "curand_poisson4") {
+    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
+    for (const arg of expression.args.slice(1)) {
+      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    }
+    return { kind: "vector", valueType: "uint4" };
   }
   if (callName === "skipahead") {
     const count = expression.args[0];

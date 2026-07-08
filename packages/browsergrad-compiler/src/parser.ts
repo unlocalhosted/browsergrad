@@ -46,6 +46,7 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["size_type", "uint"],
   ["curandState", "uint"],
   ["curandState_t", "uint"],
+  ["curandStatePhilox4_32_10_t", "uint"],
   ["curandStateSobol32", "uint"],
   ["curandStateSobol32_t", "uint"],
   ["curandStateSobol64", "uint"],
@@ -1513,7 +1514,9 @@ class Parser {
     if (token.value === "int32_t" || token.value === "int64_t") return "int";
     if (token.value === "uint32_t" || token.value === "uint64_t" || token.value === "uintptr_t") return "uint";
   if (
+    token.value === "curandState" ||
     token.value === "curandState_t" ||
+    token.value === "curandStatePhilox4_32_10_t" ||
     token.value === "curandStateSobol32" ||
     token.value === "curandStateSobol32_t" ||
     token.value === "curandStateSobol64" ||
