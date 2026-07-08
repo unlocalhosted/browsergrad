@@ -4403,6 +4403,10 @@ __global__ void unsupported(float* x) {
       message: "WGMMA/TMA object pipeline declarations require a modeled async tensor-core pipeline before CUDA-lite lowering",
     })).toMatchObject({ family: "subgroup", gpuRuns: false, referenceRuns: false });
     expect(describeCudaDiagnostic({
+      code: "unsupported-device-trap",
+      message: "__trap cannot be lowered to WebGPU without an explicit device abort contract",
+    })).toMatchObject({ family: "safety", gpuRuns: false, referenceRuns: false });
+    expect(describeCudaDiagnostic({
       code: "unsupported-dependent-carrier-param",
       message: "dependent C++ carrier parameters require concrete source/context normalization before CUDA-lite lowering",
     })).toMatchObject({ family: "frontend", gpuRuns: false, referenceRuns: false });
@@ -18587,10 +18591,9 @@ __global__ void conditional_pointer(float* target, float* fallback, int enabled)
     expect(compiled.wgsl).toContain("select(4294967295u, 0u, (bg_uniforms.enabled != 0))");
   });
 
-  it("lowers CUDA bitwise not and trap no-op control paths", () => {
+  it("lowers CUDA bitwise not without treating trap as a no-op primitive", () => {
     const compiled = compileCudaLiteKernel(`
-__global__ void bitwise_not_and_trap(int* out) {
-  if (threadIdx.x == 99) { __trap(); }
+__global__ void bitwise_not(int* out) {
   out[0] = ~(4 - 1);
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -18612,6 +18615,26 @@ __global__ void bitwise_not_and_trap(int* out) {
     expect(compiled.wgsl).toContain("~((4 - 1))");
     expect(compiled.wgsl).toContain("out[0u] = ~((4 - 1));");
     expect(compiled.wgsl).not.toContain("\n    0;\n");
+  });
+
+  it("rejects CUDA device trap instead of silently lowering it as a no-op", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void trap_kernel(int* out) {
+  if (threadIdx.x == 0) { __trap(); }
+  out[0] = 1;
+}`, { workgroupSize: [1, 1, 1] })).toThrow(/unsupported-device-trap/u);
+  });
+
+  it("ignores CUDA device trap in unreachable helpers for selected kernels", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void trap_helper() {
+  __trap();
+}
+__global__ void reachable_kernel(int* out) {
+  out[threadIdx.x] = 7;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-device-trap");
   });
 
   it("lowers scalar CUDA half arithmetic and comparison intrinsics", () => {

@@ -78,6 +78,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("divergent-break-before-barrier", "safety", "Divergent break before barrier", "native", true, true, "Active-lane lowering preserves safe post-break barrier execution when supported."),
   feature("divergent-continue-before-barrier", "safety", "Divergent continue before barrier", "unsupported", false, true, "Continue before a later barrier needs per-iteration active-lane lowering before WGSL can run safely."),
   feature("barrier-expression", "safety", "Barrier used as expression", "unsupported", false, true, "CUDA barriers must be standalone statements."),
+  feature("unsupported-device-trap", "safety", "Unsupported CUDA device trap", "unsupported", false, false, "WebGPU has no CUDA device-lane abort primitive; __trap requires an explicit trap/runtime contract before lowering."),
   feature("continue-outside-loop", "safety", "Continue outside loop", "unsupported", false, false, "continue is valid only inside a loop."),
   feature("break-outside-loop", "safety", "Break outside loop", "unsupported", false, false, "break is valid only inside a loop."),
   feature("const-pointer-write", "safety", "Const pointer write", "unsupported", false, false, "Rejects invalid memory mutation."),

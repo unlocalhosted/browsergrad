@@ -1938,6 +1938,9 @@ function validateCallExpression(
     return { kind: "scalar", valueType: "uint" };
   }
   if (callName === "__trap") {
+    if (compatibilityDiagnosticsReachable) {
+      diagnostics.push(error("unsupported-device-trap", "__trap cannot be lowered to WebGPU without an explicit device abort contract", expression.span));
+    }
     return { kind: "scalar", valueType: "int" };
   }
   if (callName === "__nanosleep" || callName === "__prof_trigger") {
