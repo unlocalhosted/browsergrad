@@ -97,7 +97,10 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
   "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
   "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
-  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vhaddu2", "__vavgs2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
+  "__sad", "__usad", "__usad4",
+  "__viaddmax_s32", "__viaddmax_s32_relu", "__viaddmin_s32", "__viaddmin_s32_relu", "__viaddmax_u32", "__viaddmin_u32",
+  "__viaddmax_s16x2", "__viaddmax_s16x2_relu", "__viaddmin_s16x2", "__viaddmin_s16x2_relu", "__viaddmax_u16x2", "__viaddmin_u16x2",
+  "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vhaddu2", "__vavgs2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
   "__vcmpeq2", "__vcmpne2", "__vcmpges2", "__vcmpgeu2", "__vcmpgts2", "__vcmpgtu2", "__vcmples2", "__vcmpleu2", "__vcmplts2", "__vcmpltu2",
   "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
   "__vadd4", "__vsub4", "__vabs4", "__vabsss4", "__vneg4", "__vnegss4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vabsdiffs4", "__vsads4", "__vsadu4", "__vhaddu4", "__vavgs4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
@@ -2429,6 +2432,18 @@ function evalSemanticMathCall(
     case "__sad": return (Math.abs((Math.trunc(args[0] ?? 0) | 0) - (Math.trunc(args[1] ?? 0) | 0)) + (Math.trunc(args[2] ?? 0) >>> 0)) >>> 0;
     case "__usad": return (Math.abs((Math.trunc(args[0] ?? 0) >>> 0) - (Math.trunc(args[1] ?? 0) >>> 0)) + (Math.trunc(args[2] ?? 0) >>> 0)) >>> 0;
     case "__usad4": return u8x4SadAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+    case "__viaddmax_s32": return viaddScalar(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "max", false);
+    case "__viaddmax_s32_relu": return viaddScalar(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "max", true);
+    case "__viaddmin_s32": return viaddScalar(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "min", false);
+    case "__viaddmin_s32_relu": return viaddScalar(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "min", true);
+    case "__viaddmax_u32": return viaddScalar(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, false, "max", false);
+    case "__viaddmin_u32": return viaddScalar(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, false, "min", false);
+    case "__viaddmax_s16x2": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "max", false);
+    case "__viaddmax_s16x2_relu": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "max", true);
+    case "__viaddmin_s16x2": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "min", false);
+    case "__viaddmin_s16x2_relu": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, true, "min", true);
+    case "__viaddmax_u16x2": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, false, "max", false);
+    case "__viaddmin_u16x2": return viadd16x2(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, false, "min", false);
     case "__vadd2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
     case "__vabs2": return packedUnary(args[0] ?? 0, 16, true, (a) => Math.abs(a));
@@ -2904,6 +2919,35 @@ function i16x2Binary(aValue: number, bValue: number, op: (a: number, b: number) 
     const shift = lane * 16;
     const laneValue = op(signExtend16((a >>> shift) & 0xffff), signExtend16((b >>> shift) & 0xffff)) & 0xffff;
     out = (out | (laneValue << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function viaddScalar(aValue: number, bValue: number, cValue: number, signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const add = signed
+    ? ((Math.trunc(aValue) | 0) + (Math.trunc(bValue) | 0)) | 0
+    : ((Math.trunc(aValue) >>> 0) + (Math.trunc(bValue) >>> 0)) >>> 0;
+  const c = signed ? Math.trunc(cValue) | 0 : Math.trunc(cValue) >>> 0;
+  const selected = choose === "max" ? Math.max(add, c) : Math.min(add, c);
+  const value = relu ? Math.max(selected, 0) : selected;
+  return signed ? value | 0 : value >>> 0;
+}
+
+function viadd16x2(aValue: number, bValue: number, cValue: number, signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const c = Math.trunc(cValue) >>> 0;
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += 16) {
+    const leftBits = (a >>> shift) & 0xffff;
+    const rightBits = (b >>> shift) & 0xffff;
+    const cmpBits = (c >>> shift) & 0xffff;
+    const left = signed ? signExtend16(leftBits) : leftBits;
+    const right = signed ? signExtend16(rightBits) : rightBits;
+    const cmp = signed ? signExtend16(cmpBits) : cmpBits;
+    const selected = choose === "max" ? Math.max(left + right, cmp) : Math.min(left + right, cmp);
+    const value = relu ? Math.max(selected, 0) : selected;
+    out = (out | ((value & 0xffff) << shift)) >>> 0;
   }
   return out >>> 0;
 }
@@ -3589,6 +3633,18 @@ function semanticMathCallArity(name: string): number {
       name === "__sad" ||
       name === "__usad" ||
       name === "__usad4" ||
+      name === "__viaddmax_s32" ||
+      name === "__viaddmax_s32_relu" ||
+      name === "__viaddmin_s32" ||
+      name === "__viaddmin_s32_relu" ||
+      name === "__viaddmax_u32" ||
+      name === "__viaddmin_u32" ||
+      name === "__viaddmax_s16x2" ||
+      name === "__viaddmax_s16x2_relu" ||
+      name === "__viaddmin_s16x2" ||
+      name === "__viaddmin_s16x2_relu" ||
+      name === "__viaddmax_u16x2" ||
+      name === "__viaddmin_u16x2" ||
       name === "__dp4a" ||
       name === "__dp2a_lo" ||
       name === "__dp2a_hi" ||

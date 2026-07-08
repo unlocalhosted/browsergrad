@@ -2320,6 +2320,24 @@ __global__ void simdAvgIntrinsic(uint *out) {
   out[2] = __vhaddu2(a2, b2);
   out[3] = __vavgs2(a2, b2);
 }`,
+  viaddMinMaxIntrinsic: `
+__global__ void viaddMinMaxIntrinsic(uint *out) {
+  uint a = 0x0005fffeu;
+  uint b = 0x0003fffdu;
+  uint c = 0x0007fffcu;
+  out[0] = uint(__viaddmax_s32(7, -3, 2));
+  out[1] = uint(__viaddmax_s32_relu(-7, 3, -2));
+  out[2] = uint(__viaddmin_s32(7, -3, 6));
+  out[3] = uint(__viaddmin_s32_relu(-7, 3, -2));
+  out[4] = __viaddmax_u32(10u, 5u, 12u);
+  out[5] = __viaddmin_u32(10u, 5u, 20u);
+  out[6] = __viaddmax_s16x2(a, b, c);
+  out[7] = __viaddmax_s16x2_relu(a, b, c);
+  out[8] = __viaddmin_s16x2(a, b, c);
+  out[9] = __viaddmin_s16x2_relu(a, b, c);
+  out[10] = __viaddmax_u16x2(a, b, c);
+  out[11] = __viaddmin_u16x2(a, b, c);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -13111,6 +13129,26 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [0x80808040, 0x00800040, 0x80007fff, 0x00000000],
+            },
+          },
+          {
+            name: "intrinsic:viadd-minmax",
+            source: SOURCES.viaddMinMaxIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(12),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                0x00000004, 0x00000000, 0x00000004, 0x00000000,
+                0x0000000f, 0x0000000f, 0x0008fffc, 0x00080000,
+                0x0007fffb, 0x00070000, 0x0008fffb, 0x0007fffc,
+              ],
             },
           },
           {

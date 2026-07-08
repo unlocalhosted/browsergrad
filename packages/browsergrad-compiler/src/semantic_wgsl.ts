@@ -412,6 +412,18 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__sad", "sad"],
   ["__usad", "usad"],
   ["__usad4", "usad4"],
+  ["__viaddmax_s32", "viaddmax_s32"],
+  ["__viaddmax_s32_relu", "viaddmax_s32_relu"],
+  ["__viaddmin_s32", "viaddmin_s32"],
+  ["__viaddmin_s32_relu", "viaddmin_s32_relu"],
+  ["__viaddmax_u32", "viaddmax_u32"],
+  ["__viaddmin_u32", "viaddmin_u32"],
+  ["__viaddmax_s16x2", "viaddmax_s16x2"],
+  ["__viaddmax_s16x2_relu", "viaddmax_s16x2_relu"],
+  ["__viaddmin_s16x2", "viaddmin_s16x2"],
+  ["__viaddmin_s16x2_relu", "viaddmin_s16x2_relu"],
+  ["__viaddmax_u16x2", "viaddmax_u16x2"],
+  ["__viaddmin_u16x2", "viaddmin_u16x2"],
   ["__vadd2", "vadd2"],
   ["__vsub2", "vsub2"],
   ["__vabs2", "vabs2"],
@@ -4506,6 +4518,24 @@ function emitSemanticMathCall(
     if (wgslCallee === "uhadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
     return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u) + ((${lhs} ^ ${rhs}) & 1u))`;
   }
+  if (wgslCallee.startsWith("viadd")) {
+    const [first, second, third] = expression.args;
+    if (!first || !second || !third) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
+    const choose: "max" | "min" = wgslCallee.startsWith("viaddmax") ? "max" : "min";
+    const relu = wgslCallee.endsWith("_relu");
+    if (wgslCallee.includes("16x2")) {
+      const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
+      const c = emitSemanticExpressionAs(third, ir, names, "u32", options, textureSpecializations);
+      return emitSemanticViadd16x2Expression(a, b, c, wgslCallee.includes("_s16x2"), choose, relu);
+    }
+    const scalar = wgslCallee.includes("_s32") ? "i32" : "u32";
+    const a = emitSemanticExpressionAs(first, ir, names, scalar, options, textureSpecializations);
+    const b = emitSemanticExpressionAs(second, ir, names, scalar, options, textureSpecializations);
+    const c = emitSemanticExpressionAs(third, ir, names, scalar, options, textureSpecializations);
+    const selected = `${choose}((${a} + ${b}), ${c})`;
+    return relu ? `max(${selected}, 0)` : selected;
+  }
   if (wgslCallee === "vabs2" || wgslCallee === "vabsss2" || wgslCallee === "vneg2" || wgslCallee === "vnegss2" || wgslCallee === "vabs4" || wgslCallee === "vabsss4" || wgslCallee === "vneg4" || wgslCallee === "vnegss4") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
@@ -4947,6 +4977,22 @@ function emitSemanticVPackedAverageExpression(lhs: string, rhs: string, laneWidt
   return `(${lanes.join(" | ")})`;
 }
 
+function emitSemanticViadd16x2Expression(lhs: string, rhs: string, cmpValue: string, signed: boolean, choose: "max" | "min", relu: boolean): string {
+  const lanes: string[] = [];
+  for (const shift of ["0u", "16u"]) {
+    const leftBits = `((${lhs} >> ${shift}) & 0xffffu)`;
+    const rightBits = `((${rhs} >> ${shift}) & 0xffffu)`;
+    const cmpBits = `((${cmpValue} >> ${shift}) & 0xffffu)`;
+    const left = signed ? `(i32(${leftBits}) - select(0, 65536, ${leftBits} >= 0x8000u))` : `i32(${leftBits})`;
+    const right = signed ? `(i32(${rightBits}) - select(0, 65536, ${rightBits} >= 0x8000u))` : `i32(${rightBits})`;
+    const cmp = signed ? `(i32(${cmpBits}) - select(0, 65536, ${cmpBits} >= 0x8000u))` : `i32(${cmpBits})`;
+    const selected = `${choose}((${left} + ${right}), ${cmp})`;
+    const value = relu ? `max(${selected}, 0)` : selected;
+    lanes.push(`((u32(${value}) & 0xffffu) << ${shift})`);
+  }
+  return `(${lanes.join(" | ")})`;
+}
+
 function emitRoundEvenWgsl(emitted: string): string {
   return `bg_semantic_round_even_f32(${emitted})`;
 }
@@ -5124,6 +5170,18 @@ function semanticMathCallArity(name: string): number {
       name === "__sad" ||
       name === "__usad" ||
       name === "__usad4" ||
+      name === "__viaddmax_s32" ||
+      name === "__viaddmax_s32_relu" ||
+      name === "__viaddmin_s32" ||
+      name === "__viaddmin_s32_relu" ||
+      name === "__viaddmax_u32" ||
+      name === "__viaddmin_u32" ||
+      name === "__viaddmax_s16x2" ||
+      name === "__viaddmax_s16x2_relu" ||
+      name === "__viaddmin_s16x2" ||
+      name === "__viaddmin_s16x2_relu" ||
+      name === "__viaddmax_u16x2" ||
+      name === "__viaddmin_u16x2" ||
       name === "__dp4a" ||
       name === "__dp2a_lo" ||
       name === "__dp2a_hi" ||

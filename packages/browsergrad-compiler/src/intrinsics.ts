@@ -283,6 +283,18 @@ const INTEGER_INTRINSICS = [
   intrinsic("__sad", [3, 3], "uint", evalSignedSadAdd, emitSignedSadAdd),
   intrinsic("__usad", [3, 3], "uint", evalUnsignedSadAdd, emitUnsignedSadAdd),
   intrinsic("__usad4", [2, 3], "uint", evalU8x4SadAdd, emitU8x4SadAdd),
+  intrinsic("__viaddmax_s32", [3, 3], "int", (args) => evalViaddScalar(args, true, "max", false), (args) => emitViaddScalar(args, true, "max", false)),
+  intrinsic("__viaddmax_s32_relu", [3, 3], "int", (args) => evalViaddScalar(args, true, "max", true), (args) => emitViaddScalar(args, true, "max", true)),
+  intrinsic("__viaddmin_s32", [3, 3], "int", (args) => evalViaddScalar(args, true, "min", false), (args) => emitViaddScalar(args, true, "min", false)),
+  intrinsic("__viaddmin_s32_relu", [3, 3], "int", (args) => evalViaddScalar(args, true, "min", true), (args) => emitViaddScalar(args, true, "min", true)),
+  intrinsic("__viaddmax_u32", [3, 3], "uint", (args) => evalViaddScalar(args, false, "max", false), (args) => emitViaddScalar(args, false, "max", false)),
+  intrinsic("__viaddmin_u32", [3, 3], "uint", (args) => evalViaddScalar(args, false, "min", false), (args) => emitViaddScalar(args, false, "min", false)),
+  intrinsic("__viaddmax_s16x2", [3, 3], "uint", (args) => evalViadd16x2(args, true, "max", false), (args) => emitViadd16x2(args, true, "max", false)),
+  intrinsic("__viaddmax_s16x2_relu", [3, 3], "uint", (args) => evalViadd16x2(args, true, "max", true), (args) => emitViadd16x2(args, true, "max", true)),
+  intrinsic("__viaddmin_s16x2", [3, 3], "uint", (args) => evalViadd16x2(args, true, "min", false), (args) => emitViadd16x2(args, true, "min", false)),
+  intrinsic("__viaddmin_s16x2_relu", [3, 3], "uint", (args) => evalViadd16x2(args, true, "min", true), (args) => emitViadd16x2(args, true, "min", true)),
+  intrinsic("__viaddmax_u16x2", [3, 3], "uint", (args) => evalViadd16x2(args, false, "max", false), (args) => emitViadd16x2(args, false, "max", false)),
+  intrinsic("__viaddmin_u16x2", [3, 3], "uint", (args) => evalViadd16x2(args, false, "min", false), (args) => emitViadd16x2(args, false, "min", false)),
   intrinsic("__vadd2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => a + b), (args) => emitU16x2Binary(args, (a, b) => `((${a} + ${b}) & 0xffffu)`)),
   intrinsic("__vsub2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => a - b), (args) => emitU16x2Binary(args, (a, b) => `((${a} - ${b}) & 0xffffu)`)),
   intrinsic("__vabs2", [1, 1], "uint", (args) => evalPackedUnary(args, 16, true, (a) => Math.abs(a)), (args) => emitPackedUnary(args, 16, true, "abs")),
@@ -1168,6 +1180,60 @@ function emitI16x2SaturatingBinary(args: readonly string[], op: (a: string, b: s
     const left = `(i32(${leftBits}) - select(0, 65536, ${leftBits} >= 0x8000u))`;
     const right = `(i32(${rightBits}) - select(0, 65536, ${rightBits} >= 0x8000u))`;
     return `(u32(${op(left, right)} & 0xffff) << ${shift}u)`;
+  });
+  return `(${lanes.join(" | ")})`;
+}
+
+function evalViaddScalar(args: readonly number[], signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const add = signed
+    ? ((Math.trunc(args[0] ?? 0) | 0) + (Math.trunc(args[1] ?? 0) | 0)) | 0
+    : ((Math.trunc(args[0] ?? 0) >>> 0) + (Math.trunc(args[1] ?? 0) >>> 0)) >>> 0;
+  const c = signed ? Math.trunc(args[2] ?? 0) | 0 : Math.trunc(args[2] ?? 0) >>> 0;
+  const selected = choose === "max" ? Math.max(add, c) : Math.min(add, c);
+  const value = relu ? Math.max(selected, 0) : selected;
+  return signed ? value | 0 : value >>> 0;
+}
+
+function emitViaddScalar(args: readonly string[], signed: boolean, choose: "max" | "min", relu: boolean): string {
+  const scalar = signed ? "i32" : "u32";
+  const add = `(${scalar}(${args[0] ?? "0"}) + ${scalar}(${args[1] ?? "0"}))`;
+  const selected = `${choose}(${add}, ${scalar}(${args[2] ?? "0"}))`;
+  return relu ? `max(${selected}, 0)` : selected;
+}
+
+function evalViadd16x2(args: readonly number[], signed: boolean, choose: "max" | "min", relu: boolean): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  const c = Math.trunc(args[2] ?? 0) >>> 0;
+  let out = 0;
+  for (let shift = 0; shift < 32; shift += 16) {
+    const leftBits = (a >>> shift) & 0xffff;
+    const rightBits = (b >>> shift) & 0xffff;
+    const cmpBits = (c >>> shift) & 0xffff;
+    const left = signed ? signExtend16(leftBits) : leftBits;
+    const right = signed ? signExtend16(rightBits) : rightBits;
+    const cmp = signed ? signExtend16(cmpBits) : cmpBits;
+    const selected = choose === "max" ? Math.max(left + right, cmp) : Math.min(left + right, cmp);
+    const value = relu ? Math.max(selected, 0) : selected;
+    out = (out | ((value & 0xffff) << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function emitViadd16x2(args: readonly string[], signed: boolean, choose: "max" | "min", relu: boolean): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const c = `u32(${args[2] ?? "0"})`;
+  const lanes = [0, 16].map((shift) => {
+    const leftBits = `((${a} >> ${shift}u) & 0xffffu)`;
+    const rightBits = `((${b} >> ${shift}u) & 0xffffu)`;
+    const cmpBits = `((${c} >> ${shift}u) & 0xffffu)`;
+    const left = signed ? `(i32(${leftBits}) - select(0, 65536, ${leftBits} >= 0x8000u))` : `i32(${leftBits})`;
+    const right = signed ? `(i32(${rightBits}) - select(0, 65536, ${rightBits} >= 0x8000u))` : `i32(${rightBits})`;
+    const cmp = signed ? `(i32(${cmpBits}) - select(0, 65536, ${cmpBits} >= 0x8000u))` : `i32(${cmpBits})`;
+    const selected = `${choose}((${left} + ${right}), ${cmp})`;
+    const value = relu ? `max(${selected}, 0)` : selected;
+    return `((u32(${value}) & 0xffffu) << ${shift}u)`;
   });
   return `(${lanes.join(" | ")})`;
 }

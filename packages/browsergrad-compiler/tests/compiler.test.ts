@@ -8927,6 +8927,47 @@ __global__ void packed_simd_avg(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
   });
 
+  it("lowers CUDA viadd min/max intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void viadd_minmax(uint *out) {
+  uint a = 0x0005fffeu;
+  uint b = 0x0003fffdu;
+  uint c = 0x0007fffcu;
+  out[0] = uint(__viaddmax_s32(7, -3, 2));
+  out[1] = uint(__viaddmax_s32_relu(-7, 3, -2));
+  out[2] = uint(__viaddmin_s32(7, -3, 6));
+  out[3] = uint(__viaddmin_s32_relu(-7, 3, -2));
+  out[4] = __viaddmax_u32(10u, 5u, 12u);
+  out[5] = __viaddmin_u32(10u, 5u, 20u);
+  out[6] = __viaddmax_s16x2(a, b, c);
+  out[7] = __viaddmax_s16x2_relu(a, b, c);
+  out[8] = __viaddmin_s16x2(a, b, c);
+  out[9] = __viaddmin_s16x2_relu(a, b, c);
+  out[10] = __viaddmax_u16x2(a, b, c);
+  out[11] = __viaddmin_u16x2(a, b, c);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(12) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(12) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      0x00000004, 0x00000000, 0x00000004, 0x00000000,
+      0x0000000f, 0x0000000f, 0x0008fffc, 0x00080000,
+      0x0007fffb, 0x00070000, 0x0008fffb, 0x0007fffc,
+    ]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {
