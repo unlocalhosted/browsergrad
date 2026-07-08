@@ -113,6 +113,7 @@ const SEMANTIC_NOOP_CALLS = new Set([
 ]);
 const SEMANTIC_CURAND_CALLS = new Set([
   "curand_init",
+  "curand",
   "curand_uniform",
   "curand_uniform_double",
   "curand_normal",
@@ -2811,6 +2812,9 @@ function emitSemanticCurandCall(
   const pointer = semanticCurandStatePointer(expression.args[0], ir, names, options);
   if (!pointer) throw semanticWgslError(`${expression.callee.name} expects a modeled state address`, expression.span);
   const suffix = pointer.addressSpace === "storage" ? "_storage" : pointer.addressSpace === "workgroup" ? "_workgroup" : "";
+  if (expression.callee.name === "curand") {
+    return `bg_curand${suffix}(${pointer.expression})`;
+  }
   if (expression.callee.name === "curand_uniform" || expression.callee.name === "curand_uniform_double") {
     return `bg_curand_uniform${suffix}(${pointer.expression})`;
   }

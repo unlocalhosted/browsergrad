@@ -3094,6 +3094,14 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(lvalue, next, context);
     return (next + 1) * 2.3283064365386963e-10;
   }
+  if (name === "curand") {
+    const state = expression.args[0];
+    if (!state) throw compilerFailure("curand expects state address");
+    const lvalue = resolveAddressArgument(state, context);
+    const next = curandNext(valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0);
+    writeLValue(lvalue, next, context);
+    return next;
+  }
   if (name === "curand_normal" || name === "curand_normal_double") {
     const state = expression.args[0];
     if (!state) throw compilerFailure(`${name} expects state address`);

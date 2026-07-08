@@ -196,6 +196,7 @@ function atomicStorageScalarType(valueType: CudaLiteScalarType): "i32" | "u32" {
 export function usesCurand(ir: KernelIrModule): boolean {
   const curandCalls = new Set([
     "curand_init",
+    "curand",
     "curand_uniform",
     "curand_uniform_double",
     "curand_normal",

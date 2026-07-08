@@ -6656,6 +6656,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_uniform_storage" : "bg_curand_uniform";
       return `${helper}(${args[0] ?? "&state"})`;
     }
+    case "curand": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_storage" : "bg_curand";
+      return `${helper}(${args[0] ?? "&state"})`;
+    }
     case "curand_normal":
     case "curand_normal_double": {
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_normal_storage" : "bg_curand_normal";

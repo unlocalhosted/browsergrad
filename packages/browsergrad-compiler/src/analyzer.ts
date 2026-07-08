@@ -220,6 +220,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["deviceAllocate", [2, 4]],
   ["streamOrderedAllocate", [2, 4]],
   ["curand_init", [4, 4]],
+  ["curand", [1, 1]],
   ["curand_uniform", [1, 1]],
   ["curand_uniform_double", [1, 1]],
   ["curand_normal", [1, 1]],
@@ -2127,6 +2128,10 @@ function validateCallExpression(
   }
   if (callName === "curand_init") {
     validateCurandInit(expression, diagnostics, walkExpression, scope);
+    return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "curand") {
+    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "uint" };
   }
   if (

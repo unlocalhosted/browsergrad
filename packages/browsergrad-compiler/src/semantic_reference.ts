@@ -124,6 +124,7 @@ const SEMANTIC_NOOP_CALLS = new Set([
 ]);
 const SEMANTIC_CURAND_CALLS = new Set([
   "curand_init",
+  "curand",
   "curand_uniform",
   "curand_uniform_double",
   "curand_normal",
@@ -1467,6 +1468,11 @@ function evalSemanticCurandCall(
     const next = curandNext(semanticCurandStateRead(state, context) >>> 0);
     semanticCurandStateWrite(state, next, context);
     return (next + 1) * 2.3283064365386963e-10;
+  }
+  if (expression.callee.name === "curand") {
+    const next = curandNext(semanticCurandStateRead(state, context) >>> 0);
+    semanticCurandStateWrite(state, next, context);
+    return next;
   }
   if (expression.callee.name === "curand_normal" || expression.callee.name === "curand_normal_double") {
     const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
