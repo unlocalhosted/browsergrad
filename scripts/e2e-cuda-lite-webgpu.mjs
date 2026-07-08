@@ -1891,6 +1891,14 @@ __global__ void curandPairState(curandState_t *states, float *out, unsigned int 
   float2 logn = curand_log_normal2(&states[tid], 0.2f, 0.4f);
   out[tid] = normal.x + normal.y + logn.x + logn.y;
 }`,
+  curandPoissonState: `
+__global__ void curandPoissonState(curandState_t *states, unsigned int *out, unsigned int seed) {
+  unsigned int tid = threadIdx.x;
+  curand_init(seed, tid, 0, &states[tid]);
+  unsigned int small = curand_poisson(&states[tid], 3.0f);
+  unsigned int large = curand_poisson(&states[tid], 72.0f);
+  out[tid] = small + large;
+}`,
   fp8ConvertHelpers: `
 __global__ void fp8ConvertHelpers(const uint* input, half* output, uint* encoded, int* as_int) {
   if (threadIdx.x == 0) {
@@ -12405,6 +12413,24 @@ const html = String.raw`<!doctype html>
               ],
             },
             tolerance: 0.001,
+          },
+          {
+            name: "helpers:curand-poisson-state",
+            source: SOURCES.curandPoissonState,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                states: new Uint32Array(4),
+                out: new Uint32Array(4),
+              },
+              scalars: { seed: 1357 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [69, 92, 71, 66],
+            },
           },
           {
             name: "helpers:fp8-convert",

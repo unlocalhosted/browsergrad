@@ -9975,6 +9975,28 @@ __global__ void curandPairKernel(float *out, unsigned int seed) {
     expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
   });
 
+  it("lowers CUDA cuRAND Poisson draws through semantic IR", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void curandPoissonKernel(unsigned int *out, unsigned int seed) {
+  curandState_t state;
+  curand_init(seed, threadIdx.x, 0, &state);
+  unsigned int small = curand_poisson(&state, 3.0f);
+  unsigned int large = curand_poisson(&state, 72.0f);
+  out[threadIdx.x] = small + large;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) }, scalars: { seed: 1357 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_curand_poisson(state: ptr<function, u32>, lambda: f32) -> u32");
+    expect(compiled.wgsl).toContain("bg_curand_poisson(&state, 3.0)");
+    expect(JSON.stringify(compiled.kernelIr)).toContain("curand_poisson");
+    expect([...result.buffers.out as Uint32Array].every((value) => value > 0)).toBe(true);
+  });
+
   it("lowers cuRAND calls against storage-backed state arrays", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {

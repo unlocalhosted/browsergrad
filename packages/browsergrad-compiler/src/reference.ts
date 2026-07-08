@@ -3161,6 +3161,34 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ],
     };
   }
+  if (name === "curand_poisson") {
+    const state = expression.args[0];
+    if (!state) throw compilerFailure(`${name} expects state address`);
+    const lvalue = resolveAddressArgument(state, context);
+    let current = valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0;
+    const lambda = Math.fround(Math.max(0, evalNumber(expression.args[1]!, context)));
+    if (lambda <= 0) return 0;
+    if (lambda < 64) {
+      const limit = Math.fround(Math.exp(Math.fround(-lambda)));
+      let product = Math.fround(1);
+      let count = 0;
+      while (count < 512 && product > limit) {
+        current = curandNext(current);
+        product = Math.fround(product * Math.fround(Math.fround(current + 1) * Math.fround(2.3283064365386963e-10)));
+        count++;
+      }
+      writeLValue(lvalue, current, context);
+      return Math.max(0, count - 1) >>> 0;
+    }
+    const first = curandNext(current);
+    const second = curandNext(first);
+    writeLValue(lvalue, second, context);
+    const u1 = Math.fround(Math.max(Math.fround(Math.fround(first + 1) * Math.fround(2.3283064365386963e-10)), Math.fround(1.1754943508222875e-38)));
+    const u2 = Math.fround(Math.fround(second + 1) * Math.fround(2.3283064365386963e-10));
+    const normal = Math.fround(Math.fround(Math.sqrt(Math.fround(Math.fround(-2) * Math.fround(Math.log(u1))))) * Math.fround(Math.cos(Math.fround(Math.fround(6.283185307179586) * u2))));
+    const value = Math.fround(lambda + Math.fround(Math.fround(Math.sqrt(lambda)) * normal));
+    return Math.max(0, Math.floor(Math.fround(value + Math.fround(0.5)))) >>> 0;
+  }
   if (name !== undefined && CUDA_CACHE_HINT_LOADS.has(name)) {
     const target = expression.args[0];
     if (!target) throw compilerFailure(`${name} expects pointer argument`);

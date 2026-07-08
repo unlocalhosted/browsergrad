@@ -133,6 +133,7 @@ const SEMANTIC_CURAND_CALLS = new Set([
   "curand_log_normal",
   "curand_log_normal2",
   "curand_log_normal_double",
+  "curand_poisson",
 ]);
 const SEMANTIC_CURAND_VECTOR_CALLS = new Set(["curand_normal2", "curand_log_normal2"]);
 const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
@@ -147,6 +148,7 @@ const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
   "curand_log_normal",
   "curand_log_normal2",
   "curand_log_normal_double",
+  "curand_poisson",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
@@ -575,6 +577,11 @@ function semanticReferenceCurandCallSupported(
   }
   if (SEMANTIC_CURAND_STATE_ONLY_CALLS.has(expression.callee.name)) {
     return expression.args.length === 1 && semanticCurandState(expression.args[0]!) !== undefined;
+  }
+  if (expression.callee.name === "curand_poisson") {
+    return expression.args.length === 2 &&
+      semanticCurandState(expression.args[0]!) !== undefined &&
+      semanticReferenceExpressionSupported(expression.args[1]!, "scalar", compiled);
   }
   if (SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(expression.callee.name)) {
     return expression.args.length === 3 &&
@@ -1541,6 +1548,31 @@ function evalSemanticCurandCall(
       Math.exp(mean + stddev * radius * Math.cos(angle)),
       Math.exp(mean + stddev * radius * Math.sin(angle)),
     ];
+  }
+  if (expression.callee.name === "curand_poisson") {
+    let current = semanticCurandStateRead(state, context) >>> 0;
+    const lambda = Math.fround(Math.max(0, evalNumber(expression.args[1]!, context)));
+    if (lambda <= 0) return 0;
+    if (lambda < 64) {
+      const limit = Math.fround(Math.exp(Math.fround(-lambda)));
+      let product = Math.fround(1);
+      let count = 0;
+      while (count < 512 && product > limit) {
+        current = curandNext(current);
+        product = Math.fround(product * Math.fround(Math.fround(current + 1) * Math.fround(2.3283064365386963e-10)));
+        count++;
+      }
+      semanticCurandStateWrite(state, current, context);
+      return Math.max(0, count - 1) >>> 0;
+    }
+    const first = curandNext(current);
+    const second = curandNext(first);
+    semanticCurandStateWrite(state, second, context);
+    const u1 = Math.fround(Math.max(Math.fround(Math.fround(first + 1) * Math.fround(2.3283064365386963e-10)), Math.fround(1.1754943508222875e-38)));
+    const u2 = Math.fround(Math.fround(second + 1) * Math.fround(2.3283064365386963e-10));
+    const normal = Math.fround(Math.fround(Math.sqrt(Math.fround(Math.fround(-2) * Math.fround(Math.log(u1))))) * Math.fround(Math.cos(Math.fround(Math.fround(2 * Math.PI) * u2))));
+    const value = Math.fround(lambda + Math.fround(Math.fround(Math.sqrt(lambda)) * normal));
+    return Math.max(0, Math.floor(Math.fround(value + Math.fround(0.5)))) >>> 0;
   }
   throw semanticReferenceError(`semantic reference does not support cuRAND call '${expression.callee.name}'`, expression.span);
 }

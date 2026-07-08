@@ -6678,6 +6678,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_log_normal2_storage" : "bg_curand_log_normal2";
       return `${helper}(${args[0] ?? "&state"}, f32(${args[1] ?? "0"}), f32(${args[2] ?? "1"}))`;
     }
+    case "curand_poisson": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_poisson_storage" : "bg_curand_poisson";
+      return `${helper}(${args[0] ?? "&state"}, f32(${args[1] ?? "0"}))`;
+    }
     case "atomicAdd":
     case "atomicAdd_system":
       return emitAtomicCallImpl("atomicAdd", expression, context, args, atomicCallbacks);

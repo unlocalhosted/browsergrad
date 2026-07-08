@@ -122,6 +122,7 @@ const SEMANTIC_CURAND_CALLS = new Set([
   "curand_log_normal",
   "curand_log_normal2",
   "curand_log_normal_double",
+  "curand_poisson",
 ]);
 const SEMANTIC_CURAND_VECTOR_CALLS = new Set(["curand_normal2", "curand_log_normal2"]);
 const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
@@ -136,6 +137,7 @@ const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
   "curand_log_normal",
   "curand_log_normal2",
   "curand_log_normal_double",
+  "curand_poisson",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
@@ -1152,6 +1154,11 @@ function semanticWgslCurandCallSupported(
   }
   if (SEMANTIC_CURAND_STATE_ONLY_CALLS.has(expression.callee.name)) {
     return expression.args.length === 1 && semanticCurandStateAddressSpace(expression.args[0]!) !== undefined;
+  }
+  if (expression.callee.name === "curand_poisson") {
+    return expression.args.length === 2 &&
+      semanticCurandStateAddressSpace(expression.args[0]!) !== undefined &&
+      semanticWgslExpressionSupported(expression.args[1]!, "scalar", ir);
   }
   if (SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(expression.callee.name)) {
     return expression.args.length === 3 &&
@@ -2859,6 +2866,10 @@ function emitSemanticCurandCall(
     const mean = emitSemanticExpressionAs(expression.args[1]!, ir, names, "f32", options, textureSpecializations);
     const stddev = emitSemanticExpressionAs(expression.args[2]!, ir, names, "f32", options, textureSpecializations);
     return `bg_curand_log_normal2${suffix}(${pointer.expression}, ${mean}, ${stddev})`;
+  }
+  if (expression.callee.name === "curand_poisson") {
+    const lambda = emitSemanticExpressionAs(expression.args[1]!, ir, names, "f32", options, textureSpecializations);
+    return `bg_curand_poisson${suffix}(${pointer.expression}, ${lambda})`;
   }
   throw semanticWgslError(`semantic WGSL does not support cuRAND call '${expression.callee.name}'`, expression.span);
 }
