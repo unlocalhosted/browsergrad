@@ -9913,6 +9913,26 @@ __global__ void curandNormalKernel(float *out) {
     expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
   });
 
+  it("lowers CUDA log-normal cuRAND draws through the deterministic browser RNG island", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void curandLogNormalKernel(float *out) {
+  curandState_t state;
+  curand_init(23ULL, threadIdx.x, 5, &state);
+  float x = curand_log_normal(&state, 0.25f, 0.5f);
+  float y = curand_log_normal_double(&state, 0.1f, 0.2f);
+  out[threadIdx.x] = x + y;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_curand_log_normal");
+    expect(compiled.wgsl).toContain("bg_curand_log_normal(&state, f32(0.25), f32(0.5))");
+    expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value) && value > 0)).toBe(true);
+  });
+
   it("lowers cuRAND calls against storage-backed state arrays", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {

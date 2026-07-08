@@ -224,6 +224,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["curand_uniform_double", [1, 1]],
   ["curand_normal", [1, 1]],
   ["curand_normal_double", [1, 1]],
+  ["curand_log_normal", [3, 3]],
+  ["curand_log_normal_double", [3, 3]],
   ["make_cuComplex", [2, 2]],
   ["make_cuFloatComplex", [2, 2]],
   ["cuCrealf", [1, 1]],
@@ -2131,9 +2133,14 @@ function validateCallExpression(
     callName === "curand_uniform" ||
     callName === "curand_uniform_double" ||
     callName === "curand_normal" ||
-    callName === "curand_normal_double"
+    callName === "curand_normal_double" ||
+    callName === "curand_log_normal" ||
+    callName === "curand_log_normal_double"
   ) {
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
+    for (const arg of expression.args.slice(1)) {
+      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    }
     return { kind: "scalar", valueType: "float" };
   }
 

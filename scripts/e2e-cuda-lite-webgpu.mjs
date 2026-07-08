@@ -1869,6 +1869,12 @@ __global__ void curandSharedState(float *out, unsigned int seed) {
   curand_init(seed, tid, 0, &states[tid]);
   out[tid] = curand_uniform(&states[tid]) + curand_normal(&states[tid]);
 }`,
+  curandLogNormalState: `
+__global__ void curandLogNormalState(curandState_t *states, float *out, unsigned int seed) {
+  unsigned int tid = threadIdx.x;
+  curand_init(seed, tid, 0, &states[tid]);
+  out[tid] = curand_log_normal(&states[tid], 0.25f, 0.5f) + curand_log_normal_double(&states[tid], 0.1f, 0.2f);
+}`,
   fp8ConvertHelpers: `
 __global__ void fp8ConvertHelpers(const uint* input, half* output, uint* encoded, int* as_int) {
   if (threadIdx.x == 0) {
@@ -12314,6 +12320,30 @@ const html = String.raw`<!doctype html>
                 0.977499783039093,
                 0.5716087818145752,
                 1.7168734073638916,
+              ],
+            },
+            tolerance: 0.001,
+          },
+          {
+            name: "helpers:curand-log-normal-state",
+            source: SOURCES.curandLogNormalState,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                states: new Uint32Array(4),
+                out: new Float32Array(4),
+              },
+              scalars: { seed: 1234 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                2.2057371139526367,
+                2.346277952194214,
+                2.4733479022979736,
+                2.2704269886016846,
               ],
             },
             tolerance: 0.001,

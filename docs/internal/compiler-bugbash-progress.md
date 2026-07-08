@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-08T06:02:36Z
+Last updated: 2026-07-08T06:09:36Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails after nested local pointer-param lowering; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | cuRAND deterministic state helpers now cover local, shared, and storage state through semantic IR/reference/WGSL |
+| Active work item | cuRAND log-normal draws now run through semantic IR/reference/WGSL |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- cuRAND log-normal draws: `curand_log_normal` and `curand_log_normal_double` now lower through the deterministic cuRAND semantic IR/reference/WGSL island for modeled local/shared/storage `curandState_t`, using native WebGPU `exp(mean + stddev * normal)` helpers instead of unsupported-call fallback; changed-fast passed typecheck, lint, compiler unit `634/0`, WGSL module unit `16/0`, selected pointer/storage WebGPU `125/0/0`, fixture metadata test, bugbash status test, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; exact native WebGPU fixture `helpers:curand-log-normal-state` passed `1/0/0` with pinned expected output and max diff `0.000025`
 - cuRAND deterministic state helpers: `curand_init`, `curand_uniform`, `curand_uniform_double`, `curand_normal`, and `curand_normal_double` over modeled local/shared/storage `curandState_t` now stay on semantic IR/reference/WGSL instead of using the private AST-shaped backend path; workgroup cuRAND state uses native `ptr<workgroup, u32>` helpers; the compatibility record marks this deterministic helper subset as native while keeping Sobol/advanced cuRAND outside the supported island; focused exact native WebGPU fixture `helpers:curand-shared-state` passed `1/0/0` with pinned expected output and max diff `0.000278`; changed-fast passed typecheck, compiler unit `633/0`, WGSL module unit `16/0`, fixture metadata test, bugbash status test, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`; prior storage proof included lint and exact `helpers:curand-storage-state` `1/0/0`
 - public compiler contract guard: source-scan unit now fails if `legacyIr`, `canRunOnGpu`, or `CompiledCudaLiteKernel.ir` is reintroduced into `packages/browsergrad-compiler/src`, preserving the semantic `kernelIr` + execution-plan readiness architecture; typecheck passed, focused guard unit `1/0`, compiler unit `632/0`
 - uchar surface reads: return-form `surf2Dread<unsigned char>` now stays on semantic IR/reference/WGSL instead of falling back to modeled surface helper emission; support is intentionally limited to surface-read expressions without broadening `uchar` local-scalar lowering, and exact WebGPU fixture `surface:uchar-read` passed as `single-dispatch` with pinned output and max diff `0`; typecheck passed, lint passed, focused regression unit `6/0`, compiler unit `631/0`, fixture metadata test passed, WebGPU smoke `572/0/0`, and fast auto-corpus WebGPU smoke `32/0/0` with skips `0`

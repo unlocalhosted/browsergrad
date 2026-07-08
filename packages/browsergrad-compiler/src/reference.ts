@@ -3105,6 +3105,18 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const u2 = (second + 1) * 2.3283064365386963e-10;
     return Math.sqrt(-2 * Math.log(u1)) * Math.cos(6.283185307179586 * u2);
   }
+  if (name === "curand_log_normal" || name === "curand_log_normal_double") {
+    const state = expression.args[0];
+    if (!state) throw compilerFailure(`${name} expects state address`);
+    const lvalue = resolveAddressArgument(state, context);
+    const first = curandNext(valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0);
+    const second = curandNext(first);
+    writeLValue(lvalue, second, context);
+    const u1 = Math.max((first + 1) * 2.3283064365386963e-10, 1.1754943508222875e-38);
+    const u2 = (second + 1) * 2.3283064365386963e-10;
+    const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(6.283185307179586 * u2);
+    return Math.exp(evalNumber(expression.args[1]!, context) + evalNumber(expression.args[2]!, context) * normal);
+  }
   if (name !== undefined && CUDA_CACHE_HINT_LOADS.has(name)) {
     const target = expression.args[0];
     if (!target) throw compilerFailure(`${name} expects pointer argument`);
