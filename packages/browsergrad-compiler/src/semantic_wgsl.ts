@@ -19,7 +19,7 @@ import type {
 import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
-import { emitFp8Helpers } from "./wgsl_support_helpers.js";
+import { emitCurandHelpers, emitFp8Helpers } from "./wgsl_support_helpers.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import {
   emitFloatAtomicAddHelper,
@@ -111,6 +111,7 @@ const SEMANTIC_NOOP_CALLS = new Set([
   "__prof_trigger",
   "__trap",
 ]);
+const SEMANTIC_CURAND_CALLS = new Set(["curand_init", "curand_uniform", "curand_uniform_double", "curand_normal", "curand_normal_double"]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__activemask",
@@ -607,6 +608,9 @@ export function emitSemanticKernelIrWgsl(
   if (semanticUsesFp8(ir)) {
     lines.push("", ...emitFp8Helpers());
   }
+  if (semanticUsesCurand(ir)) {
+    lines.push("", ...emitCurandHelpers());
+  }
   for (const constant of initializedScalarConstants) {
     lines.push(emitInitializedScalarConstant(constant, ir, names, options));
   }
@@ -1063,6 +1067,7 @@ function semanticWgslScalarCallSupported(
   if (fn && isSemanticWgslFloatVectorType(fn.returnType)) return false;
   return semanticWgslFunctionCallSupported(expression, ir) ||
     semanticWgslAtomicCallSupported(expression, ir) ||
+    semanticWgslCurandCallSupported(expression, ir) ||
     semanticWgslSubgroupCallSupported(expression, ir) ||
     semanticWgslAddressPredicateCallSupported(expression) ||
     semanticWgslMathCallSupported(expression) ||
@@ -1108,6 +1113,19 @@ function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
   const arity = semanticMathCallArity(expression.callee.name);
   return expression.args.length === arity && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
+}
+
+function semanticWgslCurandCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  if (expression.callee.kind !== "symbol" || !SEMANTIC_CURAND_CALLS.has(expression.callee.name)) return false;
+  if (expression.callee.name === "curand_init") {
+    return expression.args.length === 4 &&
+      expression.args.slice(0, 3).every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir)) &&
+      semanticCurandStateAddressSpace(expression.args[3]!) !== undefined;
+  }
+  return expression.args.length === 1 && semanticCurandStateAddressSpace(expression.args[0]!) !== undefined;
 }
 
 function semanticWgslSubgroupCallSupported(
@@ -1531,6 +1549,15 @@ function semanticWgslCallSupported(
   if (operation.callee === "assert") return operation.args.length === 1 && semanticWgslExpressionSupported(operation.args[0]!, "scalar", ir);
   if (operation.callee === "printf") return semanticWgslPrintfSupported(operation, ir);
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  if (operation.callee === "curand_init") {
+    return semanticWgslCurandCallSupported({
+      kind: "call",
+      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      args: operation.args,
+      valueType: "uint",
+      span: operation.span,
+    }, ir);
+  }
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -2694,6 +2721,7 @@ function emitSemanticCall(
   if (operation.callee === "assert") return [];
   if (operation.callee === "printf") return [];
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return [];
+  if (operation.callee === "curand_init") return [`${"  ".repeat(indentLevel)}${emitSemanticCurandInit(operation, ir, names, options, textureSpecializations)};`];
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
@@ -2736,6 +2764,52 @@ function emitSemanticLocalArrayFill(
     value,
     indentLevel,
   );
+}
+
+function emitSemanticCurandInit(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  const state = operation.args[3];
+  const pointer = semanticCurandStatePointer(state, ir, names, options);
+  if (!pointer || operation.args.length !== 4) throw semanticWgslError("curand_init expects a modeled state address", operation.span);
+  const suffix = pointer.addressSpace === "storage" ? "_storage" : "";
+  const seed = emitSemanticExpressionAs(operation.args[0]!, ir, names, "u32", options, textureSpecializations);
+  const sequence = emitSemanticExpressionAs(operation.args[1]!, ir, names, "u32", options, textureSpecializations);
+  const offset = emitSemanticExpressionAs(operation.args[2]!, ir, names, "u32", options, textureSpecializations);
+  return `bg_curand_init${suffix}(${seed}, ${sequence}, ${offset}, ${pointer.expression})`;
+}
+
+function emitSemanticCurandCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL cuRAND call requires symbol callee", expression.span);
+  if (expression.callee.name === "curand_init") {
+    return emitSemanticCurandInit({
+      kind: "call",
+      callee: expression.callee.name,
+      args: expression.args,
+      reads: [],
+      span: expression.span,
+    }, ir, names, options, textureSpecializations);
+  }
+  const pointer = semanticCurandStatePointer(expression.args[0], ir, names, options);
+  if (!pointer) throw semanticWgslError(`${expression.callee.name} expects a modeled state address`, expression.span);
+  const suffix = pointer.addressSpace === "storage" ? "_storage" : "";
+  if (expression.callee.name === "curand_uniform" || expression.callee.name === "curand_uniform_double") {
+    return `bg_curand_uniform${suffix}(${pointer.expression})`;
+  }
+  if (expression.callee.name === "curand_normal" || expression.callee.name === "curand_normal_double") {
+    return `bg_curand_normal${suffix}(${pointer.expression})`;
+  }
+  throw semanticWgslError(`semantic WGSL does not support cuRAND call '${expression.callee.name}'`, expression.span);
 }
 
 function emitSemanticLoop(
@@ -2897,6 +2971,7 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslCurandCallSupported(expression, ir)) return emitSemanticCurandCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslSubgroupCallSupported(expression, ir)) return emitSemanticSubgroupCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslAddressPredicateCallSupported(expression)) return emitSemanticAddressPredicateCall(expression);
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
@@ -4436,6 +4511,37 @@ function emitSemanticVectorMemoryRead(
   }).join(", ")})`;
 }
 
+function semanticCurandStateAddressSpace(expression: SemanticExpression | undefined): "function" | "storage" | undefined {
+  if (!expression || expression.kind !== "unary" || expression.operator !== "&") return undefined;
+  const target = expression.argument;
+  if (target.kind === "symbol" && target.addressSpace === "local") return "function";
+  if (target.kind !== "index") return undefined;
+  const ref = memoryRefFromIndexExpression(target);
+  if (!ref) return undefined;
+  if (ref.addressSpace === "local") return "function";
+  if (ref.addressSpace === "storage" || ref.addressSpace === "device-global") return "storage";
+  return undefined;
+}
+
+function semanticCurandStatePointer(
+  expression: SemanticExpression | undefined,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): { readonly addressSpace: "function" | "storage"; readonly expression: string } | undefined {
+  const addressSpace = semanticCurandStateAddressSpace(expression);
+  if (!addressSpace || !expression || expression.kind !== "unary" || expression.operator !== "&") return undefined;
+  if (expression.argument.kind === "symbol") {
+    return { addressSpace, expression: `&${nameFor(expression.argument.name, names)}` };
+  }
+  if (expression.argument.kind === "index") {
+    const ref = memoryRefFromIndexExpression(expression.argument);
+    if (!ref) return undefined;
+    return { addressSpace, expression: `&${emitSemanticMemoryRef({ ...ref, valueType: "uint" }, ir, names, options)}` };
+  }
+  return undefined;
+}
+
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
   const flattened = flattenMemoryRef(expression);
   if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared" && flattened.base.addressSpace !== "constant" && flattened.base.addressSpace !== "device-global" && flattened.base.addressSpace !== "local")) return undefined;
@@ -4503,6 +4609,26 @@ function semanticUsesGenericSurfaceWrite(ir: SemanticKernelIrModule): boolean {
 
 function semanticUsesFp8(ir: SemanticKernelIrModule): boolean {
   return semanticOperationsUseFp8(ir.operations) || ir.functions.some((fn) => semanticOperationsUseFp8(fn.body));
+}
+
+function semanticUsesCurand(ir: SemanticKernelIrModule): boolean {
+  return semanticOperationsUseCurand(ir.operations) || ir.functions.some((fn) => semanticOperationsUseCurand(fn.body));
+}
+
+function semanticOperationsUseCurand(operations: readonly SemanticKernelIrOperation[]): boolean {
+  for (const operation of operations) {
+    if (operation.kind === "call" && SEMANTIC_CURAND_CALLS.has(operation.callee)) return true;
+    if (semanticOperationExpressions(operation).some(semanticExpressionUsesCurand)) return true;
+    if (operation.kind === "branch" && (semanticOperationsUseCurand(operation.consequent) || semanticOperationsUseCurand(operation.alternate))) return true;
+    if (operation.kind === "loop" && semanticOperationsUseCurand(operation.body)) return true;
+    if (operation.kind === "block" && semanticOperationsUseCurand(operation.body)) return true;
+  }
+  return false;
+}
+
+function semanticExpressionUsesCurand(expression: SemanticExpression): boolean {
+  if (expression.kind === "call" && expression.callee.kind === "symbol" && SEMANTIC_CURAND_CALLS.has(expression.callee.name)) return true;
+  return semanticExpressionChildren(expression).some(semanticExpressionUsesCurand);
 }
 
 function semanticOperationsUseFp8(operations: readonly SemanticKernelIrOperation[]): boolean {

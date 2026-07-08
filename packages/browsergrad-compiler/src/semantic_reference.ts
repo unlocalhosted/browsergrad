@@ -31,6 +31,9 @@ import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, c
 type SemanticValue = number | Vector3 | number[];
 type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas" | "inc" | "dec";
 type SemanticControl = "fallthrough" | "return" | "break" | "continue";
+type SemanticCurandState =
+  | { readonly kind: "local"; readonly name: string; readonly span: SourceSpan }
+  | { readonly kind: "memory"; readonly ref: SemanticMemoryRef };
 
 const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
   ["atomicAdd", "add"],
@@ -119,6 +122,7 @@ const SEMANTIC_NOOP_CALLS = new Set([
   "__prof_trigger",
   "__trap",
 ]);
+const SEMANTIC_CURAND_CALLS = new Set(["curand_init", "curand_uniform", "curand_uniform_double", "curand_normal", "curand_normal_double"]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__activemask",
@@ -511,7 +515,7 @@ function semanticReferenceFloatAtomicOpSupported(atomicOp: SemanticAtomicOp): bo
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -532,6 +536,19 @@ function semanticReferenceMathCallSupported(expression: Extract<SemanticExpressi
   if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
   const arity = semanticMathCallArity(expression.callee.name);
   return expression.args.length === arity && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+}
+
+function semanticReferenceCurandCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.callee.kind !== "symbol" || !SEMANTIC_CURAND_CALLS.has(expression.callee.name)) return false;
+  if (expression.callee.name === "curand_init") {
+    return expression.args.length === 4 &&
+      expression.args.slice(0, 3).every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled)) &&
+      semanticCurandState(expression.args[3]!) !== undefined;
+  }
+  return expression.args.length === 1 && semanticCurandState(expression.args[0]!) !== undefined;
 }
 
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -772,6 +789,15 @@ function semanticReferenceCallSupported(
   if (operation.callee === "assert") return operation.args.length === 1 && semanticReferenceExpressionSupported(operation.args[0]!, "scalar", compiled);
   if (operation.callee === "printf") return semanticReferencePrintfSupported(operation, compiled);
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  if (operation.callee === "curand_init") {
+    return semanticReferenceCurandCallSupported({
+      kind: "call",
+      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      args: operation.args,
+      valueType: "uint",
+      span: operation.span,
+    }, compiled);
+  }
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
   if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
   const [target, value] = operation.args;
@@ -923,6 +949,7 @@ function semanticReferenceExpressionSupported(
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
+        semanticReferenceCurandCallSupported(expression, compiled) ||
         semanticReferenceSubgroupCallSupported(expression) ||
         semanticReferenceAddressPredicateCallSupported(expression) ||
         semanticReferenceMathCallSupported(expression) ||
@@ -998,6 +1025,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
 ): boolean {
   if (expression.kind === "call") {
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
+      semanticReferenceCurandCallSupported(expression, compiled) ||
       semanticReferenceFunctionCallSupported(expression, compiled) ||
       semanticReferenceSubgroupCallSupported(expression) ||
       semanticReferenceAddressPredicateCallSupported(expression) ||
@@ -1364,6 +1392,10 @@ function execSemanticCall(
   }
   if (operation.callee === "printf") return;
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return;
+  if (operation.callee === "curand_init") {
+    execSemanticCurandInit(operation, context);
+    return;
+  }
   if (semanticReferenceVoidFunctionCallSupported(operation, context.compiled)) {
     execSemanticVoidFunctionCall(operation, context);
     return;
@@ -1402,6 +1434,71 @@ function execSemanticLocalArrayFill(
   for (let index = 0; index < localValues.length; index++) {
     localValues[index] = Array.isArray(value) ? [...value] : value;
   }
+}
+
+function execSemanticCurandInit(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): void {
+  const state = semanticCurandState(operation.args[3]);
+  if (!state) throw semanticReferenceError("curand_init expects state address", operation.span);
+  const seed = evalNumber(operation.args[0]!, context) >>> 0;
+  const sequence = evalNumber(operation.args[1]!, context) >>> 0;
+  const offset = evalNumber(operation.args[2]!, context) >>> 0;
+  semanticCurandStateWrite(state, curandNext((seed ^ Math.imul(sequence, 747796405) ^ offset ^ 2891336453) >>> 0), context);
+}
+
+function evalSemanticCurandCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic cuRAND call requires symbol callee", expression.span);
+  const state = semanticCurandState(expression.args[0]);
+  if (!state) throw semanticReferenceError(`${expression.callee.name} expects state address`, expression.span);
+  if (expression.callee.name === "curand_uniform" || expression.callee.name === "curand_uniform_double") {
+    const next = curandNext(semanticCurandStateRead(state, context) >>> 0);
+    semanticCurandStateWrite(state, next, context);
+    return (next + 1) * 2.3283064365386963e-10;
+  }
+  if (expression.callee.name === "curand_normal" || expression.callee.name === "curand_normal_double") {
+    const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
+    const second = curandNext(first);
+    semanticCurandStateWrite(state, second, context);
+    const u1 = Math.max((first + 1) * 2.3283064365386963e-10, 1.1754943508222875e-38);
+    const u2 = (second + 1) * 2.3283064365386963e-10;
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  }
+  throw semanticReferenceError(`semantic reference does not support cuRAND call '${expression.callee.name}'`, expression.span);
+}
+
+function semanticCurandState(expression: SemanticExpression | undefined): SemanticCurandState | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "unary" && expression.operator === "&") {
+    if (expression.argument.kind === "symbol" && expression.argument.addressSpace === "local") {
+      return { kind: "local", name: expression.argument.name, span: expression.argument.span };
+    }
+    if (expression.argument.kind === "index") {
+      const ref = memoryRefFromIndexExpression(expression.argument);
+      return ref && (ref.addressSpace === "storage" || ref.addressSpace === "device-global" || ref.addressSpace === "shared" || ref.addressSpace === "local")
+        ? { kind: "memory", ref: { ...ref, valueType: "uint" } }
+        : undefined;
+    }
+  }
+  return undefined;
+}
+
+function semanticCurandStateRead(state: SemanticCurandState, context: SemanticReferenceContext): number {
+  return state.kind === "local"
+    ? Number(context.locals.get(state.name) ?? 0)
+    : readMemory(state.ref, context);
+}
+
+function semanticCurandStateWrite(state: SemanticCurandState, value: number, context: SemanticReferenceContext): void {
+  if (state.kind === "local") {
+    context.locals.set(state.name, value >>> 0);
+    return;
+  }
+  writeMemory(state.ref, value >>> 0, context);
 }
 
 function semanticAtomicValue(
@@ -1664,6 +1761,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     }
     case "call":
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
+      if (semanticReferenceCurandCallSupported(expression, context.compiled)) return evalSemanticCurandCall(expression, context);
       if (semanticReferenceSubgroupCallSupported(expression)) return evalSemanticSubgroupCall(expression, context);
       if (semanticReferenceAddressPredicateCallSupported(expression)) return evalSemanticAddressPredicateCall(expression);
       if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);
@@ -2215,6 +2313,10 @@ function float32ToUintBits(value: number): number {
   const view = new DataView(buffer);
   view.setFloat32(0, value, true);
   return view.getUint32(0, true);
+}
+
+function curandNext(state: number): number {
+  return (Math.imul(state >>> 0, 1664525) + 1013904223) >>> 0;
 }
 
 function roundSemanticHalf(value: number): number {

@@ -9929,7 +9929,9 @@ __global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {
     expect(compiled.wgsl).toContain("fn bg_curand_init_storage");
     expect(compiled.wgsl).toContain("fn bg_curand_uniform_storage");
     expect(compiled.wgsl).toContain("fn bg_curand_normal_storage");
-    expect(compiled.wgsl).toContain("bg_curand_init_storage(u32(bg_uniforms.seed), u32(tid), u32(0), &states[tid])");
+    expect(compiled.wgsl).toContain("bg_curand_init_storage(bg_uniforms.seed, tid, 0u, &states[tid])");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.kernelIr.operations.some((operation) => operation.kind === "call" && operation.callee === "curand_init")).toBe(true);
     expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
   });
 

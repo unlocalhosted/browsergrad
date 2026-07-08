@@ -12277,6 +12277,15 @@ const html = String.raw`<!doctype html>
               scalars: { seed: 1234 },
             }),
             output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                -0.7953461408615112,
+                0.977499783039093,
+                0.5716087818145752,
+                1.7168734073638916,
+              ],
+            },
             tolerance: 0.001,
           },
           {
