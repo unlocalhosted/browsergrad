@@ -3445,15 +3445,17 @@ function assignLocalVectorMember(
   const valueType = semanticExpressionValueType(expression.target.object);
   const lanes = cudaVectorSwizzleIndices(valueType, expression.target.property);
   if (lanes !== undefined && lanes.length > 1) {
-    if (expression.operator !== "=") throw semanticReferenceError("semantic reference vector swizzle assignment supports only '='", expression.target.span);
     const right = evalSemanticExpression(expression.value, context);
-    if (!Array.isArray(right)) throw semanticReferenceError("semantic reference vector swizzle assignment requires vector value", expression.value.span);
+    const assigned = expression.operator === "="
+      ? right
+      : evalVectorBinary(expression.operator.slice(0, -1), lanes.map((lane) => Number(current[lane] ?? 0)), right, expression.span);
+    if (!Array.isArray(assigned)) throw semanticReferenceError("semantic reference vector swizzle assignment requires vector value", expression.value.span);
     const next = [...current];
     lanes.forEach((lane, index) => {
-      next[lane] = Number(right[index] ?? 0);
+      next[lane] = Number(assigned[index] ?? 0);
     });
     context.locals.set(expression.target.object.name, next);
-    return next;
+    return assigned;
   }
   const lane = lanes?.[0] ?? (valueType === undefined ? undefined : cudaVectorFieldIndex(valueType, expression.target.property));
   if (lane === undefined) throw semanticReferenceError("semantic reference vector assignment requires modeled lane", expression.target.span);

@@ -1414,8 +1414,10 @@ __global__ void vector_swizzle_writes(float* out, uint* ui) {
   float2 next = make_float2(9.0f, 8.0f);
   value.xy = next;
   value.yx = value.zw;
+  value.xy += make_float2(1.0f, 2.0f);
   uint4 bits = make_uint4(5u, 6u, 7u, 8u);
   bits.s210 = make_uint3(11u, 12u, 13u);
+  bits.s210 += make_uint3(1u, 2u, 3u);
   out[0] = value.x;
   out[1] = value.y;
   out[2] = value.z;
@@ -1442,11 +1444,13 @@ __global__ void vector_swizzle_writes(float* out, uint* ui) {
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("value.xy = next;");
     expect(compiled.wgsl).toContain("value.yx = value.zw;");
+    expect(compiled.wgsl).toContain("value.xy = value.xy + vec2<f32>(f32(1.0), f32(2.0));");
     expect(compiled.wgsl).toContain("bits.zyx = vec3<u32>(u32(11u), u32(12u), u32(13u));");
-    expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 3, 4]);
-    expect([...result.buffers.ui as Uint32Array]).toEqual([13, 12, 11, 8]);
-    expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 3, 3, 4]);
-    expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([13, 12, 11, 8]);
+    expect(compiled.wgsl).toContain("bits.zyx = bits.zyx + vec3<u32>(u32(1u), u32(2u), u32(3u));");
+    expect([...result.buffers.out as Float32Array]).toEqual([5, 5, 3, 4]);
+    expect([...result.buffers.ui as Uint32Array]).toEqual([16, 14, 12, 8]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([5, 5, 3, 4]);
+    expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([16, 14, 12, 8]);
   });
 
   it("rejects repeated CUDA vector swizzle write targets", () => {

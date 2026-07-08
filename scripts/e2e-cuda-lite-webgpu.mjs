@@ -587,8 +587,10 @@ __global__ void vectorSwizzleWrite(float* out, uint* ui) {
   float4 value = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
   value.xy = make_float2(9.0f, 8.0f);
   value.yx = value.zw;
+  value.xy += make_float2(1.0f, 2.0f);
   uint4 bits = make_uint4(5u, 6u, 7u, 8u);
   bits.s210 = make_uint3(11u, 12u, 13u);
+  bits.s210 += make_uint3(1u, 2u, 3u);
   out[0] = value.x;
   out[1] = value.y;
   out[2] = value.z;
@@ -11345,7 +11347,7 @@ const html = String.raw`<!doctype html>
               },
             }),
             output: "out",
-            expectedOutput: { type: "Float32Array", data: [4, 3, 3, 4] },
+            expectedOutput: { type: "Float32Array", data: [5, 5, 3, 4] },
           },
           {
             name: "helpers:vector-cache-hint-dynamic-read",

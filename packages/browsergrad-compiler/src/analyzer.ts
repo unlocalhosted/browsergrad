@@ -4242,10 +4242,6 @@ function validateNonCallExpression(
           diagnostics.push(error("unsupported-scalar-expression", "complex assignment expects a complex value", expression.right.span));
         }
       } else if (left.kind === "vector") {
-        const swizzleTarget = vectorSwizzleAssignmentTarget(expression.left, scope);
-        if (swizzleTarget && swizzleTarget.length > 1 && expression.operator !== "=") {
-          diagnostics.push(error("unsupported-vector-assignment", "CUDA vector swizzle compound assignment is not modeled", expression.left.span));
-        }
         if (expression.operator === "=" && right.kind !== "vector" && right.kind !== "unknown" && !isFloat2ComplexCompatible(left.valueType, right)) {
           diagnostics.push(error("unsupported-vector-assignment", "CUDA vector assignment expects a CUDA vector value", expression.right.span));
         } else if (expression.operator !== "=") {
@@ -4391,14 +4387,6 @@ function validateLValueExpression(
     return;
   }
   diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, shared element, or device global", expression.span));
-}
-
-function vectorSwizzleAssignmentTarget(
-  expression: CudaLiteExpression,
-  scope: Scope,
-): readonly number[] | undefined {
-  if (expression.kind !== "member" || expression.object.kind !== "identifier") return undefined;
-  return cudaVectorSwizzleIndices(lookupSymbol(expression.object.name, scope, expression.object.span)?.valueType, expression.property);
 }
 
 function isPointerRebaseOperator(

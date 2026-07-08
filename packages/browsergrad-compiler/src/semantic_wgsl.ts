@@ -2383,8 +2383,11 @@ function emitSemanticAssignmentStatement(
     const target = emitSemanticMember(expression.target, ir, names, options);
     const targetValueType = semanticExpressionValueType(expression.target);
     const value = isCudaVectorType(targetValueType)
-      ? emitSemanticExpression(expression.value, ir, names, options, textureSpecializations)
+      ? emitSemanticVectorOperand(expression.value, targetValueType, ir, names, options, textureSpecializations)
       : emitSemanticExpressionAs(expression.value, ir, names, wgslVectorScalar(semanticExpressionVectorValueType(expression.target.object, ir)), options, textureSpecializations);
+    if (isCudaVectorType(targetValueType) && expression.operator !== "=") {
+      return `${target} = ${target} ${expression.operator.slice(0, -1)} ${value}`;
+    }
     if (expression.operator === "+=") return `${target} += ${value}`;
     if (expression.operator === "-=") return `${target} -= ${value}`;
     return `${target} = ${value}`;
