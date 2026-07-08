@@ -10238,6 +10238,51 @@ __global__ void half2Compare(const half2 *a, const half2 *b, half2 *vec, uint *m
     expect(Array.from(semanticResult.buffers.flags as Iterable<number>)).toEqual(expectedFlags);
   });
 
+  it("lowers CUDA half2 NaN-propagating min/max intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half2MinMaxNan(const half2 *a, const half2 *b, half2 *out, half2 *nanFlags) {
+  half2 x = a[0];
+  half2 y = b[0];
+  half2 nx = a[1];
+  half2 ny = b[1];
+  out[0] = __hmin2_nan(x, y);
+  out[1] = __hmax2_nan(x, y);
+  out[2] = __hmin2_nan(nx, ny);
+  out[3] = __hmax2_nan(nx, ny);
+  nanFlags[0] = __hisnan2(out[2]);
+  nanFlags[1] = __hisnan2(out[3]);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        a: createWgslFloat16Array([1, 4, NaN, 2]),
+        b: createWgslFloat16Array([3, 2, 5, NaN]),
+        out: createWgslFloat16Array(8),
+        nanFlags: createWgslFloat16Array(4),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const out = Array.from(result.buffers.out as Iterable<number>);
+    const semanticOut = Array.from(semanticResult.buffers.out as Iterable<number>);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(out.slice(0, 4)).toEqual([1, 2, 3, 4]);
+    expect(Number.isNaN(out[4])).toBe(true);
+    expect(Number.isNaN(out[5])).toBe(true);
+    expect(Number.isNaN(out[6])).toBe(true);
+    expect(Number.isNaN(out[7])).toBe(true);
+    expect(Array.from(result.buffers.nanFlags as Iterable<number>)).toEqual([1, 1, 1, 1]);
+    expect(semanticOut.slice(0, 4)).toEqual([1, 2, 3, 4]);
+    expect(Number.isNaN(semanticOut[4])).toBe(true);
+    expect(Number.isNaN(semanticOut[5])).toBe(true);
+    expect(Number.isNaN(semanticOut[6])).toBe(true);
+    expect(Number.isNaN(semanticOut[7])).toBe(true);
+    expect(Array.from(semanticResult.buffers.nanFlags as Iterable<number>)).toEqual([1, 1, 1, 1]);
+  });
+
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void intrinsic_pack(half2 *h, float2 *f, float *out, uint *bits) {

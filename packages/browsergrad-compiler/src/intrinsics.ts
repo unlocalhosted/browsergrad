@@ -493,6 +493,8 @@ const HALF_INTRINSICS = [
   intrinsic("__hfma2_sat", [3, 3], "half2", () => 0, (args) => emitHalf2Saturate(`fma(${args[0] ?? "vec2<f16>()"}, ${args[1] ?? "vec2<f16>()"}, ${args[2] ?? "vec2<f16>()"})`), HALF_FEATURES),
   intrinsic("__hmin2", [2, 2], "half2", () => 0, (args) => `min(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hmax2", [2, 2], "half2", () => 0, (args) => `max(${args.join(", ")})`, HALF_FEATURES),
+  intrinsic("__hmin2_nan", [2, 2], "half2", () => 0, (args) => emitHalf2NanMinMax("min", args), HALF_FEATURES),
+  intrinsic("__hmax2_nan", [2, 2], "half2", () => 0, (args) => emitHalf2NanMinMax("max", args), HALF_FEATURES),
   intrinsic("__half22float2", [1, 1], "float2", () => 0, (args) => `vec2<f32>(${args[0] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__half2_as_uint", [1, 1], "uint", () => 0, (args) => `pack2x16float(vec2<f32>(f32((${args[0] ?? "vec2<f16>()"}).x), f32((${args[0] ?? "vec2<f16>()"}).y)))`, HALF_FEATURES),
   intrinsic("__uint_as_half2", [1, 1], "half2", () => 0, (args) => `vec2<f16>(unpack2x16float(u32(${args[0] ?? "0"})))`, HALF_FEATURES),
@@ -655,6 +657,12 @@ function emitHalf2ComparisonPredicate(name: string, args: readonly string[]): st
 function emitHalf2IsNanPredicate(value: string): string {
   const bits = `bitcast<vec2<u32>>(vec2<f32>(${value}))`;
   return `((${bits} & vec2<u32>(0x7fffffffu)) > vec2<u32>(0x7f800000u))`;
+}
+
+function emitHalf2NanMinMax(op: "min" | "max", args: readonly string[]): string {
+  const left = args[0] ?? "vec2<f16>()";
+  const right = args[1] ?? "vec2<f16>()";
+  return `select(${op}(${left}, ${right}), (${left} + ${right}), ${emitHalf2IsNanPredicate(left)} | ${emitHalf2IsNanPredicate(right)})`;
 }
 
 function half2ComparisonOperator(name: string): "==" | "!=" | ">" | ">=" | "<" | "<=" {

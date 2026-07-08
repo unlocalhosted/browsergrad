@@ -2725,7 +2725,9 @@ function isHalf2VectorIntrinsic(name: string): boolean {
     name === "__hfma2_rn" ||
     name === "__hfma2_sat" ||
     name === "__hmin2" ||
-    name === "__hmax2";
+    name === "__hmax2" ||
+    name === "__hmin2_nan" ||
+    name === "__hmax2_nan";
 }
 
 function isHalf2VectorComparisonIntrinsic(name: string): boolean {

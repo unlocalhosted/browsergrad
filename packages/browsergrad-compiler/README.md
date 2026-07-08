@@ -130,9 +130,10 @@ Scalar half helpers lower behind `shader-f16`: `__half2float`, `__float2half`,
 `__hmin`, `__hmax`, `__heq`, `__hne`, `__hgt`, `__hge`, `__hlt`, and
 `__hle`.
 Half2 helpers include arithmetic, unary math, ordered/unordered comparison
-vectors, comparison masks, boolean reductions, and `__hisnan2`; these lower
-through the same semantic reference/WGSL path and can run in explicit f32
-compatibility mode when `shader-f16` is unavailable.
+vectors, comparison masks, boolean reductions, `__hisnan2`, and
+NaN-propagating `__hmin2_nan` / `__hmax2_nan`; these lower through the same
+semantic reference/WGSL path and can run in explicit f32 compatibility mode
+when `shader-f16` is unavailable.
 CUDA/C named constants such as `INFINITY`, `NAN`, `FLT_MAX`, `M_PI`,
 `cudaMemcpyDeviceToDevice`, and stream/event flag values lower through the same
 analyzer, CPU-reference, and WGSL path.

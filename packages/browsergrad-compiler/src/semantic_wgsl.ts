@@ -109,7 +109,7 @@ const SEMANTIC_FP8_CALLS = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_t
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
   "__hisnan2", "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2", "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
-  "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2",
+  "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
@@ -1742,7 +1742,7 @@ function semanticWgslHalf2CallSupported(
   if (isSemanticHalf2ComparisonCall(name)) {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
   }
-  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
+  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2" || name === "__hmin2_nan" || name === "__hmax2_nan") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
   }
   if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat") {
@@ -4523,10 +4523,13 @@ function emitSemanticHalf2Call(
     const value = `(${emitHalf2(left)} ${operator} ${emitHalf2(right)})`;
     return name.endsWith("_sat") ? wgslSaturateHalf2(value) : value;
   }
-  if (name === "__hmin2" || name === "__hmax2") {
+  if (name === "__hmin2" || name === "__hmax2" || name === "__hmin2_nan" || name === "__hmax2_nan") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${name} expects two half2 operands`, expression.span);
-    return `${name === "__hmin2" ? "min" : "max"}(${emitHalf2(left)}, ${emitHalf2(right)})`;
+    const lhs = emitHalf2(left);
+    const rhs = emitHalf2(right);
+    if (name === "__hmin2_nan" || name === "__hmax2_nan") return emitSemanticHalf2NanMinMax(name === "__hmin2_nan" ? "min" : "max", lhs, rhs);
+    return `${name === "__hmin2" ? "min" : "max"}(${lhs}, ${rhs})`;
   }
   if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat") {
     const [left, right, addend] = expression.args;
@@ -4681,6 +4684,10 @@ function emitSemanticHalf2ComparisonPredicate(name: string, left: string, right:
 function emitSemanticHalf2IsNanPredicate(value: string): string {
   const bits = `bitcast<vec2<u32>>(vec2<f32>(${value}))`;
   return `((${bits} & vec2<u32>(0x7fffffffu)) > vec2<u32>(0x7f800000u))`;
+}
+
+function emitSemanticHalf2NanMinMax(op: "min" | "max", left: string, right: string): string {
+  return `select(${op}(${left}, ${right}), (${left} + ${right}), ${emitSemanticHalf2IsNanPredicate(left)} | ${emitSemanticHalf2IsNanPredicate(right)})`;
 }
 
 function emitSemanticBf162Call(

@@ -3644,7 +3644,9 @@ function isHalf2VectorIntrinsic(name: string | undefined): boolean {
     name === "__hfma2_rn" ||
     name === "__hfma2_sat" ||
     name === "__hmin2" ||
-    name === "__hmax2";
+    name === "__hmax2" ||
+    name === "__hmin2_nan" ||
+    name === "__hmax2_nan";
 }
 
 function isHalf2UnaryIntrinsic(name: string | undefined): boolean {
@@ -3781,8 +3783,10 @@ function half2IntrinsicOperator(name: string | undefined): (left: number, right:
     case "__hmul2_sat":
       return (left, right) => saturateHalf(left * right);
     case "__hmin2":
+    case "__hmin2_nan":
       return Math.min;
     case "__hmax2":
+    case "__hmax2_nan":
       return Math.max;
     default:
       throw compilerFailure(`unsupported half2 intrinsic '${name ?? "<expr>"}'`);

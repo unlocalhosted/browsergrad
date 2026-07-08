@@ -128,7 +128,7 @@ const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs",
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
   "__hisnan2", "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2", "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
-  "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2",
+  "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
@@ -856,7 +856,7 @@ function semanticReferenceHalf2CallSupported(
   if (isSemanticHalf2ComparisonCall(name)) {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
-  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
+  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2" || name === "__hmin2_nan" || name === "__hmax2_nan") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
   if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat") {
@@ -3523,7 +3523,7 @@ function evalSemanticHalf2Call(
     if (isSemanticHalf2MaskComparisonCall(name)) return ((lanes[0] ? 0xffff : 0) | (lanes[1] ? 0xffff0000 : 0)) >>> 0;
     return lanes.map((lane) => lane ? 1 : 0);
   }
-  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
+  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2" || name === "__hmin2_nan" || name === "__hmax2_nan") {
     const left = half2Arg(0);
     const right = half2Arg(1);
     return [0, 1].map((lane) => {
@@ -3535,7 +3535,7 @@ function evalSemanticHalf2Call(
       if (name === "__hsub2_sat") return saturateSemanticHalf(lhs - rhs);
       if (name === "__hmul2" || name === "__hmul2_rn") return roundSemanticHalf(lhs * rhs);
       if (name === "__hmul2_sat") return saturateSemanticHalf(lhs * rhs);
-      if (name === "__hmin2") return roundSemanticHalf(Math.min(lhs, rhs));
+      if (name === "__hmin2" || name === "__hmin2_nan") return roundSemanticHalf(Math.min(lhs, rhs));
       return roundSemanticHalf(Math.max(lhs, rhs));
     });
   }

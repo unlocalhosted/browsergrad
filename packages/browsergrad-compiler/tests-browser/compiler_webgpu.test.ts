@@ -2585,6 +2585,47 @@ __global__ void half2Compare(const half2* a, const half2* b, half2* vec, uint* m
     expect([...actual.buffers.flags as Int32Array]).toEqual([0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1]);
   });
 
+  it("runs half2 NaN-propagating min/max intrinsics through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void half2MinMaxNan(const half2* a, const half2* b, half2* out, half2* nanFlags) {
+  if (threadIdx.x < 1) {
+    half2 x = a[0];
+    half2 y = b[0];
+    half2 nx = a[1];
+    half2 ny = b[1];
+    out[0] = __hmin2_nan(x, y);
+    out[1] = __hmax2_nan(x, y);
+    out[2] = __hmin2_nan(nx, ny);
+    out[3] = __hmax2_nan(nx, ny);
+    nanFlags[0] = __hisnan2(out[2]);
+    nanFlags[1] = __hisnan2(out[3]);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      f16Mode: "f32",
+      workgroupSize: [1, 1, 1],
+    });
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, {
+      buffers: {
+        a: new Float32Array([1, 4, NaN, 2]),
+        b: new Float32Array([3, 2, 5, NaN]),
+        out: new Float32Array(8),
+        nanFlags: new Float32Array(4),
+      },
+    }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
+    const out = [...actual.buffers.out as Float32Array];
+
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(out.slice(0, 4)).toEqual([1, 2, 3, 4]);
+    expect(Number.isNaN(out[4])).toBe(true);
+    expect(Number.isNaN(out[5])).toBe(true);
+    expect(Number.isNaN(out[6])).toBe(true);
+    expect(Number.isNaN(out[7])).toBe(true);
+    expect([...actual.buffers.nanFlags as Float32Array]).toEqual([1, 1, 1, 1]);
+  });
+
   it("updates prepared half scalar uniforms in f32 compatibility mode", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();
