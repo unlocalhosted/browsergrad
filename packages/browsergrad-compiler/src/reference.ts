@@ -4025,12 +4025,14 @@ function evalCooperativeGroupCall(
   const args = expression.args.map((arg) => evalNumber(arg, context));
   if (callee.property === "sync") return 0;
   if (callee.property === "size") {
+    if (value.groupKind === "grid") return gridThreadCount(context);
     if (value.groupKind === "tile") return cooperativeTileParticipantCount(value, context);
     return context.blockDim.x * context.blockDim.y * context.blockDim.z;
   }
   if (callee.property === "thread_rank") {
     const localRank = localLinearRank(context);
     if (value.partitionPredicate) return localRank % (value.tileSize ?? 32);
+    if (value.groupKind === "grid") return globalLinearRank(context);
     if (value.groupKind === "tile") return localRank % (value.tileSize ?? 32);
     return localRank;
   }
@@ -4098,6 +4100,22 @@ function localLinearRank(context: ThreadContext): number {
   return context.threadIdx.x +
     context.threadIdx.y * context.blockDim.x +
     context.threadIdx.z * context.blockDim.x * context.blockDim.y;
+}
+
+function blockLinearRank(context: ThreadContext): number {
+  return context.blockIdx.x +
+    context.blockIdx.y * context.gridDim.x +
+    context.blockIdx.z * context.gridDim.x * context.gridDim.y;
+}
+
+function globalLinearRank(context: ThreadContext): number {
+  return localLinearRank(context) +
+    blockLinearRank(context) * context.blockDim.x * context.blockDim.y * context.blockDim.z;
+}
+
+function gridThreadCount(context: ThreadContext): number {
+  return context.gridDim.x * context.gridDim.y * context.gridDim.z *
+    context.blockDim.x * context.blockDim.y * context.blockDim.z;
 }
 
 function deviceFunctionArgs(

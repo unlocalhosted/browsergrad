@@ -233,6 +233,25 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
+    sourceKey: "corpusCudaSamplesReduceSinglePassMultiBlockCg",
+    caseName: "corpus:cuda-samples:reduceSinglePassMultiBlockCG_grid_sync",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/2_Concepts_and_Techniques/reductionMultiBlockCG/reductionMultiBlockCG.cu",
+    kernelName: "reduceSinglePassMultiBlockCG",
+    workgroupSize: [4, 1, 1],
+    options: { f64Mode: "f32", dynamicSharedMemory: { sdata: 4 } },
+    launch: { gridDim: [2, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        g_idata: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+        g_odata: { type: "Float32Array", length: 2 },
+      },
+      scalars: { n: 8 },
+    },
+    output: "g_odata",
+    expectedOutput: { type: "Float32Array", data: [36, 26] },
+  },
+  {
     sourceKey: "corpusCudaSamplesSimplePitchLinearTextureShiftArray",
     caseName: "corpus:cuda-samples:shiftArray_normalized_wrap",
     corpusId: "cuda-samples",

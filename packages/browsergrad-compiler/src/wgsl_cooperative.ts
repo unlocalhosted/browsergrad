@@ -44,6 +44,7 @@ export function emitCooperativeGroupCall(
   if (callee.property === "size") {
     const partitionSize = emitCooperativePartitionSize(group, context, callbacks);
     if (partitionSize) return partitionSize;
+    if (group.groupKind === "grid") return emitGridThreadCount(context);
     if (group.groupKind === "thread" && group.dynamicTileSizeName) return `i32(${group.dynamicTileSizeName})`;
     if (group.groupKind === "tile") return String(group.tileSize ?? 32);
     return String(context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2]);
@@ -51,6 +52,7 @@ export function emitCooperativeGroupCall(
   if (callee.property === "thread_rank") {
     const partitionRank = emitCooperativePartitionRank(group, context, callbacks);
     if (partitionRank) return partitionRank;
+    if (group.groupKind === "grid") return emitGlobalLinearRank(context);
     const localRank = emitLocalLinearRank(context);
     if (group.groupKind === "thread" && group.dynamicTileSizeName) return `(${localRank} % i32(${group.dynamicTileSizeName}))`;
     if (group.groupKind === "tile") return `(${localRank} % ${group.tileSize ?? 32})`;
@@ -367,6 +369,16 @@ export function emitLocalLinearRank(context: EmitContext): string {
   return `i32(local_id.x + local_id.y * ${context.ir.workgroupSize[0]}u + local_id.z * ${context.ir.workgroupSize[0] * context.ir.workgroupSize[1]}u)`;
 }
 
+function emitGlobalLinearRank(context: EmitContext): string {
+  const blockSize = context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2];
+  return `(${emitLocalLinearRank(context)} + i32(${blockSize}u * (workgroup_id.x + workgroup_id.y * num_workgroups.x + workgroup_id.z * num_workgroups.x * num_workgroups.y)))`;
+}
+
+function emitGridThreadCount(context: EmitContext): string {
+  const blockSize = context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2];
+  return `i32(${blockSize}u * num_workgroups.x * num_workgroups.y * num_workgroups.z)`;
+}
+
 function emitCooperativeNamespaceCall(
   expression: CudaLiteCallExpression,
   context: EmitContext,
@@ -396,7 +408,6 @@ function emitCooperativeNamespaceCall(
   if (vectorReduce !== undefined) return vectorReduce;
   const value = expression.args[1] ? callbacks.emitExpression(expression.args[1]) : "0";
   const op = cooperativeReductionOpName(expression.args[2]);
-  if (context.subgroupMode === "scalar") return value;
   const partitionPredicate = emitCooperativePartitionPredicate(group, context, callbacks);
   if (partitionPredicate) {
     const valueType = scalarWarpValueType(expression.args[1]!, callbacks, "cooperative group reduce");
@@ -635,7 +646,6 @@ function emitVectorCooperativeNamespaceReduce(
   if (!valueExpression) return undefined;
   const valueType = callbacks.expressionValueType(valueExpression);
   if (!isCudaVectorType(valueType)) return undefined;
-  if (context.subgroupMode === "scalar") return callbacks.emitExpression(valueExpression);
   const opName = opExpression ? expressionName(opExpression) : undefined;
   const op = opName ? context.deviceFunctionFor(opName) : undefined;
   if (!op || op.returnType !== valueType) {

@@ -1744,7 +1744,7 @@ function validateCallExpression(
   const callName = expressionName(expression.callee);
   const namespaceCooperativeCall = cooperativeNamespaceCall(expression, scope);
   if (namespaceCooperativeCall) {
-    return validateCooperativeNamespaceCall(expression, namespaceCooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, compatibilityDiagnosticsReachable);
+    return validateCooperativeNamespaceCall(expression, namespaceCooperativeCall, diagnostics, walkExpression, scope, compatibilityDiagnosticsReachable);
   }
   const cooperativeCall = cooperativeGroupCall(expression, scope);
   if (cooperativeCall) {
@@ -3194,7 +3194,6 @@ function validateCooperativeGroupCall(
 function validateCooperativeNamespaceCall(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   call: { readonly symbol: SymbolInfo; readonly method: string; readonly groupArg: CudaLiteExpression },
-  requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   scope: Scope,
@@ -3212,7 +3211,6 @@ function validateCooperativeNamespaceCall(
     return { kind: "scalar" };
   }
   if (method === "reduce") {
-    requiredFeatures.add("subgroups");
     if (expression.args.length !== 3) diagnostics.push(error("invalid-call-arity", "cg::reduce expects 3 arguments", expression.span));
     if (symbol.groupKind !== "tile" && symbol.groupKind !== "thread") {
       diagnostics.push(error("unsupported-cooperative-groups", "cg::reduce currently supports tile-like cooperative groups", groupArg.span));

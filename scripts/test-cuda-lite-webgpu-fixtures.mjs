@@ -17,6 +17,7 @@ import { cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs
 import {
   autoCorpusSmokeCacheInputHash,
   autoCorpusSmokeCachePath,
+  compiledHasReferenceUnsupportedDeviceFunctionBarrier,
   corpusExecutionFixturesForCaseFilters,
   fixtureJsLiteral,
   inferAutoCorpusWorkgroupSize,
@@ -46,6 +47,30 @@ assert.deepEqual(
   inferAutoCorpusWorkgroupSize("__global__ void kernel() {}"),
   [32, 1, 1],
 );
+assert.equal(compiledHasReferenceUnsupportedDeviceFunctionBarrier({
+  analysis: {
+    functions: [{
+      body: [{ kind: "expression", expression: { kind: "call", callee: { kind: "identifier", name: "__syncthreads" }, args: [] } }],
+    }],
+  },
+}), true);
+assert.equal(compiledHasReferenceUnsupportedDeviceFunctionBarrier({
+  analysis: {
+    functions: [{
+      body: [{ kind: "expression", expression: { kind: "call", callee: { kind: "member", object: { kind: "identifier", name: "group" }, property: "sync" }, args: [] } }],
+    }],
+  },
+}), true);
+assert.equal(compiledHasReferenceUnsupportedDeviceFunctionBarrier({
+  analysis: {
+    functions: [{
+      body: [{ kind: "return", value: { kind: "call", callee: { kind: "member", object: { kind: "identifier", name: "cg" }, property: "reduce" }, args: [] } }],
+    }],
+  },
+}), true);
+assert.equal(compiledHasReferenceUnsupportedDeviceFunctionBarrier({
+  analysis: { functions: [{ body: [{ kind: "return", value: { kind: "literal", value: 1 } }] }] },
+}), false);
 
 assert.equal(effectiveAutoCorpusSmokeLimit(0, []), 0);
 assert.equal(effectiveAutoCorpusSmokeLimit(0, ["corpus:llm.c:kernel"]), 0);
@@ -82,7 +107,7 @@ const cachePathB = autoCorpusSmokeCachePath("/tmp/browsergrad", {
   allowedRequiredFeatures: new Set(["shader-f16", "subgroups"]),
   inputHash: "def",
 });
-assert.match(cachePathA, /v5/u);
+assert.match(cachePathA, /v6/u);
 assert.match(cachePathA, /sig-abc/u);
 assert.match(cachePathA, /corpora-leetcuda/u);
 assert.match(cachePathA, /features-shader-f16-subgroups/u);

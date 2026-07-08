@@ -174,7 +174,7 @@ export function autoCorpusSmokeCachePath(root, options) {
   const features = [...options.allowedRequiredFeatures].sort().join("-");
   const corpora = [...(options.corpusIds ?? [])].sort().join("-");
   const key = [
-    "v5",
+    "v6",
     `limit-${options.limit}`,
     `mode-${options.verifyMode}`,
     `profile-${options.profile}`,
@@ -307,6 +307,7 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptio
   try {
     const compiled = compiler.compileCudaLiteKernelForWebGpu(source, compileOptions);
     if (compiled.kernelIr.requiredFeatures.some((feature) => !allowedRequiredFeatures.has(feature))) return undefined;
+    if (verifyMode === "reference" && compiledHasReferenceUnsupportedDeviceFunctionBarrier(compiled)) return undefined;
     const input = syntheticInputForCompiled(compiled);
     if (verifyMode === "reference" && Object.keys(input.buffers).length === 0) return undefined;
     const launch = syntheticLaunchForCompiled(compiled);
@@ -341,6 +342,68 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptio
   } catch {
     return undefined;
   }
+}
+
+const REFERENCE_UNSUPPORTED_DEVICE_FUNCTION_BARRIERS = new Set([
+  "__syncthreads",
+  "__syncthreads_count",
+  "__syncthreads_and",
+  "__syncthreads_or",
+  "__syncwarp",
+]);
+const REFERENCE_UNSUPPORTED_DEVICE_FUNCTION_COLLECTIVE_MEMBERS = new Set([
+  "all",
+  "any",
+  "ballot",
+  "exclusive_scan",
+  "inclusive_scan",
+  "reduce",
+  "shfl",
+  "shfl_down",
+  "shfl_up",
+  "shfl_xor",
+  "sync",
+]);
+
+export function compiledHasReferenceUnsupportedDeviceFunctionBarrier(compiled) {
+  for (const fn of compiled?.analysis?.functions ?? []) {
+    if (nodeContainsReferenceUnsupportedDeviceFunctionBarrier(fn.body)) return true;
+  }
+  return false;
+}
+
+function nodeContainsReferenceUnsupportedDeviceFunctionBarrier(node) {
+  if (node === null || node === undefined) return false;
+  if (Array.isArray(node)) return node.some(nodeContainsReferenceUnsupportedDeviceFunctionBarrier);
+  if (typeof node !== "object") return false;
+  if (node.kind === "call" && isReferenceUnsupportedBarrierCall(node)) return true;
+  return Object.values(node).some(nodeContainsReferenceUnsupportedDeviceFunctionBarrier);
+}
+
+function isReferenceUnsupportedBarrierCall(expression) {
+  const callee = expression.callee;
+  if (!callee || typeof callee !== "object") return false;
+  const name = cudaLiteExpressionName(callee);
+  if (name && REFERENCE_UNSUPPORTED_DEVICE_FUNCTION_BARRIERS.has(name)) return true;
+  for (const member of REFERENCE_UNSUPPORTED_DEVICE_FUNCTION_COLLECTIVE_MEMBERS) {
+    if (name?.endsWith(`::${member}`) || name?.endsWith(`.${member}`)) return true;
+  }
+  return callee.kind === "member" && REFERENCE_UNSUPPORTED_DEVICE_FUNCTION_COLLECTIVE_MEMBERS.has(callee.property);
+}
+
+function cudaLiteExpressionName(expression) {
+  if (!expression || typeof expression !== "object") return undefined;
+  if (expression.kind === "identifier") return expression.name;
+  if (expression.kind === "member") {
+    const object = cudaLiteExpressionName(expression.object);
+    return object ? `${object}.${expression.property}` : expression.property;
+  }
+  if (expression.kind === "namespace") return expression.name;
+  if (expression.kind === "qualified") {
+    const object = cudaLiteExpressionName(expression.object);
+    return object ? `${object}::${expression.name}` : expression.name;
+  }
+  return undefined;
 }
 
 function nonEmptyDynamicSharedMemory(value) {

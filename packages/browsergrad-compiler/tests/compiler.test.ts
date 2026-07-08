@@ -6671,6 +6671,25 @@ __global__ void gridPhases(float *scratch, float *out) {
     if (executionPlan.supported) expect(executionPlan.steps).toHaveLength(2);
   });
 
+  it("lowers grid cooperative group rank and size across all blocks", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void gridRankSize(int *out) {
+  cg::grid_group grid = cg::this_grid();
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  out[idx] = grid.size() * 10 + grid.thread_rank();
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(4) } },
+      { gridDim: [2, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("num_workgroups.x");
+    expect(compiled.wgsl).toContain("workgroup_id.x");
+    expect([...result.buffers.out as Int32Array]).toEqual([40, 41, 42, 43]);
+  });
+
   it("rejects grid sync phase splitting when private locals cross phases", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;
@@ -6794,10 +6813,7 @@ __global__ void namespaceTileReduce(const float *input, float *output) {
   float sum = cg::reduce(tile, value, cg::plus<float>{});
   if (rank == 0) { output[0] = sum; }
   cg::sync(block);
-}`, {
-      features: { subgroups: true },
-      workgroupSize: [8, 1, 1],
-    });
+}`, { workgroupSize: [8, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
       {
@@ -6811,6 +6827,8 @@ __global__ void namespaceTileReduce(const float *input, float *output) {
 
     expect(compiled.wgsl).toContain("bg_warp_reduce_sum_float_8(value, 8u, local_id)");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("enable subgroups;");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
     expect([...result.buffers.output as Float32Array]).toEqual([8]);
   });
 
