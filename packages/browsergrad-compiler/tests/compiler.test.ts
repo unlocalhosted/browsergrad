@@ -9411,7 +9411,7 @@ __global__ void reduce_add_sum_kernel(float* dst, const float* src, size_t n, si
 }`, { workgroupSize: [1, 1, 1] });
 
     expect(compiled.wgsl).not.toContain("f32((vec4<f32>");
-    expect(compiled.wgsl).toContain("dst[(idx + u32(k))] = f32(f32((f32(dst[(idx + u32(k))]) + acc[u32(k)])));");
+    expect(compiled.wgsl).toContain("dst[(idx + u32(k))] = f32((f32(dst[(idx + u32(k))]) + acc[u32(k)]));");
   });
 
   it("maps CUDA Packed128 float aliases onto vector storage views", () => {
@@ -11640,6 +11640,49 @@ __global__ void surfaceHalfReadWrite(cudaSurfaceObject_t surf, float *out, uint 
     expect(compiled.wgsl).toContain("vec2<f16>(f16(bg_sem_surf2dread_surf((0 + 0), 0, 0)), f16(bg_sem_surf2dread_surf((0 + 4), 0, 0)))");
     expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
     expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
+    expect([...result.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66, 0x46804580]);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66, 0x46804580]);
+    expect([...result.buffers.surf as Float32Array]).toEqual([5.5, 6.5]);
+    expect([...semanticResult.buffers.surf as Float32Array]).toEqual([5.5, 6.5]);
+  });
+
+  it("lowers half and half2 surface reads and writes through f32 compatibility mode", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceHalfReadWrite(cudaSurfaceObject_t surf, float *out, uint *bits) {
+  half scalar = surf2Dread<half>(surf, 0, 0);
+  half2 pair;
+  surf2Dread(&pair, surf, 0, 0);
+  half2 written = __floats2half2_rn(5.5f, 6.5f);
+  surf2Dwrite(written, surf, 0, 0);
+  half2 after = surf2Dread<half2>(surf, 0, 0);
+  out[0] = __half2float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  out[3] = after.x;
+  out[4] = after.y;
+  bits[0] = __half_as_ushort(scalar);
+  bits[1] = __half2_as_uint(pair);
+  bits[2] = __half2_as_uint(after);
+}`, { f16Mode: "f32", workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(5),
+        bits: new Uint32Array(3),
+      },
+      surfaces: { surf: { width: 2, height: 1, data: new Float32Array([1.1, 2.2]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("enable f16;");
+    expect(compiled.wgsl).not.toContain("f16(");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...result.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
     expect([...result.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66, 0x46804580]);
@@ -16603,6 +16646,48 @@ __global__ void sample(float *out, uint *bits) {
     expect(compiled.wgsl).not.toContain("bg_tex2d_half_texRef");
     expect(compiled.wgsl).not.toContain("bg_tex2d_half2_texRef");
     expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.099609375);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.099609375);
+    expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.19921875);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66]);
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(1.099609375);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(1.099609375);
+    expect([...semanticResult.buffers.out as Float32Array][2]).toBeCloseTo(2.19921875);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66]);
+  });
+
+  it("lowers templated half and half2 tex2D reads through f32 compatibility mode", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(float *out, uint *bits) {
+  half scalar = tex2D<half>(texRef, 0.5f, 0.5f);
+  half2 pair = tex2D<half2>(texRef, 0.5f, 0.5f);
+  out[0] = __half2float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  bits[0] = __half_as_ushort(scalar);
+  bits[1] = __half2_as_uint(pair);
+}`, { f16Mode: "f32", workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(3),
+        bits: new Uint32Array(2),
+      },
+      textures: { texRef: { width: 1, height: 1, data: new Float32Array([1.1, 2.2, 3.3, 4.4]), channels: 4 as const } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-texture");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("enable f16;");
+    expect(compiled.wgsl).not.toContain("f16(");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_half_texRef");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_half2_texRef");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.099609375);
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.099609375);
     expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.19921875);

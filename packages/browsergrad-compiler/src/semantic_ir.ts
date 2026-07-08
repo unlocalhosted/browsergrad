@@ -2023,25 +2023,34 @@ function localPointerAliasIndexExpression(
   expression: Extract<CudaLiteExpression, { readonly kind: "index" }>,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): SemanticExpression | undefined {
-  if (expression.target.kind !== "identifier") return undefined;
-  const symbol = scope.get(expression.target.name);
-  if (!symbol?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(symbol.pointerAddressSpace) || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
-  const root = scope.get(symbol.pointerRoot);
+  const alias = localPointerAliasForInitializer(expression.target, scope);
+  if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || !alias.pointerBaseIndices || alias.pointerBaseIndices.length !== 1) return undefined;
+  const root = scope.get(alias.pointerRoot);
   if (!root) return undefined;
+  const aliasValueType = pointerAliasTargetValueType(expression.target, scope) ?? root.valueType;
   const target = semanticSymbolExpression(root, expression.target.span);
   const index = addIndexExpressions(
-    symbol.pointerBaseIndices[0]!,
-    pointerAliasElementOffset(symbol.valueType, root.valueType, lowerExpression(expression.index, scope), expression.index.span),
+    alias.pointerBaseIndices[0]!,
+    pointerAliasElementOffset(aliasValueType, root.valueType, lowerExpression(expression.index, scope), expression.index.span),
     expression.index.span,
   );
   return {
     kind: "index",
     target,
     index,
-    ...optionalValueType(symbol.valueType ?? root.valueType),
+    ...optionalValueType(aliasValueType),
     addressSpace: root.addressSpace,
     span: expression.span,
   };
+}
+
+function pointerAliasTargetValueType(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): CudaLiteScalarType | undefined {
+  if (expression.kind === "cast" && expression.pointer) return expression.valueType;
+  if (expression.kind === "identifier") return scope.get(expression.name)?.valueType;
+  return undefined;
 }
 
 function pointerAliasElementOffset(

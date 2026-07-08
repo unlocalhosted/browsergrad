@@ -14585,8 +14585,7 @@ const html = String.raw`<!doctype html>
           {
             name: "surface:half-scalar-vector-read-write",
             source: SOURCES.surfaceHalfScalarVectorReadWrite,
-            options: { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] },
-            requiredFeatures: ["shader-f16"],
+            options: { f16Mode: "f32", workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
@@ -16672,8 +16671,7 @@ const html = String.raw`<!doctype html>
           {
             name: "texture:half-scalar-vector-read",
             source: SOURCES.textureHalfScalarVector,
-            options: { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] },
-            requiredFeatures: ["shader-f16"],
+            options: { f16Mode: "f32", workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {

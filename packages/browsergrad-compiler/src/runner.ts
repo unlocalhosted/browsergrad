@@ -87,6 +87,7 @@ export function compileCudaLiteKernel(
   const semantic = createCudaLiteSemanticModel(analysis);
   const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
   const semanticWgslOptions = {
+    ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
     ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
   };

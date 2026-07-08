@@ -22,6 +22,10 @@ import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { emitCurandHelpers, emitFp8Helpers } from "./wgsl_support_helpers.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import {
+  rewriteF16BindingsToF32,
+  rewriteF16WgslToF32,
+} from "./wgsl_feature_usage.js";
+import {
   emitFloatAtomicAddHelper,
   emitFloatAtomicMaxHelper,
   emitFloatAtomicMinHelper,
@@ -38,6 +42,7 @@ export interface SemanticKernelIrWgslOutput {
 }
 
 export interface EmitSemanticKernelIrWgslOptions {
+  readonly f16Mode?: "native" | "f32";
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
   readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
 }
@@ -691,6 +696,7 @@ export function emitSemanticKernelIrWgsl(
   const atomicStorage = semanticAtomicStorageNames(ir.operations);
   const atomicDeviceGlobals = semanticAtomicDeviceGlobalNames(ir.operations);
   const atomicShared = semanticAtomicSharedNames(ir.operations);
+  const f16Mode = effectiveSemanticF16Mode(ir, options);
   const bindings: WgslKernelBindingInput[] = ir.params
     .filter((param) => param.addressSpace === "storage")
     .map((param, binding) => ({
@@ -745,7 +751,7 @@ export function emitSemanticKernelIrWgsl(
   }
 
   const lines: string[] = ["// browsergrad-semantic-wgsl: direct semantic IR emission"];
-  if (ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
+  if (f16Mode === "native" && ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
   if (ir.requiredFeatures.includes("subgroups")) lines.push("enable subgroups;");
   for (const param of ir.params.filter((item) => item.addressSpace === "storage")) {
     const access = param.constant ? "read" : "read_write";
@@ -857,13 +863,15 @@ export function emitSemanticKernelIrWgsl(
     ...emitSemanticOperations(ir.operations, ir, names, 1, false, options, textureSpecializations),
     "}",
   );
-  const wgsl = lines.join("\n");
+  const rawWgsl = lines.join("\n");
+  const wgsl = f16Mode === "f32" ? rewriteF16WgslToF32(rawWgsl) : rawWgsl;
+  const programBindings = f16Mode === "f32" ? rewriteF16BindingsToF32(bindings) : bindings;
   return {
     wgsl,
     program: defineWgslKernelProgram({
       name: ir.name,
       wgsl,
-      bindings,
+      bindings: programBindings,
       workgroupSize: ir.workgroupSize,
     }),
   };
@@ -1034,6 +1042,22 @@ function operationsHaveNoBarrierOrControlTransfer(operations: readonly SemanticK
 
 function semanticWgslRequiredFeaturesSupported(requiredFeatures: readonly string[]): boolean {
   return requiredFeatures.every((feature) => feature === "shader-f16" || feature === "subgroups");
+}
+
+function effectiveSemanticF16Mode(
+  ir: SemanticKernelIrModule,
+  options: { readonly f16Mode?: "native" | "f32" },
+): "native" | "f32" {
+  if (options.f16Mode !== undefined) return options.f16Mode;
+  return !ir.requiredFeatures.includes("shader-f16") && semanticIrUsesHalf(ir) ? "f32" : "native";
+}
+
+function semanticIrUsesHalf(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value === "half" || value === "half2";
+  if (typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(semanticIrUsesHalf);
+  return Object.values(value as Record<string, unknown>).some(semanticIrUsesHalf);
 }
 
 function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -6025,6 +6049,8 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
         if (mathCallee && (mathCallee.startsWith("half_to_uint_") || mathCallee === "half_as_ushort" || mathCallee === "float_to_fp8" || mathCallee.startsWith("half_") && !semanticMathCallReturnsHalf(mathCallee))) return "u32";
         if (mathCallee && mathCallee.startsWith("bf16_to_int_")) return "i32";
         if (mathCallee && (mathCallee.startsWith("bf16_to_uint_") || mathCallee === "bf16_as_ushort")) return "u32";
+        if (mathCallee === "mul24" || mathCallee === "mulhi") return "i32";
+        if (mathCallee === "umul24" || mathCallee === "umulhi" || mathCallee === "umul" || mathCallee === "umin") return "u32";
       }
       if (semanticWgslMathCallSupported(expression) && (expression.valueType === undefined || expression.valueType === "float")) return "f32";
       const atomicType = semanticAtomicCallValueType(expression);
@@ -6104,6 +6130,7 @@ function zeroForType(valueType: SemanticWgslValueType): string {
   if (valueType === "i32") return "0";
   if (valueType === "bool") return "false";
   if (valueType === "f16") return "f16(0.0)";
+  if (valueType === "vec2<f16>") return "vec2<f16>(f16(0.0))";
   if (valueType === "vec2<f32>") return "vec2<f32>(0.0)";
   if (valueType === "vec3<f32>") return "vec3<f32>(0.0)";
   if (valueType === "vec4<f32>") return "vec4<f32>(0.0)";
