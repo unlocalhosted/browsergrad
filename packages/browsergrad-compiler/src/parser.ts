@@ -55,6 +55,7 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["curandDirectionVectors64_t", "uint"],
   ["cuComplex", "complex64"],
   ["cuFloatComplex", "complex64"],
+  ["cuDoubleComplex", "complex64"],
   ["CUtexObject", "texture2d"],
   ["CUsurfObject", "surface2d"],
   ["CUtensorMap", "uint"],
@@ -115,6 +116,7 @@ const TYPE_START_KEYWORDS = new Set([
   "cufftComplex",
   "cuComplex",
   "cuFloatComplex",
+  "cuDoubleComplex",
   "cudaTextureObject_t",
   "cudaSurfaceObject_t",
   "cudaEvent_t",
@@ -1528,7 +1530,7 @@ class Parser {
     token.value === "curandDirectionVectors32_t" ||
     token.value === "curandDirectionVectors64_t"
   ) return "uint";
-    if (token.value === "cufftComplex") return "complex64";
+    if (token.value === "cufftComplex" || token.value === "cuComplex" || token.value === "cuFloatComplex" || token.value === "cuDoubleComplex") return "complex64";
     if (token.value === "cudaTextureObject_t") return "texture2d";
     if (token.value === "cudaSurfaceObject_t") return "surface2d";
     if (

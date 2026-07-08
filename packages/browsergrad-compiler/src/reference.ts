@@ -2763,7 +2763,7 @@ function evalCuComplexBuiltin(
   name: string | undefined,
   context: ThreadContext,
 ): EvalValue | undefined {
-  if (name === "make_cuComplex" || name === "make_cuFloatComplex") {
+  if (name === "make_cuComplex" || name === "make_cuFloatComplex" || name === "make_cuDoubleComplex") {
     return {
       kind: "complex64",
       x: evalNumber(expression.args[0]!, context),
@@ -2772,16 +2772,16 @@ function evalCuComplexBuiltin(
   }
   if (!isCuComplexBuiltin(name)) return undefined;
   const a = valueAsComplex(evalExpression(expression.args[0]!, context), name ?? "cuComplex");
-  if (name === "cuCrealf") return a.x;
-  if (name === "cuCimagf") return a.y;
-  if (name === "cuCabsf") return Math.hypot(a.x, a.y);
-  if (name === "cuConjf") return { kind: "complex64", x: a.x, y: -a.y };
+  if (name === "cuCrealf" || name === "cuCreal") return a.x;
+  if (name === "cuCimagf" || name === "cuCimag") return a.y;
+  if (name === "cuCabsf" || name === "cuCabs") return Math.hypot(a.x, a.y);
+  if (name === "cuConjf" || name === "cuConj") return { kind: "complex64", x: a.x, y: -a.y };
   const b = valueAsComplex(evalExpression(expression.args[1]!, context), name ?? "cuComplex");
-  if (name === "cuCaddf") return { kind: "complex64", x: a.x + b.x, y: a.y + b.y };
-  if (name === "cuCsubf") return { kind: "complex64", x: a.x - b.x, y: a.y - b.y };
-  if (name === "cuCmulf") return { kind: "complex64", x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x };
-  if (name === "cuCdivf") return divCuComplex(a, b);
-  if (name === "cuCfmaf") {
+  if (name === "cuCaddf" || name === "cuCadd") return { kind: "complex64", x: a.x + b.x, y: a.y + b.y };
+  if (name === "cuCsubf" || name === "cuCsub") return { kind: "complex64", x: a.x - b.x, y: a.y - b.y };
+  if (name === "cuCmulf" || name === "cuCmul") return { kind: "complex64", x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x };
+  if (name === "cuCdivf" || name === "cuCdiv") return divCuComplex(a, b);
+  if (name === "cuCfmaf" || name === "cuCfma") {
     const d = valueAsComplex(evalExpression(expression.args[2]!, context), name);
     return { kind: "complex64", x: a.x * b.x - a.y * b.y + d.x, y: a.x * b.y + a.y * b.x + d.y };
   }
@@ -2801,14 +2801,23 @@ function divCuComplex(a: ComplexValue, b: ComplexValue): ComplexValue {
 
 function isCuComplexBuiltin(name: string | undefined): boolean {
   return name === "cuCrealf" ||
+    name === "cuCreal" ||
     name === "cuCimagf" ||
+    name === "cuCimag" ||
     name === "cuCabsf" ||
+    name === "cuCabs" ||
     name === "cuConjf" ||
+    name === "cuConj" ||
     name === "cuCaddf" ||
+    name === "cuCadd" ||
     name === "cuCsubf" ||
+    name === "cuCsub" ||
     name === "cuCmulf" ||
+    name === "cuCmul" ||
     name === "cuCdivf" ||
-    name === "cuCfmaf";
+    name === "cuCdiv" ||
+    name === "cuCfmaf" ||
+    name === "cuCfma";
 }
 
 function matrixTileRowsCols(tile: MatrixTileResolvedSpec): readonly [number, number] {

@@ -11165,6 +11165,50 @@ __global__ void cuComplexFma(cuComplex *a, cuComplex *b, cuComplex *d) {
     expect([...result.buffers.d as Float32Array]).toEqual([2, 26, 0, 64]);
   });
 
+  it("lowers cuDoubleComplex helpers through f32-compatible native complex ops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void cuDoubleComplexCompat(cuDoubleComplex *a, cuDoubleComplex *b, float *out) {
+  int i = threadIdx.x;
+  cuDoubleComplex x = make_cuDoubleComplex(a[i].x, a[i].y);
+  cuDoubleComplex y = make_cuDoubleComplex(b[i].x, b[i].y);
+  cuDoubleComplex z = cuCadd(cuCmul(x, y), cuConj(y));
+  cuDoubleComplex q = cuCdiv(z, make_cuDoubleComplex(2.0, 0.0));
+  a[i] = cuCsub(q, make_cuDoubleComplex(1.0, -1.0));
+  b[i] = cuCfma(x, y, b[i]);
+  out[i] = cuCabs(a[i]) + cuCreal(a[i]) + cuCimag(a[i]);
+}`, { workgroupSize: [2, 1, 1], f64Mode: "f32" });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([1, 2, 3, 4]),
+          b: new Float32Array([5, 6, 7, 8]),
+          out: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    const codes = compiled.diagnostics.map((diagnostic) => diagnostic.code);
+    expect(codes).not.toContain("unsupported-call");
+    expect(codes).not.toContain("unsupported-cufft");
+    expect(codes).toContain("f64-lowered-to-f32");
+    expect(compiled.wgsl).toContain("vec2<f32>(f32");
+    expect(compiled.wgsl).toContain("fn bg_cuCabsf");
+    expect(compiled.wgsl).toContain("fn bg_cuCdivf");
+    expect([...result.buffers.a as Float32Array]).toEqual([-2, 6, -3, 23]);
+    expect([...result.buffers.b as Float32Array]).toEqual([-2, 22, -4, 60]);
+    expect([...result.buffers.out as Float32Array]).toEqual([...Float32Array.from([Math.hypot(-2, 6) + 4, Math.hypot(-3, 23) + 20])]);
+  });
+
+  it("rejects cuDoubleComplex helper lowering without explicit f64 compatibility mode", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void cuDoubleComplexStrict(cuDoubleComplex *a, cuDoubleComplex *b) {
+  int i = threadIdx.x;
+  a[i] = cuCadd(a[i], b[i]);
+}`, { workgroupSize: [2, 1, 1] })).toThrow(/unsupported-f64/u);
+  });
+
   it("lowers supported inline PTX fma statements", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void asmFma(const float *A, const float *B, float *out) {

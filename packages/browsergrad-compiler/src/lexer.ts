@@ -413,9 +413,10 @@ function normalizeAliasType(sourceType: string | undefined, defines: ReadonlyMap
     "char4",
     "cuComplex",
     "cuFloatComplex",
+    "cuDoubleComplex",
     "cufftComplex",
   ]);
-  if (type === "cuComplex" || type === "cuFloatComplex") return "cufftComplex";
+  if (type === "cuComplex" || type === "cuFloatComplex" || type === "cuDoubleComplex") return "cufftComplex";
   if (type === "uchar2") return "uint2";
   if (type === "uchar3") return "uint3";
   if (type === "uchar4") return "uint4";

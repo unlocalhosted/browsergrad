@@ -5643,16 +5643,24 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
 }
 
 function cuComplexCallReturnType(name: string | undefined): CudaLiteScalarType | undefined {
-  if (name === "cuCrealf" || name === "cuCimagf" || name === "cuCabsf") return "float";
+  if (name === "cuCrealf" || name === "cuCimagf" || name === "cuCabsf" ||
+    name === "cuCreal" || name === "cuCimag" || name === "cuCabs") return "float";
   if (
     name === "make_cuComplex" ||
     name === "make_cuFloatComplex" ||
+    name === "make_cuDoubleComplex" ||
     name === "cuConjf" ||
     name === "cuCaddf" ||
     name === "cuCsubf" ||
     name === "cuCmulf" ||
     name === "cuCdivf" ||
-    name === "cuCfmaf"
+    name === "cuCfmaf" ||
+    name === "cuConj" ||
+    name === "cuCadd" ||
+    name === "cuCsub" ||
+    name === "cuCmul" ||
+    name === "cuCdiv" ||
+    name === "cuCfma"
   ) {
     return "complex64";
   }
@@ -6698,36 +6706,46 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `cross(${args[0] ?? "vec3<f32>()"}, ${args[1] ?? "vec3<f32>()"})`;
     case "make_cuComplex":
     case "make_cuFloatComplex":
+    case "make_cuDoubleComplex":
       return `vec2<f32>(f32(${args[0] ?? "0"}), f32(${args[1] ?? "0"}))`;
     case "cuCrealf":
+    case "cuCreal":
       return `(${args[0] ?? "vec2<f32>()"}).x`;
     case "cuCimagf":
+    case "cuCimag":
       return `(${args[0] ?? "vec2<f32>()"}).y`;
-    case "cuCabsf": {
+    case "cuCabsf":
+    case "cuCabs": {
       const a = args[0] ?? "vec2<f32>()";
       return `bg_cuCabsf(${a})`;
     }
-    case "cuConjf": {
+    case "cuConjf":
+    case "cuConj": {
       const a = args[0] ?? "vec2<f32>()";
       return `vec2<f32>((${a}).x, -(${a}).y)`;
     }
-    case "cuCaddf": {
+    case "cuCaddf":
+    case "cuCadd": {
       return `((${args[0] ?? "vec2<f32>()"}) + (${args[1] ?? "vec2<f32>()"}))`;
     }
-    case "cuCsubf": {
+    case "cuCsubf":
+    case "cuCsub": {
       return `((${args[0] ?? "vec2<f32>()"}) - (${args[1] ?? "vec2<f32>()"}))`;
     }
-    case "cuCmulf": {
+    case "cuCmulf":
+    case "cuCmul": {
       const a = args[0] ?? "vec2<f32>()";
       const b = args[1] ?? "vec2<f32>()";
       return `vec2<f32>(((${a}).x * (${b}).x - (${a}).y * (${b}).y), ((${a}).x * (${b}).y + (${a}).y * (${b}).x))`;
     }
-    case "cuCdivf": {
+    case "cuCdivf":
+    case "cuCdiv": {
       const a = args[0] ?? "vec2<f32>()";
       const b = args[1] ?? "vec2<f32>()";
       return `bg_cuCdivf(${a}, ${b})`;
     }
-    case "cuCfmaf": {
+    case "cuCfmaf":
+    case "cuCfma": {
       const a = args[0] ?? "vec2<f32>()";
       const b = args[1] ?? "vec2<f32>()";
       const d = args[2] ?? "vec2<f32>()";

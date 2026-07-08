@@ -253,6 +253,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["skipahead", [2, 2]],
   ["make_cuComplex", [2, 2]],
   ["make_cuFloatComplex", [2, 2]],
+  ["make_cuDoubleComplex", [2, 2]],
   ["cuCrealf", [1, 1]],
   ["cuCimagf", [1, 1]],
   ["cuCabsf", [1, 1]],
@@ -262,6 +263,15 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cuCmulf", [2, 2]],
   ["cuCdivf", [2, 2]],
   ["cuCfmaf", [3, 3]],
+  ["cuCreal", [1, 1]],
+  ["cuCimag", [1, 1]],
+  ["cuCabs", [1, 1]],
+  ["cuConj", [1, 1]],
+  ["cuCadd", [2, 2]],
+  ["cuCsub", [2, 2]],
+  ["cuCmul", [2, 2]],
+  ["cuCdiv", [2, 2]],
+  ["cuCfma", [3, 3]],
   ["cudaDeviceSynchronize", [0, 0]],
   ["cudaStreamCreate", [1, 1]],
   ["cudaStreamCreateWithFlags", [2, 2]],
@@ -1853,7 +1863,7 @@ function validateCallExpression(
     return validatePointerIdentityCall(expression, callName, scope, diagnostics, walkExpression);
   }
   if (isCuComplexBuiltin(callName)) {
-    validateCuComplexBuiltin(expression, callName, scope, diagnostics, walkExpression);
+    validateCuComplexBuiltin(expression, callName, scope, diagnostics, walkExpression, options);
     return isCuComplexScalarBuiltin(callName)
       ? { kind: "scalar", valueType: "float" }
       : { kind: "complex", valueType: "complex64" };
@@ -3488,21 +3498,26 @@ function validateCuComplexBuiltin(
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  options: CudaLiteAnalyzeOptions,
 ): void {
-  if (callName === "make_cuComplex" || callName === "make_cuFloatComplex") {
+  if (isCuDoubleComplexBuiltin(callName)) {
+    validateF64Type("double", expression.span, diagnostics, options);
+  }
+  if (callName === "make_cuComplex" || callName === "make_cuFloatComplex" || callName === "make_cuDoubleComplex") {
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return;
   }
   for (const arg of expression.args) {
     const info = walkExpression(arg, scope);
     if (info.kind === "unknown" || info.kind === "complex" || isFloat2ComplexCompatible("complex64", info)) continue;
-    diagnostics.push(error("unsupported-cufft", `${callName} expects cuComplex/cuFloatComplex or float2 operands`, arg.span));
+    diagnostics.push(error("unsupported-cufft", `${callName} expects cuComplex/cuFloatComplex/cuDoubleComplex or float2 operands`, arg.span));
   }
 }
 
 function isCuComplexBuiltin(callName: string): boolean {
   return callName === "make_cuComplex" ||
     callName === "make_cuFloatComplex" ||
+    callName === "make_cuDoubleComplex" ||
     callName === "cuCrealf" ||
     callName === "cuCimagf" ||
     callName === "cuCabsf" ||
@@ -3511,11 +3526,34 @@ function isCuComplexBuiltin(callName: string): boolean {
     callName === "cuCsubf" ||
     callName === "cuCmulf" ||
     callName === "cuCdivf" ||
-    callName === "cuCfmaf";
+    callName === "cuCfmaf" ||
+    callName === "cuCreal" ||
+    callName === "cuCimag" ||
+    callName === "cuCabs" ||
+    callName === "cuConj" ||
+    callName === "cuCadd" ||
+    callName === "cuCsub" ||
+    callName === "cuCmul" ||
+    callName === "cuCdiv" ||
+    callName === "cuCfma";
 }
 
 function isCuComplexScalarBuiltin(callName: string): boolean {
-  return callName === "cuCrealf" || callName === "cuCimagf" || callName === "cuCabsf";
+  return callName === "cuCrealf" || callName === "cuCimagf" || callName === "cuCabsf" ||
+    callName === "cuCreal" || callName === "cuCimag" || callName === "cuCabs";
+}
+
+function isCuDoubleComplexBuiltin(callName: string): boolean {
+  return callName === "make_cuDoubleComplex" ||
+    callName === "cuCreal" ||
+    callName === "cuCimag" ||
+    callName === "cuCabs" ||
+    callName === "cuConj" ||
+    callName === "cuCadd" ||
+    callName === "cuCsub" ||
+    callName === "cuCmul" ||
+    callName === "cuCdiv" ||
+    callName === "cuCfma";
 }
 
 function validateAtomicBuiltin(

@@ -217,7 +217,7 @@ export function usesCurand(ir: KernelIrModule): boolean {
 }
 
 export function usesCuComplexRobustMath(ir: KernelIrModule): boolean {
-  const calls = new Set(["cuCabsf", "cuCdivf"]);
+  const calls = new Set(["cuCabsf", "cuCdivf", "cuCabs", "cuCdiv"]);
   return statementsUseCall(ir.body, calls) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, calls));
 }

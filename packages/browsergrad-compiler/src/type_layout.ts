@@ -79,6 +79,7 @@ const TYPE_SIZE_BYTES = new Map<string, number>([
   ["cufftComplex", 8],
   ["cuComplex", 8],
   ["cuFloatComplex", 8],
+  ["cuDoubleComplex", 8],
 ]);
 
 const TYPE_ALIGN_BYTES = new Map<string, number>([

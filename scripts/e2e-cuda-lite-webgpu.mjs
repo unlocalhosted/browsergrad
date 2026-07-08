@@ -2619,6 +2619,17 @@ __global__ void complexCuFma(cuComplex *a, cuComplex *b, cuComplex *d) {
   int i = threadIdx.x;
   d[i] = cuCfmaf(a[i], b[i], d[i]);
 }`,
+  complexCuDoubleCompat: `
+__global__ void complexCuDoubleCompat(cuDoubleComplex *a, cuDoubleComplex *b, float *out) {
+  int i = threadIdx.x;
+  cuDoubleComplex x = make_cuDoubleComplex(a[i].x, a[i].y);
+  cuDoubleComplex y = make_cuDoubleComplex(b[i].x, b[i].y);
+  cuDoubleComplex z = cuCadd(cuCmul(x, y), cuConj(y));
+  cuDoubleComplex q = cuCdiv(z, make_cuDoubleComplex(2.0, 0.0));
+  a[i] = cuCsub(q, make_cuDoubleComplex(1.0, -1.0));
+  b[i] = cuCfma(x, y, b[i]);
+  out[i] = cuCabs(a[i]) + cuCreal(a[i]) + cuCimag(a[i]);
+}`,
   subgroupScalarCompat: `
 __global__ void subgroupScalarCompat(float *x) {
   int idx = threadIdx.x;
@@ -13423,6 +13434,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "d",
             expectedOutput: { type: "Float32Array", data: [2, 26, 0, 64] },
+          },
+          {
+            name: "complex:cu-double-helper-compat",
+            source: SOURCES.complexCuDoubleCompat,
+            options: { workgroupSize: [2, 1, 1], f64Mode: "f32" },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                a: new Float32Array([1, 2, 3, 4]),
+                b: new Float32Array([5, 6, 7, 8]),
+                out: new Float32Array(2),
+              },
+            }),
+            output: "a",
+            expectedOutput: { type: "Float32Array", data: [-2, 6, -3, 23] },
           },
           {
             name: "compat:subgroup-scalar-mode",
