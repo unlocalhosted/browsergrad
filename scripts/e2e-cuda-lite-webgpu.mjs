@@ -3762,6 +3762,18 @@ __global__ void atomicFloatExchangeAssign(float *data) {
     data[idx] = oldValue + newValue;
   }
 }`,
+  helperAtomicFloatCas: `
+__device__ float cas_f32(float *target, float compare, float value) {
+  return atomicCAS(target, compare, value);
+}
+__global__ void helperAtomicFloatCas(float *x, float *out) {
+  if (threadIdx.x == 0) {
+    out[0] = cas_f32(x, 2.5f, 7.5f);
+    out[1] = x[0];
+    out[2] = cas_f32(&x[0], 2.5f, 9.5f);
+    out[3] = x[0];
+  }
+}`,
   helperAtomicRmw: `
 __device__ void helperRmw(int *xi, float *xf, float *out) {
   out[0] = float(atomicSub(xi, 2));
@@ -14397,6 +14409,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "data",
             expectedOutput: { type: "Float32Array", data: [11, 12, 13, 14] },
+          },
+          {
+            name: "atomic:helper-float-cas",
+            source: SOURCES.helperAtomicFloatCas,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([2.5]),
+                out: new Float32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [2.5, 7.5, 7.5, 7.5] },
           },
           {
             name: "atomic:helper-rmw",

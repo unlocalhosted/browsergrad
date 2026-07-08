@@ -18701,6 +18701,38 @@ __global__ void atomic_cas_float(float* x, float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([2.5, 7.5, 7.5, 7.5, 11.5]);
   });
 
+  it("supports CUDA float atomicCAS through device helper pointer parameters", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float cas_f32(float* target, float compare, float value) {
+  return atomicCAS(target, compare, value);
+}
+__global__ void helper_atomic_cas_float(float* x, float* out) {
+  if (threadIdx.x < 1) {
+    out[0] = cas_f32(x, 2.5f, 7.5f);
+    out[1] = x[0];
+    out[2] = cas_f32(&x[0], 2.5f, 9.5f);
+    out[3] = x[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2.5]),
+          out: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("bg_ptr_atomicCompareExchange_f32");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicCompareExchangeWeak(&x[index], bitcast<u32>(compare), bitcast<u32>(value)).old_value)");
+    expect([...semanticResult.buffers.x as Float32Array]).toEqual([7.5]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([2.5, 7.5, 7.5, 7.5]);
+  });
+
   it("stores computed float values back into atomic float storage with u32 carriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_exchange_assign(float* data, float newValue, int N) {

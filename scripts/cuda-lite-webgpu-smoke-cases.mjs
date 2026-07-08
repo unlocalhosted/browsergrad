@@ -190,6 +190,7 @@ export const atomicScopeCases = [
   "helpers:float3-vector-scalar-min-max",
   "helpers:shared-vector-scalar-exchange-cas",
   "atomic:float-exchange-assign",
+  "atomic:helper-float-cas",
   "atomic:helper-rmw",
   "atomic:helper-shared-rmw",
   "atomic:helper-exchange-cas",

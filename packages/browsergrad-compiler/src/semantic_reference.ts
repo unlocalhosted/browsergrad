@@ -578,7 +578,7 @@ function semanticReferenceAtomicSupported(
 ): boolean {
   const atomicOp = SEMANTIC_ATOMIC_OPS.get(operation.callee);
   if (!atomicOp) return false;
-  if (!operation.target || !semanticReferenceMemoryRefSupported(operation.target)) return false;
+  if (!operation.target || !semanticReferenceAtomicMemoryRefSupported(operation.target, compiled)) return false;
   if (
     operation.target.valueType !== "uint" &&
     operation.target.valueType !== "int" &&
@@ -758,7 +758,7 @@ function semanticReferenceFunctionArgSupported(
 ): boolean {
   if (!param) return false;
   if (param.pointer) {
-    const ref = memoryRefFromIndexExpression(arg);
+    const ref = semanticPointerArgMemoryRef(arg);
     return param.addressSpace === "storage" && ref?.addressSpace === "storage";
   }
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
@@ -896,11 +896,22 @@ function semanticReferencePointerFunctionOperationSupported(
   pointerParams: ReadonlySet<string>,
 ): boolean {
   if (operation.kind === "store") return pointerParams.has(operation.target.base) && operation.target.fields.length > 0;
+  if (operation.kind === "return" && operation.value) return semanticReferencePointerFunctionExpressionSupported(operation.value, pointerParams);
   if (operation.kind === "expression" && operation.expression.kind === "update") {
     const ref = memoryRefFromIndexExpression(operation.expression.argument);
     return ref !== undefined && pointerParams.has(ref.base);
   }
+  if (operation.kind === "expression") return semanticReferencePointerFunctionExpressionSupported(operation.expression, pointerParams);
   return false;
+}
+
+function semanticReferencePointerFunctionExpressionSupported(
+  expression: SemanticExpression,
+  pointerParams: ReadonlySet<string>,
+): boolean {
+  if (expression.kind !== "call") return false;
+  const target = semanticAtomicCallTarget(expression);
+  return target !== undefined && pointerParams.has(target.base);
 }
 
 function semanticReferenceAtomicCallSupported(
@@ -911,7 +922,7 @@ function semanticReferenceAtomicCallSupported(
   const atomicOp = SEMANTIC_ATOMIC_OPS.get(expression.callee.name);
   if (!atomicOp) return false;
   const target = semanticAtomicCallTarget(expression);
-  if (!target || !semanticReferenceMemoryRefSupported(target)) return false;
+  if (!target || !semanticReferenceAtomicMemoryRefSupported(target, compiled)) return false;
   if (
     target.valueType !== "uint" &&
     target.valueType !== "int" &&
@@ -923,6 +934,18 @@ function semanticReferenceAtomicCallSupported(
   const expectedArgs = atomicOp === "cas" ? 3 : 2;
   return expression.args.length >= expectedArgs &&
     expression.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+}
+
+function semanticReferenceAtomicMemoryRefSupported(
+  ref: SemanticMemoryRef,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return semanticReferenceMemoryRefSupported(ref) ||
+    ref.addressSpace === "storage" &&
+      ref.indices.length === 0 &&
+      compiled.kernelIr.functions.some((fn) =>
+        fn.params.some((param) => param.name === ref.base && param.pointer && param.addressSpace === "storage")
+      );
 }
 
 function semanticReferenceCallSupported(
@@ -1033,7 +1056,10 @@ function semanticReferenceSurfaceReadStoreSupported(
 
 function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (ref.addressSpace === "storage") {
-    return compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
+    return compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant) ||
+      compiled.kernelIr.functions.some((fn) =>
+        fn.params.some((param) => param.name === ref.base && param.pointer && param.addressSpace === "storage")
+      );
   }
   if (ref.addressSpace === "device-global") {
     return compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "device-global");
@@ -1109,6 +1135,7 @@ function semanticReferenceExpressionSupported(
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
+        compiled !== undefined && semanticReferenceAtomicCallSupported(expression, compiled) ||
         semanticReferenceCurandCallSupported(expression, compiled) &&
           (expected === "any" || !isSemanticReferenceFloatVectorType(semanticExpressionVectorValueType(expression))) ||
         semanticReferenceSubgroupCallSupported(expression) ||
@@ -3599,7 +3626,7 @@ function runSemanticFunction(
       continue;
     }
     if (param.pointer && param.addressSpace === "storage") {
-      const ref = memoryRefFromIndexExpression(arg);
+      const ref = semanticPointerArgMemoryRef(arg);
       if (!ref || ref.addressSpace !== "storage") throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled storage`, arg.span);
       const buffer = context.buffers.get(ref.base);
       if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, arg.span);
@@ -3897,6 +3924,34 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
     };
   }
   if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
+  if (firstArg.kind === "symbol" && firstArg.addressSpace === "storage") {
+    return {
+      base: firstArg.name,
+      addressSpace: firstArg.addressSpace,
+      ...(firstArg.valueType === undefined ? {} : { valueType: firstArg.valueType }),
+      indices: [],
+      fields: [],
+      span: firstArg.span,
+    };
+  }
+  return undefined;
+}
+
+function semanticPointerArgMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {
+  if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "index") {
+    return memoryRefFromIndexExpression(expression.argument);
+  }
+  if (expression.kind === "index") return memoryRefFromIndexExpression(expression);
+  if (expression.kind === "symbol" && expression.addressSpace === "storage") {
+    return {
+      base: expression.name,
+      addressSpace: expression.addressSpace,
+      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+      indices: [],
+      fields: [],
+      span: expression.span,
+    };
+  }
   return undefined;
 }
 
