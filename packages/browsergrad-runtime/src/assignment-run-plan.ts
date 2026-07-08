@@ -1,4 +1,5 @@
 import { BrowsergradError } from "./types.js";
+import type { ResourceBudgets } from "./types.js";
 import {
   evaluateAssignmentCapabilities,
   requiredAssignmentCapabilities,
@@ -231,9 +232,11 @@ export function createAssignmentRubricExecRequest(
     `runpy.run_path(${JSON.stringify(plan.files.rubricPath)}, run_name="__main__")`,
   ];
   const timeoutMs = assignmentRubricTimeoutMs(plan);
+  const resourceMetrics = assignmentRubricResourceMetrics(plan);
   return {
     code: lines.join("\n"),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(resourceMetrics ? { resourceMetrics } : {}),
   };
 }
 
@@ -312,4 +315,45 @@ function assignmentRubricTimeoutMs(plan: AssignmentRunPlan): number | undefined 
   ].filter((timeout): timeout is number => timeout !== undefined);
   if (candidates.length === 0) return undefined;
   return Math.min(...candidates);
+}
+
+function assignmentRubricResourceMetrics(
+  plan: AssignmentRunPlan,
+): AssignmentRubricExecRequest["resourceMetrics"] | undefined {
+  const resourceGates = plan.behavioralGates.filter(
+    (gate) => gate.kind === "resource-budget",
+  );
+  if (resourceGates.length === 0) return undefined;
+
+  type MutableResourceBudgets = {
+    -readonly [K in keyof ResourceBudgets]?: number;
+  };
+  const budgets: MutableResourceBudgets = {};
+  const setTightest = (
+    key: keyof ResourceBudgets,
+    value: unknown,
+  ): void => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return;
+    const current = budgets[key];
+    budgets[key] = current === undefined ? value : Math.min(current, value);
+  };
+
+  for (const gate of resourceGates) {
+    setTightest("wallTimeMs", gate.options.wall_time_ms);
+    setTightest("browsergradOwnedGpuBytes", gate.options.browsergrad_owned_gpu_bytes);
+    setTightest("estimatedPageBytes", gate.options.estimated_page_bytes);
+    setTightest("wasmHeapCapacityBytes", gate.options.wasm_heap_capacity_bytes);
+    setTightest("webgpuTimestampMs", gate.options.webgpu_timestamp_ms);
+  }
+
+  return {
+    enabled: true,
+    budgets,
+    histogram: {
+      assignmentId: plan.id,
+      assignmentVersion: plan.profileVersion,
+      backendTier: "pyodide",
+      runtimePackages: plan.session.packages,
+    },
+  };
 }

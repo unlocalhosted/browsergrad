@@ -34,6 +34,9 @@ import {
   materializeFloat32,
   uploadFloat32,
   runDirect,
+  type DirectDispatchProfile,
+  type DirectDispatchProfileOptions,
+  type DirectDispatchResult,
   type KernelDescriptor,
 } from "./runner.js";
 import { matmulTiledDirect } from "./kernels/matmul_tiled.js";
@@ -239,6 +242,28 @@ export interface WebGpuRealizerBridge {
   ): Handle;
   /** Diagnostic — number of GPU buffers currently alive. */
   aliveHandleCount(): number;
+  /** Correctness-labeled BrowserGrad-owned WebGPU resource snapshot. */
+  resourceSnapshot(): WebGpuResourceSnapshot;
+  /** Wait for submitted WebGPU profile readbacks, then return a fresh snapshot. */
+  flushProfiles(): Promise<WebGpuResourceSnapshot>;
+}
+
+export type WebGpuTimingMode =
+  | "timestamp-query"
+  | "queue-completion"
+  | "unavailable";
+
+export interface WebGpuResourceSnapshot {
+  readonly timingMode: WebGpuTimingMode;
+  readonly timestampQueryAvailable: boolean;
+  readonly currentOwnedGpuBytes: number;
+  readonly peakOwnedGpuBytes: number;
+  readonly totalAllocatedGpuBytes: number;
+  readonly totalReleasedGpuBytes: number;
+  readonly aliveHandleCount: number;
+  readonly logicalTensorPlanPeakBytes?: number;
+  readonly pendingProfileCount: number;
+  readonly passProfiles: readonly DirectDispatchProfile[];
 }
 
 function assertF32(dtype: string, op: string): void {
@@ -829,11 +854,25 @@ function normalizeTensorPlanInputs(
  * Construct a WebGpuRealizerBridge bound to the given device. Holds a
  * mutable handle map internally; never thread-shared.
  */
+export interface WebGpuRealizerBridgeOptions {
+  readonly profiling?: boolean;
+}
+
 export function createWebGpuRealizerBridge(
   device: KernelDevice,
+  options: WebGpuRealizerBridgeOptions = {},
 ): WebGpuRealizerBridge {
   const handles = new Map<Handle, BufferRecord>();
   let nextId = 1;
+  let currentOwnedGpuBytes = 0;
+  let peakOwnedGpuBytes = 0;
+  let totalAllocatedGpuBytes = 0;
+  let totalReleasedGpuBytes = 0;
+  let logicalTensorPlanPeakBytes: number | undefined;
+  const timestampQueryAvailable = device.gpu.features.has("timestamp-query");
+  const profilingEnabled = options.profiling !== false;
+  const passProfiles: DirectDispatchProfile[] = [];
+  const pendingProfiles = new Set<Promise<DirectDispatchProfile>>();
 
   const mint = (
     buffer: GPUBuffer,
@@ -843,7 +882,66 @@ export function createWebGpuRealizerBridge(
   ): Handle => {
     const id = nextId++;
     handles.set(id, { buffer, byteLength, shape, dtype });
+    currentOwnedGpuBytes += byteLength;
+    totalAllocatedGpuBytes += byteLength;
+    peakOwnedGpuBytes = Math.max(peakOwnedGpuBytes, currentOwnedGpuBytes);
     return id;
+  };
+
+  const releaseRecord = (rec: BufferRecord): void => {
+    rec.buffer.destroy();
+    currentOwnedGpuBytes = Math.max(0, currentOwnedGpuBytes - rec.byteLength);
+    totalReleasedGpuBytes += rec.byteLength;
+  };
+
+  const profileFor = (label: string): DirectDispatchProfileOptions =>
+    profilingEnabled ? { enabled: true, label } : { enabled: false, label };
+
+  const trackProfilePromise = (profilePromise: Promise<DirectDispatchProfile>): void => {
+    const tracked = profilePromise.then((profile) => {
+      passProfiles.push(profile);
+      return profile;
+    });
+    pendingProfiles.add(tracked);
+    tracked.finally(() => {
+      pendingProfiles.delete(tracked);
+    }).catch(() => {});
+  };
+
+  const trackProfile = (result: DirectDispatchResult): void => {
+    if (!result.profile) return;
+    trackProfilePromise(result.profile);
+  };
+
+  const mintProfiled = (
+    result: DirectDispatchResult,
+    shape: readonly number[],
+    dtype: string,
+  ): Handle => {
+    trackProfile(result);
+    return mint(result.buffer, result.byteLength, shape, dtype);
+  };
+
+  const snapshot = (): WebGpuResourceSnapshot => {
+    const latestProfile = passProfiles[passProfiles.length - 1];
+    const timingMode = latestProfile?.timingMode
+      ?? (pendingProfiles.size > 0
+        ? (timestampQueryAvailable ? "timestamp-query" : "queue-completion")
+        : "unavailable");
+    return {
+      timingMode,
+      timestampQueryAvailable,
+      currentOwnedGpuBytes,
+      peakOwnedGpuBytes,
+      totalAllocatedGpuBytes,
+      totalReleasedGpuBytes,
+      aliveHandleCount: handles.size,
+      pendingProfileCount: pendingProfiles.size,
+      passProfiles,
+      ...(logicalTensorPlanPeakBytes !== undefined
+        ? { logicalTensorPlanPeakBytes }
+        : {}),
+    };
   };
 
   const get = (handle: Handle, op: string): BufferRecord => {
@@ -890,7 +988,7 @@ export function createWebGpuRealizerBridge(
     release(handle: Handle): void {
       const rec = handles.get(handle);
       if (rec === undefined) return; // idempotent
-      rec.buffer.destroy();
+      releaseRecord(rec);
       handles.delete(handle);
     },
 
@@ -901,8 +999,16 @@ export function createWebGpuRealizerBridge(
       // PRD-012a: tiled GEMM (16×16 workgroup-shared tiles) replaces the
       // naive triple-loop. Reduces DRAM reads from 2*M*N*K to ~M*N*K/8 —
       // the load-bearing perf win the megakernel-PRD was claiming.
-      const result = matmulTiledDirect(device, aRec.buffer, bRec.buffer, m, k, n);
-      return mint(result.buffer, result.byteLength, [m, n], dtype);
+      const result = matmulTiledDirect(
+        device,
+        aRec.buffer,
+        bRec.buffer,
+        m,
+        k,
+        n,
+        profileFor("matmul_tiled"),
+      );
+      return mintProfiled(result, [m, n], dtype);
     },
 
     fused_elementwise(
@@ -920,8 +1026,14 @@ export function createWebGpuRealizerBridge(
       for (const d of shape) total *= d;
       if (total === 0) total = 1;
       const fusedOps: FusedOp[] = ops.map((o) => [o[0], o[1], o[2]] as FusedOp);
-      const result = fusedElementwiseDirect(device, inputBufs, fusedOps, total);
-      return mint(result.buffer, result.byteLength, shape, dtype);
+      const result = fusedElementwiseDirect(
+        device,
+        inputBufs,
+        fusedOps,
+        total,
+        profileFor("fused_elementwise"),
+      );
+      return mintProfiled(result, shape, dtype);
     },
 
     cast(
@@ -985,8 +1097,9 @@ export function createWebGpuRealizerBridge(
         maskRec?.buffer ?? null,
         { B: b, H: h, Sq: sq, Sk: sk, D: d },
         scale,
+        profileFor("flash_attention"),
       );
-      return mint(result.buffer, result.byteLength, [b, h, sq, d], dtype);
+      return mintProfiled(result, [b, h, sq, d], dtype);
     },
 
     conv1d(
@@ -1033,8 +1146,9 @@ export function createWebGpuRealizerBridge(
           bias === null ? "nobias" : "bias",
           n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
         ].join("_"),
+        profile: profileFor(bias === null ? "conv1d_nobias" : "conv1d_bias"),
       });
-      return mint(result.buffer, result.byteLength, [n, cOut, lOut], dtype);
+      return mintProfiled(result, [n, cOut, lOut], dtype);
     },
 
     conv1d_backward_input(
@@ -1073,8 +1187,9 @@ export function createWebGpuRealizerBridge(
         params,
         dispatchCount: [outputLength, 1, 1],
         cacheKeySuffix: [n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut].join("_"),
+        profile: profileFor("conv1d_backward_input"),
       });
-      return mint(result.buffer, result.byteLength, [n, cIn, lIn], dtype);
+      return mintProfiled(result, [n, cIn, lIn], dtype);
     },
 
     conv1d_backward_weight(
@@ -1114,8 +1229,9 @@ export function createWebGpuRealizerBridge(
         params,
         dispatchCount: [outputLength, 1, 1],
         cacheKeySuffix: [n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut].join("_"),
+        profile: profileFor("conv1d_backward_weight"),
       });
-      return mint(result.buffer, result.byteLength, [cOut, cPerGroup, k], dtype);
+      return mintProfiled(result, [cOut, cPerGroup, k], dtype);
     },
 
     conv1d_backward_bias(
@@ -1145,8 +1261,9 @@ export function createWebGpuRealizerBridge(
         params,
         dispatchCount: [cOut, 1, 1],
         cacheKeySuffix: [n, cOut, lOut].join("_"),
+        profile: profileFor("conv1d_backward_bias"),
       });
-      return mint(result.buffer, result.byteLength, [cOut], dtype);
+      return mintProfiled(result, [cOut], dtype);
     },
 
     conv2d(
@@ -1205,8 +1322,9 @@ export function createWebGpuRealizerBridge(
           strideH, strideW, padH, padW, dilationH, dilationW,
           groups, outH, outW,
         ].join("_"),
+        profile: profileFor(bias === null ? "conv2d_nobias" : "conv2d_bias"),
       });
-      return mint(result.buffer, result.byteLength, [n, cOut, outH, outW], dtype);
+      return mintProfiled(result, [n, cOut, outH, outW], dtype);
     },
 
     conv2d_backward_input(
@@ -1259,8 +1377,9 @@ export function createWebGpuRealizerBridge(
           strideH, strideW, padH, padW, dilationH, dilationW,
           groups, outH, outW,
         ].join("_"),
+        profile: profileFor("conv2d_backward_input"),
       });
-      return mint(result.buffer, result.byteLength, [n, cIn, h, w], dtype);
+      return mintProfiled(result, [n, cIn, h, w], dtype);
     },
 
     conv2d_backward_weight(
@@ -1314,8 +1433,9 @@ export function createWebGpuRealizerBridge(
           strideH, strideW, padH, padW, dilationH, dilationW,
           groups, outH, outW,
         ].join("_"),
+        profile: profileFor("conv2d_backward_weight"),
       });
-      return mint(result.buffer, result.byteLength, [cOut, cPerGroup, kh, kw], dtype);
+      return mintProfiled(result, [cOut, cPerGroup, kh, kw], dtype);
     },
 
     conv2d_backward_bias(
@@ -1347,8 +1467,9 @@ export function createWebGpuRealizerBridge(
         params,
         dispatchCount: [cOut, 1, 1],
         cacheKeySuffix: [n, cOut, outH, outW].join("_"),
+        profile: profileFor("conv2d_backward_bias"),
       });
-      return mint(result.buffer, result.byteLength, [cOut], dtype);
+      return mintProfiled(result, [cOut], dtype);
     },
 
     run_user_kernel(
@@ -1380,8 +1501,9 @@ export function createWebGpuRealizerBridge(
         params: new Uint32Array(0),
         dispatchCount: [dispatchShape[0], dispatchShape[1], dispatchShape[2]],
         cacheKeySuffix: hash,
+        profile: profileFor(`user_kernel:${name}`),
       });
-      return mint(result.buffer, result.byteLength, outputShape, dtype);
+      return mintProfiled(result, outputShape, dtype);
     },
 
     async run_tensor_plan(
@@ -1395,6 +1517,9 @@ export function createWebGpuRealizerBridge(
         plan,
         normalizeTensorPlanInputs(inputs, get),
       );
+      if (profilingEnabled) {
+        for (const profile of result.profiles) trackProfilePromise(profile);
+      }
       return new Uint8Array(
         result.data.buffer,
         result.data.byteOffset,
@@ -1413,11 +1538,27 @@ export function createWebGpuRealizerBridge(
         plan,
         normalizeTensorPlanInputs(inputs, get),
       );
+      logicalTensorPlanPeakBytes = Math.max(
+        logicalTensorPlanPeakBytes ?? 0,
+        result.peakLiveBytes,
+      );
+      if (profilingEnabled) {
+        for (const profile of result.profiles) trackProfilePromise(profile);
+      }
       return mint(result.buffer, result.byteLength, result.shape, dtype);
     },
 
     aliveHandleCount(): number {
       return handles.size;
+    },
+
+    resourceSnapshot(): WebGpuResourceSnapshot {
+      return snapshot();
+    },
+
+    async flushProfiles(): Promise<WebGpuResourceSnapshot> {
+      await Promise.allSettled([...pendingProfiles]);
+      return snapshot();
     },
   };
 }

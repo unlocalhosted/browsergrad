@@ -6,6 +6,7 @@ import {
   releaseDirectBuffer,
   runDirect,
   uploadFloat32,
+  type DirectDispatchProfile,
   type DirectDispatchResult,
 } from "./runner.js";
 import { KernelError, type KernelDevice } from "./types.js";
@@ -102,6 +103,7 @@ export interface TensorPlanRunResult {
   readonly materializedValueId: number;
   readonly earlyReleasedBuffers: number;
   readonly earlyReleasedBytes: number;
+  readonly profiles: readonly Promise<DirectDispatchProfile>[];
 }
 
 export interface TensorPlanResidentResult {
@@ -112,6 +114,7 @@ export interface TensorPlanResidentResult {
   readonly residentValueId: number;
   readonly earlyReleasedBuffers: number;
   readonly earlyReleasedBytes: number;
+  readonly profiles: readonly Promise<DirectDispatchProfile>[];
 }
 
 type RawRecord = Record<string, unknown>;
@@ -122,6 +125,7 @@ interface ResidentValue {
   readonly owns: boolean;
   readonly poolable: boolean;
   readonly byteLength: number;
+  readonly profile?: Promise<DirectDispatchProfile>;
 }
 
 export function normalizeTensorGpuPlan(raw: unknown): TensorGpuPlan {
@@ -177,7 +181,7 @@ export async function runTensorGpuPlan(
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
 ): Promise<TensorPlanRunResult> {
-  const { root, rootMeta, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
+  const { root, rootMeta, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats, profiles } = executeTensorGpuPlan(
     device,
     rawPlan,
     inputs,
@@ -191,6 +195,7 @@ export async function runTensorGpuPlan(
       materializedValueId: rootId,
       earlyReleasedBuffers: earlyReleaseStats.buffers,
       earlyReleasedBytes: earlyReleaseStats.bytes,
+      profiles,
     };
   } finally {
     for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
@@ -202,7 +207,7 @@ export function runTensorGpuPlanResident(
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
 ): TensorPlanResidentResult {
-  const { root, rootMeta, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
+  const { root, rootMeta, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats, profiles } = executeTensorGpuPlan(
     device,
     rawPlan,
     inputs,
@@ -223,6 +228,7 @@ export function runTensorGpuPlanResident(
     residentValueId: rootId,
     earlyReleasedBuffers: earlyReleaseStats.buffers,
     earlyReleasedBytes: earlyReleaseStats.bytes,
+    profiles,
   };
 }
 
@@ -238,6 +244,7 @@ function executeTensorGpuPlan(
   readonly peakLiveBytes: number;
   readonly rootId: number;
   readonly earlyReleaseStats: { readonly buffers: number; readonly bytes: number };
+  readonly profiles: readonly Promise<DirectDispatchProfile>[];
 } {
   const plan = normalizeTensorGpuPlan(rawPlan);
   validatePlan(plan);
@@ -256,6 +263,7 @@ function executeTensorGpuPlan(
   const owned = new Set<GPUBuffer>();
   const ownedBytes = new Map<GPUBuffer, number>();
   const earlyReleaseStats = { buffers: 0, bytes: 0 };
+  const profiles: Promise<DirectDispatchProfile>[] = [];
 
   try {
     for (const step of plan.steps) {
@@ -264,6 +272,7 @@ function executeTensorGpuPlan(
       if (value.owns) {
         owned.add(value.buffer);
         ownedBytes.set(value.buffer, value.poolable ? value.byteLength : -value.byteLength);
+        if (value.profile) profiles.push(value.profile);
       }
       releaseDeadOwnedBuffers(device, plan, step.step, values, owned, ownedBytes, earlyReleaseStats);
     }
@@ -286,6 +295,7 @@ function executeTensorGpuPlan(
     peakLiveBytes: plan.peakLiveBytes,
     rootId: plan.rootId,
     earlyReleaseStats,
+    profiles,
   };
 }
 
@@ -3053,6 +3063,7 @@ function fromDirect(step: TensorPlanStep, result: DirectDispatchResult): Residen
     owns: true,
     poolable: true,
     byteLength: result.byteLength,
+    ...(result.profile ? { profile: result.profile } : {}),
   };
 }
 

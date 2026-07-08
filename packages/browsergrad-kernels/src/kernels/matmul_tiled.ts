@@ -40,6 +40,7 @@
 
 import {
   runDirect,
+  type DirectDispatchProfileOptions,
   type KernelDescriptor,
   type DirectDispatchResult,
 } from "../runner.js";
@@ -119,6 +120,7 @@ export function matmulTiledDirect(
   M: number,
   K: number,
   N: number,
+  profile?: DirectDispatchProfileOptions,
 ): DirectDispatchResult {
   const params = new Uint32Array([M, K, N, 0]);
   return runDirect(device, DESCRIPTOR, {
@@ -132,6 +134,7 @@ export function matmulTiledDirect(
       1,
     ],
     cacheKeySuffix: "f32-tiled16",
+    ...(profile ? { profile } : {}),
   });
 }
 

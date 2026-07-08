@@ -189,6 +189,21 @@ export interface ExecOptions {
    * The library does not interpret artifacts — it just relays them.
    */
   onArtifact?: (artifact: Artifact) => void;
+
+  /**
+   * Enable correctness-labeled resource collection for this exec.
+   *
+   * BrowserGrad only reports values it can name by provenance. Exact values
+   * may be used for hard budgets; estimated/coarse values are advisory unless
+   * a caller explicitly chooses to treat them otherwise.
+   */
+  resourceMetrics?: ExecResourceMetricsOptions | undefined;
+
+  /**
+   * Called with resource samples as they are collected. Samples are intended
+   * for live graphs; the final authoritative summary is returned on ExecResult.
+   */
+  onResourceSample?: (sample: ResourceMetricSample) => void;
 }
 
 export interface ExecResult {
@@ -218,6 +233,106 @@ export interface ExecResult {
 
   /** Wall-clock time spent in the worker for this exec, in milliseconds. */
   readonly durationMs: number;
+
+  /** Optional correctness-labeled resource evidence for this exec. */
+  readonly resources?: ResourceMetricSummary;
+}
+
+export interface ExecResourceMetricsOptions {
+  readonly enabled: boolean;
+  /**
+   * Host-side graph sampling interval. Values below 16ms are clamped to avoid
+   * pretending the browser can provide stable sub-frame resource telemetry.
+   */
+  readonly sampleIntervalMs?: number;
+  readonly budgets?: ResourceBudgets;
+  readonly histogram?: ResourceHistogramOptions;
+}
+
+export interface ResourceHistogramOptions {
+  readonly assignmentId?: string;
+  readonly assignmentVersion?: string;
+  readonly backendTier?: string;
+  readonly runtimePackages?: readonly string[];
+}
+
+export type ResourceMetricConfidence =
+  | "exact"
+  | "estimated"
+  | "coarse"
+  | "unavailable";
+
+export type ResourceMetricUnit = "ms" | "bytes" | "count";
+
+export type ResourceMetricSource =
+  | "runtime-worker"
+  | "runtime-host"
+  | "browser-measure-memory"
+  | "webgpu-bridge"
+  | "webgpu-timestamp-query"
+  | "webgpu-queue-completion"
+  | "tensor-plan"
+  | "unavailable";
+
+export interface ResourceMetricValue {
+  readonly name: string;
+  readonly label: string;
+  readonly unit: ResourceMetricUnit;
+  readonly value: number | null;
+  readonly source: ResourceMetricSource;
+  readonly confidence: ResourceMetricConfidence;
+  readonly unavailableReason?: string;
+}
+
+export interface ResourceMetricSample {
+  /** Host-relative elapsed time for graph placement. */
+  readonly elapsedMs: number;
+  readonly values: readonly ResourceMetricValue[];
+}
+
+export interface ResourceBudgets {
+  /** Exact worker execution duration budget. */
+  readonly wallTimeMs?: number;
+  /** Exact BrowserGrad-owned GPU buffer budget, when a WebGPU bridge reports it. */
+  readonly browsergradOwnedGpuBytes?: number;
+  /** Advisory browser estimate budget; never hard-failed by default. */
+  readonly estimatedPageBytes?: number;
+  /** Advisory WASM heap capacity budget; never hard-failed by default. */
+  readonly wasmHeapCapacityBytes?: number;
+  /** Exact WebGPU timestamp-query budget, when timestamp queries are available. */
+  readonly webgpuTimestampMs?: number;
+}
+
+export type ResourceBudgetStatus =
+  | "pass"
+  | "warn"
+  | "fail"
+  | "unavailable";
+
+export interface ResourceBudgetEvaluation {
+  readonly name: string;
+  readonly status: ResourceBudgetStatus;
+  readonly metric: ResourceMetricValue;
+  readonly limit: number;
+  readonly hard: boolean;
+  readonly message: string;
+}
+
+export interface ResourceMetricSummary {
+  readonly workerWallTimeMs: ResourceMetricValue;
+  readonly hostRoundTripMs?: ResourceMetricValue;
+  readonly samples: readonly ResourceMetricSample[];
+  readonly budgetEvaluations: readonly ResourceBudgetEvaluation[];
+  readonly histogramKey: ResourceHistogramKey;
+}
+
+export interface ResourceHistogramKey {
+  readonly assignmentId?: string;
+  readonly assignmentVersion?: string;
+  readonly browserFamily?: string;
+  readonly backendTier?: string;
+  readonly runtimePackages: readonly string[];
+  readonly metricNames: readonly string[];
 }
 
 export type ExecErrorKind =

@@ -32,6 +32,7 @@ interface DeviceCheck {
   reason?: string;
   adapterName?: string;
   adapterInfo?: GPUAdapterInfo;
+  timestampQuerySupported?: boolean;
 }
 
 async function checkDevice(): Promise<DeviceCheck> {
@@ -47,6 +48,7 @@ async function checkDevice(): Promise<DeviceCheck> {
       available: true,
       adapterName: adapter.info?.device ?? "unknown",
       adapterInfo: adapter.info,
+      timestampQuerySupported: adapter.features.has("timestamp-query"),
     };
   } catch (err) {
     return {
@@ -434,6 +436,101 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect(bridge.aliveHandleCount()).toBe(0);
   });
 
+  it("WebGpuRealizerBridge reports exact owned GPU buffer bytes", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const bridge = createWebGpuRealizerBridge(device);
+    const a = new Float32Array([1, 2]);
+    const b = new Float32Array([3, 4, 5, 6]);
+
+    expect(bridge.resourceSnapshot()).toMatchObject({
+      currentOwnedGpuBytes: 0,
+      peakOwnedGpuBytes: 0,
+      totalAllocatedGpuBytes: 0,
+      totalReleasedGpuBytes: 0,
+      aliveHandleCount: 0,
+    });
+
+    const aHandle = bridge.upload(new Uint8Array(a.buffer, a.byteOffset, a.byteLength), [2], "float32");
+    const bHandle = bridge.upload(new Uint8Array(b.buffer, b.byteOffset, b.byteLength), [2, 2], "float32");
+    expect(bridge.resourceSnapshot()).toMatchObject({
+      currentOwnedGpuBytes: a.byteLength + b.byteLength,
+      peakOwnedGpuBytes: a.byteLength + b.byteLength,
+      totalAllocatedGpuBytes: a.byteLength + b.byteLength,
+      totalReleasedGpuBytes: 0,
+      aliveHandleCount: 2,
+      timingMode: "unavailable",
+    });
+
+    bridge.release(aHandle);
+    expect(bridge.resourceSnapshot()).toMatchObject({
+      currentOwnedGpuBytes: b.byteLength,
+      peakOwnedGpuBytes: a.byteLength + b.byteLength,
+      totalReleasedGpuBytes: a.byteLength,
+      aliveHandleCount: 1,
+    });
+
+    bridge.release(bHandle);
+    expect(bridge.resourceSnapshot()).toMatchObject({
+      currentOwnedGpuBytes: 0,
+      peakOwnedGpuBytes: a.byteLength + b.byteLength,
+      totalAllocatedGpuBytes: a.byteLength + b.byteLength,
+      totalReleasedGpuBytes: a.byteLength + b.byteLength,
+      aliveHandleCount: 0,
+    });
+  });
+
+  it("WebGpuRealizerBridge profiles dispatches with labeled queue-completion timing by default", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const bridge = createWebGpuRealizerBridge(device);
+    const a = new Float32Array([1, 2, 3, 4]);
+    const b = new Float32Array([1, 0, 0, 1]);
+    const aHandle = bridge.upload(new Uint8Array(a.buffer, a.byteOffset, a.byteLength), [2, 2], "float32");
+    const bHandle = bridge.upload(new Uint8Array(b.buffer, b.byteOffset, b.byteLength), [2, 2], "float32");
+    const outHandle = bridge.matmul(aHandle, bHandle, 2, 2, 2, "float32");
+
+    const profiled = await bridge.flushProfiles();
+    expect(profiled.pendingProfileCount).toBe(0);
+    expect(profiled.passProfiles).toHaveLength(1);
+    expect(profiled.passProfiles[0]).toMatchObject({
+      label: "matmul_tiled",
+      timingMode: "queue-completion",
+      confidence: "coarse",
+      workgroupSize: [16, 16, 1],
+    });
+    expect(profiled.passProfiles[0]?.queueElapsedMs).toEqual(expect.any(Number));
+
+    bridge.release(aHandle);
+    bridge.release(bHandle);
+    bridge.release(outHandle);
+  });
+
+  it("WebGpuRealizerBridge uses exact timestamp-query timing when the device exposes it", async () => {
+    if (!deviceCheck.available || !deviceCheck.timestampQuerySupported) return;
+    const device = await createDevice({ requiredFeatures: ["timestamp-query"] });
+    const bridge = createWebGpuRealizerBridge(device);
+    const a = new Float32Array([1, 2, 3, 4]);
+    const b = new Float32Array([1, 0, 0, 1]);
+    const aHandle = bridge.upload(new Uint8Array(a.buffer, a.byteOffset, a.byteLength), [2, 2], "float32");
+    const bHandle = bridge.upload(new Uint8Array(b.buffer, b.byteOffset, b.byteLength), [2, 2], "float32");
+    const outHandle = bridge.matmul(aHandle, bHandle, 2, 2, 2, "float32");
+
+    const profiled = await bridge.flushProfiles();
+    expect(profiled.timestampQueryAvailable).toBe(true);
+    expect(profiled.passProfiles).toHaveLength(1);
+    expect(profiled.passProfiles[0]).toMatchObject({
+      label: "matmul_tiled",
+      timingMode: "timestamp-query",
+      confidence: "exact",
+    });
+    expect(profiled.passProfiles[0]?.gpuElapsedMs).toEqual(expect.any(Number));
+
+    bridge.release(aHandle);
+    bridge.release(bHandle);
+    bridge.release(outHandle);
+  });
+
   it("WebGpuRealizerBridge can keep tensor-plan roots resident and reuse handle inputs", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();
@@ -471,6 +568,18 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
       "float32",
     );
     expect(bridge.aliveHandleCount()).toBe(1);
+    expect(bridge.resourceSnapshot()).toMatchObject({
+      aliveHandleCount: 1,
+      currentOwnedGpuBytes: offset.byteLength,
+      logicalTensorPlanPeakBytes: 64,
+    });
+    const tensorPlanProfiled = await bridge.flushProfiles();
+    expect(tensorPlanProfiled.passProfiles.some((profile) => profile.label === "matmul_tiled"))
+      .toBe(true);
+    expect(tensorPlanProfiled.passProfiles.at(-1)).toMatchObject({
+      label: "matmul_tiled",
+      timingMode: expect.stringMatching(/^(timestamp-query|queue-completion)$/),
+    });
 
     const addPlan = {
       steps: [

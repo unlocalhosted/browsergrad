@@ -12,6 +12,7 @@ Use this as a fast navigation layer before diving into files.
 | `docs/platform/consuming-browsergrad.md` | Production npm consumption guide and import matrix. |
 | `docs/platform/agent-consumption-guide.md` | Agent-facing package selection and import rules. |
 | `docs/platform/release-readiness.md` | Publish workflow, packed tarball checks, and npm verification. |
+| `docs/platform/resource-metrics.md` | Correctness contract for runtime/WebGPU resource metrics and budgets. |
 | `docs/internal/` | Internal vision, progress, status, and compatibility notes. |
 | `docs/platform/` | Platform architecture and authoring guides for multi-course guided labs, profiles, rubrics, fixtures, and browser-safe gates. |
 | `docs/prd/` | Design records and roadmap PRDs. |

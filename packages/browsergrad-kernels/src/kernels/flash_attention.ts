@@ -30,6 +30,7 @@
 
 import {
   runDirect,
+  type DirectDispatchProfileOptions,
   type KernelDescriptor,
   type DirectDispatchResult,
 } from "../runner.js";
@@ -167,6 +168,7 @@ export function flashAttentionDirect(
     maskH?: number;
   },
   scale: number,
+  profile?: DirectDispatchProfileOptions,
 ): DirectDispatchResult {
   if (shapes.D > MAX_D) {
     throw new KernelError(
@@ -200,6 +202,7 @@ export function flashAttentionDirect(
       params,
       dispatchCount: [shapes.B * shapes.H * BR, numQBlocks, 1],
       cacheKeySuffix: `f32-${mask ? "masked" : "unmasked"}-D${shapes.D}-BR${BR}-BC${BC}`,
+      ...(profile ? { profile } : {}),
     });
   } finally {
     if (!mask) {

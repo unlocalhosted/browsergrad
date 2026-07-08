@@ -13,6 +13,7 @@ import {
   type AssertionPass,
   type ExecError,
   type ExecResult,
+  type ResourceMetricSample,
   type Session,
   type SessionOptions,
 } from "../src/index";
@@ -163,6 +164,72 @@ describe("Session worker hardening", () => {
     expect(interruptBuffer![0]).toBe(0);
     await session.dispose();
   });
+
+  it("collects provenance-labeled resource metrics when opted in", async () => {
+    const worker = new FakeWorker();
+    const streamed: ResourceMetricSample[] = [];
+    const session = await createSession({
+      pyodideIndexURL: "/pyodide/",
+      worker: worker as unknown as Worker,
+      disableInterruptBuffer: true,
+    });
+
+    const result = await session.exec({
+      code: "print('profiled')",
+      resourceMetrics: {
+        enabled: true,
+        histogram: {
+          assignmentId: "toy-lab",
+          assignmentVersion: "1.0.0",
+          backendTier: "pyodide",
+          runtimePackages: ["numpy"],
+        },
+        budgets: {
+          wallTimeMs: 0,
+          estimatedPageBytes: 1,
+        },
+      },
+      onResourceSample: (sample) => {
+        streamed.push(sample);
+      },
+    });
+
+    expect(result.resources?.workerWallTimeMs).toMatchObject({
+      name: "worker_wall_time_ms",
+      source: "runtime-worker",
+      confidence: "exact",
+      unit: "ms",
+      value: 1,
+    });
+    expect(result.resources?.samples.length).toBeGreaterThan(0);
+    expect(streamed.length).toBeGreaterThan(0);
+    expect(result.resources?.budgetEvaluations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "wall_time_ms",
+          status: "fail",
+          hard: true,
+        }),
+        expect.objectContaining({
+          name: "estimated_page_bytes",
+          hard: false,
+        }),
+      ]),
+    );
+    expect(result.resources?.histogramKey).toMatchObject({
+      assignmentId: "toy-lab",
+      assignmentVersion: "1.0.0",
+      backendTier: "pyodide",
+      runtimePackages: ["numpy"],
+      metricNames: expect.arrayContaining([
+        "estimated_page_bytes",
+        "host_elapsed_ms",
+        "host_round_trip_ms",
+        "worker_wall_time_ms",
+      ]),
+    });
+    await session.dispose();
+  });
 });
 
 describe("type shape sanity", () => {
@@ -245,6 +312,24 @@ describe("type shape sanity", () => {
       onStderr: () => {},
       onAssertion: () => {},
       onArtifact: () => {},
+      resourceMetrics: {
+        enabled: true,
+        sampleIntervalMs: 50,
+        histogram: {
+          assignmentId: "lab",
+          assignmentVersion: "1.0.0",
+          backendTier: "pyodide",
+          runtimePackages: ["numpy"],
+        },
+        budgets: {
+          wallTimeMs: 1000,
+          browsergradOwnedGpuBytes: 1024,
+          estimatedPageBytes: 2048,
+          wasmHeapCapacityBytes: 4096,
+          webgpuTimestampMs: 10,
+        },
+      },
+      onResourceSample: () => {},
     };
     expect(_opts.code).toBe("print('hi')");
   });

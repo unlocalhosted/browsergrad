@@ -236,6 +236,7 @@ export interface DirectDispatchOptions {
   readonly params: Uint32Array;
   readonly dispatchCount: readonly [number, number, number];
   readonly cacheKeySuffix: string;
+  readonly profile?: DirectDispatchProfileOptions | undefined;
 }
 
 export interface DirectDispatchResult {
@@ -243,6 +244,42 @@ export interface DirectDispatchResult {
   readonly buffer: GPUBuffer;
   /** Byte length corresponding to outputLength * 4. */
   readonly byteLength: number;
+  /** Optional timing evidence for this dispatch. */
+  readonly profile?: Promise<DirectDispatchProfile>;
+}
+
+export interface DirectDispatchProfileOptions {
+  /** Defaults to true. Set false only for callers that explicitly do not want timing evidence. */
+  readonly enabled?: boolean;
+  readonly label?: string;
+}
+
+export type DirectDispatchTimingMode =
+  | "timestamp-query"
+  | "queue-completion"
+  | "unavailable";
+
+export type DirectDispatchTimingConfidence =
+  | "exact"
+  | "coarse"
+  | "unavailable";
+
+export interface DirectDispatchProfile {
+  readonly label: string;
+  readonly timingMode: DirectDispatchTimingMode;
+  readonly confidence: DirectDispatchTimingConfidence;
+  readonly gpuElapsedMs?: number;
+  readonly queueElapsedMs?: number;
+  readonly unavailableReason?: string;
+  readonly dispatchCount: readonly [number, number, number];
+  readonly workgroupSize: readonly [number, number, number];
+}
+
+interface DirectDispatchProfiler {
+  readonly passDescriptor: GPUComputePassDescriptor;
+  resolve(encoder: GPUCommandEncoder): void;
+  finish(): Promise<DirectDispatchProfile>;
+  cleanup(): void;
 }
 
 export function runDirect(
@@ -295,6 +332,7 @@ export function runDirect(
   let completed = false;
   let outputBuffer: GPUBuffer | undefined;
   let paramsBuffer: GPUBuffer | undefined;
+  let profiler: DirectDispatchProfiler | null = null;
   try {
     outputBuffer =
       opts.outputBuffer ??
@@ -327,24 +365,160 @@ export function runDirect(
       entries: bgEntries,
     });
 
+    const workgroupDispatchCount = workgroupDispatchCountFor(desc, opts.dispatchCount);
+    profiler = createDirectDispatchProfiler(gpu, desc, opts, workgroupDispatchCount);
     const encoder = gpu.createCommandEncoder({ label: `bg-direct-${desc.name}` });
-    const pass = encoder.beginComputePass();
+    const pass = encoder.beginComputePass(profiler?.passDescriptor ?? {});
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
-    const wgX = Math.ceil(opts.dispatchCount[0] / desc.workgroupSize[0]);
-    const wgY = Math.ceil(opts.dispatchCount[1] / desc.workgroupSize[1]);
-    const wgZ = Math.ceil(opts.dispatchCount[2] / desc.workgroupSize[2]);
-    pass.dispatchWorkgroups(Math.max(wgX, 1), Math.max(wgY, 1), Math.max(wgZ, 1));
+    pass.dispatchWorkgroups(
+      workgroupDispatchCount[0],
+      workgroupDispatchCount[1],
+      workgroupDispatchCount[2],
+    );
     pass.end();
+    profiler?.resolve(encoder);
     gpu.queue.submit([encoder.finish()]);
 
+    const profile = profiler?.finish();
     impl.recordInvocation();
     completed = true;
-    return { buffer: outputBuffer, byteLength: outputByteLength };
+    return {
+      buffer: outputBuffer,
+      byteLength: outputByteLength,
+      ...(profile ? { profile } : {}),
+    };
   } finally {
     paramsBuffer?.destroy();
+    if (!completed) profiler?.cleanup();
     if (!completed && ownsOutput) outputBuffer?.destroy();
   }
+}
+
+function workgroupDispatchCountFor(
+  desc: KernelDescriptor,
+  dispatchCount: readonly [number, number, number],
+): readonly [number, number, number] {
+  const wgX = Math.ceil(dispatchCount[0] / desc.workgroupSize[0]);
+  const wgY = Math.ceil(dispatchCount[1] / desc.workgroupSize[1]);
+  const wgZ = Math.ceil(dispatchCount[2] / desc.workgroupSize[2]);
+  return [Math.max(wgX, 1), Math.max(wgY, 1), Math.max(wgZ, 1)];
+}
+
+function createDirectDispatchProfiler(
+  gpu: GPUDevice,
+  desc: KernelDescriptor,
+  opts: DirectDispatchOptions,
+  workgroupDispatchCount: readonly [number, number, number],
+): DirectDispatchProfiler | null {
+  if (opts.profile?.enabled === false) return null;
+  const label = opts.profile?.label ?? desc.name;
+
+  if (gpu.features.has("timestamp-query")) {
+    const querySet = gpu.createQuerySet({ type: "timestamp", count: 2 });
+    const queryBuffer = gpu.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+    });
+    const readBuffer = gpu.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    return {
+      passDescriptor: {
+        label: `bg-profile-${label}`,
+        timestampWrites: {
+          querySet,
+          beginningOfPassWriteIndex: 0,
+          endOfPassWriteIndex: 1,
+        },
+      },
+      resolve(encoder): void {
+        encoder.resolveQuerySet(querySet, 0, 2, queryBuffer, 0);
+        encoder.copyBufferToBuffer(queryBuffer, 0, readBuffer, 0, 16);
+      },
+      async finish(): Promise<DirectDispatchProfile> {
+        try {
+          await readBuffer.mapAsync(GPUMapMode.READ);
+          try {
+            const timestamps = new BigUint64Array(readBuffer.getMappedRange(0, 16).slice(0));
+            const deltaNs = timestamps[1]! > timestamps[0]!
+              ? timestamps[1]! - timestamps[0]!
+              : 0n;
+            return {
+              label,
+              timingMode: "timestamp-query",
+              confidence: "exact",
+              gpuElapsedMs: Number(deltaNs) / 1_000_000,
+              dispatchCount: workgroupDispatchCount,
+              workgroupSize: desc.workgroupSize,
+            };
+          } finally {
+            readBuffer.unmap();
+          }
+        } catch (err) {
+          return unavailableProfile(
+            label,
+            desc,
+            workgroupDispatchCount,
+            err instanceof Error ? err.message : String(err),
+          );
+        } finally {
+          querySet.destroy();
+          queryBuffer.destroy();
+          readBuffer.destroy();
+        }
+      },
+      cleanup(): void {
+        querySet.destroy();
+        queryBuffer.destroy();
+        readBuffer.destroy();
+      },
+    };
+  }
+
+  const t0 = performance.now();
+  return {
+    passDescriptor: { label: `bg-profile-${label}` },
+    resolve(): void {},
+    async finish(): Promise<DirectDispatchProfile> {
+      try {
+        await gpu.queue.onSubmittedWorkDone();
+        return {
+          label,
+          timingMode: "queue-completion",
+          confidence: "coarse",
+          queueElapsedMs: performance.now() - t0,
+          dispatchCount: workgroupDispatchCount,
+          workgroupSize: desc.workgroupSize,
+        };
+      } catch (err) {
+        return unavailableProfile(
+          label,
+          desc,
+          workgroupDispatchCount,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    },
+    cleanup(): void {},
+  };
+}
+
+function unavailableProfile(
+  label: string,
+  desc: KernelDescriptor,
+  workgroupDispatchCount: readonly [number, number, number],
+  reason: string,
+): DirectDispatchProfile {
+  return {
+    label,
+    timingMode: "unavailable",
+    confidence: "unavailable",
+    unavailableReason: reason,
+    dispatchCount: workgroupDispatchCount,
+    workgroupSize: desc.workgroupSize,
+  };
 }
 
 export function releaseDirectBuffer(

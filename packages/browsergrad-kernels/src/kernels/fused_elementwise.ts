@@ -40,6 +40,7 @@
 
 import {
   runDirect,
+  type DirectDispatchProfileOptions,
   type KernelDescriptor,
   type DirectDispatchResult,
 } from "../runner.js";
@@ -157,6 +158,7 @@ export function fusedElementwiseDirect(
   inputs: readonly GPUBuffer[],
   ops: readonly FusedOp[],
   outputLength: number,
+  profile?: DirectDispatchProfileOptions,
 ): DirectDispatchResult {
   const wgsl = generateFusedWgsl(ops, inputs.length);
   const hash = hashOps(ops, inputs.length);
@@ -172,5 +174,6 @@ export function fusedElementwiseDirect(
     params,
     dispatchCount: [outputLength, 1, 1],
     cacheKeySuffix: hash,
+    ...(profile ? { profile } : {}),
   });
 }

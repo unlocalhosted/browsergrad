@@ -546,6 +546,54 @@ describe("assignment routing and exec requests", () => {
     expect(createAssignmentRubricExecRequest(plan).timeoutMs).toBe(45_000);
   });
 
+  it("creates resource metric options from resource-budget gates", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "wide_resource_limits",
+          kind: "resource-budget",
+          options: {
+            wall_time_ms: 50_000,
+            browsergrad_owned_gpu_bytes: 4_000_000,
+            estimated_page_bytes: 80_000_000,
+          },
+        },
+        {
+          name: "tight_resource_limits",
+          kind: "resource-budget",
+          options: {
+            wall_time_ms: 25_000,
+            browsergrad_owned_gpu_bytes: 2_000_000,
+            webgpu_timestamp_ms: 12.5,
+          },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    expect(createAssignmentRubricExecRequest(plan).resourceMetrics).toEqual({
+      enabled: true,
+      budgets: {
+        wallTimeMs: 25_000,
+        browsergradOwnedGpuBytes: 2_000_000,
+        estimatedPageBytes: 80_000_000,
+        webgpuTimestampMs: 12.5,
+      },
+      histogram: {
+        assignmentId: "cs336-assignment1",
+        assignmentVersion: "1.0.0",
+        backendTier: "pyodide",
+        runtimePackages: ["numpy", "regex", "pytest"],
+      },
+    });
+  });
+
   it("rejects Pyodide exec requests for non-Python rubrics", () => {
     const result = parseAssignmentProfile({
       ...VALID_PROFILE,

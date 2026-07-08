@@ -61,7 +61,10 @@ export {
 // `bg.register_webgpu_bridge(...)` on the Python side.
 export {
   createWebGpuRealizerBridge,
+  type WebGpuRealizerBridgeOptions,
   type WebGpuRealizerBridge,
+  type WebGpuResourceSnapshot,
+  type WebGpuTimingMode,
 } from "./realizer.js";
 
 // Direct-dispatch helpers — public so PRD-012's Python codegen can call
@@ -72,6 +75,10 @@ export {
   releaseDirectBuffer,
   materializeFloat32,
   uploadFloat32,
+  type DirectDispatchProfile,
+  type DirectDispatchProfileOptions,
+  type DirectDispatchTimingConfidence,
+  type DirectDispatchTimingMode,
   type DirectDispatchOptions,
   type DirectDispatchResult,
 } from "./runner.js";

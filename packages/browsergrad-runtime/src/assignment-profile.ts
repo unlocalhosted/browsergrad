@@ -22,6 +22,7 @@ const GATE_KINDS = new Set<AssignmentGateKind>([
   "streaming",
   "timeout",
   "forbidden-read",
+  "resource-budget",
 ]);
 
 export function parseAssignmentProfile(
@@ -279,6 +280,27 @@ function validateTimeoutGateOptions(
   );
 }
 
+function validateResourceBudgetGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  for (const key of [
+    "wall_time_ms",
+    "browsergrad_owned_gpu_bytes",
+    "estimated_page_bytes",
+    "wasm_heap_capacity_bytes",
+    "webgpu_timestamp_ms",
+  ]) {
+    validateNonNegativeFiniteNumberOption(
+      options[key],
+      `${path}.${key}`,
+      errors,
+      true,
+    );
+  }
+}
+
 function validateNonNegativeIntegerOption(
   value: unknown,
   path: string,
@@ -295,6 +317,26 @@ function validateNonNegativeIntegerOption(
       optional
         ? `${path}: must be a non-negative integer when present`
         : `${path}: must be a non-negative integer`,
+    );
+  }
+}
+
+function validateNonNegativeFiniteNumberOption(
+  value: unknown,
+  path: string,
+  errors: string[],
+  optional: boolean,
+): void {
+  if (value === undefined && optional) return;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0
+  ) {
+    errors.push(
+      optional
+        ? `${path}: must be a non-negative finite number when present`
+        : `${path}: must be a non-negative finite number`,
     );
   }
 }
@@ -426,7 +468,7 @@ function readGates(
     const name = readString(obj, "name", errors);
     const kindValue = obj.kind;
     if (typeof kindValue !== "string" || !GATE_KINDS.has(kindValue as AssignmentGateKind)) {
-      errors.push(`gates[${i}].kind: must be one of capability, streaming, timeout, forbidden-read`);
+      errors.push(`gates[${i}].kind: must be one of capability, streaming, timeout, forbidden-read, resource-budget`);
       continue;
     }
     const options = obj.options;
@@ -458,6 +500,12 @@ function readGates(
       );
     } else if (kindValue === "timeout") {
       validateTimeoutGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    } else if (kindValue === "resource-budget") {
+      validateResourceBudgetGateOptions(
         normalizedOptions,
         `gates[${i}].options`,
         errors,

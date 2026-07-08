@@ -106,6 +106,66 @@ describe("assignment profile parsing", () => {
     }
   });
 
+  it("accepts correctness-labeled resource budget gates", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "resource_limits",
+          kind: "resource-budget",
+          options: {
+            wall_time_ms: 1000,
+            browsergrad_owned_gpu_bytes: 1_048_576,
+            estimated_page_bytes: 64_000_000,
+            wasm_heap_capacity_bytes: 128_000_000,
+            webgpu_timestamp_ms: 2.5,
+          },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.profile.gates[0]).toEqual({
+        name: "resource_limits",
+        kind: "resource-budget",
+        options: {
+          wall_time_ms: 1000,
+          browsergrad_owned_gpu_bytes: 1_048_576,
+          estimated_page_bytes: 64_000_000,
+          wasm_heap_capacity_bytes: 128_000_000,
+          webgpu_timestamp_ms: 2.5,
+        },
+      });
+    }
+  });
+
+  it("rejects malformed resource budget gate options", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "bad_resource_limits",
+          kind: "resource-budget",
+          options: {
+            wall_time_ms: -1,
+            browsergrad_owned_gpu_bytes: "many",
+            estimated_page_bytes: Number.POSITIVE_INFINITY,
+          },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toEqual([
+        "gates[0].options.wall_time_ms: must be a non-negative finite number when present",
+        "gates[0].options.browsergrad_owned_gpu_bytes: must be a non-negative finite number when present",
+        "gates[0].options.estimated_page_bytes: must be a non-negative finite number when present",
+      ]);
+    }
+  });
+
   it("maps oracle specs to runtime JS module registrations", () => {
     const result = parseAssignmentProfile(VALID_PROFILE);
     expect(result.ok).toBe(true);

@@ -27,6 +27,11 @@ import type {
   ExecOptions,
   ExecResult,
   PackageProgressEvent,
+  ResourceBudgetEvaluation,
+  ResourceBudgets,
+  ResourceMetricSample,
+  ResourceMetricSummary,
+  ResourceMetricValue,
   Session,
   SessionFS,
   SessionOptions,
@@ -60,6 +65,7 @@ interface PendingRequest {
 
 /** Time we wait for cooperative cancel to land before terminating. */
 const COOPERATIVE_CANCEL_GRACE_MS = 500;
+const MIN_RESOURCE_SAMPLE_INTERVAL_MS = 16;
 
 function isInterruptBufferSupported(): boolean {
   // SharedArrayBuffer requires cross-origin isolation. In non-isolated contexts
@@ -73,6 +79,288 @@ function isInterruptBufferSupported(): boolean {
     return false;
   }
   return true;
+}
+
+interface ExecResourceCollector {
+  start(): void;
+  finish(done: {
+    readonly workerDurationMs?: number;
+    readonly hostDurationMs: number;
+  }): Promise<ResourceMetricSummary>;
+}
+
+function createExecResourceCollector(
+  opts: ExecOptions,
+  startedAt: number,
+): ExecResourceCollector | null {
+  if (opts.resourceMetrics?.enabled !== true) return null;
+  const samples: ResourceMetricSample[] = [];
+  let intervalHandle: ReturnType<typeof setInterval> | null = null;
+  let sampleInFlight: Promise<void> | null = null;
+  const sampleIntervalMs = Math.max(
+    MIN_RESOURCE_SAMPLE_INTERVAL_MS,
+    opts.resourceMetrics.sampleIntervalMs ?? 100,
+  );
+
+  const collectSample = async (): Promise<void> => {
+    if (sampleInFlight) return sampleInFlight;
+    sampleInFlight = (async () => {
+      const sample = await createResourceSample(startedAt);
+      samples.push(sample);
+      try {
+        opts.onResourceSample?.(sample);
+      } catch {
+        // Resource samples are evidence for the caller; a graph callback
+        // should not change the outcome of the Python execution.
+      }
+    })();
+    try {
+      await sampleInFlight;
+    } finally {
+      sampleInFlight = null;
+    }
+  };
+
+  return {
+    start(): void {
+      void collectSample();
+      intervalHandle = setInterval(() => {
+        void collectSample();
+      }, sampleIntervalMs);
+    },
+    async finish(done): Promise<ResourceMetricSummary> {
+      if (intervalHandle !== null) {
+        clearInterval(intervalHandle);
+        intervalHandle = null;
+      }
+      await collectSample();
+      const workerWallTimeMs = createWorkerWallTimeMetric(done.workerDurationMs);
+      const hostRoundTripMs = createHostRoundTripMetric(done.hostDurationMs);
+      return {
+        workerWallTimeMs,
+        hostRoundTripMs,
+        samples,
+        budgetEvaluations: evaluateResourceBudgets(
+          opts.resourceMetrics?.budgets,
+          workerWallTimeMs,
+          samples[samples.length - 1],
+        ),
+        histogramKey: createResourceHistogramKey(opts, workerWallTimeMs, samples),
+      };
+    },
+  };
+}
+
+function createResourceHistogramKey(
+  opts: ExecOptions,
+  workerWallTimeMs: ResourceMetricValue,
+  samples: readonly ResourceMetricSample[],
+): ResourceMetricSummary["histogramKey"] {
+  const metricNames = new Set<string>([workerWallTimeMs.name, "host_round_trip_ms"]);
+  for (const sample of samples) {
+    for (const value of sample.values) metricNames.add(value.name);
+  }
+  const histogram = opts.resourceMetrics?.histogram;
+  const browserFamily = detectBrowserFamily();
+  return {
+    ...(histogram?.assignmentId ? { assignmentId: histogram.assignmentId } : {}),
+    ...(histogram?.assignmentVersion ? { assignmentVersion: histogram.assignmentVersion } : {}),
+    ...(histogram?.backendTier ? { backendTier: histogram.backendTier } : {}),
+    ...(browserFamily ? { browserFamily } : {}),
+    runtimePackages: histogram?.runtimePackages ?? [],
+    metricNames: [...metricNames].sort(),
+  };
+}
+
+function detectBrowserFamily(): string | undefined {
+  const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  if (!userAgent) return undefined;
+  if (/\bEdg\//.test(userAgent)) return "edge";
+  if (/\bFirefox\//.test(userAgent)) return "firefox";
+  if (/\bChrome\//.test(userAgent)) return "chrome";
+  if (/\bSafari\//.test(userAgent)) return "safari";
+  return "unknown";
+}
+
+async function createResourceSample(
+  startedAt: number,
+): Promise<ResourceMetricSample> {
+  const elapsedMs = performance.now() - startedAt;
+  const values: ResourceMetricValue[] = [
+    {
+      name: "host_elapsed_ms",
+      label: "Host elapsed time",
+      unit: "ms",
+      value: elapsedMs,
+      source: "runtime-host",
+      confidence: "exact",
+    },
+  ];
+
+  const estimatedPageBytes = await measureEstimatedPageBytes();
+  values.push(estimatedPageBytes);
+
+  return { elapsedMs, values };
+}
+
+async function measureEstimatedPageBytes(): Promise<ResourceMetricValue> {
+  const maybePerformance = performance as Performance & {
+    measureUserAgentSpecificMemory?: () => Promise<{ readonly bytes: number }>;
+  };
+  if (typeof maybePerformance.measureUserAgentSpecificMemory !== "function") {
+    return {
+      name: "estimated_page_bytes",
+      label: "Estimated page memory",
+      unit: "bytes",
+      value: null,
+      source: "unavailable",
+      confidence: "unavailable",
+      unavailableReason: "performance.measureUserAgentSpecificMemory is unavailable",
+    };
+  }
+  try {
+    const result = await maybePerformance.measureUserAgentSpecificMemory();
+    return {
+      name: "estimated_page_bytes",
+      label: "Estimated page memory",
+      unit: "bytes",
+      value: result.bytes,
+      source: "browser-measure-memory",
+      confidence: "estimated",
+    };
+  } catch (err) {
+    return {
+      name: "estimated_page_bytes",
+      label: "Estimated page memory",
+      unit: "bytes",
+      value: null,
+      source: "unavailable",
+      confidence: "unavailable",
+      unavailableReason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function createWorkerWallTimeMetric(
+  durationMs: number | undefined,
+): ResourceMetricValue {
+  if (durationMs === undefined) {
+    return {
+      name: "worker_wall_time_ms",
+      label: "Worker execution wall time",
+      unit: "ms",
+      value: null,
+      source: "unavailable",
+      confidence: "unavailable",
+      unavailableReason: "worker execution did not report a terminal duration",
+    };
+  }
+  return {
+    name: "worker_wall_time_ms",
+    label: "Worker execution wall time",
+    unit: "ms",
+    value: durationMs,
+    source: "runtime-worker",
+    confidence: "exact",
+  };
+}
+
+function createHostRoundTripMetric(durationMs: number): ResourceMetricValue {
+  return {
+    name: "host_round_trip_ms",
+    label: "Host round-trip time",
+    unit: "ms",
+    value: durationMs,
+    source: "runtime-host",
+    confidence: "exact",
+  };
+}
+
+function evaluateResourceBudgets(
+  budgets: ResourceBudgets | undefined,
+  workerWallTimeMs: ResourceMetricValue,
+  latestSample: ResourceMetricSample | undefined,
+): ResourceBudgetEvaluation[] {
+  if (!budgets) return [];
+  const out: ResourceBudgetEvaluation[] = [];
+  if (budgets.wallTimeMs !== undefined) {
+    out.push(evaluateBudget("wall_time_ms", workerWallTimeMs, budgets.wallTimeMs, true));
+  }
+  if (budgets.estimatedPageBytes !== undefined) {
+    const metric = latestSample?.values.find((value) => value.name === "estimated_page_bytes")
+      ?? unavailableMetric("estimated_page_bytes", "Estimated page memory", "bytes");
+    out.push(evaluateBudget("estimated_page_bytes", metric, budgets.estimatedPageBytes, false));
+  }
+  if (budgets.browsergradOwnedGpuBytes !== undefined) {
+    out.push(evaluateBudget(
+      "browsergrad_owned_gpu_bytes",
+      unavailableMetric("browsergrad_owned_gpu_bytes", "BrowserGrad-owned GPU bytes", "bytes"),
+      budgets.browsergradOwnedGpuBytes,
+      true,
+    ));
+  }
+  if (budgets.wasmHeapCapacityBytes !== undefined) {
+    out.push(evaluateBudget(
+      "wasm_heap_capacity_bytes",
+      unavailableMetric("wasm_heap_capacity_bytes", "WASM heap capacity", "bytes"),
+      budgets.wasmHeapCapacityBytes,
+      false,
+    ));
+  }
+  if (budgets.webgpuTimestampMs !== undefined) {
+    out.push(evaluateBudget(
+      "webgpu_timestamp_ms",
+      unavailableMetric("webgpu_timestamp_ms", "WebGPU timestamp-query elapsed time", "ms"),
+      budgets.webgpuTimestampMs,
+      true,
+    ));
+  }
+  return out;
+}
+
+function unavailableMetric(
+  name: string,
+  label: string,
+  unit: ResourceMetricValue["unit"],
+): ResourceMetricValue {
+  return {
+    name,
+    label,
+    unit,
+    value: null,
+    source: "unavailable",
+    confidence: "unavailable",
+    unavailableReason: "metric is not reported by this execution path",
+  };
+}
+
+function evaluateBudget(
+  name: string,
+  metric: ResourceMetricValue,
+  limit: number,
+  hard: boolean,
+): ResourceBudgetEvaluation {
+  if (metric.value === null || metric.confidence === "unavailable") {
+    return {
+      name,
+      status: "unavailable",
+      metric,
+      limit,
+      hard,
+      message: `${metric.label} is unavailable; no budget decision was made`,
+    };
+  }
+  const overLimit = metric.value > limit;
+  return {
+    name,
+    status: overLimit ? (hard ? "fail" : "warn") : "pass",
+    metric,
+    limit,
+    hard,
+    message: overLimit
+      ? `${metric.label} ${metric.value} exceeds budget ${limit}`
+      : `${metric.label} ${metric.value} is within budget ${limit}`,
+  };
 }
 
 class SessionImpl implements Session {
@@ -145,6 +433,8 @@ class SessionImpl implements Session {
     this.activeExecId = id;
     if (this.interruptBuffer) this.interruptBuffer[0] = 0;
     const t0 = performance.now();
+    const resourceCollector = createExecResourceCollector(opts, t0);
+    resourceCollector?.start();
     const assertions: Assertion[] = [];
     const artifacts: Artifact[] = [];
 
@@ -236,6 +526,13 @@ class SessionImpl implements Session {
                 err instanceof Error ? err.message : "exec failed before completion",
             },
             durationMs: performance.now() - t0,
+            ...(resourceCollector
+              ? {
+                  resources: await resourceCollector.finish({
+                    hostDurationMs: performance.now() - t0,
+                  }),
+                }
+              : {}),
           };
         }
       } finally {
@@ -262,6 +559,14 @@ class SessionImpl implements Session {
         artifacts,
         error,
         durationMs: done.durationMs,
+        ...(resourceCollector
+          ? {
+              resources: await resourceCollector.finish({
+                workerDurationMs: done.durationMs,
+                hostDurationMs: performance.now() - t0,
+              }),
+            }
+          : {}),
       };
     } finally {
       this.activeExecId = null;

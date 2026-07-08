@@ -53,7 +53,8 @@ export type AssignmentGateKind =
   | "capability"
   | "streaming"
   | "timeout"
-  | "forbidden-read";
+  | "forbidden-read"
+  | "resource-budget";
 
 export type AssignmentRubricKind = "python" | "javascript" | "unknown";
 
@@ -299,6 +300,7 @@ export interface AssignmentRunPlanExecution {
 export interface AssignmentRubricExecRequest {
   readonly code: string;
   readonly timeoutMs?: number;
+  readonly resourceMetrics?: ExecOptions["resourceMetrics"];
 }
 
 export interface AssignmentExternalRunnerRequest {
