@@ -426,6 +426,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__vabsdiffs2", "vabsdiffs2"],
   ["__vsads2", "vsads2"],
   ["__vsadu2", "vsadu2"],
+  ["__vhaddu2", "vhaddu2"],
+  ["__vavgs2", "vavgs2"],
   ["__vavgu2", "vavgu2"],
   ["__vminu2", "vminu2"],
   ["__vmaxu2", "vmaxu2"],
@@ -465,6 +467,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__vabsdiffs4", "vabsdiffs4"],
   ["__vsads4", "vsads4"],
   ["__vsadu4", "vsadu4"],
+  ["__vhaddu4", "vhaddu4"],
+  ["__vavgs4", "vavgs4"],
   ["__vavgu4", "vavgu4"],
   ["__vminu4", "vminu4"],
   ["__vmaxu4", "vmaxu4"],
@@ -4523,6 +4527,13 @@ function emitSemanticMathCall(
     if (wgslCallee.startsWith("vabsdiffs")) return emitSemanticVPackedAbsDiffExpression(lhs, rhs, laneWidth);
     return emitSemanticVPackedSadExpression(lhs, rhs, laneWidth, wgslCallee.startsWith("vsads"));
   }
+  if (wgslCallee === "vhaddu2" || wgslCallee === "vhaddu4" || wgslCallee === "vavgs2" || wgslCallee === "vavgs4") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
+    const rhs = emitSemanticExpressionAs(right, ir, names, "u32", options, textureSpecializations);
+    return emitSemanticVPackedAverageExpression(lhs, rhs, wgslCallee.endsWith("2") ? 16 : 8, wgslCallee.startsWith("vavgs"));
+  }
   if (wgslCallee === "vadd2" || wgslCallee === "vsub2" || wgslCallee === "vaddss2" || wgslCallee === "vsubss2" || wgslCallee === "vaddus2" || wgslCallee === "vsubus2" || wgslCallee === "vabsdiffu2" || wgslCallee === "vavgu2" || wgslCallee === "vminu2" || wgslCallee === "vmaxu2" || wgslCallee === "vmins2" || wgslCallee === "vmaxs2" || wgslCallee === "vadd4" || wgslCallee === "vsub4" || wgslCallee === "vaddss4" || wgslCallee === "vsubss4" || wgslCallee === "vaddus4" || wgslCallee === "vsubus4" || wgslCallee === "vabsdiffu4" || wgslCallee === "vavgu4" || wgslCallee === "vminu4" || wgslCallee === "vmaxu4" || wgslCallee === "vmins4" || wgslCallee === "vmaxs4") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
@@ -4915,6 +4926,27 @@ function emitSemanticVPackedSadExpression(lhs: string, rhs: string, laneWidth: 8
   return `(${lanes.join(" + ")})`;
 }
 
+function emitSemanticVPackedAverageExpression(lhs: string, rhs: string, laneWidth: 8 | 16, signedRounded: boolean): string {
+  const laneCount = 32 / laneWidth;
+  const mask = laneWidth === 8 ? "0xffu" : "0xffffu";
+  const signBit = laneWidth === 8 ? "0x80u" : "0x8000u";
+  const signSub = laneWidth === 8 ? "256" : "65536";
+  const lanes: string[] = [];
+  for (let lane = 0; lane < laneCount; lane++) {
+    const shift = `${lane * laneWidth}u`;
+    const leftBits = `((${lhs} >> ${shift}) & ${mask})`;
+    const rightBits = `((${rhs} >> ${shift}) & ${mask})`;
+    if (signedRounded) {
+      const left = `(i32(${leftBits}) - select(0, ${signSub}, ${leftBits} >= ${signBit}))`;
+      const right = `(i32(${rightBits}) - select(0, ${signSub}, ${rightBits} >= ${signBit}))`;
+      lanes.push(`((u32((${left} + ${right} + 1) >> 1u) & ${mask}) << ${shift})`);
+    } else {
+      lanes.push(`(((${leftBits} + ${rightBits}) >> 1u) << ${shift})`);
+    }
+  }
+  return `(${lanes.join(" | ")})`;
+}
+
 function emitRoundEvenWgsl(emitted: string): string {
   return `bg_semantic_round_even_f32(${emitted})`;
 }
@@ -5010,6 +5042,8 @@ function semanticMathCallArity(name: string): number {
     name === "__vabsdiffs2" ||
     name === "__vsads2" ||
     name === "__vsadu2" ||
+    name === "__vhaddu2" ||
+    name === "__vavgs2" ||
     name === "__vavgu2" ||
     name === "__vminu2" ||
     name === "__vmaxu2" ||
@@ -5045,6 +5079,8 @@ function semanticMathCallArity(name: string): number {
     name === "__vabsdiffs4" ||
     name === "__vsads4" ||
     name === "__vsadu4" ||
+    name === "__vhaddu4" ||
+    name === "__vavgs4" ||
     name === "__vavgu4" ||
     name === "__vminu4" ||
     name === "__vmaxu4" ||

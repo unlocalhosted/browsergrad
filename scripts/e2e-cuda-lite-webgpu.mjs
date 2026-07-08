@@ -2309,6 +2309,17 @@ __global__ void simdAbsSadIntrinsic(uint *out) {
   out[12] = __vsads2(a2, b2);
   out[13] = __vsadu2(a2, b2);
 }`,
+  simdAvgIntrinsic: `
+__global__ void simdAvgIntrinsic(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x8180017fu;
+  uint a2 = 0x80017fffu;
+  uint b2 = 0x7fff8000u;
+  out[0] = __vhaddu4(a4, b4);
+  out[1] = __vavgs4(a4, b4);
+  out[2] = __vhaddu2(a2, b2);
+  out[3] = __vavgs2(a2, b2);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -13084,6 +13095,22 @@ const html = String.raw`<!doctype html>
                 0x7fff7fff, 0x7fff7fff, 0x7fff8001, 0x7fff8001,
                 0xfffeffff, 0x0001fffd, 0x00000003,
               ],
+            },
+          },
+          {
+            name: "intrinsic:simd-avg",
+            source: SOURCES.simdAvgIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0x80808040, 0x00800040, 0x80007fff, 0x00000000],
             },
           },
           {

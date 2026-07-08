@@ -97,10 +97,10 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
   "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
   "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
-  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
+  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vhaddu2", "__vavgs2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
   "__vcmpeq2", "__vcmpne2", "__vcmpges2", "__vcmpgeu2", "__vcmpgts2", "__vcmpgtu2", "__vcmples2", "__vcmpleu2", "__vcmplts2", "__vcmpltu2",
   "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
-  "__vadd4", "__vsub4", "__vabs4", "__vabsss4", "__vneg4", "__vnegss4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vabsdiffs4", "__vsads4", "__vsadu4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
+  "__vadd4", "__vsub4", "__vabs4", "__vabsss4", "__vneg4", "__vnegss4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vabsdiffs4", "__vsads4", "__vsadu4", "__vhaddu4", "__vavgs4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
   "__vcmpeq4", "__vcmpne4", "__vcmpges4", "__vcmpgeu4", "__vcmpgts4", "__vcmpgtu4", "__vcmples4", "__vcmpleu4", "__vcmplts4", "__vcmpltu4",
   "__vseteq4", "__vsetne4", "__vsetges4", "__vsetgeu4", "__vsetgts4", "__vsetgtu4", "__vsetles4", "__vsetleu4", "__vsetlts4", "__vsetltu4",
   "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
@@ -2443,6 +2443,8 @@ function evalSemanticMathCall(
     case "__vabsdiffs2": return i16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
     case "__vsads2": return packedSad(args[0] ?? 0, args[1] ?? 0, 16, true);
     case "__vsadu2": return packedSad(args[0] ?? 0, args[1] ?? 0, 16, false);
+    case "__vhaddu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b) >> 1);
+    case "__vavgs2": return i16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__vavgu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__vminu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
@@ -2482,6 +2484,8 @@ function evalSemanticMathCall(
     case "__vabsdiffs4": return i8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
     case "__vsads4": return packedSad(args[0] ?? 0, args[1] ?? 0, 8, true);
     case "__vsadu4": return packedSad(args[0] ?? 0, args[1] ?? 0, 8, false);
+    case "__vhaddu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b) >> 1);
+    case "__vavgs4": return i8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__vavgu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__vminu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
@@ -3503,6 +3507,8 @@ function semanticMathCallArity(name: string): number {
     name === "__vabsdiffs2" ||
     name === "__vsads2" ||
     name === "__vsadu2" ||
+    name === "__vhaddu2" ||
+    name === "__vavgs2" ||
     name === "__vavgu2" ||
     name === "__vminu2" ||
     name === "__vmaxu2" ||
@@ -3538,6 +3544,8 @@ function semanticMathCallArity(name: string): number {
     name === "__vabsdiffs4" ||
     name === "__vsads4" ||
     name === "__vsadu4" ||
+    name === "__vhaddu4" ||
+    name === "__vavgs4" ||
     name === "__vavgu4" ||
     name === "__vminu4" ||
     name === "__vmaxu4" ||

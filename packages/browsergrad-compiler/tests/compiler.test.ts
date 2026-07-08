@@ -8895,6 +8895,38 @@ __global__ void packed_simd_abs_sad(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
   });
 
+  it("lowers CUDA packed SIMD average intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void packed_simd_avg(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x8180017fu;
+  uint a2 = 0x80017fffu;
+  uint b2 = 0x7fff8000u;
+  out[0] = __vhaddu4(a4, b4);
+  out[1] = __vavgs4(a4, b4);
+  out[2] = __vhaddu2(a2, b2);
+  out[3] = __vavgs2(a2, b2);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      0x80808040, 0x00800040, 0x80007fff, 0x00000000,
+    ]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {
