@@ -5886,6 +5886,17 @@ __global__ void textureBf16ScalarVector(float *out, uint *bits) {
   bits[0] = __bfloat16_as_ushort(scalar);
   bits[1] = __bfloat162_as_uint(pair);
 }`,
+  textureHalfScalarVector: `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void textureHalfScalarVector(float *out, uint *bits) {
+  half scalar = tex2D<half>(texRef, 0.5f, 0.5f);
+  half2 pair = tex2D<half2>(texRef, 0.5f, 0.5f);
+  out[0] = __half2float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  bits[0] = __half_as_ushort(scalar);
+  bits[1] = __half2_as_uint(pair);
+}`,
   textureObjectUint4HelperRead: `
 __device__ uint4 read_uint4_tex(cudaTextureObject_t texArg) {
   return tex2D<uint4>(texArg, 0.5f, 0.5f);
@@ -9323,8 +9334,8 @@ const html = String.raw`<!doctype html>
           emitProgress({ event: "case-pass", index: specs.length + 1, total: specs.length + 1, name: "prepared-resident-saxpy", ms: cases[cases.length - 1].ms });
         }
 
-        const failed = cases.filter((item) => !item.ok);
-        const warmupFailed = warmupCases.filter((item) => !item.ok);
+        const failed = cases.filter((item) => !item.ok && !item.skipped);
+        const warmupFailed = warmupCases.filter((item) => !item.ok && !item.skipped);
         const skipped = cases.filter((item) => item.skipped);
         const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
         const corpusFixturePassed = corpusFixtureCases.filter((item) => item.ok);
@@ -9387,6 +9398,7 @@ const html = String.raw`<!doctype html>
             stage: "feature_check",
             plan: "missing-features:" + missingFeatures.join(","),
             ok: false,
+            skipped: true,
             maxAbsDiff: Number.POSITIVE_INFINITY,
             output: spec.output,
             ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
@@ -15803,6 +15815,29 @@ const html = String.raw`<!doctype html>
             }),
             output: "scalarOut",
             expectedOutput: { type: "Float32Array", data: [5, 33, 41, 21] },
+          },
+          {
+            name: "texture:half-scalar-vector-read",
+            source: SOURCES.textureHalfScalarVector,
+            options: { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] },
+            requiredFeatures: ["shader-f16"],
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(3),
+                bits: new Uint32Array(2),
+              },
+              textures: {
+                texRef: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([1.1, 2.2, 3.3, 4.4]),
+                },
+              },
+            }),
+            output: "bits",
+            expectedOutput: { type: "Uint32Array", data: [0x3c66, 0x40663c66] },
           },
           {
             name: "texture:bf16-scalar-vector-read",

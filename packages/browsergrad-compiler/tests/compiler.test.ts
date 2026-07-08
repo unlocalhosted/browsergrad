@@ -6292,6 +6292,24 @@ __global__ void parent(float *x, int n) {
     if (plan.supported) expect(plan.input.readback).toEqual(["dp_pool"]);
   });
 
+  it("rejects missing native WebGPU features before pipeline creation", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sample(half *out) {
+  out[0] = __float2half(1.0f);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const device = { gpu: { features: new Set<string>() } } as never;
+    const input = { buffers: { out: createWgslFloat16Array([0]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+
+    await expect(runCompiledKernelWebGpu(device, compiled, input, launch)).rejects.toMatchObject({
+      diagnostics: [expect.objectContaining({
+        code: "missing-webgpu-device-feature",
+        message: "WebGPU device missing required feature(s): shader-f16",
+      })],
+    });
+    await expect(prepareCompiledKernelWebGpu(device, compiled, input, launch)).rejects.toThrow("WebGPU device missing required feature(s): shader-f16");
+  });
+
   it("plans safe top-level grid sync as WebGPU dispatch phases", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;
@@ -15538,6 +15556,48 @@ __global__ void sample(float *out, uint *bits) {
     expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(1.1015625);
     expect([...semanticResult.buffers.out as Float32Array][2]).toBeCloseTo(2.203125);
     expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3f8d, 0x400d3f8d]);
+  });
+
+  it("lowers templated half and half2 tex2D reads with shader-f16", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(float *out, uint *bits) {
+  half scalar = tex2D<half>(texRef, 0.5f, 0.5f);
+  half2 pair = tex2D<half2>(texRef, 0.5f, 0.5f);
+  out[0] = __half2float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  bits[0] = __half_as_ushort(scalar);
+  bits[1] = __half2_as_uint(pair);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(3),
+        bits: new Uint32Array(2),
+      },
+      textures: { texRef: { width: 1, height: 1, data: new Float32Array([1.1, 2.2, 3.3, 4.4]), channels: 4 as const } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-texture");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("enable f16;");
+    expect(compiled.wgsl).toContain("f16(textureLoad(texRef");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_half_texRef");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_half2_texRef");
+    expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.099609375);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.099609375);
+    expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.19921875);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66]);
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(1.099609375);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(1.099609375);
+    expect([...semanticResult.buffers.out as Float32Array][2]).toBeCloseTo(2.19921875);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66]);
   });
 
   it("lowers float4 texture helper returns through semantic IR", () => {

@@ -200,6 +200,7 @@ export async function runCompiledKernelWebGpu(
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
   }
+  assertCompiledKernelWebGpuDeviceFeatures(device, compiled);
   const result = await runWgslKernelProgramSequence(
     device,
     executionPlan.steps,
@@ -222,6 +223,7 @@ export async function prepareCompiledKernelWebGpu(
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
   }
+  assertCompiledKernelWebGpuDeviceFeatures(device, compiled);
   const prepared = await prepareWgslKernelProgramSequence(
     device,
     executionPlan.steps,
@@ -320,6 +322,25 @@ function webGpuExecutionPlanOptions(
     ...(options.maxHostExpandedParentInvocations === undefined ? {} : { maxHostExpandedParentInvocations: options.maxHostExpandedParentInvocations }),
     ...(options.maxHostDynamicLaunchDepth === undefined ? {} : { maxHostDynamicLaunchDepth: options.maxHostDynamicLaunchDepth }),
   };
+}
+
+function assertCompiledKernelWebGpuDeviceFeatures(
+  device: KernelDevice,
+  compiled: CompiledCudaLiteKernel,
+): void {
+  const required = compiled.kernelIr.requiredFeatures;
+  if (required.length === 0) return;
+  const featureOwner = device as { readonly gpu?: { readonly features?: GPUSupportedFeatures } };
+  const features = featureOwner.gpu?.features;
+  const missing = required.filter((feature) => features?.has(feature as GPUFeatureName) !== true);
+  if (missing.length === 0) return;
+  const message = `WebGPU device missing required feature(s): ${missing.join(", ")}`;
+  throw new CudaLiteCompilerError(message, [{
+    code: "missing-webgpu-device-feature",
+    severity: "error",
+    message,
+    span: compiled.kernelIr.span,
+  }]);
 }
 
 function validatePreparedPlanTopology(

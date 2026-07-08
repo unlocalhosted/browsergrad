@@ -569,6 +569,7 @@ function semanticReferenceTextureReadSupported(
 
 function semanticReferenceTextureValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float" ||
+    valueType === "half" ||
     valueType === "bf16" ||
     valueType === "uint" ||
     valueType === "int" ||
@@ -1758,10 +1759,12 @@ function evalSemanticTextureValue(
   valueType: CudaLiteScalarType | undefined,
   laneValue: (lane: number) => number,
 ): SemanticValue {
+  if (valueType === "half") return roundSemanticHalf(laneValue(0));
   if (valueType === "bf16") return roundSemanticBfloat16(laneValue(0));
   if (!isSemanticReferenceFloatVectorType(valueType)) return laneValue(0);
   return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) => {
     const value = laneValue(lane);
+    if (valueType === "half2") return roundSemanticHalf(value);
     return valueType === "bf162" ? roundSemanticBfloat16(value) : value;
   });
 }
