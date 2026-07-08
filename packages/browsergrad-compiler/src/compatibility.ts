@@ -132,6 +132,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-cuda-runtime", "runtime", "CUDA runtime call", "unsupported", false, true, "Stream/event create/destroy/record/sync/query/wait no-ops, stream device/id/flag/priority/capture queries, thread capture-mode exchange, stream priority range queries, event elapsed-time zero writes, profiler start/stop no-ops, function/device cache/shared-memory config no-ops, function-attribute no-ops, device/thread reset/sync/cache/limits, device selection/status/attributes/limits, L2 cache-policy reset no-op, peer-access status no-ops, cudaMemGetInfo, occupancy queries, cudaGetDeviceCount, runtime/driver version queries, cudaFree lifecycle no-ops, unified-memory advice/prefetch/stream-attach no-ops, last-error no-ops, modeled 1D/2D host/device/default runtime copies, peer copies, symbol copies, and byte-pattern cudaMemset/cudaMemsetAsync/cudaMemset2D/cudaMemset2DAsync fills are modeled; remaining runtime calls need host orchestration or reference execution."),
   feature("unsupported-cuda-runtime-copy-kind", "runtime", "CUDA runtime copy kind", "unsupported", false, true, "Only modeled cudaMemcpyHostToHost/HostToDevice/DeviceToHost/DeviceToDevice/Default 1D/2D runtime copies can be host-lifted."),
   feature("cuda-graph-conditional-host-orchestration", "runtime", "CUDA graph conditional host orchestration", "unsupported", false, true, "Conditional graph setters are host-managed and require explicit WebGPU runtime orchestration."),
+  feature("cuda-grid-sync-host-orchestration", "runtime", "CUDA grid sync host orchestration", "gpu-polyfill", true, true, "grid.sync()/cg::sync(grid) lower to explicit browser WebGPU dispatch phases when createCudaWebGpuExecutionPlan() can prove safe phase splitting."),
   feature("grid-sync-phase-unsupported", "runtime", "Unsupported grid-sync phase plan", "unsupported", false, true, "Grid synchronization cannot be split into safe WebGPU phases for this kernel."),
   feature("launch-workgroup-mismatch", "runtime", "CUDA launch/workgroup mismatch", "unsupported", false, false, "Runtime launch block dimensions must match the compiled WebGPU workgroup size."),
   feature("prepared-scalar-update-topology-changed", "runtime", "Prepared scalar update changes topology", "unsupported", false, true, "Prepared WebGPU kernels can update scalars only when the plan topology stays fixed."),
@@ -194,10 +195,11 @@ export function createCudaLoweringPlan(
 ): CudaLoweringPlan {
   const features = uniqueByCode(diagnostics.map(describeCudaDiagnostic));
   const unsupported = features.filter((featureRecord) => featureRecord.lowering === "unsupported");
+  const requiresGpuPolyfill = features.some((featureRecord) => featureRecord.lowering === "gpu-polyfill");
   return {
     features,
-    canDirectLowerToWgsl: unsupported.length === 0 && features.every((featureRecord) => featureRecord.gpuRuns),
-    requiresGpuPolyfill: features.some((featureRecord) => featureRecord.lowering === "gpu-polyfill"),
+    canDirectLowerToWgsl: unsupported.length === 0 && !requiresGpuPolyfill && features.every((featureRecord) => featureRecord.gpuRuns),
+    requiresGpuPolyfill,
     referenceAvailable: features.every((featureRecord) => featureRecord.referenceRuns),
     unsupported,
   };

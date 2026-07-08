@@ -5440,7 +5440,7 @@ __global__ void bareThreadGroup(int *out) {
     expect(compiled.wgsl).toContain("workgroupBarrier();");
   });
 
-  it("classifies grid-wide cooperative sync as an explicit runtime gap", () => {
+  it("classifies grid-wide cooperative sync as host-orchestrated WebGPU lowering", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 namespace cg = cooperative_groups;
 __global__ void gridSync(float *x) {
@@ -5450,11 +5450,12 @@ __global__ void gridSync(float *x) {
 }`));
 
     expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-cooperative-groups",
+      code: "cuda-grid-sync-host-orchestration",
+      severity: "warning",
     }));
   });
 
-  it("compiles host-orchestratable runtime gaps for WebGPU planning", () => {
+  it("compiles host-orchestratable grid sync for WebGPU planning", () => {
     const source = `
 namespace cg = cooperative_groups;
 __global__ void gridSync(float *scratch, float *out) {
@@ -5465,7 +5466,12 @@ __global__ void gridSync(float *scratch, float *out) {
     out[0] = scratch[0] + scratch[1];
   }
 }`;
-    expect(() => compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] })).toThrow(CudaLiteCompilerError);
+    const directCompiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    expect(directCompiled.loweringPlan).toMatchObject({
+      canDirectLowerToWgsl: false,
+      requiresGpuPolyfill: true,
+      unsupported: [],
+    });
     expect(cudaLiteWebGpuCompileOptions({ referenceGridSync: false })).toMatchObject({
       referenceDynamicParallelism: true,
       referenceGridSync: true,
@@ -5474,7 +5480,7 @@ __global__ void gridSync(float *scratch, float *out) {
 
     const compiled = compileCudaLiteKernelForWebGpu(source, { workgroupSize: [1, 1, 1] });
     expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-cooperative-groups",
+      code: "cuda-grid-sync-host-orchestration",
       severity: "warning",
     }));
     const plan = createCudaWebGpuExecutionPlan(
@@ -5514,8 +5520,10 @@ __global__ void gridSync(float *scratch, float *out) {
     const result = runCompiledKernelReference(compiled, input, launch);
 
     expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(false);
+    expect(compiled.loweringPlan.requiresGpuPolyfill).toBe(true);
+    expect(compiled.loweringPlan.unsupported).toEqual([]);
     expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-cooperative-groups",
+      code: "cuda-grid-sync-host-orchestration",
       severity: "warning",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([3]);

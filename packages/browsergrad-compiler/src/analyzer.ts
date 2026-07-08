@@ -1743,11 +1743,11 @@ function validateCallExpression(
   const callName = expressionName(expression.callee);
   const namespaceCooperativeCall = cooperativeNamespaceCall(expression, scope);
   if (namespaceCooperativeCall) {
-    return validateCooperativeNamespaceCall(expression, namespaceCooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options, compatibilityDiagnosticsReachable);
+    return validateCooperativeNamespaceCall(expression, namespaceCooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, compatibilityDiagnosticsReachable);
   }
   const cooperativeCall = cooperativeGroupCall(expression, scope);
   if (cooperativeCall) {
-    return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options, compatibilityDiagnosticsReachable);
+    return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, compatibilityDiagnosticsReachable);
   }
   if (!callName) {
     diagnostics.push(error("unsupported-call", "CUDA-lite v0 only supports direct builtin calls", expression.span));
@@ -3134,15 +3134,14 @@ function validateCooperativeGroupCall(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   scope: Scope,
-  options: CudaLiteAnalyzeOptions,
   compatibilityDiagnosticsReachable: boolean,
 ): ExpressionInfo {
   const { symbol, method } = call;
   if (symbol.groupKind === "grid" && method === "sync") {
     if (compatibilityDiagnosticsReachable) {
       diagnostics.push({
-        ...error("unsupported-cooperative-groups", "grid.sync() requires explicit runtime orchestration", expression.span),
-        severity: options.referenceGridSync ? "warning" : "error",
+        ...error("cuda-grid-sync-host-orchestration", "grid.sync() requires WebGPU host-orchestrated dispatch phases", expression.span),
+        severity: "warning",
       });
     }
     return { kind: "scalar" };
@@ -3198,7 +3197,6 @@ function validateCooperativeNamespaceCall(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   scope: Scope,
-  options: CudaLiteAnalyzeOptions,
   compatibilityDiagnosticsReachable: boolean,
 ): ExpressionInfo {
   const { symbol, method, groupArg } = call;
@@ -3206,8 +3204,8 @@ function validateCooperativeNamespaceCall(
     if (expression.args.length !== 1) diagnostics.push(error("invalid-call-arity", "cg::sync expects 1 argument", expression.span));
     if (compatibilityDiagnosticsReachable && symbol.groupKind === "grid") {
       diagnostics.push({
-        ...error("unsupported-cooperative-groups", "cg::sync(grid) requires explicit runtime orchestration", expression.span),
-        severity: options.referenceGridSync ? "warning" : "error",
+        ...error("cuda-grid-sync-host-orchestration", "cg::sync(grid) requires WebGPU host-orchestrated dispatch phases", expression.span),
+        severity: "warning",
       });
     }
     return { kind: "scalar" };
