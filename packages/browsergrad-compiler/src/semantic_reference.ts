@@ -26,6 +26,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
+import { classifyInlineAsm } from "./ptx_tile_ops.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | Vector3 | number[];
@@ -403,6 +404,10 @@ function unsupportedSemanticReferenceOperation(
           operation.callee !== "__threadfence_block" &&
           operation.callee !== "__threadfence_system"
         ) return operation;
+        break;
+      case "inline-asm":
+        if (classifyInlineAsm(operation.statement.template)?.kind !== "cp-async-fence") return operation;
+        if (operation.statement.inputs.length !== 0 || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
         break;
       case "break":
       case "continue":
@@ -1412,6 +1417,11 @@ function execSemanticOperations(
       case "barrier":
         break;
       case "fence":
+        break;
+      case "inline-asm":
+        if (classifyInlineAsm(operation.statement.template)?.kind !== "cp-async-fence") {
+          throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
+        }
         break;
       case "break":
         return "break";

@@ -7,6 +7,7 @@ export type InlineAsmOp =
   | { readonly kind: "isspacep"; readonly space: "global" | "shared" | "const" | "local" }
   | { readonly kind: "bfind-u32" }
   | { readonly kind: "u8x4-sad-add" }
+  | { readonly kind: "cp-async-fence" }
   | {
     readonly kind: "ldmatrix";
     readonly matrices: 1 | 2 | 4;
@@ -26,6 +27,7 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (isspacep) return { kind: "isspacep", space: isspacep[1] as "global" | "shared" | "const" | "local" };
   if (/\bbfind\.u32\b/u.test(template)) return { kind: "bfind-u32" };
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
+  if (/\bcp\.async\.(?:commit_group|wait_group|wait_all)\b/u.test(template)) return { kind: "cp-async-fence" };
   if (/\bfma\.rn\.f32\b/u.test(template)) return { kind: "fma-rn-f32" };
   const ldmatrix = /\bldmatrix\.sync\.aligned\.x([124])(\.trans)?\.m8n8\.shared\.b16\b/u.exec(template);
   if (ldmatrix) {
@@ -55,6 +57,7 @@ export function inlineAsmSupportedList(): string {
     "isspacep.{global,shared,const,local}",
     "bfind.u32",
     "vabsdiff4.u32.u32.u32.add",
+    "cp.async.{commit_group,wait_group,wait_all}",
     "ldmatrix.sync.aligned.x{1,2,4}.m8n8.shared.b16",
     "mma.sync.aligned.m16n8k16.row.col.{f16,f32}.f16.f16.{f16,f32}",
   ].join(", ");

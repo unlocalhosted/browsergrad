@@ -1715,6 +1715,9 @@ function validateInlineAsmStatement(
   if (op?.kind === "u8x4-sad-add" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
+  if (op?.kind === "cp-async-fence" && (outputs.length !== 0 || statement.inputs.length !== 0)) {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "cp.async fence inline PTX expects no output or input operands", statement.span));
+  }
   if (op?.kind === "ldmatrix") {
     if (outputs.length !== op.matrices || statement.inputs.length !== 1) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `ldmatrix.x${op.matrices} inline PTX expects ${op.matrices} output operand(s) and one shared-address input operand`, statement.span));

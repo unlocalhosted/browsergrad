@@ -393,6 +393,13 @@ __global__ void selected(float *x) {
     x[0] += 2.0f;
   }
 }`,
+  inlineAsmCpAsyncFence: `
+__global__ void inlineAsmCpAsyncFence(float *out, float *in) {
+  asm volatile("cp.async.commit_group;\\n" ::);
+  asm volatile("cp.async.wait_group 0;\\n" ::);
+  asm volatile("cp.async.wait_all;\\n" ::);
+  out[threadIdx.x] = in[threadIdx.x] + 1.0f;
+}`,
   unreachableTextureSurfaceCompatDiagnostics: `
 texture<float, cudaTextureType2D, cudaReadModeElementType> tex;
 
@@ -10343,6 +10350,20 @@ const html = String.raw`<!doctype html>
               "unused_inline_asm",
               "cp.async",
             ],
+          },
+          {
+            name: "intrinsic:inline-asm-cp-async-fence",
+            source: SOURCES.inlineAsmCpAsyncFence,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+                in: new Float32Array([2, 4]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [3, 5] },
           },
           {
             name: "runtime:unreachable-texture-surface-compat-diagnostics",

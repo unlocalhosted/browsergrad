@@ -2263,6 +2263,9 @@ function emitInlineAsmStatement(
       return `${emitExpression(output, context)} = ${emitInlineU32Output(output, carrier, context)}`;
     }).join("\n");
   }
+  if (op?.kind === "cp-async-fence" && statement.inputs.length === 0 && outputs.length === 0) {
+    return `// cp.async inline asm fence omitted`;
+  }
   if (op?.kind === "mma-m16n8k16") {
     return emitMmaM16N8K16Statement(statement, outputs, op.accumulator, context);
   }

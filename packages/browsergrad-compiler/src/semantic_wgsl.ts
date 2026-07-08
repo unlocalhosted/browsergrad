@@ -21,6 +21,7 @@ import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { emitCurandHelpers, emitFp8Helpers } from "./wgsl_support_helpers.js";
+import { classifyInlineAsm } from "./ptx_tile_ops.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
@@ -962,6 +963,10 @@ function unsupportedSemanticWgslOperation(
           operation.callee !== "__threadfence_block" &&
           operation.callee !== "__threadfence_system"
         ) return operation;
+        break;
+      case "inline-asm":
+        if (classifyInlineAsm(operation.statement.template)?.kind !== "cp-async-fence") return operation;
+        if (operation.statement.inputs.length !== 0 || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
         break;
       case "return":
         if (operation.value && (!allowReturnValue || !semanticWgslExpressionSupported(operation.value, "any", ir))) return operation;
@@ -2296,6 +2301,9 @@ function emitSemanticOperation(
       return [`${prefix}workgroupBarrier();`];
     case "fence":
       return [`${prefix}storageBarrier();`];
+    case "inline-asm":
+      if (classifyInlineAsm(operation.statement.template)?.kind === "cp-async-fence") return [`${prefix}// cp.async inline asm fence omitted`];
+      throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
     case "return":
       if (operation.value) {
         if (!allowReturnValue) throw semanticWgslError("semantic WGSL supports kernel return without value only", operation.span);

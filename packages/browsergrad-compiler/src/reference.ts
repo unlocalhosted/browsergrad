@@ -899,6 +899,12 @@ function execInlineAsm(
     }
     return;
   }
+  if (op?.kind === "cp-async-fence") {
+    if (statement.inputs.length !== 0 || outputs.length !== 0) {
+      throw compilerFailure("cp.async fence inline asm expects no operands");
+    }
+    return;
+  }
   if (op?.kind === "mma-m16n8k16") {
     execMmaM16N8K16(statement, outputs, op.accumulator, context);
     return;

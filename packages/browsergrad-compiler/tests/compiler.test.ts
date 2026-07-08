@@ -11506,12 +11506,25 @@ __global__ void ldmatrixCarrier(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 7]);
   });
 
-  it("parses inline PTX with empty output sections as an unsupported semantic gap", () => {
-    expect(() => compileCudaLiteKernel(`
-__global__ void emptyAsm(float *out, float *in) {
+  it("lowers inline PTX cp.async fences as native no-op barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void cpAsyncFenceAsm(float *out, float *in) {
   asm volatile("cp.async.commit_group;\\n" ::);
-  out[threadIdx.x] = in[threadIdx.x];
-}`)).toThrow(/unsupported-inline-asm/u);
+  asm volatile("cp.async.wait_group 0;\\n" ::);
+  asm volatile("cp.async.wait_all;\\n" ::);
+  out[threadIdx.x] = in[threadIdx.x] + 1.0f;
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2), in: new Float32Array([2, 4]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("cp.async inline asm fence omitted");
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 5]);
   });
 
   it("parses inline PTX clobber sections as an unsupported semantic gap", () => {
