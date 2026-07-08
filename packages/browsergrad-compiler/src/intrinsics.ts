@@ -606,6 +606,23 @@ const BF16_INTRINSICS = [
     return `vec2<f32>(${wgslRoundBfloat16(value)}, ${wgslRoundBfloat16(value)})`;
   }),
   intrinsic("__floats2bfloat162_rn", [2, 2], "bf162", () => 0, (args) => `vec2<f32>(${wgslRoundBfloat16(args[0] ?? "0")}, ${wgslRoundBfloat16(args[1] ?? "0")})`),
+  bf162UnaryIntrinsic("h2ceil", Math.ceil, (value) => `ceil(${value})`),
+  bf162UnaryIntrinsic("h2floor", Math.floor, (value) => `floor(${value})`),
+  bf162UnaryIntrinsic("h2rcp", (value) => 1 / value, (value) => `(1.0 / ${value})`),
+  bf162UnaryIntrinsic("h2rsqrt", (value) => 1 / Math.sqrt(value), (value) => `inverseSqrt(${value})`),
+  bf162UnaryIntrinsic("h2sqrt", Math.sqrt, (value) => `sqrt(${value})`),
+  bf162UnaryIntrinsic("h2trunc", Math.trunc, (value) => `trunc(${value})`),
+  bf162UnaryIntrinsic("h2exp", Math.exp, (value) => `exp(${value})`),
+  bf162UnaryIntrinsic("h2exp2", (value) => 2 ** value, (value) => `exp2(${value})`),
+  bf162UnaryIntrinsic("h2exp10", (value) => 10 ** value, (value) => `pow(10.0, ${value})`),
+  bf162UnaryIntrinsic("h2log", Math.log, (value) => `log(${value})`),
+  bf162UnaryIntrinsic("h2log2", Math.log2, (value) => `log2(${value})`),
+  bf162UnaryIntrinsic("h2log10", Math.log10, (value) => `(log(${value}) / 2.302585092994046)`),
+  bf162UnaryIntrinsic("h2sin", Math.sin, (value) => `sin(${value})`),
+  bf162UnaryIntrinsic("h2cos", Math.cos, (value) => `cos(${value})`),
+  bf162UnaryIntrinsic("h2tanh", Math.tanh, (value) => `tanh(${value})`),
+  bf162UnaryIntrinsic("h2tanh_approx", Math.tanh, (value) => `tanh(${value})`),
+  bf162UnaryIntrinsic("h2rint", roundTiesToEven, (value) => `bg_round_even_f32(${value})`),
   intrinsic("__h2div", [2, 2], "bf162", () => 0, (args) => {
     const left = args[0] ?? "vec2<f32>()";
     const right = args[1] ?? "vec2<f32>()";
@@ -679,6 +696,17 @@ function intrinsic(
     emitWgsl,
     ...(requiredFeatures === undefined ? {} : { requiredFeatures }),
   };
+}
+
+function bf162UnaryIntrinsic(
+  name: string,
+  evaluateLane: (value: number) => number,
+  emitLane: (value: string) => string,
+): CudaIntrinsic {
+  return intrinsic(name, [1, 1], "bf162", (args) => evaluateLane(args[0] ?? 0), (args) => {
+    const value = args[0] ?? "vec2<f32>()";
+    return `vec2<f32>(${wgslRoundBfloat16(emitLane(`(${value}).x`))}, ${wgslRoundBfloat16(emitLane(`(${value}).y`))})`;
+  });
 }
 
 function roundHalf(value: number): number {

@@ -2532,6 +2532,7 @@ function semanticIntrinsicReturnType(name: string | undefined, args: readonly Se
   if (isBfloat16ScalarArithmeticName(name) && args.some((arg) => expressionValueType(arg) === "bf16")) return "bf16";
   if (name === "__hisinf" && args.some((arg) => expressionValueType(arg) === "bf16")) return "int";
   if (isBfloat16ScalarPredicateName(name) && args.some((arg) => expressionValueType(arg) === "bf16")) return "uint";
+  if (isBfloat162VectorName(name)) return "bf162";
   if (name === "__hisnan2" ||
     name === "__heq2" || name === "__hne2" || name === "__hgt2" || name === "__hge2" || name === "__hlt2" || name === "__hle2" ||
     name === "__hequ2" || name === "__hneu2" || name === "__hgtu2" || name === "__hgeu2" || name === "__hltu2" || name === "__hleu2") return "half2";
@@ -2632,6 +2633,26 @@ function isBfloat16ScalarPredicateName(name: string): boolean {
     name === "__hgeu" ||
     name === "__hltu" ||
     name === "__hleu";
+}
+
+function isBfloat162VectorName(name: string): boolean {
+  return name === "h2ceil" ||
+    name === "h2floor" ||
+    name === "h2rcp" ||
+    name === "h2rsqrt" ||
+    name === "h2sqrt" ||
+    name === "h2trunc" ||
+    name === "h2exp" ||
+    name === "h2exp2" ||
+    name === "h2exp10" ||
+    name === "h2log" ||
+    name === "h2log2" ||
+    name === "h2log10" ||
+    name === "h2sin" ||
+    name === "h2cos" ||
+    name === "h2tanh" ||
+    name === "h2tanh_approx" ||
+    name === "h2rint";
 }
 
 function indexedValueType(target: SemanticExpression): CudaLiteScalarType | undefined {

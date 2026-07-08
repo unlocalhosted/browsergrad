@@ -2838,7 +2838,8 @@ function isBf162VectorIntrinsic(name: string): boolean {
 }
 
 function isBf162VectorArithmeticIntrinsic(name: string): boolean {
-  return name === "__habs2" ||
+  return isBf162UnaryMathIntrinsic(name) ||
+    name === "__habs2" ||
     name === "__hneg2" ||
     name === "__hadd2" ||
     name === "__hadd2_rn" ||
@@ -2858,7 +2859,27 @@ function isBf162VectorArithmeticIntrinsic(name: string): boolean {
 }
 
 function isBf162OnlyVectorIntrinsic(name: string): boolean {
-  return name === "__h2div" || name === "__hfma2_relu" || name === "__hcmadd";
+  return isBf162UnaryMathIntrinsic(name) || name === "__h2div" || name === "__hfma2_relu" || name === "__hcmadd";
+}
+
+function isBf162UnaryMathIntrinsic(name: string): boolean {
+  return name === "h2ceil" ||
+    name === "h2floor" ||
+    name === "h2rcp" ||
+    name === "h2rsqrt" ||
+    name === "h2sqrt" ||
+    name === "h2trunc" ||
+    name === "h2exp" ||
+    name === "h2exp2" ||
+    name === "h2exp10" ||
+    name === "h2log" ||
+    name === "h2log2" ||
+    name === "h2log10" ||
+    name === "h2sin" ||
+    name === "h2cos" ||
+    name === "h2tanh" ||
+    name === "h2tanh_approx" ||
+    name === "h2rint";
 }
 
 function isBf162VectorComparisonIntrinsic(name: string): boolean {

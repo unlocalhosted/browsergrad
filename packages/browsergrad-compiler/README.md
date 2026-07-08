@@ -162,7 +162,10 @@ Vector bf16 helpers `__bfloat1622float2`, `__float22bfloat162_rn`,
 `__highs2bfloat162`, and bf162 `__lowhigh2highlow` use the same native f32
 storage path with explicit bf16 rounding. BF162 arithmetic aliases
 `__hadd2`, `__hsub2`, `__hmul2`, `__h2div`, `__hfma2`, `__hfma2_relu`,
-`__hfma2_sat`, `__hcmadd`, `__habs2`, and `__hneg2` lower through semantic
+`__hfma2_sat`, `__hcmadd`, `__habs2`, and `__hneg2`, plus BF162 unary math
+aliases `h2ceil`, `h2floor`, `h2rcp`, `h2rsqrt`, `h2sqrt`, `h2trunc`,
+`h2exp`, `h2exp2`, `h2exp10`, `h2log`, `h2log2`, `h2log10`, `h2sin`,
+`h2cos`, `h2tanh`, `h2tanh_approx`, and `h2rint`, lower through semantic
 reference/WGSL with lane-wise bf16 rounding. BF162 min/max and comparison
 aliases include `__hmin2`, `__hmax2`, `__hmin2_nan`, `__hmax2_nan`,
 ordered/unordered vector comparisons, mask comparisons, bool reductions, and

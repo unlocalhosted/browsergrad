@@ -124,6 +124,9 @@ const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
   "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu",
   "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
   "__halves2bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
+  "h2ceil", "h2floor", "h2rcp", "h2rsqrt", "h2sqrt", "h2trunc",
+  "h2exp", "h2exp2", "h2exp10", "h2log", "h2log2", "h2log10",
+  "h2sin", "h2cos", "h2tanh", "h2tanh_approx", "h2rint",
   "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat",
   "__hmul2", "__hmul2_rn", "__hmul2_sat", "__h2div", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
   "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
@@ -139,7 +142,12 @@ const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
   "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
   "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
 ]);
-const SEMANTIC_BF162_UNARY_VECTOR_CALLS = new Set(["__habs2", "__hneg2"]);
+const SEMANTIC_BF162_UNARY_VECTOR_CALLS = new Set([
+  "__habs2", "__hneg2",
+  "h2ceil", "h2floor", "h2rcp", "h2rsqrt", "h2sqrt", "h2trunc",
+  "h2exp", "h2exp2", "h2exp10", "h2log", "h2log2", "h2log10",
+  "h2sin", "h2cos", "h2tanh", "h2tanh_approx", "h2rint",
+]);
 const SEMANTIC_BF162_BINARY_VECTOR_CALLS = new Set([
   "__hadd2", "__hadd2_rn", "__hadd2_sat",
   "__hsub2", "__hsub2_rn", "__hsub2_sat",
@@ -4940,6 +4948,33 @@ function emitSemanticBf162NanMinMax(op: "min" | "max", left: string, right: stri
   return `vec2<f32>(${wgslRoundBfloat16(`(${value}).x`)}, ${wgslRoundBfloat16(`(${value}).y`)})`;
 }
 
+function emitSemanticBf162UnaryCall(name: string, value: string): string {
+  const lane = (body: (lane: "x" | "y") => string): string =>
+    `vec2<f32>(${wgslRoundBfloat16(body("x"))}, ${wgslRoundBfloat16(body("y"))})`;
+  switch (name) {
+    case "__habs2": return lane((l) => `abs((${value}).${l})`);
+    case "__hneg2": return lane((l) => `-(${value}).${l}`);
+    case "h2ceil": return lane((l) => `ceil((${value}).${l})`);
+    case "h2floor": return lane((l) => `floor((${value}).${l})`);
+    case "h2rcp": return lane((l) => `(1.0 / (${value}).${l})`);
+    case "h2rsqrt": return lane((l) => `inverseSqrt((${value}).${l})`);
+    case "h2sqrt": return lane((l) => `sqrt((${value}).${l})`);
+    case "h2trunc": return lane((l) => `trunc((${value}).${l})`);
+    case "h2exp": return lane((l) => `exp((${value}).${l})`);
+    case "h2exp2": return lane((l) => `exp2((${value}).${l})`);
+    case "h2exp10": return lane((l) => `pow(10.0, (${value}).${l})`);
+    case "h2log": return lane((l) => `log((${value}).${l})`);
+    case "h2log2": return lane((l) => `log2((${value}).${l})`);
+    case "h2log10": return lane((l) => `(log((${value}).${l}) / 2.302585092994046)`);
+    case "h2sin": return lane((l) => `sin((${value}).${l})`);
+    case "h2cos": return lane((l) => `cos((${value}).${l})`);
+    case "h2tanh":
+    case "h2tanh_approx": return lane((l) => `tanh((${value}).${l})`);
+    case "h2rint": return lane((l) => `bg_semantic_round_even_f32((${value}).${l})`);
+    default: return value;
+  }
+}
+
 function emitSemanticBf162Call(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
@@ -4956,8 +4991,7 @@ function emitSemanticBf162Call(
     const [arg] = expression.args;
     if (!arg) throw semanticWgslError(`${name} expects one bf162 operand`, expression.span);
     const value = emitBf162(arg);
-    if (name === "__habs2") return `vec2<f32>(${wgslRoundBfloat16(`abs((${value}).x)`)}, ${wgslRoundBfloat16(`abs((${value}).y)`)})`;
-    return `vec2<f32>(${wgslRoundBfloat16(`-(${value}).x`)}, ${wgslRoundBfloat16(`-(${value}).y`)})`;
+    return emitSemanticBf162UnaryCall(name, value);
   }
   if (SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name)) {
     const [left, right] = expression.args;

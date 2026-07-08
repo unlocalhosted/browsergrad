@@ -152,7 +152,12 @@ const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
   "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
   "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
 ]);
-const SEMANTIC_BF162_UNARY_VECTOR_CALLS = new Set(["__habs2", "__hneg2"]);
+const SEMANTIC_BF162_UNARY_VECTOR_CALLS = new Set([
+  "__habs2", "__hneg2",
+  "h2ceil", "h2floor", "h2rcp", "h2rsqrt", "h2sqrt", "h2trunc",
+  "h2exp", "h2exp2", "h2exp10", "h2log", "h2log2", "h2log10",
+  "h2sin", "h2cos", "h2tanh", "h2tanh_approx", "h2rint",
+]);
 const SEMANTIC_BF162_BINARY_VECTOR_CALLS = new Set([
   "__hadd2", "__hadd2_rn", "__hadd2_sat",
   "__hsub2", "__hsub2_rn", "__hsub2_sat",
@@ -3931,7 +3936,7 @@ function evalSemanticBf162Call(
   };
   if (SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name)) {
     const value = vectorArg(0);
-    return value.map((lane) => roundSemanticBfloat16(name === "__habs2" ? Math.abs(lane) : -lane));
+    return value.map((lane) => roundSemanticBfloat16(evalSemanticBf162UnaryLane(name, lane)));
   }
   if (SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name)) {
     const left = vectorArg(0);
@@ -4021,6 +4026,31 @@ function evalSemanticBf162Call(
     return [bfloat16BitsToFloat32(bits & 0xffff), bfloat16BitsToFloat32(bits >>> 16)];
   }
   throw semanticReferenceError(`semantic reference does not support bf162 call '${name}'`, expression.span);
+}
+
+function evalSemanticBf162UnaryLane(name: string, value: number): number {
+  switch (name) {
+    case "__habs2": return Math.abs(value);
+    case "__hneg2": return -value;
+    case "h2ceil": return Math.ceil(value);
+    case "h2floor": return Math.floor(value);
+    case "h2rcp": return 1 / value;
+    case "h2rsqrt": return 1 / Math.sqrt(value);
+    case "h2sqrt": return Math.sqrt(value);
+    case "h2trunc": return Math.trunc(value);
+    case "h2exp": return Math.exp(value);
+    case "h2exp2": return 2 ** value;
+    case "h2exp10": return 10 ** value;
+    case "h2log": return Math.log(value);
+    case "h2log2": return Math.log2(value);
+    case "h2log10": return Math.log10(value);
+    case "h2sin": return Math.sin(value);
+    case "h2cos": return Math.cos(value);
+    case "h2tanh":
+    case "h2tanh_approx": return Math.tanh(value);
+    case "h2rint": return roundTiesToEvenNumber(value);
+    default: return value;
+  }
 }
 
 function semanticReferenceBf162LocalBitsCastSupported(

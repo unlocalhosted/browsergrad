@@ -3477,11 +3477,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "bf162");
         return { kind: "cuda-vector", valueType: "bf162", lanes: half2ComparisonLanes(name, left.lanes, right.lanes).map((value) => roundBfloat16(value ? 1 : 0)) };
       }
-      if (name === "__habs2" || name === "__hneg2") {
+      if (isBf162UnaryMathIntrinsic(name)) {
         return {
           kind: "cuda-vector",
           valueType: "bf162",
-          lanes: left.lanes.map((value) => roundBfloat16(name === "__habs2" ? Math.abs(value ?? 0) : -(value ?? 0))),
+          lanes: left.lanes.map((value) => roundBfloat16(evalBf162UnaryMathLane(name, value ?? 0))),
         };
       }
       const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "bf162");
@@ -3859,7 +3859,8 @@ function isHalf2VectorIntrinsic(name: string | undefined): boolean {
 }
 
 function isBf162VectorArithmeticIntrinsic(name: string | undefined): boolean {
-  return name === "__habs2" ||
+  return isBf162UnaryMathIntrinsic(name) ||
+    name === "__habs2" ||
     name === "__hneg2" ||
     name === "__hadd2" ||
     name === "__hadd2_rn" ||
@@ -3904,7 +3905,54 @@ function isBf162BooleanComparisonIntrinsic(name: string | undefined): boolean {
 }
 
 function isBf162OnlyVectorIntrinsic(name: string | undefined): boolean {
-  return name === "__h2div" || name === "__hfma2_relu" || name === "__hcmadd";
+  return isBf162UnaryMathIntrinsic(name) || name === "__h2div" || name === "__hfma2_relu" || name === "__hcmadd";
+}
+
+function isBf162UnaryMathIntrinsic(name: string | undefined): boolean {
+  return name === "__habs2" ||
+    name === "__hneg2" ||
+    name === "h2ceil" ||
+    name === "h2floor" ||
+    name === "h2rcp" ||
+    name === "h2rsqrt" ||
+    name === "h2sqrt" ||
+    name === "h2trunc" ||
+    name === "h2exp" ||
+    name === "h2exp2" ||
+    name === "h2exp10" ||
+    name === "h2log" ||
+    name === "h2log2" ||
+    name === "h2log10" ||
+    name === "h2sin" ||
+    name === "h2cos" ||
+    name === "h2tanh" ||
+    name === "h2tanh_approx" ||
+    name === "h2rint";
+}
+
+function evalBf162UnaryMathLane(name: string | undefined, value: number): number {
+  switch (name) {
+    case "__habs2": return Math.abs(value);
+    case "__hneg2": return -value;
+    case "h2ceil": return Math.ceil(value);
+    case "h2floor": return Math.floor(value);
+    case "h2rcp": return 1 / value;
+    case "h2rsqrt": return 1 / Math.sqrt(value);
+    case "h2sqrt": return Math.sqrt(value);
+    case "h2trunc": return Math.trunc(value);
+    case "h2exp": return Math.exp(value);
+    case "h2exp2": return 2 ** value;
+    case "h2exp10": return 10 ** value;
+    case "h2log": return Math.log(value);
+    case "h2log2": return Math.log2(value);
+    case "h2log10": return Math.log10(value);
+    case "h2sin": return Math.sin(value);
+    case "h2cos": return Math.cos(value);
+    case "h2tanh":
+    case "h2tanh_approx": return Math.tanh(value);
+    case "h2rint": return roundTiesToEvenNumber(value);
+    default: throw compilerFailure(`unsupported bf162 unary intrinsic '${name ?? "<expr>"}'`);
+  }
 }
 
 function isHalf2UnaryIntrinsic(name: string | undefined): boolean {
