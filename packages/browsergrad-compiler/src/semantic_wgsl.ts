@@ -132,7 +132,20 @@ const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
   "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
   "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
 ]);
+const SEMANTIC_BF162_UNARY_VECTOR_CALLS = new Set(["__habs2", "__hneg2"]);
+const SEMANTIC_BF162_BINARY_VECTOR_CALLS = new Set([
+  "__hadd2", "__hadd2_rn", "__hadd2_sat",
+  "__hsub2", "__hsub2_rn", "__hsub2_sat",
+  "__hmul2", "__hmul2_rn", "__hmul2_sat",
+  "__h2div",
+]);
+const SEMANTIC_BF162_TERNARY_VECTOR_CALLS = new Set([
+  "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
+]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set([
+  ...SEMANTIC_BF162_UNARY_VECTOR_CALLS,
+  ...SEMANTIC_BF162_BINARY_VECTOR_CALLS,
+  ...SEMANTIC_BF162_TERNARY_VECTOR_CALLS,
   "__bfloat1622float2", "__bfloat162bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
   "__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162",
   "__low2bfloat162", "__high2bfloat162", "__lows2bfloat162", "__highs2bfloat162", "__lowhigh2highlow",
@@ -1871,6 +1884,16 @@ function semanticWgslBf162CallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const name = expression.callee.name;
   if (!SEMANTIC_BF162_VECTOR_CALLS.has(name) && !SEMANTIC_BF162_SCALAR_CALLS.has(name)) return false;
+  if (SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name)) {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir);
+  }
+  if (SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name)) {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir));
+  }
+  if (SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name)) {
+    return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir));
+  }
   if (name === "__bfloat1622float2") {
     const [arg] = expression.args;
     return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg, ir) === "bf162" && semanticWgslExpressionSupported(arg, "any", ir);
@@ -4854,6 +4877,39 @@ function emitSemanticBf162Call(
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL bf162 call requires symbol callee", expression.span);
   const name = expression.callee.name;
+  const emitBf162 = (arg: SemanticExpression): string => emitSemanticExpression(arg, ir, names, options, textureSpecializations);
+  const emitBf162Lane = (left: string, right: string, operator: string): string =>
+    `vec2<f32>(${wgslRoundBfloat16(`(${left}).x ${operator} (${right}).x`)}, ${wgslRoundBfloat16(`(${left}).y ${operator} (${right}).y`)})`;
+  if (SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name)) {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one bf162 operand`, expression.span);
+    const value = emitBf162(arg);
+    if (name === "__habs2") return `vec2<f32>(${wgslRoundBfloat16(`abs((${value}).x)`)}, ${wgslRoundBfloat16(`abs((${value}).y)`)})`;
+    return `vec2<f32>(${wgslRoundBfloat16(`-(${value}).x`)}, ${wgslRoundBfloat16(`-(${value}).y`)})`;
+  }
+  if (SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name)) {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two bf162 operands`, expression.span);
+    const lhs = emitBf162(left);
+    const rhs = emitBf162(right);
+    const operator = name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" ? "+" : name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" ? "-" : name === "__h2div" ? "/" : "*";
+    const value = emitBf162Lane(lhs, rhs, operator);
+    return name.endsWith("_sat") ? wgslSaturateBf162(value) : value;
+  }
+  if (SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name)) {
+    const [left, right, addend] = expression.args;
+    if (!left || !right || !addend) throw semanticWgslError(`${name} expects three bf162 operands`, expression.span);
+    const lhs = emitBf162(left);
+    const rhs = emitBf162(right);
+    const acc = emitBf162(addend);
+    if (name === "__hcmadd") {
+      return `vec2<f32>(${wgslRoundBfloat16(`((${lhs}).x * (${rhs}).x - (${lhs}).y * (${rhs}).y + (${acc}).x)`)}, ${wgslRoundBfloat16(`((${lhs}).x * (${rhs}).y + (${lhs}).y * (${rhs}).x + (${acc}).y)`)})`;
+    }
+    const value = `vec2<f32>(${wgslRoundBfloat16(`fma((${lhs}).x, (${rhs}).x, (${acc}).x)`)}, ${wgslRoundBfloat16(`fma((${lhs}).y, (${rhs}).y, (${acc}).y)`)})`;
+    if (name === "__hfma2_sat") return wgslSaturateBf162(value);
+    if (name === "__hfma2_relu") return wgslReluBf162(value);
+    return value;
+  }
   if (name === "__bfloat1622float2") {
     const [arg] = expression.args;
     if (!arg) throw semanticWgslError(`${name} expects one bf162 operand`, expression.span);
@@ -6178,6 +6234,14 @@ function wgslSaturateHalf2(value: string): string {
   return `select(clamp(${value}, vec2<f16>(0.0), vec2<f16>(1.0)), vec2<f16>(0.0), (${value}) != (${value}))`;
 }
 
+function wgslSaturateBf162(value: string): string {
+  return `select(clamp(${value}, vec2<f32>(0.0), vec2<f32>(1.0)), vec2<f32>(0.0), (${value}) != (${value}))`;
+}
+
+function wgslReluBf162(value: string): string {
+  return `select(max(${value}, vec2<f32>(0.0)), ${value}, (${value}) != (${value}))`;
+}
+
 function semanticMathCallArity(name: string): number {
   return name === "clock" ||
     name === "clock64" ||
@@ -7193,7 +7257,7 @@ function semanticExpressionVectorValueType(
 ): CudaLiteScalarType | undefined {
   if (expression.kind === "call" && expression.callee.kind === "symbol") {
     const calleeName = expression.callee.name;
-    if (calleeName === "__lowhigh2highlow") {
+    if (isSemanticBf162OverloadedVectorCall(calleeName)) {
       const explicitType = semanticExpressionValueType(expression);
       if (explicitType === "half2" || explicitType === "bf162") return explicitType;
     }
@@ -7216,6 +7280,13 @@ function semanticHalf2VectorReturnType(name: string): CudaLiteScalarType | undef
 function semanticBf162VectorReturnType(name: string): CudaLiteScalarType | undefined {
   if (name === "__bfloat1622float2") return "float2";
   return SEMANTIC_BF162_VECTOR_CALLS.has(name) ? "bf162" : undefined;
+}
+
+function isSemanticBf162OverloadedVectorCall(name: string): boolean {
+  return name === "__lowhigh2highlow" ||
+    SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name);
 }
 
 function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {

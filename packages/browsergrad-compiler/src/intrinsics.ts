@@ -605,6 +605,24 @@ const BF16_INTRINSICS = [
     return `vec2<f32>(${wgslRoundBfloat16(value)}, ${wgslRoundBfloat16(value)})`;
   }),
   intrinsic("__floats2bfloat162_rn", [2, 2], "bf162", () => 0, (args) => `vec2<f32>(${wgslRoundBfloat16(args[0] ?? "0")}, ${wgslRoundBfloat16(args[1] ?? "0")})`),
+  intrinsic("__h2div", [2, 2], "bf162", () => 0, (args) => {
+    const left = args[0] ?? "vec2<f32>()";
+    const right = args[1] ?? "vec2<f32>()";
+    return `vec2<f32>(${wgslRoundBfloat16(`(${left}).x / (${right}).x`)}, ${wgslRoundBfloat16(`(${left}).y / (${right}).y`)})`;
+  }),
+  intrinsic("__hfma2_relu", [3, 3], "bf162", () => 0, (args) => {
+    const left = args[0] ?? "vec2<f32>()";
+    const right = args[1] ?? "vec2<f32>()";
+    const addend = args[2] ?? "vec2<f32>()";
+    const value = `vec2<f32>(${wgslRoundBfloat16(`fma((${left}).x, (${right}).x, (${addend}).x)`)}, ${wgslRoundBfloat16(`fma((${left}).y, (${right}).y, (${addend}).y)`)})`;
+    return `select(max(${value}, vec2<f32>(0.0)), ${value}, (${value}) != (${value}))`;
+  }),
+  intrinsic("__hcmadd", [3, 3], "bf162", () => 0, (args) => {
+    const left = args[0] ?? "vec2<f32>()";
+    const right = args[1] ?? "vec2<f32>()";
+    const addend = args[2] ?? "vec2<f32>()";
+    return `vec2<f32>(${wgslRoundBfloat16(`((${left}).x * (${right}).x - (${left}).y * (${right}).y + (${addend}).x)`)}, ${wgslRoundBfloat16(`((${left}).x * (${right}).y + (${left}).y * (${right}).x + (${addend}).y)`)})`;
+  }),
   intrinsic("__low2bfloat16", [1, 1], "bf16", () => 0, (args) => `(${args[0] ?? "vec2<f32>()"}).x`),
   intrinsic("__high2bfloat16", [1, 1], "bf16", () => 0, (args) => `(${args[0] ?? "vec2<f32>()"}).y`),
   intrinsic("__low2bfloat162", [1, 1], "bf162", () => 0, (args) => {

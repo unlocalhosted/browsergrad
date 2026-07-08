@@ -2045,10 +2045,23 @@ function validateCallExpression(
     for (const [index, info] of infos.entries()) validateScalarOperand(info, expression.args[index]!.span, diagnostics);
     if (infos.some((info) => info.valueType === "bf16")) return { kind: "scalar", valueType: "bf16" };
   }
-  if (isHalf2VectorIntrinsic(callName) || isHalf2ComparisonMaskIntrinsic(callName) || isHalf2BooleanComparisonIntrinsic(callName)) {
+  if (isBf162VectorArithmeticIntrinsic(callName) || isHalf2VectorIntrinsic(callName) || isHalf2ComparisonMaskIntrinsic(callName) || isHalf2BooleanComparisonIntrinsic(callName)) {
+    const infos = expression.args.map((arg) => walkExpression(arg, scope));
+    const hasBf162Operand = infos.some((info) => info.kind === "vector" && info.valueType === "bf162");
+    if (isBf162VectorArithmeticIntrinsic(callName) && (hasBf162Operand || !isHalf2VectorIntrinsic(callName))) {
+      for (const [index, info] of infos.entries()) {
+        const arg = expression.args[index]!;
+        if (info.kind !== "vector" && info.kind !== "unknown") {
+          diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 arguments`, arg.span));
+        } else if (info.kind === "vector" && info.valueType !== "bf162") {
+          diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 arguments`, arg.span));
+        }
+      }
+      return { kind: "vector", valueType: "bf162" };
+    }
     requiredFeatures.add("shader-f16");
-    for (const arg of expression.args) {
-      const info = walkExpression(arg, scope);
+    for (const [index, info] of infos.entries()) {
+      const arg = expression.args[index]!;
       if (info.kind !== "vector" && info.kind !== "unknown") {
         diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 arguments`, arg.span));
       } else if (info.kind === "vector" && info.valueType !== "half2") {
@@ -2808,6 +2821,26 @@ function isHalf2VectorIntrinsic(name: string): boolean {
     name === "__hmax2" ||
     name === "__hmin2_nan" ||
     name === "__hmax2_nan";
+}
+
+function isBf162VectorArithmeticIntrinsic(name: string): boolean {
+  return name === "__habs2" ||
+    name === "__hneg2" ||
+    name === "__hadd2" ||
+    name === "__hadd2_rn" ||
+    name === "__hadd2_sat" ||
+    name === "__hsub2" ||
+    name === "__hsub2_rn" ||
+    name === "__hsub2_sat" ||
+    name === "__hmul2" ||
+    name === "__hmul2_rn" ||
+    name === "__hmul2_sat" ||
+    name === "__h2div" ||
+    name === "__hfma2" ||
+    name === "__hfma2_rn" ||
+    name === "__hfma2_sat" ||
+    name === "__hfma2_relu" ||
+    name === "__hcmadd";
 }
 
 function isHalf2VectorComparisonIntrinsic(name: string): boolean {

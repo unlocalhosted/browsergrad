@@ -19162,6 +19162,64 @@ __global__ void bf162Move(float *out, uint *bits) {
     expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0xc3804380, 0xc3804380, 0x3fc03fc0, 0x43804380]);
   });
 
+  it("lowers CUDA bf162 arithmetic aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf162Math(float *out, uint *bits) {
+  if (threadIdx.x < 1) {
+    __nv_bfloat162 a = __floats2bfloat162_rn(1.5f, -2.25f);
+    __nv_bfloat162 b = __floats2bfloat162_rn(2.5f, 4.0f);
+    __nv_bfloat162 c = __floats2bfloat162_rn(1.0f, -1.0f);
+    __nv_bfloat162 sum = __hadd2(a, b);
+    __nv_bfloat162 diff = __hsub2(b, a);
+    __nv_bfloat162 prod = __hmul2(a, b);
+    __nv_bfloat162 div = __h2div(__floats2bfloat162_rn(4.0f, 9.0f), __floats2bfloat162_rn(2.0f, 3.0f));
+    __nv_bfloat162 neg = __hneg2(a);
+    __nv_bfloat162 absVal = __habs2(a);
+    __nv_bfloat162 fmaValue = __hfma2(a, b, c);
+    __nv_bfloat162 sat = __hfma2_sat(__floats2bfloat162_rn(0.75f, 0.25f), __floats2bfloat162_rn(2.0f, 4.0f), __floats2bfloat162_rn(-1.0f, 0.25f));
+    __nv_bfloat162 relu = __hfma2_relu(a, b, c);
+    __nv_bfloat162 cmadd = __hcmadd(__floats2bfloat162_rn(1.0f, 2.0f), __floats2bfloat162_rn(3.0f, 4.0f), __floats2bfloat162_rn(5.0f, 6.0f));
+    out[0] = sum.x;
+    out[1] = sum.y;
+    out[2] = diff.x;
+    out[3] = diff.y;
+    out[4] = prod.x;
+    out[5] = prod.y;
+    out[6] = div.x;
+    out[7] = div.y;
+    out[8] = neg.x;
+    out[9] = neg.y;
+    out[10] = absVal.x;
+    out[11] = absVal.y;
+    out[12] = fmaValue.x;
+    out[13] = fmaValue.y;
+    out[14] = sat.x;
+    out[15] = sat.y;
+    out[16] = relu.x;
+    out[17] = relu.y;
+    out[18] = cmadd.x;
+    out[19] = cmadd.y;
+    bits[0] = __bfloat162_as_uint(sum);
+    bits[1] = __bfloat162_as_uint(fmaValue);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(20), bits: new Uint32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const expected = [4, 1.75, 1, 6.25, 3.75, -9, 2, 3, -1.5, 2.25, 1.5, 2.25, 4.75, -10, 0.5, 1, 4.75, 0, 0, 16];
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
+    expect([...result.buffers.out as Float32Array]).toEqual(expected);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x3fe04080, 0xc1204098]);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x3fe04080, 0xc1204098]);
+  });
+
   it("lowers scalar CUDA half unary math aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void half_unary(const half* input, half* output) {

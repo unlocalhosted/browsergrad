@@ -152,7 +152,20 @@ const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
   "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
   "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
 ]);
+const SEMANTIC_BF162_UNARY_VECTOR_CALLS = new Set(["__habs2", "__hneg2"]);
+const SEMANTIC_BF162_BINARY_VECTOR_CALLS = new Set([
+  "__hadd2", "__hadd2_rn", "__hadd2_sat",
+  "__hsub2", "__hsub2_rn", "__hsub2_sat",
+  "__hmul2", "__hmul2_rn", "__hmul2_sat",
+  "__h2div",
+]);
+const SEMANTIC_BF162_TERNARY_VECTOR_CALLS = new Set([
+  "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
+]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set([
+  ...SEMANTIC_BF162_UNARY_VECTOR_CALLS,
+  ...SEMANTIC_BF162_BINARY_VECTOR_CALLS,
+  ...SEMANTIC_BF162_TERNARY_VECTOR_CALLS,
   "__bfloat1622float2", "__bfloat162bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
   "__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162",
   "__low2bfloat162", "__high2bfloat162", "__lows2bfloat162", "__highs2bfloat162", "__lowhigh2highlow",
@@ -924,6 +937,16 @@ function semanticReferenceBf162CallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const name = expression.callee.name;
   if (!SEMANTIC_BF162_VECTOR_CALLS.has(name) && !SEMANTIC_BF162_SCALAR_CALLS.has(name)) return false;
+  if (SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name)) {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
+  }
+  if (SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name)) {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
+  }
+  if (SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name)) {
+    return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
+  }
   if (name === "__bfloat1622float2") {
     const [arg] = expression.args;
     return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
@@ -1427,7 +1450,7 @@ function semanticExpressionValueType(expression: SemanticExpression): CudaLiteSc
 
 function semanticExpressionVectorValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
   if (expression.kind === "call" && expression.callee.kind === "symbol") {
-    if (expression.callee.name === "__lowhigh2highlow") {
+    if (isSemanticBf162OverloadedVectorCall(expression.callee.name)) {
       const explicitType = semanticExpressionValueType(expression);
       if (explicitType === "half2" || explicitType === "bf162") return explicitType;
     }
@@ -1450,6 +1473,13 @@ function semanticHalf2VectorReturnType(name: string): CudaLiteScalarType | undef
 function semanticBf162VectorReturnType(name: string): CudaLiteScalarType | undefined {
   if (name === "__bfloat1622float2") return "float2";
   return SEMANTIC_BF162_VECTOR_CALLS.has(name) ? "bf162" : undefined;
+}
+
+function isSemanticBf162OverloadedVectorCall(name: string): boolean {
+  return name === "__lowhigh2highlow" ||
+    SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name) ||
+    SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name);
 }
 
 function execSemanticOperations(
@@ -3037,6 +3067,14 @@ function roundSemanticBfloat16(value: number): number {
   return roundFloat32ToBfloat16(value, "rn");
 }
 
+function saturateSemanticBfloat16(value: number): number {
+  return Number.isNaN(value) ? 0 : roundSemanticBfloat16(Math.min(1, Math.max(0, value)));
+}
+
+function reluSemanticBfloat16(value: number): number {
+  return Number.isNaN(value) ? roundSemanticBfloat16(Number.NaN) : roundSemanticBfloat16(Math.max(0, value));
+}
+
 function semanticFp8ToFloat32(bits: number, mode: number): number {
   const value = Math.trunc(bits) & 0xff;
   const sign = (value & 0x80) === 0 ? 1 : -1;
@@ -3827,6 +3865,41 @@ function evalSemanticBf162Call(
     if (!arg) throw semanticReferenceError(`${name} missing scalar operand`, expression.span);
     return evalNumber(arg, context);
   };
+  if (SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name)) {
+    const value = vectorArg(0);
+    return value.map((lane) => roundSemanticBfloat16(name === "__habs2" ? Math.abs(lane) : -lane));
+  }
+  if (SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name)) {
+    const left = vectorArg(0);
+    const right = vectorArg(1);
+    return [0, 1].map((lane) => {
+      const lhs = left[lane] ?? 0;
+      const rhs = right[lane] ?? 0;
+      if (name === "__hadd2" || name === "__hadd2_rn") return roundSemanticBfloat16(lhs + rhs);
+      if (name === "__hadd2_sat") return saturateSemanticBfloat16(lhs + rhs);
+      if (name === "__hsub2" || name === "__hsub2_rn") return roundSemanticBfloat16(lhs - rhs);
+      if (name === "__hsub2_sat") return saturateSemanticBfloat16(lhs - rhs);
+      if (name === "__hmul2" || name === "__hmul2_rn") return roundSemanticBfloat16(lhs * rhs);
+      if (name === "__hmul2_sat") return saturateSemanticBfloat16(lhs * rhs);
+      return roundSemanticBfloat16(lhs / rhs);
+    });
+  }
+  if (SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name)) {
+    const left = vectorArg(0);
+    const right = vectorArg(1);
+    const addend = vectorArg(2);
+    if (name === "__hcmadd") {
+      const real = (left[0] ?? 0) * (right[0] ?? 0) - (left[1] ?? 0) * (right[1] ?? 0) + (addend[0] ?? 0);
+      const imag = (left[0] ?? 0) * (right[1] ?? 0) + (left[1] ?? 0) * (right[0] ?? 0) + (addend[1] ?? 0);
+      return [roundSemanticBfloat16(real), roundSemanticBfloat16(imag)];
+    }
+    return [0, 1].map((lane) => {
+      const value = (left[lane] ?? 0) * (right[lane] ?? 0) + (addend[lane] ?? 0);
+      if (name === "__hfma2_sat") return saturateSemanticBfloat16(value);
+      if (name === "__hfma2_relu") return reluSemanticBfloat16(value);
+      return roundSemanticBfloat16(value);
+    });
+  }
   if (name === "__bfloat1622float2") return vectorArg(0);
   if (name === "__float22bfloat162_rn") return vectorArg(0).map(roundSemanticBfloat16);
   if (name === "__bfloat162bfloat162" || name === "__float2bfloat162_rn") {

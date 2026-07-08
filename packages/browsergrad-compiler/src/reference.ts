@@ -2178,6 +2178,12 @@ function vectorExpressionType(
     if (name === "curand_normal2" || name === "curand_log_normal2") return "float2";
     if (name === "curand_uniform4" || name === "curand_normal4" || name === "curand_log_normal4") return "float4";
     if (name === "curand_poisson4") return "uint4";
+    if (isBf162VectorArithmeticIntrinsic(name)) {
+      const firstArgType = expression.args[0] ? vectorExpressionType(expression.args[0], context) : undefined;
+      if (firstArgType === "bf162") return "bf162";
+      if (firstArgType === "half2") return "half2";
+      if (!isHalf2VectorIntrinsic(name)) return "bf162";
+    }
     if (isHalf2VectorIntrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
     if (name === "__half22float2") return "float2";
   }
@@ -3414,6 +3420,54 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ],
     };
   }
+  if (isBf162VectorArithmeticIntrinsic(name)) {
+    const leftValue = evalExpression(expression.args[0]!, context);
+    if (isCudaVectorValue(leftValue) && leftValue.valueType === "bf162") {
+      const left = leftValue;
+      if (name === "__habs2" || name === "__hneg2") {
+        return {
+          kind: "cuda-vector",
+          valueType: "bf162",
+          lanes: left.lanes.map((value) => roundBfloat16(name === "__habs2" ? Math.abs(value ?? 0) : -(value ?? 0))),
+        };
+      }
+      const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "bf162");
+      if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat" || name === "__hfma2_relu" || name === "__hcmadd") {
+        const addend = valueAsCudaVector(evalExpression(expression.args[2]!, context), "bf162");
+        if (name === "__hcmadd") {
+          const real = (left.lanes[0] ?? 0) * (right.lanes[0] ?? 0) - (left.lanes[1] ?? 0) * (right.lanes[1] ?? 0) + (addend.lanes[0] ?? 0);
+          const imag = (left.lanes[0] ?? 0) * (right.lanes[1] ?? 0) + (left.lanes[1] ?? 0) * (right.lanes[0] ?? 0) + (addend.lanes[1] ?? 0);
+          return { kind: "cuda-vector", valueType: "bf162", lanes: [roundBfloat16(real), roundBfloat16(imag)] };
+        }
+        return {
+          kind: "cuda-vector",
+          valueType: "bf162",
+          lanes: left.lanes.map((value, index) => {
+            const fma = (value ?? 0) * (right.lanes[index] ?? 0) + (addend.lanes[index] ?? 0);
+            if (name === "__hfma2_sat") return saturateBfloat16(fma);
+            if (name === "__hfma2_relu") return reluBfloat16(fma);
+            return roundBfloat16(fma);
+          }),
+        };
+      }
+      return {
+        kind: "cuda-vector",
+        valueType: "bf162",
+        lanes: left.lanes.map((value, index) => {
+          const lhs = value ?? 0;
+          const rhs = right.lanes[index] ?? 0;
+          if (name === "__hadd2" || name === "__hadd2_rn") return roundBfloat16(lhs + rhs);
+          if (name === "__hadd2_sat") return saturateBfloat16(lhs + rhs);
+          if (name === "__hsub2" || name === "__hsub2_rn") return roundBfloat16(lhs - rhs);
+          if (name === "__hsub2_sat") return saturateBfloat16(lhs - rhs);
+          if (name === "__hmul2" || name === "__hmul2_rn") return roundBfloat16(lhs * rhs);
+          if (name === "__hmul2_sat") return saturateBfloat16(lhs * rhs);
+          return roundBfloat16(lhs / rhs);
+        }),
+      };
+    }
+    if (!isHalf2VectorIntrinsic(name)) throw compilerFailure(`unsupported bf162 intrinsic '${name ?? "<expr>"}'`);
+  }
   if (isHalf2BooleanComparisonIntrinsic(name) || isHalf2ComparisonMaskIntrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
@@ -3675,6 +3729,26 @@ function isHalf2VectorIntrinsic(name: string | undefined): boolean {
     name === "__hmax2_nan";
 }
 
+function isBf162VectorArithmeticIntrinsic(name: string | undefined): boolean {
+  return name === "__habs2" ||
+    name === "__hneg2" ||
+    name === "__hadd2" ||
+    name === "__hadd2_rn" ||
+    name === "__hadd2_sat" ||
+    name === "__hsub2" ||
+    name === "__hsub2_rn" ||
+    name === "__hsub2_sat" ||
+    name === "__hmul2" ||
+    name === "__hmul2_rn" ||
+    name === "__hmul2_sat" ||
+    name === "__h2div" ||
+    name === "__hfma2" ||
+    name === "__hfma2_rn" ||
+    name === "__hfma2_sat" ||
+    name === "__hfma2_relu" ||
+    name === "__hcmadd";
+}
+
 function isHalf2UnaryIntrinsic(name: string | undefined): boolean {
   return name === "__habs2" ||
     name === "__hceil2" ||
@@ -3890,6 +3964,14 @@ function roundBfloat16(value: number): number {
   const bits = u32Scratch[0] ?? 0;
   u32Scratch[0] = (bits + 0x8000) & 0xffff0000;
   return f32Scratch[0] ?? 0;
+}
+
+function saturateBfloat16(value: number): number {
+  return Number.isNaN(value) ? 0 : roundBfloat16(Math.min(1, Math.max(0, value)));
+}
+
+function reluBfloat16(value: number): number {
+  return Number.isNaN(value) ? roundBfloat16(Number.NaN) : roundBfloat16(Math.max(0, value));
 }
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {
