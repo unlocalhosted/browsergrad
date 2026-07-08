@@ -412,6 +412,7 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__sad", "sad"],
   ["__usad", "usad"],
   ["__usad4", "usad4"],
+  ["__dp4a", "dp4a"],
   ["IMAD", "imad"],
   ["UMUL", "umul"],
   ["UMAD", "umad"],
@@ -3510,6 +3511,22 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "  }",
     "  return out;",
     "}",
+    "fn bg_semantic_dp4a_i32(a: u32, b: u32, c: i32) -> i32 {",
+    "  var out = c;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left = i32(((a >> shift) & 0xffu) << 24u) >> 24u;",
+    "    let right = i32(((b >> shift) & 0xffu) << 24u) >> 24u;",
+    "    out = out + (left * right);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_dp4a_u32(a: u32, b: u32, c: u32) -> u32 {",
+    "  var out = c;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    out = out + (((a >> shift) & 0xffu) * ((b >> shift) & 0xffu));",
+    "  }",
+    "  return out;",
+    "}",
   ];
 }
 
@@ -4141,7 +4158,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "uhadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
     return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u) + ((${lhs} ^ ${rhs}) & 1u))`;
   }
-  if (wgslCallee === "imad" || wgslCallee === "umad" || wgslCallee === "sad" || wgslCallee === "usad" || wgslCallee === "usad4" || wgslCallee === "byte_perm" || wgslCallee.startsWith("funnelshift_")) {
+  if (wgslCallee === "imad" || wgslCallee === "umad" || wgslCallee === "sad" || wgslCallee === "usad" || wgslCallee === "usad4" || wgslCallee === "dp4a" || wgslCallee === "byte_perm" || wgslCallee.startsWith("funnelshift_")) {
     const [first, second, third] = expression.args;
     if (!first || !second || (!third && wgslCallee !== "usad4")) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
     if (wgslCallee === "imad") {
@@ -4173,6 +4190,16 @@ function emitSemanticMathCall(
       const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
       const c = third ? emitSemanticExpressionAs(third, ir, names, "u32", options, textureSpecializations) : "0u";
       return `bg_semantic_usad4_u32(${a}, ${b}, ${c})`;
+    }
+    if (wgslCallee === "dp4a") {
+      const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
+      if (expression.valueType === "uint") {
+        const c = emitSemanticExpressionAs(third!, ir, names, "u32", options, textureSpecializations);
+        return `bg_semantic_dp4a_u32(${a}, ${b}, ${c})`;
+      }
+      const c = emitSemanticExpressionAs(third!, ir, names, "i32", options, textureSpecializations);
+      return `bg_semantic_dp4a_i32(${a}, ${b}, ${c})`;
     }
     const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
     const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
@@ -4484,6 +4511,7 @@ function semanticMathCallArity(name: string): number {
       name === "__sad" ||
       name === "__usad" ||
       name === "__usad4" ||
+      name === "__dp4a" ||
       name === "__nv_cvt_float_to_fp8" ||
       name === "IMAD" ||
       name === "UMAD"

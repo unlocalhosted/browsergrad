@@ -2151,6 +2151,15 @@ __global__ void intrinsicPack(half2 *h, float2 *f, float *out) {
   f[0] = __half22float2(value);
   out[0] = __fmaf_rn(f[0].x, 2.0f, f[0].y);
 }`,
+  dp4aIntrinsic: `
+__global__ void dp4aIntrinsic(uint *out) {
+  int a = int(0x01ff027fu);
+  int b = int(0x0203fe80u);
+  uint ua = 0x01020304u;
+  uint ub = 0x05060708u;
+  out[0] = uint(__dp4a(a, b, 5));
+  out[1] = __dp4a(ua, ub, 9u);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12775,6 +12784,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [6] },
+          },
+          {
+            name: "intrinsic:dp4a",
+            source: SOURCES.dp4aIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [4294951040, 79] },
           },
           {
             name: "complex:cufft-magnitude",

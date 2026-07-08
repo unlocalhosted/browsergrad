@@ -1889,6 +1889,7 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
   if (expression.kind === "binary") return binaryExpressionValueType(expression, context);
   if (expression.kind === "call") {
     const name = expressionNameForReference(expression.callee);
+    if (name === "__dp4a") return expressionValueType(expression.args[0] ?? expression.callee, context);
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "member") {
@@ -3438,6 +3439,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   })) {
     return signedAverage(args[0] ?? 0, args[1] ?? 0);
   }
+  if (name === "__dp4a") {
+    return expressionValueType(expression, context) === "uint"
+      ? evalU8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0)
+      : evalI8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+  }
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.evaluate) return intrinsic.evaluate(args);
   switch (name) {
@@ -3540,6 +3546,32 @@ function signedAverage(xValue: number, yValue: number): number {
   const x = BigInt(Math.trunc(xValue) | 0);
   const y = BigInt(Math.trunc(yValue) | 0);
   return Number((x + y) >> 1n) | 0;
+}
+
+function evalI8x4DotAdd(aValue: number, bValue: number, addValue = 0): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  let out = Math.trunc(addValue) | 0;
+  for (let lane = 0; lane < 4; lane++) {
+    const shift = lane * 8;
+    out = (out + Math.imul(signExtend8((a >>> shift) & 0xff), signExtend8((b >>> shift) & 0xff))) | 0;
+  }
+  return out;
+}
+
+function evalU8x4DotAdd(aValue: number, bValue: number, addValue = 0): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  let out = Math.trunc(addValue) >>> 0;
+  for (let lane = 0; lane < 4; lane++) {
+    const shift = lane * 8;
+    out = (out + (((a >>> shift) & 0xff) * ((b >>> shift) & 0xff))) >>> 0;
+  }
+  return out;
+}
+
+function signExtend8(value: number): number {
+  return (value << 24) >> 24;
 }
 
 function half2IntrinsicOperator(name: string | undefined): (left: number, right: number) => number {

@@ -2332,6 +2332,23 @@ function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context
   return `(${c} + ${lanes.join(" + ")})`;
 }
 
+function emitDp4aExpression(expression: Extract<CudaLiteExpression, { readonly kind: "call" }>, context: EmitContext): string {
+  const a = `u32(${emitExpression(expression.args[0]!, context)})`;
+  const b = `u32(${emitExpression(expression.args[1]!, context)})`;
+  if (expressionValueTypeForEmit(expression, context) === "uint") {
+    const c = `u32(${emitExpression(expression.args[2]!, context)})`;
+    const lanes = [0, 8, 16, 24].map((shift) => `((((${a} >> ${shift}u) & 0xffu) * ((${b} >> ${shift}u) & 0xffu)))`);
+    return `(${c} + ${lanes.join(" + ")})`;
+  }
+  const c = `i32(${emitExpression(expression.args[2]!, context)})`;
+  const lanes = [0, 8, 16, 24].map((shift) => {
+    const left = `i32(((${a} >> ${shift}u) & 0xffu) << 24u) >> 24u`;
+    const right = `i32(((${b} >> ${shift}u) & 0xffu) << 24u) >> 24u`;
+    return `(${left} * ${right})`;
+  });
+  return `(${c} + ${lanes.join(" + ")})`;
+}
+
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
   if (statement.pointer && context.localPointerHandleFor(statement.name, statement.span)) {
     throw featureError(
@@ -6280,6 +6297,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     const right = args[1] ?? "0";
     return `((i32(${left}) & i32(${right})) + ((i32(${left}) ^ i32(${right})) >> 1u))`;
   }
+  if (name === "__dp4a") return emitDp4aExpression(expression, context);
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) {
     const intrinsicArgs = intrinsicNeedsFloatArgs(name)

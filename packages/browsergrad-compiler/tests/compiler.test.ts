@@ -8523,6 +8523,38 @@ __global__ void bitcast_intrinsics(float *x, uint *bits, int *signed_bits, float
     expect([...result.buffers.roundtrip as Float32Array]).toEqual([-3.5, -3.5]);
   });
 
+  it("lowers CUDA dp4a signed and unsigned packed dot intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dp4a_intrinsics(int *signed_out, uint *unsigned_out) {
+  int a = int(0x01ff027fu);
+  int b = int(0x0203fe80u);
+  uint ua = 0x01020304u;
+  uint ub = 0x05060708u;
+  signed_out[0] = __dp4a(a, b, 5);
+  unsigned_out[0] = __dp4a(ua, ub, 9u);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { signed_out: new Int32Array(1), unsigned_out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { signed_out: new Int32Array(1), unsigned_out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_semantic_dp4a_i32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_dp4a_u32(");
+    expect([...semanticResult.buffers.signed_out as Int32Array]).toEqual([-16256]);
+    expect([...semanticResult.buffers.unsigned_out as Uint32Array]).toEqual([79]);
+    expect([...result.buffers.signed_out as Int32Array]).toEqual([...semanticResult.buffers.signed_out as Int32Array]);
+    expect([...result.buffers.unsigned_out as Uint32Array]).toEqual([...semanticResult.buffers.unsigned_out as Uint32Array]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {

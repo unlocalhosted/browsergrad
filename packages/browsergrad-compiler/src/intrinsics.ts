@@ -283,6 +283,7 @@ const INTEGER_INTRINSICS = [
   intrinsic("__sad", [3, 3], "uint", evalSignedSadAdd, emitSignedSadAdd),
   intrinsic("__usad", [3, 3], "uint", evalUnsignedSadAdd, emitUnsignedSadAdd),
   intrinsic("__usad4", [2, 3], "uint", evalU8x4SadAdd, emitU8x4SadAdd),
+  intrinsic("__dp4a", [3, 3], "argument1", evalI8x4DotAdd, emitI8x4DotAdd),
   intrinsic("IMAD", [3, 3], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) + (args[2] ?? 0), (args) => `((i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"})) + i32(${args[2] ?? "0"}))`),
   intrinsic("UMUL", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
   intrinsic("UMAD", [3, 3], "uint", (args) => (Math.imul(args[0] ?? 0, args[1] ?? 0) + (args[2] ?? 0)) >>> 0, (args) => `((u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"})) + u32(${args[2] ?? "0"}))`),
@@ -795,6 +796,35 @@ function emitU8x4SadAdd(args: readonly string[]): string {
     return `(max(${left}, ${right}) - min(${left}, ${right}))`;
   });
   return `(${c} + ${lanes.join(" + ")})`;
+}
+
+function evalI8x4DotAdd(args: readonly number[]): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  let out = Math.trunc(args[2] ?? 0) | 0;
+  for (let lane = 0; lane < 4; lane++) {
+    const shift = lane * 8;
+    const left = signExtend8((a >>> shift) & 0xff);
+    const right = signExtend8((b >>> shift) & 0xff);
+    out = (out + Math.imul(left, right)) | 0;
+  }
+  return out;
+}
+
+function emitI8x4DotAdd(args: readonly string[]): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const c = `i32(${args[2] ?? "0"})`;
+  const lanes = [0, 8, 16, 24].map((shift) => {
+    const left = `i32(((${a} >> ${shift}u) & 0xffu) << 24u) >> 24u`;
+    const right = `i32(((${b} >> ${shift}u) & 0xffu) << 24u) >> 24u`;
+    return `(${left} * ${right})`;
+  });
+  return `(${c} + ${lanes.join(" + ")})`;
+}
+
+function signExtend8(value: number): number {
+  return (value << 24) >> 24;
 }
 
 function evalFmod(args: readonly number[]): number {
