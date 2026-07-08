@@ -11608,6 +11608,55 @@ __global__ void singlePercentSpecialRegs(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3, 0, 0, 0, 0, 0, 1, 3, 7]);
   });
 
+  it("lowers inline PTX CUDA dimension special registers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dimensionSpecialRegs(uint *out) {
+  uint tx;
+  uint ty;
+  uint bx;
+  uint by;
+  uint ntx;
+  uint nty;
+  uint nbx;
+  uint nby;
+  asm volatile("mov.u32 %0, %tid.x;" : "=r"(tx));
+  asm volatile("mov.u32 %0, %tid.y;" : "=r"(ty));
+  asm volatile("mov.u32 %0, %ctaid.x;" : "=r"(bx));
+  asm volatile("mov.u32 %0, %ctaid.y;" : "=r"(by));
+  asm volatile("mov.u32 %0, %ntid.x;" : "=r"(ntx));
+  asm volatile("mov.u32 %0, %ntid.y;" : "=r"(nty));
+  asm volatile("mov.u32 %0, %nctaid.x;" : "=r"(nbx));
+  asm volatile("mov.u32 %0, %nctaid.y;" : "=r"(nby));
+  uint idx = (blockIdx.x * blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
+  out[idx] = tx;
+  out[idx + 8] = ty;
+  out[idx + 16] = bx;
+  out[idx + 24] = by;
+  out[idx + 32] = ntx;
+  out[idx + 40] = nty;
+  out[idx + 48] = nbx;
+  out[idx + 56] = nby;
+}`, { workgroupSize: [2, 2, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(64) } },
+      { gridDim: [2, 1, 1], blockDim: [2, 2, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0, 1, 0, 1, 0, 1, 0, 1,
+      0, 0, 1, 1, 0, 0, 1, 1,
+      0, 0, 0, 0, 1, 1, 1, 1,
+      0, 0, 0, 0, 0, 0, 0, 0,
+      2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2,
+      2, 2, 2, 2, 2, 2, 2, 2,
+      1, 1, 1, 1, 1, 1, 1, 1,
+    ]);
+  });
+
   it("lowers output-only inline PTX globaltimer statements deterministically", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned long long read_clock() {

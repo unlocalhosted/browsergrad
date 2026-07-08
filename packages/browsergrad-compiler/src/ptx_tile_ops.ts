@@ -3,6 +3,7 @@ export type InlineAsmOp =
   | { readonly kind: "laneid" }
   | { readonly kind: "warpid" }
   | { readonly kind: "lanemask-lt" }
+  | { readonly kind: "special-register-u32"; readonly register: PtxSpecialU32Register }
   | { readonly kind: "globaltimer-u64" }
   | { readonly kind: "isspacep"; readonly space: "global" | "shared" | "const" | "local" }
   | { readonly kind: "bfind-u32" }
@@ -20,10 +21,26 @@ export type InlineAsmOp =
     readonly accumulator: "f16" | "f32";
   };
 
+export type PtxSpecialU32Register =
+  | "tid.x"
+  | "tid.y"
+  | "tid.z"
+  | "ctaid.x"
+  | "ctaid.y"
+  | "ctaid.z"
+  | "ntid.x"
+  | "ntid.y"
+  | "ntid.z"
+  | "nctaid.x"
+  | "nctaid.y"
+  | "nctaid.z";
+
 export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\bmov\.u32\b/u.test(template) && /%{1,2}laneid\b/u.test(template)) return { kind: "laneid" };
   if (/\bmov\.u32\b/u.test(template) && /%{1,2}warpid\b/u.test(template)) return { kind: "warpid" };
   if (/\bmov\.u32\b/u.test(template) && /%{1,2}lanemask_lt\b/u.test(template)) return { kind: "lanemask-lt" };
+  const special = /\bmov\.u32\b[\s\S]*%{1,2}((?:tid|ctaid|ntid|nctaid)\.[xyz])\b/u.exec(template);
+  if (special) return { kind: "special-register-u32", register: special[1] as PtxSpecialU32Register };
   if (/\bmov\.u64\b/u.test(template) && /%globaltimer\b/u.test(template)) return { kind: "globaltimer-u64" };
   const isspacep = /\bisspacep\.(global|shared|const|local)\b/u.exec(template);
   if (isspacep) return { kind: "isspacep", space: isspacep[1] as "global" | "shared" | "const" | "local" };
@@ -60,6 +77,7 @@ export function inlineAsmSupportedList(): string {
     "laneid",
     "warpid",
     "lanemask_lt",
+    "{tid,ctaid,ntid,nctaid}.{x,y,z}",
     "globaltimer",
     "isspacep.{global,shared,const,local}",
     "bfind.u32",

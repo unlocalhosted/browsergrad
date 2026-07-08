@@ -19,6 +19,7 @@ import type {
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
+import { classifyInlineAsm, type PtxSpecialU32Register } from "./ptx_tile_ops.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
@@ -572,6 +573,46 @@ function lowerStatementOperations(
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
 }
 
+function lowerInlineAsmSpecialRegisterAssignment(
+  statement: CudaLiteAsmStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): SemanticKernelIrOperation | undefined {
+  const op = classifyInlineAsm(statement.template);
+  const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+  if (op?.kind !== "special-register-u32" || statement.inputs.length !== 0 || outputs.length !== 1) return undefined;
+  const target = lowerExpression(outputs[0]!, scope);
+  return {
+    kind: "expression",
+    expression: {
+      kind: "assignment",
+      operator: "=",
+      target,
+      value: semanticSpecialRegisterExpression(op.register, statement.span),
+      valueType: expressionValueType(target) ?? "uint",
+      span: statement.span,
+    },
+    span: statement.span,
+  };
+}
+
+function semanticSpecialRegisterExpression(register: PtxSpecialU32Register, span: SourceSpan): SemanticExpression {
+  const [root, property] = register.split(".") as [string, "x" | "y" | "z"];
+  const objectName = root === "tid" ? "threadIdx" : root === "ctaid" ? "blockIdx" : root === "ntid" ? "blockDim" : "gridDim";
+  return {
+    kind: "member",
+    object: {
+      kind: "symbol",
+      name: objectName,
+      valueType: "uint",
+      addressSpace: "builtin",
+      span,
+    },
+    property,
+    valueType: "uint",
+    span,
+  };
+}
+
 function lowerStatement(
   statement: CudaLiteStatement,
   scope: Map<string, CudaLiteSemanticSymbol>,
@@ -602,8 +643,11 @@ function lowerStatement(
       return { kind: "cooperative-group-declare", declaration: statement, span: statement.span };
     case "kernel-launch":
       return { kind: "device-launch", launch: lowerDeviceLaunch(statement, scope), span: statement.span };
-    case "asm":
+    case "asm": {
+      const registerAssignment = lowerInlineAsmSpecialRegisterAssignment(statement, scope);
+      if (registerAssignment) return registerAssignment;
       return { kind: "inline-asm", statement, span: statement.span };
+    }
     case "expr": {
       const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };

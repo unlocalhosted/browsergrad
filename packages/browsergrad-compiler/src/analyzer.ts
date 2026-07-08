@@ -1695,6 +1695,12 @@ function validateInlineAsmStatement(
   if (op?.kind === "lanemask-lt" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
+  if (op?.kind === "special-register-u32" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.register} inline PTX expects one output operand and no input operands`, statement.span));
+  }
+  if (op?.kind === "special-register-u32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.register} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
+  }
   if (op?.kind === "globaltimer-u64" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX expects one output operand and no input operands", statement.span));
   }

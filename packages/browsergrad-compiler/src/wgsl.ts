@@ -2242,6 +2242,9 @@ function emitInlineAsmStatement(
     const mask = `select(0u, ((1u << ${lane}) - 1u), ${lane} > 0u)`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, mask, context)}`;
   }
+  if (op?.kind === "special-register-u32" && statement.inputs.length === 0 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineAsmSpecialRegister(op.register, context), context)}`;
+  }
   if (op?.kind === "globaltimer-u64" && statement.inputs.length === 0 && outputs.length === 1) {
     const tick = `((workgroup_id.x * ${context.ir.workgroupSize[0]}u) + u32(${emitLocalLinearRank(context)}))`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, tick, context)}`;
@@ -6290,6 +6293,16 @@ function emitInlineAsmAddressPredicate(
         space === "const" ? actual === "constant" :
           actual === "local";
   return matches ? "1u" : "0u";
+}
+
+function emitInlineAsmSpecialRegister(register: string, context: EmitContext): string {
+  const [root, axis] = register.split(".");
+  const axisIndex = axis === "x" ? 0 : axis === "y" ? 1 : 2;
+  if (root === "tid") return context.ir.workgroupSize[axisIndex] === 1 ? "0u" : `local_id.${axis}`;
+  if (root === "ctaid") return `workgroup_id.${axis}`;
+  if (root === "ntid") return `${context.ir.workgroupSize[axisIndex]}u`;
+  if (root === "nctaid") return `num_workgroups.${axis}`;
+  throw featureError("unsupported-inline-asm", `unsupported inline PTX special register '${register}'`, context.ir.span);
 }
 
 function emitCall(expression: CudaLiteCallExpression, context: EmitContext): string {

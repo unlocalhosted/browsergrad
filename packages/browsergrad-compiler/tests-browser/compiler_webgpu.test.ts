@@ -349,6 +349,44 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs inline PTX CUDA dimension special registers through native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void dimensionSpecialRegs(uint *out) {
+  uint tx;
+  uint ty;
+  uint bx;
+  uint by;
+  uint ntx;
+  uint nty;
+  uint nbx;
+  uint nby;
+  asm volatile("mov.u32 %0, %tid.x;" : "=r"(tx));
+  asm volatile("mov.u32 %0, %tid.y;" : "=r"(ty));
+  asm volatile("mov.u32 %0, %ctaid.x;" : "=r"(bx));
+  asm volatile("mov.u32 %0, %ctaid.y;" : "=r"(by));
+  asm volatile("mov.u32 %0, %ntid.x;" : "=r"(ntx));
+  asm volatile("mov.u32 %0, %ntid.y;" : "=r"(nty));
+  asm volatile("mov.u32 %0, %nctaid.x;" : "=r"(nbx));
+  asm volatile("mov.u32 %0, %nctaid.y;" : "=r"(nby));
+  uint idx = (blockIdx.x * blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
+  out[idx] = tx;
+  out[idx + 8] = ty;
+  out[idx + 16] = bx;
+  out[idx + 24] = by;
+  out[idx + 32] = ntx;
+  out[idx + 40] = nty;
+  out[idx + 48] = nbx;
+  out[idx + 56] = nby;
+}`, { workgroupSize: [2, 2, 1] });
+    const input = { buffers: { out: new Uint32Array(64) } };
+    const launch = { gridDim: [2, 1, 1] as const, blockDim: [2, 2, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
   it("runs common CUDA float math builtins through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(FLOAT_MATH, { workgroupSize: [2, 1, 1] });

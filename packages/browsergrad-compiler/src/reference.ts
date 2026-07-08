@@ -862,6 +862,12 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), mask >>> 0, context);
     return;
   }
+  if (op?.kind === "special-register-u32") {
+    if (statement.inputs.length !== 0) throw compilerFailure(`${op.register} inline asm expects no inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${op.register} inline asm expects one output operand`);
+    writeLValue(resolveLValue(outputs[0]!, context), inlineAsmSpecialRegisterValue(op.register, context), context);
+    return;
+  }
   if (op?.kind === "globaltimer-u64") {
     if (statement.inputs.length !== 0) throw compilerFailure("globaltimer inline asm expects no inputs");
     if (outputs.length !== 1) throw compilerFailure("globaltimer inline asm expects one output operand");
@@ -957,6 +963,21 @@ function evalInlineAsmAddressPredicate(
   if (space === "shared") return actual === "shared" ? 1 : 0;
   if (space === "const") return actual === "constant" ? 1 : 0;
   return actual === "local" ? 1 : 0;
+}
+
+function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {
+  const [root, axis] = register.split(".");
+  const vector = root === "tid"
+    ? context.threadIdx
+    : root === "ctaid"
+    ? context.blockIdx
+    : root === "ntid"
+    ? context.blockDim
+    : root === "nctaid"
+    ? context.gridDim
+    : undefined;
+  if (!vector) throw compilerFailure(`unsupported inline asm special register '${register}'`);
+  return axis === "x" ? vector.x : axis === "y" ? vector.y : vector.z;
 }
 
 function execMmaM16N8K16(
