@@ -11509,8 +11509,10 @@ __global__ void ldmatrixCarrier(uint *out) {
   it("lowers inline PTX cp.async fences as native no-op barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void cpAsyncFenceAsm(float *out, float *in) {
+  int wait = 0;
   asm volatile("cp.async.commit_group;\\n" ::);
   asm volatile("cp.async.wait_group 0;\\n" ::);
+  asm volatile("cp.async.wait_group %0;\\n" :: "n"(wait));
   asm volatile("cp.async.wait_all;\\n" ::);
   out[threadIdx.x] = in[threadIdx.x] + 1.0f;
 }`, { workgroupSize: [2, 1, 1] });

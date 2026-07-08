@@ -965,8 +965,11 @@ function unsupportedSemanticWgslOperation(
         ) return operation;
         break;
       case "inline-asm":
-        if (classifyInlineAsm(operation.statement.template)?.kind !== "cp-async-fence") return operation;
-        if (operation.statement.inputs.length !== 0 || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
+        {
+          const asm = classifyInlineAsm(operation.statement.template);
+          if (asm?.kind !== "cp-async-fence") return operation;
+          if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
+        }
         break;
       case "return":
         if (operation.value && (!allowReturnValue || !semanticWgslExpressionSupported(operation.value, "any", ir))) return operation;
@@ -2302,7 +2305,10 @@ function emitSemanticOperation(
     case "fence":
       return [`${prefix}storageBarrier();`];
     case "inline-asm":
-      if (classifyInlineAsm(operation.statement.template)?.kind === "cp-async-fence") return [`${prefix}// cp.async inline asm fence omitted`];
+      {
+        const asm = classifyInlineAsm(operation.statement.template);
+        if (asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0)) return [`${prefix}// cp.async inline asm fence omitted`];
+      }
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
     case "return":
       if (operation.value) {

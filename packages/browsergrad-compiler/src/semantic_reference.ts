@@ -406,8 +406,11 @@ function unsupportedSemanticReferenceOperation(
         ) return operation;
         break;
       case "inline-asm":
-        if (classifyInlineAsm(operation.statement.template)?.kind !== "cp-async-fence") return operation;
-        if (operation.statement.inputs.length !== 0 || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
+        {
+          const asm = classifyInlineAsm(operation.statement.template);
+          if (asm?.kind !== "cp-async-fence") return operation;
+          if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || (operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output])).length !== 0) return operation;
+        }
         break;
       case "break":
       case "continue":
@@ -1419,8 +1422,11 @@ function execSemanticOperations(
       case "fence":
         break;
       case "inline-asm":
-        if (classifyInlineAsm(operation.statement.template)?.kind !== "cp-async-fence") {
-          throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
+        {
+          const asm = classifyInlineAsm(operation.statement.template);
+          if (asm?.kind !== "cp-async-fence" || operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0)) {
+            throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
+          }
         }
         break;
       case "break":

@@ -395,8 +395,10 @@ __global__ void selected(float *x) {
 }`,
   inlineAsmCpAsyncFence: `
 __global__ void inlineAsmCpAsyncFence(float *out, float *in) {
+  int wait = 0;
   asm volatile("cp.async.commit_group;\\n" ::);
   asm volatile("cp.async.wait_group 0;\\n" ::);
+  asm volatile("cp.async.wait_group %0;\\n" :: "n"(wait));
   asm volatile("cp.async.wait_all;\\n" ::);
   out[threadIdx.x] = in[threadIdx.x] + 1.0f;
 }`,

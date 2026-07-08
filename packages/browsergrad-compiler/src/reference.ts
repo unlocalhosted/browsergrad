@@ -900,9 +900,11 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "cp-async-fence") {
-    if (statement.inputs.length !== 0 || outputs.length !== 0) {
-      throw compilerFailure("cp.async fence inline asm expects no operands");
+    const maxInputs = op.fence === "wait_group" ? 1 : 0;
+    if (statement.inputs.length > maxInputs || outputs.length !== 0) {
+      throw compilerFailure(`${op.fence === "wait_group" ? "cp.async.wait_group" : "cp.async fence"} inline asm expects no output operands${maxInputs === 0 ? " and no input operands" : " and at most one input operand"}`);
     }
+    for (const input of statement.inputs) evalNumber(input, context);
     return;
   }
   if (op?.kind === "mma-m16n8k16") {
