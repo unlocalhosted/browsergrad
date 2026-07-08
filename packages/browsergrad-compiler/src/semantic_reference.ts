@@ -97,7 +97,11 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
   "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
   "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
-  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2", "__vadd4", "__vsub4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4", "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
+  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
+  "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
+  "__vadd4", "__vsub4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
+  "__vseteq4", "__vsetne4", "__vsetges4", "__vsetgeu4", "__vsetgts4", "__vsetgtu4", "__vsetles4", "__vsetleu4", "__vsetlts4", "__vsetltu4",
+  "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -2435,6 +2439,16 @@ function evalSemanticMathCall(
     case "__vmaxu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
     case "__vmins2": return i16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxs2": return i16x2Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
+    case "__vseteq2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a === b);
+    case "__vsetne2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a !== b);
+    case "__vsetges2": return vset(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a >= b);
+    case "__vsetgeu2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a >= b);
+    case "__vsetgts2": return vset(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a > b);
+    case "__vsetgtu2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a > b);
+    case "__vsetles2": return vset(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a <= b);
+    case "__vsetleu2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a <= b);
+    case "__vsetlts2": return vset(args[0] ?? 0, args[1] ?? 0, 16, true, (a, b) => a < b);
+    case "__vsetltu2": return vset(args[0] ?? 0, args[1] ?? 0, 16, false, (a, b) => a < b);
     case "__vadd4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
     case "__vaddss4": return i8x4SaturatingBinary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
@@ -2447,6 +2461,16 @@ function evalSemanticMathCall(
     case "__vmaxu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
     case "__vmins4": return i8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.min);
     case "__vmaxs4": return i8x4Binary(args[0] ?? 0, args[1] ?? 0, Math.max);
+    case "__vseteq4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a === b);
+    case "__vsetne4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a !== b);
+    case "__vsetges4": return vset(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a >= b);
+    case "__vsetgeu4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a >= b);
+    case "__vsetgts4": return vset(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a > b);
+    case "__vsetgtu4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a > b);
+    case "__vsetles4": return vset(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a <= b);
+    case "__vsetleu4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a <= b);
+    case "__vsetlts4": return vset(args[0] ?? 0, args[1] ?? 0, 8, true, (a, b) => a < b);
+    case "__vsetltu4": return vset(args[0] ?? 0, args[1] ?? 0, 8, false, (a, b) => a < b);
     case "__dp4a": return expression.valueType === "uint"
       ? u8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0)
       : i8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
@@ -2842,6 +2866,20 @@ function i16x2Binary(aValue: number, bValue: number, op: (a: number, b: number) 
     out = (out | (laneValue << shift)) >>> 0;
   }
   return out >>> 0;
+}
+
+function vset(aValue: number, bValue: number, laneWidth: 8 | 16, signed: boolean, op: (a: number, b: number) => boolean): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const mask = laneWidth === 8 ? 0xff : 0xffff;
+  for (let shift = 0; shift < 32; shift += laneWidth) {
+    const leftBits = (a >>> shift) & mask;
+    const rightBits = (b >>> shift) & mask;
+    const left = signed ? laneWidth === 8 ? signExtend8(leftBits) : signExtend16(leftBits) : leftBits;
+    const right = signed ? laneWidth === 8 ? signExtend8(rightBits) : signExtend16(rightBits) : rightBits;
+    if (!op(left, right)) return 0;
+  }
+  return 1;
 }
 
 function i8x4SaturatingBinary(aValue: number, bValue: number, op: (a: number, b: number) => number): number {
@@ -3389,6 +3427,16 @@ function semanticMathCallArity(name: string): number {
     name === "__vmaxu2" ||
     name === "__vmins2" ||
     name === "__vmaxs2" ||
+    name === "__vseteq2" ||
+    name === "__vsetne2" ||
+    name === "__vsetges2" ||
+    name === "__vsetgeu2" ||
+    name === "__vsetgts2" ||
+    name === "__vsetgtu2" ||
+    name === "__vsetles2" ||
+    name === "__vsetleu2" ||
+    name === "__vsetlts2" ||
+    name === "__vsetltu2" ||
     name === "__vadd4" ||
     name === "__vsub4" ||
     name === "__vaddss4" ||
@@ -3401,6 +3449,16 @@ function semanticMathCallArity(name: string): number {
     name === "__vmaxu4" ||
     name === "__vmins4" ||
     name === "__vmaxs4" ||
+    name === "__vseteq4" ||
+    name === "__vsetne4" ||
+    name === "__vsetges4" ||
+    name === "__vsetgeu4" ||
+    name === "__vsetgts4" ||
+    name === "__vsetgtu4" ||
+    name === "__vsetles4" ||
+    name === "__vsetleu4" ||
+    name === "__vsetlts4" ||
+    name === "__vsetltu4" ||
     name === "UMUL" ||
     name === "umin"
     ? 2

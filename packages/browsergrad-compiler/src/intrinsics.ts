@@ -295,6 +295,16 @@ const INTEGER_INTRINSICS = [
   intrinsic("__vmaxu2", [2, 2], "uint", (args) => evalU16x2Binary(args, Math.max), (args) => emitU16x2Binary(args, (a, b) => `max(${a}, ${b})`)),
   intrinsic("__vmins2", [2, 2], "uint", (args) => evalI16x2Binary(args, Math.min), (args) => emitI16x2Binary(args, (a, b) => `min(${a}, ${b})`)),
   intrinsic("__vmaxs2", [2, 2], "uint", (args) => evalI16x2Binary(args, Math.max), (args) => emitI16x2Binary(args, (a, b) => `max(${a}, ${b})`)),
+  intrinsic("__vseteq2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a === b), (args) => emitVSet(args, 16, false, "==")),
+  intrinsic("__vsetne2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a !== b), (args) => emitVSet(args, 16, false, "!=")),
+  intrinsic("__vsetges2", [2, 2], "uint", (args) => evalVSet(args, 16, true, (a, b) => a >= b), (args) => emitVSet(args, 16, true, ">=")),
+  intrinsic("__vsetgeu2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a >= b), (args) => emitVSet(args, 16, false, ">=")),
+  intrinsic("__vsetgts2", [2, 2], "uint", (args) => evalVSet(args, 16, true, (a, b) => a > b), (args) => emitVSet(args, 16, true, ">")),
+  intrinsic("__vsetgtu2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a > b), (args) => emitVSet(args, 16, false, ">")),
+  intrinsic("__vsetles2", [2, 2], "uint", (args) => evalVSet(args, 16, true, (a, b) => a <= b), (args) => emitVSet(args, 16, true, "<=")),
+  intrinsic("__vsetleu2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a <= b), (args) => emitVSet(args, 16, false, "<=")),
+  intrinsic("__vsetlts2", [2, 2], "uint", (args) => evalVSet(args, 16, true, (a, b) => a < b), (args) => emitVSet(args, 16, true, "<")),
+  intrinsic("__vsetltu2", [2, 2], "uint", (args) => evalVSet(args, 16, false, (a, b) => a < b), (args) => emitVSet(args, 16, false, "<")),
   intrinsic("__vadd4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => a + b), (args) => emitU8x4Binary(args, (a, b) => `((${a} + ${b}) & 0xffu)`)),
   intrinsic("__vsub4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => a - b), (args) => emitU8x4Binary(args, (a, b) => `((${a} - ${b}) & 0xffu)`)),
   intrinsic("__vaddss4", [2, 2], "uint", (args) => evalI8x4SaturatingBinary(args, (a, b) => a + b), emitI8x4SaturatingAdd),
@@ -307,6 +317,16 @@ const INTEGER_INTRINSICS = [
   intrinsic("__vmaxu4", [2, 2], "uint", (args) => evalU8x4Binary(args, Math.max), (args) => emitU8x4Binary(args, (a, b) => `max(${a}, ${b})`)),
   intrinsic("__vmins4", [2, 2], "uint", (args) => evalI8x4Binary(args, Math.min), (args) => emitI8x4Binary(args, (a, b) => `min(${a}, ${b})`)),
   intrinsic("__vmaxs4", [2, 2], "uint", (args) => evalI8x4Binary(args, Math.max), (args) => emitI8x4Binary(args, (a, b) => `max(${a}, ${b})`)),
+  intrinsic("__vseteq4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a === b), (args) => emitVSet(args, 8, false, "==")),
+  intrinsic("__vsetne4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a !== b), (args) => emitVSet(args, 8, false, "!=")),
+  intrinsic("__vsetges4", [2, 2], "uint", (args) => evalVSet(args, 8, true, (a, b) => a >= b), (args) => emitVSet(args, 8, true, ">=")),
+  intrinsic("__vsetgeu4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a >= b), (args) => emitVSet(args, 8, false, ">=")),
+  intrinsic("__vsetgts4", [2, 2], "uint", (args) => evalVSet(args, 8, true, (a, b) => a > b), (args) => emitVSet(args, 8, true, ">")),
+  intrinsic("__vsetgtu4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a > b), (args) => emitVSet(args, 8, false, ">")),
+  intrinsic("__vsetles4", [2, 2], "uint", (args) => evalVSet(args, 8, true, (a, b) => a <= b), (args) => emitVSet(args, 8, true, "<=")),
+  intrinsic("__vsetleu4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a <= b), (args) => emitVSet(args, 8, false, "<=")),
+  intrinsic("__vsetlts4", [2, 2], "uint", (args) => evalVSet(args, 8, true, (a, b) => a < b), (args) => emitVSet(args, 8, true, "<")),
+  intrinsic("__vsetltu4", [2, 2], "uint", (args) => evalVSet(args, 8, false, (a, b) => a < b), (args) => emitVSet(args, 8, false, "<")),
   intrinsic("__dp4a", [3, 3], "argument1", evalI8x4DotAdd, emitI8x4DotAdd),
   intrinsic("__dp2a_lo", [3, 3], "argument1", (args) => evalI16x2I8x2DotAdd(args, 0), (args) => emitI16x2I8x2DotAdd(args, 0)),
   intrinsic("__dp2a_hi", [3, 3], "argument1", (args) => evalI16x2I8x2DotAdd(args, 16), (args) => emitI16x2I8x2DotAdd(args, 16)),
@@ -918,6 +938,37 @@ function emitI16x2Binary(args: readonly string[], op: (a: string, b: string) => 
     return `(u32(${op(left, right)} & 0xffff) << ${shift}u)`;
   });
   return `(${lanes.join(" | ")})`;
+}
+
+function evalVSet(args: readonly number[], laneWidth: 8 | 16, signed: boolean, op: (a: number, b: number) => boolean): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  const mask = laneWidth === 8 ? 0xff : 0xffff;
+  for (let shift = 0; shift < 32; shift += laneWidth) {
+    const leftBits = (a >>> shift) & mask;
+    const rightBits = (b >>> shift) & mask;
+    const left = signed ? laneWidth === 8 ? signExtend8(leftBits) : signExtend16(leftBits) : leftBits;
+    const right = signed ? laneWidth === 8 ? signExtend8(rightBits) : signExtend16(rightBits) : rightBits;
+    if (!op(left, right)) return 0;
+  }
+  return 1;
+}
+
+function emitVSet(args: readonly string[], laneWidth: 8 | 16, signed: boolean, operator: string): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const mask = laneWidth === 8 ? "0xffu" : "0xffffu";
+  const signBit = laneWidth === 8 ? "0x80u" : "0x8000u";
+  const signSub = laneWidth === 8 ? "256" : "65536";
+  const conditions = Array.from({ length: 32 / laneWidth }, (_, lane) => {
+    const shift = lane * laneWidth;
+    const leftBits = `((${a} >> ${shift}u) & ${mask})`;
+    const rightBits = `((${b} >> ${shift}u) & ${mask})`;
+    const left = signed ? `(i32(${leftBits}) - select(0, ${signSub}, ${leftBits} >= ${signBit}))` : leftBits;
+    const right = signed ? `(i32(${rightBits}) - select(0, ${signSub}, ${rightBits} >= ${signBit}))` : rightBits;
+    return `(${left} ${operator} ${right})`;
+  });
+  return `select(0u, 1u, ${conditions.join(" && ")})`;
 }
 
 function evalI8x4SaturatingBinary(args: readonly number[], op: (a: number, b: number) => number): number {

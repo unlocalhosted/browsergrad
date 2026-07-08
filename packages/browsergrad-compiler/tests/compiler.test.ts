@@ -8737,6 +8737,66 @@ __global__ void packed_simd_minmax(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
   });
 
+  it("lowers CUDA packed SIMD set comparison intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void packed_simd_vset(uint *out) {
+  uint same4 = 0x11223344u;
+  uint hi4s = 0x7f7f7f7fu;
+  uint lo4s = 0x80808080u;
+  uint hi4u = 0xffffffffu;
+  uint lo4u = 0x01010101u;
+  uint same2 = 0x12345678u;
+  uint hi2s = 0x7fff7fffu;
+  uint lo2s = 0x80008000u;
+  uint hi2u = 0xffffffffu;
+  uint lo2u = 0x00010001u;
+  out[0] = __vseteq4(same4, same4);
+  out[1] = __vsetne4(hi4s, lo4s);
+  out[2] = __vsetges4(hi4s, lo4s);
+  out[3] = __vsetgts4(hi4s, lo4s);
+  out[4] = __vsetles4(lo4s, hi4s);
+  out[5] = __vsetlts4(lo4s, hi4s);
+  out[6] = __vsetgeu4(hi4u, lo4u);
+  out[7] = __vsetgtu4(hi4u, lo4u);
+  out[8] = __vsetleu4(lo4u, hi4u);
+  out[9] = __vsetltu4(lo4u, hi4u);
+  out[10] = __vseteq2(same2, same2);
+  out[11] = __vsetne2(hi2s, lo2s);
+  out[12] = __vsetges2(hi2s, lo2s);
+  out[13] = __vsetgts2(hi2s, lo2s);
+  out[14] = __vsetles2(lo2s, hi2s);
+  out[15] = __vsetlts2(lo2s, hi2s);
+  out[16] = __vsetgeu2(hi2u, lo2u);
+  out[17] = __vsetgtu2(hi2u, lo2u);
+  out[18] = __vsetleu2(lo2u, hi2u);
+  out[19] = __vsetltu2(lo2u, hi2u);
+  out[20] = __vseteq4(hi4s, lo4s);
+  out[21] = __vsetne4(same4, same4);
+  out[22] = __vsetgts2(lo2s, hi2s);
+  out[23] = __vsetltu2(hi2u, lo2u);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(24) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(24) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("select(0u, 1u");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+    ]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {

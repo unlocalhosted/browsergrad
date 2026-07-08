@@ -2224,6 +2224,43 @@ __global__ void simdMinMaxIntrinsic(uint *out) {
   out[6] = __vmins2(a2, b2);
   out[7] = __vmaxs2(a2, b2);
 }`,
+  simdVSetIntrinsic: `
+__global__ void simdVSetIntrinsic(uint *out) {
+  uint same4 = 0x11223344u;
+  uint hi4s = 0x7f7f7f7fu;
+  uint lo4s = 0x80808080u;
+  uint hi4u = 0xffffffffu;
+  uint lo4u = 0x01010101u;
+  uint same2 = 0x12345678u;
+  uint hi2s = 0x7fff7fffu;
+  uint lo2s = 0x80008000u;
+  uint hi2u = 0xffffffffu;
+  uint lo2u = 0x00010001u;
+  out[0] = __vseteq4(same4, same4);
+  out[1] = __vsetne4(hi4s, lo4s);
+  out[2] = __vsetges4(hi4s, lo4s);
+  out[3] = __vsetgts4(hi4s, lo4s);
+  out[4] = __vsetles4(lo4s, hi4s);
+  out[5] = __vsetlts4(lo4s, hi4s);
+  out[6] = __vsetgeu4(hi4u, lo4u);
+  out[7] = __vsetgtu4(hi4u, lo4u);
+  out[8] = __vsetleu4(lo4u, hi4u);
+  out[9] = __vsetltu4(lo4u, hi4u);
+  out[10] = __vseteq2(same2, same2);
+  out[11] = __vsetne2(hi2s, lo2s);
+  out[12] = __vsetges2(hi2s, lo2s);
+  out[13] = __vsetgts2(hi2s, lo2s);
+  out[14] = __vsetles2(lo2s, hi2s);
+  out[15] = __vsetlts2(lo2s, hi2s);
+  out[16] = __vsetgeu2(hi2u, lo2u);
+  out[17] = __vsetgtu2(hi2u, lo2u);
+  out[18] = __vsetleu2(lo2u, hi2u);
+  out[19] = __vsetltu2(lo2u, hi2u);
+  out[20] = __vseteq4(hi4s, lo4s);
+  out[21] = __vsetne4(same4, same4);
+  out[22] = __vsetgts2(lo2s, hi2s);
+  out[23] = __vsetltu2(hi2u, lo2u);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12939,6 +12976,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [25166081, 2139160447, 25231105, 2139095423, 98303, 4294934528, 4294934528, 98303] },
+          },
+          {
+            name: "intrinsic:simd-vset",
+            source: SOURCES.simdVSetIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(24),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+              ],
+            },
           },
           {
             name: "complex:cufft-magnitude",
