@@ -2198,6 +2198,17 @@ __global__ void simdUnsignedSaturatedIntrinsic(uint *out) {
   out[2] = __vaddus2(a, b);
   out[3] = __vsubus2(a, b);
 }`,
+  simdSignedSaturatedIntrinsic: `
+__global__ void simdSignedSaturatedIntrinsic(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x0180017fu;
+  uint a2 = 0x7fff8001u;
+  uint b2 = 0x00018000u;
+  out[0] = __vaddss4(a4, b4);
+  out[1] = __vsubss4(a4, b4);
+  out[2] = __vaddss2(a2, b2);
+  out[3] = __vsubss2(a2, b2);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12887,6 +12898,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [4281663361, 3472640, 4294967295, 64641] },
+          },
+          {
+            name: "intrinsic:simd-signed-saturated",
+            source: SOURCES.simdSignedSaturatedIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [2139095167, 2113994370, 2147450880, 2147352577] },
           },
           {
             name: "complex:cufft-magnitude",
