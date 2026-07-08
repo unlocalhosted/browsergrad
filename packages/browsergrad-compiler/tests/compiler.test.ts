@@ -8695,6 +8695,48 @@ __global__ void packed_signed_saturating_simd(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
   });
 
+  it("lowers CUDA packed SIMD min/max intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void packed_simd_minmax(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x0180017fu;
+  uint a2 = 0xffff7fffu;
+  uint b2 = 0x00018000u;
+  out[0] = __vminu4(a4, b4);
+  out[1] = __vmaxu4(a4, b4);
+  out[2] = __vmins4(a4, b4);
+  out[3] = __vmaxs4(a4, b4);
+  out[4] = __vminu2(a2, b2);
+  out[5] = __vmaxu2(a2, b2);
+  out[6] = __vmins2(a2, b2);
+  out[7] = __vmaxs2(a2, b2);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("fn bg_semantic_vminu4_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vmaxu4_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vmins4_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vmaxs4_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vminu2_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vmaxu2_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vmins2_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vmaxs2_u32(");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([25166081, 2139160447, 25231105, 2139095423, 98303, 4294934528, 4294934528, 98303]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {

@@ -420,6 +420,10 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__vsubus2", "vsubus2"],
   ["__vabsdiffu2", "vabsdiffu2"],
   ["__vavgu2", "vavgu2"],
+  ["__vminu2", "vminu2"],
+  ["__vmaxu2", "vmaxu2"],
+  ["__vmins2", "vmins2"],
+  ["__vmaxs2", "vmaxs2"],
   ["__vadd4", "vadd4"],
   ["__vsub4", "vsub4"],
   ["__vaddss4", "vaddss4"],
@@ -428,6 +432,10 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__vsubus4", "vsubus4"],
   ["__vabsdiffu4", "vabsdiffu4"],
   ["__vavgu4", "vavgu4"],
+  ["__vminu4", "vminu4"],
+  ["__vmaxu4", "vmaxu4"],
+  ["__vmins4", "vmins4"],
+  ["__vmaxs4", "vmaxs4"],
   ["__dp4a", "dp4a"],
   ["__dp2a_lo", "dp2a_lo"],
   ["__dp2a_hi", "dp2a_hi"],
@@ -3605,6 +3613,46 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "  }",
     "  return out;",
     "}",
+    "fn bg_semantic_vminu2_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 16u) {",
+    "    let left = (a >> shift) & 0xffffu;",
+    "    let right = (b >> shift) & 0xffffu;",
+    "    out = out | (min(left, right) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vmaxu2_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 16u) {",
+    "    let left = (a >> shift) & 0xffffu;",
+    "    let right = (b >> shift) & 0xffffu;",
+    "    out = out | (max(left, right) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vmins2_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 16u) {",
+    "    let left_bits = (a >> shift) & 0xffffu;",
+    "    let right_bits = (b >> shift) & 0xffffu;",
+    "    let left = i32(left_bits) - select(0, 65536, left_bits >= 0x8000u);",
+    "    let right = i32(right_bits) - select(0, 65536, right_bits >= 0x8000u);",
+    "    out = out | ((u32(min(left, right)) & 0xffffu) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vmaxs2_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 16u) {",
+    "    let left_bits = (a >> shift) & 0xffffu;",
+    "    let right_bits = (b >> shift) & 0xffffu;",
+    "    let left = i32(left_bits) - select(0, 65536, left_bits >= 0x8000u);",
+    "    let right = i32(right_bits) - select(0, 65536, right_bits >= 0x8000u);",
+    "    out = out | ((u32(max(left, right)) & 0xffffu) << shift);",
+    "  }",
+    "  return out;",
+    "}",
     "fn bg_semantic_vadd4_u32(a: u32, b: u32) -> u32 {",
     "  var out = 0u;",
     "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
@@ -3678,6 +3726,46 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "    let left = (a >> shift) & 0xffu;",
     "    let right = (b >> shift) & 0xffu;",
     "    out = out | (((left + right + 1u) >> 1u) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vminu4_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left = (a >> shift) & 0xffu;",
+    "    let right = (b >> shift) & 0xffu;",
+    "    out = out | (min(left, right) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vmaxu4_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left = (a >> shift) & 0xffu;",
+    "    let right = (b >> shift) & 0xffu;",
+    "    out = out | (max(left, right) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vmins4_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left_bits = (a >> shift) & 0xffu;",
+    "    let right_bits = (b >> shift) & 0xffu;",
+    "    let left = i32(left_bits) - select(0, 256, left_bits >= 0x80u);",
+    "    let right = i32(right_bits) - select(0, 256, right_bits >= 0x80u);",
+    "    out = out | ((u32(min(left, right)) & 0xffu) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vmaxs4_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left_bits = (a >> shift) & 0xffu;",
+    "    let right_bits = (b >> shift) & 0xffu;",
+    "    let left = i32(left_bits) - select(0, 256, left_bits >= 0x80u);",
+    "    let right = i32(right_bits) - select(0, 256, right_bits >= 0x80u);",
+    "    out = out | ((u32(max(left, right)) & 0xffu) << shift);",
     "  }",
     "  return out;",
     "}",
@@ -4360,7 +4448,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "uhadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
     return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u) + ((${lhs} ^ ${rhs}) & 1u))`;
   }
-  if (wgslCallee === "vadd2" || wgslCallee === "vsub2" || wgslCallee === "vaddss2" || wgslCallee === "vsubss2" || wgslCallee === "vaddus2" || wgslCallee === "vsubus2" || wgslCallee === "vabsdiffu2" || wgslCallee === "vavgu2" || wgslCallee === "vadd4" || wgslCallee === "vsub4" || wgslCallee === "vaddss4" || wgslCallee === "vsubss4" || wgslCallee === "vaddus4" || wgslCallee === "vsubus4" || wgslCallee === "vabsdiffu4" || wgslCallee === "vavgu4") {
+  if (wgslCallee === "vadd2" || wgslCallee === "vsub2" || wgslCallee === "vaddss2" || wgslCallee === "vsubss2" || wgslCallee === "vaddus2" || wgslCallee === "vsubus2" || wgslCallee === "vabsdiffu2" || wgslCallee === "vavgu2" || wgslCallee === "vminu2" || wgslCallee === "vmaxu2" || wgslCallee === "vmins2" || wgslCallee === "vmaxs2" || wgslCallee === "vadd4" || wgslCallee === "vsub4" || wgslCallee === "vaddss4" || wgslCallee === "vsubss4" || wgslCallee === "vaddus4" || wgslCallee === "vsubus4" || wgslCallee === "vabsdiffu4" || wgslCallee === "vavgu4" || wgslCallee === "vminu4" || wgslCallee === "vmaxu4" || wgslCallee === "vmins4" || wgslCallee === "vmaxs4") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
@@ -4721,6 +4809,10 @@ function semanticMathCallArity(name: string): number {
     name === "__vsubus2" ||
     name === "__vabsdiffu2" ||
     name === "__vavgu2" ||
+    name === "__vminu2" ||
+    name === "__vmaxu2" ||
+    name === "__vmins2" ||
+    name === "__vmaxs2" ||
     name === "__vadd4" ||
     name === "__vsub4" ||
     name === "__vaddss4" ||
@@ -4729,6 +4821,10 @@ function semanticMathCallArity(name: string): number {
     name === "__vsubus4" ||
     name === "__vabsdiffu4" ||
     name === "__vavgu4" ||
+    name === "__vminu4" ||
+    name === "__vmaxu4" ||
+    name === "__vmins4" ||
+    name === "__vmaxs4" ||
     name === "UMUL" ||
     name === "umin"
     ? 2

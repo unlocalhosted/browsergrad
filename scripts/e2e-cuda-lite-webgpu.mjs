@@ -2209,6 +2209,21 @@ __global__ void simdSignedSaturatedIntrinsic(uint *out) {
   out[2] = __vaddss2(a2, b2);
   out[3] = __vsubss2(a2, b2);
 }`,
+  simdMinMaxIntrinsic: `
+__global__ void simdMinMaxIntrinsic(uint *out) {
+  uint a4 = 0x7f80ff01u;
+  uint b4 = 0x0180017fu;
+  uint a2 = 0xffff7fffu;
+  uint b2 = 0x00018000u;
+  out[0] = __vminu4(a4, b4);
+  out[1] = __vmaxu4(a4, b4);
+  out[2] = __vmins4(a4, b4);
+  out[3] = __vmaxs4(a4, b4);
+  out[4] = __vminu2(a2, b2);
+  out[5] = __vmaxu2(a2, b2);
+  out[6] = __vmins2(a2, b2);
+  out[7] = __vmaxs2(a2, b2);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12911,6 +12926,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [2139095167, 2113994370, 2147450880, 2147352577] },
+          },
+          {
+            name: "intrinsic:simd-minmax",
+            source: SOURCES.simdMinMaxIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [25166081, 2139160447, 25231105, 2139095423, 98303, 4294934528, 4294934528, 98303] },
           },
           {
             name: "complex:cufft-magnitude",
