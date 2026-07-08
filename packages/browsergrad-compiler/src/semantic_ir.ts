@@ -265,6 +265,190 @@ export interface SemanticKernelIrModule {
   readonly workgroupSize: KernelLaunch["blockDim"];
 }
 
+export function walkSemanticOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  for (const operation of operations) walkSemanticOperation(operation, visitExpression);
+}
+
+export function walkSemanticOperation(
+  operation: SemanticKernelIrOperation,
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  switch (operation.kind) {
+    case "declare":
+      if (operation.init) walkSemanticExpression(operation.init, visitExpression);
+      return;
+    case "dim3-declare":
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "load":
+      walkSemanticMemoryRef(operation.source, visitExpression);
+      return;
+    case "store":
+      walkSemanticMemoryRef(operation.target, visitExpression);
+      walkSemanticExpression(operation.value, visitExpression);
+      for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
+      return;
+    case "surface-write":
+      walkSemanticExpression(operation.surface, visitExpression);
+      walkSemanticExpression(operation.value, visitExpression);
+      walkSemanticExpression(operation.xBytes, visitExpression);
+      walkSemanticExpression(operation.y, visitExpression);
+      if (operation.z) walkSemanticExpression(operation.z, visitExpression);
+      return;
+    case "surface-read-store":
+      walkSemanticExpression(operation.target, visitExpression);
+      walkSemanticExpression(operation.surface, visitExpression);
+      walkSemanticExpression(operation.xBytes, visitExpression);
+      walkSemanticExpression(operation.y, visitExpression);
+      if (operation.z) walkSemanticExpression(operation.z, visitExpression);
+      return;
+    case "atomic":
+      if (operation.target) walkSemanticMemoryRef(operation.target, visitExpression);
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "call":
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
+      return;
+    case "expression":
+      walkSemanticExpression(operation.expression, visitExpression);
+      return;
+    case "branch":
+      walkSemanticExpression(operation.condition, visitExpression);
+      walkSemanticOperations(operation.consequent, visitExpression);
+      walkSemanticOperations(operation.alternate, visitExpression);
+      return;
+    case "loop":
+      if (operation.init) {
+        if (isSemanticKernelIrOperation(operation.init)) walkSemanticOperation(operation.init, visitExpression);
+        else walkSemanticExpression(operation.init, visitExpression);
+      }
+      if (operation.condition) walkSemanticExpression(operation.condition, visitExpression);
+      if (operation.update) walkSemanticExpression(operation.update, visitExpression);
+      walkSemanticOperations(operation.body, visitExpression);
+      return;
+    case "device-launch":
+      for (const expression of [...operation.launch.grid, ...operation.launch.block, ...operation.launch.args]) {
+        walkSemanticExpression(expression, visitExpression);
+      }
+      return;
+    case "return":
+      if (operation.value) walkSemanticExpression(operation.value, visitExpression);
+      return;
+    case "block":
+      walkSemanticOperations(operation.body, visitExpression);
+      return;
+    case "cooperative-group-declare":
+    case "barrier":
+    case "fence":
+    case "inline-asm":
+    case "continue":
+    case "break":
+      return;
+  }
+}
+
+export function walkSemanticMemoryRef(
+  ref: SemanticMemoryRef,
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  for (const index of ref.indices) walkSemanticExpression(index, visitExpression);
+}
+
+export function walkSemanticExpression(
+  expression: SemanticExpression,
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  visitExpression(expression);
+  switch (expression.kind) {
+    case "literal":
+    case "symbol":
+      return;
+    case "member":
+      walkSemanticExpression(expression.object, visitExpression);
+      return;
+    case "index":
+      walkSemanticExpression(expression.target, visitExpression);
+      walkSemanticExpression(expression.index, visitExpression);
+      return;
+    case "call":
+      walkSemanticExpression(expression.callee, visitExpression);
+      for (const arg of expression.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "texture-read":
+      walkSemanticExpression(expression.texture, visitExpression);
+      walkSemanticExpression(expression.x, visitExpression);
+      walkSemanticExpression(expression.y, visitExpression);
+      return;
+    case "surface-read":
+      walkSemanticExpression(expression.surface, visitExpression);
+      walkSemanticExpression(expression.xBytes, visitExpression);
+      walkSemanticExpression(expression.y, visitExpression);
+      if (expression.z) walkSemanticExpression(expression.z, visitExpression);
+      return;
+    case "cast":
+      walkSemanticExpression(expression.expression, visitExpression);
+      return;
+    case "unary":
+    case "update":
+      walkSemanticExpression(expression.argument, visitExpression);
+      return;
+    case "binary":
+      walkSemanticExpression(expression.left, visitExpression);
+      walkSemanticExpression(expression.right, visitExpression);
+      return;
+    case "conditional":
+      walkSemanticExpression(expression.condition, visitExpression);
+      walkSemanticExpression(expression.consequent, visitExpression);
+      walkSemanticExpression(expression.alternate, visitExpression);
+      return;
+    case "assignment":
+      walkSemanticExpression(expression.target, visitExpression);
+      walkSemanticExpression(expression.value, visitExpression);
+      return;
+    case "initializer":
+      for (const element of expression.elements) walkSemanticExpression(element, visitExpression);
+      return;
+    case "sequence":
+      for (const item of expression.expressions) walkSemanticExpression(item, visitExpression);
+      return;
+  }
+}
+
+export function isSemanticKernelIrOperation(
+  value: SemanticKernelIrOperation | SemanticExpression,
+): value is SemanticKernelIrOperation {
+  switch (value.kind) {
+    case "declare":
+    case "dim3-declare":
+    case "cooperative-group-declare":
+    case "load":
+    case "store":
+    case "surface-write":
+    case "surface-read-store":
+    case "atomic":
+    case "expression":
+    case "branch":
+    case "loop":
+    case "barrier":
+    case "fence":
+    case "device-launch":
+    case "inline-asm":
+    case "return":
+    case "continue":
+    case "break":
+    case "block":
+      return true;
+    case "call":
+      return typeof value.callee === "string";
+    default:
+      return false;
+  }
+}
+
 const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);

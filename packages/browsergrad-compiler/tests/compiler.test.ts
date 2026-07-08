@@ -325,6 +325,25 @@ describe("CUDA-lite compiler", () => {
     expect(forbidden).toEqual([]);
   });
 
+  it("keeps semantic IR traversal centralized", () => {
+    const srcDir = path.join(packageRoot, "src");
+    const duplicates = fs.readdirSync(srcDir)
+      .filter((file) => file.endsWith(".ts") && file !== "semantic_ir.ts")
+      .flatMap((file) => {
+        const source = compilerSourceText(file);
+        return [
+          "walkSemanticOperations",
+          "walkSemanticOperation",
+          "walkSemanticExpression",
+          "walkSemanticMemoryRef",
+        ]
+          .filter((name) => new RegExp(`function\\s+${name}\\b`, "u").test(source))
+          .map((name) => `${file}:${name}`);
+      });
+
+    expect(duplicates).toEqual([]);
+  });
+
   it("parses and compiles SAXPY to WGSL", () => {
     const ast = parseCudaLite(SAXPY);
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
