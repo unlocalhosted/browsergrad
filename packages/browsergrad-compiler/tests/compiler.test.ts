@@ -11026,6 +11026,25 @@ __global__ void laneId(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
   });
 
+  it("parses inline PTX clobbers after empty input sections for supported ops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void laneIdClobber(uint *out) {
+  int idx = threadIdx.x;
+  unsigned int laneid;
+  asm volatile("mov.u32 %0, %%laneid;" : "=r"(laneid) :: "memory");
+  out[idx] = laneid;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("% 32");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
+  });
+
   it("lowers output-only inline PTX warp id statements", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void warpId(uint *out) {

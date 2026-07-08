@@ -910,14 +910,18 @@ class Parser {
     } else {
       this.expect(":");
       outputs = this.match(":") || this.match(")") ? [] : this.parseAsmOperandList();
-      if (this.consumeIf(":") && !this.match(")")) {
+      if (this.consumeIf("::")) {
+        this.parseAsmClobberList();
+      } else if (this.consumeIf(":") && !this.match(")")) {
         if (this.match(":")) {
           // empty input section before clobbers
         } else {
           inputs.push(...this.parseAsmOperandList());
         }
+        if (this.consumeIf(":")) this.parseAsmClobberList();
+      } else if (this.consumeIf(":")) {
+        this.parseAsmClobberList();
       }
-      if (this.consumeIf(":")) this.parseAsmClobberList();
     }
     this.expect(")");
     const end = this.expect(";").span;
