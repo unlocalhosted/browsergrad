@@ -10166,6 +10166,78 @@ __global__ void half2Unary(const half2 *input, half2 *out) {
     expect(Array.from(semanticResult.buffers.out as Iterable<number>)).toEqual(expected);
   });
 
+  it("lowers CUDA half2 comparison intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half2Compare(const half2 *a, const half2 *b, half2 *vec, uint *mask, int *flags) {
+  half2 x = a[0];
+  half2 y = b[0];
+  half2 nx = a[1];
+  half2 ny = b[1];
+  vec[0] = __heq2(x, y);
+  vec[1] = __hne2(x, y);
+  vec[2] = __hgt2(x, y);
+  vec[3] = __hge2(x, y);
+  vec[4] = __hlt2(x, y);
+  vec[5] = __hle2(x, y);
+  vec[6] = __hequ2(nx, ny);
+  vec[7] = __hneu2(nx, ny);
+  vec[8] = __hgtu2(nx, ny);
+  vec[9] = __hgeu2(nx, ny);
+  vec[10] = __hltu2(nx, ny);
+  vec[11] = __hleu2(nx, ny);
+  vec[12] = __hisnan2(nx);
+  vec[13] = __hisnan2(ny);
+  mask[0] = __heq2_mask(x, y);
+  mask[1] = __hne2_mask(x, y);
+  mask[2] = __hgt2_mask(x, y);
+  mask[3] = __hge2_mask(x, y);
+  mask[4] = __hlt2_mask(x, y);
+  mask[5] = __hle2_mask(x, y);
+  mask[6] = __hgt2_mask(nx, ny);
+  mask[7] = __hequ2_mask(nx, ny);
+  mask[8] = __hneu2_mask(nx, ny);
+  mask[9] = __hgtu2_mask(nx, ny);
+  if (__hbeq2(x, y)) { flags[0] = 1; }
+  if (__hbne2(x, y)) { flags[1] = 1; }
+  if (__hbgt2(x, y)) { flags[2] = 1; }
+  if (__hbge2(x, y)) { flags[3] = 1; }
+  if (__hblt2(x, y)) { flags[4] = 1; }
+  if (__hble2(x, y)) { flags[5] = 1; }
+  if (__hbequ2(nx, ny)) { flags[6] = 1; }
+  if (__hbneu2(nx, ny)) { flags[7] = 1; }
+  if (__hbgtu2(nx, ny)) { flags[8] = 1; }
+  if (__hbgeu2(nx, ny)) { flags[9] = 1; }
+  if (__hbltu2(nx, ny)) { flags[10] = 1; }
+  if (__hbleu2(nx, ny)) { flags[11] = 1; }
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        a: createWgslFloat16Array([1, 2, NaN, 4]),
+        b: createWgslFloat16Array([1, 3, 4, NaN]),
+        vec: createWgslFloat16Array(28),
+        mask: new Uint32Array(10),
+        flags: new Int32Array(12),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const expectedVec = [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1];
+    const expectedMask = [0x0000ffff, 0xffff0000, 0, 0x0000ffff, 0xffff0000, 0xffffffff, 0, 0xffffffff, 0xffffffff, 0xffffffff];
+    const expectedFlags = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1];
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(Array.from(result.buffers.vec as Iterable<number>)).toEqual(expectedVec);
+    expect(Array.from(result.buffers.mask as Iterable<number>)).toEqual(expectedMask);
+    expect(Array.from(result.buffers.flags as Iterable<number>)).toEqual(expectedFlags);
+    expect(Array.from(semanticResult.buffers.vec as Iterable<number>)).toEqual(expectedVec);
+    expect(Array.from(semanticResult.buffers.mask as Iterable<number>)).toEqual(expectedMask);
+    expect(Array.from(semanticResult.buffers.flags as Iterable<number>)).toEqual(expectedFlags);
+  });
+
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void intrinsic_pack(half2 *h, float2 *f, float *out, uint *bits) {

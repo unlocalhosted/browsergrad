@@ -1992,14 +1992,18 @@ function validateCallExpression(
     for (const [index, info] of infos.entries()) validateScalarOperand(info, expression.args[index]!.span, diagnostics);
     if (infos.some((info) => info.valueType === "bf16")) return { kind: "scalar", valueType: "bf16" };
   }
-  if (isHalf2Intrinsic(callName)) {
+  if (isHalf2VectorIntrinsic(callName) || isHalf2ComparisonMaskIntrinsic(callName) || isHalf2BooleanComparisonIntrinsic(callName)) {
     requiredFeatures.add("shader-f16");
     for (const arg of expression.args) {
       const info = walkExpression(arg, scope);
       if (info.kind !== "vector" && info.kind !== "unknown") {
         diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 arguments`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "half2") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 arguments`, arg.span));
       }
     }
+    if (isHalf2ComparisonMaskIntrinsic(callName)) return { kind: "scalar", valueType: "uint" };
+    if (isHalf2BooleanComparisonIntrinsic(callName)) return { kind: "scalar", valueType: "bool" };
     return { kind: "vector", valueType: "half2" };
   }
   if (callName === "__half22float2" || callName === "__float22half2_rn") {
@@ -2697,7 +2701,7 @@ function validatePointerIdentityCall(
     : { kind: "pointer", valueType: info.valueType ?? "float", symbol: info.symbol };
 }
 
-function isHalf2Intrinsic(name: string): boolean {
+function isHalf2VectorIntrinsic(name: string): boolean {
   return name === "__habs2" ||
     name === "__hceil2" ||
     name === "__hfloor2" ||
@@ -2706,6 +2710,8 @@ function isHalf2Intrinsic(name: string): boolean {
     name === "__hrsqrt2" ||
     name === "__hsqrt2" ||
     name === "__htrunc2" ||
+    name === "__hisnan2" ||
+    isHalf2VectorComparisonIntrinsic(name) ||
     name === "__hadd2" ||
     name === "__hadd2_rn" ||
     name === "__hadd2_sat" ||
@@ -2720,6 +2726,51 @@ function isHalf2Intrinsic(name: string): boolean {
     name === "__hfma2_sat" ||
     name === "__hmin2" ||
     name === "__hmax2";
+}
+
+function isHalf2VectorComparisonIntrinsic(name: string): boolean {
+  return name === "__heq2" ||
+    name === "__hne2" ||
+    name === "__hgt2" ||
+    name === "__hge2" ||
+    name === "__hlt2" ||
+    name === "__hle2" ||
+    name === "__hequ2" ||
+    name === "__hneu2" ||
+    name === "__hgtu2" ||
+    name === "__hgeu2" ||
+    name === "__hltu2" ||
+    name === "__hleu2";
+}
+
+function isHalf2ComparisonMaskIntrinsic(name: string): boolean {
+  return name === "__heq2_mask" ||
+    name === "__hne2_mask" ||
+    name === "__hgt2_mask" ||
+    name === "__hge2_mask" ||
+    name === "__hlt2_mask" ||
+    name === "__hle2_mask" ||
+    name === "__hequ2_mask" ||
+    name === "__hneu2_mask" ||
+    name === "__hgtu2_mask" ||
+    name === "__hgeu2_mask" ||
+    name === "__hltu2_mask" ||
+    name === "__hleu2_mask";
+}
+
+function isHalf2BooleanComparisonIntrinsic(name: string): boolean {
+  return name === "__hbeq2" ||
+    name === "__hbne2" ||
+    name === "__hbgt2" ||
+    name === "__hbge2" ||
+    name === "__hblt2" ||
+    name === "__hble2" ||
+    name === "__hbequ2" ||
+    name === "__hbneu2" ||
+    name === "__hbgtu2" ||
+    name === "__hbgeu2" ||
+    name === "__hbltu2" ||
+    name === "__hbleu2";
 }
 
 function isBfloat16ScalarArithmetic(name: string): boolean {

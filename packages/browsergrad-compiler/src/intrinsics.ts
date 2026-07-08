@@ -416,6 +416,9 @@ const emitHalfSaturate = (value: string): string =>
   `select(clamp(${value}, f16(0.0), f16(1.0)), f16(0.0), (${value}) != (${value}))`;
 const emitHalf2Saturate = (value: string): string =>
   `select(clamp(${value}, vec2<f16>(0.0), vec2<f16>(1.0)), vec2<f16>(0.0), (${value}) != (${value}))`;
+const HALF2_COMPARISON_NAMES = ["__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2", "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2"] as const;
+const HALF2_COMPARISON_MASK_NAMES = ["__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask"] as const;
+const HALF2_BOOLEAN_COMPARISON_NAMES = ["__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2"] as const;
 const HALF_INTRINSICS = [
   intrinsic("__half2float", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__float2half", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
@@ -472,6 +475,10 @@ const HALF_INTRINSICS = [
   intrinsic("__hrsqrt2", [1, 1], "half2", () => 0, (args) => `vec2<f16>(inverseSqrt(vec2<f32>(${args[0] ?? "vec2<f16>()"})))`, HALF_FEATURES),
   intrinsic("__hsqrt2", [1, 1], "half2", () => 0, (args) => `vec2<f16>(sqrt(vec2<f32>(${args[0] ?? "vec2<f16>()"})))`, HALF_FEATURES),
   intrinsic("__htrunc2", [1, 1], "half2", () => 0, (args) => `vec2<f16>(trunc(vec2<f32>(${args[0] ?? "vec2<f16>()"})))`, HALF_FEATURES),
+  intrinsic("__hisnan2", [1, 1], "half2", () => 0, (args) => `select(vec2<f16>(0.0), vec2<f16>(1.0), ${emitHalf2IsNanPredicate(args[0] ?? "vec2<f16>()")})`, HALF_FEATURES),
+  ...HALF2_COMPARISON_NAMES.map((name) => intrinsic(name, [2, 2], "half2", () => 0, (args) => emitHalf2Comparison(name, args), HALF_FEATURES)),
+  ...HALF2_COMPARISON_MASK_NAMES.map((name) => intrinsic(name, [2, 2], "uint", () => 0, (args) => emitHalf2ComparisonMask(name, args), HALF_FEATURES)),
+  ...HALF2_BOOLEAN_COMPARISON_NAMES.map((name) => intrinsic(name, [2, 2], "bool", () => 0, (args) => emitHalf2BooleanComparison(name, args), HALF_FEATURES)),
   intrinsic("__hadd2", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} + ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__hadd2_rn", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} + ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__hadd2_sat", [2, 2], "half2", () => 0, (args) => emitHalf2Saturate(`(${args[0] ?? "vec2<f16>()"} + ${args[1] ?? "vec2<f16>()"})`), HALF_FEATURES),
@@ -618,6 +625,46 @@ function emitOrderedCompare(args: readonly string[], operator: ">" | ">=" | "<" 
   const a = args[0] ?? "0";
   const b = args[1] ?? "0";
   return `(!(((${a}) != (${a})) || ((${b}) != (${b}))) && ((${a}) ${operator} (${b})))`;
+}
+
+function emitHalf2Comparison(name: string, args: readonly string[]): string {
+  return `select(vec2<f16>(0.0), vec2<f16>(1.0), ${emitHalf2ComparisonPredicate(name, args)})`;
+}
+
+function emitHalf2ComparisonMask(name: string, args: readonly string[]): string {
+  const predicate = emitHalf2ComparisonPredicate(name.replace(/_mask$/u, ""), args);
+  return `((select(0u, 0xffffu, (${predicate}).x)) | (select(0u, 0xffff0000u, (${predicate}).y)))`;
+}
+
+function emitHalf2BooleanComparison(name: string, args: readonly string[]): string {
+  const predicate = emitHalf2ComparisonPredicate(name.replace(/^__hb/u, "__h"), args);
+  return `all(${predicate})`;
+}
+
+function emitHalf2ComparisonPredicate(name: string, args: readonly string[]): string {
+  const a = args[0] ?? "vec2<f16>()";
+  const b = args[1] ?? "vec2<f16>()";
+  if (name === "__hisnan2") return emitHalf2IsNanPredicate(a);
+  const ordered = `!(${emitHalf2IsNanPredicate(a)} | ${emitHalf2IsNanPredicate(b)})`;
+  const unordered = `(${emitHalf2IsNanPredicate(a)} | ${emitHalf2IsNanPredicate(b)})`;
+  const op = half2ComparisonOperator(name);
+  const base = `((${a}) ${op} (${b}))`;
+  return name.includes("u2") ? `(${unordered} | ${base})` : `(${ordered} & ${base})`;
+}
+
+function emitHalf2IsNanPredicate(value: string): string {
+  const bits = `bitcast<vec2<u32>>(vec2<f32>(${value}))`;
+  return `((${bits} & vec2<u32>(0x7fffffffu)) > vec2<u32>(0x7f800000u))`;
+}
+
+function half2ComparisonOperator(name: string): "==" | "!=" | ">" | ">=" | "<" | "<=" {
+  const base = name.replace(/_mask$/u, "");
+  if (base === "__heq2" || base === "__hequ2") return "==";
+  if (base === "__hne2" || base === "__hneu2") return "!=";
+  if (base === "__hgt2" || base === "__hgtu2") return ">";
+  if (base === "__hge2" || base === "__hgeu2") return ">=";
+  if (base === "__hlt2" || base === "__hltu2") return "<";
+  return "<=";
 }
 
 function emitIsLessGreater(args: readonly string[]): string {

@@ -2517,6 +2517,74 @@ __global__ void half2Unary(half2* x, half2* out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([1.5, 1.25, -1, 2, -2, 1, 1.5, -1.25, 0.25, 0.0625, 0.5, 0.25, 2, 4, -1, 1]);
   });
 
+  it("runs half2 comparison intrinsics through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void half2Compare(const half2* a, const half2* b, half2* vec, uint* mask, int* flags) {
+  if (threadIdx.x < 1) {
+    half2 x = a[0];
+    half2 y = b[0];
+    half2 nx = a[1];
+    half2 ny = b[1];
+    vec[0] = __heq2(x, y);
+    vec[1] = __hne2(x, y);
+    vec[2] = __hgt2(x, y);
+    vec[3] = __hge2(x, y);
+    vec[4] = __hlt2(x, y);
+    vec[5] = __hle2(x, y);
+    vec[6] = __hequ2(nx, ny);
+    vec[7] = __hneu2(nx, ny);
+    vec[8] = __hgtu2(nx, ny);
+    vec[9] = __hgeu2(nx, ny);
+    vec[10] = __hltu2(nx, ny);
+    vec[11] = __hleu2(nx, ny);
+    vec[12] = __hisnan2(nx);
+    vec[13] = __hisnan2(ny);
+    mask[0] = __heq2_mask(x, y);
+    mask[1] = __hne2_mask(x, y);
+    mask[2] = __hgt2_mask(x, y);
+    mask[3] = __hge2_mask(x, y);
+    mask[4] = __hlt2_mask(x, y);
+    mask[5] = __hle2_mask(x, y);
+    mask[6] = __hgt2_mask(nx, ny);
+    mask[7] = __hequ2_mask(nx, ny);
+    mask[8] = __hneu2_mask(nx, ny);
+    mask[9] = __hgtu2_mask(nx, ny);
+    if (__hbeq2(x, y)) { flags[0] = 1; }
+    if (__hbne2(x, y)) { flags[1] = 1; }
+    if (__hbgt2(x, y)) { flags[2] = 1; }
+    if (__hbge2(x, y)) { flags[3] = 1; }
+    if (__hblt2(x, y)) { flags[4] = 1; }
+    if (__hble2(x, y)) { flags[5] = 1; }
+    if (__hbequ2(nx, ny)) { flags[6] = 1; }
+    if (__hbneu2(nx, ny)) { flags[7] = 1; }
+    if (__hbgtu2(nx, ny)) { flags[8] = 1; }
+    if (__hbgeu2(nx, ny)) { flags[9] = 1; }
+    if (__hbltu2(nx, ny)) { flags[10] = 1; }
+    if (__hbleu2(nx, ny)) { flags[11] = 1; }
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      f16Mode: "f32",
+      workgroupSize: [1, 1, 1],
+    });
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, {
+      buffers: {
+        a: new Float32Array([1, 2, NaN, 4]),
+        b: new Float32Array([1, 3, 4, NaN]),
+        vec: new Float32Array(28),
+        mask: new Uint32Array(10),
+        flags: new Int32Array(12),
+      },
+    }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
+
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...actual.buffers.vec as Float32Array]).toEqual([1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1]);
+    expect([...actual.buffers.mask as Uint32Array]).toEqual([0x0000ffff, 0xffff0000, 0, 0x0000ffff, 0xffff0000, 0xffffffff, 0, 0xffffffff, 0xffffffff, 0xffffffff]);
+    expect([...actual.buffers.flags as Int32Array]).toEqual([0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1]);
+  });
+
   it("updates prepared half scalar uniforms in f32 compatibility mode", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

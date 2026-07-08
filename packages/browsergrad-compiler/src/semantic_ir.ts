@@ -897,7 +897,7 @@ function lowerExpression(
             ? "uint"
           : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)
             ? "int"
-            : expression.templateValueType ?? expressionValueType(callee) ?? expressionValueType(args[0])),
+            : expression.templateValueType ?? semanticIntrinsicReturnType(expression.callee.kind === "identifier" ? expression.callee.name : undefined, args) ?? expressionValueType(callee) ?? expressionValueType(args[0])),
         span: expression.span,
       };
     }
@@ -2519,6 +2519,19 @@ function expressionAddressSpace(expression: SemanticExpression): SemanticAddress
 function expressionValueType(expression: SemanticExpression | undefined): CudaLiteScalarType | undefined {
   if (!expression || expression.kind === "initializer") return undefined;
   return "valueType" in expression ? expression.valueType : undefined;
+}
+
+function semanticIntrinsicReturnType(name: string | undefined, args: readonly SemanticExpression[]): CudaLiteScalarType | undefined {
+  if (name === undefined) return undefined;
+  if (name === "__hisnan2" ||
+    name === "__heq2" || name === "__hne2" || name === "__hgt2" || name === "__hge2" || name === "__hlt2" || name === "__hle2" ||
+    name === "__hequ2" || name === "__hneu2" || name === "__hgtu2" || name === "__hgeu2" || name === "__hltu2" || name === "__hleu2") return "half2";
+  if (name === "__heq2_mask" || name === "__hne2_mask" || name === "__hgt2_mask" || name === "__hge2_mask" || name === "__hlt2_mask" || name === "__hle2_mask" ||
+    name === "__hequ2_mask" || name === "__hneu2_mask" || name === "__hgtu2_mask" || name === "__hgeu2_mask" || name === "__hltu2_mask" || name === "__hleu2_mask") return "uint";
+  if (name === "__hbeq2" || name === "__hbne2" || name === "__hbgt2" || name === "__hbge2" || name === "__hblt2" || name === "__hble2" ||
+    name === "__hbequ2" || name === "__hbneu2" || name === "__hbgtu2" || name === "__hbgeu2" || name === "__hbltu2" || name === "__hbleu2") return "bool";
+  void args;
+  return undefined;
 }
 
 function indexedValueType(target: SemanticExpression): CudaLiteScalarType | undefined {

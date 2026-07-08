@@ -127,10 +127,15 @@ const SEMANTIC_MATH_CALLS = new Set([
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
+  "__hisnan2", "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2", "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
   "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2",
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
-const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
+const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
+  "__half2_as_uint", "__low2float", "__high2float",
+  "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
+  "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
+]);
 const SEMANTIC_BF162_VECTOR_CALLS = new Set(["__halves2bfloat162", "__uint_as_bfloat162", "__uint_as_nv_bfloat162"]);
 const SEMANTIC_BF162_SCALAR_CALLS = new Set(["__bfloat162_as_uint", "__nv_bfloat162_as_uint"]);
 const SEMANTIC_NOOP_CALLS = new Set([
@@ -847,6 +852,9 @@ function semanticReferenceHalf2CallSupported(
   if (isSemanticHalf2UnaryCall(name)) {
     const [arg] = expression.args;
     return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled);
+  }
+  if (isSemanticHalf2ComparisonCall(name)) {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
   if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
@@ -3507,6 +3515,14 @@ function evalSemanticHalf2Call(
     const value = half2Arg(0);
     return value.map((lane) => roundSemanticHalf(evalSemanticHalf2UnaryLane(name, lane)));
   }
+  if (isSemanticHalf2ComparisonCall(name)) {
+    const left = half2Arg(0);
+    const right = half2Arg(1);
+    const lanes = semanticHalf2ComparisonLanes(name, left, right);
+    if (isSemanticHalf2BooleanComparisonCall(name)) return lanes.every(Boolean) ? 1 : 0;
+    if (isSemanticHalf2MaskComparisonCall(name)) return ((lanes[0] ? 0xffff : 0) | (lanes[1] ? 0xffff0000 : 0)) >>> 0;
+    return lanes.map((lane) => lane ? 1 : 0);
+  }
   if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2") {
     const left = half2Arg(0);
     const right = half2Arg(1);
@@ -3562,7 +3578,8 @@ function isSemanticHalf2UnaryCall(name: string): boolean {
     name === "__hrcp2" ||
     name === "__hrsqrt2" ||
     name === "__hsqrt2" ||
-    name === "__htrunc2";
+    name === "__htrunc2" ||
+    name === "__hisnan2";
 }
 
 function evalSemanticHalf2UnaryLane(name: string, value: number): number {
@@ -3575,8 +3592,81 @@ function evalSemanticHalf2UnaryLane(name: string, value: number): number {
     case "__hrsqrt2": return 1 / Math.sqrt(value);
     case "__hsqrt2": return Math.sqrt(value);
     case "__htrunc2": return Math.trunc(value);
+    case "__hisnan2": return Number.isNaN(value) ? 1 : 0;
     default: return value;
   }
+}
+
+function isSemanticHalf2ComparisonCall(name: string): boolean {
+  return isSemanticHalf2VectorComparisonCall(name) ||
+    isSemanticHalf2MaskComparisonCall(name) ||
+    isSemanticHalf2BooleanComparisonCall(name);
+}
+
+function isSemanticHalf2VectorComparisonCall(name: string): boolean {
+  return name === "__heq2" ||
+    name === "__hne2" ||
+    name === "__hgt2" ||
+    name === "__hge2" ||
+    name === "__hlt2" ||
+    name === "__hle2" ||
+    name === "__hequ2" ||
+    name === "__hneu2" ||
+    name === "__hgtu2" ||
+    name === "__hgeu2" ||
+    name === "__hltu2" ||
+    name === "__hleu2";
+}
+
+function isSemanticHalf2MaskComparisonCall(name: string): boolean {
+  return name === "__heq2_mask" ||
+    name === "__hne2_mask" ||
+    name === "__hgt2_mask" ||
+    name === "__hge2_mask" ||
+    name === "__hlt2_mask" ||
+    name === "__hle2_mask" ||
+    name === "__hequ2_mask" ||
+    name === "__hneu2_mask" ||
+    name === "__hgtu2_mask" ||
+    name === "__hgeu2_mask" ||
+    name === "__hltu2_mask" ||
+    name === "__hleu2_mask";
+}
+
+function isSemanticHalf2BooleanComparisonCall(name: string): boolean {
+  return name === "__hbeq2" ||
+    name === "__hbne2" ||
+    name === "__hbgt2" ||
+    name === "__hbge2" ||
+    name === "__hblt2" ||
+    name === "__hble2" ||
+    name === "__hbequ2" ||
+    name === "__hbneu2" ||
+    name === "__hbgtu2" ||
+    name === "__hbgeu2" ||
+    name === "__hbltu2" ||
+    name === "__hbleu2";
+}
+
+function semanticHalf2ComparisonLanes(name: string, left: readonly number[], right: readonly number[]): [boolean, boolean] {
+  return [0, 1].map((lane) => semanticHalf2ComparisonLane(name, left[lane] ?? 0, right[lane] ?? 0)) as [boolean, boolean];
+}
+
+function semanticHalf2ComparisonLane(name: string, left: number, right: number): boolean {
+  const normalized = name.replace(/_mask$/u, "").replace(/^__hb/u, "__h");
+  const unordered = Number.isNaN(left) || Number.isNaN(right);
+  const base = normalized === "__heq2" || normalized === "__hequ2"
+    ? left === right
+    : normalized === "__hne2" || normalized === "__hneu2"
+      ? left !== right
+      : normalized === "__hgt2" || normalized === "__hgtu2"
+        ? left > right
+        : normalized === "__hge2" || normalized === "__hgeu2"
+          ? left >= right
+          : normalized === "__hlt2" || normalized === "__hltu2"
+            ? left < right
+            : left <= right;
+  return normalized.includes("u2") ? unordered || base : !unordered && base;
 }
 
 function evalSemanticBf162Call(

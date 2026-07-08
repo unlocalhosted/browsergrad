@@ -2178,7 +2178,7 @@ function vectorExpressionType(
     if (name === "curand_normal2" || name === "curand_log_normal2") return "float2";
     if (name === "curand_uniform4" || name === "curand_normal4" || name === "curand_log_normal4") return "float4";
     if (name === "curand_poisson4") return "uint4";
-    if (isHalf2Intrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
+    if (isHalf2VectorIntrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
     if (name === "__half22float2") return "float2";
   }
   if (expression.kind === "unary" && expression.operator === "*") {
@@ -3414,7 +3414,14 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ],
     };
   }
-  if (isHalf2Intrinsic(name)) {
+  if (isHalf2BooleanComparisonIntrinsic(name) || isHalf2ComparisonMaskIntrinsic(name)) {
+    const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
+    const lanes = half2ComparisonLanes(name, left.lanes, right.lanes);
+    if (isHalf2BooleanComparisonIntrinsic(name)) return lanes.every(Boolean) ? 1 : 0;
+    return ((lanes[0] ? 0xffff : 0) | (lanes[1] ? 0xffff0000 : 0)) >>> 0;
+  }
+  if (isHalf2VectorIntrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     if (isHalf2UnaryIntrinsic(name)) {
       const op = half2UnaryIntrinsicOperator(name);
@@ -3422,6 +3429,14 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         kind: "cuda-vector",
         valueType: "half2",
         lanes: left.lanes.map((value) => roundHalf(op(value ?? 0))),
+      };
+    }
+    if (isHalf2VectorComparisonIntrinsic(name)) {
+      const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
+      return {
+        kind: "cuda-vector",
+        valueType: "half2",
+        lanes: half2ComparisonLanes(name, left.lanes, right.lanes).map((value) => value ? 1 : 0),
       };
     }
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
@@ -3613,8 +3628,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }
 }
 
-function isHalf2Intrinsic(name: string | undefined): boolean {
+function isHalf2VectorIntrinsic(name: string | undefined): boolean {
   return isHalf2UnaryIntrinsic(name) ||
+    isHalf2VectorComparisonIntrinsic(name) ||
     name === "__hadd2" ||
     name === "__hadd2_rn" ||
     name === "__hadd2_sat" ||
@@ -3639,7 +3655,53 @@ function isHalf2UnaryIntrinsic(name: string | undefined): boolean {
     name === "__hrcp2" ||
     name === "__hrsqrt2" ||
     name === "__hsqrt2" ||
-    name === "__htrunc2";
+    name === "__htrunc2" ||
+    name === "__hisnan2";
+}
+
+function isHalf2VectorComparisonIntrinsic(name: string | undefined): boolean {
+  return name === "__heq2" ||
+    name === "__hne2" ||
+    name === "__hgt2" ||
+    name === "__hge2" ||
+    name === "__hlt2" ||
+    name === "__hle2" ||
+    name === "__hequ2" ||
+    name === "__hneu2" ||
+    name === "__hgtu2" ||
+    name === "__hgeu2" ||
+    name === "__hltu2" ||
+    name === "__hleu2";
+}
+
+function isHalf2ComparisonMaskIntrinsic(name: string | undefined): boolean {
+  return name === "__heq2_mask" ||
+    name === "__hne2_mask" ||
+    name === "__hgt2_mask" ||
+    name === "__hge2_mask" ||
+    name === "__hlt2_mask" ||
+    name === "__hle2_mask" ||
+    name === "__hequ2_mask" ||
+    name === "__hneu2_mask" ||
+    name === "__hgtu2_mask" ||
+    name === "__hgeu2_mask" ||
+    name === "__hltu2_mask" ||
+    name === "__hleu2_mask";
+}
+
+function isHalf2BooleanComparisonIntrinsic(name: string | undefined): boolean {
+  return name === "__hbeq2" ||
+    name === "__hbne2" ||
+    name === "__hbgt2" ||
+    name === "__hbge2" ||
+    name === "__hblt2" ||
+    name === "__hble2" ||
+    name === "__hbequ2" ||
+    name === "__hbneu2" ||
+    name === "__hbgtu2" ||
+    name === "__hbgeu2" ||
+    name === "__hbltu2" ||
+    name === "__hbleu2";
 }
 
 function signedAverage(xValue: number, yValue: number): number {
@@ -3727,6 +3789,36 @@ function half2IntrinsicOperator(name: string | undefined): (left: number, right:
   }
 }
 
+function half2ComparisonLanes(name: string | undefined, left: readonly (number | undefined)[], right: readonly (number | undefined)[]): [boolean, boolean] {
+  return [0, 1].map((lane) => {
+    const lhs = left[lane] ?? 0;
+    const rhs = right[lane] ?? 0;
+    return evalHalf2ComparisonLane(name, lhs, rhs);
+  }) as [boolean, boolean];
+}
+
+function evalHalf2ComparisonLane(name: string | undefined, left: number, right: number): boolean {
+  const normalized = normalizeHalf2ComparisonName(name);
+  const unordered = Number.isNaN(left) || Number.isNaN(right);
+  const base = half2ComparisonBasePredicate(normalized, left, right);
+  return normalized.includes("u2") ? unordered || base : !unordered && base;
+}
+
+function normalizeHalf2ComparisonName(name: string | undefined): string {
+  return (name ?? "")
+    .replace(/_mask$/u, "")
+    .replace(/^__hb/u, "__h");
+}
+
+function half2ComparisonBasePredicate(name: string, left: number, right: number): boolean {
+  if (name === "__heq2" || name === "__hequ2") return left === right;
+  if (name === "__hne2" || name === "__hneu2") return left !== right;
+  if (name === "__hgt2" || name === "__hgtu2") return left > right;
+  if (name === "__hge2" || name === "__hgeu2") return left >= right;
+  if (name === "__hlt2" || name === "__hltu2") return left < right;
+  return left <= right;
+}
+
 function half2UnaryIntrinsicOperator(name: string | undefined): (value: number) => number {
   switch (name) {
     case "__habs2":
@@ -3745,6 +3837,8 @@ function half2UnaryIntrinsicOperator(name: string | undefined): (value: number) 
       return Math.sqrt;
     case "__htrunc2":
       return Math.trunc;
+    case "__hisnan2":
+      return (value) => Number.isNaN(value) ? 1 : 0;
     default:
       throw compilerFailure(`unsupported half2 unary intrinsic '${name ?? "<expr>"}'`);
   }
