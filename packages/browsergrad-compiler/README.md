@@ -149,6 +149,12 @@ Scalar bf16 helpers use browser-native f32 storage with explicit bf16 bits:
 `__ushort2bfloat16_*`, `__bfloat16_as_short`,
 `__bfloat16_as_ushort`, `__short_as_bfloat16`, and
 `__ushort_as_bfloat16` lower through semantic reference/WGSL and real WebGPU.
+Vector bf16 helpers `__bfloat1622float2`, `__float22bfloat162_rn`,
+`__float2bfloat162_rn`, `__floats2bfloat162_rn`,
+`__bfloat162bfloat162`, `__low2bfloat16`, `__high2bfloat16`,
+`__low2bfloat162`, `__high2bfloat162`, `__lows2bfloat162`,
+`__highs2bfloat162`, and bf162 `__lowhigh2highlow` use the same native f32
+storage path with explicit bf16 rounding.
 CUDA/C named constants such as `INFINITY`, `NAN`, `FLT_MAX`, `M_PI`,
 `cudaMemcpyDeviceToDevice`, and stream/event flag values lower through the same
 analyzer, CPU-reference, and WGSL path.

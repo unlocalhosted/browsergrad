@@ -321,7 +321,18 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["clock64", [0, 0]],
   ["__builtin_assume_aligned", [2, 2]],
   ["ct::assume_aligned", [1, 2]],
+  ["__bfloat1622float2", [1, 1]],
+  ["__bfloat162bfloat162", [1, 1]],
+  ["__float22bfloat162_rn", [1, 1]],
+  ["__float2bfloat162_rn", [1, 1]],
+  ["__floats2bfloat162_rn", [2, 2]],
   ["__halves2bfloat162", [2, 2]],
+  ["__low2bfloat16", [1, 1]],
+  ["__high2bfloat16", [1, 1]],
+  ["__low2bfloat162", [1, 1]],
+  ["__high2bfloat162", [1, 1]],
+  ["__lows2bfloat162", [2, 2]],
+  ["__highs2bfloat162", [2, 2]],
   ["dot", [2, 2]],
   ["length", [1, 1]],
   ["normalize", [1, 1]],
@@ -1956,8 +1967,50 @@ function validateCallExpression(
     validateVectorConstructorArgs(vectorConstructor, expression, scope, diagnostics, walkExpression);
     return { kind: "vector", valueType: vectorConstructor };
   }
-  if (callName === "__halves2bfloat162") {
+  if (callName === "__bfloat1622float2" || callName === "__float22bfloat162_rn") {
+    const expectedType = callName === "__bfloat1622float2" ? "bf162" : "float2";
+    const returnType = callName === "__bfloat1622float2" ? "float2" : "bf162";
+    const arg = expression.args[0];
+    if (arg) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects ${expectedType} argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== expectedType) {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects ${expectedType} argument`, arg.span));
+      }
+    }
+    return { kind: "vector", valueType: returnType };
+  }
+  if (callName === "__halves2bfloat162" || callName === "__floats2bfloat162_rn") {
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "vector", valueType: "bf162" };
+  }
+  if (callName === "__bfloat162bfloat162" || callName === "__float2bfloat162_rn") {
+    const arg = expression.args[0];
+    if (arg) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "vector", valueType: "bf162" };
+  }
+  if (callName === "__low2bfloat16" || callName === "__high2bfloat16") {
+    const arg = expression.args[0];
+    if (arg) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "bf162") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 argument`, arg.span));
+      }
+    }
+    return { kind: "scalar", valueType: "bf16" };
+  }
+  if (callName === "__low2bfloat162" || callName === "__high2bfloat162" || callName === "__lows2bfloat162" || callName === "__highs2bfloat162") {
+    for (const arg of expression.args) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "bf162") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 argument`, arg.span));
+      }
+    }
     return { kind: "vector", valueType: "bf162" };
   }
   if (callName === "__bfloat162_as_uint" || callName === "__nv_bfloat162_as_uint") {
@@ -2041,17 +2094,21 @@ function validateCallExpression(
     return { kind: "vector", valueType: "half2" };
   }
   if (callName === "__low2half" || callName === "__high2half" || callName === "__low2float" || callName === "__high2float") {
-    requiredFeatures.add("shader-f16");
+    if (callName === "__low2half" || callName === "__high2half") requiredFeatures.add("shader-f16");
     const arg = expression.args[0];
+    let vectorType: CudaLiteScalarType | undefined;
     if (arg) {
       const info = walkExpression(arg, scope);
       if (info.kind !== "vector" && info.kind !== "unknown") {
-        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 argument`, arg.span));
-      } else if (info.kind === "vector" && info.valueType !== "half2") {
-        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 argument`, arg.span));
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 or bf162 argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "half2" && info.valueType !== "bf162") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 or bf162 argument`, arg.span));
+      } else if (info.kind === "vector") {
+        vectorType = info.valueType;
       }
     }
-    return { kind: "scalar", valueType: callName === "__low2float" || callName === "__high2float" ? "float" : "half" };
+    if (vectorType !== "bf162") requiredFeatures.add("shader-f16");
+    return { kind: "scalar", valueType: callName === "__low2float" || callName === "__high2float" ? "float" : vectorType === "bf162" ? "bf16" : "half" };
   }
   if (callName === "__halves2half2" || callName === "__half2half2") {
     requiredFeatures.add("shader-f16");
@@ -2059,15 +2116,21 @@ function validateCallExpression(
     return { kind: "vector", valueType: "half2" };
   }
   if (callName === "__low2half2" || callName === "__high2half2" || callName === "__lowhigh2highlow" || callName === "__lows2half2" || callName === "__highs2half2") {
-    requiredFeatures.add("shader-f16");
+    if (callName !== "__lowhigh2highlow") requiredFeatures.add("shader-f16");
+    let vectorType: CudaLiteScalarType | undefined;
     for (const arg of expression.args) {
       const info = walkExpression(arg, scope);
       if (info.kind !== "vector" && info.kind !== "unknown") {
-        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 argument`, arg.span));
-      } else if (info.kind === "vector" && info.valueType !== "half2") {
-        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 argument`, arg.span));
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 or bf162 argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "half2" && info.valueType !== "bf162") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 or bf162 argument`, arg.span));
+      } else if (info.kind === "vector") {
+        vectorType = vectorType ?? info.valueType;
+        if (vectorType !== info.valueType) diagnostics.push(error("unsupported-vector-argument", `${callName} expects matching half2 or bf162 arguments`, arg.span));
       }
     }
+    if (vectorType === "bf162") return { kind: "vector", valueType: "bf162" };
+    requiredFeatures.add("shader-f16");
     return { kind: "vector", valueType: "half2" };
   }
   if (callName === "__float2half2_rn" || callName === "__floats2half2_rn") {

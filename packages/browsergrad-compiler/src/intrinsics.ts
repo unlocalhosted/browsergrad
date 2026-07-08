@@ -591,6 +591,32 @@ const BF16_INTRINSICS = [
   intrinsic("__nv_bfloat162_as_uint", [1, 1], "uint", () => 0, (args) => `((bitcast<u32>((${args[0] ?? "vec2<f32>()"}).x) >> 16u) | (bitcast<u32>((${args[0] ?? "vec2<f32>()"}).y) & 0xffff0000u))`),
   intrinsic("__uint_as_bfloat162", [1, 1], "bf162", () => 0, (args) => `vec2<f32>(bitcast<f32>((u32(${args[0] ?? "0"}) & 0x0000ffffu) << 16u), bitcast<f32>(u32(${args[0] ?? "0"}) & 0xffff0000u))`),
   intrinsic("__uint_as_nv_bfloat162", [1, 1], "bf162", () => 0, (args) => `vec2<f32>(bitcast<f32>((u32(${args[0] ?? "0"}) & 0x0000ffffu) << 16u), bitcast<f32>(u32(${args[0] ?? "0"}) & 0xffff0000u))`),
+  intrinsic("__bfloat1622float2", [1, 1], "float2", () => 0, (args) => `vec2<f32>(${args[0] ?? "vec2<f32>()"})`),
+  intrinsic("__bfloat162bfloat162", [1, 1], "bf162", () => 0, (args) => {
+    const value = args[0] ?? "0";
+    return `vec2<f32>(${wgslRoundBfloat16(value)}, ${wgslRoundBfloat16(value)})`;
+  }),
+  intrinsic("__float22bfloat162_rn", [1, 1], "bf162", () => 0, (args) => {
+    const value = args[0] ?? "vec2<f32>()";
+    return `vec2<f32>(${wgslRoundBfloat16(`(${value}).x`)}, ${wgslRoundBfloat16(`(${value}).y`)})`;
+  }),
+  intrinsic("__float2bfloat162_rn", [1, 1], "bf162", () => 0, (args) => {
+    const value = args[0] ?? "0";
+    return `vec2<f32>(${wgslRoundBfloat16(value)}, ${wgslRoundBfloat16(value)})`;
+  }),
+  intrinsic("__floats2bfloat162_rn", [2, 2], "bf162", () => 0, (args) => `vec2<f32>(${wgslRoundBfloat16(args[0] ?? "0")}, ${wgslRoundBfloat16(args[1] ?? "0")})`),
+  intrinsic("__low2bfloat16", [1, 1], "bf16", () => 0, (args) => `(${args[0] ?? "vec2<f32>()"}).x`),
+  intrinsic("__high2bfloat16", [1, 1], "bf16", () => 0, (args) => `(${args[0] ?? "vec2<f32>()"}).y`),
+  intrinsic("__low2bfloat162", [1, 1], "bf162", () => 0, (args) => {
+    const value = `(${args[0] ?? "vec2<f32>()"}).x`;
+    return `vec2<f32>(${value}, ${value})`;
+  }),
+  intrinsic("__high2bfloat162", [1, 1], "bf162", () => 0, (args) => {
+    const value = `(${args[0] ?? "vec2<f32>()"}).y`;
+    return `vec2<f32>(${value}, ${value})`;
+  }),
+  intrinsic("__lows2bfloat162", [2, 2], "bf162", () => 0, (args) => `vec2<f32>((${args[0] ?? "vec2<f32>()"}).x, (${args[1] ?? "vec2<f32>()"}).x)`),
+  intrinsic("__highs2bfloat162", [2, 2], "bf162", () => 0, (args) => `vec2<f32>((${args[0] ?? "vec2<f32>()"}).y, (${args[1] ?? "vec2<f32>()"}).y)`),
   intrinsic("__bfloat162int_rn", [1, 1], "int", (args) => roundTiesToEven(args[0] ?? 0) | 0, (args) => `i32(bg_round_even_f32(f32(${args[0] ?? "0"})))`),
   intrinsic("__bfloat162int_rz", [1, 1], "int", (args) => Math.trunc(args[0] ?? 0), (args) => `i32(trunc(f32(${args[0] ?? "0"})))`),
   intrinsic("__bfloat162int_ru", [1, 1], "int", (args) => Math.ceil(args[0] ?? 0) | 0, (args) => `i32(ceil(f32(${args[0] ?? "0"})))`),
