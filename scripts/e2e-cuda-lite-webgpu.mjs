@@ -5885,6 +5885,16 @@ __global__ void textureObjectUint4HelperRead(cudaTextureObject_t tex, uint4 *out
     out[0] = read_uint4_tex(tex);
   }
 }`,
+  textureObjectUintScalarHelperRead: `
+__device__ uint read_uint_tex(cudaTextureObject_t texArg) {
+  return tex2D<uint>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureObjectUintScalarHelperRead(cudaTextureObject_t tex, uint *out) {
+  if (threadIdx.x == 0) {
+    out[0] = read_uint_tex(tex);
+  }
+}`,
   textureHelperVectorCastCoercion: `
 __device__ uint4 read_uint4_for_float(cudaTextureObject_t texArg) {
   return tex2D<uint4>(texArg, 0.5f, 0.5f);
@@ -15823,6 +15833,26 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [1, 2, 3, 255] },
+          },
+          {
+            name: "texture:object-uint-scalar-helper-read",
+            source: SOURCES.textureObjectUintScalarHelperRead,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  data: new Float32Array([42]),
+                },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [42] },
           },
           {
             name: "texture:object-uint4-helper-read",

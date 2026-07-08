@@ -15969,6 +15969,32 @@ __global__ void sample(uint4 *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 3, 255]);
   });
 
+  it("lowers typed scalar texture helper reads through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint read_uint_tex(cudaTextureObject_t texArg) {
+  return tex2D<uint>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void sample(cudaTextureObject_t tex, uint *out) {
+  out[0] = read_uint_tex(tex);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(1) },
+      textures: { tex: { width: 1, height: 1, data: new Float32Array([42]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("return u32(textureLoad(texArg");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_uint_tex");
+    expect([...result.buffers.out as Uint32Array]).toEqual([42]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([42]);
+  });
+
   it("lowers CUDA texture fetch aliases without repo-specific rewrites", () => {
     const compiled = compileCudaLiteKernel(`
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
