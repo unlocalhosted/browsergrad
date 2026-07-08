@@ -172,6 +172,10 @@ const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__reduce_and_sync",
   "__reduce_or_sync",
   "__reduce_xor_sync",
+  "__shfl",
+  "__shfl_down",
+  "__shfl_up",
+  "__shfl_xor",
   "__shfl_sync",
   "__shfl_down_sync",
   "__shfl_up_sync",
@@ -1201,6 +1205,10 @@ function semanticWgslSubgroupCallSupported(
   if (expression.callee.name === "__activemask") return expression.args.length === 0;
   if (legacyVoteCall(expression.callee.name)) {
     return expression.args.length === 1 && semanticWgslExpressionSupported(expression.args[0]!, "scalar", ir);
+  }
+  if (legacyShuffleCall(expression.callee.name)) {
+    return (expression.args.length === 2 || expression.args.length === 3) &&
+      expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
   }
   if (semanticBitwiseReduceOpForCall(expression.callee.name)) {
     const value = expression.args[1];
@@ -2465,7 +2473,7 @@ function collectSemanticWarpShuffleExpressionHelpers(
 ): void {
   if (expression.kind === "call" && expression.callee.kind === "symbol") {
     const op = semanticShuffleOpForCall(expression.callee.name);
-    const value = expression.args[1];
+    const value = expression.args[legacyShuffleCall(expression.callee.name) ? 0 : 1];
     const valueType = value ? semanticExpressionValueType(value) : undefined;
     if (op && valueType && valueType !== "void") {
       const helper = semanticWarpShuffleHelper(op, valueType, 32);
@@ -2703,10 +2711,10 @@ function emitSemanticBitwiseReduceHelper(
 }
 
 function semanticShuffleOpForCall(name: string): SemanticShuffleOp | undefined {
-  if (name === "__shfl_sync") return "sync";
-  if (name === "__shfl_down_sync") return "down";
-  if (name === "__shfl_up_sync") return "up";
-  if (name === "__shfl_xor_sync") return "xor";
+  if (name === "__shfl" || name === "__shfl_sync") return "sync";
+  if (name === "__shfl_down" || name === "__shfl_down_sync") return "down";
+  if (name === "__shfl_up" || name === "__shfl_up_sync") return "up";
+  if (name === "__shfl_xor" || name === "__shfl_xor_sync") return "xor";
   return undefined;
 }
 
@@ -3874,7 +3882,7 @@ function emitSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return "subgroupBallot(true).x";
-  const value = expression.args[legacyVoteCall(name) ? 0 : 1];
+  const value = expression.args[legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
   if (name === "__any" || name === "__all" || name === "__ballot" || name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync") {
     const predicate = emitTruthiness(value, ir, names, options);
@@ -3900,8 +3908,10 @@ function emitSemanticSubgroupCall(
     const valueType = semanticExpressionValueType(value);
     if (!valueType || valueType === "void") throw semanticWgslError(`${name} expects scalar value operand`, expression.span);
     const helper = semanticWarpShuffleHelper(shuffleOp, valueType, 32);
-    const index = expression.args[2] ? emitSemanticExpressionAs(expression.args[2], ir, names, "u32", options, textureSpecializations) : "0u";
-    const width = expression.args[3] ? emitSemanticExpressionAs(expression.args[3], ir, names, "u32", options, textureSpecializations) : "32u";
+    const indexArg = legacyShuffleCall(name) ? expression.args[1] : expression.args[2];
+    const widthArg = legacyShuffleCall(name) ? expression.args[2] : expression.args[3];
+    const index = indexArg ? emitSemanticExpressionAs(indexArg, ir, names, "u32", options, textureSpecializations) : "0u";
+    const width = widthArg ? emitSemanticExpressionAs(widthArg, ir, names, "u32", options, textureSpecializations) : "32u";
     return `${helper.name}(${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(valueType), options, textureSpecializations)}, ${index}, ${width}, local_id)`;
   }
   if (name === "__reduce_add_sync" || name === "__reduce_min_sync" || name === "__reduce_max_sync") {
@@ -3914,6 +3924,10 @@ function emitSemanticSubgroupCall(
 
 function legacyVoteCall(name: string): boolean {
   return name === "__any" || name === "__all" || name === "__ballot";
+}
+
+function legacyShuffleCall(name: string): boolean {
+  return name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor";
 }
 
 function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {

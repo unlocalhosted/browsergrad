@@ -133,12 +133,16 @@ export function emitScalarWarpShuffleCall(
   context: EmitContext,
   callbacks: WgslCooperativeCallbacks,
 ): string {
-  const valueExpression = expression.args[1];
+  const callee = expressionName(expression.callee);
+  const legacy = callee === "__shfl" || callee === "__shfl_down" || callee === "__shfl_up" || callee === "__shfl_xor";
+  const valueExpression = expression.args[legacy ? 0 : 1];
   if (!valueExpression) return "0";
   const valueType = scalarWarpValueType(valueExpression, callbacks, "warp shuffle");
   const helper = registerScalarWarpShuffleHelper(context, op, valueType, 32);
-  const index = expression.args[2] ? callbacks.emitExpressionAsWgslScalar(expression.args[2], "u32") : "0u";
-  const width = expression.args[3] ? callbacks.emitExpressionAsWgslScalar(expression.args[3], "u32") : "32u";
+  const indexExpression = expression.args[legacy ? 1 : 2];
+  const widthExpression = expression.args[legacy ? 2 : 3];
+  const index = indexExpression ? callbacks.emitExpressionAsWgslScalar(indexExpression, "u32") : "0u";
+  const width = widthExpression ? callbacks.emitExpressionAsWgslScalar(widthExpression, "u32") : "32u";
   return `${helper.name}(${callbacks.emitExpressionAsValueType(valueExpression, valueType)}, ${index}, ${width}, local_id)`;
 }
 

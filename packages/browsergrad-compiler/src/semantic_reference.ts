@@ -182,6 +182,10 @@ const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__reduce_and_sync",
   "__reduce_or_sync",
   "__reduce_xor_sync",
+  "__shfl",
+  "__shfl_down",
+  "__shfl_up",
+  "__shfl_xor",
   "__shfl_sync",
   "__shfl_down_sync",
   "__shfl_up_sync",
@@ -621,6 +625,10 @@ function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpr
   if (legacyVoteCall(expression.callee.name)) {
     return expression.args.length === 1 && semanticReferenceExpressionSupported(expression.args[0]!, "scalar");
   }
+  if (legacyShuffleCall(expression.callee.name)) {
+    return (expression.args.length === 2 || expression.args.length === 3) &&
+      expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+  }
   if (
     expression.callee.name === "__shfl_sync" ||
     expression.callee.name === "__shfl_down_sync" ||
@@ -635,6 +643,10 @@ function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpr
 
 function legacyVoteCall(name: string): boolean {
   return name === "__any" || name === "__all" || name === "__ballot";
+}
+
+function legacyShuffleCall(name: string): boolean {
+  return name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor";
 }
 
 function semanticReferenceAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1785,7 +1797,7 @@ function evalSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return semanticReferenceActiveMask(context);
-  const value = expression.args[legacyVoteCall(name) ? 0 : 1];
+  const value = expression.args[legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
   if (context.compiled.subgroupMode === "scalar") {
     const scalar = evalNumber(value, context);
@@ -1818,9 +1830,11 @@ function evalSemanticSubgroupCall(
   if (name === "__reduce_and_sync") return peers.reduce((acc, peer) => acc & (evalNumber(value, peer) | 0), -1) >>> 0;
   if (name === "__reduce_or_sync") return peers.reduce((acc, peer) => acc | (evalNumber(value, peer) | 0), 0) >>> 0;
   if (name === "__reduce_xor_sync") return peers.reduce((acc, peer) => acc ^ (evalNumber(value, peer) | 0), 0) >>> 0;
-  if (name === "__shfl_sync" || name === "__shfl_down_sync" || name === "__shfl_up_sync" || name === "__shfl_xor_sync") {
-    const index = expression.args[2] ? Math.trunc(evalNumber(expression.args[2], context)) : 0;
-    const width = semanticShuffleWidth(expression.args[3] ? evalNumber(expression.args[3], context) : 32);
+  if (legacyShuffleCall(name) || name === "__shfl_sync" || name === "__shfl_down_sync" || name === "__shfl_up_sync" || name === "__shfl_xor_sync") {
+    const indexArg = legacyShuffleCall(name) ? expression.args[1] : expression.args[2];
+    const widthArg = legacyShuffleCall(name) ? expression.args[2] : expression.args[3];
+    const index = indexArg ? Math.trunc(evalNumber(indexArg, context)) : 0;
+    const width = semanticShuffleWidth(widthArg ? evalNumber(widthArg, context) : 32);
     const rank = semanticLocalLinearRank(context);
     const lane = rank % width;
     const base = rank - lane;
@@ -1849,9 +1863,9 @@ function semanticShuffleWidth(width: number): number {
 
 function semanticShuffleTargetLane(name: string, lane: number, index: number, width: number): number {
   const operand = Math.max(0, Math.trunc(index));
-  if (name === "__shfl_sync") return operand % width;
-  if (name === "__shfl_down_sync") return lane + operand < width ? lane + operand : lane;
-  if (name === "__shfl_up_sync") return lane >= operand ? lane - operand : lane;
+  if (name === "__shfl" || name === "__shfl_sync") return operand % width;
+  if (name === "__shfl_down" || name === "__shfl_down_sync") return lane + operand < width ? lane + operand : lane;
+  if (name === "__shfl_up" || name === "__shfl_up_sync") return lane >= operand ? lane - operand : lane;
   const xorLane = lane ^ operand;
   return xorLane < width ? xorLane : lane;
 }

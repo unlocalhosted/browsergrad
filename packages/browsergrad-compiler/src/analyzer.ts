@@ -113,6 +113,10 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemsetAsync", [4, 4]],
   ["cudaMemset2D", [5, 5]],
   ["cudaMemset2DAsync", [6, 6]],
+  ["__shfl", [2, 3]],
+  ["__shfl_down", [2, 3]],
+  ["__shfl_up", [2, 3]],
+  ["__shfl_xor", [2, 3]],
   ["__shfl_sync", [3, 4]],
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
@@ -3897,7 +3901,11 @@ function isSupportedDevicePointerAtomic(
 }
 
 function isShuffleBuiltin(callName: string): boolean {
-  return callName === "__shfl_sync" ||
+  return callName === "__shfl" ||
+    callName === "__shfl_down" ||
+    callName === "__shfl_up" ||
+    callName === "__shfl_xor" ||
+    callName === "__shfl_sync" ||
     callName === "__shfl_down_sync" ||
     callName === "__shfl_up_sync" ||
     callName === "__shfl_xor_sync";

@@ -2181,6 +2181,15 @@ __global__ void semanticShuffle(uint *out) {
   out[tid * 4 + 2] = __shfl_up_sync(mask, value, 1, 4);
   out[tid * 4 + 3] = __shfl_xor_sync(mask, value, 1, 4);
 }`,
+  legacyShuffle: `
+__global__ void legacyShuffle(uint *out) {
+  int tid = threadIdx.x;
+  uint value = uint(tid) + 10u;
+  out[tid * 4] = __shfl(value, 2, 4);
+  out[tid * 4 + 1] = __shfl_down(value, 1, 4);
+  out[tid * 4 + 2] = __shfl_up(value, 1, 4);
+  out[tid * 4 + 3] = __shfl_xor(value, 1, 4);
+}`,
   semanticShuffleFunction: `
 __device__ uint pick_first_lane(uint value) {
   return __shfl_sync(0xffffffffu, value, 0, 4);
@@ -12991,6 +13000,20 @@ const html = String.raw`<!doctype html>
           {
             name: "subgroup:semantic-shuffle",
             source: SOURCES.semanticShuffle,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [12, 11, 10, 11, 12, 12, 10, 10, 12, 13, 11, 13, 12, 13, 12, 12] },
+          },
+          {
+            name: "subgroup:legacy-shuffle",
+            source: SOURCES.legacyShuffle,
             options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
             requiredFeatures: ["subgroups"],
             launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },

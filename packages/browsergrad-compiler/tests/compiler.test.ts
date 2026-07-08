@@ -5003,6 +5003,52 @@ __global__ void semanticShuffleKernel(uint *out) {
     ]);
   });
 
+  it("lowers legacy CUDA warp shuffle aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void legacyShuffleKernel(uint *out) {
+  int tid = threadIdx.x;
+  uint value = uint(tid) + 10u;
+  out[tid * 4] = __shfl(value, 2, 4);
+  out[tid * 4 + 1] = __shfl_down(value, 1, 4);
+  out[tid * 4 + 2] = __shfl_up(value, 1, 4);
+  out[tid * 4 + 3] = __shfl_xor(value, 1, 4);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(16) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(16) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_32");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_32");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_32");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_uint_32");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      12, 11, 10, 11,
+      12, 12, 10, 10,
+      12, 13, 11, 13,
+      12, 13, 12, 12,
+    ]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      12, 11, 10, 11,
+      12, 12, 10, 10,
+      12, 13, 11, 13,
+      12, 13, 12, 12,
+    ]);
+  });
+
   it("lowers CUDA match_any through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void semanticMatchAnyKernel(uint *input, uint *out) {

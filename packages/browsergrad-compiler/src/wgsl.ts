@@ -5638,6 +5638,9 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (name === "subgroupBallot") return "uint";
     if (name === "__activemask") return "uint";
     if (name === "__any" || name === "__all" || name === "__ballot") return "uint";
+    if (name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor") {
+      return expression.args[0] ? expressionValueTypeForEmit(expression.args[0], context) : undefined;
+    }
     if (isSyncthreadsPredicateCall(name)) return "int";
     if (isAddressSpacePredicateCall(name)) return "int";
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
@@ -6494,6 +6497,18 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "warp_reduce_min":
       if (context.subgroupMode === "scalar") return args.length === 2 ? args[1] ?? "0" : args[0] ?? "0";
       return emitScalarWarpReduceCall("min", expression, context, cooperativeCallbacks(context));
+    case "__shfl":
+      if (context.subgroupMode === "scalar") return args[0] ?? "0";
+      return emitScalarWarpShuffleCall("sync", expression, context, cooperativeCallbacks(context));
+    case "__shfl_down":
+      if (context.subgroupMode === "scalar") return args[0] ?? "0";
+      return emitScalarWarpShuffleCall("down", expression, context, cooperativeCallbacks(context));
+    case "__shfl_up":
+      if (context.subgroupMode === "scalar") return args[0] ?? "0";
+      return emitScalarWarpShuffleCall("up", expression, context, cooperativeCallbacks(context));
+    case "__shfl_xor":
+      if (context.subgroupMode === "scalar") return args[0] ?? "0";
+      return emitScalarWarpShuffleCall("xor", expression, context, cooperativeCallbacks(context));
     case "__shfl_sync":
       if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return emitScalarWarpShuffleCall("sync", expression, context, cooperativeCallbacks(context));

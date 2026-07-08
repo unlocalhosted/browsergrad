@@ -1213,25 +1213,26 @@ function nativeShuffleCollective(
   args: readonly CudaLiteExpression[],
   context: ThreadContext,
 ): CollectiveYield | undefined {
-  const op = name === "__shfl_sync"
+  const op = name === "__shfl_sync" || name === "__shfl"
     ? "shfl"
-    : name === "__shfl_down_sync"
+    : name === "__shfl_down_sync" || name === "__shfl_down"
       ? "shfl_down"
-      : name === "__shfl_up_sync"
+      : name === "__shfl_up_sync" || name === "__shfl_up"
         ? "shfl_up"
-        : name === "__shfl_xor_sync"
+        : name === "__shfl_xor_sync" || name === "__shfl_xor"
           ? "shfl_xor"
           : undefined;
   if (!op) return undefined;
-  const value = args[1];
-  const index = args[2];
+  const legacy = name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor";
+  const value = legacy ? args[0] : args[1];
+  const index = legacy ? args[1] : args[2];
   if (!value || !index) return undefined;
   return {
     kind: "collective",
     op,
     value: evalExpression(value, context),
     shuffleIndex: evalNumber(index, context),
-    shuffleWidth: args[3] ? evalNumber(args[3], context) : 32,
+    shuffleWidth: (legacy ? args[2] : args[3]) ? evalNumber((legacy ? args[2] : args[3])!, context) : 32,
     groupKey: `warp:${Math.floor(localLinearRank(context) / 32)}`,
   };
 }
@@ -3473,6 +3474,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "max":
       return Math.max(...args);
     case "bg_subgroup_add":
+      return args[0] ?? 0;
+    case "__shfl":
+    case "__shfl_down":
+    case "__shfl_up":
+    case "__shfl_xor":
       return args[0] ?? 0;
     case "__shfl_sync":
     case "__shfl_down_sync":

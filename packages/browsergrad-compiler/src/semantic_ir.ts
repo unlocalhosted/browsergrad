@@ -668,12 +668,16 @@ function lowerExpression(
               expression.callee.name === "__reduce_and_sync" ||
               expression.callee.name === "__reduce_or_sync" ||
               expression.callee.name === "__reduce_xor_sync" ||
+              expression.callee.name === "__shfl" ||
+              expression.callee.name === "__shfl_down" ||
+              expression.callee.name === "__shfl_up" ||
+              expression.callee.name === "__shfl_xor" ||
               expression.callee.name === "__shfl_sync" ||
               expression.callee.name === "__shfl_down_sync" ||
               expression.callee.name === "__shfl_up_sync" ||
               expression.callee.name === "__shfl_xor_sync"
             )
-            ? expressionValueType(args[1]) ?? "uint"
+            ? expressionValueType(legacyShuffleCall(expression.callee.name) ? args[0] : args[1]) ?? "uint"
           : expression.callee.kind === "identifier" && (expression.callee.name === "clock" || expression.callee.name === "clock64")
             ? "uint"
           : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)
@@ -2177,6 +2181,10 @@ function vectorArrayIndexInfo(
 
 function optionalValueType(valueType: CudaLiteScalarType | undefined): { readonly valueType?: CudaLiteScalarType } {
   return valueType === undefined ? {} : { valueType };
+}
+
+function legacyShuffleCall(name: string): boolean {
+  return name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor";
 }
 
 function numberLiteralType(raw: string): CudaLiteScalarType {
