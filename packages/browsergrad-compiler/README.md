@@ -149,6 +149,10 @@ Scalar bf16 helpers use browser-native f32 storage with explicit bf16 bits:
 `__ushort2bfloat16_*`, `__bfloat16_as_short`,
 `__bfloat16_as_ushort`, `__short_as_bfloat16`, and
 `__ushort_as_bfloat16` lower through semantic reference/WGSL and real WebGPU.
+Scalar bf16-to-integer helpers `__bfloat162short_*`,
+`__bfloat162ushort_*`, `__bfloat162char_rz`, and
+`__bfloat162uchar_rz` preserve explicit CUDA narrow integer rounding and
+8-bit/16-bit wrap/sign-extension semantics on the same browser-native path.
 Scalar bf16 unary math, arithmetic, and predicate aliases, including `__habs`,
 `__hceil`, `__hfloor`, `__hrcp`, `__hrsqrt`, `__hsqrt`, `__htrunc`, `__hneg`,
 `hexp`, `__hadd_rn`, `__hadd_sat`, `__hsub_sat`, `__hmul_sat`, `__hfma_sat`,

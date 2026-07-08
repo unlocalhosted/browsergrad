@@ -250,7 +250,7 @@ export function usesRoundingMathIntrinsics(ir: KernelIrModule): boolean {
     "lrint", "lrintf", "llrint", "llrintf", "lround", "lroundf", "llround", "llroundf",
     "remainder", "remainderf", "remquo", "remquof", "logb", "logbf", "ilogb", "ilogbf",
     "__float2int_rn", "__float2uint_rn", "__half2int_rn", "__half2uint_rn",
-    "__bfloat162int_rn", "__bfloat162uint_rn",
+    "__bfloat162int_rn", "__bfloat162uint_rn", "__bfloat162short_rn", "__bfloat162ushort_rn",
   ]);
   return statementsUseCall(ir.body, names) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, names));
@@ -299,6 +299,9 @@ export function usesBfloatConversionIntrinsics(ir: KernelIrModule): boolean {
     "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
     "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
     "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
+    "__bfloat162short_rn", "__bfloat162short_rz", "__bfloat162short_ru", "__bfloat162short_rd",
+    "__bfloat162ushort_rn", "__bfloat162ushort_rz", "__bfloat162ushort_ru", "__bfloat162ushort_rd",
+    "__bfloat162char_rz", "__bfloat162uchar_rz",
   ]);
   return statementsUseCall(ir.body, names) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, names));

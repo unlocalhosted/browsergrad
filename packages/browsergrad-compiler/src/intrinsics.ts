@@ -661,6 +661,16 @@ const BF16_INTRINSICS = [
   intrinsic("__bfloat162uint_rz", [1, 1], "uint", (args) => Math.trunc(args[0] ?? 0) >>> 0, (args) => `u32(max(trunc(f32(${args[0] ?? "0"})), 0.0))`),
   intrinsic("__bfloat162uint_ru", [1, 1], "uint", (args) => Math.ceil(args[0] ?? 0) >>> 0, (args) => `u32(max(ceil(f32(${args[0] ?? "0"})), 0.0))`),
   intrinsic("__bfloat162uint_rd", [1, 1], "uint", (args) => Math.floor(args[0] ?? 0) >>> 0, (args) => `u32(max(floor(f32(${args[0] ?? "0"})), 0.0))`),
+  intrinsic("__bfloat162short_rn", [1, 1], "int", (args) => signExtend16(roundTiesToEven(args[0] ?? 0)), (args) => emitSignExtendWgsl(`i32(bg_round_even_f32(f32(${args[0] ?? "0"})))`, 16)),
+  intrinsic("__bfloat162short_rz", [1, 1], "int", (args) => signExtend16(Math.trunc(args[0] ?? 0)), (args) => emitSignExtendWgsl(`i32(trunc(f32(${args[0] ?? "0"})))`, 16)),
+  intrinsic("__bfloat162short_ru", [1, 1], "int", (args) => signExtend16(Math.ceil(args[0] ?? 0)), (args) => emitSignExtendWgsl(`i32(ceil(f32(${args[0] ?? "0"})))`, 16)),
+  intrinsic("__bfloat162short_rd", [1, 1], "int", (args) => signExtend16(Math.floor(args[0] ?? 0)), (args) => emitSignExtendWgsl(`i32(floor(f32(${args[0] ?? "0"})))`, 16)),
+  intrinsic("__bfloat162ushort_rn", [1, 1], "uint", (args) => roundTiesToEven(args[0] ?? 0) & 0xffff, (args) => `(u32(max(bg_round_even_f32(f32(${args[0] ?? "0"})), 0.0)) & 0xffffu)`),
+  intrinsic("__bfloat162ushort_rz", [1, 1], "uint", (args) => Math.trunc(args[0] ?? 0) & 0xffff, (args) => `(u32(max(trunc(f32(${args[0] ?? "0"})), 0.0)) & 0xffffu)`),
+  intrinsic("__bfloat162ushort_ru", [1, 1], "uint", (args) => Math.ceil(args[0] ?? 0) & 0xffff, (args) => `(u32(max(ceil(f32(${args[0] ?? "0"})), 0.0)) & 0xffffu)`),
+  intrinsic("__bfloat162ushort_rd", [1, 1], "uint", (args) => Math.floor(args[0] ?? 0) & 0xffff, (args) => `(u32(max(floor(f32(${args[0] ?? "0"})), 0.0)) & 0xffffu)`),
+  intrinsic("__bfloat162char_rz", [1, 1], "int", (args) => signExtend8(Math.trunc(args[0] ?? 0)), (args) => emitSignExtendWgsl(`i32(trunc(f32(${args[0] ?? "0"})))`, 8)),
+  intrinsic("__bfloat162uchar_rz", [1, 1], "uint", (args) => Math.trunc(args[0] ?? 0) & 0xff, (args) => `(u32(max(trunc(f32(${args[0] ?? "0"})), 0.0)) & 0xffu)`),
   intrinsic("__short_as_bfloat16", [1, 1], "bf16", (args) => bfloat16BitsToFloat32(args[0] ?? 0), (args) => `bitcast<f32>((u32(i32(${args[0] ?? "0"})) & 0xffffu) << 16u)`),
   intrinsic("__ushort_as_bfloat16", [1, 1], "bf16", (args) => bfloat16BitsToFloat32(args[0] ?? 0), (args) => `bitcast<f32>(u32(${args[0] ?? "0"}) << 16u)`),
 ] as const;
@@ -1580,6 +1590,12 @@ function emitI8x4DotAdd(args: readonly string[]): string {
 
 function signExtend8(value: number): number {
   return (value << 24) >> 24;
+}
+
+function emitSignExtendWgsl(value: string, bits: 8 | 16): string {
+  const mask = bits === 8 ? "0xffu" : "0xffffu";
+  const shift = bits === 8 ? "24u" : "16u";
+  return `((bitcast<i32>((u32(${value}) & ${mask}) << ${shift})) >> ${shift})`;
 }
 
 function evalI16x2I8x2DotAdd(args: readonly number[], byteShift: 0 | 16): number {

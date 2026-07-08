@@ -109,6 +109,9 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__bfloat16_as_short", "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__short_as_bfloat16", "__ushort_as_bfloat16",
   "__bfloat162int_rn", "__bfloat162int_rz", "__bfloat162int_ru", "__bfloat162int_rd",
   "__bfloat162uint_rn", "__bfloat162uint_rz", "__bfloat162uint_ru", "__bfloat162uint_rd",
+  "__bfloat162short_rn", "__bfloat162short_rz", "__bfloat162short_ru", "__bfloat162short_rd",
+  "__bfloat162ushort_rn", "__bfloat162ushort_rz", "__bfloat162ushort_ru", "__bfloat162ushort_rd",
+  "__bfloat162char_rz", "__bfloat162uchar_rz",
   "wmma::__float_to_tf32", "isNan",
   "__clz", "__clzll", "__ffs", "__ffsll", "__popc", "__popcll", "__brev", "__brevll",
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
@@ -2811,6 +2814,16 @@ function evalSemanticMathCall(
     case "__bfloat162uint_rz": return Math.trunc(args[0] ?? 0) >>> 0;
     case "__bfloat162uint_ru": return Math.ceil(args[0] ?? 0) >>> 0;
     case "__bfloat162uint_rd": return Math.floor(args[0] ?? 0) >>> 0;
+    case "__bfloat162short_rn": return signExtend16(roundTiesToEvenNumber(args[0] ?? 0));
+    case "__bfloat162short_rz": return signExtend16(Math.trunc(args[0] ?? 0));
+    case "__bfloat162short_ru": return signExtend16(Math.ceil(args[0] ?? 0));
+    case "__bfloat162short_rd": return signExtend16(Math.floor(args[0] ?? 0));
+    case "__bfloat162ushort_rn": return roundTiesToEvenNumber(args[0] ?? 0) & 0xffff;
+    case "__bfloat162ushort_rz": return Math.trunc(args[0] ?? 0) & 0xffff;
+    case "__bfloat162ushort_ru": return Math.ceil(args[0] ?? 0) & 0xffff;
+    case "__bfloat162ushort_rd": return Math.floor(args[0] ?? 0) & 0xffff;
+    case "__bfloat162char_rz": return signExtend8(Math.trunc(args[0] ?? 0));
+    case "__bfloat162uchar_rz": return Math.trunc(args[0] ?? 0) & 0xff;
     case "wmma::__float_to_tf32": return args[0] ?? 0;
     case "__clz": return Math.clz32(args[0] ?? 0);
     case "__clzll": return Math.clz32(args[0] ?? 0) + 32;

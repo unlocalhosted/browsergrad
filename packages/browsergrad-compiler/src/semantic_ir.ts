@@ -2576,14 +2576,24 @@ function isBfloat16ToSignedIntegerName(name: string): boolean {
   return name === "__bfloat162int_rn" ||
     name === "__bfloat162int_rz" ||
     name === "__bfloat162int_ru" ||
-    name === "__bfloat162int_rd";
+    name === "__bfloat162int_rd" ||
+    name === "__bfloat162short_rn" ||
+    name === "__bfloat162short_rz" ||
+    name === "__bfloat162short_ru" ||
+    name === "__bfloat162short_rd" ||
+    name === "__bfloat162char_rz";
 }
 
 function isBfloat16ToUnsignedIntegerName(name: string): boolean {
   return name === "__bfloat162uint_rn" ||
     name === "__bfloat162uint_rz" ||
     name === "__bfloat162uint_ru" ||
-    name === "__bfloat162uint_rd";
+    name === "__bfloat162uint_rd" ||
+    name === "__bfloat162ushort_rn" ||
+    name === "__bfloat162ushort_rz" ||
+    name === "__bfloat162ushort_ru" ||
+    name === "__bfloat162ushort_rd" ||
+    name === "__bfloat162uchar_rz";
 }
 
 function isBfloat16ScalarArithmeticName(name: string): boolean {

@@ -119,6 +119,9 @@ const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
   "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
   "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
   "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
+  "__bfloat162short_rn", "__bfloat162short_rz", "__bfloat162short_ru", "__bfloat162short_rd",
+  "__bfloat162ushort_rn", "__bfloat162ushort_rz", "__bfloat162ushort_ru", "__bfloat162ushort_rd",
+  "__bfloat162char_rz", "__bfloat162uchar_rz",
   "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "hexp",
   "__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat",
   "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu",
@@ -537,6 +540,16 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__bfloat162uint_rz", "bf16_to_uint_rz"],
   ["__bfloat162uint_ru", "bf16_to_uint_ru"],
   ["__bfloat162uint_rd", "bf16_to_uint_rd"],
+  ["__bfloat162short_rn", "bf16_to_short_rn"],
+  ["__bfloat162short_rz", "bf16_to_short_rz"],
+  ["__bfloat162short_ru", "bf16_to_short_ru"],
+  ["__bfloat162short_rd", "bf16_to_short_rd"],
+  ["__bfloat162ushort_rn", "bf16_to_ushort_rn"],
+  ["__bfloat162ushort_rz", "bf16_to_ushort_rz"],
+  ["__bfloat162ushort_ru", "bf16_to_ushort_ru"],
+  ["__bfloat162ushort_rd", "bf16_to_ushort_rd"],
+  ["__bfloat162char_rz", "bf16_to_char_rz"],
+  ["__bfloat162uchar_rz", "bf16_to_uchar_rz"],
   ["__clz", "clz"],
   ["__clzll", "clzll"],
   ["__ffs", "ffs"],
@@ -5690,7 +5703,14 @@ function emitSemanticMathCall(
     if (wgslCallee === "bf16_as_ushort") return `((bitcast<u32>(f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})) >> 16u) & 0xffffu)`;
     return `bitcast<f32>(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)} << 16u)`;
   }
-  if (wgslCallee.startsWith("bf16_to_int_") || wgslCallee.startsWith("bf16_to_uint_")) {
+  if (
+    wgslCallee.startsWith("bf16_to_int_") ||
+    wgslCallee.startsWith("bf16_to_uint_") ||
+    wgslCallee.startsWith("bf16_to_short_") ||
+    wgslCallee.startsWith("bf16_to_ushort_") ||
+    wgslCallee === "bf16_to_char_rz" ||
+    wgslCallee === "bf16_to_uchar_rz"
+  ) {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
     const emitted = `f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
@@ -5701,7 +5721,12 @@ function emitSemanticMathCall(
       : wgslCallee.endsWith("_ru")
       ? `ceil(${emitted})`
       : `floor(${emitted})`;
-    return wgslCallee.startsWith("bf16_to_uint_") ? `u32(max(${rounded}, 0.0))` : `i32(${rounded})`;
+    if (wgslCallee.startsWith("bf16_to_uint_")) return `u32(max(${rounded}, 0.0))`;
+    if (wgslCallee.startsWith("bf16_to_ushort_")) return `(u32(max(${rounded}, 0.0)) & 0xffffu)`;
+    if (wgslCallee === "bf16_to_uchar_rz") return `(u32(max(${rounded}, 0.0)) & 0xffu)`;
+    if (wgslCallee.startsWith("bf16_to_short_")) return `((bitcast<i32>((u32(i32(${rounded})) & 0xffffu) << 16u)) >> 16)`;
+    if (wgslCallee === "bf16_to_char_rz") return `((bitcast<i32>((u32(i32(${rounded})) & 0xffu) << 24u)) >> 24)`;
+    return `i32(${rounded})`;
   }
   if (wgslCallee === "half_abs" || wgslCallee === "half_ceil" || wgslCallee === "half_floor" || wgslCallee === "half_rcp" || wgslCallee === "half_rsqrt" || wgslCallee === "half_sqrt" || wgslCallee === "half_trunc" || wgslCallee === "half_neg" || wgslCallee === "half_exp") {
     const [value] = expression.args;

@@ -19121,14 +19121,30 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     out[15] = __bfloat162float(__ushort_as_bfloat16(0x4000u));
     bits[0] = __bfloat16_as_ushort(prn);
     bits[1] = __bfloat16_as_ushort(__ushort_as_bfloat16(0x3f80u));
+    bits[2] = __bfloat162ushort_rn(__float2bfloat16_rn(1.5f));
+    bits[3] = __bfloat162ushort_rz(__float2bfloat16_rn(1.5f));
+    bits[4] = __bfloat162ushort_ru(__float2bfloat16_rn(1.5f));
+    bits[5] = __bfloat162ushort_rd(__float2bfloat16_rn(1.5f));
+    bits[6] = __bfloat162uchar_rz(__float2bfloat16_rn(255.0f));
+    bits[7] = __bfloat162uchar_rz(__float2bfloat16_rn(257.0f));
     signedBits[0] = __bfloat16_as_short(__short_as_bfloat16(0xbf80));
+    signedBits[1] = __bfloat162short_rn(__float2bfloat16_rn(1.5f));
+    signedBits[2] = __bfloat162short_rz(__float2bfloat16_rn(1.5f));
+    signedBits[3] = __bfloat162short_ru(__float2bfloat16_rn(1.5f));
+    signedBits[4] = __bfloat162short_rd(__float2bfloat16_rn(1.5f));
+    signedBits[5] = __bfloat162short_rn(__float2bfloat16_rn(-1.5f));
+    signedBits[6] = __bfloat162short_rz(__float2bfloat16_rn(-1.5f));
+    signedBits[7] = __bfloat162short_ru(__float2bfloat16_rn(-1.5f));
+    signedBits[8] = __bfloat162short_rd(__float2bfloat16_rn(-1.5f));
+    signedBits[9] = __bfloat162char_rz(__float2bfloat16_rn(255.0f));
+    signedBits[10] = __bfloat162char_rz(__float2bfloat16_rn(129.0f));
   }
 }`, { workgroupSize: [1, 1, 1] });
     const input = {
       buffers: {
         out: new Float32Array(16),
-        bits: new Uint32Array(2),
-        signedBits: new Int32Array(1),
+        bits: new Uint32Array(8),
+        signedBits: new Int32Array(11),
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
@@ -19142,10 +19158,10 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
     expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
     expect([...result.buffers.out as Float32Array]).toEqual(expected);
     expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
-    expect([...result.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80]);
-    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80]);
-    expect([...result.buffers.signedBits as Int32Array]).toEqual([-16512]);
-    expect([...semanticResult.buffers.signedBits as Int32Array]).toEqual([-16512]);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80, 2, 1, 2, 1, 255, 0]);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80, 2, 1, 2, 1, 255, 0]);
+    expect([...result.buffers.signedBits as Int32Array]).toEqual([-16512, 2, 1, 2, 1, -2, -1, -1, -2, -1, -127]);
+    expect([...semanticResult.buffers.signedBits as Int32Array]).toEqual([-16512, 2, 1, 2, 1, -2, -1, -1, -2, -1, -127]);
   });
 
   it("lowers CUDA bf162 lane and vector conversion aliases", () => {
