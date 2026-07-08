@@ -309,6 +309,29 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Uint32Array", data: [512, ...Array.from({ length: 256 }, () => 1)] },
   },
   {
+    sourceKey: "corpusCuda120Day84ParentKernelDevicePoolDynamicLaunch",
+    caseName: "corpus:cuda-120:day84_parentKernel_device_pool_dynamic_launch",
+    corpusId: "cuda-120",
+    relativePath: "daily-updates/day-84-Progress-Checkpoint.md",
+    kernelName: "parentKernel",
+    workgroupSize: [1, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    input: {
+      buffers: {
+        output: { type: "Float32Array", length: 4 },
+      },
+      memoryPools: {
+        dp: { data: { type: "Uint32Array", length: 256 }, offset: { type: "Uint32Array", data: [0] } },
+      },
+      scalars: { N: 4 },
+      readback: ["output", "dp_offset"],
+    },
+    output: "output",
+    offsetOutput: "dp_offset",
+    expectedOffset: 1024,
+    expectedOutput: { type: "Float32Array", data: [1, 1, 1, 1] },
+  },
+  {
     sourceKey: "corpusCudaSamplesVectorAdd",
     caseName: "corpus:cuda-samples:vectorAdd",
     corpusId: "cuda-samples",
