@@ -129,10 +129,10 @@ const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
   "__hisnan2", "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2", "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
   "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
-  "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
+  "__half22float2", "__uint_as_half2", "__halves2half2", "__half2half2", "__low2half2", "__high2half2", "__lows2half2", "__highs2half2", "__lowhigh2highlow", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
-  "__half2_as_uint", "__low2float", "__high2float",
+  "__half2_as_uint", "__low2half", "__high2half", "__low2float", "__high2float",
   "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
   "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
 ]);
@@ -862,9 +862,19 @@ function semanticReferenceHalf2CallSupported(
   if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat") {
     return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
-  if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2float" || name === "__high2float") {
+  if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2half" || name === "__high2half" || name === "__low2float" || name === "__high2float" || name === "__low2half2" || name === "__high2half2" || name === "__lowhigh2highlow") {
     const [arg] = expression.args;
     return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled);
+  }
+  if (name === "__halves2half2") {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  }
+  if (name === "__half2half2") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticReferenceExpressionSupported(arg, "scalar", compiled);
+  }
+  if (name === "__lows2half2" || name === "__highs2half2") {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
   if (name === "__uint_as_half2") {
     const [arg] = expression.args;
@@ -3577,8 +3587,27 @@ function evalSemanticHalf2Call(
     const bits = Math.trunc(scalarArg(0)) >>> 0;
     return [float16BitsToFloat32(bits & 0xffff), float16BitsToFloat32(bits >>> 16)];
   }
+  if (name === "__low2half") return roundSemanticHalf(half2Arg(0)[0] ?? 0);
+  if (name === "__high2half") return roundSemanticHalf(half2Arg(0)[1] ?? 0);
   if (name === "__low2float") return half2Arg(0)[0] ?? 0;
   if (name === "__high2float") return half2Arg(0)[1] ?? 0;
+  if (name === "__halves2half2") return [roundSemanticHalf(scalarArg(0)), roundSemanticHalf(scalarArg(1))];
+  if (name === "__half2half2") {
+    const value = roundSemanticHalf(scalarArg(0));
+    return [value, value];
+  }
+  if (name === "__low2half2" || name === "__high2half2") {
+    const value = roundSemanticHalf(half2Arg(0)[name === "__low2half2" ? 0 : 1] ?? 0);
+    return [value, value];
+  }
+  if (name === "__lows2half2" || name === "__highs2half2") {
+    const lane = name === "__lows2half2" ? 0 : 1;
+    return [roundSemanticHalf(half2Arg(0)[lane] ?? 0), roundSemanticHalf(half2Arg(1)[lane] ?? 0)];
+  }
+  if (name === "__lowhigh2highlow") {
+    const value = half2Arg(0);
+    return [roundSemanticHalf(value[1] ?? 0), roundSemanticHalf(value[0] ?? 0)];
+  }
   if (name === "__float2half2_rn") {
     const value = roundSemanticHalf(scalarArg(0));
     return [value, value];

@@ -2530,6 +2530,8 @@ function semanticIntrinsicReturnType(name: string | undefined, args: readonly Se
     name === "__hequ2_mask" || name === "__hneu2_mask" || name === "__hgtu2_mask" || name === "__hgeu2_mask" || name === "__hltu2_mask" || name === "__hleu2_mask") return "uint";
   if (name === "__hbeq2" || name === "__hbne2" || name === "__hbgt2" || name === "__hbge2" || name === "__hblt2" || name === "__hble2" ||
     name === "__hbequ2" || name === "__hbneu2" || name === "__hbgtu2" || name === "__hbgeu2" || name === "__hbltu2" || name === "__hbleu2") return "bool";
+  if (name === "__low2half" || name === "__high2half") return "half";
+  if (name === "__halves2half2" || name === "__half2half2" || name === "__low2half2" || name === "__high2half2" || name === "__lows2half2" || name === "__highs2half2" || name === "__lowhigh2highlow") return "half2";
   void args;
   return undefined;
 }

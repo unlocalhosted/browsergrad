@@ -2739,6 +2739,39 @@ __global__ void halfUnordered(const half* input, half* output, int* flags) {
     expect([...actual.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, -1]);
   });
 
+  it("runs half2 lane extraction and packing helpers through f32 compatibility mode on real WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half2LaneHelpers(const half2 *input, half2 *out, half *scalar) {
+  half2 x = input[0];
+  half2 y = input[1];
+  half lo = __low2half(x);
+  half hi = __high2half(x);
+  scalar[0] = lo;
+  scalar[1] = hi;
+  out[0] = __halves2half2(hi, lo);
+  out[1] = __half2half2(lo);
+  out[2] = __low2half2(x);
+  out[3] = __high2half2(x);
+  out[4] = __lows2half2(x, y);
+  out[5] = __highs2half2(x, y);
+  out[6] = __lowhigh2highlow(x);
+}`, { workgroupSize: [1, 1, 1], f16Mode: "f32" });
+    const input = {
+      buffers: {
+        input: new Float32Array([1, 2, 3, 4]),
+        out: new Float32Array(14),
+        scalar: new Float32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...actual.buffers.scalar as Float32Array]).toEqual([1, 2]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([2, 1, 1, 1, 1, 1, 2, 2, 1, 3, 2, 4, 2, 1]);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });

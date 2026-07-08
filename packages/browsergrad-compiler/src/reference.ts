@@ -3479,6 +3479,32 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     return value.lanes[name === "__low2float" ? 0 : 1] ?? 0;
   }
+  if (name === "__low2half" || name === "__high2half") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    return roundHalf(value.lanes[name === "__low2half" ? 0 : 1] ?? 0);
+  }
+  if (name === "__halves2half2") {
+    return { kind: "cuda-vector", valueType: "half2", lanes: [roundHalf(evalNumber(expression.args[0]!, context)), roundHalf(evalNumber(expression.args[1]!, context))] };
+  }
+  if (name === "__half2half2") {
+    const value = roundHalf(evalNumber(expression.args[0]!, context));
+    return { kind: "cuda-vector", valueType: "half2", lanes: [value, value] };
+  }
+  if (name === "__low2half2" || name === "__high2half2") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    const lane = roundHalf(value.lanes[name === "__low2half2" ? 0 : 1] ?? 0);
+    return { kind: "cuda-vector", valueType: "half2", lanes: [lane, lane] };
+  }
+  if (name === "__lows2half2" || name === "__highs2half2") {
+    const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
+    const lane = name === "__lows2half2" ? 0 : 1;
+    return { kind: "cuda-vector", valueType: "half2", lanes: [roundHalf(left.lanes[lane] ?? 0), roundHalf(right.lanes[lane] ?? 0)] };
+  }
+  if (name === "__lowhigh2highlow") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    return { kind: "cuda-vector", valueType: "half2", lanes: [roundHalf(value.lanes[1] ?? 0), roundHalf(value.lanes[0] ?? 0)] };
+  }
   if (name === "__float22half2_rn") {
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "float2");
     return { kind: "cuda-vector", valueType: "half2", lanes: value.lanes.map((lane) => roundHalf(lane ?? 0)) };

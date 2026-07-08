@@ -110,10 +110,10 @@ const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
   "__hisnan2", "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2", "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
   "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
-  "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
+  "__half22float2", "__uint_as_half2", "__halves2half2", "__half2half2", "__low2half2", "__high2half2", "__lows2half2", "__highs2half2", "__lowhigh2highlow", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
-  "__half2_as_uint", "__low2float", "__high2float",
+  "__half2_as_uint", "__low2half", "__high2half", "__low2float", "__high2float",
   "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask", "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
   "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
 ]);
@@ -1758,9 +1758,19 @@ function semanticWgslHalf2CallSupported(
   if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat") {
     return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
   }
-  if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2float" || name === "__high2float") {
+  if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2half" || name === "__high2half" || name === "__low2float" || name === "__high2float" || name === "__low2half2" || name === "__high2half2" || name === "__lowhigh2highlow") {
     const [arg] = expression.args;
     return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir);
+  }
+  if (name === "__halves2half2") {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  }
+  if (name === "__half2half2") {
+    const [arg] = expression.args;
+    return expression.args.length === 1 && arg !== undefined && semanticWgslExpressionSupported(arg, "scalar", ir);
+  }
+  if (name === "__lows2half2" || name === "__highs2half2") {
+    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
   }
   if (name === "__uint_as_half2") {
     const [arg] = expression.args;
@@ -4568,10 +4578,44 @@ function emitSemanticHalf2Call(
     if (!arg) throw semanticWgslError(`${name} expects one uint operand`, expression.span);
     return `vec2<f16>(unpack2x16float(${emitSemanticExpressionAs(arg, ir, names, "u32", options, textureSpecializations)}))`;
   }
+  if (name === "__low2half" || name === "__high2half") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
+    return `(${emitHalf2(arg)}).${name === "__low2half" ? "x" : "y"}`;
+  }
   if (name === "__low2float" || name === "__high2float") {
     const [arg] = expression.args;
     if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
     return `f32((${emitHalf2(arg)}).${name === "__low2float" ? "x" : "y"})`;
+  }
+  if (name === "__halves2half2") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two half operands`, expression.span);
+    return `vec2<f16>(${emitSemanticExpressionAs(left, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(right, ir, names, "f16", options, textureSpecializations)})`;
+  }
+  if (name === "__half2half2") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half operand`, expression.span);
+    const emitted = emitSemanticExpressionAs(arg, ir, names, "f16", options, textureSpecializations);
+    return `vec2<f16>(${emitted}, ${emitted})`;
+  }
+  if (name === "__low2half2" || name === "__high2half2") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
+    const emitted = `(${emitHalf2(arg)}).${name === "__low2half2" ? "x" : "y"}`;
+    return `vec2<f16>(${emitted}, ${emitted})`;
+  }
+  if (name === "__lows2half2" || name === "__highs2half2") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${name} expects two half2 operands`, expression.span);
+    const lane = name === "__lows2half2" ? "x" : "y";
+    return `vec2<f16>((${emitHalf2(left)}).${lane}, (${emitHalf2(right)}).${lane})`;
+  }
+  if (name === "__lowhigh2highlow") {
+    const [arg] = expression.args;
+    if (!arg) throw semanticWgslError(`${name} expects one half2 operand`, expression.span);
+    const emitted = emitHalf2(arg);
+    return `vec2<f16>((${emitted}).y, (${emitted}).x)`;
   }
   if (name === "__float2half2_rn") {
     const [arg] = expression.args;
@@ -6903,6 +6947,7 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
     case "call": {
       if (expression.callee.kind === "symbol") {
         if (expression.callee.name === "__half2_as_uint") return "u32";
+        if (expression.callee.name === "__low2half" || expression.callee.name === "__high2half") return "f16";
         if (expression.callee.name === "__low2float" || expression.callee.name === "__high2float") return "f32";
         if (expression.callee.name === "__bfloat162_as_uint" || expression.callee.name === "__nv_bfloat162_as_uint") return "u32";
         const mathCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);

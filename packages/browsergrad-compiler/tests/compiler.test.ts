@@ -10283,6 +10283,44 @@ __global__ void half2MinMaxNan(const half2 *a, const half2 *b, half2 *out, half2
     expect(Array.from(semanticResult.buffers.nanFlags as Iterable<number>)).toEqual([1, 1, 1, 1]);
   });
 
+  it("lowers CUDA half2 lane extraction and packing helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half2LaneHelpers(const half2 *input, half2 *out, half *scalar) {
+  half2 x = input[0];
+  half2 y = input[1];
+  half lo = __low2half(x);
+  half hi = __high2half(x);
+  scalar[0] = lo;
+  scalar[1] = hi;
+  out[0] = __halves2half2(hi, lo);
+  out[1] = __half2half2(lo);
+  out[2] = __low2half2(x);
+  out[3] = __high2half2(x);
+  out[4] = __lows2half2(x, y);
+  out[5] = __highs2half2(x, y);
+  out[6] = __lowhigh2highlow(x);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        input: createWgslFloat16Array([1, 2, 3, 4]),
+        out: createWgslFloat16Array(14),
+        scalar: createWgslFloat16Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const expectedOut = [2, 1, 1, 1, 1, 1, 2, 2, 1, 3, 2, 4, 2, 1];
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(Array.from(result.buffers.scalar as Iterable<number>)).toEqual([1, 2]);
+    expect(Array.from(result.buffers.out as Iterable<number>)).toEqual(expectedOut);
+    expect(Array.from(semanticResult.buffers.scalar as Iterable<number>)).toEqual([1, 2]);
+    expect(Array.from(semanticResult.buffers.out as Iterable<number>)).toEqual(expectedOut);
+  });
+
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void intrinsic_pack(half2 *h, float2 *f, float *out, uint *bits) {
