@@ -97,7 +97,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
   "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
   "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
-  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vabsdiffu2", "__vavgu2", "__vadd4", "__vsub4", "__vabsdiffu4", "__vavgu4", "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
+  "__sad", "__usad", "__usad4", "__vadd2", "__vsub2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vavgu2", "__vadd4", "__vsub4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vavgu4", "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -2425,10 +2425,14 @@ function evalSemanticMathCall(
     case "__usad4": return u8x4SadAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
     case "__vadd2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
+    case "__vaddus2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.min(0xffff, a + b));
+    case "__vsubus2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.max(0, a - b));
     case "__vabsdiffu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
     case "__vavgu2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__vadd4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
+    case "__vaddus4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.min(0xff, a + b));
+    case "__vsubus4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.max(0, a - b));
     case "__vabsdiffu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => Math.abs(a - b));
     case "__vavgu4": return u8x4Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => (a + b + 1) >> 1);
     case "__dp4a": return expression.valueType === "uint"
@@ -3315,10 +3319,14 @@ function semanticMathCallArity(name: string): number {
     name === "__hadd" ||
     name === "__vadd2" ||
     name === "__vsub2" ||
+    name === "__vaddus2" ||
+    name === "__vsubus2" ||
     name === "__vabsdiffu2" ||
     name === "__vavgu2" ||
     name === "__vadd4" ||
     name === "__vsub4" ||
+    name === "__vaddus4" ||
+    name === "__vsubus4" ||
     name === "__vabsdiffu4" ||
     name === "__vavgu4" ||
     name === "UMUL" ||

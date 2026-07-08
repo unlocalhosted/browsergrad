@@ -414,10 +414,14 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__usad4", "usad4"],
   ["__vadd2", "vadd2"],
   ["__vsub2", "vsub2"],
+  ["__vaddus2", "vaddus2"],
+  ["__vsubus2", "vsubus2"],
   ["__vabsdiffu2", "vabsdiffu2"],
   ["__vavgu2", "vavgu2"],
   ["__vadd4", "vadd4"],
   ["__vsub4", "vsub4"],
+  ["__vaddus4", "vaddus4"],
+  ["__vsubus4", "vsubus4"],
   ["__vabsdiffu4", "vabsdiffu4"],
   ["__vavgu4", "vavgu4"],
   ["__dp4a", "dp4a"],
@@ -3539,6 +3543,24 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "  }",
     "  return out;",
     "}",
+    "fn bg_semantic_vaddus2_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 16u) {",
+    "    let left = (a >> shift) & 0xffffu;",
+    "    let right = (b >> shift) & 0xffffu;",
+    "    out = out | (min(0xffffu, left + right) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vsubus2_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 16u) {",
+    "    let left = (a >> shift) & 0xffffu;",
+    "    let right = (b >> shift) & 0xffffu;",
+    "    out = out | (select(0u, left - right, left >= right) << shift);",
+    "  }",
+    "  return out;",
+    "}",
     "fn bg_semantic_vabsdiffu2_u32(a: u32, b: u32) -> u32 {",
     "  var out = 0u;",
     "  for (var shift = 0u; shift < 32u; shift = shift + 16u) {",
@@ -3572,6 +3594,24 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "    let left = (a >> shift) & 0xffu;",
     "    let right = (b >> shift) & 0xffu;",
     "    out = out | (((left - right) & 0xffu) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vaddus4_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left = (a >> shift) & 0xffu;",
+    "    let right = (b >> shift) & 0xffu;",
+    "    out = out | (min(0xffu, left + right) << shift);",
+    "  }",
+    "  return out;",
+    "}",
+    "fn bg_semantic_vsubus4_u32(a: u32, b: u32) -> u32 {",
+    "  var out = 0u;",
+    "  for (var shift = 0u; shift < 32u; shift = shift + 8u) {",
+    "    let left = (a >> shift) & 0xffu;",
+    "    let right = (b >> shift) & 0xffu;",
+    "    out = out | (select(0u, left - right, left >= right) << shift);",
     "  }",
     "  return out;",
     "}",
@@ -4272,7 +4312,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "uhadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
     return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u) + ((${lhs} ^ ${rhs}) & 1u))`;
   }
-  if (wgslCallee === "vadd2" || wgslCallee === "vsub2" || wgslCallee === "vabsdiffu2" || wgslCallee === "vavgu2" || wgslCallee === "vadd4" || wgslCallee === "vsub4" || wgslCallee === "vabsdiffu4" || wgslCallee === "vavgu4") {
+  if (wgslCallee === "vadd2" || wgslCallee === "vsub2" || wgslCallee === "vaddus2" || wgslCallee === "vsubus2" || wgslCallee === "vabsdiffu2" || wgslCallee === "vavgu2" || wgslCallee === "vadd4" || wgslCallee === "vsub4" || wgslCallee === "vaddus4" || wgslCallee === "vsubus4" || wgslCallee === "vabsdiffu4" || wgslCallee === "vavgu4") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     const lhs = emitSemanticExpressionAs(left, ir, names, "u32", options, textureSpecializations);
@@ -4627,10 +4667,14 @@ function semanticMathCallArity(name: string): number {
     name === "__hadd" ||
     name === "__vadd2" ||
     name === "__vsub2" ||
+    name === "__vaddus2" ||
+    name === "__vsubus2" ||
     name === "__vabsdiffu2" ||
     name === "__vavgu2" ||
     name === "__vadd4" ||
     name === "__vsub4" ||
+    name === "__vaddus4" ||
+    name === "__vsubus4" ||
     name === "__vabsdiffu4" ||
     name === "__vavgu4" ||
     name === "UMUL" ||
