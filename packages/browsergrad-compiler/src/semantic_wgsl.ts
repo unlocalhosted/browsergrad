@@ -107,7 +107,7 @@ const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 const SEMANTIC_FP8_CALLS = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
-  "__hadd2", "__hsub2", "__hmul2", "__hfma2", "__hmin2", "__hmax2",
+  "__hadd2", "__hadd2_rn", "__hsub2", "__hsub2_rn", "__hmul2", "__hmul2_rn", "__hfma2", "__hfma2_rn", "__hmin2", "__hmax2",
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
@@ -362,10 +362,15 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__nv_cvt_float_to_fp8", "float_to_fp8"],
   ["hrsqrt", "half_rsqrt"],
   ["__hneg", "half_neg"],
+  ["__hadd_rn", "half_add"],
   ["__hsub", "half_sub"],
+  ["__hsub_rn", "half_sub"],
   ["__hmul", "half_mul"],
+  ["__hmul_rn", "half_mul"],
   ["__hdiv", "half_div"],
+  ["__hdiv_rn", "half_div"],
   ["__hfma", "half_fma"],
+  ["__hfma_rn", "half_fma"],
   ["hexp", "half_exp"],
   ["__hmin", "half_min"],
   ["__hmax", "half_max"],
@@ -1713,10 +1718,10 @@ function semanticWgslHalf2CallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const name = expression.callee.name;
   if (!SEMANTIC_HALF2_VECTOR_CALLS.has(name) && !SEMANTIC_HALF2_SCALAR_CALLS.has(name)) return false;
-  if (name === "__hadd2" || name === "__hsub2" || name === "__hmul2" || name === "__hmin2" || name === "__hmax2") {
+  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmin2" || name === "__hmax2") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
   }
-  if (name === "__hfma2") {
+  if (name === "__hfma2" || name === "__hfma2_rn") {
     return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg, ir) === "half2" && semanticWgslExpressionSupported(arg, "any", ir));
   }
   if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2float" || name === "__high2float") {
@@ -4477,10 +4482,10 @@ function emitSemanticHalf2Call(
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL half2 call requires symbol callee", expression.span);
   const name = expression.callee.name;
   const emitHalf2 = (arg: SemanticExpression): string => emitSemanticExpression(arg, ir, names, options, textureSpecializations);
-  if (name === "__hadd2" || name === "__hsub2" || name === "__hmul2") {
+  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hmul2" || name === "__hmul2_rn") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${name} expects two half2 operands`, expression.span);
-    const operator = name === "__hadd2" ? "+" : name === "__hsub2" ? "-" : "*";
+    const operator = name === "__hadd2" || name === "__hadd2_rn" ? "+" : name === "__hsub2" || name === "__hsub2_rn" ? "-" : "*";
     return `(${emitHalf2(left)} ${operator} ${emitHalf2(right)})`;
   }
   if (name === "__hmin2" || name === "__hmax2") {
@@ -4488,7 +4493,7 @@ function emitSemanticHalf2Call(
     if (!left || !right) throw semanticWgslError(`${name} expects two half2 operands`, expression.span);
     return `${name === "__hmin2" ? "min" : "max"}(${emitHalf2(left)}, ${emitHalf2(right)})`;
   }
-  if (name === "__hfma2") {
+  if (name === "__hfma2" || name === "__hfma2_rn") {
     const [left, right, addend] = expression.args;
     if (!left || !right || !addend) throw semanticWgslError(`${name} expects three half2 operands`, expression.span);
     return `fma(${emitHalf2(left)}, ${emitHalf2(right)}, ${emitHalf2(addend)})`;
@@ -5097,12 +5102,13 @@ function emitSemanticMathCall(
     }
     return `fma(${emitSemanticExpressionAs(first, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(second, ir, names, "f16", options, textureSpecializations)}, ${emitSemanticExpressionAs(third, ir, names, "f16", options, textureSpecializations)})`;
   }
-  if (wgslCallee === "half_sub" || wgslCallee === "half_mul" || wgslCallee === "half_div" || wgslCallee === "half_min" || wgslCallee === "half_max" || wgslCallee === "half_eq" || wgslCallee === "half_ne" || wgslCallee === "half_gt" || wgslCallee === "half_ge" || wgslCallee === "half_lt" || wgslCallee === "half_le") {
+  if (wgslCallee === "half_add" || wgslCallee === "half_sub" || wgslCallee === "half_mul" || wgslCallee === "half_div" || wgslCallee === "half_min" || wgslCallee === "half_max" || wgslCallee === "half_eq" || wgslCallee === "half_ne" || wgslCallee === "half_gt" || wgslCallee === "half_ge" || wgslCallee === "half_lt" || wgslCallee === "half_le") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     if (expression.valueType === "bf16") {
       const lhs = emitSemanticExpressionAs(left, ir, names, "f32", options, textureSpecializations);
       const rhs = emitSemanticExpressionAs(right, ir, names, "f32", options, textureSpecializations);
+      if (wgslCallee === "half_add") return wgslRoundBfloat16(`(${lhs} + ${rhs})`);
       if (wgslCallee === "half_sub") return wgslRoundBfloat16(`(${lhs} - ${rhs})`);
       if (wgslCallee === "half_mul") return wgslRoundBfloat16(`(${lhs} * ${rhs})`);
       if (wgslCallee === "half_div") return wgslRoundBfloat16(`(${lhs} / ${rhs})`);
@@ -5111,6 +5117,7 @@ function emitSemanticMathCall(
     }
     const lhs = emitSemanticExpressionAs(left, ir, names, "f16", options, textureSpecializations);
     const rhs = emitSemanticExpressionAs(right, ir, names, "f16", options, textureSpecializations);
+    if (wgslCallee === "half_add") return `(${lhs} + ${rhs})`;
     if (wgslCallee === "half_sub") return `(${lhs} - ${rhs})`;
     if (wgslCallee === "half_mul") return `(${lhs} * ${rhs})`;
     if (wgslCallee === "half_div") return `(${lhs} / ${rhs})`;
@@ -5725,9 +5732,13 @@ function semanticMathCallArity(name: string): number {
     name === "__fsub_rn" ||
     name === "__fmul_rn" ||
     name === "__fdiv_rn" ||
+    name === "__hadd_rn" ||
     name === "__hsub" ||
+    name === "__hsub_rn" ||
     name === "__hmul" ||
+    name === "__hmul_rn" ||
     name === "__hdiv" ||
+    name === "__hdiv_rn" ||
     name === "__hmin" ||
     name === "__hmax" ||
     name === "__heq" ||
@@ -5876,6 +5887,7 @@ function semanticMathCallArity(name: string): number {
       name === "fmaf" ||
       name === "__fmaf_rn" ||
       name === "__hfma" ||
+      name === "__hfma_rn" ||
       name === "lerp" ||
       name === "norm3df" ||
       name === "rnorm3df" ||
@@ -6730,6 +6742,7 @@ function semanticMathCallReturnsHalf(callee: string): boolean {
     callee === "fp8_to_half" ||
     callee === "half_rsqrt" ||
     callee === "half_neg" ||
+    callee === "half_add" ||
     callee === "half_sub" ||
     callee === "half_mul" ||
     callee === "half_div" ||

@@ -3417,7 +3417,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (isHalf2Intrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
-    const addend = name === "__hfma2"
+    const addend = name === "__hfma2" || name === "__hfma2_rn"
       ? valueAsCudaVector(evalExpression(expression.args[2]!, context), "half2")
       : undefined;
     const op = half2IntrinsicOperator(name);
@@ -3601,9 +3601,13 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
 
 function isHalf2Intrinsic(name: string | undefined): boolean {
   return name === "__hadd2" ||
+    name === "__hadd2_rn" ||
     name === "__hsub2" ||
+    name === "__hsub2_rn" ||
     name === "__hmul2" ||
+    name === "__hmul2_rn" ||
     name === "__hfma2" ||
+    name === "__hfma2_rn" ||
     name === "__hmin2" ||
     name === "__hmax2";
 }
@@ -3667,11 +3671,15 @@ function signExtend16(value: number): number {
 function half2IntrinsicOperator(name: string | undefined): (left: number, right: number) => number {
   switch (name) {
     case "__hadd2":
+    case "__hadd2_rn":
       return (left, right) => left + right;
     case "__hsub2":
+    case "__hsub2_rn":
       return (left, right) => left - right;
     case "__hmul2":
     case "__hfma2":
+    case "__hmul2_rn":
+    case "__hfma2_rn":
       return (left, right) => left * right;
     case "__hmin2":
       return Math.min;

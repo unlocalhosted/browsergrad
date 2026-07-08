@@ -10050,12 +10050,13 @@ __global__ void half2PtrAssign(half2 *x) {
   it("lowers CUDA half2 arithmetic intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out, float *scalar) {
-  half2 sum = __hadd2(x[0], y[0]);
-  half2 prod = __hmul2(sum, make_half2(__float2half(2.0f), __float2half(0.5f)));
+  half2 sum = __hadd2_rn(x[0], y[0]);
+  half2 back = __hsub2_rn(sum, y[0]);
+  half2 prod = __hmul2_rn(sum, make_half2(__float2half(2.0f), __float2half(0.5f)));
   out[0] = __hmax2(prod, make_half2(__float2half(5.0f), __float2half(5.0f)));
-  half2 fused = __hfma2(x[0], y[0], make_half2(__float2half(1.0f), __float2half(2.0f)));
+  half2 fused = __hfma2_rn(back, y[0], make_half2(__float2half(1.0f), __float2half(2.0f)));
   out[1] = x[0] * y[0] + fused;
-  scalar[0] = __low2float(fused) + __high2float(fused);
+  scalar[0] = __low2float(fused) + __high2float(fused) + __low2float(back);
 }`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
@@ -10088,9 +10089,9 @@ __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out, float *scal
     expect(compiled.wgsl).toContain("max(");
     expect(compiled.wgsl).toContain("fma(");
     expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([6, 6, 5, 66]);
-    expect([...result.buffers.scalar as Float32Array]).toEqual([37]);
+    expect([...result.buffers.scalar as Float32Array]).toEqual([38]);
     expect(Array.from(semanticResult.buffers.out as ArrayLike<number>)).toEqual([6, 6, 5, 66]);
-    expect([...semanticResult.buffers.scalar as Float32Array]).toEqual([37]);
+    expect([...semanticResult.buffers.scalar as Float32Array]).toEqual([38]);
   });
 
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
@@ -18644,12 +18645,12 @@ __global__ void half_ops(const __half* input, half* output, int* flags) {
   if (idx < 1) {
     half a = input[0];
     half b = input[1];
-    half sum = __hadd(a, b);
-    half diff = __hsub(sum, __float2half(0.5f));
-    half prod = __hmul(diff, __float2half(2.0f));
-    half quot = __hdiv(prod, __float2half(2.0f));
+    half sum = __hadd_rn(a, b);
+    half diff = __hsub_rn(sum, __float2half(0.5f));
+    half prod = __hmul_rn(diff, __float2half(2.0f));
+    half quot = __hdiv_rn(prod, __float2half(2.0f));
     half neg = __hneg(quot);
-    half mixed = __hfma(neg, __float2half(-1.0f), __float2half(0.25f));
+    half mixed = __hfma_rn(neg, __float2half(-1.0f), __float2half(0.25f));
     half one = hexp(__float2half(0.0f));
     half capped = __hmax(__hmin(mixed, __float2half(3.0f)), one);
     output[0] = capped;

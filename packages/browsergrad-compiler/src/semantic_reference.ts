@@ -87,7 +87,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
   "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
   "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
-  "hrsqrt", "__hneg", "__hsub", "__hmul", "__hdiv", "__hfma", "hexp", "__hmin", "__hmax",
+  "hrsqrt", "__hneg", "__hadd_rn", "__hsub", "__hsub_rn", "__hmul", "__hmul_rn", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "hexp", "__hmin", "__hmax",
   "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle",
   "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__int2bfloat16_rn", "__uint2bfloat16_rn",
   "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__ushort_as_bfloat16",
@@ -126,7 +126,7 @@ const SEMANTIC_MATH_CALLS = new Set([
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
-  "__hadd2", "__hsub2", "__hmul2", "__hfma2", "__hmin2", "__hmax2",
+  "__hadd2", "__hadd2_rn", "__hsub2", "__hsub2_rn", "__hmul2", "__hmul2_rn", "__hfma2", "__hfma2_rn", "__hmin2", "__hmax2",
   "__half22float2", "__uint_as_half2", "__float22half2_rn", "__float2half2_rn", "__floats2half2_rn",
 ]);
 const SEMANTIC_HALF2_SCALAR_CALLS = new Set(["__half2_as_uint", "__low2float", "__high2float"]);
@@ -843,10 +843,10 @@ function semanticReferenceHalf2CallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const name = expression.callee.name;
   if (!SEMANTIC_HALF2_VECTOR_CALLS.has(name) && !SEMANTIC_HALF2_SCALAR_CALLS.has(name)) return false;
-  if (name === "__hadd2" || name === "__hsub2" || name === "__hmul2" || name === "__hmin2" || name === "__hmax2") {
+  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmin2" || name === "__hmax2") {
     return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
-  if (name === "__hfma2") {
+  if (name === "__hfma2" || name === "__hfma2_rn") {
     return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
   }
   if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2float" || name === "__high2float") {
@@ -2514,16 +2514,21 @@ function evalSemanticMathCall(
     case "__nv_cvt_float_to_fp8": return semanticFloat32ToFp8(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
     case "hrsqrt": return roundSemanticHalf(1 / Math.sqrt(args[0] ?? 0));
     case "__hneg": return roundSemanticHalf(-(args[0] ?? 0));
-    case "__hsub": return expression.valueType === "bf16"
+    case "__hadd_rn": return roundSemanticHalf((args[0] ?? 0) + (args[1] ?? 0));
+    case "__hsub":
+    case "__hsub_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) - (args[1] ?? 0))
       : roundSemanticHalf((args[0] ?? 0) - (args[1] ?? 0));
-    case "__hmul": return expression.valueType === "bf16"
+    case "__hmul":
+    case "__hmul_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0))
       : roundSemanticHalf((args[0] ?? 0) * (args[1] ?? 0));
-    case "__hdiv": return expression.valueType === "bf16"
+    case "__hdiv":
+    case "__hdiv_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) / (args[1] ?? 0))
       : roundSemanticHalf((args[0] ?? 0) / (args[1] ?? 0));
-    case "__hfma": return expression.valueType === "bf16"
+    case "__hfma":
+    case "__hfma_rn": return expression.valueType === "bf16"
       ? roundSemanticBfloat16((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0))
       : roundSemanticHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0));
     case "hexp": return roundSemanticHalf(Math.exp(args[0] ?? 0));
@@ -3471,20 +3476,20 @@ function evalSemanticHalf2Call(
     if (!arg) throw semanticReferenceError(`${name} missing scalar operand`, expression.span);
     return evalNumber(arg, context);
   };
-  if (name === "__hadd2" || name === "__hsub2" || name === "__hmul2" || name === "__hmin2" || name === "__hmax2") {
+  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmin2" || name === "__hmax2") {
     const left = half2Arg(0);
     const right = half2Arg(1);
     return [0, 1].map((lane) => {
       const lhs = left[lane] ?? 0;
       const rhs = right[lane] ?? 0;
-      if (name === "__hadd2") return roundSemanticHalf(lhs + rhs);
-      if (name === "__hsub2") return roundSemanticHalf(lhs - rhs);
-      if (name === "__hmul2") return roundSemanticHalf(lhs * rhs);
+      if (name === "__hadd2" || name === "__hadd2_rn") return roundSemanticHalf(lhs + rhs);
+      if (name === "__hsub2" || name === "__hsub2_rn") return roundSemanticHalf(lhs - rhs);
+      if (name === "__hmul2" || name === "__hmul2_rn") return roundSemanticHalf(lhs * rhs);
       if (name === "__hmin2") return roundSemanticHalf(Math.min(lhs, rhs));
       return roundSemanticHalf(Math.max(lhs, rhs));
     });
   }
-  if (name === "__hfma2") {
+  if (name === "__hfma2" || name === "__hfma2_rn") {
     const left = half2Arg(0);
     const right = half2Arg(1);
     const addend = half2Arg(2);
@@ -3722,9 +3727,13 @@ function semanticMathCallArity(name: string): number {
     name === "__fsub_rn" ||
     name === "__fmul_rn" ||
     name === "__fdiv_rn" ||
+    name === "__hadd_rn" ||
     name === "__hsub" ||
+    name === "__hsub_rn" ||
     name === "__hmul" ||
+    name === "__hmul_rn" ||
     name === "__hdiv" ||
+    name === "__hdiv_rn" ||
     name === "__hmin" ||
     name === "__hmax" ||
     name === "__heq" ||
@@ -3873,6 +3882,7 @@ function semanticMathCallArity(name: string): number {
       name === "fmaf" ||
       name === "__fmaf_rn" ||
       name === "__hfma" ||
+      name === "__hfma_rn" ||
       name === "lerp" ||
       name === "norm3df" ||
       name === "rnorm3df" ||

@@ -509,7 +509,7 @@ __global__ void boolPointer(bool *flags, int *out) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
-    expect(compiled.wgsl).toContain("fn bg_ptr_write_bool");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
     expect([...actual.buffers.flags as Uint32Array]).toEqual([...expected.buffers.flags as Uint32Array]);
     expect([...actual.buffers.out as Int32Array]).toEqual([1, 0]);
@@ -2194,7 +2194,7 @@ __global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
-    expect(compiled.wgsl).toContain("fn bg_surf2dread_surf");
+    expect(compiled.wgsl).toContain("fn bg_sem_surf2dread_surf");
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([9, 3]);
   });
@@ -2399,8 +2399,9 @@ __global__ void wmma_toy(float* A, float* B, float* C) {
     const source = `
 __global__ void halfCompat(half* x, half2* y, half a) {
   if (threadIdx.x < 1) {
-    x[0] = __float2half(__half2float(x[0]) + __half2float(a));
-    y[0] = __hadd2(y[0], __floats2half2_rn(1.0f, 2.0f));
+    x[0] = __hadd_rn(x[0], a);
+    half2 sum = __hadd2_rn(y[0], __floats2half2_rn(1.0f, 2.0f));
+    y[0] = __hsub2_rn(sum, __floats2half2_rn(0.0f, 0.0f));
   }
 }`;
     const compiled = compileCudaLiteKernel(source, {
@@ -2428,8 +2429,9 @@ __global__ void halfCompat(half* x, half2* y, half a) {
     const source = `
 __global__ void halfCompat(half* x, half2* y, half a) {
   if (threadIdx.x < 1) {
-    x[0] = __float2half(__half2float(x[0]) + __half2float(a));
-    y[0] = __hadd2(y[0], __floats2half2_rn(1.0f, 2.0f));
+    x[0] = __hadd_rn(x[0], a);
+    half2 sum = __hadd2_rn(y[0], __floats2half2_rn(1.0f, 2.0f));
+    y[0] = __hsub2_rn(sum, __floats2half2_rn(0.0f, 0.0f));
   }
 }`;
     const compiled = compileCudaLiteKernel(source, {
@@ -2505,7 +2507,7 @@ __global__ void doubleCompat(double* result, double* out, double a) {
 __global__ void half_inc(half* x) {
   if (threadIdx.x < 1) {
     half one = hexp(__float2half(0.0));
-    half scaled = __hfma(x[0], __float2half(1.0), one);
+    half scaled = __hfma_rn(x[0], __float2half(1.0), one);
     x[0] = __hmax(__hmin(scaled, __float2half(4.0)), one);
   }
 }`;
@@ -2532,7 +2534,8 @@ __global__ void half2_add(const half2* x, half2* y) {
   int i = threadIdx.x;
   half2 value = x[i];
   half2 bias = {__float2half(1.0f), __float2half(2.0f)};
-  y[i] = make_half2(value.x + bias.x, value.y + bias.y);
+  half2 sum = __hadd2_rn(value, bias);
+  y[i] = __hfma2_rn(sum, __floats2half2_rn(1.0f, 1.0f), __floats2half2_rn(0.0f, 0.0f));
 }`;
     const compiled = compileCudaLiteKernel(source, {
       features: { "shader-f16": true },
