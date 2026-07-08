@@ -1925,11 +1925,15 @@ function semanticWgslExpressionSupported(
         semanticWgslExpressionSupported(expression.consequent, expected, ir) &&
         semanticWgslExpressionSupported(expression.alternate, expected, ir);
     case "assignment":
-      return semanticWgslAssignmentOperatorSupported(expression.operator) &&
+      {
+        const vectorMemberTarget = expression.target.kind === "member" &&
+          isSemanticWgslFloatVectorType(semanticExpressionValueType(expression.target));
+        return semanticWgslAssignmentOperatorSupported(expression.operator) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
           expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir) ||
           semanticWgslAssignmentMemoryRefSupported(expression.target, ir)) &&
-        semanticWgslExpressionSupported(expression.value, "scalar", ir);
+        semanticWgslExpressionSupported(expression.value, vectorMemberTarget ? "any" : "scalar", ir);
+      }
     case "update":
       return expression.argument.kind === "symbol" &&
         expression.argument.addressSpace === "local" &&
@@ -2377,8 +2381,10 @@ function emitSemanticAssignmentStatement(
 ): string {
   if (expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) {
     const target = emitSemanticMember(expression.target, ir, names, options);
-    const targetType = wgslVectorScalar(semanticExpressionVectorValueType(expression.target.object, ir));
-    const value = emitSemanticExpressionAs(expression.value, ir, names, targetType, options, textureSpecializations);
+    const targetValueType = semanticExpressionValueType(expression.target);
+    const value = isCudaVectorType(targetValueType)
+      ? emitSemanticExpression(expression.value, ir, names, options, textureSpecializations)
+      : emitSemanticExpressionAs(expression.value, ir, names, wgslVectorScalar(semanticExpressionVectorValueType(expression.target.object, ir)), options, textureSpecializations);
     if (expression.operator === "+=") return `${target} += ${value}`;
     if (expression.operator === "-=") return `${target} -= ${value}`;
     return `${target} = ${value}`;

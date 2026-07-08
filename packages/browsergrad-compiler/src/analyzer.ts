@@ -43,9 +43,9 @@ import {
   CUDA_VECTOR_TYPES,
   CUDA_VECTOR_CONSTRUCTORS,
   cudaVectorConstructorType,
-  cudaVectorFieldIndex,
   cudaVectorLaneCount,
   cudaVectorScalarType,
+  cudaVectorSwizzleIndices,
   cudaVectorSwizzleType,
   isCudaVectorType,
   type CudaLiteVectorType,
@@ -4242,6 +4242,10 @@ function validateNonCallExpression(
           diagnostics.push(error("unsupported-scalar-expression", "complex assignment expects a complex value", expression.right.span));
         }
       } else if (left.kind === "vector") {
+        const swizzleTarget = vectorSwizzleAssignmentTarget(expression.left, scope);
+        if (swizzleTarget && swizzleTarget.length > 1 && expression.operator !== "=") {
+          diagnostics.push(error("unsupported-vector-assignment", "CUDA vector swizzle compound assignment is not modeled", expression.left.span));
+        }
         if (expression.operator === "=" && right.kind !== "vector" && right.kind !== "unknown" && !isFloat2ComplexCompatible(left.valueType, right)) {
           diagnostics.push(error("unsupported-vector-assignment", "CUDA vector assignment expects a CUDA vector value", expression.right.span));
         } else if (expression.operator !== "=") {
@@ -4359,8 +4363,11 @@ function validateLValueExpression(
       return;
     }
     if (isCudaVectorType(info.valueType)) {
-      if (cudaVectorFieldIndex(info.valueType, expression.property) === undefined) {
+      const fields = cudaVectorSwizzleIndices(info.valueType, expression.property);
+      if (fields === undefined) {
         diagnostics.push(error("invalid-assignment-target", `vector assignment target must be one of .${CUDA_VECTOR_TYPES.get(info.valueType)!.fields.join("/.")}`, expression.span));
+      } else if (new Set(fields).size !== fields.length) {
+        diagnostics.push(error("invalid-assignment-target", "vector swizzle assignment target cannot repeat lanes", expression.span));
       }
       return;
     }
@@ -4384,6 +4391,14 @@ function validateLValueExpression(
     return;
   }
   diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, shared element, or device global", expression.span));
+}
+
+function vectorSwizzleAssignmentTarget(
+  expression: CudaLiteExpression,
+  scope: Scope,
+): readonly number[] | undefined {
+  if (expression.kind !== "member" || expression.object.kind !== "identifier") return undefined;
+  return cudaVectorSwizzleIndices(lookupSymbol(expression.object.name, scope, expression.object.span)?.valueType, expression.property);
 }
 
 function isPointerRebaseOperator(

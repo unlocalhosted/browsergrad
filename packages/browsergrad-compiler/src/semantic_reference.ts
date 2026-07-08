@@ -1043,11 +1043,15 @@ function semanticReferenceExpressionSupported(
         semanticReferenceExpressionSupported(expression.consequent, expected, compiled) &&
         semanticReferenceExpressionSupported(expression.alternate, expected, compiled);
     case "assignment":
-      return semanticReferenceAssignmentOperatorSupported(expression.operator) &&
+      {
+        const vectorMemberTarget = expression.target.kind === "member" &&
+          isSemanticReferenceFloatVectorType(semanticExpressionValueType(expression.target));
+        return semanticReferenceAssignmentOperatorSupported(expression.operator) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
           expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, compiled) ||
           semanticReferenceAssignmentMemoryRefSupported(expression.target, compiled)) &&
-        semanticReferenceExpressionSupported(expression.value, "scalar", compiled);
+        semanticReferenceExpressionSupported(expression.value, vectorMemberTarget ? "any" : "scalar", compiled);
+      }
     case "sequence":
       return expression.expressions.every((item) => semanticReferenceExpressionSupported(item, "scalar", compiled));
     case "update":
@@ -1303,7 +1307,7 @@ function execSemanticOperations(
         execSemanticCall(operation, context);
         break;
       case "expression":
-        evalNumber(operation.expression, context);
+        evalSemanticExpression(operation.expression, context);
         break;
       case "branch":
         if (truthy(evalNumber(operation.condition, context))) {
@@ -3432,14 +3436,26 @@ function evalSemanticBf162LocalBitsCast(
 function assignLocalVectorMember(
   expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
   if (expression.target.kind !== "member" || expression.target.object.kind !== "symbol") {
     throw semanticReferenceError("semantic reference vector assignment requires local vector member", expression.target.span);
   }
   const current = context.locals.get(expression.target.object.name);
   if (!Array.isArray(current)) throw semanticReferenceError(`missing local vector '${expression.target.object.name}'`, expression.target.span);
   const valueType = semanticExpressionValueType(expression.target.object);
-  const lane = valueType === undefined ? undefined : cudaVectorFieldIndex(valueType, expression.target.property);
+  const lanes = cudaVectorSwizzleIndices(valueType, expression.target.property);
+  if (lanes !== undefined && lanes.length > 1) {
+    if (expression.operator !== "=") throw semanticReferenceError("semantic reference vector swizzle assignment supports only '='", expression.target.span);
+    const right = evalSemanticExpression(expression.value, context);
+    if (!Array.isArray(right)) throw semanticReferenceError("semantic reference vector swizzle assignment requires vector value", expression.value.span);
+    const next = [...current];
+    lanes.forEach((lane, index) => {
+      next[lane] = Number(right[index] ?? 0);
+    });
+    context.locals.set(expression.target.object.name, next);
+    return next;
+  }
+  const lane = lanes?.[0] ?? (valueType === undefined ? undefined : cudaVectorFieldIndex(valueType, expression.target.property));
   if (lane === undefined) throw semanticReferenceError("semantic reference vector assignment requires modeled lane", expression.target.span);
   const right = evalNumber(expression.value, context);
   const left = Number(current[lane] ?? 0);

@@ -1407,6 +1407,57 @@ __global__ void vector_swizzles(float* out, uint* ui) {
     expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([7, 6, 5]);
   });
 
+  it("lowers CUDA vector swizzle writes to local vectors", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_swizzle_writes(float* out, uint* ui) {
+  float4 value = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  float2 next = make_float2(9.0f, 8.0f);
+  value.xy = next;
+  value.yx = value.zw;
+  uint4 bits = make_uint4(5u, 6u, 7u, 8u);
+  bits.s210 = make_uint3(11u, 12u, 13u);
+  out[0] = value.x;
+  out[1] = value.y;
+  out[2] = value.z;
+  out[3] = value.w;
+  ui[0] = bits.x;
+  ui[1] = bits.y;
+  ui[2] = bits.z;
+  ui[3] = bits.w;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("invalid-assignment-target");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-assignment");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("value.xy = next;");
+    expect(compiled.wgsl).toContain("value.yx = value.zw;");
+    expect(compiled.wgsl).toContain("bits.zyx = vec3<u32>(u32(11u), u32(12u), u32(13u));");
+    expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 3, 4]);
+    expect([...result.buffers.ui as Uint32Array]).toEqual([13, 12, 11, 8]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 3, 3, 4]);
+    expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([13, 12, 11, 8]);
+  });
+
+  it("rejects repeated CUDA vector swizzle write targets", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void repeated_vector_swizzle(float* out) {
+  float4 value = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  value.xx = make_float2(5.0f, 6.0f);
+  out[0] = value.x;
+}`, { workgroupSize: [1, 1, 1] })).toThrow(/vector swizzle assignment target cannot repeat lanes/u);
+  });
+
   it("keeps shifted scalar bases aligned when casting helper pointer params to vector lanes", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void write_lane_offset(float4* out, int idx, float value) {

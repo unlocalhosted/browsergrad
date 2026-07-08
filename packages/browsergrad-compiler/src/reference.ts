@@ -121,6 +121,7 @@ interface LValue {
   readonly index?: number;
   readonly field?: "x" | "y" | "z" | "w";
   readonly fieldIndex?: number;
+  readonly swizzleIndices?: readonly number[];
   readonly valueType?: CudaLiteScalarType;
   readonly rawStorageIndex?: boolean;
   readonly locals?: Map<string, LocalValue>;
@@ -4302,11 +4303,24 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
     return resolvePointerArgument(expression.argument, context);
   }
   if (expression.kind === "member") {
-    if (expression.property !== "x" && expression.property !== "y") {
-      const info = expressionValueType(expression.object, context);
-      if (!isCudaVectorType(info) || cudaVectorFieldIndex(info, expression.property) === undefined) {
-        throw compilerFailure(`unsupported lvalue member '${expression.property}'`);
+    const info = expressionValueType(expression.object, context);
+    if (isCudaVectorType(info)) {
+      const indices = cudaVectorSwizzleIndices(info, expression.property);
+      if (indices === undefined) throw compilerFailure(`unsupported ${info} member '${expression.property}'`);
+      const base = resolveLValue(expression.object, context);
+      if (indices.length > 1) {
+        const valueType = cudaVectorSwizzleType(info, expression.property);
+        if (!isCudaVectorType(valueType)) throw compilerFailure(`unsupported ${info} swizzle '${expression.property}'`);
+        return { ...base, swizzleIndices: indices, valueType };
       }
+      const fieldIndex = indices[0];
+      if (fieldIndex === undefined) throw compilerFailure(`unsupported ${info} member '${expression.property}'`);
+      const field = ["x", "y", "z", "w"][fieldIndex] as NonNullable<LValue["field"]> | undefined;
+      if (field === undefined) throw compilerFailure(`unsupported ${info} member '${expression.property}'`);
+      return { ...base, field };
+    }
+    if (expression.property !== "x" && expression.property !== "y") {
+      throw compilerFailure(`unsupported lvalue member '${expression.property}'`);
     }
     const field = expression.property as NonNullable<LValue["field"]>;
     return { ...resolveLValue(expression.object, context), field };
@@ -4613,16 +4627,27 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
       if (ok) writeLocalBufferValue(local, storageIndex, valueType, lvalue.field, value);
       return;
     }
-    if (lvalue.field || lvalue.fieldIndex !== undefined) {
+    if (lvalue.field || lvalue.fieldIndex !== undefined || lvalue.swizzleIndices !== undefined) {
       const current = readIdentifierFrom(lvalue.name, context, locals);
       if (isComplex(current)) {
-        if (lvalue.fieldIndex !== undefined) throw compilerFailure(`'${lvalue.name}' is not a CUDA vector`);
+        if (lvalue.fieldIndex !== undefined || lvalue.swizzleIndices !== undefined) throw compilerFailure(`'${lvalue.name}' is not a CUDA vector`);
         locals.set(lvalue.name, { ...current, [lvalue.field!]: valueAsNumber(value, lvalue.name) });
       } else if (isCudaVectorValue(current)) {
-        const field = lvalue.fieldIndex ?? cudaVectorFieldIndex(current.valueType, lvalue.field!);
-        if (field === undefined) throw compilerFailure(`unsupported ${current.valueType} member '${lvalue.field}'`);
         const lanes = [...current.lanes];
-        lanes[field] = roundVectorLane(current.valueType, valueAsNumber(value, lvalue.name));
+        if (lvalue.swizzleIndices !== undefined) {
+          if (!isCudaVectorType(lvalue.valueType)) throw compilerFailure(`unsupported ${current.valueType} swizzle`);
+          if (new Set(lvalue.swizzleIndices).size !== lvalue.swizzleIndices.length) {
+            throw compilerFailure("vector swizzle assignment target cannot repeat lanes");
+          }
+          const vector = valueAsCudaVector(value, lvalue.valueType);
+          for (const [slot, field] of lvalue.swizzleIndices.entries()) {
+            lanes[field] = roundVectorLane(current.valueType, vector.lanes[slot] ?? 0);
+          }
+        } else {
+          const field = lvalue.fieldIndex ?? cudaVectorFieldIndex(current.valueType, lvalue.field!);
+          if (field === undefined) throw compilerFailure(`unsupported ${current.valueType} member '${lvalue.field}'`);
+          lanes[field] = roundVectorLane(current.valueType, valueAsNumber(value, lvalue.name));
+        }
         locals.set(lvalue.name, { ...current, lanes });
       } else {
         throw compilerFailure(`'${lvalue.name}' is not complex or CUDA vector`);
@@ -5740,6 +5765,15 @@ function isAddress(value: LocalValue | EvalValue | undefined): value is AddressV
 }
 
 function projectField(value: LocalValue, lvalue: LValue): EvalValue {
+  if (lvalue.swizzleIndices !== undefined) {
+    if (!isCudaVectorValue(value)) throw compilerFailure(`'${lvalue.name}' is not a CUDA vector`);
+    if (!isCudaVectorType(lvalue.valueType)) throw compilerFailure(`unsupported ${value.valueType} swizzle`);
+    return {
+      kind: "cuda-vector",
+      valueType: lvalue.valueType,
+      lanes: lvalue.swizzleIndices.map((index) => value.lanes[index] ?? 0),
+    };
+  }
   if (lvalue.fieldIndex !== undefined) {
     if (!isCudaVectorValue(value)) throw compilerFailure(`'${lvalue.name}' is not a CUDA vector`);
     return value.lanes[lvalue.fieldIndex] ?? 0;
