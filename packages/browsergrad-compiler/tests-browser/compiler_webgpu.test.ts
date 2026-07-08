@@ -2811,6 +2811,35 @@ __global__ void halfShortConvert(const half* input, int* out, uint* uout, half* 
     expect([...actual.buffers.h as Float32Array]).toEqual([-2, 1]);
   });
 
+  it("runs directed half conversion aliases through f32 compatibility mode on real WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void halfDirectedConvert(half* out) {
+  out[0] = __float2half_rn(2049.0f);
+  out[1] = __float2half_rz(2049.0f);
+  out[2] = __float2half_ru(2049.0f);
+  out[3] = __float2half_rd(2049.0f);
+  out[4] = __float2half_rn(-2049.0f);
+  out[5] = __float2half_rz(-2049.0f);
+  out[6] = __float2half_ru(-2049.0f);
+  out[7] = __float2half_rd(-2049.0f);
+  out[8] = __int2half_rn(2049);
+  out[9] = __int2half_ru(2049);
+  out[10] = __int2half_rd(-2049);
+  out[11] = __uint2half_ru(2049u);
+  out[12] = __short2half_rz(32767);
+  out[13] = __short2half_rd(-32767);
+  out[14] = __ushort2half_ru(2049u);
+  out[15] = __short2half_rn(0xffff);
+}`, { workgroupSize: [1, 1, 1], f16Mode: "f32" });
+    const input = { buffers: { out: new Float32Array(16) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...actual.buffers.out as Float32Array]).toEqual([2048, 2048, 2050, 2048, -2048, -2048, -2048, -2050, 2048, 2050, -2050, 2050, 32752, -32768, 2050, -1]);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });

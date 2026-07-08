@@ -5,6 +5,7 @@ import {
   type WgslTexture2DInput,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
+import { roundFloat32ToFloat16 } from "./half_rounding.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
@@ -82,7 +83,11 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__float2uint_rn", "__float2uint_rz", "__float2uint_ru", "__float2uint_rd",
   "__int2float_rn", "__int2float_rz", "__int2float_ru", "__int2float_rd",
   "__uint2float_rn", "__uint2float_rz", "__uint2float_ru", "__uint2float_rd",
-  "__half2float", "__float2half", "__float2half_rn", "__int2half_rn", "__uint2half_rn",
+  "__half2float", "__float2half", "__float2half_rn", "__float2half_rz", "__float2half_ru", "__float2half_rd",
+  "__int2half_rn", "__int2half_rz", "__int2half_ru", "__int2half_rd",
+  "__uint2half_rn", "__uint2half_rz", "__uint2half_ru", "__uint2half_rd",
+  "__short2half_rn", "__short2half_rz", "__short2half_ru", "__short2half_rd",
+  "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
   "__half_as_short", "__half_as_ushort", "__short_as_half", "__ushort_as_half",
   "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
   "__half2short_rn", "__half2short_rz", "__half2short_ru", "__half2short_rd",
@@ -2530,8 +2535,25 @@ function evalSemanticMathCall(
     case "__half2float": return args[0] ?? 0;
     case "__float2half":
     case "__float2half_rn": return roundSemanticHalf(args[0] ?? 0);
+    case "__float2half_rz": return roundFloat32ToFloat16(args[0] ?? 0, "rz");
+    case "__float2half_ru": return roundFloat32ToFloat16(args[0] ?? 0, "ru");
+    case "__float2half_rd": return roundFloat32ToFloat16(args[0] ?? 0, "rd");
     case "__int2half_rn": return roundSemanticHalf(Math.trunc(args[0] ?? 0) | 0);
+    case "__int2half_rz": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) | 0, "rz");
+    case "__int2half_ru": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) | 0, "ru");
+    case "__int2half_rd": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) | 0, "rd");
     case "__uint2half_rn": return roundSemanticHalf(Math.trunc(args[0] ?? 0) >>> 0);
+    case "__uint2half_rz": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) >>> 0, "rz");
+    case "__uint2half_ru": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) >>> 0, "ru");
+    case "__uint2half_rd": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) >>> 0, "rd");
+    case "__short2half_rn": return roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "rn");
+    case "__short2half_rz": return roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "rz");
+    case "__short2half_ru": return roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "ru");
+    case "__short2half_rd": return roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "rd");
+    case "__ushort2half_rn": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rn");
+    case "__ushort2half_rz": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rz");
+    case "__ushort2half_ru": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "ru");
+    case "__ushort2half_rd": return roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rd");
     case "__half_as_short": return signExtend16(float32ToFloat16Bits(args[0] ?? 0));
     case "__half_as_ushort": return float32ToFloat16Bits(args[0] ?? 0) >>> 0;
     case "__short_as_half": return float16BitsToFloat32(Math.trunc(args[0] ?? 0) & 0xffff);

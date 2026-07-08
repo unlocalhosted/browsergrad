@@ -18382,9 +18382,9 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("enable f16;");
     expect(compiled.wgsl).toContain("f32(input[u32(idx)])");
-    expect(compiled.wgsl).toContain("f16((value * 2.0))");
-    expect(compiled.wgsl).toContain("f16(f32(4u))");
-    expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32(f16(1.5)), 0.0)) & 0xffffu");
+    expect(compiled.wgsl).toContain("bg_f32_to_f16_bits_mode((value * 2.0), 0u)");
+    expect(compiled.wgsl).toContain("bg_f32_to_f16_bits_mode(f32(4u), 0u)");
+    expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32(f16(unpack2x16float(bg_f32_to_f16_bits_mode(1.5, 0u)).x)), 0.0)) & 0xffffu");
     expect(compiled.wgsl).toContain("f16(unpack2x16float(15360u).x)");
     expect(compiled.wgsl).toContain("1000000.0");
     expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3, 4, 1]);
@@ -18921,8 +18921,8 @@ __global__ void half_ops(const __half* input, half* output, int* flags) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("enable f16;");
     expect(compiled.wgsl).toContain("fma(");
-    expect(compiled.wgsl).toContain("f16(exp(f32(f16(0.0))))");
-    expect(compiled.wgsl).toContain("min(mixed, f16(3.0))");
+    expect(compiled.wgsl).toContain("f16(exp(f32(f16(unpack2x16float(bg_f32_to_f16_bits_mode(0.0, 0u)).x))))");
+    expect(compiled.wgsl).toContain("min(mixed, f16(unpack2x16float(bg_f32_to_f16_bits_mode(3.0, 0u)).x))");
     expect(compiled.wgsl).toContain("max(");
     expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([1.5]);
     expect([...result.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1]);
@@ -19020,6 +19020,39 @@ __global__ void half_short_convert(const half* input, int* out, uint* uout, half
     expect([...semanticResult.buffers.out as Int32Array]).toEqual([2, 1, 2, 1, -2, -1, -1, -2, -16384]);
     expect([...semanticResult.buffers.uout as Uint32Array]).toEqual([2, 1, 2, 1]);
     expect(Array.from(semanticResult.buffers.h as Iterable<number>)).toEqual([-2, 1]);
+  });
+
+  it("lowers CUDA directed half conversion aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_directed_convert(half* out) {
+  out[0] = __float2half_rn(2049.0f);
+  out[1] = __float2half_rz(2049.0f);
+  out[2] = __float2half_ru(2049.0f);
+  out[3] = __float2half_rd(2049.0f);
+  out[4] = __float2half_rn(-2049.0f);
+  out[5] = __float2half_rz(-2049.0f);
+  out[6] = __float2half_ru(-2049.0f);
+  out[7] = __float2half_rd(-2049.0f);
+  out[8] = __int2half_rn(2049);
+  out[9] = __int2half_ru(2049);
+  out[10] = __int2half_rd(-2049);
+  out[11] = __uint2half_ru(2049u);
+  out[12] = __short2half_rz(32767);
+  out[13] = __short2half_rd(-32767);
+  out[14] = __ushort2half_ru(2049u);
+  out[15] = __short2half_rn(0xffff);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: createWgslFloat16Array(16) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const expected = [2048, 2048, 2050, 2048, -2048, -2048, -2048, -2050, 2048, 2050, -2050, 2050, 32752, -32768, 2050, -1];
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(Array.from(result.buffers.out as Iterable<number>)).toEqual(expected);
+    expect(Array.from(semanticResult.buffers.out as Iterable<number>)).toEqual(expected);
   });
 
   it("lowers scalar CUDA half unary math aliases", () => {

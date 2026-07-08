@@ -25,6 +25,7 @@ import {
   usesFrexp,
   usesFunnelShiftIntrinsics,
   usesGammaIntrinsics,
+  usesHalfConversionIntrinsics,
   usesInverseDistributionIntrinsics,
   usesModf,
   usesNextafterIntrinsics,
@@ -48,6 +49,7 @@ import {
   emitFrexpHelpers,
   emitFunnelShiftHelpers,
   emitGammaHelpers,
+  emitHalfConversionHelpers,
   emitInverseDistributionHelpers,
   emitModfHelpers,
   emitNextafterHelpers,
@@ -198,4 +200,5 @@ function appendKernelModuleSupportHelpers(
   if (usesFunnelShiftIntrinsics(ir)) lines.push("", ...emitFunnelShiftHelpers());
   if (usesSpecialFloatNamedConstants(ir)) lines.push("", ...emitSpecialFloatConstantHelpers());
   if (usesFp8Intrinsics(ir)) lines.push("", ...emitFp8Helpers());
+  if (usesHalfConversionIntrinsics(ir)) lines.push("", ...emitHalfConversionHelpers());
 }

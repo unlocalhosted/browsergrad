@@ -280,6 +280,18 @@ export function usesFp8Intrinsics(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => statementsUseCall(fn.body, names));
 }
 
+export function usesHalfConversionIntrinsics(ir: KernelIrModule): boolean {
+  const names = new Set([
+    "__float2half", "__float2half_rn", "__float2half_rz", "__float2half_ru", "__float2half_rd",
+    "__int2half_rn", "__int2half_rz", "__int2half_ru", "__int2half_rd",
+    "__uint2half_rn", "__uint2half_rz", "__uint2half_ru", "__uint2half_rd",
+    "__short2half_rn", "__short2half_rz", "__short2half_ru", "__short2half_rd",
+    "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
+  ]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
 export function wgslUniformScalar(type: CudaLiteScalarType): string {
   if (isCudaVectorType(type)) return wgslScalar(type);
   if (type === "complex64") return "vec2<f32>";

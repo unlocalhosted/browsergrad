@@ -2,6 +2,7 @@ import {
   float16BitsToFloat32,
   float32ToFloat16Bits,
 } from "@unlocalhosted/browsergrad-kernels";
+import { roundFloat32ToFloat16 } from "./half_rounding.js";
 import type { CudaLiteFeatureName, CudaLiteScalarType } from "./types.js";
 
 export type CudaIntrinsicReturnType = Exclude<CudaLiteScalarType, "void"> | "argument1";
@@ -421,10 +422,27 @@ const HALF2_COMPARISON_MASK_NAMES = ["__heq2_mask", "__hne2_mask", "__hgt2_mask"
 const HALF2_BOOLEAN_COMPARISON_NAMES = ["__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2"] as const;
 const HALF_INTRINSICS = [
   intrinsic("__half2float", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args.join(", ")})`, HALF_FEATURES),
-  intrinsic("__float2half", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
-  intrinsic("__float2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
-  intrinsic("__int2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
-  intrinsic("__uint2half_rn", [1, 1], "half", (args) => roundHalf(Math.trunc(args[0] ?? 0) >>> 0), (args) => `f16(f32(u32(${args[0] ?? "0"})))`, HALF_FEATURES),
+  intrinsic("__float2half", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(${args[0] ?? "0"}), 0u)).x)`, HALF_FEATURES),
+  intrinsic("__float2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(${args[0] ?? "0"}), 0u)).x)`, HALF_FEATURES),
+  intrinsic("__float2half_rz", [1, 1], "half", (args) => roundFloat32ToFloat16(args[0] ?? 0, "rz"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(${args[0] ?? "0"}), 1u)).x)`, HALF_FEATURES),
+  intrinsic("__float2half_ru", [1, 1], "half", (args) => roundFloat32ToFloat16(args[0] ?? 0, "ru"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(${args[0] ?? "0"}), 2u)).x)`, HALF_FEATURES),
+  intrinsic("__float2half_rd", [1, 1], "half", (args) => roundFloat32ToFloat16(args[0] ?? 0, "rd"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(${args[0] ?? "0"}), 3u)).x)`, HALF_FEATURES),
+  intrinsic("__int2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(i32(${args[0] ?? "0"})), 0u)).x)`, HALF_FEATURES),
+  intrinsic("__int2half_rz", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) | 0, "rz"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(i32(${args[0] ?? "0"})), 1u)).x)`, HALF_FEATURES),
+  intrinsic("__int2half_ru", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) | 0, "ru"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(i32(${args[0] ?? "0"})), 2u)).x)`, HALF_FEATURES),
+  intrinsic("__int2half_rd", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) | 0, "rd"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(i32(${args[0] ?? "0"})), 3u)).x)`, HALF_FEATURES),
+  intrinsic("__uint2half_rn", [1, 1], "half", (args) => roundHalf(Math.trunc(args[0] ?? 0) >>> 0), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"})), 0u)).x)`, HALF_FEATURES),
+  intrinsic("__uint2half_rz", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) >>> 0, "rz"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"})), 1u)).x)`, HALF_FEATURES),
+  intrinsic("__uint2half_ru", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) >>> 0, "ru"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"})), 2u)).x)`, HALF_FEATURES),
+  intrinsic("__uint2half_rd", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) >>> 0, "rd"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"})), 3u)).x)`, HALF_FEATURES),
+  intrinsic("__short2half_rn", [1, 1], "half", (args) => roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "rn"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(bg_i16_to_f32(i32(${args[0] ?? "0"})), 0u)).x)`, HALF_FEATURES),
+  intrinsic("__short2half_rz", [1, 1], "half", (args) => roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "rz"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(bg_i16_to_f32(i32(${args[0] ?? "0"})), 1u)).x)`, HALF_FEATURES),
+  intrinsic("__short2half_ru", [1, 1], "half", (args) => roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "ru"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(bg_i16_to_f32(i32(${args[0] ?? "0"})), 2u)).x)`, HALF_FEATURES),
+  intrinsic("__short2half_rd", [1, 1], "half", (args) => roundFloat32ToFloat16(signExtend16(args[0] ?? 0), "rd"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(bg_i16_to_f32(i32(${args[0] ?? "0"})), 3u)).x)`, HALF_FEATURES),
+  intrinsic("__ushort2half_rn", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rn"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"}) & 0xffffu), 0u)).x)`, HALF_FEATURES),
+  intrinsic("__ushort2half_rz", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rz"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"}) & 0xffffu), 1u)).x)`, HALF_FEATURES),
+  intrinsic("__ushort2half_ru", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "ru"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"}) & 0xffffu), 2u)).x)`, HALF_FEATURES),
+  intrinsic("__ushort2half_rd", [1, 1], "half", (args) => roundFloat32ToFloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rd"), (args) => `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(u32(${args[0] ?? "0"}) & 0xffffu), 3u)).x)`, HALF_FEATURES),
   intrinsic("__half_as_short", [1, 1], "int", (args) => signExtend16(float32ToFloat16Bits(args[0] ?? 0)), (args) => `((bitcast<i32>((pack2x16float(vec2<f32>(f32(${args[0] ?? "0"}), 0.0)) & 0xffffu) << 16u)) >> 16)`, HALF_FEATURES),
   intrinsic("__half_as_ushort", [1, 1], "uint", (args) => float32ToFloat16Bits(args[0] ?? 0), (args) => `(pack2x16float(vec2<f32>(f32(${args[0] ?? "0"}), 0.0)) & 0xffffu)`, HALF_FEATURES),
   intrinsic("__short_as_half", [1, 1], "half", (args) => float16BitsToFloat32(Math.trunc(args[0] ?? 0) & 0xffff), (args) => `f16(unpack2x16float(u32(${args[0] ?? "0"}) & 0xffffu).x)`, HALF_FEATURES),

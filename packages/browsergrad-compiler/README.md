@@ -126,6 +126,8 @@ Common CUDA float math helpers lower natively in both WGSL and CPU reference:
 `__usad4` lowers as byte-lane sum-of-absolute-differences plus add.
 `assert(expr)` is accepted as a no-op runtime check in browser kernels.
 Scalar half helpers lower behind `shader-f16`: `__half2float`, `__float2half`,
+`__float2half_rn` / `_rz` / `_ru` / `_rd`, `__int2half_*`,
+`__uint2half_*`, `__short2half_*`, `__ushort2half_*`,
 `__half_as_short`, `__half_as_ushort`, `__short_as_half`,
 `__ushort_as_half`, `__half2short_*`, `__half2ushort_*`, `hexp`,
 `__hadd`, `__hsub`, `__hmul`, `__hdiv`, `__hneg`, `__hfma`,
