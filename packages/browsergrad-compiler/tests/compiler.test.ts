@@ -6509,6 +6509,39 @@ __global__ void namespaceTileReduce(const float *input, float *output) {
     expect([...result.buffers.output as Float32Array]).toEqual([8]);
   });
 
+  it("lowers cooperative-group inclusive and exclusive tile scans", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void tileScan(const int *input, int *output) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<4> tile = cg::tiled_partition<4>(block);
+  int lane = tile.thread_rank();
+  int value = input[threadIdx.x];
+  int inclusive = cg::inclusive_scan(tile, value);
+  int exclusive = cg::exclusive_scan(tile, value, cg::plus<int>());
+  output[threadIdx.x * 2] = inclusive;
+  output[threadIdx.x * 2 + 1] = exclusive + lane;
+  output[8 + threadIdx.x] = cg::inclusive_scan(block, value);
+}`, {
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Int32Array([1, 2, 3, 4]),
+          output: new Int32Array(12),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_cg_inclusive_scan_sum_int_4");
+    expect(compiled.wgsl).toContain("fn bg_cg_exclusive_scan_sum_int_4");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect([...result.buffers.output as Int32Array]).toEqual([1, 0, 3, 2, 6, 5, 10, 9, 1, 3, 6, 10]);
+  });
+
   it("lowers cooperative-group binary partitions to predicate masks", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;

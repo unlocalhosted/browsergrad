@@ -209,7 +209,11 @@ export function isSubgroupCallName(name: string): boolean {
     name === "__activemask" ||
     name.startsWith("__reduce") ||
     name === "cg::reduce" ||
-    name === "cooperative_groups::reduce";
+    name === "cooperative_groups::reduce" ||
+    name === "cg::inclusive_scan" ||
+    name === "cooperative_groups::inclusive_scan" ||
+    name === "cg::exclusive_scan" ||
+    name === "cooperative_groups::exclusive_scan";
 }
 
 export function isBarrierCall(expression: CudaLiteExpression): boolean {

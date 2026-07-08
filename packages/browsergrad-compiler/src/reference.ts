@@ -196,7 +196,7 @@ interface MutableTrace {
 
 type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
-type CollectiveOp = "sum" | "max" | "min" | "and" | "or" | "xor" | "any" | "all" | "activemask" | "match_any" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
+type CollectiveOp = "sum" | "max" | "min" | "and" | "or" | "xor" | "any" | "all" | "activemask" | "match_any" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor" | "inclusive_scan_sum" | "exclusive_scan_sum";
 interface CollectiveYield {
   readonly kind: "collective";
   readonly op: CollectiveOp;
@@ -508,6 +508,15 @@ function collectiveResultValues(group: {
   if (group.op === "activemask") {
     const mask = group.threads.reduce((bits, thread) => bits | (1 << (thread % 32)), 0);
     return group.threads.map(() => mask >>> 0);
+  }
+  if (group.op === "inclusive_scan_sum" || group.op === "exclusive_scan_sum") {
+    let prefix = 0;
+    return group.values.map((value) => {
+      const current = valueAsNumber(value, "cooperative scan value");
+      const exclusive = prefix;
+      prefix += current;
+      return group.op === "inclusive_scan_sum" ? prefix : exclusive;
+    });
   }
   if (group.op === "match_any") {
     return group.threads.map((_thread, index) => {
@@ -1127,6 +1136,8 @@ function collectiveCall(expression: CudaLiteExpression, context: ThreadContext):
   if (context.subgroupMode === "scalar") return undefined;
   const cooperativeReduce = cooperativeReduceCollective(expression, context);
   if (cooperativeReduce) return cooperativeReduce;
+  const cooperativeScan = cooperativeScanCollective(expression, context);
+  if (cooperativeScan) return cooperativeScan;
   const shuffle = shuffleCollective(expression, context);
   if (shuffle) return shuffle;
   const op = collectiveOpForCall(name);
@@ -1256,6 +1267,27 @@ function cooperativeReduceCollective(
   return {
     kind: "collective",
     op,
+    value: evalNumber(valueExpression, context),
+    groupKey: cooperativeCollectiveGroupKey(groupValue, context),
+  };
+}
+
+function cooperativeScanCollective(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): CollectiveYield | undefined {
+  const name = expressionNameForReference(expression.callee);
+  const inclusive = name?.endsWith("::inclusive_scan") === true;
+  if (!inclusive && name?.endsWith("::exclusive_scan") !== true) return undefined;
+  const groupArg = expression.args[0];
+  if (groupArg?.kind !== "identifier") return undefined;
+  const groupValue = context.locals.get(groupArg.name);
+  if (!isCooperativeGroup(groupValue)) return undefined;
+  const valueExpression = expression.args[1];
+  if (!valueExpression) return undefined;
+  return {
+    kind: "collective",
+    op: inclusive ? "inclusive_scan_sum" : "exclusive_scan_sum",
     value: evalNumber(valueExpression, context),
     groupKey: cooperativeCollectiveGroupKey(groupValue, context),
   };
@@ -3937,12 +3969,16 @@ function evalCooperativeNamespaceCall(
   context: ThreadContext,
 ): EvalValue | undefined {
   const name = expressionNameForReference(expression.callee);
-  if (!name?.endsWith("::sync") && !name?.endsWith("::reduce")) return undefined;
+  if (!name?.endsWith("::sync") && !name?.endsWith("::reduce") && !name?.endsWith("::inclusive_scan") && !name?.endsWith("::exclusive_scan")) return undefined;
   const groupArg = expression.args[0];
   if (groupArg?.kind !== "identifier") return undefined;
   const groupValue = context.locals.get(groupArg.name);
   if (!isCooperativeGroup(groupValue)) return undefined;
   if (name.endsWith("::sync")) return 0;
+  if (name.endsWith("::inclusive_scan") || name.endsWith("::exclusive_scan")) {
+    const scanned = expression.args[1];
+    return scanned ? evalNumber(scanned, context) : 0;
+  }
   const reduced = expression.args[1];
   if (!reduced) return 0;
   const reducedValue = evalExpression(reduced, context);

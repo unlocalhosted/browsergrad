@@ -100,6 +100,7 @@ export interface EmitContext {
     ReadonlyMap<string, DeviceFunctionTextureSpecialization>
   >;
   readonly scalarWarpReduceHelpers: Map<string, ScalarWarpReduceHelper>;
+  readonly scalarCooperativeScanHelpers: Map<string, ScalarCooperativeScanHelper>;
   readonly scalarWarpShuffleHelpers: Map<string, ScalarWarpShuffleHelper>;
   readonly vectorCooperativeReduceHelpers: Map<string, VectorCooperativeReduceHelper>;
   readonly expressionValueTypes: WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>;
@@ -131,6 +132,14 @@ export interface ScalarWarpReduceHelper {
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly tileSize: number;
   readonly partitioned?: boolean;
+}
+
+export interface ScalarCooperativeScanHelper {
+  readonly key: string;
+  readonly name: string;
+  readonly inclusive: boolean;
+  readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly tileSize: number;
 }
 
 export interface ScalarWarpShuffleHelper {
@@ -300,6 +309,7 @@ export function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslO
   const localPointerArrayRoots = collectLocalPointerArrayRoots(ir.body);
   const wgslNames = createWgslNameMap(collectWgslDeclaredNames(ir, localNames, externalPoolNames), CUDA_INTRINSICS_BY_NAME.keys());
   const scalarWarpReduceHelpers = new Map<string, ScalarWarpReduceHelper>();
+  const scalarCooperativeScanHelpers = new Map<string, ScalarCooperativeScanHelper>();
   const scalarWarpShuffleHelpers = new Map<string, ScalarWarpShuffleHelper>();
   const vectorCooperativeReduceHelpers = new Map<string, VectorCooperativeReduceHelper>();
   const expressionValueTypes = new WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>();
@@ -378,6 +388,7 @@ export function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslO
     externalPoolNames,
     mutablePointerBases,
     scalarWarpReduceHelpers,
+    scalarCooperativeScanHelpers,
     scalarWarpShuffleHelpers,
     vectorCooperativeReduceHelpers,
     expressionValueTypes,

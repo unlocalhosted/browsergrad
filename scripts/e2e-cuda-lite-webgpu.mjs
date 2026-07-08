@@ -2384,6 +2384,19 @@ __global__ void cooperativeBinaryPartitionReduce(int *out) {
     }
   }
 }`,
+  cooperativeTileScan: `
+namespace cg = cooperative_groups;
+__global__ void cooperativeTileScan(const int *input, int *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<4> tile = cg::tiled_partition<4>(block);
+  int lane = tile.thread_rank();
+  int value = input[threadIdx.x];
+  int inclusive = cg::inclusive_scan(tile, value);
+  int exclusive = cg::exclusive_scan(tile, value, cg::plus<int>());
+  out[threadIdx.x * 2] = inclusive;
+  out[threadIdx.x * 2 + 1] = exclusive + lane;
+  out[8 + threadIdx.x] = cg::inclusive_scan(block, value);
+}`,
   cooperativeTileVoteMask: `
 namespace cg = cooperative_groups;
 __global__ void cooperativeTileVoteMask(int *out) {
@@ -12895,6 +12908,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [4, 6, 2, 2] },
+          },
+          {
+            name: "cooperative:tile-scan",
+            source: SOURCES.cooperativeTileScan,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                input: new Int32Array([1, 2, 3, 4]),
+                out: new Int32Array(12),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [1, 0, 3, 2, 6, 5, 10, 9, 1, 3, 6, 10] },
           },
           {
             name: "cooperative:tile-vote-mask",

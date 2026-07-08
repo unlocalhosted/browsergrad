@@ -3172,6 +3172,23 @@ function validateCooperativeNamespaceCall(
     validateScalarOperand(info, value.span, diagnostics);
     return { kind: "scalar", valueType: info.valueType };
   }
+  if (method === "inclusive_scan" || method === "exclusive_scan") {
+    if (expression.args.length !== 2 && expression.args.length !== 3) diagnostics.push(error("invalid-call-arity", `cg::${method} expects 2 or 3 arguments`, expression.span));
+    if (symbol.groupKind !== "tile" && symbol.groupKind !== "thread" && symbol.groupKind !== "block") {
+      diagnostics.push(error("unsupported-cooperative-groups", `cg::${method} currently supports tile-like cooperative groups`, groupArg.span));
+    }
+    if (expression.args[2] !== undefined) {
+      const op = expressionName(expression.args[2]);
+      if (op !== undefined && !op.endsWith("::plus")) {
+        diagnostics.push(error("unsupported-cooperative-groups", `cg::${method} currently supports plus scans`, expression.args[2].span));
+      }
+    }
+    const value = expression.args[1];
+    if (!value) return { kind: "unknown" };
+    const info = walkExpression(value, scope);
+    validateScalarOperand(info, value.span, diagnostics);
+    return { kind: "scalar", valueType: info.valueType };
+  }
   diagnostics.push(error("unsupported-cooperative-groups", `unsupported cooperative group call 'cg::${method}'`, expression.span));
   return { kind: "unknown" };
 }
@@ -3196,6 +3213,10 @@ function cooperativeNamespaceCall(
     ? "sync"
     : callName?.endsWith("::reduce")
       ? "reduce"
+      : callName?.endsWith("::inclusive_scan")
+        ? "inclusive_scan"
+        : callName?.endsWith("::exclusive_scan")
+          ? "exclusive_scan"
       : undefined;
   if (!method) return undefined;
   const groupArg = expression.args[0];

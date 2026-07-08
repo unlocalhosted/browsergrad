@@ -99,6 +99,8 @@ import {
   cooperativeReduceDeviceFunctionName,
   emitCooperativeGroupCall,
   emitLocalLinearRank,
+  emitScalarCooperativeScanHelper,
+  emitScalarCooperativeScanWorkgroupStorage,
   emitScalarWarpReduceCall,
   emitScalarWarpReduceHelper,
   emitScalarWarpReduceWorkgroupStorage,
@@ -275,6 +277,12 @@ export function emitKernelIrWgsl(
     lines.push(...emitScalarWarpReduceWorkgroupStorage(helper, context));
     lines.push("");
     lines.push(...emitScalarWarpReduceHelper(helper, context));
+  }
+  for (const helper of context.scalarCooperativeScanHelpers.values()) {
+    lines.push("");
+    lines.push(...emitScalarCooperativeScanWorkgroupStorage(helper, context));
+    lines.push("");
+    lines.push(...emitScalarCooperativeScanHelper(helper, context));
   }
   for (const helper of context.scalarWarpShuffleHelpers.values()) {
     lines.push("");

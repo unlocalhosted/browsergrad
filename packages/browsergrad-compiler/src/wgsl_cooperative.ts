@@ -2,6 +2,7 @@ import { expressionName } from "./analyzer.js";
 import { isCudaVectorType, type CudaLiteVectorType } from "./vector_types.js";
 import {
   type EmitContext,
+  type ScalarCooperativeScanHelper,
   type ScalarWarpReduceHelper,
   type ScalarWarpShuffleHelper,
   type VectorCooperativeReduceHelper,
@@ -220,6 +221,49 @@ export function emitScalarWarpReduceWorkgroupStorage(
   return [`var<workgroup> ${scalarWarpReduceScratchName(helper)}: array<${type}, ${workgroupSize}>;`];
 }
 
+export function emitScalarCooperativeScanHelper(
+  helper: ScalarCooperativeScanHelper,
+  context: EmitContext,
+): string[] {
+  const type = wgslScalar(helper.valueType);
+  const zero = zeroValue(helper.valueType);
+  const scratch = scalarCooperativeScanScratchName(helper);
+  return [
+    `fn ${helper.name}(value_arg: ${type}, width_arg: u32, local_id: vec3<u32>) -> ${type} {`,
+    `  let bg_linear_rank: u32 = u32(${emitLocalLinearRank(context)});`,
+    `  let bg_width: u32 = clamp(width_arg, 1u, ${helper.tileSize}u);`,
+    "  let bg_tile_lane: u32 = bg_linear_rank % bg_width;",
+    `  ${scratch}[bg_linear_rank] = value_arg;`,
+    "  workgroupBarrier();",
+    "  var bg_stride: u32 = 1u;",
+    "  while (bg_stride < bg_width) {",
+    `    var bg_addend: ${type} = ${zero};`,
+    "    if (bg_tile_lane >= bg_stride) {",
+    `      bg_addend = ${scratch}[bg_linear_rank - bg_stride];`,
+    "    }",
+    "    workgroupBarrier();",
+    "    if (bg_tile_lane >= bg_stride) {",
+    `      ${scratch}[bg_linear_rank] = ${scratch}[bg_linear_rank] + bg_addend;`,
+    "    }",
+    "    workgroupBarrier();",
+    "    bg_stride = bg_stride * 2u;",
+    "  }",
+    `  let bg_inclusive: ${type} = ${scratch}[bg_linear_rank];`,
+    "  workgroupBarrier();",
+    `  return ${helper.inclusive ? "bg_inclusive" : "bg_inclusive - value_arg"};`,
+    "}",
+  ];
+}
+
+export function emitScalarCooperativeScanWorkgroupStorage(
+  helper: ScalarCooperativeScanHelper,
+  context: EmitContext,
+): string[] {
+  const type = wgslScalar(helper.valueType);
+  const workgroupSize = context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2];
+  return [`var<workgroup> ${scalarCooperativeScanScratchName(helper)}: array<${type}, ${workgroupSize}>;`];
+}
+
 export function emitScalarWarpShuffleHelper(
   helper: ScalarWarpShuffleHelper,
   context: EmitContext,
@@ -325,13 +369,25 @@ function emitCooperativeNamespaceCall(
   callbacks: WgslCooperativeCallbacks,
 ): string | undefined {
   const name = expressionName(expression.callee);
-  if (!name?.endsWith("::sync") && !name?.endsWith("::reduce")) return undefined;
+  if (!name?.endsWith("::sync") && !name?.endsWith("::reduce") && !name?.endsWith("::inclusive_scan") && !name?.endsWith("::exclusive_scan")) return undefined;
   const groupArg = expression.args[0];
   if (groupArg?.kind !== "identifier") return undefined;
   const group = context.cooperativeGroupFor(groupArg.name);
   if (!group && name.endsWith("::sync")) return "workgroupBarrier()";
   if (!group) return undefined;
   if (name.endsWith("::sync")) return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
+  if (name.endsWith("::inclusive_scan") || name.endsWith("::exclusive_scan")) {
+    const valueExpression = expression.args[1];
+    if (!valueExpression) return "0";
+    const valueType = scalarWarpValueType(valueExpression, callbacks, "cooperative group scan");
+    const helper = registerScalarCooperativeScanHelper(
+      context,
+      name.endsWith("::inclusive_scan"),
+      valueType,
+      maxCooperativeGroupTileSize(group, context),
+    );
+    return `${helper.name}(${callbacks.emitExpressionAsValueType(valueExpression, valueType)}, ${emitCooperativeGroupTileSizeValue(group, context)}, local_id)`;
+  }
   const vectorReduce = emitVectorCooperativeNamespaceReduce(expression, group, context, callbacks);
   if (vectorReduce !== undefined) return vectorReduce;
   const value = expression.args[1] ? callbacks.emitExpression(expression.args[1]) : "0";
@@ -406,6 +462,26 @@ function registerScalarWarpPartitionReduceHelper(
   return helper;
 }
 
+function registerScalarCooperativeScanHelper(
+  context: EmitContext,
+  inclusive: boolean,
+  valueType: Exclude<CudaLiteScalarType, "void">,
+  tileSize: number,
+): ScalarCooperativeScanHelper {
+  const key = `${inclusive ? "inclusive" : "exclusive"}:${valueType}:${tileSize}`;
+  const existing = context.scalarCooperativeScanHelpers.get(key);
+  if (existing) return existing;
+  const helper = {
+    key,
+    name: `bg_cg_${inclusive ? "inclusive" : "exclusive"}_scan_sum_${safeWgslIdentifier(valueType)}_${tileSize}`,
+    inclusive,
+    valueType,
+    tileSize,
+  };
+  context.scalarCooperativeScanHelpers.set(key, helper);
+  return helper;
+}
+
 function emitScalarWarpReduceStep(helper: ScalarWarpReduceHelper, left: string, right: string): string {
   switch (helper.op) {
     case "sum":
@@ -418,6 +494,10 @@ function emitScalarWarpReduceStep(helper: ScalarWarpReduceHelper, left: string, 
 }
 
 function scalarWarpReduceScratchName(helper: ScalarWarpReduceHelper): string {
+  return `${helper.name}_scratch`;
+}
+
+function scalarCooperativeScanScratchName(helper: ScalarCooperativeScanHelper): string {
   return `${helper.name}_scratch`;
 }
 
