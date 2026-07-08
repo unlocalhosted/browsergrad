@@ -128,8 +128,24 @@ const SEMANTIC_CURAND_CALLS = new Set([
   "curand_uniform",
   "curand_uniform_double",
   "curand_normal",
+  "curand_normal2",
   "curand_normal_double",
   "curand_log_normal",
+  "curand_log_normal2",
+  "curand_log_normal_double",
+]);
+const SEMANTIC_CURAND_VECTOR_CALLS = new Set(["curand_normal2", "curand_log_normal2"]);
+const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
+  "curand",
+  "curand_uniform",
+  "curand_uniform_double",
+  "curand_normal",
+  "curand_normal2",
+  "curand_normal_double",
+]);
+const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
+  "curand_log_normal",
+  "curand_log_normal2",
   "curand_log_normal_double",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
@@ -557,7 +573,15 @@ function semanticReferenceCurandCallSupported(
       expression.args.slice(0, 3).every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled)) &&
       semanticCurandState(expression.args[3]!) !== undefined;
   }
-  return expression.args.length === 1 && semanticCurandState(expression.args[0]!) !== undefined;
+  if (SEMANTIC_CURAND_STATE_ONLY_CALLS.has(expression.callee.name)) {
+    return expression.args.length === 1 && semanticCurandState(expression.args[0]!) !== undefined;
+  }
+  if (SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(expression.callee.name)) {
+    return expression.args.length === 3 &&
+      semanticCurandState(expression.args[0]!) !== undefined &&
+      expression.args.slice(1).every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  }
+  return false;
 }
 
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -958,7 +982,8 @@ function semanticReferenceExpressionSupported(
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
-        semanticReferenceCurandCallSupported(expression, compiled) ||
+        semanticReferenceCurandCallSupported(expression, compiled) &&
+          (expected === "any" || !isSemanticReferenceFloatVectorType(semanticExpressionVectorValueType(expression))) ||
         semanticReferenceSubgroupCallSupported(expression) ||
         semanticReferenceAddressPredicateCallSupported(expression) ||
         semanticReferenceMathCallSupported(expression) ||
@@ -1164,6 +1189,7 @@ function semanticExpressionValueType(expression: SemanticExpression): CudaLiteSc
 
 function semanticExpressionVectorValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
   if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    if (SEMANTIC_CURAND_VECTOR_CALLS.has(expression.callee.name)) return "float2";
     if (SEMANTIC_BF162_VECTOR_CALLS.has(expression.callee.name)) return "bf162";
     return cudaVectorConstructorType(expression.callee.name) ?? semanticExpressionValueType(expression);
   }
@@ -1460,7 +1486,7 @@ function execSemanticCurandInit(
 function evalSemanticCurandCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic cuRAND call requires symbol callee", expression.span);
   const state = semanticCurandState(expression.args[0]);
   if (!state) throw semanticReferenceError(`${expression.callee.name} expects state address`, expression.span);
@@ -1482,6 +1508,16 @@ function evalSemanticCurandCall(
     const u2 = (second + 1) * 2.3283064365386963e-10;
     return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
+  if (expression.callee.name === "curand_normal2") {
+    const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
+    const second = curandNext(first);
+    semanticCurandStateWrite(state, second, context);
+    const u1 = Math.max((first + 1) * 2.3283064365386963e-10, 1.1754943508222875e-38);
+    const u2 = (second + 1) * 2.3283064365386963e-10;
+    const radius = Math.sqrt(-2 * Math.log(u1));
+    const angle = 2 * Math.PI * u2;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  }
   if (expression.callee.name === "curand_log_normal" || expression.callee.name === "curand_log_normal_double") {
     const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
     const second = curandNext(first);
@@ -1490,6 +1526,21 @@ function evalSemanticCurandCall(
     const u2 = (second + 1) * 2.3283064365386963e-10;
     const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     return Math.exp(evalNumber(expression.args[1]!, context) + evalNumber(expression.args[2]!, context) * normal);
+  }
+  if (expression.callee.name === "curand_log_normal2") {
+    const first = curandNext(semanticCurandStateRead(state, context) >>> 0);
+    const second = curandNext(first);
+    semanticCurandStateWrite(state, second, context);
+    const u1 = Math.max((first + 1) * 2.3283064365386963e-10, 1.1754943508222875e-38);
+    const u2 = (second + 1) * 2.3283064365386963e-10;
+    const radius = Math.sqrt(-2 * Math.log(u1));
+    const angle = 2 * Math.PI * u2;
+    const mean = evalNumber(expression.args[1]!, context);
+    const stddev = evalNumber(expression.args[2]!, context);
+    return [
+      Math.exp(mean + stddev * radius * Math.cos(angle)),
+      Math.exp(mean + stddev * radius * Math.sin(angle)),
+    ];
   }
   throw semanticReferenceError(`semantic reference does not support cuRAND call '${expression.callee.name}'`, expression.span);
 }

@@ -9929,7 +9929,7 @@ __global__ void curandLogNormalKernel(float *out) {
     );
 
     expect(compiled.wgsl).toContain("fn bg_curand_log_normal");
-    expect(compiled.wgsl).toContain("bg_curand_log_normal(&state, f32(0.25), f32(0.5))");
+    expect(compiled.wgsl).toContain("bg_curand_log_normal(&state, 0.25, 0.5)");
     expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value) && value > 0)).toBe(true);
   });
 
@@ -9951,6 +9951,28 @@ __global__ void curandRawKernel(unsigned int *out) {
     expect(compiled.wgsl).toContain("fn bg_curand(state: ptr<function, u32>) -> u32");
     expect(compiled.wgsl).toContain("var x: u32 = u32(bg_curand(&state))");
     expect([...result.buffers.out as Uint32Array].some((value) => value !== 0)).toBe(true);
+  });
+
+  it("lowers CUDA cuRAND vector-pair draws through semantic IR", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void curandPairKernel(float *out, unsigned int seed) {
+  curandState_t state;
+  curand_init(seed, threadIdx.x, 0, &state);
+  float2 normal = curand_normal2(&state);
+  float2 logn = curand_log_normal2(&state, 0.2f, 0.4f);
+  out[threadIdx.x] = normal.x + normal.y + logn.x + logn.y;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) }, scalars: { seed: 2468 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn bg_curand_normal2(state: ptr<function, u32>) -> vec2<f32>");
+    expect(compiled.wgsl).toContain("var normal: vec2<f32> = bg_curand_normal2(&state)");
+    expect(compiled.wgsl).toContain("bg_curand_log_normal2(&state, 0.2, 0.4)");
+    expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
   });
 
   it("lowers cuRAND calls against storage-backed state arrays", () => {

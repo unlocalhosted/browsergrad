@@ -200,8 +200,10 @@ export function usesCurand(ir: KernelIrModule): boolean {
     "curand_uniform",
     "curand_uniform_double",
     "curand_normal",
+    "curand_normal2",
     "curand_normal_double",
     "curand_log_normal",
+    "curand_log_normal2",
     "curand_log_normal_double",
   ]);
   return statementsUseCall(ir.body, curandCalls) ||

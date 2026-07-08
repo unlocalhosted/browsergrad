@@ -1883,6 +1883,14 @@ __global__ void curandRawState(curandState_t *states, unsigned int *out, unsigne
   unsigned int y = curand(&states[tid]);
   out[tid] = x ^ y;
 }`,
+  curandPairState: `
+__global__ void curandPairState(curandState_t *states, float *out, unsigned int seed) {
+  unsigned int tid = threadIdx.x;
+  curand_init(seed, tid, 0, &states[tid]);
+  float2 normal = curand_normal2(&states[tid]);
+  float2 logn = curand_log_normal2(&states[tid], 0.2f, 0.4f);
+  out[tid] = normal.x + normal.y + logn.x + logn.y;
+}`,
   fp8ConvertHelpers: `
 __global__ void fp8ConvertHelpers(const uint* input, half* output, uint* encoded, int* as_int) {
   if (threadIdx.x == 0) {
@@ -12373,6 +12381,30 @@ const html = String.raw`<!doctype html>
               type: "Uint32Array",
               data: [613652523, 2931321509, 2129132415, 873061861],
             },
+          },
+          {
+            name: "helpers:curand-pair-state",
+            source: SOURCES.curandPairState,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                states: new Uint32Array(4),
+                out: new Float32Array(4),
+              },
+              scalars: { seed: 2468 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                -1.2391196489334106,
+                5.249747276306152,
+                1.891848087310791,
+                -1.144092321395874,
+              ],
+            },
+            tolerance: 0.001,
           },
           {
             name: "helpers:fp8-convert",
