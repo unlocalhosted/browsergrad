@@ -1121,7 +1121,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
 }
 
 function semanticWgslVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  if (ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared") return false;
+  if (ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared" && ref.addressSpace !== "local") return false;
   if (ref.fields.length !== 1 || !isCudaVectorType(ref.containerValueType)) return false;
   const lanes = cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!);
   if (lanes === undefined || new Set(lanes).size !== lanes.length) return false;
@@ -2371,6 +2371,22 @@ function emitSemanticVectorFieldMemoryWrite(
   if (!isCudaVectorType(containerType)) throw semanticWgslError("semantic WGSL vector field write requires vector container", operation.span);
   const lanes = cudaVectorSwizzleIndices(containerType, operation.target.fields[0] ?? "");
   if (lanes === undefined) throw semanticWgslError("semantic WGSL vector field write requires modeled lanes", operation.span);
+  if (operation.target.addressSpace === "local") {
+    const target = emitSemanticMemoryRef({ ...operation.target, valueType: containerType, fields: [] }, ir, names, options);
+    const field = lanes.map((lane) => ["x", "y", "z", "w"][lane]).join("");
+    if (lanes.length === 1) {
+      const access = `${target}.${field}`;
+      const value = emitSemanticExpressionAs(operation.value, ir, names, wgslVectorScalar(containerType), options, textureSpecializations);
+      if (operation.operator === "=") return [`${access} = ${value}`];
+      return [`${access} = (${access} ${operation.operator.slice(0, -1)} ${value})`];
+    }
+    const valueType = operation.target.valueType;
+    if (!isCudaVectorType(valueType)) throw semanticWgslError("semantic WGSL swizzle write requires vector value", operation.span);
+    const value = emitSemanticVectorOperand(operation.value, valueType, ir, names, options, textureSpecializations);
+    const access = `${target}.${field}`;
+    const assigned = operation.operator === "=" ? value : `(${access} ${operation.operator.slice(0, -1)} ${value})`;
+    return [`${access} = ${assigned}`];
+  }
   const base = emitFlatStorageVectorBaseIndex(operation.target, ir, names, options);
   const target = nameFor(operation.target.base, names);
   const fields = ["x", "y", "z", "w"];

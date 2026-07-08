@@ -1494,6 +1494,47 @@ __global__ void vector_storage_swizzle_writes(float* out, uint* ui) {
     expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
   });
 
+  it("lowers CUDA vector swizzle writes through local vector arrays", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void local_vector_array_swizzles(float* out, uint* ui) {
+  float4 values[2];
+  values[0] = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  values[0].xy = make_float2(9.0f, 8.0f);
+  values[0].zw += make_float2(1.0f, 2.0f);
+  uint4 bits[1];
+  bits[0] = make_uint4(5u, 6u, 7u, 8u);
+  bits[0].s210 = make_uint3(11u, 12u, 13u);
+  bits[0].xy += make_uint2(1u, 2u);
+  out[0] = values[0].x;
+  out[1] = values[0].y;
+  out[2] = values[0].z;
+  out[3] = values[0].w;
+  ui[0] = bits[0].x;
+  ui[1] = bits[0].y;
+  ui[2] = bits[0].z;
+  ui[3] = bits[0].w;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-assignment");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("values[0u].xy = vec2<f32>(f32(9.0), f32(8.0));");
+    expect([...result.buffers.out as Float32Array]).toEqual([9, 8, 4, 6]);
+    expect([...result.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([9, 8, 4, 6]);
+    expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
+  });
+
   it("keeps shifted scalar bases aligned when casting helper pointer params to vector lanes", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void write_lane_offset(float4* out, int idx, float value) {
