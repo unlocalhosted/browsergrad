@@ -2700,12 +2700,16 @@ function validatePointerIdentityCall(
 function isHalf2Intrinsic(name: string): boolean {
   return name === "__hadd2" ||
     name === "__hadd2_rn" ||
+    name === "__hadd2_sat" ||
     name === "__hsub2" ||
     name === "__hsub2_rn" ||
+    name === "__hsub2_sat" ||
     name === "__hmul2" ||
     name === "__hmul2_rn" ||
+    name === "__hmul2_sat" ||
     name === "__hfma2" ||
     name === "__hfma2_rn" ||
+    name === "__hfma2_sat" ||
     name === "__hmin2" ||
     name === "__hmax2";
 }

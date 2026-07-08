@@ -3417,14 +3417,20 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (isHalf2Intrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
-    const addend = name === "__hfma2" || name === "__hfma2_rn"
+    const addend = name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat"
       ? valueAsCudaVector(evalExpression(expression.args[2]!, context), "half2")
       : undefined;
     const op = half2IntrinsicOperator(name);
     return {
       kind: "cuda-vector",
       valueType: "half2",
-      lanes: left.lanes.map((value, index) => roundHalf(op(value ?? 0, right.lanes[index] ?? 0) + (addend?.lanes[index] ?? 0))),
+      lanes: left.lanes.map((value, index) => {
+        const lhs = value ?? 0;
+        const rhs = right.lanes[index] ?? 0;
+        const acc = addend?.lanes[index] ?? 0;
+        if (name === "__hfma2_sat") return roundHalf(saturateHalf(lhs * rhs + acc));
+        return roundHalf(op(lhs, rhs) + acc);
+      }),
     };
   }
   if (name === "__half22float2") {
@@ -3602,12 +3608,16 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
 function isHalf2Intrinsic(name: string | undefined): boolean {
   return name === "__hadd2" ||
     name === "__hadd2_rn" ||
+    name === "__hadd2_sat" ||
     name === "__hsub2" ||
     name === "__hsub2_rn" ||
+    name === "__hsub2_sat" ||
     name === "__hmul2" ||
     name === "__hmul2_rn" ||
+    name === "__hmul2_sat" ||
     name === "__hfma2" ||
     name === "__hfma2_rn" ||
+    name === "__hfma2_sat" ||
     name === "__hmin2" ||
     name === "__hmax2";
 }
@@ -3673,14 +3683,21 @@ function half2IntrinsicOperator(name: string | undefined): (left: number, right:
     case "__hadd2":
     case "__hadd2_rn":
       return (left, right) => left + right;
+    case "__hadd2_sat":
+      return (left, right) => saturateHalf(left + right);
     case "__hsub2":
     case "__hsub2_rn":
       return (left, right) => left - right;
+    case "__hsub2_sat":
+      return (left, right) => saturateHalf(left - right);
     case "__hmul2":
     case "__hfma2":
     case "__hmul2_rn":
     case "__hfma2_rn":
+    case "__hfma2_sat":
       return (left, right) => left * right;
+    case "__hmul2_sat":
+      return (left, right) => saturateHalf(left * right);
     case "__hmin2":
       return Math.min;
     case "__hmax2":
@@ -3692,6 +3709,10 @@ function half2IntrinsicOperator(name: string | undefined): (left: number, right:
 
 function roundHalf(value: number): number {
   return float16BitsToFloat32(float32ToFloat16Bits(value));
+}
+
+function saturateHalf(value: number): number {
+  return Number.isNaN(value) ? 0 : Math.min(1, Math.max(0, value));
 }
 
 const f32Scratch = new Float32Array(1);

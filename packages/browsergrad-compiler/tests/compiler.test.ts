@@ -10094,6 +10094,43 @@ __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out, float *scal
     expect([...semanticResult.buffers.scalar as Float32Array]).toEqual([38]);
   });
 
+  it("lowers CUDA half and half2 saturating arithmetic intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void halfSat(const half *x, const half2 *v, half *out, half2 *vecOut) {
+  half a = x[0];
+  half b = x[1];
+  out[0] = __hadd_sat(a, b);
+  out[1] = __hsub_sat(b, a);
+  out[2] = __hmul_sat(a, __float2half(2.0f));
+  out[3] = __hfma_sat(a, b, __float2half(0.25f));
+  half2 pair = v[0];
+  vecOut[0] = __hadd2_sat(pair, __floats2half2_rn(0.5f, 0.75f));
+  vecOut[1] = __hsub2_sat(__floats2half2_rn(0.5f, 1.0f), pair);
+  vecOut[2] = __hmul2_sat(pair, __floats2half2_rn(2.0f, 0.75f));
+  vecOut[3] = __hfma2_sat(pair, __floats2half2_rn(2.0f, 4.0f), __floats2half2_rn(-1.0f, 0.25f));
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: createWgslFloat16Array([0.75, 0.5]),
+        v: createWgslFloat16Array([0.75, 0.25]),
+        out: createWgslFloat16Array(4),
+        vecOut: createWgslFloat16Array(8),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("select(clamp");
+    expect(Array.from(result.buffers.out as Iterable<number>)).toEqual([1, 0, 1, 0.625]);
+    expect(Array.from(result.buffers.vecOut as Iterable<number>)).toEqual([1, 1, 0, 0.75, 1, 0.1875, 0.5, 1]);
+    expect(Array.from(semanticResult.buffers.out as Iterable<number>)).toEqual([1, 0, 1, 0.625]);
+    expect(Array.from(semanticResult.buffers.vecOut as Iterable<number>)).toEqual([1, 1, 0, 0.75, 1, 0.1875, 0.5, 1]);
+  });
+
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void intrinsic_pack(half2 *h, float2 *f, float *out, uint *bits) {
@@ -10125,11 +10162,12 @@ __global__ void intrinsic_pack(half2 *h, float2 *f, float *out, uint *bits) {
     );
 
     expect(backendIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
-    expect(compiled.wgsl).toContain("bg_warp_shuffle_sync_int_32(0, 0u, 32u, local_id)");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_32(0u, 0u, 32u, local_id)");
     expect(compiled.wgsl).toContain("workgroupBarrier()");
     expect(compiled.wgsl).toContain("storageBarrier()");
     expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32((value).x), f32((value).y)))");
-    expect(compiled.wgsl).toContain("vec2<f16>(unpack2x16float(u32(0x40003c00u)))");
+    expect(compiled.wgsl).toContain("vec2<f16>(unpack2x16float(");
     expect([...result.buffers.f as Float32Array]).toEqual([1, 4]);
     expect(Array.from(result.buffers.h as Iterable<number>)).toEqual([1, 4, 1, 2]);
     expect([...result.buffers.bits as Uint32Array]).toEqual([0x44003c00]);

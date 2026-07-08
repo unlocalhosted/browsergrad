@@ -409,6 +409,13 @@ const INTEGER_INTRINSICS = [
 ] as const;
 
 const HALF_FEATURES = ["shader-f16"] as const;
+const saturateHalf = (value: number): number => Number.isNaN(value)
+  ? 0
+  : roundHalf(Math.min(1, Math.max(0, value)));
+const emitHalfSaturate = (value: string): string =>
+  `select(clamp(${value}, f16(0.0), f16(1.0)), f16(0.0), (${value}) != (${value}))`;
+const emitHalf2Saturate = (value: string): string =>
+  `select(clamp(${value}, vec2<f16>(0.0), vec2<f16>(1.0)), vec2<f16>(0.0), (${value}) != (${value}))`;
 const HALF_INTRINSICS = [
   intrinsic("__half2float", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__float2half", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
@@ -429,14 +436,18 @@ const HALF_INTRINSICS = [
   intrinsic("__hneg", [1, 1], "half", (args) => roundHalf(-(args[0] ?? 0)), (args) => `(-${args[0] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hadd", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) + (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} + ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hadd_rn", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) + (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} + ${args[1] ?? "0"})`, HALF_FEATURES),
+  intrinsic("__hadd_sat", [2, 2], "half", (args) => saturateHalf((args[0] ?? 0) + (args[1] ?? 0)), (args) => emitHalfSaturate(`(${args[0] ?? "0"} + ${args[1] ?? "0"})`), HALF_FEATURES),
   intrinsic("__hsub", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) - (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} - ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hsub_rn", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) - (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} - ${args[1] ?? "0"})`, HALF_FEATURES),
+  intrinsic("__hsub_sat", [2, 2], "half", (args) => saturateHalf((args[0] ?? 0) - (args[1] ?? 0)), (args) => emitHalfSaturate(`(${args[0] ?? "0"} - ${args[1] ?? "0"})`), HALF_FEATURES),
   intrinsic("__hmul", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) * (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} * ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hmul_rn", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) * (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} * ${args[1] ?? "0"})`, HALF_FEATURES),
+  intrinsic("__hmul_sat", [2, 2], "half", (args) => saturateHalf((args[0] ?? 0) * (args[1] ?? 0)), (args) => emitHalfSaturate(`(${args[0] ?? "0"} * ${args[1] ?? "0"})`), HALF_FEATURES),
   intrinsic("__hdiv", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) / (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} / ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hdiv_rn", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) / (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} / ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hfma", [3, 3], "half", (args) => roundHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0)), (args) => `fma(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hfma_rn", [3, 3], "half", (args) => roundHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0)), (args) => `fma(${args.join(", ")})`, HALF_FEATURES),
+  intrinsic("__hfma_sat", [3, 3], "half", (args) => saturateHalf((args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0)), (args) => emitHalfSaturate(`fma(${args.join(", ")})`), HALF_FEATURES),
   intrinsic("hexp", [1, 1], "half", (args) => roundHalf(Math.exp(args[0] ?? 0)), (args) => `f16(exp(f32(${args[0] ?? "0"})))`, HALF_FEATURES),
   intrinsic("__hmin", [2, 2], "half", (args) => roundHalf(Math.min(args[0] ?? 0, args[1] ?? 0)), (args) => `min(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hmax", [2, 2], "half", (args) => roundHalf(Math.max(args[0] ?? 0, args[1] ?? 0)), (args) => `max(${args.join(", ")})`, HALF_FEATURES),
@@ -448,12 +459,16 @@ const HALF_INTRINSICS = [
   intrinsic("__hle", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a <= b), (args) => `(${args[0] ?? "0"} <= ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hadd2", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} + ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__hadd2_rn", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} + ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__hadd2_sat", [2, 2], "half2", () => 0, (args) => emitHalf2Saturate(`(${args[0] ?? "vec2<f16>()"} + ${args[1] ?? "vec2<f16>()"})`), HALF_FEATURES),
   intrinsic("__hsub2", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} - ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__hsub2_rn", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} - ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__hsub2_sat", [2, 2], "half2", () => 0, (args) => emitHalf2Saturate(`(${args[0] ?? "vec2<f16>()"} - ${args[1] ?? "vec2<f16>()"})`), HALF_FEATURES),
   intrinsic("__hmul2", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} * ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__hmul2_rn", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} * ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__hmul2_sat", [2, 2], "half2", () => 0, (args) => emitHalf2Saturate(`(${args[0] ?? "vec2<f16>()"} * ${args[1] ?? "vec2<f16>()"})`), HALF_FEATURES),
   intrinsic("__hfma2", [3, 3], "half2", () => 0, (args) => `fma(${args[0] ?? "vec2<f16>()"}, ${args[1] ?? "vec2<f16>()"}, ${args[2] ?? "vec2<f16>()"})`, HALF_FEATURES),
   intrinsic("__hfma2_rn", [3, 3], "half2", () => 0, (args) => `fma(${args[0] ?? "vec2<f16>()"}, ${args[1] ?? "vec2<f16>()"}, ${args[2] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__hfma2_sat", [3, 3], "half2", () => 0, (args) => emitHalf2Saturate(`fma(${args[0] ?? "vec2<f16>()"}, ${args[1] ?? "vec2<f16>()"}, ${args[2] ?? "vec2<f16>()"})`), HALF_FEATURES),
   intrinsic("__hmin2", [2, 2], "half2", () => 0, (args) => `min(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hmax2", [2, 2], "half2", () => 0, (args) => `max(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__half22float2", [1, 1], "float2", () => 0, (args) => `vec2<f32>(${args[0] ?? "vec2<f16>()"})`, HALF_FEATURES),
