@@ -361,7 +361,7 @@ function unsupportedSemanticReferenceOperation(
         if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) return operation;
         if (
           operation.target.addressSpace === "storage" &&
-          !compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
+          !semanticReferenceStorageBaseSupported(operation.target.base, compiled)
         ) return operation;
         if (!semanticReferenceValueExpressionSupported(operation.value, compiled)) return operation;
         break;
@@ -444,7 +444,7 @@ function semanticReferenceOperationsContainUnsupportedCallableSignatures(
   for (const operation of operations) {
     if (operation.kind === "call") {
       const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
-      if (fn && fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) {
+      if (fn && fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) {
         return true;
       }
     } else if (operation.kind === "branch") {
@@ -475,6 +475,13 @@ function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["
   if (symbol.kind === "device-global") return semanticReferenceScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "texture") return symbol.valueType === "texture2d";
   return false;
+}
+
+function semanticReferenceFunctionParamSupported(
+  param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number],
+): boolean {
+  if (param.pointer) return param.addressSpace === "storage" && semanticReferenceValueTypeSupported(param.valueType);
+  return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";
 }
 
 function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel): boolean {
@@ -531,6 +538,11 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
+}
+
+function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledCudaLiteKernel): boolean {
+  return compiled.kernelIr.params.some((param) => param.name === base && param.addressSpace === "storage") ||
+    compiled.kernelIr.functions.some((fn) => fn.params.some((param) => param.name === base && param.pointer && param.addressSpace === "storage"));
 }
 
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -730,7 +742,8 @@ function semanticReferenceFunctionCallSupported(
   const callee = expression.callee.name;
   const fn = compiled.kernelIr.functions.find((item) => item.name === callee);
   if (!fn || !semanticReferenceValueTypeSupported(fn.returnType)) return false;
-  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
+  if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
+  if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
   if (fn.params.some((param) => param.addressSpace === "local" && !semanticReferenceValueTypeSupported(param.valueType))) return false;
   if (!semanticReferenceFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
@@ -744,6 +757,10 @@ function semanticReferenceFunctionArgSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (!param) return false;
+  if (param.pointer) {
+    const ref = memoryRefFromIndexExpression(arg);
+    return param.addressSpace === "storage" && ref?.addressSpace === "storage";
+  }
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
   if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
   return semanticReferenceExpressionSupported(arg, isSemanticReferenceFloatVectorType(param.valueType) ? "any" : "scalar", compiled);
@@ -859,7 +876,7 @@ function semanticReferenceBf162CallSupported(
 function semanticReferenceFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
   return operations.every((operation) => {
     if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
-    if (operation.kind === "store") return operation.target.addressSpace === "local";
+    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage";
     if (operation.kind === "surface-write") return true;
     if (operation.kind === "call") return true;
     if (operation.kind === "branch") return semanticReferenceFunctionBodyShapeSupported(operation.consequent) && semanticReferenceFunctionBodyShapeSupported(operation.alternate);
@@ -867,6 +884,23 @@ function semanticReferenceFunctionBodyShapeSupported(operations: readonly Semant
     if (operation.kind === "loop") return semanticReferenceFunctionBodyShapeSupported(operation.body);
     return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
   });
+}
+
+function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
+  const pointerParams = new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "storage").map((param) => param.name));
+  return pointerParams.size > 0 && fn.body.every((operation) => semanticReferencePointerFunctionOperationSupported(operation, pointerParams));
+}
+
+function semanticReferencePointerFunctionOperationSupported(
+  operation: SemanticKernelIrOperation,
+  pointerParams: ReadonlySet<string>,
+): boolean {
+  if (operation.kind === "store") return pointerParams.has(operation.target.base) && operation.target.fields.length > 0;
+  if (operation.kind === "expression" && operation.expression.kind === "update") {
+    const ref = memoryRefFromIndexExpression(operation.expression.argument);
+    return ref !== undefined && pointerParams.has(ref.base);
+  }
+  return false;
 }
 
 function semanticReferenceAtomicCallSupported(
@@ -945,7 +979,8 @@ function semanticReferenceVoidFunctionCallSupported(
 ): boolean {
   const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
   if (!fn || fn.returnType !== "void") return false;
-  if (fn.params.some((param) => param.pointer || (param.addressSpace !== "local" && param.addressSpace !== "texture" && param.addressSpace !== "surface"))) return false;
+  if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
+  if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
     semanticReferenceFunctionBodyShapeSupported(fn.body) &&
@@ -1063,8 +1098,10 @@ function semanticReferenceExpressionSupported(
     case "sequence":
       return expression.expressions.every((item) => semanticReferenceExpressionSupported(item, "scalar", compiled));
     case "update":
-      return expression.argument.kind === "symbol" &&
-        expression.argument.addressSpace === "local" &&
+      return (expression.argument.kind === "symbol" && expression.argument.addressSpace === "local" ||
+          (compiled === undefined
+            ? Boolean(memoryRefFromIndexExpression(expression.argument))
+            : semanticReferenceAssignmentMemoryRefSupported(expression.argument, compiled))) &&
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
@@ -2170,11 +2207,18 @@ function evalUpdate(
   expression: Extract<SemanticExpression, { readonly kind: "update" }>,
   context: SemanticReferenceContext,
 ): number {
+  const delta = expression.operator === "++" ? 1 : expression.operator === "--" ? -1 : 0;
+  const ref = memoryRefFromIndexExpression(expression.argument);
+  if (ref) {
+    const oldValue = readMemory(ref, context);
+    const next = oldValue + delta;
+    writeMemory(ref, next, context);
+    return expression.prefix ? next : oldValue;
+  }
   if (expression.argument.kind !== "symbol") {
-    throw semanticReferenceError("semantic reference supports only local scalar updates", expression.span);
+    throw semanticReferenceError("semantic reference supports only local scalar or modeled memory updates", expression.span);
   }
   const oldValue = evalNumber(expression.argument, context);
-  const delta = expression.operator === "++" ? 1 : expression.operator === "--" ? -1 : 0;
   const next = oldValue + delta;
   context.locals.set(expression.argument.name, next);
   return expression.prefix ? next : oldValue;
@@ -3515,6 +3559,8 @@ function runSemanticFunction(
   const textures = { ...context.textures };
   const textureDescriptors = { ...context.textureDescriptors };
   const surfaces = { ...context.surfaces };
+  const buffers = new Map(context.buffers);
+  const storageOffsets = new Map(context.storageOffsets);
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
     if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, span);
@@ -3534,18 +3580,27 @@ function runSemanticFunction(
       surfaces[param.name] = surface;
       continue;
     }
+    if (param.pointer && param.addressSpace === "storage") {
+      const ref = memoryRefFromIndexExpression(arg);
+      if (!ref || ref.addressSpace !== "storage") throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled storage`, arg.span);
+      const buffer = context.buffers.get(ref.base);
+      if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, arg.span);
+      buffers.set(param.name, buffer);
+      storageOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, context));
+      continue;
+    }
     locals.set(param.name, isSemanticReferenceFloatVectorType(param.valueType) ? evalSemanticExpression(arg, context) : evalNumber(arg, context));
   }
   const child: SemanticReferenceContext = {
     compiled: context.compiled,
-    buffers: context.buffers,
+    buffers,
     constants: context.constants,
     deviceGlobals: context.deviceGlobals,
     textures,
     textureDescriptors,
     surfaces,
     sharedMemory: context.sharedMemory,
-    storageOffsets: new Map(context.storageOffsets),
+    storageOffsets,
     scalars: context.scalars,
     locals,
     blockIdx: context.blockIdx,
@@ -3560,6 +3615,14 @@ function runSemanticFunction(
     throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
   }
   return child;
+}
+
+function semanticReferencePointerArgBaseIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  const root = context.compiled.kernelIr.params.find((param) => param.name === ref.base) ??
+    context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
+  const index = flatIndex(ref, context);
+  const valueType = root?.valueType;
+  return isSemanticReferenceFloatVectorType(valueType) ? index * cudaVectorLaneCount(valueType) : index;
 }
 
 function semanticMathCallArity(name: string): number {

@@ -22,6 +22,26 @@ import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
+const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
+const SEMANTIC_CURAND_CALLS = new Set([
+  "curand_init",
+  "curand",
+  "curand_uniform",
+  "curand_uniform4",
+  "curand_uniform_double",
+  "curand_normal",
+  "curand_normal2",
+  "curand_normal4",
+  "curand_normal_double",
+  "curand_log_normal",
+  "curand_log_normal2",
+  "curand_log_normal4",
+  "curand_log_normal_double",
+  "curand_poisson",
+  "curand_poisson4",
+  "skipahead",
+]);
+
 export type SemanticAddressSpace =
   | "uniform"
   | "storage"
@@ -614,7 +634,11 @@ function lowerExpression(
         const value = semanticSizeofAlignofValue(expression.callee.name, expression.args[0], scope);
         if (value !== undefined) return intNumberExpression(value, expression.span);
       }
-      const args = expression.args.map((arg) => lowerExpression(arg, scope));
+      const preservePointerArgs = expression.callee.kind === "identifier" &&
+        (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(expression.callee.name) || SEMANTIC_CURAND_CALLS.has(expression.callee.name));
+      const args = expression.args.map((arg) => preservePointerArgs
+        ? lowerExpression(arg, scope)
+        : pointerAliasValueExpression(arg, scope, arg.span) ?? lowerExpression(arg, scope));
       if (expression.callee.kind === "identifier" && CUDA_CACHE_HINT_LOADS.has(expression.callee.name)) {
         const load = cacheHintLoadExpression(expression, scope);
         if (load) return load;
@@ -1426,11 +1450,12 @@ function pointerAliasValueExpression(
   if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
   const root = scope.get(alias.pointerRoot);
   if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;
+  const aliasValueType = pointerAliasTargetValueType(expression, scope) ?? root.valueType;
   return {
     kind: "index",
     target: semanticSymbolExpression(root, span),
     index: alias.pointerBaseIndices[0]!,
-    ...optionalValueType(root.valueType),
+    ...optionalValueType(aliasValueType),
     addressSpace: root.addressSpace,
     span,
   };

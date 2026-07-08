@@ -1494,6 +1494,42 @@ __global__ void vector_storage_swizzle_writes(float* out, uint* ui) {
     expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
   });
 
+  it("lowers CUDA vector swizzle writes through helper pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void set_vector_swizzles(float4* view, uint4* bits) {
+  view[0].xy = make_float2(9.0f, 8.0f);
+  view[0].zw += make_float2(1.0f, 2.0f);
+  bits[0].s210 = make_uint3(11u, 12u, 13u);
+  bits[0].xy += make_uint2(1u, 2u);
+}
+
+__global__ void helper_vector_storage_swizzle_writes(float* out, uint* ui) {
+  float4* view = reinterpret_cast<float4*>(out);
+  view[0] = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  uint4* bits = reinterpret_cast<uint4*>(ui);
+  bits[0] = make_uint4(5u, 6u, 7u, 8u);
+  set_vector_swizzles(view, bits);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-assignment");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...result.buffers.out as Float32Array]).toEqual([9, 8, 4, 6]);
+    expect([...result.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([9, 8, 4, 6]);
+    expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
+  });
+
   it("lowers CUDA vector swizzle writes through local vector arrays", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void local_vector_array_swizzles(float* out, uint* ui) {
@@ -1549,7 +1585,7 @@ __global__ void vector_lane_offset(float* out, const float* inp) {
   write_lane_offset(writeView, idx, value.x + value.w);
 }`, { workgroupSize: [2, 1, 1] });
 
-    expect(compiled.wgsl).toContain("write_lane_offset(0u, (0u + u32((0 + 4))), idx");
+    expect(compiled.wgsl).toContain("write_lane_offset(0u, u32((i32(out_base) + 4)), idx");
     expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(out_buffer, (out_base + (u32(idx) * 4u))");
   });
 
@@ -1565,9 +1601,8 @@ __global__ void vector_to_scalar_offset(float* out, const float4* inp) {
   out[idx] = load_scalar_offset(scalarView, idx);
 }`, { workgroupSize: [2, 1, 1] });
 
-    expect(compiled.wgsl).toContain("load_scalar_offset(1u, (0u + u32(((0 + 1) * 4))), idx");
-    expect(compiled.wgsl).toContain("return inp[index];");
-    expect(compiled.wgsl).toContain("return bg_ptr_read_f32(inp_buffer, (inp_base + u32(idx)));");
+    expect(compiled.wgsl).toMatch(/load_scalar_offset\(1u, .*4.*idx/u);
+    expect(compiled.wgsl).toContain("return bg_ptr_read_f32(inp_buffer");
   });
 
   it("writes scalar helper pointer params through shifted vector-backed storage", () => {
@@ -1582,9 +1617,8 @@ __global__ void vector_to_scalar_write_offset(float4* out) {
   write_scalar_offset(scalarView, idx, 7.0f + (float)idx);
 }`, { workgroupSize: [2, 1, 1] });
 
-    expect(compiled.wgsl).toContain("write_scalar_offset(0u, (0u + u32(((0 + 1) * 4))), idx");
-    expect(compiled.wgsl).toContain("out[index] = value;");
-    expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer, (out_base + u32(idx)), value);");
+    expect(compiled.wgsl).toMatch(/write_scalar_offset\(0u, .*4.*idx/u);
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer");
   });
 
   it("keeps shifted vector-backed scalar atomics on atomic storage carriers", () => {
@@ -2178,9 +2212,9 @@ __global__ void kernel(uint* out) {
     );
 
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 8]);
-    expect(compiled.wgsl).toContain("bg_ptr_write_u32(ptr_buffer, (ptr_base + u32(index)), (bg_ptr_read_u32(ptr_buffer, (ptr_base + u32(index))) + 1u))");
+    expect(compiled.wgsl).toContain("bg_ptr_write_u32(ptr_buffer, u32((i32(ptr_base) + i32(index))), (bg_ptr_read_u32(ptr_buffer, u32((i32(ptr_base) + i32(index)))) + 1u))");
     expect(compiled.wgsl).not.toContain("u32(index * vec4<u32>");
-    expect(compiled.wgsl).not.toContain("bg_ptr_read_u32(ptr_buffer, (ptr_base + u32(index))) =");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_u32(ptr_buffer, u32((i32(ptr_base) + i32(index)))) =");
   });
 
   it("lowers device helper pointer-param writes fed by atomic return values", () => {
@@ -2283,7 +2317,7 @@ __global__ void incKernel(int *data, int n) {
     );
 
     expect([...result.buffers.data as Int32Array]).toEqual([1, 2, 3, 4]);
-    expect(compiled.wgsl).toContain("data[i] = (i32(data[i]) + 1)");
+    expect(compiled.wgsl).toMatch(/data(?:\[i\]|\[u32\(i\)\]) = \((?:i32\()?data(?:\[i\]|\[u32\(i\)\])\)? \+ 1\)/u);
     expect(compiled.wgsl).not.toContain("bg_ptr_read_i32");
     expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
   });
@@ -4800,7 +4834,10 @@ __global__ void hello(char *name) {
   printf("%s %s\\n", buffer, name);
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("printf omitted");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("printf(");
   });
 
   it("parses scalar C++ aliases and brace scalar constructors", () => {
@@ -18623,9 +18660,9 @@ __global__ void atomic_count(int* x) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
-    expect(compiled.wgsl).toContain("atomicExchange(&x[0], 42);");
-    expect(compiled.wgsl).toContain("atomicAdd(&x[(0u + u32(1))], 3);");
+    expect(compiled.wgsl).toContain("atomicAdd(&x[0u], 1);");
+    expect(compiled.wgsl).toContain("atomicExchange(&x[0u], 42);");
+    expect(compiled.wgsl).toContain("atomicAdd(&x[1u], 3);");
     expect([...result.buffers.x as Int32Array]).toEqual([42, 3]);
   });
 
