@@ -354,16 +354,26 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__float2half_rn", "to_half"],
   ["__int2half_rn", "int_to_half"],
   ["__uint2half_rn", "uint_to_half"],
+  ["__half_as_short", "half_as_short"],
   ["__half_as_ushort", "half_as_ushort"],
+  ["__short_as_half", "short_as_half"],
   ["__ushort_as_half", "ushort_as_half"],
   ["__half2int_rn", "half_to_int_rn"],
   ["__half2int_rz", "half_to_int_rz"],
   ["__half2int_ru", "half_to_int_ru"],
   ["__half2int_rd", "half_to_int_rd"],
+  ["__half2short_rn", "half_to_short_rn"],
+  ["__half2short_rz", "half_to_short_rz"],
+  ["__half2short_ru", "half_to_short_ru"],
+  ["__half2short_rd", "half_to_short_rd"],
   ["__half2uint_rn", "half_to_uint_rn"],
   ["__half2uint_rz", "half_to_uint_rz"],
   ["__half2uint_ru", "half_to_uint_ru"],
   ["__half2uint_rd", "half_to_uint_rd"],
+  ["__half2ushort_rn", "half_to_ushort_rn"],
+  ["__half2ushort_rz", "half_to_ushort_rz"],
+  ["__half2ushort_ru", "half_to_ushort_ru"],
+  ["__half2ushort_rd", "half_to_ushort_rd"],
   ["__nv_cvt_fp8_to_halfraw", "fp8_to_half"],
   ["__nv_cvt_float_to_fp8", "float_to_fp8"],
   ["__habs", "half_abs"],
@@ -5245,14 +5255,16 @@ function emitSemanticMathCall(
     const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations);
     return wgslCallee === "float_as_int" ? `bitcast<i32>(${emitted})` : `bitcast<u32>(${emitted})`;
   }
-  if (wgslCallee === "half_to_float" || wgslCallee === "to_half" || wgslCallee === "int_to_half" || wgslCallee === "uint_to_half" || wgslCallee === "half_as_ushort" || wgslCallee === "ushort_as_half") {
+  if (wgslCallee === "half_to_float" || wgslCallee === "to_half" || wgslCallee === "int_to_half" || wgslCallee === "uint_to_half" || wgslCallee === "half_as_short" || wgslCallee === "half_as_ushort" || wgslCallee === "short_as_half" || wgslCallee === "ushort_as_half") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
     if (wgslCallee === "half_to_float") return `f32(${emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations)})`;
     if (wgslCallee === "to_half") return `f16(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
     if (wgslCallee === "int_to_half") return `f16(f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)}))`;
     if (wgslCallee === "uint_to_half") return `f16(f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)}))`;
+    if (wgslCallee === "half_as_short") return `((bitcast<i32>((pack2x16float(vec2<f32>(f32(${emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations)}), 0.0)) & 0xffffu) << 16u)) >> 16)`;
     if (wgslCallee === "half_as_ushort") return `(pack2x16float(vec2<f32>(f32(${emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations)}), 0.0)) & 0xffffu)`;
+    if (wgslCallee === "short_as_half") return `f16(unpack2x16float(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)} & 0xffffu).x)`;
     return `f16(unpack2x16float(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)}).x)`;
   }
   if (wgslCallee === "fp8_to_half") {
@@ -5265,7 +5277,7 @@ function emitSemanticMathCall(
     if (!value || !saturate || !mode) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
     return `bg_f32_to_fp8(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)}, ${emitSemanticExpressionAs(saturate, ir, names, "u32", options, textureSpecializations)}, ${emitSemanticExpressionAs(mode, ir, names, "u32", options, textureSpecializations)})`;
   }
-  if (wgslCallee.startsWith("half_to_int_") || wgslCallee.startsWith("half_to_uint_")) {
+  if (wgslCallee.startsWith("half_to_int_") || wgslCallee.startsWith("half_to_short_") || wgslCallee.startsWith("half_to_uint_") || wgslCallee.startsWith("half_to_ushort_")) {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
     const emitted = `f32(${emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations)})`;
@@ -5276,7 +5288,7 @@ function emitSemanticMathCall(
       : wgslCallee.endsWith("_ru")
       ? `ceil(${emitted})`
       : `floor(${emitted})`;
-    return wgslCallee.startsWith("half_to_uint_") ? `u32(max(${rounded}, 0.0))` : `i32(${rounded})`;
+    return wgslCallee.startsWith("half_to_uint_") || wgslCallee.startsWith("half_to_ushort_") ? `u32(max(${rounded}, 0.0))` : `i32(${rounded})`;
   }
   if (wgslCallee === "bf16_to_float" || wgslCallee === "to_bf16" || wgslCallee === "int_to_bf16" || wgslCallee === "uint_to_bf16" || wgslCallee === "bf16_as_ushort" || wgslCallee === "ushort_as_bf16") {
     const [value] = expression.args;
@@ -6954,8 +6966,8 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
         if (mathCallee && semanticMathCallReturnsFloat(expression.callee.name)) return "f32";
         if (mathCallee === "hadd" && expression.valueType === "half") return "f16";
         if (mathCallee && semanticMathCallReturnsHalf(mathCallee)) return "f16";
-        if (mathCallee && mathCallee.startsWith("half_to_int_")) return "i32";
-        if (mathCallee && (mathCallee.startsWith("half_to_uint_") || mathCallee === "half_as_ushort" || mathCallee === "float_to_fp8" || mathCallee.startsWith("half_") && !semanticMathCallReturnsHalf(mathCallee))) return "u32";
+        if (mathCallee && (mathCallee.startsWith("half_to_int_") || mathCallee.startsWith("half_to_short_") || mathCallee === "half_as_short")) return "i32";
+        if (mathCallee && (mathCallee.startsWith("half_to_uint_") || mathCallee.startsWith("half_to_ushort_") || mathCallee === "half_as_ushort" || mathCallee === "float_to_fp8" || mathCallee.startsWith("half_") && !semanticMathCallReturnsHalf(mathCallee))) return "u32";
         if (mathCallee && mathCallee.startsWith("bf16_to_int_")) return "i32";
         if (mathCallee && (mathCallee.startsWith("bf16_to_uint_") || mathCallee === "bf16_as_ushort")) return "u32";
         if (mathCallee === "mul24" || mathCallee === "mulhi") return "i32";
@@ -7007,6 +7019,7 @@ function semanticMathCallReturnsHalf(callee: string): boolean {
   return callee === "to_half" ||
     callee === "int_to_half" ||
     callee === "uint_to_half" ||
+    callee === "short_as_half" ||
     callee === "ushort_as_half" ||
     callee === "fp8_to_half" ||
     callee === "half_abs" ||

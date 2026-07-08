@@ -83,9 +83,11 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__int2float_rn", "__int2float_rz", "__int2float_ru", "__int2float_rd",
   "__uint2float_rn", "__uint2float_rz", "__uint2float_ru", "__uint2float_rd",
   "__half2float", "__float2half", "__float2half_rn", "__int2half_rn", "__uint2half_rn",
-  "__half_as_ushort", "__ushort_as_half",
+  "__half_as_short", "__half_as_ushort", "__short_as_half", "__ushort_as_half",
   "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
+  "__half2short_rn", "__half2short_rz", "__half2short_ru", "__half2short_rd",
   "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
+  "__half2ushort_rn", "__half2ushort_rz", "__half2ushort_ru", "__half2ushort_rd",
   "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
   "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "hexp", "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
   "__hisnan", "__hisinf", "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle", "__hequ", "__hneu", "__hgtu", "__hgeu", "__hltu", "__hleu",
@@ -2530,16 +2532,26 @@ function evalSemanticMathCall(
     case "__float2half_rn": return roundSemanticHalf(args[0] ?? 0);
     case "__int2half_rn": return roundSemanticHalf(Math.trunc(args[0] ?? 0) | 0);
     case "__uint2half_rn": return roundSemanticHalf(Math.trunc(args[0] ?? 0) >>> 0);
+    case "__half_as_short": return signExtend16(float32ToFloat16Bits(args[0] ?? 0));
     case "__half_as_ushort": return float32ToFloat16Bits(args[0] ?? 0) >>> 0;
-    case "__ushort_as_half": return float16BitsToFloat32(args[0] ?? 0);
+    case "__short_as_half": return float16BitsToFloat32(Math.trunc(args[0] ?? 0) & 0xffff);
+    case "__ushort_as_half": return float16BitsToFloat32(Math.trunc(args[0] ?? 0) & 0xffff);
     case "__half2int_rn": return roundTiesToEvenNumber(args[0] ?? 0) | 0;
     case "__half2int_rz": return Math.trunc(args[0] ?? 0) | 0;
     case "__half2int_ru": return Math.ceil(args[0] ?? 0) | 0;
     case "__half2int_rd": return Math.floor(args[0] ?? 0) | 0;
+    case "__half2short_rn": return signExtend16(roundTiesToEvenNumber(args[0] ?? 0));
+    case "__half2short_rz": return signExtend16(Math.trunc(args[0] ?? 0));
+    case "__half2short_ru": return signExtend16(Math.ceil(args[0] ?? 0));
+    case "__half2short_rd": return signExtend16(Math.floor(args[0] ?? 0));
     case "__half2uint_rn": return roundTiesToEvenNumber(args[0] ?? 0) >>> 0;
     case "__half2uint_rz": return Math.trunc(args[0] ?? 0) >>> 0;
     case "__half2uint_ru": return Math.ceil(args[0] ?? 0) >>> 0;
     case "__half2uint_rd": return Math.floor(args[0] ?? 0) >>> 0;
+    case "__half2ushort_rn": return (roundTiesToEvenNumber(args[0] ?? 0) & 0xffff) >>> 0;
+    case "__half2ushort_rz": return (Math.trunc(args[0] ?? 0) & 0xffff) >>> 0;
+    case "__half2ushort_ru": return (Math.ceil(args[0] ?? 0) & 0xffff) >>> 0;
+    case "__half2ushort_rd": return (Math.floor(args[0] ?? 0) & 0xffff) >>> 0;
     case "__nv_cvt_fp8_to_halfraw": return roundSemanticHalf(semanticFp8ToFloat32(args[0] ?? 0, args[1] ?? 0));
     case "__nv_cvt_float_to_fp8": return semanticFloat32ToFp8(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
     case "__habs": return roundSemanticHalf(Math.abs(args[0] ?? 0));

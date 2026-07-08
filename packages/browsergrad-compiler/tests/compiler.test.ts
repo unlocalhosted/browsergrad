@@ -18978,6 +18978,50 @@ __global__ void half_unordered(const half* input, half* output, int* flags) {
     expect([...semanticResult.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, -1]);
   });
 
+  it("lowers scalar CUDA half short conversion and bitcast helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_short_convert(const half* input, int* out, uint* uout, half* h) {
+  half pos = input[0];
+  half neg = input[1];
+  out[0] = __half2short_rn(pos);
+  out[1] = __half2short_rz(pos);
+  out[2] = __half2short_ru(pos);
+  out[3] = __half2short_rd(pos);
+  out[4] = __half2short_rn(neg);
+  out[5] = __half2short_rz(neg);
+  out[6] = __half2short_ru(neg);
+  out[7] = __half2short_rd(neg);
+  out[8] = __half_as_short(__float2half(-2.0f));
+  uout[0] = __half2ushort_rn(pos);
+  uout[1] = __half2ushort_rz(pos);
+  uout[2] = __half2ushort_ru(pos);
+  uout[3] = __half2ushort_rd(pos);
+  h[0] = __short_as_half(0xc000);
+  h[1] = __ushort_as_half(0x3c00u);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        input: createWgslFloat16Array([1.5, -1.5]),
+        out: new Int32Array(9),
+        uout: new Uint32Array(4),
+        h: createWgslFloat16Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...result.buffers.out as Int32Array]).toEqual([2, 1, 2, 1, -2, -1, -1, -2, -16384]);
+    expect([...result.buffers.uout as Uint32Array]).toEqual([2, 1, 2, 1]);
+    expect(Array.from(result.buffers.h as Iterable<number>)).toEqual([-2, 1]);
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([2, 1, 2, 1, -2, -1, -1, -2, -16384]);
+    expect([...semanticResult.buffers.uout as Uint32Array]).toEqual([2, 1, 2, 1]);
+    expect(Array.from(semanticResult.buffers.h as Iterable<number>)).toEqual([-2, 1]);
+  });
+
   it("lowers scalar CUDA half unary math aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void half_unary(const half* input, half* output) {

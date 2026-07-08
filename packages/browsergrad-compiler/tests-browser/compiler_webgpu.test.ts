@@ -2772,6 +2772,45 @@ __global__ void half2LaneHelpers(const half2 *input, half2 *out, half *scalar) {
     expect([...actual.buffers.out as Float32Array]).toEqual([2, 1, 1, 1, 1, 1, 2, 2, 1, 3, 2, 4, 2, 1]);
   });
 
+  it("runs scalar half short conversion and bitcast helpers through f32 compatibility mode on real WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void halfShortConvert(const half* input, int* out, uint* uout, half* h) {
+  half pos = input[0];
+  half neg = input[1];
+  out[0] = __half2short_rn(pos);
+  out[1] = __half2short_rz(pos);
+  out[2] = __half2short_ru(pos);
+  out[3] = __half2short_rd(pos);
+  out[4] = __half2short_rn(neg);
+  out[5] = __half2short_rz(neg);
+  out[6] = __half2short_ru(neg);
+  out[7] = __half2short_rd(neg);
+  out[8] = __half_as_short(__float2half(-2.0f));
+  uout[0] = __half2ushort_rn(pos);
+  uout[1] = __half2ushort_rz(pos);
+  uout[2] = __half2ushort_ru(pos);
+  uout[3] = __half2ushort_rd(pos);
+  h[0] = __short_as_half(0xc000);
+  h[1] = __ushort_as_half(0x3c00u);
+}`, { workgroupSize: [1, 1, 1], f16Mode: "f32" });
+    const input = {
+      buffers: {
+        input: new Float32Array([1.5, -1.5]),
+        out: new Int32Array(9),
+        uout: new Uint32Array(4),
+        h: new Float32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...actual.buffers.out as Int32Array]).toEqual([2, 1, 2, 1, -2, -1, -1, -2, -16384]);
+    expect([...actual.buffers.uout as Uint32Array]).toEqual([2, 1, 2, 1]);
+    expect([...actual.buffers.h as Float32Array]).toEqual([-2, 1]);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });
