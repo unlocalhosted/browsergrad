@@ -87,7 +87,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
   "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
   "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
-  "hrsqrt", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "hexp", "__hmin", "__hmax",
+  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "hexp", "__hmin", "__hmax",
   "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle",
   "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__int2bfloat16_rn", "__uint2bfloat16_rn",
   "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__ushort_as_bfloat16",
@@ -2519,7 +2519,14 @@ function evalSemanticMathCall(
     case "__half2uint_rd": return Math.floor(args[0] ?? 0) >>> 0;
     case "__nv_cvt_fp8_to_halfraw": return roundSemanticHalf(semanticFp8ToFloat32(args[0] ?? 0, args[1] ?? 0));
     case "__nv_cvt_float_to_fp8": return semanticFloat32ToFp8(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+    case "__habs": return roundSemanticHalf(Math.abs(args[0] ?? 0));
+    case "__hceil": return roundSemanticHalf(Math.ceil(args[0] ?? 0));
+    case "__hfloor": return roundSemanticHalf(Math.floor(args[0] ?? 0));
+    case "__hrcp": return roundSemanticHalf(1 / (args[0] ?? 0));
+    case "__hrsqrt":
     case "hrsqrt": return roundSemanticHalf(1 / Math.sqrt(args[0] ?? 0));
+    case "__hsqrt": return roundSemanticHalf(Math.sqrt(args[0] ?? 0));
+    case "__htrunc": return roundSemanticHalf(Math.trunc(args[0] ?? 0));
     case "__hneg": return roundSemanticHalf(-(args[0] ?? 0));
     case "__hadd_rn": return roundSemanticHalf((args[0] ?? 0) + (args[1] ?? 0));
     case "__hadd_sat": return saturateSemanticHalf((args[0] ?? 0) + (args[1] ?? 0));

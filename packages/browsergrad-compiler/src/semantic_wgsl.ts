@@ -360,7 +360,14 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__half2uint_rd", "half_to_uint_rd"],
   ["__nv_cvt_fp8_to_halfraw", "fp8_to_half"],
   ["__nv_cvt_float_to_fp8", "float_to_fp8"],
+  ["__habs", "half_abs"],
+  ["__hceil", "half_ceil"],
+  ["__hfloor", "half_floor"],
+  ["__hrcp", "half_rcp"],
+  ["__hrsqrt", "half_rsqrt"],
   ["hrsqrt", "half_rsqrt"],
+  ["__hsqrt", "half_sqrt"],
+  ["__htrunc", "half_trunc"],
   ["__hneg", "half_neg"],
   ["__hadd_rn", "half_add"],
   ["__hadd_sat", "half_add_sat"],
@@ -5092,11 +5099,17 @@ function emitSemanticMathCall(
       : `floor(${emitted})`;
     return wgslCallee.startsWith("bf16_to_uint_") ? `u32(max(${rounded}, 0.0))` : `i32(${rounded})`;
   }
-  if (wgslCallee === "half_rsqrt" || wgslCallee === "half_neg" || wgslCallee === "half_exp") {
+  if (wgslCallee === "half_abs" || wgslCallee === "half_ceil" || wgslCallee === "half_floor" || wgslCallee === "half_rcp" || wgslCallee === "half_rsqrt" || wgslCallee === "half_sqrt" || wgslCallee === "half_trunc" || wgslCallee === "half_neg" || wgslCallee === "half_exp") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
     const emitted = emitSemanticExpressionAs(value, ir, names, "f16", options, textureSpecializations);
+    if (wgslCallee === "half_abs") return `abs(${emitted})`;
+    if (wgslCallee === "half_ceil") return `f16(ceil(f32(${emitted})))`;
+    if (wgslCallee === "half_floor") return `f16(floor(f32(${emitted})))`;
+    if (wgslCallee === "half_rcp") return `f16(1.0 / f32(${emitted}))`;
     if (wgslCallee === "half_rsqrt") return `f16(inverseSqrt(f32(${emitted})))`;
+    if (wgslCallee === "half_sqrt") return `f16(sqrt(f32(${emitted})))`;
+    if (wgslCallee === "half_trunc") return `f16(trunc(f32(${emitted})))`;
     if (wgslCallee === "half_exp") return `f16(exp(f32(${emitted})))`;
     return `(-${emitted})`;
   }
@@ -6769,7 +6782,13 @@ function semanticMathCallReturnsHalf(callee: string): boolean {
     callee === "uint_to_half" ||
     callee === "ushort_as_half" ||
     callee === "fp8_to_half" ||
+    callee === "half_abs" ||
+    callee === "half_ceil" ||
+    callee === "half_floor" ||
+    callee === "half_rcp" ||
     callee === "half_rsqrt" ||
+    callee === "half_sqrt" ||
+    callee === "half_trunc" ||
     callee === "half_neg" ||
     callee === "half_add" ||
     callee === "half_add_sat" ||

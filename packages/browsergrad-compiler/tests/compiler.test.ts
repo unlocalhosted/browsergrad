@@ -18740,6 +18740,46 @@ __global__ void half_ops(const __half* input, half* output, int* flags) {
     expect([...semanticResult.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1]);
   });
 
+  it("lowers scalar CUDA half unary math aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_unary(const half* input, half* output) {
+  if (threadIdx.x < 1) {
+    half negative = input[0];
+    half two = input[1];
+    half four = input[2];
+    half fractional = input[3];
+    output[0] = __habs(negative);
+    output[1] = __hceil(fractional);
+    output[2] = __hfloor(fractional);
+    output[3] = __htrunc(__float2half(-1.75f));
+    output[4] = __hrcp(two);
+    output[5] = __hrsqrt(four);
+    output[6] = __hsqrt(four);
+  }
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        input: createWgslFloat16Array([-1.5, 2, 4, 1.25]),
+        output: createWgslFloat16Array(7),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("sqrt(f32(");
+    expect(compiled.wgsl).toContain("trunc(f32(");
+    expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([1.5, 2, 1, -1, 0.5, 0.5, 2]);
+    expect(Array.from(semanticResult.buffers.output as Iterable<number>)).toEqual([1.5, 2, 1, -1, 0.5, 0.5, 2]);
+  });
+
   it("emits atomic storage buffers with explicit load/store operations", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_read(int* x) {
