@@ -103,6 +103,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__vimax_s32_relu", "__vimin_s32_relu", "__vimax_s16x2_relu", "__vimin_s16x2_relu",
   "__vimax3_s32", "__vimax3_s32_relu", "__vimin3_s32", "__vimin3_s32_relu", "__vimax3_u32", "__vimin3_u32",
   "__vimax3_s16x2", "__vimax3_s16x2_relu", "__vimin3_s16x2", "__vimin3_s16x2_relu", "__vimax3_u16x2", "__vimin3_u16x2",
+  "__vibmax_s32", "__vibmin_s32", "__vibmax_u32", "__vibmin_u32", "__vibmax_s16x2", "__vibmin_s16x2", "__vibmax_u16x2", "__vibmin_u16x2",
   "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vhaddu2", "__vavgs2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
   "__vcmpeq2", "__vcmpne2", "__vcmpges2", "__vcmpgeu2", "__vcmpgts2", "__vcmpgtu2", "__vcmples2", "__vcmpleu2", "__vcmplts2", "__vcmpltu2",
   "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
@@ -120,6 +121,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__bg_modf_intpart", "__bg_modf_fraction",
   "__bg_frexp_exponent", "__bg_frexp_mantissa",
   "__bg_remquo_quotient", "__bg_remquo_remainder",
+  "__bg_i16_lane", "__bg_u16_lane",
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
@@ -513,7 +515,7 @@ function semanticReferenceLoopInitSupported(
 }
 
 function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" || valueType === "half" || valueType === "bf16" || valueType === "int" || valueType === "uint";
+  return valueType === "float" || valueType === "half" || valueType === "bf16" || valueType === "int" || valueType === "uint" || valueType === "bool";
 }
 
 function semanticReferenceValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -525,7 +527,7 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
     return false;
   }
   if (ref.fields.length > 0) return false;
-  if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
+  if (ref.addressSpace === "local" && ref.indices.length === 0) return semanticReferenceScalarTypeSupported(ref.valueType);
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
@@ -2463,6 +2465,14 @@ function evalSemanticMathCall(
     case "__vimin3_s16x2_relu": return viMinMax16x2(args, true, "min", true);
     case "__vimax3_u16x2": return viMinMax16x2(args, false, "max", false);
     case "__vimin3_u16x2": return viMinMax16x2(args, false, "min", false);
+    case "__vibmax_s32": return viMinMaxScalar(args.slice(0, 2), true, "max", false);
+    case "__vibmin_s32": return viMinMaxScalar(args.slice(0, 2), true, "min", false);
+    case "__vibmax_u32": return viMinMaxScalar(args.slice(0, 2), false, "max", false);
+    case "__vibmin_u32": return viMinMaxScalar(args.slice(0, 2), false, "min", false);
+    case "__vibmax_s16x2": return viMinMax16x2(args.slice(0, 2), true, "max", false);
+    case "__vibmin_s16x2": return viMinMax16x2(args.slice(0, 2), true, "min", false);
+    case "__vibmax_u16x2": return viMinMax16x2(args.slice(0, 2), false, "max", false);
+    case "__vibmin_u16x2": return viMinMax16x2(args.slice(0, 2), false, "min", false);
     case "__vadd2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
     case "__vabs2": return packedUnary(args[0] ?? 0, 16, true, (a) => Math.abs(a));
@@ -2621,6 +2631,8 @@ function evalSemanticMathCall(
       const quotient = roundTiesToEvenNumber((args[0] ?? 0) / (args[1] ?? 1));
       return (args[0] ?? 0) - quotient * (args[1] ?? 1);
     }
+    case "__bg_i16_lane": return signExtend16(((Math.trunc(args[0] ?? 0) >>> 0) >>> (Math.trunc(args[1] ?? 0) & 16)) & 0xffff);
+    case "__bg_u16_lane": return (((Math.trunc(args[0] ?? 0) >>> 0) >>> (Math.trunc(args[1] ?? 0) & 16)) & 0xffff) >>> 0;
     default:
       throw semanticReferenceError(`semantic reference does not support math call '${expression.callee.name}'`, expression.span);
   }
@@ -3660,6 +3672,16 @@ function semanticMathCallArity(name: string): number {
     name === "__vimin_s32_relu" ||
     name === "__vimax_s16x2_relu" ||
     name === "__vimin_s16x2_relu" ||
+    name === "__vibmax_s32" ||
+    name === "__vibmin_s32" ||
+    name === "__vibmax_u32" ||
+    name === "__vibmin_u32" ||
+    name === "__vibmax_s16x2" ||
+    name === "__vibmin_s16x2" ||
+    name === "__vibmax_u16x2" ||
+    name === "__vibmin_u16x2" ||
+    name === "__bg_i16_lane" ||
+    name === "__bg_u16_lane" ||
     name === "UMUL" ||
     name === "umin"
     ? 2

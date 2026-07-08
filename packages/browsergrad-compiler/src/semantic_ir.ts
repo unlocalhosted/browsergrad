@@ -825,7 +825,6 @@ function semanticMathOutVarDeclOperations(
     statement.pointer ||
     statement.dimensions.length > 0 ||
     statement.matrixTile ||
-    statement.valueType !== "float" ||
     statement.init?.kind !== "call"
   ) return undefined;
 
@@ -855,8 +854,20 @@ function semanticMathOutAssignmentOperations(
   const expression = lowerExpression(statement.expression, scope);
   if (expression.kind !== "assignment" || expression.value.kind !== "call") return undefined;
   const target = memoryRefFromExpression(expression.target);
-  if (!target) return undefined;
-  return semanticMathOutAssignmentStores(statement.expression.right, expression.value, target, scope, statement.span);
+  if (target) return semanticMathOutAssignmentStores(statement.expression.right, expression.value, target, scope, statement.span);
+  const result = semanticMathOutCallResult(statement.expression.right, expression.value, scope, statement.span);
+  if (!result) return undefined;
+  return [
+    ...result.sideEffects,
+    {
+      kind: "expression",
+      expression: {
+        ...expression,
+        value: result.value,
+      },
+      span: statement.span,
+    },
+  ];
 }
 
 function semanticMathOutCallStatementOperations(
@@ -905,6 +916,7 @@ function semanticMathOutCallResult(
   span: SourceSpan,
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
   if (expression.callee.kind !== "symbol") return undefined;
+  if (isVibMinMaxCallName(expression.callee.name)) return semanticVibMinMaxCallResult(source, expression, scope, span);
   if (isModfCallName(expression.callee.name)) return semanticModfCallResult(source, expression, scope, span);
   if (isFrexpCallName(expression.callee.name)) return semanticFrexpCallResult(source, expression, scope, span);
   if (isRemquoCallName(expression.callee.name)) return semanticRemquoCallResult(source, expression, scope, span);
@@ -976,6 +988,46 @@ function semanticRemquoCallResult(
       storeOperation(quotientRef, binaryIntCallExpression("__bg_remquo_quotient", tempValue, divisorValue, expression.span), span),
     ],
     value: binaryFloatCallExpression("__bg_remquo_remainder", tempValue, divisorValue, expression.span),
+  };
+}
+
+function semanticVibMinMaxCallResult(
+  source: CudaLiteCallExpression,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
+  if (expression.callee.kind !== "symbol") return undefined;
+  const left = expression.args[0];
+  const right = expression.args[1];
+  if (!left || !right || !semanticExpressionSideEffectFree(left) || !semanticExpressionSideEffectFree(right)) return undefined;
+  const name = expression.callee.name;
+  const choose: "max" | "min" = name.startsWith("__vibmax") ? "max" : "min";
+  const signed = name.includes("_s");
+  const packed = name.includes("16x2");
+  const predicateArgs = source.args.slice(2);
+  const predicateTargets = predicateArgs.map((arg) => mathOutTargetExpressionFromSource(arg, scope));
+  if (predicateTargets.some((target) => target === undefined)) return undefined;
+  const valueType: Exclude<CudaLiteScalarType, "void"> = name.includes("_s32") ? "int" : "uint";
+  const value = semanticCallExpression(name, [left, right], valueType, expression.span);
+  if (packed) {
+    const lo = vibLanePredicateExpression(left, right, signed, choose, 0, expression.span);
+    const hi = vibLanePredicateExpression(left, right, signed, choose, 16, expression.span);
+    const [hiTarget, loTarget] = predicateTargets;
+    if (!hiTarget || !loTarget) return undefined;
+    return {
+      sideEffects: [
+        mathOutStoreOrAssignOperation(hiTarget, hi, span),
+        mathOutStoreOrAssignOperation(loTarget, lo, span),
+      ],
+      value,
+    };
+  }
+  const [predicateTarget] = predicateTargets;
+  if (!predicateTarget) return undefined;
+  return {
+    sideEffects: [mathOutStoreOrAssignOperation(predicateTarget, vibScalarPredicateExpression(left, right, signed, choose, expression.span), span)],
+    value,
   };
 }
 
@@ -1096,6 +1148,49 @@ function mathCallExpression(name: string, value: SemanticExpression, span: Sourc
     callee: { kind: "symbol", name, valueType: "float", addressSpace: "builtin", span },
     args: [value],
     valueType: "float",
+    span,
+  };
+}
+
+function semanticCallExpression(name: string, args: readonly SemanticExpression[], valueType: Exclude<CudaLiteScalarType, "void">, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "call",
+    callee: { kind: "symbol", name, valueType, addressSpace: "builtin", span },
+    args,
+    valueType,
+    span,
+  };
+}
+
+function vibScalarPredicateExpression(left: SemanticExpression, right: SemanticExpression, signed: boolean, choose: "max" | "min", span: SourceSpan): SemanticExpression {
+  const valueType: CudaLiteScalarType = signed ? "int" : "uint";
+  return {
+    kind: "binary",
+    operator: choose === "max" ? ">=" : "<=",
+    left: castScalarExpression(left, valueType, span),
+    right: castScalarExpression(right, valueType, span),
+    valueType: "bool",
+    span,
+  };
+}
+
+function vibLanePredicateExpression(left: SemanticExpression, right: SemanticExpression, signed: boolean, choose: "max" | "min", shift: 0 | 16, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "binary",
+    operator: choose === "max" ? ">=" : "<=",
+    left: castScalarExpression(semanticCallExpression(signed ? "__bg_i16_lane" : "__bg_u16_lane", [left, intNumberExpression(shift, span)], signed ? "int" : "uint", span), signed ? "int" : "uint", span),
+    right: castScalarExpression(semanticCallExpression(signed ? "__bg_i16_lane" : "__bg_u16_lane", [right, intNumberExpression(shift, span)], signed ? "int" : "uint", span), signed ? "int" : "uint", span),
+    valueType: "bool",
+    span,
+  };
+}
+
+function castScalarExpression(expression: SemanticExpression, valueType: Exclude<CudaLiteScalarType, "void">, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "cast",
+    valueType,
+    pointer: false,
+    expression,
     span,
   };
 }
@@ -1289,6 +1384,17 @@ function isFrexpCallName(name: string): boolean {
   return name === "frexp" || name === "frexpf";
 }
 
+function isVibMinMaxCallName(name: string): boolean {
+  return name === "__vibmax_s32" ||
+    name === "__vibmin_s32" ||
+    name === "__vibmax_u32" ||
+    name === "__vibmin_u32" ||
+    name === "__vibmax_s16x2" ||
+    name === "__vibmin_s16x2" ||
+    name === "__vibmax_u16x2" ||
+    name === "__vibmin_u16x2";
+}
+
 function pointerAliasValueExpression(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
@@ -1304,6 +1410,32 @@ function pointerAliasValueExpression(
     index: alias.pointerBaseIndices[0]!,
     ...optionalValueType(root.valueType),
     addressSpace: root.addressSpace,
+    span,
+  };
+}
+
+function mathOutTargetExpressionFromSource(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  const lowered = lowerExpression(expression, scope);
+  if (lowered.kind === "unary" && lowered.operator === "&") return lowered.argument;
+  return pointerAliasValueExpression(expression, scope, expression.span);
+}
+
+function mathOutStoreOrAssignOperation(target: SemanticExpression, value: SemanticExpression, span: SourceSpan): SemanticKernelIrOperation {
+  const ref = memoryRefFromExpression(target);
+  if (ref) return storeOperation(ref, value, span);
+  return {
+    kind: "expression",
+    expression: {
+      kind: "assignment",
+      operator: "=",
+      target,
+      value,
+      ...optionalValueType(expressionValueType(target)),
+      span,
+    },
     span,
   };
 }

@@ -6827,7 +6827,7 @@ __global__ void boolKernel(int *data, int N,) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("var even: bool = ((idx % 2) == 0);");
+    expect(compiled.wgsl).toContain("var even: bool = (u32((idx % 2)) == 0u);");
     expect([...result.buffers.data as Int32Array]).toEqual([11, -8, 13, -6]);
   });
 
@@ -6851,7 +6851,7 @@ __global__ void boolPointer(bool *flags, int *out) {
     );
 
     expect(compiled.wgsl).toContain("var<storage, read_write> flags: array<u32>;");
-    expect(compiled.wgsl).toContain("var bg_active: bool = (flags[idx] != 0u);");
+    expect(compiled.wgsl).toContain("var bg_active: bool = (flags[u32(idx)] != 0u);");
     expect([...result.buffers.out as Int32Array]).toEqual([1, 0]);
     expect([...result.buffers.flags as Uint32Array]).toEqual([1, 0, 0, 1]);
   });
@@ -9014,6 +9014,56 @@ __global__ void viminmax_relu3(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
   });
 
+  it("lowers CUDA vib min/max predicate intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vib_predicate(uint *out) {
+  bool pred = 0;
+  bool pred_hi = 0;
+  bool pred_lo = 0;
+  int s = __vibmax_s32(7, 3, &pred);
+  out[0] = uint(s);
+  out[1] = pred ? 1u : 0u;
+  s = __vibmin_s32(7, -3, &pred);
+  out[2] = uint(s);
+  out[3] = pred ? 1u : 0u;
+  __vibmax_u32(10u, 12u, &pred);
+  out[4] = pred ? 1u : 0u;
+  uint u = __vibmin_u32(10u, 12u, &pred);
+  out[5] = u;
+  out[6] = pred ? 1u : 0u;
+  uint a = 0xfffe8005u;
+  uint b = 0x00030004u;
+  out[7] = __vibmax_s16x2(a, b, &pred_hi, &pred_lo);
+  out[8] = pred_hi ? 1u : 0u;
+  out[9] = pred_lo ? 1u : 0u;
+  out[10] = __vibmin_s16x2(a, b, &pred_hi, &pred_lo);
+  out[11] = pred_hi ? 1u : 0u;
+  out[12] = pred_lo ? 1u : 0u;
+  out[13] = __vibmax_u16x2(a, b, &pred_hi, &pred_lo);
+  out[14] = pred_hi ? 1u : 0u;
+  out[15] = pred_lo ? 1u : 0u;
+  out[16] = __vibmin_u16x2(a, b, &pred_hi, &pred_lo);
+  out[17] = pred_hi ? 1u : 0u;
+  out[18] = pred_lo ? 1u : 0u;
+}`, { workgroupSize: [1, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(19) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      0x00000007, 0x00000001, 0xfffffffd, 0x00000000,
+      0x00000000, 0x0000000a, 0x00000001, 0x00030004,
+      0x00000000, 0x00000000, 0xfffe8005, 0x00000001,
+      0x00000001, 0xfffe8005, 0x00000001, 0x00000001,
+      0x00030004, 0x00000000, 0x00000000,
+    ]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {
@@ -10374,7 +10424,7 @@ __global__ void localPointerAliases(float *out, const float *left, const float *
     expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33, 44]);
   });
 
-  it("emits pointer helpers for bool storage-pointer aliases", () => {
+  it("lowers bool storage-pointer aliases directly over u32-backed storage", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void boolPointerAliases(bool *flags) {
   int idx = threadIdx.x;
@@ -10387,8 +10437,9 @@ __global__ void boolPointerAliases(bool *flags) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("fn bg_ptr_write_bool(buffer: u32, index: u32, value: bool)");
-    expect(compiled.wgsl).toContain("bg_ptr_write_bool(0u");
+    expect(compiled.wgsl).toContain("var<storage, read_write> flags: array<u32>;");
+    expect(compiled.wgsl).toContain("flags[u32(idx)] = (u32((idx & 1)) != 0u);");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_bool");
     expect([...result.buffers.flags as Uint32Array]).toEqual([0, 1, 0, 1]);
   });
 

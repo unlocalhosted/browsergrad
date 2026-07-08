@@ -54,6 +54,14 @@ const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
+  ["__vibmax_s32", [3, 3]],
+  ["__vibmin_s32", [3, 3]],
+  ["__vibmax_u32", [3, 3]],
+  ["__vibmin_u32", [3, 3]],
+  ["__vibmax_s16x2", [4, 4]],
+  ["__vibmin_s16x2", [4, 4]],
+  ["__vibmax_u16x2", [4, 4]],
+  ["__vibmin_u16x2", [4, 4]],
   ["__syncthreads", [0, 0]],
   ["__syncthreads_count", [1, 1]],
   ["__syncthreads_and", [1, 1]],
@@ -2031,6 +2039,8 @@ function validateCallExpression(
     const vectorMath = validateVectorMathBuiltin(expression, callName, diagnostics, walkExpression, scope);
     if (vectorMath) return vectorMath;
   }
+  const vibMinMax = validateVibMinMaxCall(expression, callName, scope, diagnostics, walkExpression);
+  if (vibMinMax) return vibMinMax;
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
     for (const feature of intrinsic.requiredFeatures ?? []) requiredFeatures.add(feature);
@@ -2330,8 +2340,44 @@ function validateRemquo(
   }
 }
 
+function validateVibMinMaxCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string | undefined,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): ExpressionInfo | undefined {
+  if (!callName || !isVibMinMaxCallName(callName)) return undefined;
+  const [left, right] = expression.args;
+  if (left) validateScalarOperand(walkExpression(left, scope), left.span, diagnostics);
+  if (right) validateScalarOperand(walkExpression(right, scope), right.span, diagnostics);
+  const predicateArgs = expression.args.slice(2);
+  for (const target of predicateArgs) {
+    const info = validateReadPointerExpression(target, scope, diagnostics, walkExpression);
+    if (!isMathOutPointerInfo(info)) {
+      diagnostics.push(error("unsupported-call", `${callName} predicate output must be an addressable bool pointer`, target.span));
+      continue;
+    }
+    if (info.valueType !== undefined && info.valueType !== "bool") {
+      diagnostics.push(error("unsupported-call", `${callName} predicate output must point to bool storage`, target.span));
+    }
+  }
+  return { kind: "scalar", valueType: callName.includes("_s32") ? "int" : "uint" };
+}
+
 function isMathOutPointerInfo(info: ExpressionInfo): boolean {
   return info.kind === "address" || info.kind === "pointer" || info.kind === "pool-pointer" || info.kind === "unknown";
+}
+
+function isVibMinMaxCallName(name: string): boolean {
+  return name === "__vibmax_s32" ||
+    name === "__vibmin_s32" ||
+    name === "__vibmax_u32" ||
+    name === "__vibmin_u32" ||
+    name === "__vibmax_s16x2" ||
+    name === "__vibmin_s16x2" ||
+    name === "__vibmax_u16x2" ||
+    name === "__vibmin_u16x2";
 }
 
 function isSincosCallName(name: string | undefined): boolean {

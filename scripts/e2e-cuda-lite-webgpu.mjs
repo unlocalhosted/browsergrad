@@ -2360,6 +2360,37 @@ __global__ void viminmaxRelu3Intrinsic(uint *out) {
   out[14] = __vimax3_u16x2(a, b, c);
   out[15] = __vimin3_u16x2(a, b, c);
 }`,
+  vibPredicateIntrinsic: `
+__global__ void vibPredicateIntrinsic(uint *out) {
+  bool pred = 0;
+  bool pred_hi = 0;
+  bool pred_lo = 0;
+  int s = __vibmax_s32(7, 3, &pred);
+  out[0] = uint(s);
+  out[1] = pred ? 1u : 0u;
+  s = __vibmin_s32(7, -3, &pred);
+  out[2] = uint(s);
+  out[3] = pred ? 1u : 0u;
+  __vibmax_u32(10u, 12u, &pred);
+  out[4] = pred ? 1u : 0u;
+  uint u = __vibmin_u32(10u, 12u, &pred);
+  out[5] = u;
+  out[6] = pred ? 1u : 0u;
+  uint a = 0xfffe8005u;
+  uint b = 0x00030004u;
+  out[7] = __vibmax_s16x2(a, b, &pred_hi, &pred_lo);
+  out[8] = pred_hi ? 1u : 0u;
+  out[9] = pred_lo ? 1u : 0u;
+  out[10] = __vibmin_s16x2(a, b, &pred_hi, &pred_lo);
+  out[11] = pred_hi ? 1u : 0u;
+  out[12] = pred_lo ? 1u : 0u;
+  out[13] = __vibmax_u16x2(a, b, &pred_hi, &pred_lo);
+  out[14] = pred_hi ? 1u : 0u;
+  out[15] = pred_lo ? 1u : 0u;
+  out[16] = __vibmin_u16x2(a, b, &pred_hi, &pred_lo);
+  out[17] = pred_hi ? 1u : 0u;
+  out[18] = pred_lo ? 1u : 0u;
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -13191,6 +13222,28 @@ const html = String.raw`<!doctype html>
                 0x00000003, 0x00000000, 0xfffffffd, 0x00000000,
                 0x0000000c, 0x00000005, 0x00070004, 0x00070004,
                 0xfffe8005, 0x00000000, 0xfffefff6, 0x00030004,
+              ],
+            },
+          },
+          {
+            name: "intrinsic:vib-predicate",
+            source: SOURCES.vibPredicateIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(19),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                0x00000007, 0x00000001, 0xfffffffd, 0x00000000,
+                0x00000000, 0x0000000a, 0x00000001, 0x00030004,
+                0x00000000, 0x00000000, 0xfffe8005, 0x00000001,
+                0x00000001, 0xfffe8005, 0x00000001, 0x00000001,
+                0x00030004, 0x00000000, 0x00000000,
               ],
             },
           },
