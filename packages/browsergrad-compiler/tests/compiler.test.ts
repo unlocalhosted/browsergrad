@@ -10844,6 +10844,30 @@ __global__ void surfaceBf16ReadWrite(cudaSurfaceObject_t surf, float *out, uint 
     expect([...semanticResult.buffers.surf as Float32Array]).toEqual([5.5, 6.5]);
   });
 
+  it("lowers uchar surface reads through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceUcharRead(cudaSurfaceObject_t surf, uint *out) {
+  out[0] = surf2Dread<unsigned char>(surf, 0, 0);
+  out[1] = surf2Dread<unsigned char>(surf, 4, 0);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(2) },
+      surfaces: { surf: { width: 2, height: 1, data: new Float32Array([5, 7]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("u32(bg_sem_surf2dread_surf(0, 0, 0))");
+    expect(compiled.wgsl).toContain("u32(bg_sem_surf2dread_surf(4, 0, 0))");
+    expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
+    expect([...result.buffers.out as Uint32Array]).toEqual([5, 7]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([5, 7]);
+  });
+
   it("preserves templated vector surf2Dread return type in device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float4 read_surface_vec_return(cudaSurfaceObject_t surfaceArg) {

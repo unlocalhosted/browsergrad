@@ -3690,6 +3690,11 @@ __global__ void surfaceBf16ScalarVectorReadWrite(float *out, uint *bits, cudaSur
   bits[1] = __bfloat162_as_uint(pair);
   bits[2] = __bfloat162_as_uint(after);
 }`,
+  surfaceUcharRead: `
+__global__ void surfaceUcharRead(uint *out, cudaSurfaceObject_t surf) {
+  out[0] = surf2Dread<unsigned char>(surf, 0, 0);
+  out[1] = surf2Dread<unsigned char>(surf, 4, 0);
+}`,
   surfaceInt4VectorUnalignedByteOffset: `
 __global__ void surfaceInt4VectorUnalignedByteOffset(int *out, cudaSurfaceObject_t surf) {
   int4 pointerValue = make_int4(99, 99, 99, 99);
@@ -13848,6 +13853,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "bits",
             expectedOutput: { type: "Uint32Array", data: [0x3f8d, 0x400d3f8d, 0x40d040b0] },
+          },
+          {
+            name: "surface:uchar-read",
+            source: SOURCES.surfaceUcharRead,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([5, 7]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [5, 7] },
           },
           {
             name: "surface:int4-vector-unaligned-byte-offset",

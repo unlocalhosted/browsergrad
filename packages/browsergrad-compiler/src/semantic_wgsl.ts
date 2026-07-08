@@ -1169,6 +1169,7 @@ function semanticWgslSurfaceReadSupported(
       expression.valueType === "bf16" ||
       expression.valueType === "uint" ||
       expression.valueType === "int" ||
+      expression.valueType === "uchar" ||
       isSemanticWgslFloatVectorType(expression.valueType)) &&
     target.kind === "symbol" &&
     target.addressSpace === "surface" &&
@@ -2946,7 +2947,7 @@ function emitSemanticSurfaceRead(
   const read = readAt(xBytes);
   if (expression.valueType === "half") return `f16(${read})`;
   if (expression.valueType === "bf16") return wgslRoundBfloat16(read);
-  if (expression.valueType === "uint") return `u32(${read})`;
+  if (expression.valueType === "uint" || expression.valueType === "uchar") return `u32(${read})`;
   if (expression.valueType === "int") return `i32(${read})`;
   return read;
 }

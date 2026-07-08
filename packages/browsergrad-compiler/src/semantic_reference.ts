@@ -591,6 +591,7 @@ function semanticReferenceSurfaceReadSupported(
       expression.valueType === "bf16" ||
       expression.valueType === "uint" ||
       expression.valueType === "int" ||
+      expression.valueType === "uchar" ||
       isSemanticReferenceFloatVectorType(expression.valueType)) &&
     surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
