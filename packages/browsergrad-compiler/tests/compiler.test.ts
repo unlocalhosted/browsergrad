@@ -8597,6 +8597,38 @@ __global__ void packed_byte_simd(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
   });
 
+  it("lowers CUDA packed halfword SIMD intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void packed_halfword_simd(uint *out) {
+  uint a = 0x10ff807fu;
+  uint b = 0x01028081u;
+  out[0] = __vadd2(a, b);
+  out[1] = __vsub2(a, b);
+  out[2] = __vabsdiffu2(a, b);
+  out[3] = __vavgu2(a, b);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("fn bg_semantic_vadd2_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vsub2_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vabsdiffu2_u32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_vavgu2_u32(");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([302055680, 268304382, 268238850, 151093376]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([...semanticResult.buffers.out as Uint32Array]);
+  });
+
   it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {

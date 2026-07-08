@@ -283,6 +283,10 @@ const INTEGER_INTRINSICS = [
   intrinsic("__sad", [3, 3], "uint", evalSignedSadAdd, emitSignedSadAdd),
   intrinsic("__usad", [3, 3], "uint", evalUnsignedSadAdd, emitUnsignedSadAdd),
   intrinsic("__usad4", [2, 3], "uint", evalU8x4SadAdd, emitU8x4SadAdd),
+  intrinsic("__vadd2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => a + b), (args) => emitU16x2Binary(args, (a, b) => `((${a} + ${b}) & 0xffffu)`)),
+  intrinsic("__vsub2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => a - b), (args) => emitU16x2Binary(args, (a, b) => `((${a} - ${b}) & 0xffffu)`)),
+  intrinsic("__vabsdiffu2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => Math.abs(a - b)), (args) => emitU16x2Binary(args, (a, b) => `(max(${a}, ${b}) - min(${a}, ${b}))`)),
+  intrinsic("__vavgu2", [2, 2], "uint", (args) => evalU16x2Binary(args, (a, b) => (a + b + 1) >> 1), (args) => emitU16x2Binary(args, (a, b) => `(((${a} + ${b}) + 1u) >> 1u)`)),
   intrinsic("__vadd4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => a + b), (args) => emitU8x4Binary(args, (a, b) => `((${a} + ${b}) & 0xffu)`)),
   intrinsic("__vsub4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => a - b), (args) => emitU8x4Binary(args, (a, b) => `((${a} - ${b}) & 0xffu)`)),
   intrinsic("__vabsdiffu4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => Math.abs(a - b)), (args) => emitU8x4Binary(args, (a, b) => `(max(${a}, ${b}) - min(${a}, ${b}))`)),
@@ -822,6 +826,29 @@ function emitU8x4Binary(args: readonly string[], op: (a: string, b: string) => s
   const lanes = [0, 8, 16, 24].map((shift) => {
     const left = `((${a} >> ${shift}u) & 0xffu)`;
     const right = `((${b} >> ${shift}u) & 0xffu)`;
+    return `(${op(left, right)} << ${shift}u)`;
+  });
+  return `(${lanes.join(" | ")})`;
+}
+
+function evalU16x2Binary(args: readonly number[], op: (a: number, b: number) => number): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  let out = 0;
+  for (let lane = 0; lane < 2; lane++) {
+    const shift = lane * 16;
+    const laneValue = op((a >>> shift) & 0xffff, (b >>> shift) & 0xffff) & 0xffff;
+    out = (out | (laneValue << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function emitU16x2Binary(args: readonly string[], op: (a: string, b: string) => string): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const lanes = [0, 16].map((shift) => {
+    const left = `((${a} >> ${shift}u) & 0xffffu)`;
+    const right = `((${b} >> ${shift}u) & 0xffffu)`;
     return `(${op(left, right)} << ${shift}u)`;
   });
   return `(${lanes.join(" | ")})`;

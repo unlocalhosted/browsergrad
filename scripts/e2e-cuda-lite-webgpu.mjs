@@ -2180,6 +2180,15 @@ __global__ void simdByteIntrinsic(uint *out) {
   out[2] = __vabsdiffu4(a, b);
   out[3] = __vavgu4(a, b);
 }`,
+  simdHalfwordIntrinsic: `
+__global__ void simdHalfwordIntrinsic(uint *out) {
+  uint a = 0x10ff807fu;
+  uint b = 0x01028081u;
+  out[0] = __vadd2(a, b);
+  out[1] = __vsub2(a, b);
+  out[2] = __vabsdiffu2(a, b);
+  out[3] = __vavgu2(a, b);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12843,6 +12852,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [285278208, 268239102, 268238850, 159481984] },
+          },
+          {
+            name: "intrinsic:simd-halfword",
+            source: SOURCES.simdHalfwordIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [302055680, 268304382, 268238850, 151093376] },
           },
           {
             name: "complex:cufft-magnitude",
