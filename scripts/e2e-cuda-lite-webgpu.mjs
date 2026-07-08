@@ -2164,6 +2164,13 @@ __global__ void semanticVote(uint *input, uint *out) {
   out[tid * 4 + 2] = __ballot_sync(mask, input[tid]);
   out[tid * 4 + 3] = __reduce_add_sync(mask, input[tid]);
 }`,
+  legacyVote: `
+__global__ void legacyVote(uint *input, uint *out) {
+  int tid = threadIdx.x;
+  out[tid * 3] = __any(input[tid]);
+  out[tid * 3 + 1] = __all(input[tid]);
+  out[tid * 3 + 2] = __ballot(input[tid]);
+}`,
   semanticShuffle: `
 __global__ void semanticShuffle(uint *out) {
   int tid = threadIdx.x;
@@ -12965,6 +12972,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2] },
+          },
+          {
+            name: "subgroup:legacy-vote",
+            source: SOURCES.legacyVote,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                input: new Uint32Array([0, 1, 0, 1]),
+                out: new Uint32Array(12),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 0, 10, 1, 0, 10, 1, 0, 10, 1, 0, 10] },
           },
           {
             name: "subgroup:semantic-shuffle",

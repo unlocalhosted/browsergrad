@@ -169,6 +169,9 @@ const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__activemask",
+  "__any",
+  "__all",
+  "__ballot",
   "__any_sync",
   "__all_sync",
   "__ballot_sync",
@@ -615,6 +618,9 @@ function semanticReferenceCurandCallSupported(
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return false;
   if (expression.callee.name === "__activemask") return expression.args.length === 0;
+  if (legacyVoteCall(expression.callee.name)) {
+    return expression.args.length === 1 && semanticReferenceExpressionSupported(expression.args[0]!, "scalar");
+  }
   if (
     expression.callee.name === "__shfl_sync" ||
     expression.callee.name === "__shfl_down_sync" ||
@@ -625,6 +631,10 @@ function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpr
       expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
   }
   return expression.args.length === 2 && semanticReferenceExpressionSupported(expression.args[1]!, "scalar");
+}
+
+function legacyVoteCall(name: string): boolean {
+  return name === "__any" || name === "__all" || name === "__ballot";
 }
 
 function semanticReferenceAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1775,17 +1785,17 @@ function evalSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return semanticReferenceActiveMask(context);
-  const value = expression.args[1];
+  const value = expression.args[legacyVoteCall(name) ? 0 : 1];
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
   if (context.compiled.subgroupMode === "scalar") {
     const scalar = evalNumber(value, context);
-    if (name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync" || name === "__match_any_sync") return truthy(scalar) ? 1 : 0;
+    if (name === "__any" || name === "__all" || name === "__ballot" || name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync" || name === "__match_any_sync") return truthy(scalar) ? 1 : 0;
     return scalar;
   }
   const peers = semanticWarpContexts(context);
-  if (name === "__any_sync") return peers.some((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
-  if (name === "__all_sync") return peers.every((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
-  if (name === "__ballot_sync") {
+  if (name === "__any" || name === "__any_sync") return peers.some((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
+  if (name === "__all" || name === "__all_sync") return peers.every((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
+  if (name === "__ballot" || name === "__ballot_sync") {
     let mask = 0;
     for (const peer of peers) {
       if (!truthy(evalNumber(value, peer))) continue;

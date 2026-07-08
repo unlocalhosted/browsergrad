@@ -5637,6 +5637,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (name === "subgroupAny" || name === "subgroupAll") return "bool";
     if (name === "subgroupBallot") return "uint";
     if (name === "__activemask") return "uint";
+    if (name === "__any" || name === "__all" || name === "__ballot") return "uint";
     if (isSyncthreadsPredicateCall(name)) return "int";
     if (isAddressSpacePredicateCall(name)) return "int";
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
@@ -6508,6 +6509,21 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "__activemask":
       if (context.subgroupMode === "scalar") return "1u";
       return "subgroupBallot(true).x";
+    case "__any": {
+      const predicate = expression.args[0] ? emitTruthinessExpression(expression.args[0], context) : "false";
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;
+      return `select(0u, 1u, subgroupAny(${predicate}))`;
+    }
+    case "__all": {
+      const predicate = expression.args[0] ? emitTruthinessExpression(expression.args[0], context) : "false";
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;
+      return `select(0u, 1u, subgroupAll(${predicate}))`;
+    }
+    case "__ballot": {
+      const predicate = expression.args[0] ? emitTruthinessExpression(expression.args[0], context) : "false";
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;
+      return `subgroupBallot(${predicate}).x`;
+    }
     case "__any_sync": {
       const predicate = expression.args[1] ? emitTruthinessExpression(expression.args[1], context) : "false";
       if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;

@@ -4913,6 +4913,50 @@ __global__ void semanticVoteKernel(uint *input, uint *out) {
     ]);
   });
 
+  it("lowers legacy CUDA warp vote aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void legacyVoteKernel(uint *input, uint *out) {
+  int tid = threadIdx.x;
+  out[tid * 3] = __any(input[tid]);
+  out[tid * 3 + 1] = __all(input[tid]);
+  out[tid * 3 + 2] = __ballot(input[tid]);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Uint32Array([0, 1, 0, 1]), out: new Uint32Array(12) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Uint32Array([0, 1, 0, 1]), out: new Uint32Array(12) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("subgroupAny");
+    expect(compiled.wgsl).toContain("subgroupAll");
+    expect(compiled.wgsl).toContain("subgroupBallot");
+    expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      1, 0, 10,
+      1, 0, 10,
+      1, 0, 10,
+      1, 0, 10,
+    ]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      1, 0, 10,
+      1, 0, 10,
+      1, 0, 10,
+      1, 0, 10,
+    ]);
+  });
+
   it("lowers CUDA warp shuffle helpers through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void semanticShuffleKernel(uint *out) {

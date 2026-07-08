@@ -122,6 +122,9 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__isShared", [1, 1]],
   ["__isConstant", [1, 1]],
   ["__isLocal", [1, 1]],
+  ["__any", [1, 1]],
+  ["__all", [1, 1]],
+  ["__ballot", [1, 1]],
   ["__any_sync", [2, 2]],
   ["__all_sync", [2, 2]],
   ["__ballot_sync", [2, 2]],
@@ -3901,7 +3904,13 @@ function isShuffleBuiltin(callName: string): boolean {
 }
 
 function isVoteBuiltin(callName: string): boolean {
-  return callName === "__any_sync" || callName === "__all_sync" || callName === "__ballot_sync" || callName === "__match_any_sync";
+  return callName === "__any" ||
+    callName === "__all" ||
+    callName === "__ballot" ||
+    callName === "__any_sync" ||
+    callName === "__all_sync" ||
+    callName === "__ballot_sync" ||
+    callName === "__match_any_sync";
 }
 
 function isSyncthreadsPredicateBuiltin(callName: string): boolean {

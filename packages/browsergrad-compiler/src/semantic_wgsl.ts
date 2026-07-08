@@ -159,6 +159,9 @@ const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
   "__activemask",
+  "__any",
+  "__all",
+  "__ballot",
   "__any_sync",
   "__all_sync",
   "__ballot_sync",
@@ -1196,6 +1199,9 @@ function semanticWgslSubgroupCallSupported(
 ): boolean {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) || ir?.requiredFeatures.includes("subgroups") !== true) return false;
   if (expression.callee.name === "__activemask") return expression.args.length === 0;
+  if (legacyVoteCall(expression.callee.name)) {
+    return expression.args.length === 1 && semanticWgslExpressionSupported(expression.args[0]!, "scalar", ir);
+  }
   if (semanticBitwiseReduceOpForCall(expression.callee.name)) {
     const value = expression.args[1];
     const valueType = value ? semanticExpressionValueType(value) : undefined;
@@ -3868,12 +3874,12 @@ function emitSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return "subgroupBallot(true).x";
-  const value = expression.args[1];
+  const value = expression.args[legacyVoteCall(name) ? 0 : 1];
   if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
-  if (name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync") {
+  if (name === "__any" || name === "__all" || name === "__ballot" || name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync") {
     const predicate = emitTruthiness(value, ir, names, options);
-    if (name === "__any_sync") return `select(0u, 1u, subgroupAny(${predicate}))`;
-    if (name === "__all_sync") return `select(0u, 1u, subgroupAll(${predicate}))`;
+    if (name === "__any" || name === "__any_sync") return `select(0u, 1u, subgroupAny(${predicate}))`;
+    if (name === "__all" || name === "__all_sync") return `select(0u, 1u, subgroupAll(${predicate}))`;
     return `subgroupBallot(${predicate}).x`;
   }
   if (name === "__match_any_sync") {
@@ -3904,6 +3910,10 @@ function emitSemanticSubgroupCall(
     return `${wgslCall}(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
   }
   throw semanticWgslError(`semantic WGSL does not support subgroup call '${name}'`, expression.span);
+}
+
+function legacyVoteCall(name: string): boolean {
+  return name === "__any" || name === "__all" || name === "__ballot";
 }
 
 function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {

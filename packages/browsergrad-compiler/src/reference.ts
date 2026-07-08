@@ -1344,8 +1344,10 @@ function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined
     case "warpReduceMin":
     case "warp_reduce_min":
       return "min";
+    case "__any":
     case "__any_sync":
       return "any";
+    case "__all":
     case "__all_sync":
       return "all";
     case "__activemask":
@@ -1369,6 +1371,7 @@ function collectiveValueExpression(
     name === "__reduce_or_sync" ||
     name === "__reduce_xor_sync"
   ) return args[1];
+  if (name === "__any" || name === "__all") return args[0];
   if (name === "__any_sync" || name === "__all_sync" || name === "__match_any_sync") return args[1];
   return args.length === 2 ? args[1] : args[0];
 }
@@ -3478,6 +3481,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return args[1] ?? 0;
     case "__activemask":
       return 1;
+    case "__any":
+    case "__all":
+      return truthy(args[0] ?? 0) ? 1 : 0;
+    case "__ballot":
+      return truthy(args[0] ?? 0) ? 1 : 0;
     case "__any_sync":
     case "__all_sync":
       return truthy(args[1] ?? 0) ? 1 : 0;
