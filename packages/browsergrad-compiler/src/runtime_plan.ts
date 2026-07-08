@@ -68,7 +68,12 @@ function collectSemanticRuntimeOperations(operations: readonly SemanticKernelIrO
       });
       return;
     }
-    if (operation.kind === "barrier" && (operation.callee === "grid.sync" || operation.callee === "cg::sync")) {
+    if (
+      operation.kind === "barrier" &&
+      (operation.callee === "grid.sync" || operation.callee === "cg::sync") &&
+      operation.groupName !== undefined &&
+      cooperativeGroups.get(operation.groupName) === "grid"
+    ) {
       runtime.push({
         kind: "grid-sync",
         span: operation.span,

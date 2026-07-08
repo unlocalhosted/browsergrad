@@ -216,7 +216,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
-  | { readonly kind: "barrier"; readonly callee: string; readonly span: SourceSpan }
+  | { readonly kind: "barrier"; readonly callee: string; readonly groupName?: string; readonly span: SourceSpan }
   | { readonly kind: "fence"; readonly callee: string; readonly span: SourceSpan }
   | { readonly kind: "device-launch"; readonly launch: SemanticDeviceLaunch; readonly span: SourceSpan }
   | { readonly kind: "inline-asm"; readonly statement: CudaLiteAsmStatement; readonly span: SourceSpan }
@@ -404,7 +404,13 @@ function lowerStatement(
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const expression = lowerExpression(statement.expression, scope);
       if (expression.kind === "call" && expression.callee.kind === "symbol" && BARRIER_CALLS.has(expression.callee.name)) {
-        return { kind: "barrier", callee: expression.callee.name, span: statement.span };
+        const groupName = barrierGroupName(expression);
+        return {
+          kind: "barrier",
+          callee: expression.callee.name,
+          ...(groupName === undefined ? {} : { groupName }),
+          span: statement.span,
+        };
       }
       if (expression.kind === "call" && expression.callee.kind === "symbol" && FENCE_CALLS.has(expression.callee.name)) {
         return { kind: "fence", callee: expression.callee.name, span: statement.span };
@@ -784,6 +790,21 @@ function lowerDeviceLaunch(
     block: statement.block.map((arg) => lowerExpression(arg, scope)),
     args: statement.args.map((arg) => lowerExpression(arg, scope)),
   };
+}
+
+function barrierGroupName(expression: Extract<SemanticExpression, { readonly kind: "call" }>): string | undefined {
+  if (
+    expression.callee.kind === "member" &&
+    expression.callee.property === "sync" &&
+    expression.callee.object.kind === "symbol"
+  ) {
+    return expression.callee.object.name;
+  }
+  if (expression.callee.kind === "symbol" && expression.callee.name.endsWith("::sync")) {
+    const group = expression.args[0];
+    return group?.kind === "symbol" ? group.name : undefined;
+  }
+  return undefined;
 }
 
 function collectDeclaredMemory(operations: readonly SemanticKernelIrOperation[]): readonly CudaLiteSemanticSymbol[] {

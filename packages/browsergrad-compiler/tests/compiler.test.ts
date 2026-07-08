@@ -12219,6 +12219,38 @@ __global__ void parent(float *x, int n) {
     });
   });
 
+  it("does not route block cooperative sync through grid-sync phase planning", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void child(float *dst) {
+  if (threadIdx.x == 0) { dst[0] += 1.0f; }
+}
+__global__ void parent(float *x) {
+  cg::thread_block cta = cg::this_thread_block();
+  cg::sync(cta);
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(x);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      workgroupSize: [1, 1, 1],
+    });
+    const input = { buffers: { x: new Float32Array([1]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind)).toEqual([
+      "device-launch",
+      "device-sync",
+    ]);
+    expect(createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: compileCudaLiteKernel,
+    })).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+  });
+
   it("plans host-expanded per-invocation dynamic launches with builtin coordinates", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *dst, int value) {
