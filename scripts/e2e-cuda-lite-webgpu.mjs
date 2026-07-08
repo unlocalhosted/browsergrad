@@ -2171,6 +2171,15 @@ __global__ void dp2aIntrinsic(uint *out) {
   out[2] = __dp2a_lo(ua, ub, 9u);
   out[3] = __dp2a_hi(ua, ub, 9u);
 }`,
+  simdByteIntrinsic: `
+__global__ void simdByteIntrinsic(uint *out) {
+  uint a = 0x10ff807fu;
+  uint b = 0x01028081u;
+  out[0] = __vadd4(a, b);
+  out[1] = __vsub4(a, b);
+  out[2] = __vabsdiffu4(a, b);
+  out[3] = __vavgu4(a, b);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12821,6 +12830,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [4294951049, 382, 16773, 394] },
+          },
+          {
+            name: "intrinsic:simd-byte",
+            source: SOURCES.simdByteIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [285278208, 268239102, 268238850, 159481984] },
           },
           {
             name: "complex:cufft-magnitude",

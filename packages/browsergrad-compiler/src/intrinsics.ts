@@ -283,6 +283,10 @@ const INTEGER_INTRINSICS = [
   intrinsic("__sad", [3, 3], "uint", evalSignedSadAdd, emitSignedSadAdd),
   intrinsic("__usad", [3, 3], "uint", evalUnsignedSadAdd, emitUnsignedSadAdd),
   intrinsic("__usad4", [2, 3], "uint", evalU8x4SadAdd, emitU8x4SadAdd),
+  intrinsic("__vadd4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => a + b), (args) => emitU8x4Binary(args, (a, b) => `((${a} + ${b}) & 0xffu)`)),
+  intrinsic("__vsub4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => a - b), (args) => emitU8x4Binary(args, (a, b) => `((${a} - ${b}) & 0xffu)`)),
+  intrinsic("__vabsdiffu4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => Math.abs(a - b)), (args) => emitU8x4Binary(args, (a, b) => `(max(${a}, ${b}) - min(${a}, ${b}))`)),
+  intrinsic("__vavgu4", [2, 2], "uint", (args) => evalU8x4Binary(args, (a, b) => (a + b + 1) >> 1), (args) => emitU8x4Binary(args, (a, b) => `(((${a} + ${b}) + 1u) >> 1u)`)),
   intrinsic("__dp4a", [3, 3], "argument1", evalI8x4DotAdd, emitI8x4DotAdd),
   intrinsic("__dp2a_lo", [3, 3], "argument1", (args) => evalI16x2I8x2DotAdd(args, 0), (args) => emitI16x2I8x2DotAdd(args, 0)),
   intrinsic("__dp2a_hi", [3, 3], "argument1", (args) => evalI16x2I8x2DotAdd(args, 16), (args) => emitI16x2I8x2DotAdd(args, 16)),
@@ -798,6 +802,29 @@ function emitU8x4SadAdd(args: readonly string[]): string {
     return `(max(${left}, ${right}) - min(${left}, ${right}))`;
   });
   return `(${c} + ${lanes.join(" + ")})`;
+}
+
+function evalU8x4Binary(args: readonly number[], op: (a: number, b: number) => number): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  let out = 0;
+  for (let lane = 0; lane < 4; lane++) {
+    const shift = lane * 8;
+    const laneValue = op((a >>> shift) & 0xff, (b >>> shift) & 0xff) & 0xff;
+    out = (out | (laneValue << shift)) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function emitU8x4Binary(args: readonly string[], op: (a: string, b: string) => string): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const lanes = [0, 8, 16, 24].map((shift) => {
+    const left = `((${a} >> ${shift}u) & 0xffu)`;
+    const right = `((${b} >> ${shift}u) & 0xffu)`;
+    return `(${op(left, right)} << ${shift}u)`;
+  });
+  return `(${lanes.join(" | ")})`;
 }
 
 function evalI8x4DotAdd(args: readonly number[]): number {
