@@ -309,6 +309,22 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler", () => {
+  it("keeps legacy IR and misleading GPU readiness out of public compiler contracts", () => {
+    const srcDir = path.join(packageRoot, "src");
+    const sources = fs.readdirSync(srcDir)
+      .filter((file) => file.endsWith(".ts"))
+      .map((file) => [file, compilerSourceText(file)] as const);
+    const forbidden = sources.flatMap(([file, source]) => {
+      const hits: string[] = [];
+      if (/\blegacyIr\b/u.test(source)) hits.push(`${file}:legacyIr`);
+      if (/\bcanRunOnGpu\b/u.test(source)) hits.push(`${file}:canRunOnGpu`);
+      if (/interface\s+CompiledCudaLiteKernel[\s\S]*?readonly\s+ir\s*:/u.test(source)) hits.push(`${file}:CompiledCudaLiteKernel.ir`);
+      return hits;
+    });
+
+    expect(forbidden).toEqual([]);
+  });
+
   it("parses and compiles SAXPY to WGSL", () => {
     const ast = parseCudaLite(SAXPY);
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
