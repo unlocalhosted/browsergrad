@@ -46,6 +46,7 @@ import {
   cudaVectorFieldIndex,
   cudaVectorLaneCount,
   cudaVectorScalarType,
+  cudaVectorSwizzleType,
   isCudaVectorType,
   type CudaLiteVectorType,
 } from "./vector_types.js";
@@ -4071,11 +4072,16 @@ function validateNonCallExpression(
       }
       if (isCudaVectorType(object.valueType)) {
         if (expression.property === "size") return { kind: "scalar", valueType: "int" };
-        const field = cudaVectorFieldIndex(object.valueType, expression.property);
-        if (field === undefined) {
+        const swizzleType = cudaVectorSwizzleType(object.valueType, expression.property);
+        if (swizzleType === undefined) {
           diagnostics.push(error("unsupported-vector-member", `unsupported ${object.valueType} member '${expression.property}'`, expression.span));
         }
-        return { kind: "scalar", valueType: cudaVectorScalarType(object.valueType) };
+        const scalarType = swizzleType === undefined || isCudaVectorType(swizzleType)
+          ? cudaVectorScalarType(object.valueType)
+          : swizzleType as ValueType;
+        return isCudaVectorType(swizzleType)
+          ? { kind: "vector", valueType: swizzleType }
+          : { kind: "scalar", valueType: scalarType };
       }
       if (object.kind !== "vector") {
         diagnostics.push(error("unsupported-member-target", "member access is only supported on CUDA-lite builtin vectors", expression.span));

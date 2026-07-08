@@ -25,6 +25,8 @@ import {
   cudaVectorFieldIndex,
   cudaVectorLaneCount,
   cudaVectorScalarType,
+  cudaVectorSwizzleIndices,
+  cudaVectorSwizzleType,
   isCudaVectorType,
   type CudaLiteVectorType,
 } from "./vector_types.js";
@@ -5595,8 +5597,8 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
       return `i32(num_workgroups.${expression.property})`;
     default: {
       const valueType = expressionValueTypeForEmit(expression.object, context);
-      const fieldIndex = isCudaVectorType(valueType) ? cudaVectorFieldIndex(valueType, expression.property) : undefined;
-      if (fieldIndex !== undefined) return `${emitExpression(expression.object, context)}.${vectorFieldName(fieldIndex)}`;
+      const fields = cudaVectorSwizzleIndices(valueType, expression.property);
+      if (fields !== undefined) return `${emitExpression(expression.object, context)}.${fields.map(vectorFieldName).join("")}`;
       return `${emitExpression(expression.object, context)}.${expression.property}`;
     }
   }
@@ -5764,7 +5766,8 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
       return "int";
     }
     const objectType = expressionValueTypeForEmit(expression.object, context);
-    if (isCudaVectorType(objectType)) return cudaVectorScalarType(objectType);
+    const swizzleType = cudaVectorSwizzleType(objectType, expression.property);
+    if (swizzleType !== undefined) return swizzleType;
     if (objectType === "complex64") return "float";
     return objectType;
   }

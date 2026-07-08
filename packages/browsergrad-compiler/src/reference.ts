@@ -35,6 +35,8 @@ import {
   cudaVectorFieldIndex,
   cudaVectorLaneCount,
   cudaVectorScalarType,
+  cudaVectorSwizzleIndices,
+  cudaVectorSwizzleType,
   isCudaVectorType,
   type CudaLiteVectorType,
 } from "./vector_types.js";
@@ -1894,7 +1896,8 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
   }
   if (expression.kind === "member") {
     const objectType = expressionValueType(expression.object, context);
-    if (isCudaVectorType(objectType) && cudaVectorFieldIndex(objectType, expression.property) !== undefined) return cudaVectorScalarType(objectType);
+    const swizzleType = cudaVectorSwizzleType(objectType, expression.property);
+    if (swizzleType !== undefined) return swizzleType;
     return objectType;
   }
   return undefined;
@@ -2011,8 +2014,16 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       }
       if (isCudaVectorValue(object)) {
         if (expression.property === "size") return cudaVectorLaneCount(object.valueType);
-        const index = cudaVectorFieldIndex(object.valueType, expression.property);
-        if (index !== undefined) return object.lanes[index] ?? 0;
+        const indices = cudaVectorSwizzleIndices(object.valueType, expression.property);
+        if (indices !== undefined && indices.length === 1) return object.lanes[indices[0]!] ?? 0;
+        const swizzleType = cudaVectorSwizzleType(object.valueType, expression.property);
+        if (indices !== undefined && swizzleType !== undefined && isCudaVectorType(swizzleType)) {
+          return {
+            kind: "cuda-vector",
+            valueType: swizzleType,
+            lanes: indices.map((index) => object.lanes[index] ?? 0),
+          };
+        }
         throw compilerFailure(`unsupported ${object.valueType} member '${expression.property}'`);
       }
       if (expression.property === "x") return object.x;

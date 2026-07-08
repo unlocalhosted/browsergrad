@@ -567,6 +567,21 @@ __global__ void vectorCastDynamicBaseRead(float* out, const float* inp) {
   out[idx * 4 + 2] = value.z + (float)idx;
   out[idx * 4 + 3] = value.w + (float)idx;
 }`,
+  vectorSwizzleRead: `
+__global__ void vectorSwizzleRead(float* out, uint* ui) {
+  float4 value = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  float2 lo = value.xy;
+  float3 mix = value.zyx;
+  float4 color = value.rgba;
+  uint4 bits = make_uint4(5u, 6u, 7u, 8u);
+  uint3 packed = bits.s210;
+  out[0] = lo.x + lo.y;
+  out[1] = mix.x + mix.y + mix.z;
+  out[2] = color.x + color.w;
+  ui[0] = packed.x;
+  ui[1] = packed.y;
+  ui[2] = packed.z;
+}`,
   vectorCacheHintDynamicRead: `
 __global__ void vectorCacheHintDynamicRead(float* out, const float* inp) {
   int idx = threadIdx.x;
@@ -11287,6 +11302,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 11, 21, 31, 41] },
+          },
+          {
+            name: "storage:vector-swizzle-read",
+            source: SOURCES.vectorSwizzleRead,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(3),
+                ui: new Uint32Array(3),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [3, 6, 5] },
           },
           {
             name: "helpers:vector-cache-hint-dynamic-read",

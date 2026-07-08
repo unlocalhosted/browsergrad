@@ -26,7 +26,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | Vector3 | number[];
 type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas" | "inc" | "dec";
@@ -1013,6 +1013,7 @@ function semanticReferenceExpressionSupported(
         expression.addressSpace === "device-global" ||
         isBuiltinVectorSymbol(expression.name);
     case "member":
+      if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return isBuiltinVectorMember(expression) || semanticReferenceVectorMemberSupported(expression, compiled);
     case "index":
       if (semanticReferenceVectorIndexSupported(expression, compiled)) return true;
@@ -1253,7 +1254,7 @@ function semanticReferenceVectorMemberSupported(
   const valueType = semanticExpressionValueType(expression.object);
   return semanticReferenceExpressionSupported(expression.object, "any", compiled) &&
     isCudaVectorType(valueType) &&
-    cudaVectorFieldIndex(valueType, expression.property) !== undefined;
+    cudaVectorSwizzleType(valueType, expression.property) !== undefined;
 }
 
 function semanticExpressionValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
@@ -1927,7 +1928,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "symbol":
       return symbolValue(expression.name, context, expression.span);
     case "member":
-      return memberValue(evalSemanticExpression(expression.object, context), expression.property, expression.span);
+      return memberValue(evalSemanticExpression(expression.object, context), semanticExpressionValueType(expression.object), expression.property, expression.span);
     case "index":
       return readIndexExpression(expression, context);
     case "cast":
@@ -3993,9 +3994,16 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);
 }
 
-function memberValue(value: SemanticValue, property: string, span: SourceSpan): number {
+function memberValue(
+  value: SemanticValue,
+  valueType: CudaLiteScalarType | undefined,
+  property: string,
+  span: SourceSpan,
+): SemanticValue {
   if (Array.isArray(value)) {
-    const index = vectorFieldIndex(property);
+    const indices = cudaVectorSwizzleIndices(valueType, property);
+    if (indices && indices.length > 1) return indices.map((index) => value[index] ?? 0);
+    const index = indices?.[0] ?? vectorFieldIndex(property);
     if (index !== undefined) return value[index] ?? 0;
     throw semanticReferenceError(`unsupported semantic member '${property}'`, span);
   }

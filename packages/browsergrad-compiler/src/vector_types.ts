@@ -82,6 +82,58 @@ export function cudaVectorFieldIndex(type: CudaLiteScalarType, field: string): n
   return alias !== undefined && alias < info.lanes ? alias : undefined;
 }
 
+export function cudaVectorSwizzleIndices(type: CudaLiteScalarType | undefined, property: string): readonly number[] | undefined {
+  if (!isCudaVectorType(type)) return undefined;
+  const info = cudaVectorTypeInfo(type);
+  if (!info || property.length === 0) return undefined;
+  const alias = CUDA_VECTOR_FIELD_ALIASES.get(property);
+  if (alias !== undefined) return alias < info.lanes ? [alias] : undefined;
+  const family = swizzleFamily(property);
+  if (!family) return undefined;
+  if (family !== "s" && property.length > 4) return undefined;
+  if (family === "s" && (property.length < 2 || property.length > 5)) return undefined;
+  const indices = family === "fields"
+    ? [...property].map((field) => info.fields.indexOf(field))
+    : family === "rgba"
+    ? [...property].map((field) => CUDA_VECTOR_FIELD_ALIASES.get(field) ?? -1)
+    : property.slice(1).split("").map((field) => Number(field));
+  if (indices.some((index) => index < 0 || index >= info.lanes)) return undefined;
+  return indices;
+}
+
+export function cudaVectorSwizzleType(type: CudaLiteScalarType | undefined, property: string): CudaLiteScalarType | undefined {
+  const info = isCudaVectorType(type) ? cudaVectorTypeInfo(type) : undefined;
+  const indices = cudaVectorSwizzleIndices(type, property);
+  if (!info || !indices) return undefined;
+  if (indices.length === 1) return info.scalarType;
+  return cudaVectorTypeFromParts(info.scalarType, indices.length);
+}
+
+function cudaVectorTypeFromParts(
+  scalarType: CudaVectorTypeInfo["scalarType"],
+  lanes: number,
+): CudaLiteScalarType | undefined {
+  if (scalarType === "float" && lanes === 2) return "float2";
+  if (scalarType === "float" && lanes === 3) return "float3";
+  if (scalarType === "float" && lanes === 4) return "float4";
+  if (scalarType === "int" && lanes === 2) return "int2";
+  if (scalarType === "int" && lanes === 3) return "int3";
+  if (scalarType === "int" && lanes === 4) return "int4";
+  if (scalarType === "uint" && lanes === 2) return "uint2";
+  if (scalarType === "uint" && lanes === 3) return "uint3";
+  if (scalarType === "uint" && lanes === 4) return "uint4";
+  if (scalarType === "half" && lanes === 2) return "half2";
+  if (scalarType === "bf16" && lanes === 2) return "bf162";
+  return undefined;
+}
+
+function swizzleFamily(property: string): "fields" | "rgba" | "s" | undefined {
+  if (/^[xyzw]+$/u.test(property)) return "fields";
+  if (/^[rgba]+$/u.test(property)) return "rgba";
+  if (/^s[0-3]+$/u.test(property)) return "s";
+  return undefined;
+}
+
 const CUDA_VECTOR_FIELD_ALIASES: ReadonlyMap<string, number> = new Map([
   ["r", 0],
   ["g", 1],

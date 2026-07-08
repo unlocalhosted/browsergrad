@@ -20,7 +20,7 @@ import type {
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
-import { cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -2287,8 +2287,9 @@ function memberValueType(object: SemanticExpression, property: string): CudaLite
     if (object.kind === "symbol" && (object.name === "threadIdx" || object.name === "blockIdx" || object.name === "blockDim" || object.name === "gridDim")) return "uint";
   }
   const objectType = expressionValueType(object);
-  if (isCudaVectorType(objectType) && cudaVectorFieldIndex(objectType, property) !== undefined) {
-    return cudaVectorScalarType(objectType);
+  const swizzleType = cudaVectorSwizzleType(objectType, property);
+  if (swizzleType !== undefined) {
+    return swizzleType;
   }
   return expressionValueType(object);
 }

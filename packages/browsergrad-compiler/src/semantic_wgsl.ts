@@ -20,7 +20,7 @@ import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { emitCurandHelpers, emitFp8Helpers } from "./wgsl_support_helpers.js";
-import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
   rewriteF16WgslToF32,
@@ -1281,7 +1281,7 @@ function semanticWgslVectorMemberSupported(
   const valueType = semanticExpressionValueType(expression.object);
   return semanticWgslExpressionSupported(expression.object, "any", ir) &&
     isCudaVectorType(valueType) &&
-    cudaVectorFieldIndex(valueType, expression.property) !== undefined;
+    cudaVectorSwizzleType(valueType, expression.property) !== undefined;
 }
 
 function semanticWgslVectorIndexSupported(
@@ -1893,6 +1893,7 @@ function semanticWgslExpressionSupported(
         expression.addressSpace === "shared" ||
         BUILTIN_VECTOR_NAMES.has(expression.name);
     case "member":
+      if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return expression.object.kind === "symbol" &&
         BUILTIN_VECTOR_NAMES.has(expression.object.name) &&
         (expression.property === "x" || expression.property === "y" || expression.property === "z") ||
@@ -5367,8 +5368,8 @@ function emitSemanticMember(
 
 function semanticVectorFieldName(expression: Extract<SemanticExpression, { readonly kind: "member" }>): string {
   const valueType = semanticExpressionVectorValueType(expression.object);
-  const field = valueType === undefined ? undefined : cudaVectorFieldIndex(valueType, expression.property);
-  return ["x", "y", "z", "w"][field ?? -1] ?? expression.property;
+  const fields = valueType === undefined ? undefined : cudaVectorSwizzleIndices(valueType, expression.property);
+  return fields?.map((field) => ["x", "y", "z", "w"][field]).join("") ?? expression.property;
 }
 
 function emitSemanticUnary(
