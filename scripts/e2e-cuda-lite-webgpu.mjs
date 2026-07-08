@@ -2160,6 +2160,17 @@ __global__ void dp4aIntrinsic(uint *out) {
   out[0] = uint(__dp4a(a, b, 5));
   out[1] = __dp4a(ua, ub, 9u);
 }`,
+  dp2aIntrinsic: `
+__global__ void dp2aIntrinsic(uint *out) {
+  int a = int(0xfffe007fu);
+  int b = int(0x0203fe80u);
+  uint ua = 0x0002007fu;
+  uint ub = 0x0203fe80u;
+  out[0] = uint(__dp2a_lo(a, b, 5));
+  out[1] = uint(__dp2a_hi(a, b, 5));
+  out[2] = __dp2a_lo(ua, ub, 9u);
+  out[3] = __dp2a_hi(ua, ub, 9u);
+}`,
   activeMask: `
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
@@ -12797,6 +12808,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [4294951040, 79] },
+          },
+          {
+            name: "intrinsic:dp2a",
+            source: SOURCES.dp2aIntrinsic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [4294951049, 382, 16773, 394] },
           },
           {
             name: "complex:cufft-magnitude",

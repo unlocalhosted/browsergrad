@@ -3908,7 +3908,7 @@ __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed
     expect(compiled.wgsl).toContain("var stride: i32");
     expect(compiled.wgsl).toContain("var unsignedWide: u32");
     expect(compiled.wgsl).toContain("var ptrValue: u32");
-    expect(compiled.wgsl).toContain("var bytes: u32 = u32(4)");
+    expect(compiled.wgsl).toContain("var bytes: u32 = bitcast<u32>(4)");
     expect([...result.buffers.signedOut as Int32Array]).toEqual([4, 6]);
     expect([...result.buffers.unsignedOut as Uint32Array]).toEqual([15, 17]);
   });
@@ -8523,24 +8523,31 @@ __global__ void bitcast_intrinsics(float *x, uint *bits, int *signed_bits, float
     expect([...result.buffers.roundtrip as Float32Array]).toEqual([-3.5, -3.5]);
   });
 
-  it("lowers CUDA dp4a signed and unsigned packed dot intrinsics", () => {
+  it("lowers CUDA packed dot signed and unsigned intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void dp4a_intrinsics(int *signed_out, uint *unsigned_out) {
   int a = int(0x01ff027fu);
   int b = int(0x0203fe80u);
+  int a2 = int(0xfffe007fu);
   uint ua = 0x01020304u;
   uint ub = 0x05060708u;
+  uint ua2 = 0x0002007fu;
+  uint ub2 = 0x0203fe80u;
   signed_out[0] = __dp4a(a, b, 5);
+  signed_out[1] = __dp2a_lo(a2, b, 5);
+  signed_out[2] = __dp2a_hi(a2, b, 5);
   unsigned_out[0] = __dp4a(ua, ub, 9u);
+  unsigned_out[1] = __dp2a_lo(ua2, ub2, 9u);
+  unsigned_out[2] = __dp2a_hi(ua2, ub2, 9u);
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { signed_out: new Int32Array(1), unsigned_out: new Uint32Array(1) } },
+      { buffers: { signed_out: new Int32Array(3), unsigned_out: new Uint32Array(3) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     const semanticResult = runCompiledKernelSemanticReference(
       compiled,
-      { buffers: { signed_out: new Int32Array(1), unsigned_out: new Uint32Array(1) } },
+      { buffers: { signed_out: new Int32Array(3), unsigned_out: new Uint32Array(3) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
@@ -8549,8 +8556,11 @@ __global__ void dp4a_intrinsics(int *signed_out, uint *unsigned_out) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("fn bg_semantic_dp4a_i32(");
     expect(compiled.wgsl).toContain("fn bg_semantic_dp4a_u32(");
-    expect([...semanticResult.buffers.signed_out as Int32Array]).toEqual([-16256]);
-    expect([...semanticResult.buffers.unsigned_out as Uint32Array]).toEqual([79]);
+    expect(compiled.wgsl).toContain("fn bg_semantic_dp2a_i32(");
+    expect(compiled.wgsl).toContain("fn bg_semantic_dp2a_u32(");
+    expect(compiled.wgsl).toContain("bitcast<i32>(4294836351u)");
+    expect([...semanticResult.buffers.signed_out as Int32Array]).toEqual([-16256, -16247, 382]);
+    expect([...semanticResult.buffers.unsigned_out as Uint32Array]).toEqual([79, 16773, 394]);
     expect([...result.buffers.signed_out as Int32Array]).toEqual([...semanticResult.buffers.signed_out as Int32Array]);
     expect([...result.buffers.unsigned_out as Uint32Array]).toEqual([...semanticResult.buffers.unsigned_out as Uint32Array]);
   });
@@ -13927,7 +13937,7 @@ __global__ void activeNestedConditionalHelperVarInit(uint *storage, uint *out, i
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
     expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
-    expect(compiled.wgsl).toContain("value = (u32((step + 1)) + active_nested_conditional_var_init_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).toContain("value = (bitcast<u32>((step + 1)) + active_nested_conditional_var_init_helper_with_pointer_side_effect");
     expect(compiled.wgsl).not.toContain("select(0u, active_nested_conditional_var_init_helper_with_pointer_side_effect");
   });
 
@@ -19109,9 +19119,9 @@ __global__ void qualified_std_casts(float* out, int q) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([12]);
-    expect(compiled.wgsl).toContain("var a: u32 = (u32(bg_uniforms.q) * 2u);");
+    expect(compiled.wgsl).toContain("var a: u32 = (bitcast<u32>(bg_uniforms.q) * 2u);");
     expect(compiled.wgsl).toContain("var b: u32 = u32((a + 1u));");
-    expect(compiled.wgsl).toContain("var c: i32 = (i32(workgroup_id.x) + 3);");
+    expect(compiled.wgsl).toContain("var c: i32 = (bitcast<i32>(workgroup_id.x) + 3);");
   });
 
   it("lowers vector pack static constructors after source normalization", () => {

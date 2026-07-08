@@ -2188,7 +2188,8 @@ function legacyShuffleCall(name: string): boolean {
 }
 
 function numberLiteralType(raw: string): CudaLiteScalarType {
-  return /[.eE]|f$/u.test(raw) ? "float" : raw.endsWith("u") || raw.endsWith("U") ? "uint" : "int";
+  if (/^0x/iu.test(raw)) return /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw) ? "uint" : "int";
+  return /[.eE]|[fF]$/u.test(raw) ? "float" : /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw) ? "uint" : "int";
 }
 
 function normalizeWorkgroupSize(value: readonly [number, number, number]): [number, number, number] {

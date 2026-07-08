@@ -413,6 +413,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__usad", "usad"],
   ["__usad4", "usad4"],
   ["__dp4a", "dp4a"],
+  ["__dp2a_lo", "dp2a_lo"],
+  ["__dp2a_hi", "dp2a_hi"],
   ["IMAD", "imad"],
   ["UMUL", "umul"],
   ["UMAD", "umad"],
@@ -3083,7 +3085,7 @@ function emitSemanticExpression(
       throw semanticWgslError("semantic WGSL does not support index target", expression.span);
     }
     case "cast":
-      return `${wgslScalar(expression.valueType)}(${emitSemanticExpression(expression.expression, ir, names, options, textureSpecializations)})`;
+      return emitSemanticCast(expression, ir, names, options, textureSpecializations);
     case "unary":
       if (semanticWgslBf162LocalBitsCastSupported(expression, ir)) return emitSemanticBf162LocalBitsCast(expression, ir, names, options, textureSpecializations);
       return emitSemanticUnary(expression, ir, names, options, textureSpecializations);
@@ -3527,6 +3529,24 @@ function emitSemanticNumericHelpers(): readonly string[] {
     "  }",
     "  return out;",
     "}",
+    "fn bg_semantic_dp2a_i32(a: u32, b: u32, c: i32, byte_shift: u32) -> i32 {",
+    "  let left0_bits = a & 0xffffu;",
+    "  let left1_bits = (a >> 16u) & 0xffffu;",
+    "  let right0_bits = (b >> byte_shift) & 0xffu;",
+    "  let right1_bits = (b >> (byte_shift + 8u)) & 0xffu;",
+    "  let left0 = i32(left0_bits) - select(0, 65536, left0_bits >= 0x8000u);",
+    "  let left1 = i32(left1_bits) - select(0, 65536, left1_bits >= 0x8000u);",
+    "  let right0 = i32(right0_bits) - select(0, 256, right0_bits >= 0x80u);",
+    "  let right1 = i32(right1_bits) - select(0, 256, right1_bits >= 0x80u);",
+    "  return c + (left0 * right0) + (left1 * right1);",
+    "}",
+    "fn bg_semantic_dp2a_u32(a: u32, b: u32, c: u32, byte_shift: u32) -> u32 {",
+    "  let left0 = a & 0xffffu;",
+    "  let left1 = (a >> 16u) & 0xffffu;",
+    "  let right0 = (b >> byte_shift) & 0xffu;",
+    "  let right1 = (b >> (byte_shift + 8u)) & 0xffu;",
+    "  return c + (left0 * right0) + (left1 * right1);",
+    "}",
   ];
 }
 
@@ -3760,6 +3780,20 @@ function emitSemanticBf162LocalBitsCast(
   }
   const value = emitSemanticExpression(cast.expression.argument, ir, names, options, textureSpecializations);
   return `((bitcast<u32>(f32((${value}).x)) >> 16u) | (bitcast<u32>(f32((${value}).y)) & 0xffff0000u))`;
+}
+
+function emitSemanticCast(
+  expression: Extract<SemanticExpression, { readonly kind: "cast" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  const value = emitSemanticExpression(expression.expression, ir, names, options, textureSpecializations);
+  const sourceType = "valueType" in expression.expression ? expression.expression.valueType : undefined;
+  if (expression.valueType === "int" && sourceType === "uint") return `bitcast<i32>(${value})`;
+  if (expression.valueType === "uint" && sourceType === "int") return `bitcast<u32>(${value})`;
+  return `${wgslScalar(expression.valueType)}(${value})`;
 }
 
 function emitSemanticFunctionArg(
@@ -4158,7 +4192,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "uhadd") return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u))`;
     return `((${lhs} & ${rhs}) + ((${lhs} ^ ${rhs}) >> 1u) + ((${lhs} ^ ${rhs}) & 1u))`;
   }
-  if (wgslCallee === "imad" || wgslCallee === "umad" || wgslCallee === "sad" || wgslCallee === "usad" || wgslCallee === "usad4" || wgslCallee === "dp4a" || wgslCallee === "byte_perm" || wgslCallee.startsWith("funnelshift_")) {
+  if (wgslCallee === "imad" || wgslCallee === "umad" || wgslCallee === "sad" || wgslCallee === "usad" || wgslCallee === "usad4" || wgslCallee === "dp4a" || wgslCallee === "dp2a_lo" || wgslCallee === "dp2a_hi" || wgslCallee === "byte_perm" || wgslCallee.startsWith("funnelshift_")) {
     const [first, second, third] = expression.args;
     if (!first || !second || (!third && wgslCallee !== "usad4")) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
     if (wgslCallee === "imad") {
@@ -4200,6 +4234,17 @@ function emitSemanticMathCall(
       }
       const c = emitSemanticExpressionAs(third!, ir, names, "i32", options, textureSpecializations);
       return `bg_semantic_dp4a_i32(${a}, ${b}, ${c})`;
+    }
+    if (wgslCallee === "dp2a_lo" || wgslCallee === "dp2a_hi") {
+      const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
+      const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
+      const byteShift = wgslCallee === "dp2a_hi" ? "16u" : "0u";
+      if (expression.valueType === "uint") {
+        const c = emitSemanticExpressionAs(third!, ir, names, "u32", options, textureSpecializations);
+        return `bg_semantic_dp2a_u32(${a}, ${b}, ${c}, ${byteShift})`;
+      }
+      const c = emitSemanticExpressionAs(third!, ir, names, "i32", options, textureSpecializations);
+      return `bg_semantic_dp2a_i32(${a}, ${b}, ${c}, ${byteShift})`;
     }
     const a = emitSemanticExpressionAs(first, ir, names, "u32", options, textureSpecializations);
     const b = emitSemanticExpressionAs(second, ir, names, "u32", options, textureSpecializations);
@@ -4512,6 +4557,8 @@ function semanticMathCallArity(name: string): number {
       name === "__usad" ||
       name === "__usad4" ||
       name === "__dp4a" ||
+      name === "__dp2a_lo" ||
+      name === "__dp2a_hi" ||
       name === "__nv_cvt_float_to_fp8" ||
       name === "IMAD" ||
       name === "UMAD"

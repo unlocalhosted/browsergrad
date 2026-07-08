@@ -284,6 +284,8 @@ const INTEGER_INTRINSICS = [
   intrinsic("__usad", [3, 3], "uint", evalUnsignedSadAdd, emitUnsignedSadAdd),
   intrinsic("__usad4", [2, 3], "uint", evalU8x4SadAdd, emitU8x4SadAdd),
   intrinsic("__dp4a", [3, 3], "argument1", evalI8x4DotAdd, emitI8x4DotAdd),
+  intrinsic("__dp2a_lo", [3, 3], "argument1", (args) => evalI16x2I8x2DotAdd(args, 0), (args) => emitI16x2I8x2DotAdd(args, 0)),
+  intrinsic("__dp2a_hi", [3, 3], "argument1", (args) => evalI16x2I8x2DotAdd(args, 16), (args) => emitI16x2I8x2DotAdd(args, 16)),
   intrinsic("IMAD", [3, 3], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) + (args[2] ?? 0), (args) => `((i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"})) + i32(${args[2] ?? "0"}))`),
   intrinsic("UMUL", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
   intrinsic("UMAD", [3, 3], "uint", (args) => (Math.imul(args[0] ?? 0, args[1] ?? 0) + (args[2] ?? 0)) >>> 0, (args) => `((u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"})) + u32(${args[2] ?? "0"}))`),
@@ -825,6 +827,35 @@ function emitI8x4DotAdd(args: readonly string[]): string {
 
 function signExtend8(value: number): number {
   return (value << 24) >> 24;
+}
+
+function evalI16x2I8x2DotAdd(args: readonly number[], byteShift: 0 | 16): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  const left0 = signExtend16(a & 0xffff);
+  const left1 = signExtend16((a >>> 16) & 0xffff);
+  const right0 = signExtend8((b >>> byteShift) & 0xff);
+  const right1 = signExtend8((b >>> (byteShift + 8)) & 0xff);
+  return ((Math.trunc(args[2] ?? 0) | 0) + Math.imul(left0, right0) + Math.imul(left1, right1)) | 0;
+}
+
+function emitI16x2I8x2DotAdd(args: readonly string[], byteShift: 0 | 16): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const c = `i32(${args[2] ?? "0"})`;
+  const left0Bits = `(${a} & 0xffffu)`;
+  const left1Bits = `((${a} >> 16u) & 0xffffu)`;
+  const right0Bits = `((${b} >> ${byteShift}u) & 0xffu)`;
+  const right1Bits = `((${b} >> ${byteShift + 8}u) & 0xffu)`;
+  const left0 = `(i32(${left0Bits}) - select(0, 65536, ${left0Bits} >= 0x8000u))`;
+  const left1 = `(i32(${left1Bits}) - select(0, 65536, ${left1Bits} >= 0x8000u))`;
+  const right0 = `(i32(${right0Bits}) - select(0, 256, ${right0Bits} >= 0x80u))`;
+  const right1 = `(i32(${right1Bits}) - select(0, 256, ${right1Bits} >= 0x80u))`;
+  return `(${c} + (${left0} * ${right0}) + (${left1} * ${right1}))`;
+}
+
+function signExtend16(value: number): number {
+  return (value << 16) >> 16;
 }
 
 function evalFmod(args: readonly number[]): number {

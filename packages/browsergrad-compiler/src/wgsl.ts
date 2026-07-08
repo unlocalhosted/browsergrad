@@ -2349,6 +2349,29 @@ function emitDp4aExpression(expression: Extract<CudaLiteExpression, { readonly k
   return `(${c} + ${lanes.join(" + ")})`;
 }
 
+function emitDp2aExpression(expression: Extract<CudaLiteExpression, { readonly kind: "call" }>, context: EmitContext, byteShift: 0 | 16): string {
+  const a = `u32(${emitExpression(expression.args[0]!, context)})`;
+  const b = `u32(${emitExpression(expression.args[1]!, context)})`;
+  if (expressionValueTypeForEmit(expression, context) === "uint") {
+    const c = `u32(${emitExpression(expression.args[2]!, context)})`;
+    const left0 = `(${a} & 0xffffu)`;
+    const left1 = `((${a} >> 16u) & 0xffffu)`;
+    const right0 = `((${b} >> ${byteShift}u) & 0xffu)`;
+    const right1 = `((${b} >> ${byteShift + 8}u) & 0xffu)`;
+    return `(${c} + (${left0} * ${right0}) + (${left1} * ${right1}))`;
+  }
+  const c = `i32(${emitExpression(expression.args[2]!, context)})`;
+  const left0Bits = `(${a} & 0xffffu)`;
+  const left1Bits = `((${a} >> 16u) & 0xffffu)`;
+  const right0Bits = `((${b} >> ${byteShift}u) & 0xffu)`;
+  const right1Bits = `((${b} >> ${byteShift + 8}u) & 0xffu)`;
+  const left0 = `(i32(${left0Bits}) - select(0, 65536, ${left0Bits} >= 0x8000u))`;
+  const left1 = `(i32(${left1Bits}) - select(0, 65536, ${left1Bits} >= 0x8000u))`;
+  const right0 = `(i32(${right0Bits}) - select(0, 256, ${right0Bits} >= 0x80u))`;
+  const right1 = `(i32(${right1Bits}) - select(0, 256, ${right1Bits} >= 0x80u))`;
+  return `(${c} + (${left0} * ${right0}) + (${left1} * ${right1}))`;
+}
+
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
   if (statement.pointer && context.localPointerHandleFor(statement.name, statement.span)) {
     throw featureError(
@@ -3338,6 +3361,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       const value = emitExpression(expression.expression, context);
       if (sourceType === "complex64") return `${wgslScalar(expression.valueType)}(${value}.x)`;
       if (isCudaVectorType(sourceType)) return `${wgslScalar(expression.valueType)}(${value}.x)`;
+      if (expression.valueType === "int" && sourceType === "uint") return `bitcast<i32>(${value})`;
+      if (expression.valueType === "uint" && sourceType === "int") return `bitcast<u32>(${value})`;
       return `${wgslScalar(expression.valueType)}(${value})`;
     }
     case "member":
@@ -6298,6 +6323,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     return `((i32(${left}) & i32(${right})) + ((i32(${left}) ^ i32(${right})) >> 1u))`;
   }
   if (name === "__dp4a") return emitDp4aExpression(expression, context);
+  if (name === "__dp2a_lo" || name === "__dp2a_hi") return emitDp2aExpression(expression, context, name === "__dp2a_hi" ? 16 : 0);
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) {
     const intrinsicArgs = intrinsicNeedsFloatArgs(name)

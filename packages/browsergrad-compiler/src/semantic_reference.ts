@@ -97,7 +97,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
   "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
   "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
-  "__sad", "__usad", "__usad4", "__dp4a", "IMAD", "UMUL", "UMAD", "umin", "assert",
+  "__sad", "__usad", "__usad4", "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
   "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
@@ -2426,6 +2426,12 @@ function evalSemanticMathCall(
     case "__dp4a": return expression.valueType === "uint"
       ? u8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0)
       : i8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+    case "__dp2a_lo": return expression.valueType === "uint"
+      ? u16x2U8x2DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, 0)
+      : i16x2I8x2DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, 0);
+    case "__dp2a_hi": return expression.valueType === "uint"
+      ? u16x2U8x2DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, 16)
+      : i16x2I8x2DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, 16);
     case "IMAD": return (Math.imul(args[0] ?? 0, args[1] ?? 0) + (Math.trunc(args[2] ?? 0) | 0)) | 0;
     case "UMUL": return Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0;
     case "UMAD": return (Math.imul(args[0] ?? 0, args[1] ?? 0) + (Math.trunc(args[2] ?? 0) >>> 0)) >>> 0;
@@ -2790,6 +2796,30 @@ function u8x4DotAdd(aValue: number, bValue: number, addValue = 0): number {
 
 function signExtend8(value: number): number {
   return (value << 24) >> 24;
+}
+
+function i16x2I8x2DotAdd(aValue: number, bValue: number, addValue = 0, byteShift: 0 | 16): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const left0 = signExtend16(a & 0xffff);
+  const left1 = signExtend16((a >>> 16) & 0xffff);
+  const right0 = signExtend8((b >>> byteShift) & 0xff);
+  const right1 = signExtend8((b >>> (byteShift + 8)) & 0xff);
+  return ((Math.trunc(addValue) | 0) + Math.imul(left0, right0) + Math.imul(left1, right1)) | 0;
+}
+
+function u16x2U8x2DotAdd(aValue: number, bValue: number, addValue = 0, byteShift: 0 | 16): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const left0 = a & 0xffff;
+  const left1 = (a >>> 16) & 0xffff;
+  const right0 = (b >>> byteShift) & 0xff;
+  const right1 = (b >>> (byteShift + 8)) & 0xff;
+  return ((Math.trunc(addValue) >>> 0) + (left0 * right0) + (left1 * right1)) >>> 0;
+}
+
+function signExtend16(value: number): number {
+  return (value << 16) >> 16;
 }
 
 function evalSemanticErf(value: number): number {
@@ -3270,6 +3300,8 @@ function semanticMathCallArity(name: string): number {
       name === "__usad" ||
       name === "__usad4" ||
       name === "__dp4a" ||
+      name === "__dp2a_lo" ||
+      name === "__dp2a_hi" ||
       name === "__nv_cvt_float_to_fp8" ||
       name === "IMAD" ||
       name === "UMAD"

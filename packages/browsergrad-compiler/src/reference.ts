@@ -1889,7 +1889,7 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
   if (expression.kind === "binary") return binaryExpressionValueType(expression, context);
   if (expression.kind === "call") {
     const name = expressionNameForReference(expression.callee);
-    if (name === "__dp4a") return expressionValueType(expression.args[0] ?? expression.callee, context);
+    if (name === "__dp4a" || name === "__dp2a_lo" || name === "__dp2a_hi") return expressionValueType(expression.args[0] ?? expression.callee, context);
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "member") {
@@ -3444,6 +3444,12 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ? evalU8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0)
       : evalI8x4DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
   }
+  if (name === "__dp2a_lo" || name === "__dp2a_hi") {
+    const byteShift = name === "__dp2a_hi" ? 16 : 0;
+    return expressionValueType(expression, context) === "uint"
+      ? evalU16x2U8x2DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, byteShift)
+      : evalI16x2I8x2DotAdd(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, byteShift);
+  }
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.evaluate) return intrinsic.evaluate(args);
   switch (name) {
@@ -3572,6 +3578,30 @@ function evalU8x4DotAdd(aValue: number, bValue: number, addValue = 0): number {
 
 function signExtend8(value: number): number {
   return (value << 24) >> 24;
+}
+
+function evalI16x2I8x2DotAdd(aValue: number, bValue: number, addValue = 0, byteShift: 0 | 16): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const left0 = signExtend16(a & 0xffff);
+  const left1 = signExtend16((a >>> 16) & 0xffff);
+  const right0 = signExtend8((b >>> byteShift) & 0xff);
+  const right1 = signExtend8((b >>> (byteShift + 8)) & 0xff);
+  return ((Math.trunc(addValue) | 0) + Math.imul(left0, right0) + Math.imul(left1, right1)) | 0;
+}
+
+function evalU16x2U8x2DotAdd(aValue: number, bValue: number, addValue = 0, byteShift: 0 | 16): number {
+  const a = Math.trunc(aValue) >>> 0;
+  const b = Math.trunc(bValue) >>> 0;
+  const left0 = a & 0xffff;
+  const left1 = (a >>> 16) & 0xffff;
+  const right0 = (b >>> byteShift) & 0xff;
+  const right1 = (b >>> (byteShift + 8)) & 0xff;
+  return ((Math.trunc(addValue) >>> 0) + (left0 * right0) + (left1 * right1)) >>> 0;
+}
+
+function signExtend16(value: number): number {
+  return (value << 16) >> 16;
 }
 
 function half2IntrinsicOperator(name: string | undefined): (left: number, right: number) => number {
