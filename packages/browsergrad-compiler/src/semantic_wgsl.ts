@@ -1104,7 +1104,7 @@ function semanticWgslLoopInitSupported(
 
 function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local") return false;
-  if (ref.fields.length > 0) return false;
+  if (ref.fields.length > 0) return semanticWgslVectorFieldMemoryRefSupported(ref);
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return semanticWgslScalarTypeSupported(ref.valueType);
@@ -1113,10 +1113,19 @@ function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
 
 function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (!semanticWgslMemoryRefSupported(ref)) return false;
+  if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol !== undefined && symbol.valueType === ref.valueType;
+}
+
+function semanticWgslVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
+  if (ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared") return false;
+  if (ref.fields.length !== 1 || !isCudaVectorType(ref.containerValueType)) return false;
+  const lanes = cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!);
+  if (lanes === undefined || new Set(lanes).size !== lanes.length) return false;
+  return ref.indices.length > 0 && ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
 }
 
 function semanticWgslLocalVectorLaneRefSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
@@ -1212,6 +1221,11 @@ function semanticWgslStoreValueSupported(
 ): boolean {
   const targetVectorType = operation.target.valueType;
   const valueVectorType = semanticExpressionVectorValueType(operation.value, ir);
+  if (semanticWgslVectorFieldMemoryRefSupported(operation.target)) {
+    return isSemanticWgslFloatVectorType(targetVectorType)
+      ? valueVectorType === targetVectorType && semanticWgslExpressionSupported(operation.value, "any", ir)
+      : semanticWgslScalarStoreValueSupported(operation.value, ir);
+  }
   if (isSemanticWgslFloatVectorType(targetVectorType)) {
     return operation.operator === "=" &&
       valueVectorType === targetVectorType &&
@@ -2285,6 +2299,9 @@ function emitSemanticStore(
     const value = emitSemanticExpressionAs(operation.value, ir, names, "i32", options, textureSpecializations);
     return operation.operator === "-=" ? `${offset} = (${offset} - ${value})` : `${offset} = (${offset} + ${value})`;
   }
+  if (semanticWgslVectorFieldMemoryRefSupported(operation.target)) {
+    return emitSemanticVectorFieldMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
+  }
   const target = emitSemanticLocalVectorLaneRef(operation.target, ir, names, options, textureSpecializations) ??
     emitSemanticMemoryRef(operation.target, ir, names, options);
   if (
@@ -2341,6 +2358,35 @@ function emitSemanticVectorMemoryWrite(
   return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
     `${target}[(${base} + ${lane}u)] = (${value}).${fields[lane]}`
   );
+}
+
+function emitSemanticVectorFieldMemoryWrite(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): readonly string[] {
+  const containerType = operation.target.containerValueType;
+  if (!isCudaVectorType(containerType)) throw semanticWgslError("semantic WGSL vector field write requires vector container", operation.span);
+  const lanes = cudaVectorSwizzleIndices(containerType, operation.target.fields[0] ?? "");
+  if (lanes === undefined) throw semanticWgslError("semantic WGSL vector field write requires modeled lanes", operation.span);
+  const base = emitFlatStorageVectorBaseIndex(operation.target, ir, names, options);
+  const target = nameFor(operation.target.base, names);
+  const fields = ["x", "y", "z", "w"];
+  if (lanes.length === 1) {
+    const access = `${target}[(${base} + ${lanes[0]}u)]`;
+    const value = emitSemanticExpressionAs(operation.value, ir, names, wgslVectorScalar(containerType), options, textureSpecializations);
+    if (operation.operator === "=") return [`${access} = ${value}`];
+    return [`${access} = (${access} ${operation.operator.slice(0, -1)} ${value})`];
+  }
+  const valueType = operation.target.valueType;
+  if (!isCudaVectorType(valueType)) throw semanticWgslError("semantic WGSL swizzle write requires vector value", operation.span);
+  const value = emitSemanticVectorOperand(operation.value, valueType, ir, names, options, textureSpecializations);
+  const assigned = operation.operator === "="
+    ? value
+    : `(${wgslValueType(valueType)}(${lanes.map((lane) => `${target}[(${base} + ${lane}u)]`).join(", ")}) ${operation.operator.slice(0, -1)} ${value})`;
+  return lanes.map((lane, index) => `${target}[(${base} + ${lane}u)] = (${assigned}).${fields[index]}`);
 }
 
 function emitSemanticFunction(
@@ -5849,7 +5895,7 @@ function emitFlatStorageVectorBaseIndex(
 ): string {
   const base = emitFlatStorageIndex({ ...ref, valueType: "float" }, ir, names, options);
   const root = ir.params.find((param) => param.name === ref.base) ?? ir.memory.find((symbol) => symbol.name === ref.base);
-  const valueType = root?.valueType;
+  const valueType = isSemanticWgslFloatVectorType(ref.containerValueType) ? ref.containerValueType : root?.valueType;
   const stride = isSemanticWgslFloatVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
   return stride === 1 ? base : `(${base} * ${stride}u)`;
 }

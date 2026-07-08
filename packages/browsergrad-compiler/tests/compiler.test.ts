@@ -1462,6 +1462,38 @@ __global__ void repeated_vector_swizzle(float* out) {
 }`, { workgroupSize: [1, 1, 1] })).toThrow(/vector swizzle assignment target cannot repeat lanes/u);
   });
 
+  it("lowers CUDA vector swizzle writes through storage vector views", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_storage_swizzle_writes(float* out, uint* ui) {
+  float4* view = reinterpret_cast<float4*>(out);
+  view[0] = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  view[0].xy = make_float2(9.0f, 8.0f);
+  view[0].zw += make_float2(1.0f, 2.0f);
+  uint4* bits = reinterpret_cast<uint4*>(ui);
+  bits[0] = make_uint4(5u, 6u, 7u, 8u);
+  bits[0].s210 = make_uint3(11u, 12u, 13u);
+  bits[0].xy += make_uint2(1u, 2u);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), ui: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-assignment");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...result.buffers.out as Float32Array]).toEqual([9, 8, 4, 6]);
+    expect([...result.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([9, 8, 4, 6]);
+    expect([...semanticResult.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
+  });
+
   it("keeps shifted scalar bases aligned when casting helper pointer params to vector lanes", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void write_lane_offset(float4* out, int idx, float value) {
@@ -10561,7 +10593,7 @@ __global__ void vectorDeref(float *x, float *out) {
 
     expect(compiled.wgsl).not.toContain("bg_ptr_write_f32x4(0u,");
     expect(compiled.wgsl).not.toMatch(/x\[[^\n]+\] = vec[234]<f32>/u);
-    expect(compiled.wgsl).toMatch(/x\[[^\n]+ \+ 2u\] =/u);
+    expect(compiled.wgsl).toMatch(/x\[[^\n]+\+ 2u\)\] =/u);
     expect([...result.buffers.x as Float32Array]).toEqual([2, 4, 6, 8]);
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });

@@ -526,7 +526,7 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local" && ref.addressSpace !== "shared") {
     return false;
   }
-  if (ref.fields.length > 0) return false;
+  if (ref.fields.length > 0) return semanticReferenceVectorFieldMemoryRefSupported(ref);
   if (ref.addressSpace === "local" && ref.indices.length === 0) return semanticReferenceScalarTypeSupported(ref.valueType);
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
@@ -535,9 +535,17 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
 
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
+  if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol === undefined || symbol.valueType === ref.valueType;
+}
+
+function semanticReferenceVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
+  if (ref.fields.length !== 1 || !isCudaVectorType(ref.containerValueType)) return false;
+  const lanes = cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!);
+  if (lanes === undefined || new Set(lanes).size !== lanes.length) return false;
+  return ref.indices.length > 0 && ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
 }
 
 function semanticReferenceStorageOffsetStoreSupported(
@@ -1437,6 +1445,14 @@ function storeValueExpression(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
   context: SemanticReferenceContext,
 ): SemanticValue {
+  if (semanticReferenceVectorFieldMemoryRefSupported(operation.target)) {
+    const right = isSemanticReferenceFloatVectorType(operation.target.valueType)
+      ? evalSemanticExpression(operation.value, context)
+      : evalNumber(operation.value, context);
+    if (operation.operator === "=") return right;
+    const left = readMemoryValue(operation.target, context);
+    return evalVectorFieldAssignment(operation.operator, left, right, operation.span);
+  }
   if (isSemanticReferenceFloatVectorType(operation.target.valueType)) {
     if (operation.operator !== "=") throw semanticReferenceError("semantic reference supports only direct vector assignment", operation.span);
     return evalSemanticExpression(operation.value, context);
@@ -1447,6 +1463,16 @@ function storeValueExpression(
   if (operation.operator === "+=") return left + right;
   if (operation.operator === "-=") return left - right;
   throw semanticReferenceError(`semantic reference does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function evalVectorFieldAssignment(operator: string, left: SemanticValue, right: SemanticValue, span: SourceSpan): SemanticValue {
+  if (operator === "+=") return Array.isArray(left) || Array.isArray(right)
+    ? evalVectorBinary("+", left, right, span)
+    : Number(left) + Number(right);
+  if (operator === "-=") return Array.isArray(left) || Array.isArray(right)
+    ? evalVectorBinary("-", left, right, span)
+    : Number(left) - Number(right);
+  throw semanticReferenceError(`semantic reference does not support assignment '${operator}'`, span);
 }
 
 function semanticDeclareValue(
@@ -3814,6 +3840,11 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
 }
 
 function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  if (semanticReferenceVectorFieldMemoryRefSupported(ref)) {
+    const value = readMemoryValue(ref, context);
+    if (typeof value !== "number") throw semanticReferenceError("semantic reference scalar read received vector value", ref.span);
+    return value;
+  }
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
@@ -3840,6 +3871,17 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   const value = ok ? Number(buffer[index]) : 0;
   context.trace.reads.push({ name: ref.base, index, value, ok });
   return value;
+}
+
+function readMemoryValue(ref: SemanticMemoryRef, context: SemanticReferenceContext): SemanticValue {
+  if (!semanticReferenceVectorFieldMemoryRefSupported(ref)) {
+    return isSemanticReferenceFloatVectorType(ref.valueType) ? readVectorMemory(ref, context) : readMemory(ref, context);
+  }
+  const lanes = vectorFieldMemoryLanes(ref);
+  if (!lanes) throw semanticReferenceError("semantic reference vector field read requires modeled lanes", ref.span);
+  const values = readVectorContainerMemory(ref, context);
+  if (lanes.length === 1) return Number(values[lanes[0]!] ?? 0);
+  return lanes.map((lane) => Number(values[lane] ?? 0));
 }
 
 function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticReferenceContext): void {
@@ -3910,6 +3952,22 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
 }
 
 function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context: SemanticReferenceContext): void {
+  if (semanticReferenceVectorFieldMemoryRefSupported(ref)) {
+    const lanes = vectorFieldMemoryLanes(ref);
+    if (!lanes) throw semanticReferenceError("semantic reference vector field write requires modeled lanes", ref.span);
+    const next = readVectorContainerMemory(ref, context);
+    if (lanes.length === 1) {
+      if (typeof value !== "number") throw semanticReferenceError("semantic reference scalar vector-field write received vector value", ref.span);
+      next[lanes[0]!] = value;
+    } else {
+      if (!Array.isArray(value)) throw semanticReferenceError("semantic reference swizzle write received scalar value", ref.span);
+      lanes.forEach((lane, index) => {
+        next[lane] = Number(value[index] ?? 0);
+      });
+    }
+    writeVectorContainerMemory(ref, next, context);
+    return;
+  }
   if (!isSemanticReferenceFloatVectorType(ref.valueType)) {
     if (typeof value !== "number") throw semanticReferenceError("semantic reference scalar write received vector value", ref.span);
     writeMemory(ref, value, context);
@@ -3935,6 +3993,68 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     const ok = index >= 0 && index < buffer.length;
     if (ok) buffer[index] = laneValue;
     context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
+  }
+}
+
+function vectorFieldMemoryLanes(ref: SemanticMemoryRef): readonly number[] | undefined {
+  return isCudaVectorType(ref.containerValueType) && ref.fields.length === 1
+    ? cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!)
+    : undefined;
+}
+
+function readVectorContainerMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number[] {
+  if (!isCudaVectorType(ref.containerValueType)) throw semanticReferenceError("semantic reference vector field requires vector container", ref.span);
+  const laneCount = cudaVectorLaneCount(ref.containerValueType);
+  if (ref.addressSpace === "local") {
+    const buffer = context.locals.get(ref.base);
+    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    const value = buffer[flatIndex(ref, context)];
+    if (Array.isArray(value)) return Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));
+  }
+  const base = flatIndex(ref, context) * laneCount;
+  const buffer = ref.addressSpace === "constant"
+    ? context.constants.get(ref.base)
+    : ref.addressSpace === "device-global"
+    ? context.deviceGlobals.get(ref.base)
+    : ref.addressSpace === "shared"
+    ? context.sharedMemory.get(ref.base)
+    : context.buffers.get(ref.base);
+  if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+  return Array.from({ length: laneCount }, (_, lane) => {
+    const index = base + lane;
+    const ok = index >= 0 && index < buffer.length;
+    const value = ok ? Number(buffer[index]) : 0;
+    if (ref.addressSpace === "shared") context.trace.sharedReads.push({ name: ref.base, index, value, ok });
+    else context.trace.reads.push({ name: ref.base, index, value, ok });
+    return value;
+  });
+}
+
+function writeVectorContainerMemory(ref: SemanticMemoryRef, value: readonly number[], context: SemanticReferenceContext): void {
+  if (!isCudaVectorType(ref.containerValueType)) throw semanticReferenceError("semantic reference vector field requires vector container", ref.span);
+  const laneCount = cudaVectorLaneCount(ref.containerValueType);
+  if (ref.addressSpace === "local") {
+    const buffer = context.locals.get(ref.base);
+    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    const index = flatIndex(ref, context);
+    if (index >= 0 && index < buffer.length) (buffer as SemanticValue[])[index] = Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));
+    return;
+  }
+  if (ref.addressSpace === "constant") throw semanticReferenceError(`cannot write constant memory '${ref.base}'`, ref.span);
+  const base = flatIndex(ref, context) * laneCount;
+  const buffer = ref.addressSpace === "device-global"
+    ? context.deviceGlobals.get(ref.base)
+    : ref.addressSpace === "shared"
+    ? context.sharedMemory.get(ref.base)
+    : context.buffers.get(ref.base);
+  if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+  for (let lane = 0; lane < laneCount; lane++) {
+    const index = base + lane;
+    const laneValue = Number(value[lane] ?? 0);
+    const ok = index >= 0 && index < buffer.length;
+    if (ok) buffer[index] = laneValue;
+    if (ref.addressSpace === "shared") context.trace.sharedWrites.push({ name: ref.base, index, value: laneValue, ok });
+    else context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
   }
 }
 

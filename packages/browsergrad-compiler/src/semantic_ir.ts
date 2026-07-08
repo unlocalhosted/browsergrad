@@ -83,6 +83,7 @@ export interface SemanticMemoryRef {
   readonly base: string;
   readonly addressSpace: SemanticAddressSpace;
   readonly valueType?: CudaLiteScalarType;
+  readonly containerValueType?: CudaLiteScalarType;
   readonly indices: readonly SemanticExpression[];
   readonly fields: readonly string[];
   readonly span: SourceSpan;
@@ -1544,10 +1545,15 @@ function memoryRefFromExpression(expression: SemanticExpression): SemanticMemory
     base: parts.base.name,
     addressSpace: parts.base.addressSpace,
     ...(valueType === undefined ? {} : { valueType }),
+    ...(expression.kind === "member" ? optionalContainerValueType(expressionValueType(expression.object)) : {}),
     indices: parts.indices,
     fields: parts.fields,
     span: expression.span,
   };
+}
+
+function optionalContainerValueType(valueType: CudaLiteScalarType | undefined): { readonly containerValueType: CudaLiteScalarType } | Record<string, never> {
+  return valueType === undefined ? {} : { containerValueType: valueType };
 }
 
 function flattenMemoryRef(expression: SemanticExpression): {
