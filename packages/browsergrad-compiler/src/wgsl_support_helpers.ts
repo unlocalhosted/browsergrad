@@ -661,3 +661,27 @@ export function emitHalfConversionHelpers(): readonly string[] {
     "}",
   ];
 }
+
+export function emitBfloatConversionHelpers(): readonly string[] {
+  return [
+    "fn bg_bf16_i16_to_f32(value: i32) -> f32 {",
+    "  let bits = u32(value) & 0xffffu;",
+    "  return f32(i32(bits) - select(0, 65536, bits >= 0x8000u));",
+    "}",
+    "",
+    "fn bg_f32_to_bf16_bits_mode(value: f32, mode: u32) -> u32 {",
+    "  let bits = bitcast<u32>(value);",
+    "  if ((bits & 0x7f800000u) == 0x7f800000u) { return (bits >> 16u) & 0xffffu; }",
+    "  let lower = bits & 0xffffu;",
+    "  if (mode == 0u) {",
+    "    return ((bits + 0x7fffu + ((bits >> 16u) & 1u)) >> 16u) & 0xffffu;",
+    "  }",
+    "  var high = (bits >> 16u) & 0xffffu;",
+    "  if (lower != 0u) {",
+    "    let negative = (bits & 0x80000000u) != 0u;",
+    "    if ((mode == 2u && !negative) || (mode == 3u && negative)) { high += 1u; }",
+    "  }",
+    "  return high & 0xffffu;",
+    "}",
+  ];
+}

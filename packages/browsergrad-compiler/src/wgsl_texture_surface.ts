@@ -423,7 +423,8 @@ export function emitSurfaceWriteExpression(
 }
 
 function wgslRoundBfloat16(value: string): string {
-  return `bitcast<f32>((bitcast<u32>(f32(${value})) + 0x8000u) & 0xffff0000u)`;
+  const bits = `bitcast<u32>(f32(${value}))`;
+  return `bitcast<f32>(((${bits} + 0x7fffu + ((${bits} >> 16u) & 1u)) & 0xffff0000u))`;
 }
 
 function emitTextureVectorCastHelpers(

@@ -2,6 +2,12 @@ import {
   float16BitsToFloat32,
   float32ToFloat16Bits,
 } from "@unlocalhosted/browsergrad-kernels";
+import {
+  bfloat16BitsToFloat32,
+  roundFloat32ToBfloat16,
+  roundFloat32ToBfloat16Bits,
+  type BfloatRoundingMode,
+} from "./bfloat_rounding.js";
 import { roundFloat32ToFloat16 } from "./half_rounding.js";
 import type { CudaLiteFeatureName, CudaLiteScalarType } from "./types.js";
 
@@ -559,8 +565,26 @@ const BF16_INTRINSICS = [
   intrinsic("__bfloat162float", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args[0] ?? "0"})`),
   intrinsic("__float2bfloat16", [1, 1], "bf16", (args) => roundBfloat16(args[0] ?? 0), (args) => wgslRoundBfloat16(args[0] ?? "0")),
   intrinsic("__float2bfloat16_rn", [1, 1], "bf16", (args) => roundBfloat16(args[0] ?? 0), (args) => wgslRoundBfloat16(args[0] ?? "0")),
+  intrinsic("__float2bfloat16_rz", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(args[0] ?? 0, "rz"), (args) => wgslRoundBfloat16(args[0] ?? "0", "rz")),
+  intrinsic("__float2bfloat16_ru", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(args[0] ?? 0, "ru"), (args) => wgslRoundBfloat16(args[0] ?? "0", "ru")),
+  intrinsic("__float2bfloat16_rd", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(args[0] ?? 0, "rd"), (args) => wgslRoundBfloat16(args[0] ?? "0", "rd")),
   intrinsic("__int2bfloat16_rn", [1, 1], "bf16", (args) => roundBfloat16(Math.trunc(args[0] ?? 0)), (args) => wgslRoundBfloat16(`f32(i32(${args[0] ?? "0"}))`)),
+  intrinsic("__int2bfloat16_rz", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rz"), (args) => wgslRoundBfloat16(`f32(i32(${args[0] ?? "0"}))`, "rz")),
+  intrinsic("__int2bfloat16_ru", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "ru"), (args) => wgslRoundBfloat16(`f32(i32(${args[0] ?? "0"}))`, "ru")),
+  intrinsic("__int2bfloat16_rd", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rd"), (args) => wgslRoundBfloat16(`f32(i32(${args[0] ?? "0"}))`, "rd")),
   intrinsic("__uint2bfloat16_rn", [1, 1], "bf16", (args) => roundBfloat16(Math.trunc(args[0] ?? 0) >>> 0), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}))`)),
+  intrinsic("__uint2bfloat16_rz", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rz"), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}))`, "rz")),
+  intrinsic("__uint2bfloat16_ru", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "ru"), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}))`, "ru")),
+  intrinsic("__uint2bfloat16_rd", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rd"), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}))`, "rd")),
+  intrinsic("__short2bfloat16_rn", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rn"), (args) => wgslRoundBfloat16(`bg_bf16_i16_to_f32(i32(${args[0] ?? "0"}))`)),
+  intrinsic("__short2bfloat16_rz", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rz"), (args) => wgslRoundBfloat16(`bg_bf16_i16_to_f32(i32(${args[0] ?? "0"}))`, "rz")),
+  intrinsic("__short2bfloat16_ru", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "ru"), (args) => wgslRoundBfloat16(`bg_bf16_i16_to_f32(i32(${args[0] ?? "0"}))`, "ru")),
+  intrinsic("__short2bfloat16_rd", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rd"), (args) => wgslRoundBfloat16(`bg_bf16_i16_to_f32(i32(${args[0] ?? "0"}))`, "rd")),
+  intrinsic("__ushort2bfloat16_rn", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rn"), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}) & 0xffffu)`)),
+  intrinsic("__ushort2bfloat16_rz", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rz"), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}) & 0xffffu)`, "rz")),
+  intrinsic("__ushort2bfloat16_ru", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "ru"), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}) & 0xffffu)`, "ru")),
+  intrinsic("__ushort2bfloat16_rd", [1, 1], "bf16", (args) => roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rd"), (args) => wgslRoundBfloat16(`f32(u32(${args[0] ?? "0"}) & 0xffffu)`, "rd")),
+  intrinsic("__bfloat16_as_short", [1, 1], "int", (args) => signExtend16(roundFloat32ToBfloat16Bits(args[0] ?? 0)), (args) => `((bitcast<i32>(((bitcast<u32>(f32(${args[0] ?? "0"})) >> 16u) & 0xffffu) << 16u)) >> 16)`),
   intrinsic("__bfloat16_as_ushort", [1, 1], "uint", evalBfloat16AsUshort, (args) => `((bitcast<u32>(f32(${args[0] ?? "0"})) >> 16u) & 0xffffu)`),
   intrinsic("__nv_bfloat16_as_ushort", [1, 1], "uint", evalBfloat16AsUshort, (args) => `((bitcast<u32>(f32(${args[0] ?? "0"})) >> 16u) & 0xffffu)`),
   intrinsic("__bfloat162_as_uint", [1, 1], "uint", () => 0, (args) => `((bitcast<u32>((${args[0] ?? "vec2<f32>()"}).x) >> 16u) | (bitcast<u32>((${args[0] ?? "vec2<f32>()"}).y) & 0xffff0000u))`),
@@ -575,6 +599,7 @@ const BF16_INTRINSICS = [
   intrinsic("__bfloat162uint_rz", [1, 1], "uint", (args) => Math.trunc(args[0] ?? 0) >>> 0, (args) => `u32(max(trunc(f32(${args[0] ?? "0"})), 0.0))`),
   intrinsic("__bfloat162uint_ru", [1, 1], "uint", (args) => Math.ceil(args[0] ?? 0) >>> 0, (args) => `u32(max(ceil(f32(${args[0] ?? "0"})), 0.0))`),
   intrinsic("__bfloat162uint_rd", [1, 1], "uint", (args) => Math.floor(args[0] ?? 0) >>> 0, (args) => `u32(max(floor(f32(${args[0] ?? "0"})), 0.0))`),
+  intrinsic("__short_as_bfloat16", [1, 1], "bf16", (args) => bfloat16BitsToFloat32(args[0] ?? 0), (args) => `bitcast<f32>((u32(i32(${args[0] ?? "0"})) & 0xffffu) << 16u)`),
   intrinsic("__ushort_as_bfloat16", [1, 1], "bf16", (args) => bfloat16BitsToFloat32(args[0] ?? 0), (args) => `bitcast<f32>(u32(${args[0] ?? "0"}) << 16u)`),
 ] as const;
 
@@ -624,16 +649,7 @@ const f32Scratch = new Float32Array(1);
 const u32Scratch = new Uint32Array(f32Scratch.buffer);
 
 function roundBfloat16(value: number): number {
-  f32Scratch[0] = value;
-  const bits = u32Scratch[0] ?? 0;
-  const rounded = (bits + 0x8000) & 0xffff0000;
-  u32Scratch[0] = rounded >>> 0;
-  return f32Scratch[0] ?? 0;
-}
-
-function bfloat16BitsToFloat32(bits: number): number {
-  u32Scratch[0] = (Math.trunc(bits) & 0xffff) << 16;
-  return f32Scratch[0] ?? 0;
+  return roundFloat32ToBfloat16(value, "rn");
 }
 
 function evalBfloat16AsUshort(args: readonly number[]): number {
@@ -654,8 +670,9 @@ function uintBitsToFloat32(bits: number): number {
   return f32Scratch[0] ?? 0;
 }
 
-function wgslRoundBfloat16(value: string): string {
-  return `bitcast<f32>((bitcast<u32>(f32(${value})) + 0x8000u) & 0xffff0000u)`;
+function wgslRoundBfloat16(value: string, mode: BfloatRoundingMode = "rn"): string {
+  const modeLiteral = mode === "rn" ? "0u" : mode === "rz" ? "1u" : mode === "ru" ? "2u" : "3u";
+  return `bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(${value}), ${modeLiteral}) << 16u)`;
 }
 
 function orderedCompare(args: readonly number[], compare: (a: number, b: number) => boolean): number {

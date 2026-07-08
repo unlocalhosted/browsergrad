@@ -12374,8 +12374,8 @@ __global__ void surfaceBf16ReadWrite(cudaSurfaceObject_t surf, float *out, uint 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-    expect(compiled.wgsl).toContain("bitcast<f32>((bitcast<u32>(f32(bg_sem_surf2dread_surf(0, 0, 0))) + 0x8000u) & 0xffff0000u)");
-    expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>((bitcast<u32>(f32(bg_sem_surf2dread_surf((0 + 0), 0, 0))) + 0x8000u) & 0xffff0000u), bitcast<f32>((bitcast<u32>(f32(bg_sem_surf2dread_surf((0 + 4), 0, 0))) + 0x8000u) & 0xffff0000u))");
+    expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode(f32(bg_sem_surf2dread_surf(0, 0, 0)), 0u)");
+    expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(bg_sem_surf2dread_surf((0 + 0), 0, 0)), 0u) << 16u), bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(bg_sem_surf2dread_surf((0 + 4), 0, 0)), 0u) << 16u))");
     expect(compiled.wgsl).not.toContain("enable f16;");
     expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -17251,7 +17251,7 @@ __global__ void sample(float *out, uint *bits) {
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-texture");
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-    expect(compiled.wgsl).toContain("bitcast<f32>((bitcast<u32>(f32(textureLoad(texRef");
+    expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode(f32(textureLoad(texRef");
     expect(compiled.wgsl).not.toContain("bg_tex2d_bf16_texRef");
     expect(compiled.wgsl).not.toContain("bg_tex2d_bf162_texRef");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -18672,8 +18672,8 @@ __global__ void bf16_scalar_ops(const __nv_bfloat16* input, __nv_bfloat16* outpu
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-    expect(compiled.wgsl).toContain("bitcast<f32>((bitcast<u32>(f32((a + b))) + 0x8000u) & 0xffff0000u)");
-    expect(compiled.wgsl).toContain("fma(a, b, bitcast<f32>((bitcast<u32>(f32(1.0)) + 0x8000u) & 0xffff0000u))");
+    expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode(f32((a + b)), 0u)");
+    expect(compiled.wgsl).toContain("fma(a, b, bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(1.0), 0u) << 16u))");
     expect([...result.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2]);
     expect([...semanticResult.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2]);
   });
@@ -19053,6 +19053,56 @@ __global__ void half_directed_convert(half* out) {
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(Array.from(result.buffers.out as Iterable<number>)).toEqual(expected);
     expect(Array.from(semanticResult.buffers.out as Iterable<number>)).toEqual(expected);
+  });
+
+  it("lowers CUDA directed bf16 conversion aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
+  if (threadIdx.x < 1) {
+    __nv_bfloat16 prn = __float2bfloat16_rn(257.0f);
+    out[0] = __bfloat162float(prn);
+    out[1] = __bfloat162float(__float2bfloat16_rz(257.0f));
+    out[2] = __bfloat162float(__float2bfloat16_ru(257.0f));
+    out[3] = __bfloat162float(__float2bfloat16_rd(257.0f));
+    out[4] = __bfloat162float(__float2bfloat16_rn(-257.0f));
+    out[5] = __bfloat162float(__float2bfloat16_rz(-257.0f));
+    out[6] = __bfloat162float(__float2bfloat16_ru(-257.0f));
+    out[7] = __bfloat162float(__float2bfloat16_rd(-257.0f));
+    out[8] = __bfloat162float(__int2bfloat16_ru(257));
+    out[9] = __bfloat162float(__int2bfloat16_rd(-257));
+    out[10] = __bfloat162float(__uint2bfloat16_ru(257u));
+    out[11] = __bfloat162float(__short2bfloat16_rn(0xffff));
+    out[12] = __bfloat162float(__short2bfloat16_rd(-257));
+    out[13] = __bfloat162float(__ushort2bfloat16_ru(257u));
+    out[14] = __bfloat162float(__ushort2bfloat16_rd(257u));
+    out[15] = __bfloat162float(__ushort_as_bfloat16(0x4000u));
+    bits[0] = __bfloat16_as_ushort(prn);
+    bits[1] = __bfloat16_as_ushort(__ushort_as_bfloat16(0x3f80u));
+    signedBits[0] = __bfloat16_as_short(__short_as_bfloat16(0xbf80));
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(16),
+        bits: new Uint32Array(2),
+        signedBits: new Int32Array(1),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const expected = [256, 256, 258, 256, -256, -256, -256, -258, 258, -258, 258, -1, -258, 258, 256, 2];
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
+    expect([...result.buffers.out as Float32Array]).toEqual(expected);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80]);
+    expect([...semanticResult.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80]);
+    expect([...result.buffers.signedBits as Int32Array]).toEqual([-16512]);
+    expect([...semanticResult.buffers.signedBits as Int32Array]).toEqual([-16512]);
   });
 
   it("lowers scalar CUDA half unary math aliases", () => {

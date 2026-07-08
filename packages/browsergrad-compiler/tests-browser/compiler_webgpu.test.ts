@@ -2840,6 +2840,48 @@ __global__ void halfDirectedConvert(half* out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([2048, 2048, 2050, 2048, -2048, -2048, -2048, -2050, 2048, 2050, -2050, 2050, 32752, -32768, 2050, -1]);
   });
 
+  it("runs directed bf16 conversion aliases on real WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
+  if (threadIdx.x < 1) {
+    __nv_bfloat16 prn = __float2bfloat16_rn(257.0f);
+    out[0] = __bfloat162float(prn);
+    out[1] = __bfloat162float(__float2bfloat16_rz(257.0f));
+    out[2] = __bfloat162float(__float2bfloat16_ru(257.0f));
+    out[3] = __bfloat162float(__float2bfloat16_rd(257.0f));
+    out[4] = __bfloat162float(__float2bfloat16_rn(-257.0f));
+    out[5] = __bfloat162float(__float2bfloat16_rz(-257.0f));
+    out[6] = __bfloat162float(__float2bfloat16_ru(-257.0f));
+    out[7] = __bfloat162float(__float2bfloat16_rd(-257.0f));
+    out[8] = __bfloat162float(__int2bfloat16_ru(257));
+    out[9] = __bfloat162float(__int2bfloat16_rd(-257));
+    out[10] = __bfloat162float(__uint2bfloat16_ru(257u));
+    out[11] = __bfloat162float(__short2bfloat16_rn(0xffff));
+    out[12] = __bfloat162float(__short2bfloat16_rd(-257));
+    out[13] = __bfloat162float(__ushort2bfloat16_ru(257u));
+    out[14] = __bfloat162float(__ushort2bfloat16_rd(257u));
+    out[15] = __bfloat162float(__ushort_as_bfloat16(0x4000u));
+    bits[0] = __bfloat16_as_ushort(prn);
+    bits[1] = __bfloat16_as_ushort(__ushort_as_bfloat16(0x3f80u));
+    signedBits[0] = __bfloat16_as_short(__short_as_bfloat16(0xbf80));
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(16),
+        bits: new Uint32Array(2),
+        signedBits: new Int32Array(1),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect([...actual.buffers.out as Float32Array]).toEqual([256, 256, 258, 256, -256, -256, -256, -258, 258, -258, 258, -1, -258, 258, 256, 2]);
+    expect([...actual.buffers.bits as Uint32Array]).toEqual([0x4380, 0x3f80]);
+    expect([...actual.buffers.signedBits as Int32Array]).toEqual([-16512]);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });

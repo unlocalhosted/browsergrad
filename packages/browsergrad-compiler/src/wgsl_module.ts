@@ -15,6 +15,7 @@ import {
   irUsesSubgroups,
   storageElementType,
   usesAtomicIncDec,
+  usesBfloatConversionIntrinsics,
   usesCuComplexRobustMath,
   usesCurand,
   usesFloatAtomicAdd,
@@ -44,6 +45,7 @@ import { UNIFORM_PARAMS_NAME, type EmitContext } from "./wgsl_context.js";
 import { wgslScalar } from "./wgsl_storage.js";
 import {
   emitCurandHelpers,
+  emitBfloatConversionHelpers,
   emitCuComplexRobustMathHelpers,
   emitFp8Helpers,
   emitFrexpHelpers,
@@ -201,4 +203,5 @@ function appendKernelModuleSupportHelpers(
   if (usesSpecialFloatNamedConstants(ir)) lines.push("", ...emitSpecialFloatConstantHelpers());
   if (usesFp8Intrinsics(ir)) lines.push("", ...emitFp8Helpers());
   if (usesHalfConversionIntrinsics(ir)) lines.push("", ...emitHalfConversionHelpers());
+  if (usesBfloatConversionIntrinsics(ir)) lines.push("", ...emitBfloatConversionHelpers());
 }

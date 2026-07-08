@@ -292,6 +292,18 @@ export function usesHalfConversionIntrinsics(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => statementsUseCall(fn.body, names));
 }
 
+export function usesBfloatConversionIntrinsics(ir: KernelIrModule): boolean {
+  const names = new Set([
+    "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd",
+    "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
+    "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
+    "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
+    "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
+  ]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
 export function wgslUniformScalar(type: CudaLiteScalarType): string {
   if (isCudaVectorType(type)) return wgslScalar(type);
   if (type === "complex64") return "vec2<f32>";

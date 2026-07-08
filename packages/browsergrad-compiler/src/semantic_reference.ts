@@ -5,6 +5,11 @@ import {
   type WgslTexture2DInput,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
+import {
+  bfloat16BitsToFloat32,
+  roundFloat32ToBfloat16,
+  roundFloat32ToBfloat16Bits,
+} from "./bfloat_rounding.js";
 import { roundFloat32ToFloat16 } from "./half_rounding.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
@@ -96,8 +101,12 @@ const SEMANTIC_MATH_CALLS = new Set([
   "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
   "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "hexp", "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
   "__hisnan", "__hisinf", "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle", "__hequ", "__hneu", "__hgtu", "__hgeu", "__hltu", "__hleu",
-  "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__int2bfloat16_rn", "__uint2bfloat16_rn",
-  "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__ushort_as_bfloat16",
+  "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd",
+  "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
+  "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
+  "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
+  "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
+  "__bfloat16_as_short", "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__short_as_bfloat16", "__ushort_as_bfloat16",
   "__bfloat162int_rn", "__bfloat162int_rz", "__bfloat162int_ru", "__bfloat162int_rd",
   "__bfloat162uint_rn", "__bfloat162uint_rz", "__bfloat162uint_ru", "__bfloat162uint_rd",
   "wmma::__float_to_tf32", "isNan",
@@ -2635,10 +2644,29 @@ function evalSemanticMathCall(
     case "__bfloat162float": return args[0] ?? 0;
     case "__float2bfloat16":
     case "__float2bfloat16_rn": return roundSemanticBfloat16(args[0] ?? 0);
+    case "__float2bfloat16_rz": return roundFloat32ToBfloat16(args[0] ?? 0, "rz");
+    case "__float2bfloat16_ru": return roundFloat32ToBfloat16(args[0] ?? 0, "ru");
+    case "__float2bfloat16_rd": return roundFloat32ToBfloat16(args[0] ?? 0, "rd");
     case "__int2bfloat16_rn": return roundSemanticBfloat16(Math.trunc(args[0] ?? 0) | 0);
+    case "__int2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rz");
+    case "__int2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "ru");
+    case "__int2bfloat16_rd": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) | 0, "rd");
     case "__uint2bfloat16_rn": return roundSemanticBfloat16(Math.trunc(args[0] ?? 0) >>> 0);
+    case "__uint2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rz");
+    case "__uint2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "ru");
+    case "__uint2bfloat16_rd": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) >>> 0, "rd");
+    case "__short2bfloat16_rn": return roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rn");
+    case "__short2bfloat16_rz": return roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rz");
+    case "__short2bfloat16_ru": return roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "ru");
+    case "__short2bfloat16_rd": return roundFloat32ToBfloat16(signExtend16(args[0] ?? 0), "rd");
+    case "__ushort2bfloat16_rn": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rn");
+    case "__ushort2bfloat16_rz": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rz");
+    case "__ushort2bfloat16_ru": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "ru");
+    case "__ushort2bfloat16_rd": return roundFloat32ToBfloat16(Math.trunc(args[0] ?? 0) & 0xffff, "rd");
+    case "__bfloat16_as_short": return signExtend16(roundFloat32ToBfloat16Bits(args[0] ?? 0));
     case "__bfloat16_as_ushort":
     case "__nv_bfloat16_as_ushort": return (float32ToUintBits(roundSemanticBfloat16(args[0] ?? 0)) >>> 16) & 0xffff;
+    case "__short_as_bfloat16":
     case "__ushort_as_bfloat16": return bfloat16BitsToFloat32(args[0] ?? 0);
     case "__bfloat162int_rn": return roundTiesToEvenNumber(args[0] ?? 0) | 0;
     case "__bfloat162int_rz": return Math.trunc(args[0] ?? 0) | 0;
@@ -2970,11 +2998,7 @@ function saturateSemanticHalf(value: number): number {
 }
 
 function roundSemanticBfloat16(value: number): number {
-  return uintBitsToFloat32((float32ToUintBits(value) + 0x8000) & 0xffff0000);
-}
-
-function bfloat16BitsToFloat32(bits: number): number {
-  return uintBitsToFloat32((Math.trunc(bits) & 0xffff) << 16);
+  return roundFloat32ToBfloat16(value, "rn");
 }
 
 function semanticFp8ToFloat32(bits: number, mode: number): number {

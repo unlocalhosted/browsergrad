@@ -143,6 +143,12 @@ comparison masks, boolean reductions, `__hisnan2`, and NaN-propagating
 `__hmin2_nan` / `__hmax2_nan`; these lower through the same semantic
 reference/WGSL path and can run in explicit f32 compatibility mode when
 `shader-f16` is unavailable.
+Scalar bf16 helpers use browser-native f32 storage with explicit bf16 bits:
+`__float2bfloat16`, `__float2bfloat16_rn` / `_rz` / `_ru` / `_rd`,
+`__int2bfloat16_*`, `__uint2bfloat16_*`, `__short2bfloat16_*`,
+`__ushort2bfloat16_*`, `__bfloat16_as_short`,
+`__bfloat16_as_ushort`, `__short_as_bfloat16`, and
+`__ushort_as_bfloat16` lower through semantic reference/WGSL and real WebGPU.
 CUDA/C named constants such as `INFINITY`, `NAN`, `FLT_MAX`, `M_PI`,
 `cudaMemcpyDeviceToDevice`, and stream/event flag values lower through the same
 analyzer, CPU-reference, and WGSL path.

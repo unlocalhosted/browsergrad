@@ -20,7 +20,7 @@ import type {
 import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
-import { emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers } from "./wgsl_support_helpers.js";
+import { emitBfloatConversionHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers } from "./wgsl_support_helpers.js";
 import { classifyInlineAsm } from "./ptx_tile_ops.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
@@ -112,6 +112,14 @@ const SEMANTIC_HALF_CONVERSION_CALLS = new Set([
   "__uint2half_rn", "__uint2half_rz", "__uint2half_ru", "__uint2half_rd",
   "__short2half_rn", "__short2half_rz", "__short2half_ru", "__short2half_rd",
   "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
+]);
+const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
+  "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd",
+  "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
+  "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
+  "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
+  "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
+  "__halves2bfloat162",
 ]);
 const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
@@ -444,10 +452,29 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__bfloat162float", "bf16_to_float"],
   ["__float2bfloat16", "to_bf16"],
   ["__float2bfloat16_rn", "to_bf16"],
+  ["__float2bfloat16_rz", "float_to_bf16_rz"],
+  ["__float2bfloat16_ru", "float_to_bf16_ru"],
+  ["__float2bfloat16_rd", "float_to_bf16_rd"],
   ["__int2bfloat16_rn", "int_to_bf16"],
+  ["__int2bfloat16_rz", "int_to_bf16_rz"],
+  ["__int2bfloat16_ru", "int_to_bf16_ru"],
+  ["__int2bfloat16_rd", "int_to_bf16_rd"],
   ["__uint2bfloat16_rn", "uint_to_bf16"],
+  ["__uint2bfloat16_rz", "uint_to_bf16_rz"],
+  ["__uint2bfloat16_ru", "uint_to_bf16_ru"],
+  ["__uint2bfloat16_rd", "uint_to_bf16_rd"],
+  ["__short2bfloat16_rn", "short_to_bf16_rn"],
+  ["__short2bfloat16_rz", "short_to_bf16_rz"],
+  ["__short2bfloat16_ru", "short_to_bf16_ru"],
+  ["__short2bfloat16_rd", "short_to_bf16_rd"],
+  ["__ushort2bfloat16_rn", "ushort_to_bf16_rn"],
+  ["__ushort2bfloat16_rz", "ushort_to_bf16_rz"],
+  ["__ushort2bfloat16_ru", "ushort_to_bf16_ru"],
+  ["__ushort2bfloat16_rd", "ushort_to_bf16_rd"],
+  ["__bfloat16_as_short", "bf16_as_short"],
   ["__bfloat16_as_ushort", "bf16_as_ushort"],
   ["__nv_bfloat16_as_ushort", "bf16_as_ushort"],
+  ["__short_as_bfloat16", "short_as_bf16"],
   ["__ushort_as_bfloat16", "ushort_as_bf16"],
   ["__bfloat162int_rn", "bf16_to_int_rn"],
   ["__bfloat162int_rz", "bf16_to_int_rz"],
@@ -851,6 +878,9 @@ export function emitSemanticKernelIrWgsl(
     lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
   lines.push("", ...emitSemanticNumericHelpers());
+  if (semanticUsesBfloatHelper(ir)) {
+    lines.push("", ...emitBfloatConversionHelpers());
+  }
   if (semanticUsesHalfConversion(ir)) {
     lines.push("", ...emitHalfConversionHelpers());
   }
@@ -5295,6 +5325,27 @@ function emitSemanticMathCall(
     return `f16(unpack2x16float(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)}).x)`;
   }
   if (
+    wgslCallee === "bf16_to_float" ||
+    wgslCallee === "to_bf16" ||
+    wgslCallee === "int_to_bf16" ||
+    wgslCallee === "uint_to_bf16" ||
+    wgslCallee === "bf16_as_short" ||
+    wgslCallee === "bf16_as_ushort" ||
+    wgslCallee === "short_as_bf16" ||
+    wgslCallee === "ushort_as_bf16"
+  ) {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    if (wgslCallee === "bf16_to_float") return `f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
+    if (wgslCallee === "to_bf16") return wgslRoundBfloat16(emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations));
+    if (wgslCallee === "int_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)})`);
+    if (wgslCallee === "uint_to_bf16") return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)})`);
+    if (wgslCallee === "bf16_as_short") return `((bitcast<i32>(((bitcast<u32>(f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})) >> 16u) & 0xffffu) << 16u)) >> 16)`;
+    if (wgslCallee === "bf16_as_ushort") return `((bitcast<u32>(f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})) >> 16u) & 0xffffu)`;
+    if (wgslCallee === "short_as_bf16") return `bitcast<f32>((u32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)}) & 0xffffu) << 16u)`;
+    return `bitcast<f32>(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)} << 16u)`;
+  }
+  if (
     wgslCallee.startsWith("float_to_half_") ||
     wgslCallee.startsWith("int_to_half_") ||
     wgslCallee.startsWith("uint_to_half_") ||
@@ -5317,6 +5368,30 @@ function emitSemanticMathCall(
       return `f16(unpack2x16float(bg_f32_to_f16_bits_mode(bg_i16_to_f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)}), ${mode})).x)`;
     }
     return `f16(unpack2x16float(bg_f32_to_f16_bits_mode(f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)} & 0xffffu), ${mode})).x)`;
+  }
+  if (
+    wgslCallee.startsWith("float_to_bf16_") ||
+    wgslCallee.startsWith("int_to_bf16_") ||
+    wgslCallee.startsWith("uint_to_bf16_") ||
+    wgslCallee.startsWith("short_to_bf16_") ||
+    wgslCallee.startsWith("ushort_to_bf16_")
+  ) {
+    const [value] = expression.args;
+    if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
+    const mode = halfConversionModeLiteral(wgslCallee);
+    if (wgslCallee.startsWith("float_to_bf16_")) {
+      return wgslRoundBfloat16(emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations), mode);
+    }
+    if (wgslCallee.startsWith("int_to_bf16_")) {
+      return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)})`, mode);
+    }
+    if (wgslCallee.startsWith("uint_to_bf16_")) {
+      return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)})`, mode);
+    }
+    if (wgslCallee.startsWith("short_to_bf16_")) {
+      return wgslRoundBfloat16(`bg_bf16_i16_to_f32(${emitSemanticExpressionAs(value, ir, names, "i32", options, textureSpecializations)})`, mode);
+    }
+    return wgslRoundBfloat16(`f32(${emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)} & 0xffffu)`, mode);
   }
   if (wgslCallee === "fp8_to_half") {
     const [bits, mode] = expression.args;
@@ -6015,8 +6090,8 @@ function halfConversionModeLiteral(callee: string): "0u" | "1u" | "2u" | "3u" {
   return "3u";
 }
 
-function wgslRoundBfloat16(value: string): string {
-  return `bitcast<f32>((bitcast<u32>(f32(${value})) + 0x8000u) & 0xffff0000u)`;
+function wgslRoundBfloat16(value: string, mode: "0u" | "1u" | "2u" | "3u" = "0u"): string {
+  return `bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(${value}), ${mode}) << 16u)`;
 }
 
 function wgslSaturateHalf(value: string): string {
@@ -6558,6 +6633,15 @@ function semanticUsesHalfConversion(ir: SemanticKernelIrModule): boolean {
   return semanticOperationsUseHalfConversion(ir.operations) || ir.functions.some((fn) => semanticOperationsUseHalfConversion(fn.body));
 }
 
+function semanticUsesBfloatHelper(ir: SemanticKernelIrModule): boolean {
+  return ir.params.some((param) => param.valueType === "bf16" || param.valueType === "bf162") ||
+    ir.memory.some((memory) => memory.valueType === "bf16" || memory.valueType === "bf162") ||
+    semanticOperationsUseBfloatHelper(ir.operations) ||
+    ir.functions.some((fn) =>
+      fn.params.some((param) => param.valueType === "bf16" || param.valueType === "bf162") ||
+      semanticOperationsUseBfloatHelper(fn.body));
+}
+
 function semanticUsesCurand(ir: SemanticKernelIrModule): boolean {
   return semanticOperationsUseCurand(ir.operations) || ir.functions.some((fn) => semanticOperationsUseCurand(fn.body));
 }
@@ -6606,6 +6690,23 @@ function semanticOperationsUseHalfConversion(operations: readonly SemanticKernel
 function semanticExpressionUsesHalfConversion(expression: SemanticExpression): boolean {
   if (expression.kind === "call" && expression.callee.kind === "symbol" && SEMANTIC_HALF_CONVERSION_CALLS.has(expression.callee.name)) return true;
   return semanticExpressionChildren(expression).some(semanticExpressionUsesHalfConversion);
+}
+
+function semanticOperationsUseBfloatHelper(operations: readonly SemanticKernelIrOperation[]): boolean {
+  for (const operation of operations) {
+    if (semanticOperationExpressions(operation).some(semanticExpressionUsesBfloatHelper)) return true;
+    if (operation.kind === "branch" && (semanticOperationsUseBfloatHelper(operation.consequent) || semanticOperationsUseBfloatHelper(operation.alternate))) return true;
+    if (operation.kind === "loop" && semanticOperationsUseBfloatHelper(operation.body)) return true;
+    if (operation.kind === "block" && semanticOperationsUseBfloatHelper(operation.body)) return true;
+  }
+  return false;
+}
+
+function semanticExpressionUsesBfloatHelper(expression: SemanticExpression): boolean {
+  const valueType = semanticExpressionValueType(expression);
+  if (valueType === "bf16" || valueType === "bf162") return true;
+  if (expression.kind === "call" && expression.callee.kind === "symbol" && SEMANTIC_BFLOAT_HELPER_CALLS.has(expression.callee.name)) return true;
+  return semanticExpressionChildren(expression).some(semanticExpressionUsesBfloatHelper);
 }
 
 function semanticOperationsUseSurfaceParamWrite(
@@ -7046,6 +7147,7 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
         if (mathCallee && (mathCallee.startsWith("half_to_int_") || mathCallee.startsWith("half_to_short_") || mathCallee === "half_as_short")) return "i32";
         if (mathCallee && (mathCallee.startsWith("half_to_uint_") || mathCallee.startsWith("half_to_ushort_") || mathCallee === "half_as_ushort" || mathCallee === "float_to_fp8" || mathCallee.startsWith("half_") && !semanticMathCallReturnsHalf(mathCallee))) return "u32";
         if (mathCallee && mathCallee.startsWith("bf16_to_int_")) return "i32";
+        if (mathCallee && mathCallee === "bf16_as_short") return "i32";
         if (mathCallee && (mathCallee.startsWith("bf16_to_uint_") || mathCallee === "bf16_as_ushort")) return "u32";
         if (mathCallee === "mul24" || mathCallee === "mulhi") return "i32";
         if (mathCallee === "umul24" || mathCallee === "umulhi" || mathCallee === "umul" || mathCallee === "umin") return "u32";
