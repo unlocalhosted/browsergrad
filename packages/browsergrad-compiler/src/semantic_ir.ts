@@ -22,26 +22,8 @@ import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
-
-const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
-const SEMANTIC_CURAND_CALLS = new Set([
-  "curand_init",
-  "curand",
-  "curand_uniform",
-  "curand_uniform4",
-  "curand_uniform_double",
-  "curand_normal",
-  "curand_normal2",
-  "curand_normal4",
-  "curand_normal_double",
-  "curand_log_normal",
-  "curand_log_normal2",
-  "curand_log_normal4",
-  "curand_log_normal_double",
-  "curand_poisson",
-  "curand_poisson4",
-  "skipahead",
-]);
+import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
+import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
 
 export type SemanticAddressSpace =
   | "uniform"

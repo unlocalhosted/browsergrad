@@ -45,6 +45,12 @@ import {
   SEMANTIC_CURAND_VECTOR_CALLS,
   SEMANTIC_CURAND_VECTOR_RETURN_TYPES,
 } from "./semantic_curand_intrinsics.js";
+import {
+  SEMANTIC_ADDRESS_PREDICATE_CALLS,
+  SEMANTIC_LOCAL_ARRAY_FILL_CALLS,
+  SEMANTIC_NOOP_CALLS,
+  SEMANTIC_SUBGROUP_CALLS,
+} from "./semantic_builtin_calls.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
@@ -162,36 +168,6 @@ const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
   "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat",
   "__hmul2", "__hmul2_rn", "__hmul2_sat", "__h2div", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
   "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
-]);
-const SEMANTIC_NOOP_CALLS = new Set([
-  "__nanosleep",
-  "__prof_trigger",
-  "__trap",
-]);
-const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
-const SEMANTIC_SUBGROUP_CALLS = new Set([
-  "__activemask",
-  "__any",
-  "__all",
-  "__ballot",
-  "__any_sync",
-  "__all_sync",
-  "__ballot_sync",
-  "__match_any_sync",
-  "__reduce_add_sync",
-  "__reduce_min_sync",
-  "__reduce_max_sync",
-  "__reduce_and_sync",
-  "__reduce_or_sync",
-  "__reduce_xor_sync",
-  "__shfl",
-  "__shfl_down",
-  "__shfl_up",
-  "__shfl_xor",
-  "__shfl_sync",
-  "__shfl_down_sync",
-  "__shfl_up_sync",
-  "__shfl_xor_sync",
 ]);
 const SEMANTIC_MATH_CALLS = new Map([
   ["clock", "clock"],
@@ -709,7 +685,6 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["__bg_i16_lane", "i16_lane"],
   ["__bg_u16_lane", "u16_lane"],
 ]);
-const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const WGSL_ATOMIC_CALLEES = new Map([
   ["atomicAdd", "atomicAdd"],
   ["atomicAdd_system", "atomicAdd"],
