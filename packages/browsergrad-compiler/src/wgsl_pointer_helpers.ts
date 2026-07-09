@@ -1,5 +1,5 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
-import { expressionName } from "./analyzer.js";
+import { kernelIrUsesAtomicOperation } from "./kernel_ir_atomic_usage.js";
 import {
   cudaVectorLaneCount,
   cudaVectorScalarType,
@@ -487,58 +487,47 @@ export function isDevicePointerAtomicCasType(type: CudaLiteScalarType): type is 
 }
 
 function usesDevicePointerAtomicAdd(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"])));
+  return kernelIrUsesAtomicOperation(ir, "add");
 }
 
 function usesDevicePointerAtomicSub(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicSub", "atomicSub_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicSub", "atomicSub_system"])));
+  return kernelIrUsesAtomicOperation(ir, "sub");
 }
 
 function usesDevicePointerAtomicMin(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicMin", "atomicMin_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin", "atomicMin_system"])));
+  return kernelIrUsesAtomicOperation(ir, "min");
 }
 
 function usesDevicePointerAtomicMax(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])));
+  return kernelIrUsesAtomicOperation(ir, "max");
 }
 
 function usesDevicePointerAtomicAnd(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicAnd", "atomicAnd_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAnd", "atomicAnd_system"])));
+  return kernelIrUsesAtomicOperation(ir, "and");
 }
 
 function usesDevicePointerAtomicOr(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicOr", "atomicOr_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicOr", "atomicOr_system"])));
+  return kernelIrUsesAtomicOperation(ir, "or");
 }
 
 function usesDevicePointerAtomicXor(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicXor", "atomicXor_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicXor", "atomicXor_system"])));
+  return kernelIrUsesAtomicOperation(ir, "xor");
 }
 
 function usesDevicePointerAtomicInc(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicInc", "atomicInc_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicInc", "atomicInc_system"])));
+  return kernelIrUsesAtomicOperation(ir, "inc");
 }
 
 function usesDevicePointerAtomicDec(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicDec", "atomicDec_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicDec", "atomicDec_system"])));
+  return kernelIrUsesAtomicOperation(ir, "dec");
 }
 
 function usesDevicePointerAtomicExchange(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicExch", "atomicExch_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicExch", "atomicExch_system"])));
+  return kernelIrUsesAtomicOperation(ir, "exchange");
 }
 
 function usesDevicePointerAtomicCas(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicCAS", "atomicCAS_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicCAS", "atomicCAS_system"])));
+  return kernelIrUsesAtomicOperation(ir, "cas");
 }
 
 function emitDevicePointerAtomicAddHelper(
@@ -1004,14 +993,6 @@ export function pointerHelperTypeName(type: CudaLiteScalarType): string {
   if (type === "uint") return "u32";
   if (type === "uchar") return "u8";
   return type;
-}
-
-function statementsUseCall(statements: readonly CudaLiteStatement[], names: ReadonlySet<string>): boolean {
-  let used = false;
-  walkCudaLiteExpressions(statements, (expression) => {
-    if (expression.kind === "call" && names.has(expressionName(expression.callee) ?? "")) used = true;
-  });
-  return used;
 }
 
 function isDevicePoolParam(param: { readonly valueType: CudaLiteScalarType }): boolean {

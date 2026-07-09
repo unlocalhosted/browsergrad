@@ -1,5 +1,10 @@
 import { statementsUseCall, statementsUseIdentifier } from "./ir_usage.js";
 import {
+  kernelIrUsesAtomicOperation,
+  kernelIrUsesAtomicOperations,
+} from "./kernel_ir_atomic_usage.js";
+import type { SemanticAtomicOp } from "./semantic_atomic_intrinsics.js";
+import {
   type CudaLiteStatement,
   type CudaLiteDeviceGlobal,
   type CudaLiteParam,
@@ -86,63 +91,43 @@ function atomicStorageElementType(valueType: CudaLiteScalarType): string {
 }
 
 export function usesBfloatAtomicAdd(ir: KernelIrModule): boolean {
-  return hasAtomicStorageBfloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
+  return hasAtomicStorageBfloat(ir) && kernelIrUsesAtomicOperation(ir, "add");
 }
 
 export function usesSharedBfloatAtomicAdd(ir: KernelIrModule): boolean {
-  return hasAtomicSharedBfloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
+  return hasAtomicSharedBfloat(ir) && kernelIrUsesAtomicOperation(ir, "add");
 }
 
 export function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
-  return hasAtomicStorageFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
+  return hasAtomicStorageFloat(ir) && kernelIrUsesAtomicOperation(ir, "add");
 }
 
 export function usesSharedFloatAtomicAdd(ir: KernelIrModule): boolean {
-  return hasAtomicSharedFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
+  return hasAtomicSharedFloat(ir) && kernelIrUsesAtomicOperation(ir, "add");
 }
 
 export function usesFloatAtomicSub(ir: KernelIrModule): boolean {
-  return hasAtomicStorageFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicSub", "atomicSub_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicSub", "atomicSub_system"]))));
+  return hasAtomicStorageFloat(ir) && kernelIrUsesAtomicOperation(ir, "sub");
 }
 
 export function usesSharedFloatAtomicSub(ir: KernelIrModule): boolean {
-  return hasAtomicSharedFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicSub", "atomicSub_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicSub", "atomicSub_system"]))));
+  return hasAtomicSharedFloat(ir) && kernelIrUsesAtomicOperation(ir, "sub");
 }
 
 export function usesFloatAtomicMin(ir: KernelIrModule): boolean {
-  return hasAtomicStorageFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicMin", "atomicMin_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin", "atomicMin_system"]))));
+  return hasAtomicStorageFloat(ir) && kernelIrUsesAtomicOperation(ir, "min");
 }
 
 export function usesSharedFloatAtomicMin(ir: KernelIrModule): boolean {
-  return hasAtomicSharedFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicMin", "atomicMin_system"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin", "atomicMin_system"]))));
+  return hasAtomicSharedFloat(ir) && kernelIrUsesAtomicOperation(ir, "min");
 }
 
 export function usesFloatAtomicMax(ir: KernelIrModule): boolean {
-  return hasAtomicStorageFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"]))));
+  return hasAtomicStorageFloat(ir) && kernelIrUsesAtomicOperation(ir, "max");
 }
 
 export function usesSharedFloatAtomicMax(ir: KernelIrModule): boolean {
-  return hasAtomicSharedFloat(ir) &&
-    (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"]))));
+  return hasAtomicSharedFloat(ir) && kernelIrUsesAtomicOperation(ir, "max");
 }
 
 function hasAtomicSharedFloat(ir: KernelIrModule): boolean {
@@ -173,8 +158,7 @@ function isFloatAtomicStorageType(valueType: CudaLiteScalarType): boolean {
 }
 
 export function usesAtomicIncDec(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system"])));
+  return kernelIrUsesAtomicOperations(ir, ["inc", "dec"]);
 }
 
 export function usesIntViewAtomicStorage(ir: KernelIrModule): boolean {
@@ -187,20 +171,19 @@ export function usesSharedIntViewAtomics(ir: KernelIrModule): boolean {
 
 export function intViewAtomicKinds(ir: KernelIrModule): ReadonlySet<WgslIntViewAtomicEmitKind> {
   const kinds = new Set<WgslIntViewAtomicEmitKind>();
-  const calls: readonly [WgslIntViewAtomicEmitKind, readonly string[]][] = [
-    ["Add", ["atomicAdd", "atomicAdd_system"]],
-    ["Sub", ["atomicSub", "atomicSub_system"]],
-    ["Min", ["atomicMin", "atomicMin_system"]],
-    ["Max", ["atomicMax", "atomicMax_system"]],
-    ["And", ["atomicAnd", "atomicAnd_system"]],
-    ["Or", ["atomicOr", "atomicOr_system"]],
-    ["Xor", ["atomicXor", "atomicXor_system"]],
-    ["Exchange", ["atomicExch", "atomicExch_system"]],
-    ["CompareExchange", ["atomicCAS", "atomicCAS_system"]],
+  const calls: readonly [WgslIntViewAtomicEmitKind, readonly SemanticAtomicOp[]][] = [
+    ["Add", ["add"]],
+    ["Sub", ["sub"]],
+    ["Min", ["min"]],
+    ["Max", ["max"]],
+    ["And", ["and"]],
+    ["Or", ["or"]],
+    ["Xor", ["xor"]],
+    ["Exchange", ["exchange"]],
+    ["CompareExchange", ["cas"]],
   ];
-  for (const [kind, names] of calls) {
-    const callNames = new Set(names);
-    if (statementsUseCall(ir.body, callNames) || ir.functions.some((fn) => statementsUseCall(fn.body, callNames))) {
+  for (const [kind, ops] of calls) {
+    if (kernelIrUsesAtomicOperations(ir, ops)) {
       kinds.add(kind);
     }
   }
