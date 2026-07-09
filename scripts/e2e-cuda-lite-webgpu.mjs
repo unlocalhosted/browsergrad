@@ -2721,11 +2721,17 @@ __device__ unsigned int mul_lo_ptx(unsigned int a, unsigned int b) {
   asm volatile("mul.lo.u32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
   return ret;
 }
-__global__ void ptxArithmeticB32(uint *out, uint *a, uint *b) {
+__device__ unsigned int mad_lo_ptx(unsigned int a, unsigned int b, unsigned int c) {
+  unsigned int ret;
+  asm volatile("mad.lo.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(a), "r"(b), "r"(c));
+  return ret;
+}
+__global__ void ptxArithmeticB32(uint *out, uint *a, uint *b, uint *c) {
   int idx = threadIdx.x;
   out[idx] = add_ptx(a[idx], b[idx]);
   out[idx + 4] = (uint)sub_ptx((int)a[idx], (int)b[idx]);
   out[idx + 8] = mul_lo_ptx(a[idx], b[idx]);
+  out[idx + 12] = mad_lo_ptx(a[idx], b[idx], c[idx]);
 }`,
   ptxMinMaxB32: `
 __device__ unsigned int min_u_ptx(unsigned int a, unsigned int b) {
@@ -14139,15 +14145,16 @@ const html = String.raw`<!doctype html>
             launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
             input: () => ({
               buffers: {
-                out: new Uint32Array(12),
+                out: new Uint32Array(16),
                 a: new Uint32Array([1, 0xffffffff, 0x80000000, 0x12345678]),
                 b: new Uint32Array([2, 2, 2, 0x87654321]),
+                c: new Uint32Array([5, 7, 9, 0xffffffff]),
               },
             }),
             output: "out",
             expectedOutput: {
               type: "Uint32Array",
-              data: [3, 1, 0x80000002, 0x99999999, 0xffffffff, 0xfffffffd, 0x7ffffffe, 0x8acf1357, 2, 0xfffffffe, 0, 0x70b88d78],
+              data: [3, 1, 0x80000002, 0x99999999, 0xffffffff, 0xfffffffd, 0x7ffffffe, 0x8acf1357, 2, 0xfffffffe, 0, 0x70b88d78, 7, 5, 9, 0x70b88d77],
             },
           },
           {

@@ -1798,11 +1798,16 @@ function validateInlineAsmStatement(
   if (op?.kind === "shift-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.b32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
-  if (op?.kind === "arithmetic-b32" && (outputs.length !== 1 || statement.inputs.length !== 2)) {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op === "mul-lo" ? "mul.lo" : op.op}.b32 inline PTX expects one output operand and two input operands`, statement.span));
+  if (op?.kind === "arithmetic-b32") {
+    const expectedInputs = op.op === "mad-lo" ? 3 : 2;
+    const opLabel = op.op === "mul-lo" ? "mul.lo" : op.op === "mad-lo" ? "mad.lo" : op.op;
+    if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `${opLabel}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
+    }
   }
   if (op?.kind === "arithmetic-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op === "mul-lo" ? "mul.lo" : op.op}.b32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
+    const opLabel = op.op === "mul-lo" ? "mul.lo" : op.op === "mad-lo" ? "mad.lo" : op.op;
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `${opLabel}.b32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "minmax-b32" && (outputs.length !== 1 || statement.inputs.length !== 2)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.signed ? "s32" : "u32"} inline PTX expects one output operand and two input operands`, statement.span));
