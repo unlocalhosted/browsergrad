@@ -2324,6 +2324,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "minmax-b32" && statement.inputs.length === 2 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineMinMaxExpression(statement.inputs, op.op, op.signed, context), context)}`;
   }
+  if (op?.kind === "unary-int-b32" && statement.inputs.length === 1 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpression(statement.inputs[0]!, op.op, context), context)}`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2464,6 +2467,13 @@ function emitInlineMinMaxExpression(inputs: readonly CudaLiteExpression[], op: "
   const right = `u32(${emitExpression(inputs[1]!, context)})`;
   if (!signed) return `${op}(${left}, ${right})`;
   return `bitcast<u32>(${op}(bitcast<i32>(${left}), bitcast<i32>(${right})))`;
+}
+
+function emitInlineUnaryIntExpression(input: CudaLiteExpression, op: "neg" | "abs", context: EmitContext): string {
+  const value = `u32(${emitExpression(input, context)})`;
+  if (op === "neg") return `(0u - ${value})`;
+  const mask = `select(0u, 0xffffffffu, ((${value} & 0x80000000u) != 0u))`;
+  return `((${value} ^ ${mask}) - ${mask})`;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {

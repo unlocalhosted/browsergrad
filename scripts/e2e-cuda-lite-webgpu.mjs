@@ -2761,6 +2761,22 @@ __global__ void ptxMinMaxB32(uint *out, uint *a, uint *b) {
   out[idx + 8] = (uint)min_s_ptx((int)a[idx], (int)b[idx]);
   out[idx + 12] = (uint)max_s_ptx((int)a[idx], (int)b[idx]);
 }`,
+  ptxUnaryIntB32: `
+__device__ int neg_ptx(int value) {
+  int ret;
+  asm volatile("neg.s32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__device__ int abs_ptx(int value) {
+  int ret;
+  asm volatile("abs.s32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__global__ void ptxUnaryIntB32(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = (uint)neg_ptx((int)input[idx]);
+  out[idx + 5] = (uint)abs_ptx((int)input[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -14173,6 +14189,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [1, 2, 0x7fffffff, 0x7fffffff, 2, 0xffffffff, 0x80000000, 0x80000000, 1, 0xffffffff, 0x80000000, 0x80000000, 2, 2, 0x7fffffff, 0x7fffffff],
+            },
+          },
+          {
+            name: "inline-asm:unary-int-b32",
+            source: SOURCES.ptxUnaryIntB32,
+            options: { workgroupSize: [5, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [5, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(10),
+                input: new Uint32Array([0, 1, 0xffffffff, 0x80000000, 0x7fffffff]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0, 0xffffffff, 1, 0x80000000, 0x80000001, 0, 1, 1, 0x80000000, 0x7fffffff],
             },
           },
           {

@@ -12170,6 +12170,50 @@ __global__ void minMaxKernel(uint *out, uint *a, uint *b) {
     ]);
   });
 
+  it("lowers inline PTX signed neg and abs b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int neg_ptx(int value) {
+  int ret;
+  asm volatile("neg.s32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__device__ int abs_ptx(int value) {
+  int ret;
+  asm volatile("abs.s32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__global__ void unaryIntKernel(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = (uint)neg_ptx((int)input[idx]);
+  out[idx + 5] = (uint)abs_ptx((int)input[idx]);
+}`, { workgroupSize: [5, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(10),
+          input: new Uint32Array([0, 1, 0xffffffff, 0x80000000, 0x7fffffff]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [5, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("0u - ");
+    expect(compiled.wgsl).toContain("0x80000000u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0,
+      0xffffffff,
+      1,
+      0x80000000,
+      0x80000001,
+      0,
+      1,
+      1,
+      0x80000000,
+      0x7fffffff,
+    ]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {

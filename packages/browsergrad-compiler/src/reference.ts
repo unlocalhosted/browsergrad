@@ -985,6 +985,14 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmMinMax(op.op, left, right, op.signed), context);
     return;
   }
+  if (op?.kind === "unary-int-b32") {
+    const label = `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"}`;
+    if (statement.inputs.length !== 1) throw compilerFailure(`${label} inline asm expects one input`);
+    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    const value = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmUnaryInt(op.op, value), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1114,6 +1122,12 @@ function evalInlineAsmMinMax(op: "min" | "max", left: number, right: number, sig
   const rightValue = signed ? right | 0 : right >>> 0;
   const takeLeft = op === "min" ? leftValue <= rightValue : leftValue >= rightValue;
   return (takeLeft ? left : right) >>> 0;
+}
+
+function evalInlineAsmUnaryInt(op: "neg" | "abs", value: number): number {
+  if (op === "neg") return (0 - value) >>> 0;
+  const mask = (value & 0x80000000) === 0 ? 0 : 0xffffffff;
+  return ((value ^ mask) - mask) >>> 0;
 }
 
 function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {
