@@ -2315,8 +2315,8 @@ function emitInlineAsmStatement(
   if (op?.kind === "bitwise-b32" && statement.inputs.length === (op.op === "not" ? 1 : 2) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBitwiseExpression(statement.inputs, op.op, context), context)}`;
   }
-  if (op?.kind === "shift-b32" && statement.inputs.length === 2 && outputs.length === 1) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineShiftExpression(statement.inputs, op.op, op.signed, context), context)}`;
+  if (op?.kind === "shift-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineShiftExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
   }
   if (op?.kind === "arithmetic-b32" && statement.inputs.length === ((op.op === "mad-lo" ? 3 : 2) - (op.immediate === undefined ? 0 : 1)) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineArithmeticExpression(statement.inputs, op.op, context, op.immediate), context)}`;
@@ -2459,9 +2459,9 @@ function emitInlineBitwiseExpression(inputs: readonly CudaLiteExpression[], op: 
   return `(${left} ${operator} ${right})`;
 }
 
-function emitInlineShiftExpression(inputs: readonly CudaLiteExpression[], op: "shl" | "shr", signed: boolean, context: EmitContext): string {
+function emitInlineShiftExpression(inputs: readonly CudaLiteExpression[], op: "shl" | "shr", signed: boolean, context: EmitContext, immediate?: number): string {
   const value = `u32(${emitExpression(inputs[0]!, context)})`;
-  const amount = `u32(${emitExpression(inputs[1]!, context)})`;
+  const amount = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
   const clamped = `min(${amount}, 31u)`;
   if (op === "shl") return `select((${value} << ${clamped}), 0u, (${amount} >= 32u))`;
   if (!signed) return `select((${value} >> ${clamped}), 0u, (${amount} >= 32u))`;

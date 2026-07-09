@@ -2705,6 +2705,28 @@ __global__ void ptxShiftB32(uint *out, uint *input, uint *amount) {
   out[idx + 5] = shr_u_ptx(input[idx], amount[idx]);
   out[idx + 10] = (uint)shr_s_ptx((int)input[idx], amount[idx]);
 }`,
+  ptxShiftImmediateB32: `
+__device__ unsigned int shl_imm_ptx(unsigned int value) {
+  unsigned int ret;
+  asm volatile("shl.b32 %0, %1, 4;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__device__ unsigned int shr_u_imm_ptx(unsigned int value) {
+  unsigned int ret;
+  asm volatile("shr.u32 %0, %1, 4;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__device__ int shr_s_imm_ptx(int value) {
+  int ret;
+  asm volatile("shr.s32 %0, %1, 4;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__global__ void ptxShiftImmediateB32(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = shl_imm_ptx(input[idx]);
+  out[idx + 5] = shr_u_imm_ptx(input[idx]);
+  out[idx + 10] = (uint)shr_s_imm_ptx((int)input[idx]);
+}`,
   ptxArithmeticB32: `
 __device__ unsigned int add_ptx(unsigned int a, unsigned int b) {
   unsigned int ret;
@@ -14267,6 +14289,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [1, 0, 0, 0x80000000, 0, 1, 0x40000000, 0x0f000000, 0, 0, 1, 0xc0000000, 0xff000000, 0, 0] },
+          },
+          {
+            name: "inline-asm:shift-immediate-b32",
+            source: SOURCES.ptxShiftImmediateB32,
+            options: { workgroupSize: [5, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [5, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(15),
+                input: new Uint32Array([1, 0x80000000, 0xf0000000, 0x7fffffff, 0x12345678]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0x10, 0, 0, 0xfffffff0, 0x23456780, 0, 0x08000000, 0x0f000000, 0x07ffffff, 0x01234567, 0, 0xf8000000, 0xff000000, 0x07ffffff, 0x01234567],
+            },
           },
           {
             name: "inline-asm:arithmetic-b32",

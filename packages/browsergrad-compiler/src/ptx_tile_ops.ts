@@ -14,7 +14,7 @@ export type InlineAsmOp =
   | { readonly kind: "prmt-b32" }
   | { readonly kind: "lop3-b32"; readonly immLut?: number }
   | { readonly kind: "bitwise-b32"; readonly op: "and" | "or" | "xor" | "not" }
-  | { readonly kind: "shift-b32"; readonly op: "shl" | "shr"; readonly signed: boolean }
+  | { readonly kind: "shift-b32"; readonly op: "shl" | "shr"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "arithmetic-b32"; readonly op: "add" | "sub" | "mul-lo" | "mad-lo"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "minmax-b32"; readonly op: "min" | "max"; readonly signed: boolean }
   | { readonly kind: "unary-int-b32"; readonly op: "neg" | "abs"; readonly signed: boolean }
@@ -70,6 +70,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\blop3\.b32\b/u.test(template)) return { kind: "lop3-b32" };
   const bitwise = /\b(and|or|xor|not)\.b32\b/u.exec(template);
   if (bitwise) return { kind: "bitwise-b32", op: bitwise[1] as "and" | "or" | "xor" | "not" };
+  const shiftImmediate = /\b(shl|shr)\.(b32|u32|s32)\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (shiftImmediate) return { kind: "shift-b32", op: shiftImmediate[1] as "shl" | "shr", signed: shiftImmediate[2] === "s32", immediate: parseInlineAsmImmediate(shiftImmediate[3]!) >>> 0 };
   const shift = /\b(shl|shr)\.(b32|u32|s32)\b/u.exec(template);
   if (shift) return { kind: "shift-b32", op: shift[1] as "shl" | "shr", signed: shift[2] === "s32" };
   const arithmeticImmediate = /\b(add|sub)\.(b32|u32|s32)\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);

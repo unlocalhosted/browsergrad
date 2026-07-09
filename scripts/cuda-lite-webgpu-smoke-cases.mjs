@@ -23,6 +23,7 @@ export const runtimeScopeCases = [
   "inline-asm:lop3-b32",
   "inline-asm:bitwise-b32",
   "inline-asm:shift-b32",
+  "inline-asm:shift-immediate-b32",
   "inline-asm:arithmetic-b32",
   "inline-asm:arithmetic-immediate-b32",
   "inline-asm:minmax-b32",

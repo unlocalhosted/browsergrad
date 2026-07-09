@@ -958,10 +958,13 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "shift-b32") {
-    if (statement.inputs.length !== 2) throw compilerFailure(`${op.op}.b32 inline asm expects two inputs`);
+    const expectedInputs = op.immediate === undefined ? 2 : 1;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
     const value = valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
-    const amount = valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0;
+    const amount = op.immediate === undefined
+      ? valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0
+      : op.immediate >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmShift(op.op, value, amount, op.signed), context);
     return;
   }
