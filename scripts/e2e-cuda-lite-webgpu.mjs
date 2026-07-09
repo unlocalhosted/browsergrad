@@ -144,6 +144,18 @@ __global__ void runtimeCopy(float *dst, const float *src, const unsigned int *bi
     cudaStreamDestroy(stream);
   }
 }`,
+  guardedTrapPrecondition: `
+__global__ void guardedTrapPrecondition(int *out, int C) {
+  if (C % (32 * 4) != 0) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+      printf("bad shape");
+    }
+    __trap();
+  }
+  if (threadIdx.x < 1) {
+    out[0] = C;
+  }
+}`,
   runtimeByteFill: `
 __global__ void runtimeByteFill(unsigned int *bits) {
   cudaStream_t stream;
@@ -10099,6 +10111,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "dst",
             expectedOutput: { type: "Float32Array", data: [2.5, 3.5, 4.5, 3.5] },
+          },
+          {
+            name: "runtime:guarded-trap-precondition",
+            source: SOURCES.guardedTrapPrecondition,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(1),
+              },
+              scalars: { C: 128 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [128] },
           },
           {
             name: "runtime:byte-fill",
