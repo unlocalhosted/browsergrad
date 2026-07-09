@@ -987,10 +987,11 @@ function execInlineAsm(
   }
   if (op?.kind === "minmax-b32") {
     const label = `${op.op}.${op.signed ? "s32" : "u32"}`;
-    if (statement.inputs.length !== 2) throw compilerFailure(`${label} inline asm expects two inputs`);
+    const expectedInputs = op.immediate === undefined ? 2 : 1;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
     const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
-    const right = valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
+    const right = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmMinMax(op.op, left, right, op.signed), context);
     return;
   }

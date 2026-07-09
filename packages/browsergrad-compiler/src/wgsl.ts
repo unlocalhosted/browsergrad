@@ -2321,8 +2321,8 @@ function emitInlineAsmStatement(
   if (op?.kind === "arithmetic-b32" && statement.inputs.length === ((op.op === "mad-lo" ? 3 : 2) - (op.immediate === undefined ? 0 : 1)) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineArithmeticExpression(statement.inputs, op.op, context, op.immediate), context)}`;
   }
-  if (op?.kind === "minmax-b32" && statement.inputs.length === 2 && outputs.length === 1) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineMinMaxExpression(statement.inputs, op.op, op.signed, context), context)}`;
+  if (op?.kind === "minmax-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineMinMaxExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
   }
   if (op?.kind === "unary-int-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpression(statement.inputs[0]!, op.op, context), context)}`;
@@ -2477,9 +2477,9 @@ function emitInlineArithmeticExpression(inputs: readonly CudaLiteExpression[], o
   return `(${left} * ${right})`;
 }
 
-function emitInlineMinMaxExpression(inputs: readonly CudaLiteExpression[], op: "min" | "max", signed: boolean, context: EmitContext): string {
+function emitInlineMinMaxExpression(inputs: readonly CudaLiteExpression[], op: "min" | "max", signed: boolean, context: EmitContext, immediate?: number): string {
   const left = `u32(${emitExpression(inputs[0]!, context)})`;
-  const right = `u32(${emitExpression(inputs[1]!, context)})`;
+  const right = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
   if (!signed) return `${op}(${left}, ${right})`;
   return `bitcast<u32>(${op}(bitcast<i32>(${left}), bitcast<i32>(${right})))`;
 }

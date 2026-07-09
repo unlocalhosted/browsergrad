@@ -16,7 +16,7 @@ export type InlineAsmOp =
   | { readonly kind: "bitwise-b32"; readonly op: "and" | "or" | "xor" | "not"; readonly immediate?: number }
   | { readonly kind: "shift-b32"; readonly op: "shl" | "shr"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "arithmetic-b32"; readonly op: "add" | "sub" | "mul-lo" | "mad-lo"; readonly signed: boolean; readonly immediate?: number }
-  | { readonly kind: "minmax-b32"; readonly op: "min" | "max"; readonly signed: boolean }
+  | { readonly kind: "minmax-b32"; readonly op: "min" | "max"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "unary-int-b32"; readonly op: "neg" | "abs"; readonly signed: boolean }
   | { readonly kind: "select-b32"; readonly signed: boolean }
   | { readonly kind: "compare-b32"; readonly op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; readonly signed: boolean }
@@ -88,6 +88,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (madLoImmediate) return { kind: "arithmetic-b32", op: "mad-lo", signed: madLoImmediate[1] === "s32", immediate: parseInlineAsmImmediate(madLoImmediate[2]!) >>> 0 };
   const madLo = /\bmad\.lo\.(b32|u32|s32)\b/u.exec(template);
   if (madLo) return { kind: "arithmetic-b32", op: "mad-lo", signed: madLo[1] === "s32" };
+  const minmaxImmediate = /\b(min|max)\.(u32|s32)\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (minmaxImmediate) return { kind: "minmax-b32", op: minmaxImmediate[1] as "min" | "max", signed: minmaxImmediate[2] === "s32", immediate: parseInlineAsmImmediate(minmaxImmediate[3]!) >>> 0 };
   const minmax = /\b(min|max)\.(u32|s32)\b/u.exec(template);
   if (minmax) return { kind: "minmax-b32", op: minmax[1] as "min" | "max", signed: minmax[2] === "s32" };
   const neg = /\bneg\.(b32|s32)\b/u.exec(template);

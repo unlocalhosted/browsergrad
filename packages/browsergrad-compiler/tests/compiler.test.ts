@@ -12342,6 +12342,69 @@ __global__ void minMaxKernel(uint *out, uint *a, uint *b) {
     ]);
   });
 
+  it("lowers inline PTX min/max u32 and s32 immediate statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int min_u_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("min.u32 %0, %1, 0x7fffffff;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int max_u_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("max.u32 %0, %1, 2;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ int min_s_imm_ptx(int a) {
+  int ret;
+  asm volatile("min.s32 %0, %1, -8;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ int max_s_imm_ptx(int a) {
+  int ret;
+  asm volatile("max.s32 %0, %1, 7;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__global__ void minMaxImmediateKernel(uint *out, uint *a) {
+  int idx = threadIdx.x;
+  out[idx] = min_u_imm_ptx(a[idx]);
+  out[idx + 4] = max_u_imm_ptx(a[idx]);
+  out[idx + 8] = (uint)min_s_imm_ptx((int)a[idx]);
+  out[idx + 12] = (uint)max_s_imm_ptx((int)a[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(16),
+          a: new Uint32Array([1, 0xffffffff, 0x80000000, 0x7fffffff]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("2147483647u");
+    expect(compiled.wgsl).toContain("4294967288u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      1,
+      0x7fffffff,
+      0x7fffffff,
+      0x7fffffff,
+      2,
+      0xffffffff,
+      0x80000000,
+      0x7fffffff,
+      0xfffffff8,
+      0xfffffff8,
+      0x80000000,
+      0xfffffff8,
+      7,
+      7,
+      7,
+      0x7fffffff,
+    ]);
+  });
+
   it("lowers inline PTX signed neg and abs b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ int neg_ptx(int value) {

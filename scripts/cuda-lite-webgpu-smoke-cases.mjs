@@ -28,6 +28,7 @@ export const runtimeScopeCases = [
   "inline-asm:arithmetic-b32",
   "inline-asm:arithmetic-immediate-b32",
   "inline-asm:minmax-b32",
+  "inline-asm:minmax-immediate-b32",
   "inline-asm:unary-int-b32",
   "inline-asm:select-b32",
   "inline-asm:compare-b32",
