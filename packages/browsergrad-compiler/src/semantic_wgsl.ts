@@ -61,11 +61,16 @@ import {
   semanticAtomicSupportsFloat,
 } from "./semantic_atomic_intrinsics.js";
 import {
-  cudaLiteDimensionStride as dimensionStride,
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
+import {
+  emitSemanticFlatArrayType,
+  emitSemanticFlatLocalArrayIndexes,
+  emitSemanticFlatRankedIndex,
+  emitSemanticNestedArrayType,
+} from "./semantic_wgsl_memory_layout.js";
 import {
   SEMANTIC_BFLOAT_HELPER_CALLS,
   SEMANTIC_FP8_CALLS,
@@ -6219,10 +6224,7 @@ function localArraySymbol(ir: SemanticKernelIrModule, name: string): SemanticKer
 }
 
 function emitLocalArrayType(symbol: SemanticKernelIrModule["memory"][number]): string {
-  return symbol.dimensions.reduceRight<string>(
-    (element, dimension) => `array<${element}, ${Math.max(1, dimension)}>`,
-    wgslValueType(symbol.valueType),
-  );
+  return emitSemanticNestedArrayType(symbol.dimensions, wgslValueType(symbol.valueType));
 }
 
 function emitInitializedConstantArray(
@@ -6287,7 +6289,7 @@ function emitLocalArrayFill(
 function emitSharedType(symbol: SemanticKernelIrModule["memory"][number], atomic: boolean): string {
   const element = atomic ? `atomic<${wgslAtomicScalar(symbol.valueType)}>` : wgslScalar(symbol.valueType);
   if (symbol.dimensions.length === 0) return element;
-  return `array<${element}, ${Math.max(1, totalElements(symbol.dimensions))}>`;
+  return emitSemanticFlatArrayType(symbol.dimensions, element);
 }
 
 function storageOffsetSymbol(base: string): string {
@@ -6371,15 +6373,14 @@ function emitFlatSharedIndex(
 ): string {
   if (indices.length === 0) return "0u";
   if (indices.length === 1) return emitSemanticExpressionAs(indices[0]!, ir, names, "u32");
-  if (indices.length !== symbol.dimensions.length) {
-    throw semanticWgslError(`shared memory '${symbol.name}' index rank mismatch`, symbol.span);
-  }
-  const terms = indices.map((index, offset) => {
-    const stride = dimensionStride(symbol.dimensions, offset);
-    const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
-    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
-  });
-  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  return emitSemanticFlatRankedIndex(
+    "shared memory",
+    symbol.name,
+    symbol.dimensions,
+    indices,
+    symbol.span,
+    (index) => emitSemanticExpressionAs(index, ir, names, "u32"),
+  );
 }
 
 function emitFlatDeviceGlobalIndex(
@@ -6396,12 +6397,14 @@ function emitFlatDeviceGlobalIndex(
   if (indices.length !== symbol.dimensions.length) {
     throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
   }
-  const terms = indices.map((index, offset) => {
-    const stride = dimensionStride(symbol.dimensions, offset);
-    const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
-    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
-  });
-  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  return emitSemanticFlatRankedIndex(
+    "device-global memory",
+    symbol.name,
+    symbol.dimensions,
+    indices,
+    span,
+    (index) => emitSemanticExpressionAs(index, ir, names, "u32"),
+  );
 }
 
 function emitFlatConstantIndex(
@@ -6418,20 +6421,18 @@ function emitFlatConstantIndex(
   if (indices.length !== symbol.dimensions.length) {
     throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
   }
-  const terms = indices.map((index, offset) => {
-    const stride = dimensionStride(symbol.dimensions, offset);
-    const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
-    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
-  });
-  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  return emitSemanticFlatRankedIndex(
+    "constant memory",
+    symbol.name,
+    symbol.dimensions,
+    indices,
+    span,
+    (index) => emitSemanticExpressionAs(index, ir, names, "u32"),
+  );
 }
 
 function emitFlatLocalArrayIndexes(flat: string, dimensions: readonly number[]): string {
-  return dimensions.map((dimension, offset) => {
-    const stride = dimensionStride(dimensions, offset);
-    const quotient = stride === 1 ? flat : `(${flat} / ${stride}u)`;
-    return `[${dimension > 1 ? `(${quotient} % ${Math.max(1, dimension)}u)` : "0u"}]`;
-  }).join("");
+  return emitSemanticFlatLocalArrayIndexes(flat, dimensions);
 }
 
 function semanticStorageOffsetBaseNames(
