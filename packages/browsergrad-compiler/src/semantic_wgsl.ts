@@ -115,6 +115,7 @@ import {
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
   semanticFunctionArgSupported as semanticFunctionArgContractSupported,
+  semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
   semanticFunctionLocalParamValueTypesSupported,
   semanticFunctionParamContractSupported,
 } from "./semantic_function_calls.js";
@@ -1305,16 +1306,7 @@ function semanticWgslBf162CallSupported(
 }
 
 function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.every((operation) => {
-    if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
-    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage";
-    if (operation.kind === "surface-write") return true;
-    if (operation.kind === "call") return true;
-    if (operation.kind === "barrier" || operation.kind === "fence") return true;
-    if (operation.kind === "branch") return semanticWgslFunctionBodyShapeSupported(operation.consequent) && semanticWgslFunctionBodyShapeSupported(operation.alternate);
-    if (operation.kind === "loop") return semanticWgslFunctionBodyShapeSupported(operation.body);
-    return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
-  });
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBarrierFence: true });
 }
 
 function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["functions"][number]): boolean {

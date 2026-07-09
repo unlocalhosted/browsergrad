@@ -118,6 +118,7 @@ import { isSemanticMathCallName, semanticMathCallArity } from "./semantic_math_i
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
   semanticFunctionArgSupported as semanticFunctionArgContractSupported,
+  semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
   semanticFunctionLocalParamValueTypesSupported,
   semanticFunctionParamContractSupported,
 } from "./semantic_function_calls.js";
@@ -785,16 +786,7 @@ function semanticReferenceBf162CallSupported(
 }
 
 function semanticReferenceFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.every((operation) => {
-    if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
-    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage";
-    if (operation.kind === "surface-write") return true;
-    if (operation.kind === "call") return true;
-    if (operation.kind === "branch") return semanticReferenceFunctionBodyShapeSupported(operation.consequent) && semanticReferenceFunctionBodyShapeSupported(operation.alternate);
-    if (operation.kind === "block") return semanticReferenceFunctionBodyShapeSupported(operation.body);
-    if (operation.kind === "loop") return semanticReferenceFunctionBodyShapeSupported(operation.body);
-    return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
-  });
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true });
 }
 
 function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {

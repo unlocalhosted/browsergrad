@@ -2,6 +2,7 @@ import type {
   CudaLiteSemanticFunction,
   CudaLiteSemanticSymbol,
   SemanticExpression,
+  SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import type { CudaLiteScalarType } from "./types.js";
@@ -53,4 +54,25 @@ export function semanticFunctionArgSupported(
   const addressContract = semanticFunctionArgAddressContractSupported(arg, param, pointerRef);
   if (addressContract !== undefined) return addressContract;
   return expressionSupported(arg, semanticFunctionArgExpressionMode(param));
+}
+
+export interface SemanticFunctionBodyShapeOptions {
+  readonly allowBlock?: boolean;
+  readonly allowBarrierFence?: boolean;
+}
+
+export function semanticFunctionBodyShapeSupported(
+  operations: readonly SemanticKernelIrOperation[],
+  options: SemanticFunctionBodyShapeOptions = {},
+): boolean {
+  return operations.every((operation) => {
+    if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
+    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage";
+    if (operation.kind === "surface-write" || operation.kind === "call") return true;
+    if (options.allowBarrierFence && (operation.kind === "barrier" || operation.kind === "fence")) return true;
+    if (operation.kind === "branch") return semanticFunctionBodyShapeSupported(operation.consequent, options) && semanticFunctionBodyShapeSupported(operation.alternate, options);
+    if (options.allowBlock && operation.kind === "block") return semanticFunctionBodyShapeSupported(operation.body, options);
+    if (operation.kind === "loop") return semanticFunctionBodyShapeSupported(operation.body, options);
+    return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
+  });
 }

@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T22:36:23Z
+Last updated: 2026-07-09T22:42:06Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: function param/argument contract shared across semantic reference/WGSL |
+| Active work item | Architecture split: function body-shape contract shared across semantic reference/WGSL |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: expanded `semantic_function_calls.ts` to own shared device-function body-shape validation with explicit target options for reference blocks and WGSL barrier/fence bodies, then rewired semantic reference and semantic WGSL readiness checks to consume that contract instead of duplicating recursive operation-shape rules; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4535`, `semantic_wgsl.ts` down to `5309`, with semantic-IR bucket at `15612`
 - Architecture split: added `semantic_function_calls.ts` for shared device-function parameter contracts, local-parameter value-type checks, and argument address/expression-mode checks, then rewired semantic reference and semantic WGSL function-call readiness paths to consume it while leaving interpreter/backend-specific body validation in place; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` at `4543`, `semantic_wgsl.ts` at `5317`, with semantic-IR bucket at `15606` after adding the shared Module
 - Architecture split: added `semantic_texture_surface.ts` for shared texture/surface value-type support and rewired semantic reference plus semantic WGSL texture/surface read readiness checks to consume it instead of duplicating scalar/vector type lists; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4545`, `semantic_wgsl.ts` down to `5319`, and semantic-IR bucket at `15553`
 - Architecture split: added shared subgroup call-shape/scalar-argument helpers to `semantic_builtin_calls.ts`, then rewired semantic reference and semantic WGSL subgroup support checks to consume that contract while leaving WGSL-specific feature/type constraints in the WGSL readiness check; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4560`, `semantic_wgsl.ts` down to `5334`, and semantic-IR bucket at `15570`
