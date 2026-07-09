@@ -2629,6 +2629,16 @@ __global__ void ptxClzBrevB32(uint *out, uint *input) {
   out[idx] = clz_ptx(input[idx]);
   out[idx + 4] = brev_ptx(input[idx]);
 }`,
+  ptxPrmtB32: `
+__device__ unsigned int prmt_ptx(unsigned int x, unsigned int y, unsigned int selector) {
+  unsigned int ret;
+  asm volatile("prmt.b32 %0, %1, %2, %3;" : "=r"(ret) : "r"(x), "r"(y), "r"(selector));
+  return ret;
+}
+__global__ void ptxPrmtB32(uint *out, uint *selector) {
+  int idx = threadIdx.x;
+  out[idx] = prmt_ptx(0x80112233u, 0x445566f7u, selector[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -13942,6 +13952,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [32, 31, 7, 0, 0, 0x80000000, 0xe6a2c480, 0xffffffff] },
+          },
+          {
+            name: "inline-asm:prmt-b32",
+            source: SOURCES.ptxPrmtB32,
+            options: { workgroupSize: [5, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [5, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(5),
+                selector: new Uint32Array([0x3210, 0x5410, 0x7654, 0x0000, 0xb210]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0x80112233, 0x66f72233, 0x445566f7, 0x33333333, 0xff112233] },
           },
           {
             name: "inline-asm:special-reg-single-percent",

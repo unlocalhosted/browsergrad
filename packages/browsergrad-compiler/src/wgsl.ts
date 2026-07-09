@@ -2306,6 +2306,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "brev-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `reverseBits(u32(${emitExpression(statement.inputs[0]!, context)}))`, context)}`;
   }
+  if (op?.kind === "prmt-b32" && statement.inputs.length === 3 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpression(statement.inputs, context), context)}`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2383,6 +2386,21 @@ function emitMmaF32AccumulatorOutput(target: CudaLiteExpression, value: string, 
   if (scalar === "i32") return `bitcast<i32>(${value})`;
   if (scalar === "f16") return `f16(${value})`;
   return value;
+}
+
+function emitInlineBytePermExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
+  const x = `u32(${emitExpression(inputs[0]!, context)})`;
+  const y = `u32(${emitExpression(inputs[1]!, context)})`;
+  const selector = `u32(${emitExpression(inputs[2]!, context)})`;
+  const lanes = [0, 1, 2, 3].map((lane) => {
+    const control = `((${selector} >> ${lane * 4}u) & 0xfu)`;
+    const source = `(${control} & 0x7u)`;
+    const shift = `((${source} & 0x3u) * 8u)`;
+    const byte = `(select((${x} >> ${shift}), (${y} >> ${shift}), (${source} >= 4u)) & 0xffu)`;
+    const sign = `select(0u, 0xffu, ((${byte} & 0x80u) != 0u))`;
+    return `(select(${byte}, ${sign}, ((${control} & 0x8u) != 0u)) << ${lane * 8}u)`;
+  });
+  return `(${lanes.join(" | ")})`;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {

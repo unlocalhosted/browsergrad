@@ -928,6 +928,15 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), reversed, context);
     return;
   }
+  if (op?.kind === "prmt-b32") {
+    if (statement.inputs.length !== 3) throw compilerFailure("prmt.b32 inline asm expects three inputs");
+    if (outputs.length !== 1) throw compilerFailure("prmt.b32 inline asm expects one output operand");
+    const x = valueAsNumber(evalExpression(statement.inputs[0]!, context), "prmt.b32") >>> 0;
+    const y = valueAsNumber(evalExpression(statement.inputs[1]!, context), "prmt.b32") >>> 0;
+    const selector = valueAsNumber(evalExpression(statement.inputs[2]!, context), "prmt.b32") >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmBytePerm(x, y, selector), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1001,6 +1010,19 @@ function evalInlineAsmAddressPredicate(
   if (space === "shared") return actual === "shared" ? 1 : 0;
   if (space === "const") return actual === "constant" ? 1 : 0;
   return actual === "local" ? 1 : 0;
+}
+
+function evalInlineAsmBytePerm(x: number, y: number, selector: number): number {
+  let out = 0;
+  for (let lane = 0; lane < 4; lane++) {
+    const control = (selector >>> (lane * 4)) & 0xf;
+    const source = control & 0x7;
+    const input = source < 4 ? x : y;
+    const byte = (input >>> ((source & 3) * 8)) & 0xff;
+    const value = (control & 0x8) === 0 ? byte : (byte & 0x80) === 0 ? 0 : 0xff;
+    out |= value << (lane * 8);
+  }
+  return out >>> 0;
 }
 
 function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {

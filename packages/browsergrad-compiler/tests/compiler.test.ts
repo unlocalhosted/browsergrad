@@ -11855,6 +11855,27 @@ __global__ void bitKernel(uint *out, uint *input) {
     expect([...result.buffers.out as Uint32Array]).toEqual([32, 31, 7, 0, 0, 0x80000000, 0xe6a2c480, 0xffffffff]);
   });
 
+  it("lowers inline PTX prmt.b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int prmt_ptx(unsigned int x, unsigned int y, unsigned int selector) {
+  unsigned int ret;
+  asm volatile("prmt.b32 %0, %1, %2, %3;" : "=r"(ret) : "r"(x), "r"(y), "r"(selector));
+  return ret;
+}
+__global__ void prmtKernel(uint *out, uint *selector) {
+  int idx = threadIdx.x;
+  out[idx] = prmt_ptx(0x80112233u, 0x445566f7u, selector[idx]);
+}`, { workgroupSize: [5, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(5), selector: new Uint32Array([0x3210, 0x5410, 0x7654, 0x0000, 0xb210]) } },
+      { gridDim: [1, 1, 1], blockDim: [5, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("& 0xfu");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0x80112233, 0x66f72233, 0x445566f7, 0x33333333, 0xff112233]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {
