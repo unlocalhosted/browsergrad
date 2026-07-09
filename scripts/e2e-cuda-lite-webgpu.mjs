@@ -197,6 +197,18 @@ __global__ void runtimeByteSymbolCopy(unsigned int *dst, const unsigned int *src
     cudaStreamDestroy(stream);
   }
 }`,
+  runtimeSymbolMemset: `
+__constant__ unsigned int cRuntimeSymbolMemset[3];
+__global__ void runtimeSymbolMemset(unsigned int *dst) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaStreamCreate(&stream);
+    cudaMemsetToSymbol(cRuntimeSymbolMemset, 0, sizeof(unsigned int));
+    cudaMemsetToSymbolAsync(cRuntimeSymbolMemset, 0xff, 3, sizeof(unsigned int), stream);
+    cudaMemcpyFromSymbol(dst, cRuntimeSymbolMemset, sizeof(unsigned int) * 3);
+    cudaStreamDestroy(stream);
+  }
+}`,
   dynamicLaunch: `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -10712,6 +10724,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "dst",
             expectedOutput: { type: "Uint32Array", data: [0x44bbccdd, 0xffffff33, 0x223344bb, 0xffffffff] },
+          },
+          {
+            name: "runtime:symbol-memset",
+            source: SOURCES.runtimeSymbolMemset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                dst: new Uint32Array([0, 0, 0]),
+              },
+              constants: {
+                cRuntimeSymbolMemset: new Uint32Array([0x11223344, 0x55667788, 0xaabbccdd]),
+              },
+            }),
+            output: "dst",
+            expectedOutput: { type: "Uint32Array", data: [0, 0x55ffffff, 0xaabbccdd] },
           },
           {
             name: "runtime:host-peer-copy-sync",

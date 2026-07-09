@@ -440,7 +440,9 @@ function isCudaRuntimeCopyCall(name: string): boolean {
     name === "cudaMemset" ||
     name === "cudaMemsetAsync" ||
     name === "cudaMemset2D" ||
-    name === "cudaMemset2DAsync";
+    name === "cudaMemset2DAsync" ||
+    name === "cudaMemsetToSymbol" ||
+    name === "cudaMemsetToSymbolAsync";
 }
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {

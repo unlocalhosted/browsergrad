@@ -178,6 +178,8 @@ const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "cudaEventRecord",
   "cudaEventRecordWithFlags",
   "cudaEventSynchronize",
+  "cudaMemsetToSymbol",
+  "cudaMemsetToSymbolAsync",
   "deviceAllocate",
   "max",
   "min",

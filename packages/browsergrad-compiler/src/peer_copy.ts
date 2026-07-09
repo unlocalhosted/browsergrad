@@ -226,6 +226,10 @@ function createPeerCopyOperations(
   input: CompiledKernelInput,
   deviceGlobals: readonly CudaLiteDeviceGlobal[],
 ): readonly CudaPeerCopyOperation[] | undefined {
+  if (isRuntimeSymbolMemsetCall(expression)) {
+    const fill = createPeerSymbolFillOperation(expression, env, input, deviceGlobals);
+    return fill ? [fill] : undefined;
+  }
   if (isRuntimeMemsetCall(expression)) {
     if (isRuntimeMemset2DCall(expression)) return createPeerFill2DOperations(expression, env, input, deviceGlobals);
     const fill = createPeerFillOperation(expression, env, input, deviceGlobals);
@@ -452,6 +456,48 @@ function createPeerFillOperation(
   };
 }
 
+function createPeerSymbolFillOperation(
+  expression: CudaLiteCallExpression,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+  deviceGlobals: readonly CudaLiteDeviceGlobal[],
+): CudaPeerFillBufferOperation | CudaPeerByteFillBufferOperation | undefined {
+  const symbol = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
+  const value = expression.args[1] ? evaluateHostNumber(expression.args[1], env, input) : undefined;
+  const count = expression.args[2] ? evaluateHostNumber(expression.args[2], env, input) : undefined;
+  const offsetBytes = expression.args[3] ? evaluateHostNumber(expression.args[3], env, input) : 0;
+  if (!symbol || value === undefined || count === undefined || offsetBytes === undefined) return undefined;
+  if (symbol.offset < 0 || count < 0 || offsetBytes < 0) return undefined;
+  const symbolBuffer = copyBufferViewFor(input, symbol.root, deviceGlobals);
+  if (!symbolBuffer) return undefined;
+  const elementSize = symbolBuffer.elementSize;
+  if (!Number.isInteger(count) || !Number.isInteger(offsetBytes)) return undefined;
+  const byteCount = Math.trunc(count);
+  const byteOffset = (symbol.offset * elementSize) + Math.trunc(offsetBytes);
+  const byteLength = symbolBuffer.elementLength * elementSize;
+  if (byteOffset + byteCount > byteLength) return undefined;
+  const byteValue = Math.trunc(value) & 0xff;
+  if (byteCount % elementSize !== 0 || byteOffset % elementSize !== 0) {
+    return {
+      kind: "fill-bytes",
+      expression,
+      dstRoot: symbol.root,
+      dstByteOffset: byteOffset,
+      byteCount,
+      byteValue,
+    };
+  }
+  return {
+    kind: "fill",
+    expression,
+    dstRoot: symbol.root,
+    dstOffset: byteOffset / elementSize,
+    elementCount: byteCount / elementSize,
+    valueType: symbolBuffer.valueType,
+    byteValue,
+  };
+}
+
 function createPeerFill2DOperations(
   expression: CudaLiteCallExpression,
   env: ReadonlyMap<string, HostEvalValue>,
@@ -616,7 +662,7 @@ function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatemen
 }
 
 function isPeerCopyCall(expression: CudaLiteExpression): expression is CudaLiteCallExpression {
-  return expression.kind === "call" && (cudaRuntimeCopyShape(expression) !== undefined || isRuntimeMemsetCall(expression));
+  return expression.kind === "call" && (cudaRuntimeCopyShape(expression) !== undefined || isRuntimeMemsetCall(expression) || isRuntimeSymbolMemsetCall(expression));
 }
 
 function isRuntimeMemsetCall(expression: CudaLiteExpression): boolean {
@@ -784,4 +830,9 @@ function cudaRuntimeCopyShape(
     return { kind: "symbol", direction: "from-symbol", symbolIndex: 1, pointerIndex: 0, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
   }
   return undefined;
+}
+
+function isRuntimeSymbolMemsetCall(expression: CudaLiteCallExpression): boolean {
+  const name = expressionName(expression.callee);
+  return name === "cudaMemsetToSymbol" || name === "cudaMemsetToSymbolAsync";
 }

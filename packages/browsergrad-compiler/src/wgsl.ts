@@ -6885,6 +6885,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "0";
     case "cudaMemset2DAsync":
       return "0";
+    case "cudaMemsetToSymbol":
+      return "0";
+    case "cudaMemsetToSymbolAsync":
+      return "0";
     case "cudaGraphSetConditional":
       return "0";
     case "min":
@@ -8529,6 +8533,10 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "cudaMemset2D omitted: WebGPU fill orchestration is host-managed";
     case "cudaMemset2DAsync":
       return "cudaMemset2DAsync omitted: WebGPU fill orchestration is host-managed";
+    case "cudaMemsetToSymbol":
+      return "cudaMemsetToSymbol omitted: WebGPU symbol-fill orchestration is host-managed";
+    case "cudaMemsetToSymbolAsync":
+      return "cudaMemsetToSymbolAsync omitted: WebGPU symbol-fill orchestration is host-managed";
     case "cudaGraphSetConditional":
       return "cudaGraphSetConditional omitted: CUDA graph conditional scheduling is host-managed";
     default:
@@ -8610,7 +8618,9 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaMemcpyFromSymbol" ||
     name === "cudaMemcpyFromSymbolAsync" ||
     name === "cudaMemset2D" ||
-    name === "cudaMemset2DAsync";
+    name === "cudaMemset2DAsync" ||
+    name === "cudaMemsetToSymbol" ||
+    name === "cudaMemsetToSymbolAsync";
 }
 
 function isEmittedPointerVar(statement: CudaLiteVarDecl, context: EmitContext): boolean {

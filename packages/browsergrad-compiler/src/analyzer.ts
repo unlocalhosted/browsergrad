@@ -317,6 +317,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemcpyToSymbolAsync", [3, 6]],
   ["cudaMemcpyFromSymbol", [3, 5]],
   ["cudaMemcpyFromSymbolAsync", [3, 6]],
+  ["cudaMemsetToSymbol", [3, 4]],
+  ["cudaMemsetToSymbolAsync", [3, 5]],
   ["cudaGraphSetConditional", [2, 2]],
   ...[...CUDA_CACHE_HINT_LOADS].map((name) => [name, [1, 1]] as const),
   ...[...CUDA_CACHE_HINT_STORES].map((name) => [name, [2, 2]] as const),
@@ -3317,14 +3319,17 @@ function validateRuntimeCopyCall(
   }
   const copy2d = callName === "cudaMemcpy2D" || callName === "cudaMemcpy2DAsync";
   const memset2d = callName === "cudaMemset2D" || callName === "cudaMemset2DAsync";
+  const symbolMemset = callName === "cudaMemsetToSymbol" || callName === "cudaMemsetToSymbolAsync";
   const peerCopy = callName === "cudaMemcpyPeer" || callName === "cudaMemcpyPeerAsync";
   const symbolCopy = isCudaRuntimeSymbolCopyCall(callName);
   const dst = expression.args[0];
-  const src = memset2d ? undefined : expression.args[copy2d ? 2 : peerCopy ? 2 : 1];
+  const src = memset2d || symbolMemset ? undefined : expression.args[copy2d ? 2 : peerCopy ? 2 : 1];
   if (dst) walkExpression(dst, scope);
   if (src) walkExpression(src, scope);
   const scalarArgs = memset2d
     ? [expression.args[1], expression.args[2], expression.args[3], expression.args[4]]
+    : symbolMemset
+    ? [expression.args[1], expression.args[2], expression.args[3]]
     : symbolCopy
     ? [expression.args[2], expression.args[3]]
     : copy2d
@@ -3355,7 +3360,9 @@ function isCudaRuntimeCopyCall(callName: string): boolean {
     callName === "cudaMemset" ||
     callName === "cudaMemsetAsync" ||
     callName === "cudaMemset2D" ||
-    callName === "cudaMemset2DAsync";
+    callName === "cudaMemset2DAsync" ||
+    callName === "cudaMemsetToSymbol" ||
+    callName === "cudaMemsetToSymbolAsync";
 }
 
 function isCudaRuntimeSymbolCopyCall(callName: string): boolean {
