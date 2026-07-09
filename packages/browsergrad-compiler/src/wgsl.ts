@@ -2359,6 +2359,19 @@ function emitInlineAsmStatement(
       : emitInlineAsmIntSource(op.source, statement, outputs, context);
     return `${emitExpression(outputs[0]!, context)} = f32(${op.fromSigned ? `i32(${source})` : `u32(${source})`})`;
   }
+  if (op?.kind === "float-binary-rn-f32") {
+    const sources = op.sources ?? [
+      { kind: "operand", index: outputs.length },
+      { kind: "operand", index: outputs.length + 1 },
+    ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
+    const expectedInputs = expectedInlineAsmF32SourceInputs(sources, outputs.length);
+    if (statement.inputs.length === expectedInputs && outputs.length === 1) {
+      const left = emitInlineAsmF32Source(sources[0]!, statement, outputs, context);
+      const right = emitInlineAsmF32Source(sources[1]!, statement, outputs, context);
+      const operator = op.op === "add" ? "+" : op.op === "sub" ? "-" : "*";
+      return `${emitExpression(outputs[0]!, context)} = (${left} ${operator} ${right})`;
+    }
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }

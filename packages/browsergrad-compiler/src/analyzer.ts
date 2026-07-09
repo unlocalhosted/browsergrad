@@ -1711,6 +1711,28 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `fma.rn.f32 inline PTX expects one output operand and ${expectedInputs ?? 2} input operands`, statement.span));
     }
   }
+  if (op?.kind === "float-binary-rn-f32") {
+    const expectedInputs = expectedInlineAsmF32SourceInputs(op.sources, outputs.length);
+    if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.rn.f32 inline PTX expects one output operand and ${expectedInputs ?? 2} input operands`, statement.span));
+    }
+    const sources = op.sources ?? [
+      { kind: "operand", index: outputs.length },
+      { kind: "operand", index: outputs.length + 1 },
+    ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
+    for (const source of sources) {
+      if (source.kind !== "operand" || source.index < outputs.length) continue;
+      const input = statement.inputs[source.index - outputs.length];
+      if (!input) continue;
+      const inputInfo = walkExpression(input, scope);
+      if (inputInfo.kind !== "unknown" && inputInfo.valueType !== undefined && inputInfo.valueType !== "float") {
+        asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.rn.f32 inline PTX expects f32 input operands`, input.span));
+      }
+    }
+  }
+  if (op?.kind === "float-binary-rn-f32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "float") {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.rn.f32 inline PTX writes an f32 output operand`, outputs[0]?.span ?? statement.span));
+  }
   if (op?.kind === "laneid" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects one output operand and no input operands", statement.span));
   }

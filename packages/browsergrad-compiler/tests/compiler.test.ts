@@ -13139,6 +13139,58 @@ __global__ void convertIntToF32Kernel(float *out, uint *uints, int *ints) {
     ]);
   });
 
+  it("lowers inline PTX f32 arithmetic statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float ptx_add(float value) {
+  float ret;
+  asm volatile("add.rn.f32 %0, %1, 2.25;" : "=f"(ret) : "f"(value));
+  return ret;
+}
+__device__ float ptx_sub(float value) {
+  float ret;
+  asm volatile("sub.rn.f32 %0, %1, 1.5;" : "=f"(ret) : "f"(value));
+  return ret;
+}
+__device__ float ptx_mul(float value) {
+  float ret;
+  asm volatile("mul.rn.f32 %0, %1, -2.0;" : "=f"(ret) : "f"(value));
+  return ret;
+}
+__global__ void f32ArithmeticKernel(float *out, float *input) {
+  int idx = threadIdx.x;
+  float value = input[idx];
+  out[idx] = ptx_add(value);
+  out[idx + 4] = ptx_sub(value);
+  out[idx + 8] = ptx_mul(value);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Float32Array(12),
+          input: new Float32Array([1.5, -2, 4, -8]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect([...result.buffers.out as Float32Array]).toEqual([
+      3.75,
+      0.25,
+      6.25,
+      -5.75,
+      0,
+      -3.5,
+      2.5,
+      -9.5,
+      -3,
+      4,
+      -8,
+      16,
+    ]);
+  });
+
   it("lowers inline PTX mov b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int mov_u_ptx(unsigned int value) {

@@ -1083,6 +1083,20 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), Math.fround(integer), context);
     return;
   }
+  if (op?.kind === "float-binary-rn-f32") {
+    const sources = op.sources ?? [
+      { kind: "operand", index: outputs.length },
+      { kind: "operand", index: outputs.length + 1 },
+    ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
+    const expectedInputs = expectedInlineAsmF32SourceInputs(sources, outputs.length);
+    if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.rn.f32 inline asm expects ${expectedInputs ?? 2} inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${op.op}.rn.f32 inline asm expects one output operand`);
+    const left = evalInlineAsmF32Source(sources[0]!, statement, outputs, context);
+    const right = evalInlineAsmF32Source(sources[1]!, statement, outputs, context);
+    const value = op.op === "add" ? left + right : op.op === "sub" ? left - right : left * right;
+    writeLValue(resolveLValue(outputs[0]!, context), Math.fround(value), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
