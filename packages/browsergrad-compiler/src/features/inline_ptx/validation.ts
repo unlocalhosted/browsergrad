@@ -105,6 +105,101 @@ export function inlineAsmOutputCountMatches(op: InlineAsmOp, actualOutputCount: 
   return actualOutputCount === inlineAsmExpectedOutputCount(op);
 }
 
+export function inlineAsmOperandShapeDiagnostic(
+  op: InlineAsmOp,
+  actualOutputCount: number,
+  actualInputCount: number,
+): string | undefined {
+  const expectedInputs = inlineAsmExpectedInputCount(op, actualOutputCount);
+  switch (op.kind) {
+    case "fma-rn-f32":
+      return actualOutputCount === 1 && expectedInputs !== undefined && actualInputCount === expectedInputs
+        ? undefined
+        : `fma.rn.f32 inline PTX expects one output operand and ${expectedInputs ?? 2} input operands`;
+    case "float-binary-rn-f32":
+      return actualOutputCount === 1 && expectedInputs !== undefined && actualInputCount === expectedInputs
+        ? undefined
+        : `${op.op}.rn.f32 inline PTX expects one output operand and ${expectedInputs ?? 2} input operands`;
+    case "laneid":
+      return actualOutputCount === 1 && actualInputCount === 0 ? undefined : "laneid inline PTX expects one output operand and no input operands";
+    case "warpid":
+      return actualOutputCount === 1 && actualInputCount === 0 ? undefined : "warpid inline PTX expects one output operand and no input operands";
+    case "lanemask-lt":
+      return actualOutputCount === 1 && actualInputCount === 0 ? undefined : "lanemask_lt inline PTX expects one output operand and no input operands";
+    case "special-register-u32":
+      return actualOutputCount === 1 && actualInputCount === 0 ? undefined : `${op.register} inline PTX expects one output operand and no input operands`;
+    case "globaltimer-u64":
+      return actualOutputCount === 1 && actualInputCount === 0 ? undefined : "globaltimer inline PTX expects one output operand and no input operands";
+    case "isspacep":
+      return actualOutputCount === 1 && actualInputCount === 1 ? undefined : `isspacep.${op.space} inline PTX expects one output operand and one pointer input operand`;
+    case "bfind-u32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `bfind.u32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "ffs-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `ffs.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "popc-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `popc.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "clz-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `clz.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "brev-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `brev.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "prmt-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `prmt.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "lop3-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `lop3.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "bitwise-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `${op.op}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "shift-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `${op.op}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "arithmetic-b32": {
+      const opLabel = op.op === "mul-lo" ? "mul.lo" : op.op === "mad-lo" ? "mad.lo" : op.op;
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `${opLabel}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`;
+    }
+    case "minmax-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `${op.op}.${op.signed ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "unary-int-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "select-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `selp.${op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "compare-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `setp.${op.op}.${op.signed ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "move-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs
+        ? undefined
+        : `mov.${op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs === 0 ? "no input operands" : "one input operand"}`;
+    case "convert-b32":
+      return actualOutputCount === 1 && actualInputCount === expectedInputs ? undefined : `cvt.${op.toSigned ? "s32" : "u32"}.${op.fromSigned ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs} input operands`;
+    case "convert-f32-to-int":
+      return actualOutputCount === 1 && expectedInputs !== undefined && actualInputCount === expectedInputs
+        ? undefined
+        : `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32 inline PTX expects one output operand and ${expectedInputs ?? 1} input operands`;
+    case "convert-int-to-f32":
+      return actualOutputCount === 1 && expectedInputs !== undefined && actualInputCount === expectedInputs
+        ? undefined
+        : `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs ?? 1} input operands`;
+    case "u8x4-sad-add":
+      return actualOutputCount === 1 && actualInputCount === 3 ? undefined : "vabsdiff4.u32.u32.u32.add inline PTX expects one output operand and three input operands";
+    case "cp-async-fence": {
+      const maxInputs = op.fence === "wait_group" ? 1 : 0;
+      return actualOutputCount === 0 && actualInputCount <= maxInputs
+        ? undefined
+        : `${op.fence === "wait_group" ? "cp.async.wait_group" : "cp.async fence"} inline PTX expects no output operands${maxInputs === 0 ? " and no input operands" : " and at most one input operand"}`;
+    }
+    case "membar":
+      return actualOutputCount === 0 && actualInputCount === 0 ? undefined : `membar.${op.scope} inline PTX expects no output or input operands`;
+    case "bar-sync":
+      return actualOutputCount === 0 && actualInputCount === expectedInputs ? undefined : `bar.sync inline PTX expects no output operands and ${expectedInputs} input operand(s)`;
+    case "ldmatrix":
+      return actualOutputCount === op.matrices && actualInputCount === 1 ? undefined : `ldmatrix.x${op.matrices} inline PTX expects ${op.matrices} output operand(s) and one shared-address input operand`;
+    case "mma-m16n8k16": {
+      const expectedOutputs = op.accumulator === "f32" ? 4 : 2;
+      const expectedMmaInputs = op.accumulator === "f32" ? 10 : 8;
+      return actualOutputCount === expectedOutputs && actualInputCount === expectedMmaInputs
+        ? undefined
+        : `mma.m16n8k16 ${op.accumulator} inline PTX expects ${expectedOutputs} output operand(s) and ${expectedMmaInputs} input operands`;
+    }
+  }
+}
+
 export function inlineAsmOutputValueContract(op: InlineAsmOp): InlineAsmOutputValueContract | undefined {
   switch (op.kind) {
     case "fma-rn-f32":
