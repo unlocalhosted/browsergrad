@@ -4,6 +4,10 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import {
+  cudaLiteDimensionStride as dimensionStride,
+  cudaLiteTotalElements as totalElements,
+} from "./cuda_lite_values.js";
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import {
@@ -2472,7 +2476,7 @@ function emitLocalPointerArrayDecl(
 }
 
 function localPointerArrayLength(statement: CudaLiteVarDecl): number {
-  return statement.dimensions.reduce((product, dimension) => product * dimension, 1);
+  return totalElements(statement.dimensions);
 }
 
 function emitLocalPointerHandleInit(statement: CudaLiteVarDecl, context: EmitContext): readonly [string, string] {
@@ -5036,7 +5040,7 @@ function emitMatrixTileBase(
   if (indices.length !== dimensions.length) return "0u";
   if (indices.length === 0) return "0u";
   const terms = indices.map((index, axis) => {
-    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, elementCount);
+    const stride = dimensionStride(dimensions, axis) * elementCount;
     const value = `u32(${emitExpression(index, context)})`;
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });
@@ -6847,13 +6851,13 @@ function emitAlignofValue(expression: CudaLiteExpression | undefined, context: E
 
 function emitArraySizeofValue(name: string, span: SourceSpan, context: EmitContext): number | undefined {
   const local = context.localArrayFor(name, span);
-  if (local) return local.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(local.valueType) ?? 4);
+  if (local) return totalElements(local.dimensions) * (sizeofCudaType(local.valueType) ?? 4);
   const shared = sharedDeclarationFor(name, context);
-  if (shared) return shared.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(shared.valueType) ?? 4);
+  if (shared) return totalElements(shared.dimensions) * (sizeofCudaType(shared.valueType) ?? 4);
   const constant = context.ir.constants.find((item) => item.name === name);
-  if (constant && constant.dimensions.length > 0) return constant.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(constant.valueType) ?? 4);
+  if (constant && constant.dimensions.length > 0) return totalElements(constant.dimensions) * (sizeofCudaType(constant.valueType) ?? 4);
   const global = context.deviceGlobalFor(name);
-  if (global && global.dimensions.length > 0) return global.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(global.valueType) ?? 4);
+  if (global && global.dimensions.length > 0) return totalElements(global.dimensions) * (sizeofCudaType(global.valueType) ?? 4);
   return undefined;
 }
 
@@ -7769,7 +7773,7 @@ function localArrayFlatIndexExpression(
   const dimensions = root.dimensions;
   if (indices.length !== dimensions.length) return undefined;
   const terms = indices.map((index, axis) => {
-    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(dimensions, axis);
     const value = `u32(${emitExpression(index, context)})`;
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });
