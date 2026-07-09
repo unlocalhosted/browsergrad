@@ -2603,6 +2603,16 @@ __global__ void ptxPopcB32(uint *out, uint *input) {
   int idx = threadIdx.x;
   out[idx] = popc_ptx(input[idx]);
 }`,
+  ptxFfsB32: `
+__device__ int ffs_ptx(unsigned int word) {
+  int ret;
+  asm volatile("ffs.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void ptxFfsB32(int *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = ffs_ptx(input[idx]);
+}`,
   ptxClzBrevB32: `
 __device__ unsigned int clz_ptx(unsigned int word) {
   unsigned int ret;
@@ -13904,6 +13914,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0, 1, 16, 32] },
+          },
+          {
+            name: "inline-asm:ffs-b32",
+            source: SOURCES.ptxFfsB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(4),
+                input: new Uint32Array([0, 1, 8, 0x80000000]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0, 1, 4, 32] },
           },
           {
             name: "inline-asm:clz-brev-b32",

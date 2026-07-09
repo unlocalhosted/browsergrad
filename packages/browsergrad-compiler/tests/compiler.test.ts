@@ -11806,6 +11806,27 @@ __global__ void popcKernel(uint *out, uint *input) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 16, 32]);
   });
 
+  it("lowers inline PTX ffs.b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int ffs_ptx(unsigned int word) {
+  int ret;
+  asm volatile("ffs.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void ffsKernel(int *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = ffs_ptx(input[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(4), input: new Uint32Array([0, 1, 8, 0x80000000]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("countTrailingZeros");
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 4, 32]);
+  });
+
   it("lowers inline PTX clz.b32 and brev.b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int clz_ptx(unsigned int word) {

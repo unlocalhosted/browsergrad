@@ -2293,6 +2293,10 @@ function emitInlineAsmStatement(
   if (op?.kind === "bfind-u32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
   }
+  if (op?.kind === "ffs-b32" && statement.inputs.length === 1 && outputs.length === 1) {
+    const value = `u32(${emitExpression(statement.inputs[0]!, context)})`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `select(0u, (countTrailingZeros(${value}) + 1u), (${value} != 0u))`, context)}`;
+  }
   if (op?.kind === "popc-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `countOneBits(u32(${emitExpression(statement.inputs[0]!, context)}))`, context)}`;
   }

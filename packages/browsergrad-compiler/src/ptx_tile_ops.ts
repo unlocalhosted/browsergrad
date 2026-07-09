@@ -7,6 +7,7 @@ export type InlineAsmOp =
   | { readonly kind: "globaltimer-u64" }
   | { readonly kind: "isspacep"; readonly space: "global" | "shared" | "const" | "local" }
   | { readonly kind: "bfind-u32" }
+  | { readonly kind: "ffs-b32" }
   | { readonly kind: "popc-b32" }
   | { readonly kind: "clz-b32" }
   | { readonly kind: "brev-b32" }
@@ -48,6 +49,7 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   const isspacep = /\bisspacep\.(global|shared|const|local)\b/u.exec(template);
   if (isspacep) return { kind: "isspacep", space: isspacep[1] as "global" | "shared" | "const" | "local" };
   if (/\bbfind\.u32\b/u.test(template)) return { kind: "bfind-u32" };
+  if (/\bffs\.b32\b/u.test(template)) return { kind: "ffs-b32" };
   if (/\bpopc\.b32\b/u.test(template)) return { kind: "popc-b32" };
   if (/\bclz\.b32\b/u.test(template)) return { kind: "clz-b32" };
   if (/\bbrev\.b32\b/u.test(template)) return { kind: "brev-b32" };
@@ -87,6 +89,7 @@ export function inlineAsmSupportedList(): string {
     "globaltimer",
     "isspacep.{global,shared,const,local}",
     "bfind.u32",
+    "ffs.b32",
     "popc.b32",
     "clz.b32",
     "brev.b32",

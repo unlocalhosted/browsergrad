@@ -892,6 +892,14 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), found, context);
     return;
   }
+  if (op?.kind === "ffs-b32") {
+    if (statement.inputs.length !== 1) throw compilerFailure("ffs.b32 inline asm expects one input");
+    if (outputs.length !== 1) throw compilerFailure("ffs.b32 inline asm expects one output operand");
+    const bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "ffs.b32") >>> 0;
+    const firstSet = bits === 0 ? 0 : 32 - Math.clz32(bits & -bits);
+    writeLValue(resolveLValue(outputs[0]!, context), firstSet, context);
+    return;
+  }
   if (op?.kind === "popc-b32") {
     if (statement.inputs.length !== 1) throw compilerFailure("popc.b32 inline asm expects one input");
     if (outputs.length !== 1) throw compilerFailure("popc.b32 inline asm expects one output operand");
