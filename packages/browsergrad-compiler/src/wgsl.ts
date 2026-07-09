@@ -18,7 +18,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, expectedInlineAsmF32SourceInputs, expectedInlineAsmSourceInputs, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
 import {
   emitInlineArithmeticWgsl,
   emitInlineBitwiseWgsl,
@@ -32,6 +32,7 @@ import {
   emitInlineUnaryIntWgsl,
   emitU8x4SadAddWgsl,
 } from "./features/inline_ptx/wgsl.js";
+import { inlineAsmExpectedInputCount, inlineAsmInputCountMatches } from "./features/inline_ptx/validation.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
@@ -2282,91 +2283,92 @@ function emitInlineAsmStatement(
 ): string {
   const op = classifyInlineAsm(statement.template);
   const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
-  if (op?.kind === "laneid" && statement.inputs.length === 0 && outputs.length === 1) {
+  const inputCountMatches = op === undefined ? false : inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length);
+  if (op?.kind === "laneid" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitLocalLinearRank(context)} % 32)`, context)}`;
   }
-  if (op?.kind === "warpid" && statement.inputs.length === 0 && outputs.length === 1) {
+  if (op?.kind === "warpid" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitLocalLinearRank(context)} / 32)`, context)}`;
   }
-  if (op?.kind === "lanemask-lt" && statement.inputs.length === 0 && outputs.length === 1) {
+  if (op?.kind === "lanemask-lt" && inputCountMatches && outputs.length === 1) {
     const lane = `u32(${emitLocalLinearRank(context)} & 31)`;
     const mask = `select(0u, ((1u << ${lane}) - 1u), ${lane} > 0u)`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, mask, context)}`;
   }
-  if (op?.kind === "special-register-u32" && statement.inputs.length === 0 && outputs.length === 1) {
+  if (op?.kind === "special-register-u32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineAsmSpecialRegister(op.register, context), context)}`;
   }
-  if (op?.kind === "globaltimer-u64" && statement.inputs.length === 0 && outputs.length === 1) {
+  if (op?.kind === "globaltimer-u64" && inputCountMatches && outputs.length === 1) {
     const tick = `((workgroup_id.x * ${context.ir.workgroupSize[0]}u) + u32(${emitLocalLinearRank(context)}))`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, tick, context)}`;
   }
-  if (op?.kind === "isspacep" && statement.inputs.length === 1 && outputs.length === 1) {
+  if (op?.kind === "isspacep" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineAsmAddressPredicate(op.space, statement.inputs[0]!, context), context)}`;
   }
-  if (op?.kind === "bfind-u32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+  if (op?.kind === "bfind-u32" && inputCountMatches && outputs.length === 1) {
     const value = op.immediate === undefined ? `u32(${emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
     return `${emitExpression(outputs[0]!, context)} = (31u - countLeadingZeros(${value}))`;
   }
-  if (op?.kind === "ffs-b32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+  if (op?.kind === "ffs-b32" && inputCountMatches && outputs.length === 1) {
     const value = op.immediate === undefined ? `u32(${emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `select(0u, (countTrailingZeros(${value}) + 1u), (${value} != 0u))`, context)}`;
   }
-  if (op?.kind === "popc-b32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+  if (op?.kind === "popc-b32" && inputCountMatches && outputs.length === 1) {
     const value = op.immediate === undefined ? `u32(${emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `countOneBits(${value})`, context)}`;
   }
-  if (op?.kind === "clz-b32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+  if (op?.kind === "clz-b32" && inputCountMatches && outputs.length === 1) {
     const value = op.immediate === undefined ? `u32(${emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `countLeadingZeros(${value})`, context)}`;
   }
-  if (op?.kind === "brev-b32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+  if (op?.kind === "brev-b32" && inputCountMatches && outputs.length === 1) {
     const value = op.immediate === undefined ? `u32(${emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `reverseBits(${value})`, context)}`;
   }
-  if (op?.kind === "prmt-b32" && statement.inputs.length === (op.selectorImmediate === undefined ? 3 : 2) && outputs.length === 1) {
+  if (op?.kind === "prmt-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpression(statement.inputs, context, op.selectorImmediate), context)}`;
   }
-  if (op?.kind === "lop3-b32" && statement.inputs.length === (3 - (op.dataImmediates?.filter((value) => value !== undefined).length ?? 0) + (op.immLut === undefined ? 1 : 0)) && outputs.length === 1) {
+  if (op?.kind === "lop3-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context, op.dataImmediates), context)}`;
   }
-  if (op?.kind === "bitwise-b32" && statement.inputs.length === (op.op === "not" ? (op.immediate === undefined ? 1 : 0) : (op.immediate === undefined ? 2 : 1)) && outputs.length === 1) {
+  if (op?.kind === "bitwise-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBitwiseExpression(statement.inputs, op.op, context, op.immediate), context)}`;
   }
-  if (op?.kind === "shift-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
+  if (op?.kind === "shift-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineShiftExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
   }
-  if (op?.kind === "arithmetic-b32" && statement.inputs.length === ((op.op === "mad-lo" ? 3 : 2) - (op.immediate === undefined ? 0 : 1)) && outputs.length === 1) {
+  if (op?.kind === "arithmetic-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineArithmeticExpression(statement.inputs, op.op, context, op.immediate), context)}`;
   }
-  if (op?.kind === "minmax-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
+  if (op?.kind === "minmax-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineMinMaxExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
   }
-  if (op?.kind === "unary-int-b32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+  if (op?.kind === "unary-int-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpression(statement.inputs[0], op.op, context, op.immediate), context)}`;
   }
-  if (op?.kind === "select-b32" && statement.inputs.length === 3 - (op.trueImmediate === undefined ? 0 : 1) - (op.falseImmediate === undefined ? 0 : 1) && outputs.length === 1) {
+  if (op?.kind === "select-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpression(statement.inputs, context, op.trueImmediate, op.falseImmediate), context)}`;
   }
-  if (op?.kind === "compare-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
+  if (op?.kind === "compare-b32" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineCompareExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
   }
-  if (op?.kind === "move-b32" && statement.inputs.length === 1 && outputs.length === 1) {
+  if (op?.kind === "move-b32" && inputCountMatches && op.immediate === undefined && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitExpression(statement.inputs[0]!, context)})`, context)}`;
   }
-  if (op?.kind === "move-b32" && op.immediate !== undefined && statement.inputs.length === 0 && outputs.length === 1) {
+  if (op?.kind === "move-b32" && inputCountMatches && op.immediate !== undefined && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `${op.immediate >>> 0}u`, context)}`;
   }
-  if (op?.kind === "convert-b32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+  if (op?.kind === "convert-b32" && inputCountMatches && outputs.length === 1) {
     const value = op.immediate === undefined ? `u32(${emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, value, context)}`;
   }
-  if (op?.kind === "convert-f32-to-int" && statement.inputs.length === (op.source === undefined ? 1 : expectedInlineAsmF32SourceInputs([op.source], outputs.length)) && outputs.length === 1) {
+  if (op?.kind === "convert-f32-to-int" && inputCountMatches && outputs.length === 1) {
     const source = op.source === undefined
       ? emitExpressionAsValueType(statement.inputs[0]!, "float", context)
       : emitInlineAsmF32Source(op.source, statement, outputs, context);
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineF32ToIntConvertExpression(source, op.rounding, op.toSigned, outputs[0]!, context)}`;
   }
-  if (op?.kind === "convert-int-to-f32" && statement.inputs.length === (op.source === undefined ? 1 : expectedInlineAsmSourceInputs([op.source], outputs.length)) && outputs.length === 1) {
+  if (op?.kind === "convert-int-to-f32" && inputCountMatches && outputs.length === 1) {
     const source = op.source === undefined
       ? emitExpression(statement.inputs[0]!, context)
       : emitInlineAsmIntSource(op.source, statement, outputs, context);
@@ -2377,18 +2379,17 @@ function emitInlineAsmStatement(
       { kind: "operand", index: outputs.length },
       { kind: "operand", index: outputs.length + 1 },
     ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
-    const expectedInputs = expectedInlineAsmF32SourceInputs(sources, outputs.length);
-    if (statement.inputs.length === expectedInputs && outputs.length === 1) {
+    if (inputCountMatches && outputs.length === 1) {
       const left = emitInlineAsmF32Source(sources[0]!, statement, outputs, context);
       const right = emitInlineAsmF32Source(sources[1]!, statement, outputs, context);
       const operator = op.op === "add" ? "+" : op.op === "sub" ? "-" : op.op === "mul" ? "*" : "/";
       return `${emitExpression(outputs[0]!, context)} = (${left} ${operator} ${right})`;
     }
   }
-  if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
+  if (op?.kind === "u8x4-sad-add" && inputCountMatches && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
-  if (op?.kind === "ldmatrix" && statement.inputs.length === 1 && outputs.length === op.matrices) {
+  if (op?.kind === "ldmatrix" && inputCountMatches && outputs.length === op.matrices) {
     const base = `u32(${emitExpression(statement.inputs[0]!, context)})`;
     const tag = op.transposed ? "0x80000000u" : "0u";
     return outputs.map((output, index) => {
@@ -2396,13 +2397,13 @@ function emitInlineAsmStatement(
       return `${emitExpression(output, context)} = ${emitInlineU32Output(output, carrier, context)}`;
     }).join("\n");
   }
-  if (op?.kind === "cp-async-fence" && statement.inputs.length <= (op.fence === "wait_group" ? 1 : 0) && outputs.length === 0) {
+  if (op?.kind === "cp-async-fence" && inputCountMatches && outputs.length === 0) {
     return `// cp.async inline asm fence omitted`;
   }
-  if (op?.kind === "membar" && statement.inputs.length === 0 && outputs.length === 0) {
+  if (op?.kind === "membar" && inputCountMatches && outputs.length === 0) {
     return `storageBarrier();`;
   }
-  if (op?.kind === "bar-sync" && statement.inputs.length === (op.operand === "input0" ? 1 : 0) && outputs.length === 0) {
+  if (op?.kind === "bar-sync" && inputCountMatches && outputs.length === 0) {
     return `workgroupBarrier();`;
   }
   if (op?.kind === "mma-m16n8k16") {
@@ -2415,7 +2416,7 @@ function emitInlineAsmStatement(
       { kind: "operand", index: 0 },
     ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source]
     : undefined;
-  const expectedFmaInputs = fmaSources === undefined ? undefined : expectedInlineAsmF32SourceInputs(fmaSources, outputs.length);
+  const expectedFmaInputs = op?.kind === "fma-rn-f32" ? inlineAsmExpectedInputCount(op, outputs.length) : undefined;
   if (op?.kind !== "fma-rn-f32" || fmaSources === undefined || expectedFmaInputs === undefined || statement.inputs.length !== expectedFmaInputs || outputs.length !== 1) {
     throw featureError("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in WGSL output`, statement.span);
   }

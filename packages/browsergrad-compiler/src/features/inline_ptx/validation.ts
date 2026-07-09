@@ -60,3 +60,9 @@ export function inlineAsmExpectedInputCount(op: InlineAsmOp, outputCount: number
       return op.accumulator === "f32" ? 10 : 8;
   }
 }
+
+export function inlineAsmInputCountMatches(op: InlineAsmOp, outputCount: number, actualInputCount: number): boolean {
+  if (op.kind === "cp-async-fence" && op.fence === "wait_group") return actualInputCount <= 1;
+  const expected = inlineAsmExpectedInputCount(op, outputCount);
+  return expected !== undefined && actualInputCount === expected;
+}
