@@ -2629,6 +2629,40 @@ __global__ void ptxClzBrevB32(uint *out, uint *input) {
   out[idx] = clz_ptx(input[idx]);
   out[idx + 4] = brev_ptx(input[idx]);
 }`,
+  ptxBitScanImmediateB32: `
+__device__ unsigned int bfind_imm_ptx() {
+  unsigned int ret;
+  asm volatile("bfind.u32 %0, 0x00008000;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int ffs_imm_ptx() {
+  unsigned int ret;
+  asm volatile("ffs.b32 %0, 0x00008000;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int popc_imm_ptx() {
+  unsigned int ret;
+  asm volatile("popc.b32 %0, 0xf0f0f00f;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int clz_imm_ptx() {
+  unsigned int ret;
+  asm volatile("clz.b32 %0, 0x00008000;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int brev_imm_ptx() {
+  unsigned int ret;
+  asm volatile("brev.b32 %0, 0x01234567;" : "=r"(ret));
+  return ret;
+}
+__global__ void ptxBitScanImmediateB32(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = bfind_imm_ptx();
+  out[idx + 4] = ffs_imm_ptx();
+  out[idx + 8] = popc_imm_ptx();
+  out[idx + 12] = clz_imm_ptx();
+  out[idx + 16] = brev_imm_ptx();
+}`,
   ptxPrmtB32: `
 __device__ unsigned int prmt_ptx(unsigned int x, unsigned int y, unsigned int selector) {
   unsigned int ret;
@@ -14374,6 +14408,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [32, 31, 7, 0, 0, 0x80000000, 0xe6a2c480, 0xffffffff] },
+          },
+          {
+            name: "inline-asm:bit-scan-immediate-b32",
+            source: SOURCES.ptxBitScanImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(20),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 0xe6a2c480, 0xe6a2c480, 0xe6a2c480, 0xe6a2c480],
+            },
           },
           {
             name: "inline-asm:prmt-b32",

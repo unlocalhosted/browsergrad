@@ -11855,6 +11855,75 @@ __global__ void bitKernel(uint *out, uint *input) {
     expect([...result.buffers.out as Uint32Array]).toEqual([32, 31, 7, 0, 0, 0x80000000, 0xe6a2c480, 0xffffffff]);
   });
 
+  it("lowers inline PTX bit-scan/count immediate statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int bfind_imm_ptx() {
+  unsigned int ret;
+  asm volatile("bfind.u32 %0, 0x00008000;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int ffs_imm_ptx() {
+  unsigned int ret;
+  asm volatile("ffs.b32 %0, 0x00008000;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int popc_imm_ptx() {
+  unsigned int ret;
+  asm volatile("popc.b32 %0, 0xf0f0f00f;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int clz_imm_ptx() {
+  unsigned int ret;
+  asm volatile("clz.b32 %0, 0x00008000;" : "=r"(ret));
+  return ret;
+}
+__device__ unsigned int brev_imm_ptx() {
+  unsigned int ret;
+  asm volatile("brev.b32 %0, 0x01234567;" : "=r"(ret));
+  return ret;
+}
+__global__ void bitScanImmediateKernel(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = bfind_imm_ptx();
+  out[idx + 4] = ffs_imm_ptx();
+  out[idx + 8] = popc_imm_ptx();
+  out[idx + 12] = clz_imm_ptx();
+  out[idx + 16] = brev_imm_ptx();
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(20) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("countTrailingZeros");
+    expect(compiled.wgsl).toContain("countOneBits");
+    expect(compiled.wgsl).toContain("reverseBits");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      15,
+      15,
+      15,
+      15,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      16,
+      0xe6a2c480,
+      0xe6a2c480,
+      0xe6a2c480,
+      0xe6a2c480,
+    ]);
+  });
+
   it("lowers inline PTX prmt.b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int prmt_ptx(unsigned int x, unsigned int y, unsigned int selector) {

@@ -884,26 +884,28 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "bfind-u32") {
-    if (statement.inputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one input");
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`bfind.u32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one output operand");
-    const value = evalExpression(statement.inputs[0]!, context);
-    const bits = valueAsNumber(value, "bfind.u32") >>> 0;
+    const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "bfind.u32") >>> 0;
     const found = bits === 0 ? 0xffffffff : 31 - Math.clz32(bits);
     writeLValue(resolveLValue(outputs[0]!, context), found, context);
     return;
   }
   if (op?.kind === "ffs-b32") {
-    if (statement.inputs.length !== 1) throw compilerFailure("ffs.b32 inline asm expects one input");
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`ffs.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure("ffs.b32 inline asm expects one output operand");
-    const bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "ffs.b32") >>> 0;
+    const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "ffs.b32") >>> 0;
     const firstSet = bits === 0 ? 0 : 32 - Math.clz32(bits & -bits);
     writeLValue(resolveLValue(outputs[0]!, context), firstSet, context);
     return;
   }
   if (op?.kind === "popc-b32") {
-    if (statement.inputs.length !== 1) throw compilerFailure("popc.b32 inline asm expects one input");
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`popc.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure("popc.b32 inline asm expects one output operand");
-    let bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "popc.b32") >>> 0;
+    let bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "popc.b32") >>> 0;
     let count = 0;
     while (bits !== 0) {
       bits &= bits - 1;
@@ -913,16 +915,18 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "clz-b32") {
-    if (statement.inputs.length !== 1) throw compilerFailure("clz.b32 inline asm expects one input");
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`clz.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure("clz.b32 inline asm expects one output operand");
-    const bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "clz.b32") >>> 0;
+    const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "clz.b32") >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), Math.clz32(bits), context);
     return;
   }
   if (op?.kind === "brev-b32") {
-    if (statement.inputs.length !== 1) throw compilerFailure("brev.b32 inline asm expects one input");
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`brev.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure("brev.b32 inline asm expects one output operand");
-    const bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "brev.b32") >>> 0;
+    const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "brev.b32") >>> 0;
     let reversed = 0;
     for (let bit = 0; bit < 32; bit++) reversed = ((reversed << 1) | ((bits >>> bit) & 1)) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), reversed, context);

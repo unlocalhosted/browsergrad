@@ -6,11 +6,11 @@ export type InlineAsmOp =
   | { readonly kind: "special-register-u32"; readonly register: PtxSpecialU32Register }
   | { readonly kind: "globaltimer-u64" }
   | { readonly kind: "isspacep"; readonly space: "global" | "shared" | "const" | "local" }
-  | { readonly kind: "bfind-u32" }
-  | { readonly kind: "ffs-b32" }
-  | { readonly kind: "popc-b32" }
-  | { readonly kind: "clz-b32" }
-  | { readonly kind: "brev-b32" }
+  | { readonly kind: "bfind-u32"; readonly immediate?: number }
+  | { readonly kind: "ffs-b32"; readonly immediate?: number }
+  | { readonly kind: "popc-b32"; readonly immediate?: number }
+  | { readonly kind: "clz-b32"; readonly immediate?: number }
+  | { readonly kind: "brev-b32"; readonly immediate?: number }
   | { readonly kind: "prmt-b32"; readonly selectorImmediate?: number }
   | { readonly kind: "lop3-b32"; readonly immLut?: number }
   | { readonly kind: "bitwise-b32"; readonly op: "and" | "or" | "xor" | "not"; readonly immediate?: number }
@@ -59,10 +59,20 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\bmov\.u64\b/u.test(template) && /%globaltimer\b/u.test(template)) return { kind: "globaltimer-u64" };
   const isspacep = /\bisspacep\.(global|shared|const|local)\b/u.exec(template);
   if (isspacep) return { kind: "isspacep", space: isspacep[1] as "global" | "shared" | "const" | "local" };
+  const bfindImmediate = /\bbfind\.u32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (bfindImmediate) return { kind: "bfind-u32", immediate: parseInlineAsmImmediate(bfindImmediate[1]!) >>> 0 };
   if (/\bbfind\.u32\b/u.test(template)) return { kind: "bfind-u32" };
+  const ffsImmediate = /\bffs\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (ffsImmediate) return { kind: "ffs-b32", immediate: parseInlineAsmImmediate(ffsImmediate[1]!) >>> 0 };
   if (/\bffs\.b32\b/u.test(template)) return { kind: "ffs-b32" };
+  const popcImmediate = /\bpopc\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (popcImmediate) return { kind: "popc-b32", immediate: parseInlineAsmImmediate(popcImmediate[1]!) >>> 0 };
   if (/\bpopc\.b32\b/u.test(template)) return { kind: "popc-b32" };
+  const clzImmediate = /\bclz\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (clzImmediate) return { kind: "clz-b32", immediate: parseInlineAsmImmediate(clzImmediate[1]!) >>> 0 };
   if (/\bclz\.b32\b/u.test(template)) return { kind: "clz-b32" };
+  const brevImmediate = /\bbrev\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (brevImmediate) return { kind: "brev-b32", immediate: parseInlineAsmImmediate(brevImmediate[1]!) >>> 0 };
   if (/\bbrev\.b32\b/u.test(template)) return { kind: "brev-b32" };
   const prmtImmediate = /\bprmt\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
   if (prmtImmediate) return { kind: "prmt-b32", selectorImmediate: parseInlineAsmImmediate(prmtImmediate[1]!) >>> 0 };
