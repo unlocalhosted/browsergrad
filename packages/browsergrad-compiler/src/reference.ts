@@ -1012,6 +1012,14 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmCompare(op.op, left, right, op.signed) ? 1 : 0, context);
     return;
   }
+  if (op?.kind === "convert-b32") {
+    const label = `cvt.${op.toSigned ? "s32" : "u32"}.${op.fromSigned ? "s32" : "u32"}`;
+    if (statement.inputs.length !== 1) throw compilerFailure(`${label} inline asm expects one input`);
+    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    const value = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), value, context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");

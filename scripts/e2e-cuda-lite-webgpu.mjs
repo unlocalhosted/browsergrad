@@ -2815,6 +2815,22 @@ __global__ void ptxCompareB32(uint *out, uint *a, uint *b) {
   out[idx + 4] = setp_lt_u(a[idx], b[idx]);
   out[idx + 8] = setp_ge_s((int)a[idx], (int)b[idx]);
 }`,
+  ptxConvertB32: `
+__device__ unsigned int cvt_u_s(int value) {
+  unsigned int ret;
+  asm volatile("cvt.u32.s32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__device__ int cvt_s_u(unsigned int value) {
+  int ret;
+  asm volatile("cvt.s32.u32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__global__ void ptxConvertB32(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = cvt_u_s((int)input[idx]);
+  out[idx + 4] = (uint)cvt_s_u(input[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -14281,6 +14297,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
+            },
+          },
+          {
+            name: "inline-asm:convert-b32",
+            source: SOURCES.ptxConvertB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+                input: new Uint32Array([0, 1, 0xffffffff, 0x80000000]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0, 1, 0xffffffff, 0x80000000, 0, 1, 0xffffffff, 0x80000000],
             },
           },
           {
