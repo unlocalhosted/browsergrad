@@ -60,6 +60,7 @@ import {
   semanticAtomicSupportsBfloatAdd,
   semanticAtomicSupportsFloat,
 } from "./semantic_atomic_intrinsics.js";
+import { cudaLiteTotalElements as totalElements } from "./reference_scalars.js";
 import {
   SEMANTIC_BFLOAT_HELPER_CALLS,
   SEMANTIC_FP8_CALLS,
@@ -2475,7 +2476,7 @@ function emitSemanticAtomic(
     const value = emitSemanticExpressionAs(operands[0]!, ir, names, "u32", options, textureSpecializations);
     return `_ = ${semanticIntegerLoopAtomicHelperName(loopAtomicKind, operation.target, ir)}(&${target}, ${value})`;
   }
-  if (operation.target.valueType === "bf16" && (operation.callee === "atomicAdd" || operation.callee === "atomicAdd_system")) {
+  if (semanticAtomicSupportsBfloatAdd(operation.callee, operation.target.valueType)) {
     const value = emitSemanticExpressionAs(operands[0]!, ir, names, "f32", options, textureSpecializations);
     return `_ = ${bfloatAtomicAddHelperName(semanticWgslAtomicAddressSpace(operation.target))}(&${target}, ${value})`;
   }
@@ -2572,7 +2573,7 @@ function semanticFloatAtomicHelpers(operations: readonly SemanticKernelIrOperati
   walkSemanticOperations(operations, (expression) => {
     if (expression.kind !== "call" || expression.callee.kind !== "symbol") return;
     const target = semanticAtomicCallTarget(expression);
-    if (target?.valueType === "bf16" && (expression.callee.name === "atomicAdd" || expression.callee.name === "atomicAdd_system")) {
+    if (target && semanticAtomicSupportsBfloatAdd(expression.callee.name, target.valueType)) {
       helperKeys.add(`BfloatAdd:${semanticWgslAtomicAddressSpace(target)}`);
       return;
     }
@@ -2598,7 +2599,7 @@ function collectSemanticFloatAtomicHelpers(
   helperKeys: Set<string>,
 ): void {
   for (const operation of operations) {
-    if (operation.kind === "atomic" && operation.target?.valueType === "bf16" && (operation.callee === "atomicAdd" || operation.callee === "atomicAdd_system")) {
+    if (operation.kind === "atomic" && operation.target && semanticAtomicSupportsBfloatAdd(operation.callee, operation.target.valueType)) {
       helperKeys.add(`BfloatAdd:${semanticWgslAtomicAddressSpace(operation.target)}`);
     }
     if (operation.kind === "atomic" && operation.target?.valueType === "float") {
@@ -4751,7 +4752,7 @@ function emitSemanticAtomicCall(
     if (!limit) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing limit`, expression.span);
     return `${semanticIntegerLoopAtomicHelperName(loopAtomicKind, target, ir)}(&${memoryRef}, ${emitSemanticExpressionAs(limit, ir, names, "u32", options, textureSpecializations)})`;
   }
-  if (target.valueType === "bf16" && (expression.callee.name === "atomicAdd" || expression.callee.name === "atomicAdd_system")) {
+  if (semanticAtomicSupportsBfloatAdd(expression.callee.name, target.valueType)) {
     const [value] = operands;
     if (!value) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing value`, expression.span);
     return `${bfloatAtomicAddHelperName(semanticWgslAtomicAddressSpace(target))}(&${memoryRef}, ${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
@@ -6282,10 +6283,6 @@ function emitSharedType(symbol: SemanticKernelIrModule["memory"][number], atomic
   const element = atomic ? `atomic<${wgslAtomicScalar(symbol.valueType)}>` : wgslScalar(symbol.valueType);
   if (symbol.dimensions.length === 0) return element;
   return `array<${element}, ${Math.max(1, totalElements(symbol.dimensions))}>`;
-}
-
-function totalElements(dimensions: readonly number[]): number {
-  return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
 }
 
 function storageOffsetSymbol(base: string): string {

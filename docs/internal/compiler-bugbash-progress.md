@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T12:15:16Z
+Last updated: 2026-07-09T15:28:37Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Inline PTX `div.rn.f32` now lowers f32 division through CPU reference and native WGSL/WebGPU instead of forcing source rewrites |
+| Active work item | Architecture split: shared reference scalar helpers now own CUDA truthiness, element counts, and scalar typed-array allocation across reference, semantic reference, and semantic WGSL; semantic WGSL bf16 atomic-add checks now reuse semantic atomic classification |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: extracted shared reference scalar/value helpers into `reference_scalars.ts`, removed duplicate CUDA truthiness/element-count/typed-array helpers from reference and semantic stages, and routed semantic WGSL bf16 atomic-add helper selection through `semanticAtomicSupportsBfloatAdd`; typecheck passed, lint passed, compiler unit passed `749/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed, and architecture map now shows `semantic_reference.ts` down to `4677` lines, `semantic_wgsl.ts` down to `6998`, and `reference.ts` down to `6843`
 - Inline PTX f32 division slice: `div.rn.f32` now classifies modeled f32 source operands including literals, validates f32 outputs and inputs, preserves f32 division semantics in CPU reference with `Math.fround`, emits native WGSL division, and executes in browser WebGPU as `single-dispatch`; focused compiler proof passed `749/0`; exact native WebGPU case `inline-asm:f32-division` passed `1/0/0`, skips `0`; changed-fast passed typecheck, compiler unit `733/0`, WGSL modules `16/0`, WebGPU smoke `610/0/0`, selected storage/pointer WebGPU `125/0/0`, fixture/test-scope, slow-smoke-hot `78/0/0`, and fast auto-corpus `32/0/0`; lint passed
 - Inline PTX f32 arithmetic slice: `add.rn.f32`, `sub.rn.f32`, and `mul.rn.f32` now classify modeled f32 source operands including literals, validate f32 outputs and inputs, preserve f32 arithmetic semantics in CPU reference with `Math.fround`, emit native WGSL arithmetic, and execute in browser WebGPU as `single-dispatch`; focused compiler proof passed `748/0`; exact native WebGPU case `inline-asm:f32-arithmetic` passed `1/0/0`, skips `0`; changed-fast passed typecheck, compiler unit `732/0`, WGSL modules `16/0`, WebGPU smoke `609/0/0`, selected storage/pointer WebGPU `125/0/0`, fixture/test-scope, slow-smoke-hot `78/0/0`, and fast auto-corpus `32/0/0`; lint passed
 - Inline PTX int-to-f32 convert slice: `cvt.rn.f32.{u32,s32}` now classifies modeled integer source operands including literals, validates f32 outputs and integer inputs, preserves round-to-nearest-even f32 conversion semantics in CPU reference with `Math.fround`, emits native WGSL `f32(...)` conversions, and executes in browser WebGPU as `single-dispatch`; focused compiler proof passed `747/0`; exact native WebGPU case `inline-asm:convert-int-to-f32` passed `1/0/0`, skips `0`; changed-fast passed typecheck, compiler unit `731/0`, WGSL modules `16/0`, WebGPU smoke `608/0/0`, selected storage/pointer WebGPU `125/0/0`, fixture/test-scope, slow-smoke-hot `78/0/0`, and fast auto-corpus `32/0/0`; lint passed

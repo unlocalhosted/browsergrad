@@ -17,6 +17,11 @@ import {
   cloneReferenceSurfaces,
 } from "./reference_inputs.js";
 import {
+  cudaLiteTotalElements as totalElements,
+  cudaLiteTruthy as truthy,
+  referenceTypedArrayForScalar as typedArrayForScalar,
+} from "./reference_scalars.js";
+import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
 } from "./reference_trace.js";
@@ -4617,16 +4622,6 @@ function evalConstantInitNumber(expression: SemanticExpression): number {
   }
 }
 
-function typedArrayForScalar(valueType: CudaLiteScalarType | undefined, length: number): WgslTypedArray {
-  if (valueType === "int") return new Int32Array(length);
-  if (valueType === "uint") return new Uint32Array(length);
-  return new Float32Array(length);
-}
-
-function totalElements(dimensions: readonly number[]): number {
-  return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
-}
-
 function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
   if (expression.kind !== "initializer") return [expression];
   return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
@@ -4637,10 +4632,6 @@ function flatIndexForDimensions(dimensions: readonly number[], indices: readonly
     const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
     return sum + index * stride;
   }, 0);
-}
-
-function truthy(value: number): boolean {
-  return value !== 0 && !Number.isNaN(value);
 }
 
 function semanticReferenceError(message: string, span: SourceSpan): CudaLiteCompilerError {

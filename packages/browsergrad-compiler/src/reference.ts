@@ -34,6 +34,7 @@ import {
   cloneReferenceSurfaces,
   cloneReferenceTypedArray,
 } from "./reference_inputs.js";
+import { cudaLiteTruthy as truthy } from "./reference_scalars.js";
 import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
@@ -6652,10 +6653,6 @@ function isCooperativeGroup(value: LocalValue | undefined): value is Cooperative
     typeof value !== "number" &&
     "kind" in value &&
     value.kind === "cooperative-group";
-}
-
-function truthy(value: number): boolean {
-  return value !== 0 && !Number.isNaN(value);
 }
 
 function validateInputs(
