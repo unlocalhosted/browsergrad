@@ -2603,6 +2603,22 @@ __global__ void ptxPopcB32(uint *out, uint *input) {
   int idx = threadIdx.x;
   out[idx] = popc_ptx(input[idx]);
 }`,
+  ptxClzBrevB32: `
+__device__ unsigned int clz_ptx(unsigned int word) {
+  unsigned int ret;
+  asm volatile("clz.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__device__ unsigned int brev_ptx(unsigned int word) {
+  unsigned int ret;
+  asm volatile("brev.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void ptxClzBrevB32(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = clz_ptx(input[idx]);
+  out[idx + 4] = brev_ptx(input[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -13888,6 +13904,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0, 1, 16, 32] },
+          },
+          {
+            name: "inline-asm:clz-brev-b32",
+            source: SOURCES.ptxClzBrevB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+                input: new Uint32Array([0, 1, 0x01234567, 0xffffffff]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [32, 31, 7, 0, 0, 0x80000000, 0xe6a2c480, 0xffffffff] },
           },
           {
             name: "inline-asm:special-reg-single-percent",

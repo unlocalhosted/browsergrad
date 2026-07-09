@@ -11806,6 +11806,34 @@ __global__ void popcKernel(uint *out, uint *input) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 16, 32]);
   });
 
+  it("lowers inline PTX clz.b32 and brev.b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int clz_ptx(unsigned int word) {
+  unsigned int ret;
+  asm volatile("clz.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__device__ unsigned int brev_ptx(unsigned int word) {
+  unsigned int ret;
+  asm volatile("brev.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void bitKernel(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = clz_ptx(input[idx]);
+  out[idx + 4] = brev_ptx(input[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(8), input: new Uint32Array([0, 1, 0x01234567, 0xffffffff]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("countLeadingZeros");
+    expect(compiled.wgsl).toContain("reverseBits");
+    expect([...result.buffers.out as Uint32Array]).toEqual([32, 31, 7, 0, 0, 0x80000000, 0xe6a2c480, 0xffffffff]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {

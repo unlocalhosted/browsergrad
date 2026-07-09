@@ -904,6 +904,22 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), count, context);
     return;
   }
+  if (op?.kind === "clz-b32") {
+    if (statement.inputs.length !== 1) throw compilerFailure("clz.b32 inline asm expects one input");
+    if (outputs.length !== 1) throw compilerFailure("clz.b32 inline asm expects one output operand");
+    const bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "clz.b32") >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), Math.clz32(bits), context);
+    return;
+  }
+  if (op?.kind === "brev-b32") {
+    if (statement.inputs.length !== 1) throw compilerFailure("brev.b32 inline asm expects one input");
+    if (outputs.length !== 1) throw compilerFailure("brev.b32 inline asm expects one output operand");
+    const bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "brev.b32") >>> 0;
+    let reversed = 0;
+    for (let bit = 0; bit < 32; bit++) reversed = ((reversed << 1) | ((bits >>> bit) & 1)) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), reversed, context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");

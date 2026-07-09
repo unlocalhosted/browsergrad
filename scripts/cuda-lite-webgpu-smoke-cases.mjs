@@ -17,6 +17,7 @@ export const runtimeScopeCases = [
   "intrinsic:inline-asm-membar-fence",
   "intrinsic:inline-asm-bar-sync",
   "inline-asm:popc-b32",
+  "inline-asm:clz-brev-b32",
   "inline-asm:special-reg-single-percent",
   "runtime:unreachable-texture-surface-compat-diagnostics",
   "runtime:unreachable-constant-binding",
