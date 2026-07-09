@@ -5239,6 +5239,7 @@ function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
     callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     callName === "cudaOccupancyMaxPotentialBlockSize" ||
     callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    callName === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     callName === "cudaDeviceGetCacheConfig" ||
     callName === "cudaDeviceGetSharedMemConfig" ||
     callName === "cudaThreadGetCacheConfig" ||

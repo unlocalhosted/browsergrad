@@ -304,6 +304,24 @@ function compilerSourceText(file: string): string {
   return fs.readFileSync(path.join(packageRoot, "src", file), "utf8");
 }
 
+function compilerFunctionText(file: string, functionName: string): string {
+  const source = compilerSourceText(file);
+  const functionStart = source.indexOf(`function ${functionName}`);
+  if (functionStart < 0) throw new Error(`Missing function ${functionName} in ${file}`);
+  const bodyStart = source.indexOf("{", functionStart);
+  if (bodyStart < 0) throw new Error(`Missing body for function ${functionName} in ${file}`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(functionStart, index + 1);
+    }
+  }
+  throw new Error(`Unterminated function ${functionName} in ${file}`);
+}
+
 function compilerExampleText(file: string): string {
   return fs.readFileSync(path.join(packageRoot, "examples", file), "utf8");
 }
@@ -4514,6 +4532,62 @@ __global__ void unsupported(float* x) {
       return modeledRuntimeCalls
         .filter((call) => !source.includes(`"${call}"`))
         .map((call) => `${file}:${call}`);
+    });
+
+    expect(missing).toEqual([]);
+  });
+
+  it("keeps CUDA runtime query-write calls wired through side-effect guards", () => {
+    const runtimeQueryWriteCalls = [
+      "cudaGetDevice",
+      "cudaGetDeviceCount",
+      "cudaDeviceGetAttribute",
+      "cudaDeviceGetLimit",
+      "cudaThreadGetLimit",
+      "cudaDeviceCanAccessPeer",
+      "cudaGetDeviceFlags",
+      "cudaMemGetInfo",
+      "cudaOccupancyMaxActiveBlocksPerMultiprocessor",
+      "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+      "cudaOccupancyMaxPotentialBlockSize",
+      "cudaOccupancyMaxPotentialBlockSizeWithFlags",
+      "cudaOccupancyAvailableDynamicSMemPerBlock",
+      "cudaDeviceGetCacheConfig",
+      "cudaDeviceGetSharedMemConfig",
+      "cudaThreadGetCacheConfig",
+      "cudaThreadExchangeStreamCaptureMode",
+      "cudaDeviceGetStreamPriorityRange",
+      "cudaStreamCreate",
+      "cudaStreamCreateWithFlags",
+      "cudaStreamCreateWithPriority",
+      "cudaStreamGetDevice",
+      "cudaStreamGetFlags",
+      "cudaStreamGetId",
+      "cudaStreamGetPriority",
+      "cudaStreamIsCapturing",
+      "cudaStreamGetCaptureInfo",
+      "cudaStreamGetCaptureInfo_v2",
+      "cudaStreamEndCapture",
+      "cudaGraphCreate",
+      "cudaGraphInstantiate",
+      "cudaGraphInstantiateWithFlags",
+      "cudaGraphExecUpdate",
+      "cudaEventCreate",
+      "cudaEventCreateWithFlags",
+      "cudaRuntimeGetVersion",
+      "cudaDriverGetVersion",
+    ];
+    const functionChecks = [
+      ["analyzer.ts", "isCudaIntegerRuntimeQueryCall"],
+      ["wgsl.ts", "isCudaIntegerRuntimeQueryCall"],
+      ["dynamic_launch.ts", "isRuntimeQueryWriteCall"],
+      ["peer_copy.ts", "isRuntimeQueryWriteCall"],
+    ] as const;
+    const missing = functionChecks.flatMap(([file, functionName]) => {
+      const source = compilerFunctionText(file, functionName);
+      return runtimeQueryWriteCalls
+        .filter((call) => !source.includes(`"${call}"`))
+        .map((call) => `${file}:${functionName}:${call}`);
     });
 
     expect(missing).toEqual([]);
@@ -14536,8 +14610,19 @@ __global__ void nested_runtime_query(uint *out) {
     out[0] = (uint)cudaThreadGetLimit(&limit, cudaLimitPrintfFifoSize) + limit;
   }
 }`));
+    const dynamicSmemAnalysis = analyzeCudaLite(parseCudaLite(`
+__global__ void nested_dynamic_smem_query(uint *out) {
+  if (threadIdx.x < 1) {
+    uint dynamicSmem = 99u;
+    out[0] = cudaOccupancyAvailableDynamicSMemPerBlock(&dynamicSmem, nested_dynamic_smem_query, 1, 128) + dynamicSmem;
+  }
+}`));
 
     expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
+      code: "side-effect-expression",
+      message: expect.stringContaining("side-effecting CUDA runtime calls"),
+    }));
+    expect(dynamicSmemAnalysis.diagnostics).toContainEqual(expect.objectContaining({
       code: "side-effect-expression",
       message: expect.stringContaining("side-effecting CUDA runtime calls"),
     }));
