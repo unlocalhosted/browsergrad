@@ -6,6 +6,7 @@ import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queri
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
+import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import {
   type MatrixTileLayout,
@@ -8247,85 +8248,6 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
     default:
       return undefined;
   }
-}
-
-function isHostManagedRuntimeNoopCall(name: string): boolean {
-  return name === "cudaDeviceSynchronize" ||
-    name === "cudaCtxResetPersistingL2Cache" ||
-    name === "cudaDeviceReset" ||
-    name === "cudaThreadExit" ||
-    name === "cudaThreadSynchronize" ||
-    name === "cudaDeviceGetAttribute" ||
-    name === "cudaDeviceGetLimit" ||
-    name === "cudaDeviceSetLimit" ||
-    name === "cudaThreadSetLimit" ||
-    name === "cudaDeviceCanAccessPeer" ||
-    name === "cudaDeviceEnablePeerAccess" ||
-    name === "cudaDeviceDisablePeerAccess" ||
-    name === "cudaGetDeviceFlags" ||
-    name === "cudaSetDeviceFlags" ||
-    name === "cudaMemGetInfo" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    name === "cudaOccupancyMaxPotentialBlockSize" ||
-    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    name === "cudaDeviceGetCacheConfig" ||
-    name === "cudaDeviceSetCacheConfig" ||
-    name === "cudaDeviceGetSharedMemConfig" ||
-    name === "cudaDeviceSetSharedMemConfig" ||
-    name === "cudaThreadSetCacheConfig" ||
-    name === "cudaThreadExchangeStreamCaptureMode" ||
-    name === "cudaDeviceGetStreamPriorityRange" ||
-    name === "cudaFree" ||
-    name === "cudaFreeAsync" ||
-    name === "cudaMemAdvise" ||
-    name === "cudaMemPrefetchAsync" ||
-    name === "cudaStreamAttachMemAsync" ||
-    name === "cudaStreamBeginCapture" ||
-    name === "cudaStreamEndCapture" ||
-    name === "cudaStreamUpdateCaptureDependencies" ||
-    name === "cudaGraphUpload" ||
-    name === "cudaGraphDestroy" ||
-    name === "cudaGraphExecDestroy" ||
-    name === "cudaStreamCreate" ||
-    name === "cudaStreamCreateWithFlags" ||
-    name === "cudaStreamCreateWithPriority" ||
-    name === "cudaStreamDestroy" ||
-    name === "cudaStreamGetDevice" ||
-    name === "cudaStreamGetFlags" ||
-    name === "cudaStreamGetId" ||
-    name === "cudaStreamGetPriority" ||
-    name === "cudaStreamIsCapturing" ||
-    name === "cudaStreamGetCaptureInfo" ||
-    name === "cudaStreamGetCaptureInfo_v2" ||
-    name === "cudaStreamQuery" ||
-    name === "cudaStreamSynchronize" ||
-    name === "cudaStreamWaitEvent" ||
-    name === "cudaSetDevice" ||
-    name === "cudaFuncSetAttribute" ||
-    name === "cudaFuncSetCacheConfig" ||
-    name === "cudaFuncSetSharedMemConfig" ||
-    name === "cudaGetLastError" ||
-    name === "cudaPeekAtLastError" ||
-    name === "cudaProfilerStart" ||
-    name === "cudaProfilerStop" ||
-    name === "cudaEventCreate" ||
-    name === "cudaEventCreateWithFlags" ||
-    name === "cudaEventDestroy" ||
-    name === "cudaEventQuery" ||
-    name === "cudaEventRecord" ||
-    name === "cudaEventRecordWithFlags" ||
-    name === "cudaEventSynchronize" ||
-    name === "cudaMemcpy2D" ||
-    name === "cudaMemcpy2DAsync" ||
-    name === "cudaMemcpyToSymbol" ||
-    name === "cudaMemcpyToSymbolAsync" ||
-    name === "cudaMemcpyFromSymbol" ||
-    name === "cudaMemcpyFromSymbolAsync" ||
-    name === "cudaMemset2D" ||
-    name === "cudaMemset2DAsync" ||
-    name === "cudaMemsetToSymbol" ||
-    name === "cudaMemsetToSymbolAsync";
 }
 
 function isEmittedPointerVar(statement: CudaLiteVarDecl, context: EmitContext): boolean {

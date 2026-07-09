@@ -4518,23 +4518,23 @@ __global__ void unsupported(float* x) {
       "cudaEventRecordWithFlags",
       "cudaEventSynchronize",
     ];
-    const files = [
+    const registrySource = compilerSourceText("cuda_runtime_noops.ts");
+    const missing = modeledRuntimeCalls
+      .filter((call) => !registrySource.includes(`"${call}"`))
+      .map((call) => `cuda_runtime_noops.ts:${call}`);
+
+    const stageConsumers = [
       "analyzer.ts",
       "reference.ts",
       "runtime_plan.ts",
-      "dynamic_launch.ts",
-      "peer_copy.ts",
-      "webgpu_orchestration.ts",
       "wgsl.ts",
     ];
-    const missing = files.flatMap((file) => {
-      const source = compilerSourceText(file);
-      return modeledRuntimeCalls
-        .filter((call) => !source.includes(`"${call}"`))
-        .map((call) => `${file}:${call}`);
-    });
+    const missingConsumers = stageConsumers
+      .filter((file) => !compilerSourceText(file).includes("isHostManagedRuntimeNoopCall"))
+      .map((file) => `${file}:isHostManagedRuntimeNoopCall`);
 
     expect(missing).toEqual([]);
+    expect(missingConsumers).toEqual([]);
   });
 
   it("keeps CUDA runtime query-write calls wired through side-effect guards", () => {

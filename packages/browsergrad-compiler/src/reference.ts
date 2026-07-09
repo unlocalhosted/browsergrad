@@ -10,6 +10,7 @@ import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
 import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
+import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
@@ -4527,78 +4528,6 @@ function saturateBfloat16(value: number): number {
 
 function reluBfloat16(value: number): number {
   return Number.isNaN(value) ? roundBfloat16(Number.NaN) : roundBfloat16(Math.max(0, value));
-}
-
-function isHostManagedRuntimeNoopCall(name: string): boolean {
-  return name === "cudaDeviceSynchronize" ||
-    name === "cudaCtxResetPersistingL2Cache" ||
-    name === "cudaDeviceReset" ||
-    name === "cudaThreadExit" ||
-    name === "cudaThreadSynchronize" ||
-    name === "cudaDeviceGetAttribute" ||
-    name === "cudaDeviceGetLimit" ||
-    name === "cudaDeviceSetLimit" ||
-    name === "cudaThreadSetLimit" ||
-    name === "cudaDeviceCanAccessPeer" ||
-    name === "cudaDeviceEnablePeerAccess" ||
-    name === "cudaDeviceDisablePeerAccess" ||
-    name === "cudaSetDeviceFlags" ||
-    name === "cudaMemGetInfo" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    name === "cudaOccupancyMaxPotentialBlockSize" ||
-    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    name === "cudaDeviceGetCacheConfig" ||
-    name === "cudaDeviceSetCacheConfig" ||
-    name === "cudaDeviceGetSharedMemConfig" ||
-    name === "cudaDeviceSetSharedMemConfig" ||
-    name === "cudaThreadSetCacheConfig" ||
-    name === "cudaThreadExchangeStreamCaptureMode" ||
-    name === "cudaFree" ||
-    name === "cudaFreeAsync" ||
-    name === "cudaMemAdvise" ||
-    name === "cudaMemPrefetchAsync" ||
-    name === "cudaStreamAttachMemAsync" ||
-    name === "cudaStreamBeginCapture" ||
-    name === "cudaStreamEndCapture" ||
-    name === "cudaStreamUpdateCaptureDependencies" ||
-    name === "cudaGraphUpload" ||
-    name === "cudaGraphDestroy" ||
-    name === "cudaGraphExecDestroy" ||
-    name === "cudaStreamCreate" ||
-    name === "cudaStreamCreateWithFlags" ||
-    name === "cudaStreamCreateWithPriority" ||
-    name === "cudaStreamDestroy" ||
-    name === "cudaStreamGetDevice" ||
-    name === "cudaStreamGetFlags" ||
-    name === "cudaStreamGetId" ||
-    name === "cudaStreamGetPriority" ||
-    name === "cudaStreamIsCapturing" ||
-    name === "cudaStreamGetCaptureInfo" ||
-    name === "cudaStreamGetCaptureInfo_v2" ||
-    name === "cudaStreamQuery" ||
-    name === "cudaStreamSynchronize" ||
-    name === "cudaStreamWaitEvent" ||
-    name === "cudaSetDevice" ||
-    name === "cudaGetDevice" ||
-    name === "cudaGetDeviceCount" ||
-    name === "cudaRuntimeGetVersion" ||
-    name === "cudaDriverGetVersion" ||
-    name === "cudaFuncSetAttribute" ||
-    name === "cudaFuncSetCacheConfig" ||
-    name === "cudaFuncSetSharedMemConfig" ||
-    name === "cudaGetLastError" ||
-    name === "cudaPeekAtLastError" ||
-    name === "cudaProfilerStart" ||
-    name === "cudaProfilerStop" ||
-    name === "cudaEventCreate" ||
-    name === "cudaEventCreateWithFlags" ||
-    name === "cudaEventDestroy" ||
-    name === "cudaEventQuery" ||
-    name === "cudaEventRecord" ||
-    name === "cudaEventRecordWithFlags" ||
-    name === "cudaEventSynchronize";
 }
 
 function readTextureVector(
