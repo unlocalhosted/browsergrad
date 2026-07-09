@@ -2733,6 +2733,34 @@ __global__ void ptxArithmeticB32(uint *out, uint *a, uint *b, uint *c) {
   out[idx + 8] = mul_lo_ptx(a[idx], b[idx]);
   out[idx + 12] = mad_lo_ptx(a[idx], b[idx], c[idx]);
 }`,
+  ptxArithmeticImmediateB32: `
+__device__ unsigned int add_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("add.u32 %0, %1, 5;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ int sub_imm_ptx(int a) {
+  int ret;
+  asm volatile("sub.s32 %0, %1, 7;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int mul_lo_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("mul.lo.u32 %0, %1, 3;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int mad_lo_imm_ptx(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("mad.lo.u32 %0, %1, %2, 11;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__global__ void ptxArithmeticImmediateB32(uint *out, uint *a, uint *b) {
+  int idx = threadIdx.x;
+  out[idx] = add_imm_ptx(a[idx]);
+  out[idx + 4] = (uint)sub_imm_ptx((int)a[idx]);
+  out[idx + 8] = mul_lo_imm_ptx(a[idx]);
+  out[idx + 12] = mad_lo_imm_ptx(a[idx], b[idx]);
+}`,
   ptxMinMaxB32: `
 __device__ unsigned int min_u_ptx(unsigned int a, unsigned int b) {
   unsigned int ret;
@@ -14257,6 +14285,24 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [3, 1, 0x80000002, 0x99999999, 0xffffffff, 0xfffffffd, 0x7ffffffe, 0x8acf1357, 2, 0xfffffffe, 0, 0x70b88d78, 7, 5, 9, 0x70b88d77],
+            },
+          },
+          {
+            name: "inline-asm:arithmetic-immediate-b32",
+            source: SOURCES.ptxArithmeticImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                a: new Uint32Array([1, 0xffffffff, 0x80000000, 0x12345678]),
+                b: new Uint32Array([2, 2, 2, 0x87654321]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [6, 4, 0x80000005, 0x1234567d, 0xfffffffa, 0xfffffff8, 0x7ffffff9, 0x12345671, 3, 0xfffffffd, 0x80000000, 0x369d0368, 13, 9, 11, 0x70b88d83],
             },
           },
           {

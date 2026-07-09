@@ -967,12 +967,16 @@ function execInlineAsm(
   }
   if (op?.kind === "arithmetic-b32") {
     const label = op.op === "mul-lo" ? "mul.lo.b32" : op.op === "mad-lo" ? "mad.lo.b32" : `${op.op}.b32`;
-    const expectedInputs = op.op === "mad-lo" ? 3 : 2;
+    const expectedInputs = (op.op === "mad-lo" ? 3 : 2) - (op.immediate === undefined ? 0 : 1);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
     const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
-    const right = valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
-    const addend = op.op === "mad-lo" ? valueAsNumber(evalExpression(statement.inputs[2]!, context), label) >>> 0 : 0;
+    const right = op.immediate !== undefined && op.op !== "mad-lo"
+      ? op.immediate >>> 0
+      : valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
+    const addend = op.op === "mad-lo"
+      ? op.immediate ?? valueAsNumber(evalExpression(statement.inputs[2]!, context), label) >>> 0
+      : 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmArithmetic(op.op, left, right, addend), context);
     return;
   }

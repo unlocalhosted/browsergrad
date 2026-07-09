@@ -12106,6 +12106,70 @@ __global__ void arithmeticKernel(uint *out, uint *a, uint *b, uint *c) {
     ]);
   });
 
+  it("lowers inline PTX arithmetic b32 immediate statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int add_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("add.u32 %0, %1, 5;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ int sub_imm_ptx(int a) {
+  int ret;
+  asm volatile("sub.s32 %0, %1, 7;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int mul_lo_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("mul.lo.u32 %0, %1, 3;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int mad_lo_imm_ptx(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("mad.lo.u32 %0, %1, %2, 11;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__global__ void arithmeticImmediateKernel(uint *out, uint *a, uint *b) {
+  int idx = threadIdx.x;
+  out[idx] = add_imm_ptx(a[idx]);
+  out[idx + 4] = (uint)sub_imm_ptx((int)a[idx]);
+  out[idx + 8] = mul_lo_imm_ptx(a[idx]);
+  out[idx + 12] = mad_lo_imm_ptx(a[idx], b[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(16),
+          a: new Uint32Array([1, 0xffffffff, 0x80000000, 0x12345678]),
+          b: new Uint32Array([2, 2, 2, 0x87654321]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("5u");
+    expect(compiled.wgsl).toContain("11u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      6,
+      4,
+      0x80000005,
+      0x1234567d,
+      0xfffffffa,
+      0xfffffff8,
+      0x7ffffff9,
+      0x12345671,
+      3,
+      0xfffffffd,
+      0x80000000,
+      0x369d0368,
+      13,
+      9,
+      11,
+      0x70b88d83,
+    ]);
+  });
+
   it("lowers inline PTX min/max u32 and s32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int min_u_ptx(unsigned int a, unsigned int b) {
