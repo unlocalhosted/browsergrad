@@ -16,6 +16,10 @@ import {
   cloneReferenceBuffers,
   cloneReferenceSurfaces,
 } from "./reference_inputs.js";
+import {
+  freezeReferenceTrace,
+  type MutableReferenceTrace,
+} from "./reference_trace.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
   CompiledCudaLiteKernel,
@@ -24,8 +28,6 @@ import type {
   CudaLiteScalarType,
   CudaLiteTextureDescriptor,
   KernelLaunch,
-  KernelMemoryAccess,
-  KernelThreadTrace,
   ReferenceKernelResult,
   SourceSpan,
 } from "./types.js";
@@ -109,14 +111,7 @@ interface SemanticReferenceContext {
   returnValue?: SemanticValue;
 }
 
-interface MutableTrace {
-  blockIdx: [number, number, number];
-  threadIdx: [number, number, number];
-  reads: KernelMemoryAccess[];
-  writes: KernelMemoryAccess[];
-  sharedReads: KernelMemoryAccess[];
-  sharedWrites: KernelMemoryAccess[];
-}
+type MutableTrace = MutableReferenceTrace;
 
 export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLiteKernel): boolean {
   return compiled.kernelIr.params.every(semanticReferenceParamSupported) &&
@@ -208,7 +203,7 @@ export function runCompiledKernelSemanticReference(
       if (!buffer) throw semanticReferenceError(`missing readback buffer '${name}'`, compiled.kernelIr.span);
       return [name, buffer];
     })),
-    trace: traces.map(freezeTrace),
+    trace: traces.map(freezeReferenceTrace),
   };
 }
 
@@ -4652,17 +4647,6 @@ function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
 
 function truthy(value: number): boolean {
   return value !== 0 && !Number.isNaN(value);
-}
-
-function freezeTrace(trace: MutableTrace): KernelThreadTrace {
-  return {
-    blockIdx: trace.blockIdx,
-    threadIdx: trace.threadIdx,
-    reads: trace.reads.map((item) => ({ ...item })),
-    writes: trace.writes.map((item) => ({ ...item })),
-    sharedReads: trace.sharedReads.map((item) => ({ ...item })),
-    sharedWrites: trace.sharedWrites.map((item) => ({ ...item })),
-  };
 }
 
 function semanticReferenceError(message: string, span: SourceSpan): CudaLiteCompilerError {

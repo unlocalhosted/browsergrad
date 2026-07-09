@@ -34,6 +34,10 @@ import {
   cloneReferenceSurfaces,
   cloneReferenceTypedArray,
 } from "./reference_inputs.js";
+import {
+  freezeReferenceTrace,
+  type MutableReferenceTrace,
+} from "./reference_trace.js";
 import type {
   CudaLiteSemanticSymbol,
   SemanticExpression,
@@ -99,8 +103,6 @@ import {
   type CudaLiteVarDecl,
   type KernelLaunch,
   type KernelIrModule,
-  type KernelMemoryAccess,
-  type KernelThreadTrace,
   type ReferenceKernelResult,
 } from "./types.js";
 
@@ -227,14 +229,7 @@ interface LocalPointerArrayValue {
   readonly values: Array<AddressValue | PoolPointerValue | number>;
 }
 
-interface MutableTrace {
-  readonly blockIdx: readonly [number, number, number];
-  readonly threadIdx: readonly [number, number, number];
-  readonly reads: KernelMemoryAccess[];
-  readonly writes: KernelMemoryAccess[];
-  readonly sharedReads: KernelMemoryAccess[];
-  readonly sharedWrites: KernelMemoryAccess[];
-}
+type MutableTrace = MutableReferenceTrace;
 
 type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
@@ -320,7 +315,7 @@ export function runCompiledKernelReference(
     if (!buffer) throw compilerFailure(`missing readback buffer '${name}'`);
     result[name] = cloneReferenceTypedArray(buffer);
   }
-  return { buffers: result, trace: traces.map(freezeTrace) };
+  return { buffers: result, trace: traces.map(freezeReferenceTrace) };
 }
 
 function collectReferenceKernels(compiled: CompiledCudaLiteKernel): Map<string, CudaLiteKernel> {
@@ -6674,17 +6669,6 @@ function isCooperativeGroup(value: LocalValue | undefined): value is Cooperative
 
 function truthy(value: number): boolean {
   return value !== 0 && !Number.isNaN(value);
-}
-
-function freezeTrace(trace: MutableTrace): KernelThreadTrace {
-  return {
-    blockIdx: trace.blockIdx,
-    threadIdx: trace.threadIdx,
-    reads: trace.reads.map((item) => ({ ...item })),
-    writes: trace.writes.map((item) => ({ ...item })),
-    sharedReads: trace.sharedReads.map((item) => ({ ...item })),
-    sharedWrites: trace.sharedWrites.map((item) => ({ ...item })),
-  };
 }
 
 function validateInputs(
