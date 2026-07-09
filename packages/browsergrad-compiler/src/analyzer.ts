@@ -78,6 +78,12 @@ import {
   isCudaHalf2MaskComparisonCallName as isHalf2ComparisonMaskIntrinsic,
   isCudaHalf2VectorOperationCallName as isHalf2VectorIntrinsic,
 } from "./cuda_vector_intrinsics.js";
+import {
+  isCudaVectorMathCallName as isVectorMathBuiltin,
+  isCudaVectorMathCrossCallName,
+  isCudaVectorMathLerpCallName,
+  isCudaVectorMathNormalizeCallName,
+} from "./cuda_vector_math_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
@@ -2727,10 +2733,6 @@ function validateCacheHintStoreValue(
   }
 }
 
-function isVectorMathBuiltin(name: string): boolean {
-  return name === "dot" || name === "length" || name === "normalize" || name === "cross" || name === "lerp";
-}
-
 function validateVectorMathBuiltin(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   callName: string,
@@ -2739,7 +2741,7 @@ function validateVectorMathBuiltin(
   scope: Scope,
 ): ExpressionInfo | undefined {
   const infos = expression.args.map((arg) => walkExpression(arg, scope));
-  if (callName === "lerp") {
+  if (isCudaVectorMathLerpCallName(callName)) {
     const leftType = infos[0]?.kind === "vector" && isCudaVectorType(infos[0].valueType) ? infos[0].valueType : undefined;
     const rightType = infos[1]?.kind === "vector" && isCudaVectorType(infos[1].valueType) ? infos[1].valueType : undefined;
     const vectorType = leftType ?? rightType;
@@ -2770,13 +2772,13 @@ function validateVectorMathBuiltin(
   }
   const firstType = infos[0]?.valueType;
   const secondType = infos[1]?.valueType;
-  if ((callName === "dot" || callName === "cross") && isCudaVectorType(firstType) && isCudaVectorType(secondType) && firstType !== secondType) {
+  if ((callName === "dot" || isCudaVectorMathCrossCallName(callName)) && isCudaVectorType(firstType) && isCudaVectorType(secondType) && firstType !== secondType) {
     diagnostics.push(error("unsupported-vector-argument", `${callName} expects matching CUDA vector types`, expression.span));
   }
-  if (callName === "cross" && firstType !== undefined && firstType !== "float3") {
+  if (isCudaVectorMathCrossCallName(callName) && firstType !== undefined && firstType !== "float3") {
     diagnostics.push(error("unsupported-vector-argument", "cross expects float3 arguments", expression.span));
   }
-  if (callName === "normalize") {
+  if (isCudaVectorMathNormalizeCallName(callName)) {
     return { kind: "vector", valueType: isCudaVectorType(firstType) ? firstType : undefined };
   }
   return { kind: "scalar", valueType: "float" };

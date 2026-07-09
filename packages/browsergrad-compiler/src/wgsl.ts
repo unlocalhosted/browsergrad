@@ -75,6 +75,12 @@ import {
   type CudaLiteVectorType,
 } from "./vector_types.js";
 import {
+  isCudaVectorMathCrossCallName,
+  isCudaVectorMathLerpCallName,
+  isCudaVectorMathNormalizeCallName,
+  isCudaVectorMathScalarReturnCallName,
+} from "./cuda_vector_math_calls.js";
+import {
   collectLocalArrays,
   collectLocalPointerHandleDeclarations,
   collectLocalNames,
@@ -5691,7 +5697,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
       const vectorType = expression.args.map((arg) => expressionValueTypeForEmit(arg, context)).find(isCudaVectorType);
       if (vectorType) return vectorType;
     }
-    if (name === "lerp") {
+    if (isCudaVectorMathLerpCallName(name)) {
       const left = expression.args[0] ? expressionValueTypeForEmit(expression.args[0], context) : undefined;
       const right = expression.args[1] ? expressionValueTypeForEmit(expression.args[1], context) : undefined;
       if (isCudaVectorType(left)) return left;
@@ -5700,13 +5706,13 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (name === "fma" || name === "fmaf" || name === "__fmaf_rn") {
       return expression.args.map((arg) => expressionValueTypeForEmit(arg, context)).find(isCudaVectorType) ?? "float";
     }
-    if (name === "normalize") {
+    if (isCudaVectorMathNormalizeCallName(name)) {
       return expression.args[0] ? expressionValueTypeForEmit(expression.args[0], context) : undefined;
     }
-    if (name === "cross") {
+    if (isCudaVectorMathCrossCallName(name)) {
       return expression.args.map((arg) => expressionValueTypeForEmit(arg, context)).find(isCudaVectorType);
     }
-    if (name === "dot" || name === "length") return "float";
+    if (isCudaVectorMathScalarReturnCallName(name)) return "float";
     if (name !== undefined && CUDA_CACHE_HINT_LOADS.has(name)) {
       return expression.args[0] ? devicePointerValueTypeForExpression(expression.args[0], context) : undefined;
     }

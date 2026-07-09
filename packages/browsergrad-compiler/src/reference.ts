@@ -124,6 +124,11 @@ import {
   isCudaHalf2VectorOperationCallName as isHalf2VectorIntrinsic,
 } from "./cuda_vector_intrinsics.js";
 import {
+  isCudaVectorMathCrossCallName,
+  isCudaVectorMathLerpCallName,
+  isCudaVectorMathNormalizeCallName,
+} from "./cuda_vector_math_calls.js";
+import {
   referenceEvalI16x2I8x2DotAdd as evalI16x2I8x2DotAdd,
   referenceEvalI8x4DotAdd as evalI8x4DotAdd,
   referenceEvalU16x2U8x2DotAdd as evalU16x2U8x2DotAdd,
@@ -2395,7 +2400,7 @@ function vectorExpressionType(
     const name = expressionName(expression.callee);
     const constructor = name ? cudaVectorConstructorType(name) : undefined;
     if (constructor) return constructor;
-    if (name === "lerp") return vectorExpressionType(expression.args[0]!, context) ?? vectorExpressionType(expression.args[1]!, context);
+    if (isCudaVectorMathLerpCallName(name)) return vectorExpressionType(expression.args[0]!, context) ?? vectorExpressionType(expression.args[1]!, context);
     if (name !== undefined && isTextureReadCall(name) && isCudaVectorType(expression.templateValueType)) {
       return expression.templateValueType;
     }
@@ -3850,9 +3855,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     ...expression,
     args: [expression.args[0]!, expression.args[0]!],
   }, context));
-  if (name === "normalize") return normalizeCudaVector(expression, context);
-  if (name === "cross") return crossCudaVectors(expression, context);
-  if (name === "lerp") {
+  if (isCudaVectorMathNormalizeCallName(name)) return normalizeCudaVector(expression, context);
+  if (isCudaVectorMathCrossCallName(name)) return crossCudaVectors(expression, context);
+  if (isCudaVectorMathLerpCallName(name)) {
     const vectorType = vectorExpressionType(expression.args[0]!, context) ?? vectorExpressionType(expression.args[1]!, context);
     if (vectorType) return lerpCudaVector(expression, vectorType, context);
   }
