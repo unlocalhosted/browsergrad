@@ -60,7 +60,13 @@ import {
   semanticAtomicSupportsBfloatAdd,
   semanticAtomicSupportsFloat,
 } from "./semantic_atomic_intrinsics.js";
-import { SEMANTIC_MATH_CALLS, semanticMathCallArity } from "./semantic_math_intrinsics.js";
+import {
+  SEMANTIC_BFLOAT_HELPER_CALLS,
+  SEMANTIC_FP8_CALLS,
+  SEMANTIC_HALF_CONVERSION_CALLS,
+  SEMANTIC_MATH_CALLS,
+  semanticMathCallArity,
+} from "./semantic_math_intrinsics.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
@@ -146,39 +152,6 @@ const UNIFORM_PARAMS_NAME = "bg_uniforms";
 const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
-const SEMANTIC_FP8_CALLS = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
-const SEMANTIC_HALF_CONVERSION_CALLS = new Set([
-  "__float2half", "__float2half_rn", "__float2half_rz", "__float2half_ru", "__float2half_rd",
-  "__int2half_rn", "__int2half_rz", "__int2half_ru", "__int2half_rd",
-  "__uint2half_rn", "__uint2half_rz", "__uint2half_ru", "__uint2half_rd",
-  "__short2half_rn", "__short2half_rz", "__short2half_ru", "__short2half_rd",
-  "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
-]);
-const SEMANTIC_BFLOAT_HELPER_CALLS = new Set([
-  "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd", "__double2bfloat16",
-  "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
-  "__ll2bfloat16_rn", "__ll2bfloat16_rz", "__ll2bfloat16_ru", "__ll2bfloat16_rd",
-  "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
-  "__ull2bfloat16_rn", "__ull2bfloat16_rz", "__ull2bfloat16_ru", "__ull2bfloat16_rd",
-  "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
-  "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
-  "__bfloat162short_rn", "__bfloat162short_rz", "__bfloat162short_ru", "__bfloat162short_rd",
-  "__bfloat162ushort_rn", "__bfloat162ushort_rz", "__bfloat162ushort_ru", "__bfloat162ushort_rd",
-  "__bfloat162ll_rn", "__bfloat162ll_rz", "__bfloat162ll_ru", "__bfloat162ll_rd",
-  "__bfloat162ull_rn", "__bfloat162ull_rz", "__bfloat162ull_ru", "__bfloat162ull_rd",
-  "__bfloat162char_rz", "__bfloat162uchar_rz",
-  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "hexp",
-  "__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat",
-  "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu",
-  "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
-  "__halves2bfloat162", "__float22bfloat162_rn", "__float2bfloat162_rn", "__floats2bfloat162_rn",
-  "h2ceil", "h2floor", "h2rcp", "h2rsqrt", "h2sqrt", "h2trunc",
-  "h2exp", "h2exp2", "h2exp10", "h2log", "h2log2", "h2log10",
-  "h2sin", "h2cos", "h2tanh", "h2tanh_approx", "h2rint",
-  "__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat",
-  "__hmul2", "__hmul2_rn", "__hmul2_sat", "__h2div", "__hfma2", "__hfma2_rn", "__hfma2_sat", "__hfma2_relu", "__hcmadd",
-  "__hmin2", "__hmax2", "__hmin2_nan", "__hmax2_nan",
-]);
 const WGSL_ATOMIC_CALLEES = new Map([
   ["atomicAdd", "atomicAdd"],
   ["atomicAdd_system", "atomicAdd"],
