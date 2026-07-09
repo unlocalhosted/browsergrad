@@ -58,6 +58,7 @@ import {
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
   semanticAddressPredicateAddressSpace,
+  semanticSubgroupScalarArguments,
 } from "./semantic_builtin_calls.js";
 import {
   isSemanticAtomicCallName,
@@ -1079,26 +1080,14 @@ function semanticWgslSubgroupCallSupported(
   ir?: SemanticKernelIrModule,
 ): boolean {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) || ir?.requiredFeatures.includes("subgroups") !== true) return false;
-  if (expression.callee.name === "__activemask") return expression.args.length === 0;
-  if (legacyVoteCall(expression.callee.name)) {
-    return expression.args.length === 1 && semanticWgslExpressionSupported(expression.args[0]!, "scalar", ir);
-  }
-  if (legacyShuffleCall(expression.callee.name)) {
-    return (expression.args.length === 2 || expression.args.length === 3) &&
-      expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-  }
+  const scalarArgs = semanticSubgroupScalarArguments(expression.callee.name, expression.args);
+  if (scalarArgs === undefined || !scalarArgs.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir))) return false;
   if (semanticBitwiseReduceOpForCall(expression.callee.name)) {
     const value = expression.args[1];
     const valueType = value ? semanticExpressionValueType(value) : undefined;
-    return expression.args.length === 2 &&
-      (valueType === "int" || valueType === "uint") &&
-      expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+    return valueType === "int" || valueType === "uint";
   }
-  if (semanticShuffleOpForCall(expression.callee.name)) {
-    return (expression.args.length === 3 || expression.args.length === 4) &&
-      expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-  }
-  return expression.args.length === 2 && semanticWgslExpressionSupported(expression.args[1]!, "scalar", ir);
+  return true;
 }
 
 function semanticWgslAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {

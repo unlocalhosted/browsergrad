@@ -1,5 +1,11 @@
 import { CUDA_ADDRESS_SPACE_PREDICATE_CALL_NAMES } from "./cuda_pointer_calls.js";
-import { CUDA_SUBGROUP_CALL_NAMES } from "./cuda_subgroup_calls.js";
+import {
+  CUDA_SUBGROUP_CALL_NAMES,
+  cudaBitwiseReduceOpForCall,
+  cudaShuffleOpForCall,
+  isCudaLegacyShuffleCallName,
+  isCudaLegacyVoteCallName,
+} from "./cuda_subgroup_calls.js";
 import type {
   SemanticAddressSpace,
   SemanticExpression,
@@ -16,6 +22,34 @@ export const SEMANTIC_NOOP_CALLS = new Set([
 export const SEMANTIC_ADDRESS_PREDICATE_CALLS: ReadonlySet<string> = new Set(CUDA_ADDRESS_SPACE_PREDICATE_CALL_NAMES);
 
 export const SEMANTIC_SUBGROUP_CALLS: ReadonlySet<string> = new Set(CUDA_SUBGROUP_CALL_NAMES);
+
+type SemanticSubgroupScalarArgRule = "all" | readonly number[];
+
+interface SemanticSubgroupCallShape {
+  readonly minArgs: number;
+  readonly maxArgs: number;
+  readonly scalarArgRule: SemanticSubgroupScalarArgRule;
+}
+
+export function semanticSubgroupCallShape(name: string | undefined): SemanticSubgroupCallShape | undefined {
+  if (name === undefined || !SEMANTIC_SUBGROUP_CALLS.has(name)) return undefined;
+  if (name === "__activemask") return { minArgs: 0, maxArgs: 0, scalarArgRule: [] };
+  if (isCudaLegacyVoteCallName(name)) return { minArgs: 1, maxArgs: 1, scalarArgRule: [0] };
+  if (isCudaLegacyShuffleCallName(name)) return { minArgs: 2, maxArgs: 3, scalarArgRule: "all" };
+  if (cudaBitwiseReduceOpForCall(name)) return { minArgs: 2, maxArgs: 2, scalarArgRule: "all" };
+  if (cudaShuffleOpForCall(name)) return { minArgs: 3, maxArgs: 4, scalarArgRule: "all" };
+  return { minArgs: 2, maxArgs: 2, scalarArgRule: [1] };
+}
+
+export function semanticSubgroupScalarArguments(
+  name: string | undefined,
+  args: readonly SemanticExpression[],
+): readonly SemanticExpression[] | undefined {
+  const shape = semanticSubgroupCallShape(name);
+  if (!shape || args.length < shape.minArgs || args.length > shape.maxArgs) return undefined;
+  if (shape.scalarArgRule === "all") return args;
+  return shape.scalarArgRule.map((index) => args[index]).filter((arg): arg is SemanticExpression => arg !== undefined);
+}
 
 export function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {
   if (!expression) return undefined;

@@ -100,6 +100,7 @@ import {
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
   semanticAddressPredicateAddressSpace,
+  semanticSubgroupScalarArguments,
 } from "./semantic_builtin_calls.js";
 import {
   SEMANTIC_ATOMIC_OPS,
@@ -551,24 +552,8 @@ function semanticReferenceCurandCallSupported(
 
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return false;
-  if (expression.callee.name === "__activemask") return expression.args.length === 0;
-  if (legacyVoteCall(expression.callee.name)) {
-    return expression.args.length === 1 && semanticReferenceExpressionSupported(expression.args[0]!, "scalar");
-  }
-  if (legacyShuffleCall(expression.callee.name)) {
-    return (expression.args.length === 2 || expression.args.length === 3) &&
-      expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
-  }
-  if (
-    expression.callee.name === "__shfl_sync" ||
-    expression.callee.name === "__shfl_down_sync" ||
-    expression.callee.name === "__shfl_up_sync" ||
-    expression.callee.name === "__shfl_xor_sync"
-  ) {
-    return (expression.args.length === 3 || expression.args.length === 4) &&
-      expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
-  }
-  return expression.args.length === 2 && semanticReferenceExpressionSupported(expression.args[1]!, "scalar");
+  const scalarArgs = semanticSubgroupScalarArguments(expression.callee.name, expression.args);
+  return scalarArgs !== undefined && scalarArgs.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
 }
 
 function semanticReferenceAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
