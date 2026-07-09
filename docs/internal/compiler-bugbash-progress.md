@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T20:17:18Z
+Last updated: 2026-07-09T20:24:00Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: reference texture coordinate helpers moved into focused Module |
+| Active work item | Architecture split: CUDA cp.async classification shared across stages |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: extracted `cuda_cp_async.ts` for cp.async copy/fence call classification shared by analyzer, reference, and WGSL backend; cp.async compatibility recognition now has one Module instead of three duplicated classifier implementations across compiler stages; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + compiler unit `733/0` + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + selected storage/pointer WebGPU `125/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `wgsl.ts` down to `8162`, `reference.ts` down to `6143`, and `analyzer.ts` down to `5386`
 - Architecture split: extracted `reference_texture.ts` for texture descriptor defaults, channel count, read-call classification, wrap/clamp coordinate math, and linear-filter axis indexing; `reference.ts` now keeps texture sampling execution separate from reusable texture coordinate policy; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed standalone after avoiding parallel dist-build races with unit `749/0`, and architecture map now shows `reference.ts` down to `6152` lines
 - Architecture split: extracted `reference_numeric.ts` for reference signed-average, packed dot-add helpers, half rounding/saturation, and bf16 rounding/saturation/relu helpers while preserving the legacy bf16 rounding implementation exactly; `reference.ts` now consumes one numeric-helper Module instead of carrying scalar bit math beside expression execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6224` lines
 - Architecture split: extracted `reference_kernels.ts` for reference backend-IR selection, launched-kernel catalog construction, device-function overload catalogs, and reference device-function resolution; `reference.ts` now consumes a focused reference kernel/function Module instead of mixing catalog construction into execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6294` lines

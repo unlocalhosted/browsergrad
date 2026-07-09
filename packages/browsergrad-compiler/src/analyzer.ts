@@ -24,6 +24,10 @@ import {
 } from "./types.js";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
+import {
+  isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
+  isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
+} from "./cuda_cp_async.js";
 import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
@@ -2993,19 +2997,6 @@ function isBfloat16ScalarPredicate(name: string): boolean {
 
 function isFillRegsBuiltin(name: string): boolean {
   return name === "fill_1D_regs" || name === "fill_2D_regs" || name === "fill_3D_regs";
-}
-
-function isCpAsyncCopyCall(name: string): boolean {
-  return name === "CP_ASYNC_CA" || name === "CP_ASYNC_CG" || name === "CP_ASYNC_BULK";
-}
-
-function isCpAsyncFenceCall(name: string): boolean {
-  return name === "CP_ASYNC_COMMIT_GROUP" ||
-    name === "CP_ASYNC_WAIT_ALL" ||
-    name === "CP_ASYNC_WAIT_GROUP" ||
-    name === "CP_ASYNC_BULK_COMMIT_GROUP" ||
-    name === "CP_ASYNC_BULK_WAIT_ALL" ||
-    name === "CP_ASYNC_BULK_WAIT_GROUP";
 }
 
 function validateCpAsyncCopy(

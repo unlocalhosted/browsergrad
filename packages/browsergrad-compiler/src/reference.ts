@@ -55,6 +55,10 @@ import {
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
 import {
+  isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
+  isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
+} from "./cuda_cp_async.js";
+import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
 } from "./reference_trace.js";
@@ -1298,19 +1302,6 @@ function execCpAsyncStatement(expression: CudaLiteExpression, context: ThreadCon
     writeLValue(offsetLValue(dstLvalue, index, valueType), readLValue(offsetLValue(srcLvalue, index, valueType), context), context);
   }
   return true;
-}
-
-function isCpAsyncCopyCall(name: string | undefined): boolean {
-  return name === "CP_ASYNC_CA" || name === "CP_ASYNC_CG" || name === "CP_ASYNC_BULK";
-}
-
-function isCpAsyncFenceCall(name: string | undefined): boolean {
-  return name === "CP_ASYNC_COMMIT_GROUP" ||
-    name === "CP_ASYNC_WAIT_ALL" ||
-    name === "CP_ASYNC_WAIT_GROUP" ||
-    name === "CP_ASYNC_BULK_COMMIT_GROUP" ||
-    name === "CP_ASYNC_BULK_WAIT_ALL" ||
-    name === "CP_ASYNC_BULK_WAIT_GROUP";
 }
 
 function isPointerIdentityCall(name: string | undefined): boolean {
