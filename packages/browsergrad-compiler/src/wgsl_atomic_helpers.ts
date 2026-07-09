@@ -1,3 +1,5 @@
+import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
+
 export type WgslAtomicAddressSpace = "storage" | "workgroup";
 export type WgslAtomicIntegerScalar = "i32" | "u32";
 export type WgslIntViewAtomicKind = "Add" | "Sub" | "Min" | "Max" | "And" | "Or" | "Xor" | "Exchange";
@@ -34,34 +36,16 @@ export function intViewAtomicCasHelperName(addressSpace: WgslAtomicAddressSpace)
 }
 
 export function isAtomicCasCallName(name: string | undefined): boolean {
-  return name === "atomicCAS" || name === "atomicCAS_system";
+  return semanticAtomicOperation(name) === "cas";
 }
 
 export function isAtomicExchangeCallName(name: string | undefined): boolean {
-  return name === "atomicExch" || name === "atomicExch_system";
+  return semanticAtomicOperation(name) === "exchange";
 }
 
 export function isAtomicReturnCallName(name: string | undefined): boolean {
-  return name === "atomicAdd" ||
-    name === "atomicAdd_system" ||
-    name === "atomicSub" ||
-    name === "atomicSub_system" ||
-    name === "atomicMin" ||
-    name === "atomicMin_system" ||
-    name === "atomicMax" ||
-    name === "atomicMax_system" ||
-    name === "atomicMaxFloat" ||
-    name === "atomicAnd" ||
-    name === "atomicAnd_system" ||
-    name === "atomicOr" ||
-    name === "atomicOr_system" ||
-    name === "atomicXor" ||
-    name === "atomicXor_system" ||
-    name === "atomicInc" ||
-    name === "atomicInc_system" ||
-    name === "atomicDec" ||
-    name === "atomicDec_system" ||
-    isAtomicExchangeCallName(name);
+  const op = semanticAtomicOperation(name);
+  return op !== undefined && op !== "cas";
 }
 
 export function emitFloatAtomicAddHelper(addressSpace: WgslAtomicAddressSpace): string[] {

@@ -136,6 +136,7 @@ import {
   isAtomicExchangeCallName,
   isAtomicReturnCallName,
 } from "./wgsl_atomic_helpers.js";
+import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
 import {
   emitAtomicCall as emitAtomicCallImpl,
   emitAtomicCasCall as emitAtomicCasCallImpl,
@@ -5820,30 +5821,11 @@ function atomicCallReturnValueType(
   args: readonly CudaLiteExpression[],
   context: EmitContext,
 ): CudaLiteScalarType | undefined {
-  if (name === "atomicInc" || name === "atomicInc_system" || name === "atomicDec" || name === "atomicDec_system") {
+  const atomicOp = semanticAtomicOperation(name);
+  if (atomicOp === "inc" || atomicOp === "dec") {
     return "uint";
   }
-  if (
-    name === "atomicAdd" ||
-    name === "atomicSub" ||
-    name === "atomicMin" ||
-    name === "atomicMax" ||
-    name === "atomicMaxFloat" ||
-    name === "atomicExch" ||
-    name === "atomicCAS" ||
-    name === "atomicAnd" ||
-    name === "atomicOr" ||
-    name === "atomicXor" ||
-    name === "atomicAdd_system" ||
-    name === "atomicSub_system" ||
-    name === "atomicMin_system" ||
-    name === "atomicMax_system" ||
-    name === "atomicExch_system" ||
-    name === "atomicCAS_system" ||
-    name === "atomicAnd_system" ||
-    name === "atomicOr_system" ||
-    name === "atomicXor_system"
-  ) {
+  if (atomicOp !== undefined) {
     return atomicTargetValueType(args[0], context);
   }
   return undefined;
