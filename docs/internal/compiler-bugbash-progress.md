@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T19:52:06Z
+Last updated: 2026-07-09T19:57:41Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: reference AST scans moved into a focused Module |
+| Active work item | Architecture split: reference input validation moved into a focused Module |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: extracted `reference_input_validation.ts` for semantic IR input validation, external DevicePool discovery, typed constant/device-global checks, and surface/memory-pool shape checks; `reference.ts` now asks one reference input Module to prove host inputs satisfy semantic IR contracts before execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6386` lines
 - Architecture split: extracted `reference_ast_scans.ts` for AST-only reference scans that collect shared declarations and detect cooperative grid sync; `reference.ts` now consumes a focused AST scan Module instead of carrying parser-shape traversal beside interpreter execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6555` lines
 - Architecture split: extracted `reference_curand.ts` for shared deterministic CURAND LCG, jump-ahead, Box-Muller normal pair, and Poisson draw helpers; AST reference and semantic reference now consume one CURAND reference Module instead of duplicate RNG implementations, keeping CPU reference semantics local; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6619` lines and `semantic_reference.ts` down to `4602`
 - Architecture split: moved semantic WGSL texture descriptor helper function emission into `semantic_wgsl_texture_descriptors.ts`; texture descriptor specialization, helper naming, coordinate/index policy, and generated helper WGSL now live behind one texture-descriptor Module while `semantic_wgsl.ts` only asks for helpers to emit; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `5371` lines

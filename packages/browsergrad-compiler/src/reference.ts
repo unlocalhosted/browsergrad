@@ -2,7 +2,6 @@ import {
   createWgslFloat16Array,
   float16BitsToFloat32,
   float32ToFloat16Bits,
-  isWgslFloat16Array,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectKernelLaunchCallees } from "./ast_queries.js";
@@ -44,6 +43,10 @@ import {
   referenceUsesGridSync as usesGridSync,
 } from "./reference_ast_scans.js";
 import {
+  collectReferenceExternalDevicePoolNames as collectExternalDevicePoolNames,
+  validateReferenceInputs as validateInputs,
+} from "./reference_input_validation.js";
+import {
   cudaLiteTotalElements as totalElements,
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
@@ -79,13 +82,6 @@ import {
   referenceVectorFromTuple,
   type ReferenceVector3,
 } from "./reference_vectors.js";
-import type {
-  CudaLiteSemanticSymbol,
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
-import { walkSemanticOperations } from "./semantic_ir.js";
 import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
@@ -6367,130 +6363,6 @@ function isCooperativeGroup(value: LocalValue | undefined): value is Cooperative
     value.kind === "cooperative-group";
 }
 
-function validateInputs(
-  input: CompiledKernelInput,
-  kernelIr: SemanticKernelIrModule,
-): void {
-  for (const param of kernelIr.params) {
-    if (param.valueType === "texture2d") {
-      const texture = input.textures?.[param.name];
-      if (!texture) throw compilerFailure(`missing texture input '${param.name}'`);
-      validateSurfaceInput(`texture ${param.name}`, texture);
-    } else if (param.valueType === "surface2d") {
-      const surface = input.surfaces?.[param.name];
-      if (!surface) throw compilerFailure(`missing surface input '${param.name}'`);
-      validateSurfaceInput(param.name, surface);
-    } else if (param.valueType === "devicepool") {
-      const pool = input.memoryPools?.[param.name];
-      if (!pool) throw compilerFailure(`missing memory pool input '${param.name}'`);
-      validateMemoryPoolInput(param.name, pool);
-    } else if (param.pointer) {
-      const buffer = input.buffers[param.name];
-      if (!buffer) throw compilerFailure(`missing buffer input '${param.name}'`);
-      const valueType = semanticSymbolValueType(param);
-      const scalarType = cudaVectorScalarType(valueType);
-      if ((valueType === "int" || scalarType === "int") && !(buffer instanceof Int32Array)) {
-        throw compilerFailure(`buffer '${param.name}' expects Int32Array`);
-      }
-      if ((valueType === "uint" || scalarType === "uint") && !(buffer instanceof Uint32Array)) {
-        throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
-      }
-      if ((valueType === "float" || valueType === "double" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(buffer instanceof Float32Array)) {
-        throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
-      }
-      if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(buffer)) {
-        throw compilerFailure(`buffer '${param.name}' expects Float16Array`);
-      }
-      if (valueType === "bool" && !(buffer instanceof Uint32Array)) {
-        throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
-      }
-      if (valueType === "complex64" && !(buffer instanceof Float32Array)) {
-        throw compilerFailure(`buffer '${param.name}' expects interleaved Float32Array`);
-      }
-    } else if (input.scalars?.[param.name] === undefined) {
-      throw compilerFailure(`missing scalar input '${param.name}'`);
-    }
-  }
-  for (const constant of kernelIr.memory.filter((symbol) => symbol.kind === "constant")) {
-    if (constant.initialized) continue;
-    const value = input.constants?.[constant.name];
-    if (value === undefined) throw compilerFailure(`missing constant input '${constant.name}'`);
-    const valueType = semanticSymbolValueType(constant);
-    if (constant.dimensions.length === 0 && isCudaVectorType(valueType)) {
-      if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);
-      validateTypedConstant(constant.name, valueType, value);
-      const expected = cudaVectorLaneCount(valueType);
-      if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
-    } else if (constant.dimensions.length === 0) {
-      if (typeof value !== "number") throw compilerFailure(`constant '${constant.name}' expects number`);
-    } else {
-      if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);
-      validateTypedConstant(constant.name, valueType, value);
-      const expected = totalElements(constant.dimensions);
-      if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
-    }
-  }
-  for (const global of kernelIr.memory.filter((symbol) => symbol.kind === "device-global")) {
-    const value = input.deviceGlobals?.[global.name];
-    if (value === undefined) continue;
-    validateTypedDeviceGlobal(global.name, semanticSymbolValueType(global), value);
-    const expected = totalElements(global.dimensions);
-    if (value.length < expected) throw compilerFailure(`device global '${global.name}' expects at least ${expected} elements`);
-  }
-  for (const texture of kernelIr.memory.filter((symbol) => symbol.kind === "texture")) {
-    const value = input.textures?.[texture.name];
-    if (!value) throw compilerFailure(`missing texture input '${texture.name}'`);
-    validateSurfaceInput(`texture ${texture.name}`, value);
-  }
-  for (const poolName of collectExternalDevicePoolNames(kernelIr.operations)) {
-    const pool = input.memoryPools?.[poolName];
-    if (!pool) throw compilerFailure(`missing memory pool input '${poolName}'`);
-    validateMemoryPoolInput(poolName, pool);
-  }
-}
-
-function semanticSymbolValueType(symbol: CudaLiteSemanticSymbol): Exclude<CudaLiteScalarType, "void"> {
-  if (symbol.valueType === undefined || symbol.valueType === "void") throw compilerFailure(`semantic symbol '${symbol.name}' has no value type`);
-  return symbol.valueType;
-}
-
-function collectExternalDevicePoolNames(operations: readonly SemanticKernelIrOperation[]): readonly string[] {
-  const out = new Set<string>();
-  walkSemanticOperations(operations, (expression) => {
-    if (expression.kind !== "call") return;
-    const callName = expressionNameForSemantic(expression.callee);
-    if (callName !== "deviceAllocate" && callName !== "streamOrderedAllocate") return;
-    const pool = expression.args[0];
-    if (pool?.kind !== "unary" || pool.operator !== "&" || pool.argument.kind !== "symbol") return;
-    out.add(pool.argument.name);
-  });
-  return [...out];
-}
-
-function expressionNameForSemantic(expression: SemanticExpression): string | undefined {
-  if (expression.kind === "symbol") return expression.name;
-  if (expression.kind === "member") {
-    const objectName = expressionNameForSemantic(expression.object);
-    return objectName ? `${objectName}.${expression.property}` : expression.property;
-  }
-  return undefined;
-}
-
-function validateSurfaceInput(name: string, value: { readonly width: number; readonly height: number; readonly data: Float32Array }): void {
-  if (!(value.data instanceof Float32Array)) throw compilerFailure(`${name} expects Float32Array data`);
-  if (!Number.isInteger(value.width) || value.width <= 0) throw compilerFailure(`${name} width must be positive`);
-  if (!Number.isInteger(value.height) || value.height <= 0) throw compilerFailure(`${name} height must be positive`);
-  const expected = value.width * value.height;
-  if (value.data.length < expected) throw compilerFailure(`${name} expects at least ${expected} elements`);
-}
-
-function validateMemoryPoolInput(name: string, value: { readonly data: Uint32Array; readonly offset?: Uint32Array }): void {
-  if (!(value.data instanceof Uint32Array)) throw compilerFailure(`${name} memory pool expects Uint32Array data`);
-  if (value.offset !== undefined && (!(value.offset instanceof Uint32Array) || value.offset.length < 1)) {
-    throw compilerFailure(`${name} memory pool offset expects Uint32Array length >= 1`);
-  }
-}
-
 function contextConstantDimensions(name: string, context: ThreadContext): readonly number[] {
   const dimensions = context.constantDimensions.get(name);
   if (!dimensions) throw compilerFailure(`constant dimensions unavailable for '${name}'`);
@@ -6501,47 +6373,6 @@ function contextDeviceGlobalDimensions(name: string, context: ThreadContext): re
   const dimensions = context.deviceGlobalDimensions.get(name);
   if (!dimensions) throw compilerFailure(`device global dimensions unavailable for '${name}'`);
   return dimensions.length === 0 ? [1] : dimensions;
-}
-
-function validateTypedConstant(name: string, valueType: string, value: WgslTypedArray): void {
-  const scalarType = cudaVectorScalarType(valueType as CudaLiteScalarType);
-  if ((valueType === "int" || scalarType === "int") && !(value instanceof Int32Array)) {
-    throw compilerFailure(`constant '${name}' expects Int32Array`);
-  }
-  if ((valueType === "uint" || scalarType === "uint") && !(value instanceof Uint32Array)) {
-    throw compilerFailure(`constant '${name}' expects Uint32Array`);
-  }
-  if ((valueType === "float" || valueType === "double" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(value instanceof Float32Array)) {
-    throw compilerFailure(`constant '${name}' expects Float32Array`);
-  }
-  if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(value)) {
-    throw compilerFailure(`constant '${name}' expects Float16Array`);
-  }
-  if (valueType === "bool" && !(value instanceof Uint32Array)) {
-    throw compilerFailure(`constant '${name}' expects Uint32Array`);
-  }
-  if (valueType === "complex64" && !(value instanceof Float32Array)) {
-    throw compilerFailure(`constant '${name}' expects interleaved Float32Array`);
-  }
-}
-
-function validateTypedDeviceGlobal(name: string, valueType: string, value: WgslTypedArray): void {
-  const scalarType = cudaVectorScalarType(valueType as CudaLiteScalarType);
-  if ((valueType === "int" || scalarType === "int") && !(value instanceof Int32Array)) {
-    throw compilerFailure(`device global '${name}' expects Int32Array`);
-  }
-  if ((valueType === "uint" || valueType === "uchar" || scalarType === "uint" || valueType === "bool" || valueType === "voidptr") && !(value instanceof Uint32Array)) {
-    throw compilerFailure(`device global '${name}' expects Uint32Array`);
-  }
-  if ((valueType === "float" || valueType === "double" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(value instanceof Float32Array)) {
-    throw compilerFailure(`device global '${name}' expects Float32Array`);
-  }
-  if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(value)) {
-    throw compilerFailure(`device global '${name}' expects Float16Array`);
-  }
-  if (valueType === "complex64" && !(value instanceof Float32Array)) {
-    throw compilerFailure(`device global '${name}' expects interleaved Float32Array`);
-  }
 }
 
 function compilerFailure(message: string): CudaLiteCompilerError {
