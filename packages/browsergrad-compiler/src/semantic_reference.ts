@@ -83,6 +83,9 @@ import {
   isSemanticHalf2UnaryCall,
   isSemanticFloatVectorType,
   semanticHalf2CallArgumentsSupported,
+  semanticVectorAtCallSupported as semanticVectorAtCallContractSupported,
+  semanticVectorConstructorCallSupported as semanticVectorConstructorCallContractSupported,
+  semanticVectorLerpCallSupported as semanticVectorLerpCallContractSupported,
   semanticExpressionValueType,
   semanticExpressionVectorValueType,
 } from "./semantic_vector_intrinsics.js";
@@ -622,11 +625,12 @@ function semanticReferenceVectorConstructorSupported(
   expected: "scalar" | "any",
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
-  if (expected === "scalar" || expression.callee.kind !== "symbol") return false;
-  const valueType = cudaVectorConstructorType(expression.callee.name);
-  return isSemanticFloatVectorType(valueType) &&
-    expression.args.length > 0 &&
-    expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "any", compiled));
+  return semanticVectorConstructorCallContractSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    expected,
+    (arg, mode) => semanticReferenceExpressionSupported(arg, mode, compiled),
+  );
 }
 
 function semanticReferenceVectorIndexSupported(
@@ -644,28 +648,24 @@ function semanticReferenceVectorAtCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
-  return expression.callee.kind === "symbol" &&
-    expression.callee.name === "vec_at" &&
-    expression.args.length === 2 &&
-    expression.args[0] !== undefined &&
-    expression.args[1] !== undefined &&
-    isSemanticFloatVectorType(semanticExpressionValueType(expression.args[0])) &&
-    semanticReferenceExpressionSupported(expression.args[0], "any", compiled) &&
-    semanticReferenceExpressionSupported(expression.args[1], "scalar", compiled);
+  return semanticVectorAtCallContractSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    semanticExpressionValueType,
+    (arg, mode) => semanticReferenceExpressionSupported(arg, mode, compiled),
+  );
 }
 
 function semanticReferenceVectorLerpCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
-  const [left, right, amount] = expression.args;
-  if (expression.callee.kind !== "symbol" || expression.callee.name !== "lerp" || !left || !right || !amount) return false;
-  const valueType = semanticExpressionValueType(left);
-  return isSemanticFloatVectorType(valueType) &&
-    semanticExpressionValueType(right) === valueType &&
-    semanticReferenceExpressionSupported(left, "any", compiled) &&
-    semanticReferenceExpressionSupported(right, "any", compiled) &&
-    semanticReferenceExpressionSupported(amount, "scalar", compiled);
+  return semanticVectorLerpCallContractSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    semanticExpressionValueType,
+    (arg, mode) => semanticReferenceExpressionSupported(arg, mode, compiled),
+  );
 }
 
 function semanticReferenceHalf2CallSupported(

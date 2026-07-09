@@ -242,3 +242,47 @@ export function semanticBf162CallArgumentsSupported(
   if (name === "__lows2bfloat162" || name === "__highs2bfloat162") return semanticVectorArgsSupported(args, 2, "bf162", vectorTypeOf, expressionSupported);
   return false;
 }
+
+export function semanticVectorConstructorCallSupported(
+  name: string | undefined,
+  args: readonly SemanticExpression[],
+  expected: "scalar" | "any",
+  expressionSupported: SemanticVectorExpressionSupported,
+): boolean {
+  if (expected === "scalar" || name === undefined) return false;
+  return isSemanticFloatVectorType(cudaVectorConstructorType(name)) &&
+    args.length > 0 &&
+    args.every((arg) => expressionSupported(arg, "any"));
+}
+
+export function semanticVectorAtCallSupported(
+  name: string | undefined,
+  args: readonly SemanticExpression[],
+  vectorTypeOf: SemanticVectorTypeResolver,
+  expressionSupported: SemanticVectorExpressionSupported,
+): boolean {
+  const [vector, index] = args;
+  return name === "vec_at" &&
+    args.length === 2 &&
+    vector !== undefined &&
+    index !== undefined &&
+    isSemanticFloatVectorType(vectorTypeOf(vector)) &&
+    expressionSupported(vector, "any") &&
+    expressionSupported(index, "scalar");
+}
+
+export function semanticVectorLerpCallSupported(
+  name: string | undefined,
+  args: readonly SemanticExpression[],
+  vectorTypeOf: SemanticVectorTypeResolver,
+  expressionSupported: SemanticVectorExpressionSupported,
+): boolean {
+  const [left, right, amount] = args;
+  if (name !== "lerp" || !left || !right || !amount) return false;
+  const valueType = vectorTypeOf(left);
+  return isSemanticFloatVectorType(valueType) &&
+    vectorTypeOf(right) === valueType &&
+    expressionSupported(left, "any") &&
+    expressionSupported(right, "any") &&
+    expressionSupported(amount, "scalar");
+}

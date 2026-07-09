@@ -44,6 +44,9 @@ import {
   isSemanticHalf2UnaryCall,
   isSemanticFloatVectorType,
   semanticHalf2CallArgumentsSupported,
+  semanticVectorAtCallSupported as semanticVectorAtCallContractSupported,
+  semanticVectorConstructorCallSupported as semanticVectorConstructorCallContractSupported,
+  semanticVectorLerpCallSupported as semanticVectorLerpCallContractSupported,
   semanticExpressionValueType,
   semanticExpressionVectorValueType,
 } from "./semantic_vector_intrinsics.js";
@@ -1162,39 +1165,36 @@ function semanticWgslVectorConstructorSupported(
   expected: "scalar" | "any",
   ir?: SemanticKernelIrModule,
 ): boolean {
-  if (expected === "scalar" || expression.callee.kind !== "symbol") return false;
-  const valueType = cudaVectorConstructorType(expression.callee.name);
-  return isSemanticFloatVectorType(valueType) &&
-    expression.args.length > 0 &&
-    expression.args.every((arg) => semanticWgslExpressionSupported(arg, "any", ir));
+  return semanticVectorConstructorCallContractSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    expected,
+    (arg, mode) => semanticWgslExpressionSupported(arg, mode, ir),
+  );
 }
 
 function semanticWgslVectorAtCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir?: SemanticKernelIrModule,
 ): boolean {
-  return expression.callee.kind === "symbol" &&
-    expression.callee.name === "vec_at" &&
-    expression.args.length === 2 &&
-    expression.args[0] !== undefined &&
-    expression.args[1] !== undefined &&
-    isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.args[0], ir?.functions)) &&
-    semanticWgslExpressionSupported(expression.args[0], "any", ir) &&
-    semanticWgslExpressionSupported(expression.args[1], "scalar", ir);
+  return semanticVectorAtCallContractSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    (arg) => semanticExpressionVectorValueType(arg, ir?.functions),
+    (arg, mode) => semanticWgslExpressionSupported(arg, mode, ir),
+  );
 }
 
 function semanticWgslVectorLerpCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir?: SemanticKernelIrModule,
 ): boolean {
-  const [left, right, amount] = expression.args;
-  if (expression.callee.kind !== "symbol" || expression.callee.name !== "lerp" || !left || !right || !amount) return false;
-  const valueType = semanticExpressionVectorValueType(left, ir?.functions);
-  return isSemanticFloatVectorType(valueType) &&
-    semanticExpressionVectorValueType(right, ir?.functions) === valueType &&
-    semanticWgslExpressionSupported(left, "any", ir) &&
-    semanticWgslExpressionSupported(right, "any", ir) &&
-    semanticWgslExpressionSupported(amount, "scalar", ir);
+  return semanticVectorLerpCallContractSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    (arg) => semanticExpressionVectorValueType(arg, ir?.functions),
+    (arg, mode) => semanticWgslExpressionSupported(arg, mode, ir),
+  );
 }
 
 function semanticWgslHalf2CallSupported(
