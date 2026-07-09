@@ -115,6 +115,7 @@ import {
   referenceCurandPoissonDraw as curandPoissonDraw,
 } from "./reference_curand.js";
 import { isSemanticMathCallName, semanticMathCallArity } from "./semantic_math_intrinsics.js";
+import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
@@ -567,21 +568,11 @@ function semanticReferenceTextureReadSupported(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return semanticReferenceTextureValueTypeSupported(expression.valueType) &&
+  return semanticTextureSurfaceValueTypeSupported(expression.valueType) &&
     expression.texture.kind === "symbol" &&
     expression.texture.addressSpace === "texture" &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled);
-}
-
-function semanticReferenceTextureValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" ||
-    valueType === "half" ||
-    valueType === "bf16" ||
-    valueType === "uint" ||
-    valueType === "int" ||
-    valueType === "uchar" ||
-    isSemanticFloatVectorType(valueType);
 }
 
 function semanticReferenceTextureDescriptorsSupported(_compiled: CompiledCudaLiteKernel): boolean {
@@ -593,13 +584,7 @@ function semanticReferenceSurfaceReadSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   const surface = expression.surface;
-  return (expression.valueType === "float" ||
-      expression.valueType === "half" ||
-      expression.valueType === "bf16" ||
-      expression.valueType === "uint" ||
-      expression.valueType === "int" ||
-      expression.valueType === "uchar" ||
-      isSemanticFloatVectorType(expression.valueType)) &&
+  return semanticTextureSurfaceValueTypeSupported(expression.valueType) &&
     surface.kind === "symbol" &&
     surface.addressSpace === "surface" &&
     semanticReferenceExpressionSupported(expression.xBytes, "scalar", compiled) &&
@@ -1079,7 +1064,7 @@ function semanticReferenceExpressionSupported(
         expected === "any" && semanticReferenceVectorLerpCallSupported(expression, compiled);
     case "texture-read":
       return compiled !== undefined &&
-        (expected === "any" || semanticReferenceTextureValueTypeSupported(expression.valueType)) &&
+        (expected === "any" || semanticTextureSurfaceValueTypeSupported(expression.valueType)) &&
         semanticReferenceTextureReadSupported(expression, compiled);
     case "surface-read":
       return compiled !== undefined && (expected === "scalar" || expected === "any") && semanticReferenceSurfaceReadSupported(expression, compiled);

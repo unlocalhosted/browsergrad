@@ -112,6 +112,7 @@ import {
   SEMANTIC_MATH_CALLS,
   semanticMathCallArity,
 } from "./semantic_math_intrinsics.js";
+import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
   semanticConstantMemorySymbols as constantMemorySymbols,
   semanticDeviceGlobalMemorySymbols as deviceGlobalMemorySymbols,
@@ -1102,21 +1103,11 @@ function semanticWgslTextureReadSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   const texture = expression.texture;
-  return semanticWgslTextureValueTypeSupported(expression.valueType) &&
+  return semanticTextureSurfaceValueTypeSupported(expression.valueType) &&
     texture.kind === "symbol" &&
     texture.addressSpace === "texture" &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
     semanticWgslExpressionSupported(expression.y, "scalar", ir);
-}
-
-function semanticWgslTextureValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" ||
-    valueType === "half" ||
-    valueType === "bf16" ||
-    valueType === "uint" ||
-    valueType === "int" ||
-    valueType === "uchar" ||
-    isSemanticFloatVectorType(valueType);
 }
 
 function semanticWgslSurfaceReadSupported(
@@ -1124,13 +1115,7 @@ function semanticWgslSurfaceReadSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   const target = expression.surface;
-  return (expression.valueType === "float" ||
-      expression.valueType === "half" ||
-      expression.valueType === "bf16" ||
-      expression.valueType === "uint" ||
-      expression.valueType === "int" ||
-      expression.valueType === "uchar" ||
-      isSemanticFloatVectorType(expression.valueType)) &&
+  return semanticTextureSurfaceValueTypeSupported(expression.valueType) &&
     target.kind === "symbol" &&
     target.addressSpace === "surface" &&
     semanticWgslExpressionSupported(expression.xBytes, "scalar", ir) &&
@@ -1587,7 +1572,7 @@ function semanticWgslExpressionSupported(
         expected === "any" && semanticWgslVectorLerpCallSupported(expression, ir);
     case "texture-read":
       return ir !== undefined &&
-        (expected === "any" || semanticWgslTextureValueTypeSupported(expression.valueType)) &&
+        (expected === "any" || semanticTextureSurfaceValueTypeSupported(expression.valueType)) &&
         semanticWgslTextureReadSupported(expression, ir);
     case "surface-read":
       return ir !== undefined && (expected === "scalar" || expected === "any") && semanticWgslSurfaceReadSupported(expression, ir);
