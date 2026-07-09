@@ -1768,8 +1768,11 @@ function validateInlineAsmStatement(
   if (op?.kind === "brev-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "brev.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
-  if (op?.kind === "prmt-b32" && (outputs.length !== 1 || statement.inputs.length !== 3)) {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "prmt.b32 inline PTX expects one output operand and three input operands", statement.span));
+  if (op?.kind === "prmt-b32") {
+    const expectedInputs = op.selectorImmediate === undefined ? 3 : 2;
+    if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `prmt.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
+    }
   }
   if (op?.kind === "prmt-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "prmt.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));

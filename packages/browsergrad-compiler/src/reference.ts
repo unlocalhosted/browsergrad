@@ -929,11 +929,12 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "prmt-b32") {
-    if (statement.inputs.length !== 3) throw compilerFailure("prmt.b32 inline asm expects three inputs");
+    const expectedInputs = op.selectorImmediate === undefined ? 3 : 2;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`prmt.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure("prmt.b32 inline asm expects one output operand");
     const x = valueAsNumber(evalExpression(statement.inputs[0]!, context), "prmt.b32") >>> 0;
     const y = valueAsNumber(evalExpression(statement.inputs[1]!, context), "prmt.b32") >>> 0;
-    const selector = valueAsNumber(evalExpression(statement.inputs[2]!, context), "prmt.b32") >>> 0;
+    const selector = op.selectorImmediate ?? valueAsNumber(evalExpression(statement.inputs[2]!, context), "prmt.b32") >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmBytePerm(x, y, selector), context);
     return;
   }

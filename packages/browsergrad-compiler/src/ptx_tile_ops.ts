@@ -11,7 +11,7 @@ export type InlineAsmOp =
   | { readonly kind: "popc-b32" }
   | { readonly kind: "clz-b32" }
   | { readonly kind: "brev-b32" }
-  | { readonly kind: "prmt-b32" }
+  | { readonly kind: "prmt-b32"; readonly selectorImmediate?: number }
   | { readonly kind: "lop3-b32"; readonly immLut?: number }
   | { readonly kind: "bitwise-b32"; readonly op: "and" | "or" | "xor" | "not"; readonly immediate?: number }
   | { readonly kind: "shift-b32"; readonly op: "shl" | "shr"; readonly signed: boolean; readonly immediate?: number }
@@ -64,6 +64,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\bpopc\.b32\b/u.test(template)) return { kind: "popc-b32" };
   if (/\bclz\.b32\b/u.test(template)) return { kind: "clz-b32" };
   if (/\bbrev\.b32\b/u.test(template)) return { kind: "brev-b32" };
+  const prmtImmediate = /\bprmt\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (prmtImmediate) return { kind: "prmt-b32", selectorImmediate: parseInlineAsmImmediate(prmtImmediate[1]!) >>> 0 };
   if (/\bprmt\.b32\b/u.test(template)) return { kind: "prmt-b32" };
   const lop3 = /\blop3\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|\d+)\s*;?/u.exec(template);
   if (lop3) return { kind: "lop3-b32", immLut: parseInlineAsmImmediate(lop3[1]!) & 0xff };

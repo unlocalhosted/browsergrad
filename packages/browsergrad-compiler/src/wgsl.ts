@@ -2306,8 +2306,8 @@ function emitInlineAsmStatement(
   if (op?.kind === "brev-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `reverseBits(u32(${emitExpression(statement.inputs[0]!, context)}))`, context)}`;
   }
-  if (op?.kind === "prmt-b32" && statement.inputs.length === 3 && outputs.length === 1) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpression(statement.inputs, context), context)}`;
+  if (op?.kind === "prmt-b32" && statement.inputs.length === (op.selectorImmediate === undefined ? 3 : 2) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpression(statement.inputs, context, op.selectorImmediate), context)}`;
   }
   if (op?.kind === "lop3-b32" && statement.inputs.length === (op.immLut === undefined ? 4 : 3) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context), context)}`;
@@ -2422,10 +2422,10 @@ function emitMmaF32AccumulatorOutput(target: CudaLiteExpression, value: string, 
   return value;
 }
 
-function emitInlineBytePermExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
+function emitInlineBytePermExpression(inputs: readonly CudaLiteExpression[], context: EmitContext, selectorImmediate?: number): string {
   const x = `u32(${emitExpression(inputs[0]!, context)})`;
   const y = `u32(${emitExpression(inputs[1]!, context)})`;
-  const selector = `u32(${emitExpression(inputs[2]!, context)})`;
+  const selector = selectorImmediate === undefined ? `u32(${emitExpression(inputs[2]!, context)})` : `${selectorImmediate >>> 0}u`;
   const lanes = [0, 1, 2, 3].map((lane) => {
     const control = `((${selector} >> ${lane * 4}u) & 0xfu)`;
     const source = `(${control} & 0x7u)`;

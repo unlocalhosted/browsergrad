@@ -11876,6 +11876,44 @@ __global__ void prmtKernel(uint *out, uint *selector) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0x80112233, 0x66f72233, 0x445566f7, 0x33333333, 0xff112233]);
   });
 
+  it("lowers inline PTX prmt.b32 immediate selector statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int prmt_5410_ptx(unsigned int x, unsigned int y) {
+  unsigned int ret;
+  asm volatile("prmt.b32 %0, %1, %2, 0x5410;" : "=r"(ret) : "r"(x), "r"(y));
+  return ret;
+}
+__device__ unsigned int prmt_b210_ptx(unsigned int x, unsigned int y) {
+  unsigned int ret;
+  asm volatile("prmt.b32 %0, %1, %2, 0xb210;" : "=r"(ret) : "r"(x), "r"(y));
+  return ret;
+}
+__global__ void prmtImmediateKernel(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = prmt_5410_ptx(0x80112233u, 0x445566f7u);
+  out[idx + 4] = prmt_b210_ptx(0x80112233u, 0x445566f7u);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("21520u");
+    expect(compiled.wgsl).toContain("45584u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0x66f72233,
+      0x66f72233,
+      0x66f72233,
+      0x66f72233,
+      0xff112233,
+      0xff112233,
+      0xff112233,
+      0xff112233,
+    ]);
+  });
+
   it("lowers inline PTX lop3.b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int choose_ptx(unsigned int a, unsigned int b, unsigned int c) {

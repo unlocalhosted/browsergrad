@@ -2639,6 +2639,22 @@ __global__ void ptxPrmtB32(uint *out, uint *selector) {
   int idx = threadIdx.x;
   out[idx] = prmt_ptx(0x80112233u, 0x445566f7u, selector[idx]);
 }`,
+  ptxPrmtImmediateB32: `
+__device__ unsigned int prmt_5410_ptx(unsigned int x, unsigned int y) {
+  unsigned int ret;
+  asm volatile("prmt.b32 %0, %1, %2, 0x5410;" : "=r"(ret) : "r"(x), "r"(y));
+  return ret;
+}
+__device__ unsigned int prmt_b210_ptx(unsigned int x, unsigned int y) {
+  unsigned int ret;
+  asm volatile("prmt.b32 %0, %1, %2, 0xb210;" : "=r"(ret) : "r"(x), "r"(y));
+  return ret;
+}
+__global__ void ptxPrmtImmediateB32(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = prmt_5410_ptx(0x80112233u, 0x445566f7u);
+  out[idx + 4] = prmt_b210_ptx(0x80112233u, 0x445566f7u);
+}`,
   ptxLop3B32: `
 __device__ unsigned int choose_ptx(unsigned int a, unsigned int b, unsigned int c) {
   unsigned int ret;
@@ -14372,6 +14388,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0x80112233, 0x66f72233, 0x445566f7, 0x33333333, 0xff112233] },
+          },
+          {
+            name: "inline-asm:prmt-immediate-b32",
+            source: SOURCES.ptxPrmtImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0x66f72233, 0x66f72233, 0x66f72233, 0x66f72233, 0xff112233, 0xff112233, 0xff112233, 0xff112233] },
           },
           {
             name: "inline-asm:lop3-b32",
