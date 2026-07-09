@@ -1,4 +1,5 @@
 import { matrixTileStorageDimensions } from "./matrix_tiles.js";
+import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import {
   cudaVectorLaneCount,
   cudaVectorScalarType,
@@ -73,11 +74,6 @@ export function emitLocalArrayInitializer(
   return elements.map((element, flatIndex) =>
     `${prefix}${emitLocalArrayElementAccess(context.nameFor(statement.name), statement.dimensions, flatIndex)} = ${emitExpression(element)};`,
   ).slice(0, totalElements);
-}
-
-export function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }
 
 export function emitLocalArrayElementAccess(name: string, dimensions: readonly number[], flatIndex: number): string {

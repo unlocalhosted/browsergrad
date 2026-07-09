@@ -6,6 +6,10 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectKernelLaunchCallees } from "./ast_queries.js";
+import {
+  flattenCudaLiteInitializerExpressions as flattenConstantInitializer,
+  flattenCudaLiteInitializerExpressions as flattenInitializerExpressions,
+} from "./ast_initializers.js";
 import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
 import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import {
@@ -5523,11 +5527,6 @@ function initializeLocalArray(
   }
 }
 
-function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
-}
-
 function allocateTypedArray(valueType: CudaLiteScalarType, dimensions: readonly number[]): WgslTypedArray {
   const elements = dimensions.reduce((product, item) => product * item, 1);
   const length = elements * valueStorageWidth(valueType);
@@ -6142,11 +6141,6 @@ function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray 
   if (global.valueType === "float" || global.valueType === "double") return Float32Array.from(padded);
   if (global.valueType === "complex64") return Float32Array.from(padded);
   return Float32Array.from(padded);
-}
-
-function flattenConstantInitializer(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenConstantInitializer(element));
 }
 
 function evaluateConstantNumber(expression: CudaLiteExpression): number {

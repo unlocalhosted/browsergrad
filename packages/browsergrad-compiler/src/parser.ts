@@ -1,4 +1,5 @@
 import { tokenizeCudaLite, type Token } from "./lexer.js";
+import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   CudaLiteCompilerError,
@@ -2151,9 +2152,4 @@ function cxxBraceConstructorType(name: string): Exclude<CudaLiteScalarType, "voi
   const alias = CUDA_SCALAR_TYPE_ALIASES.get(name);
   if (alias === "texture2d" || alias === "surface2d" || alias === "devicepool" || alias === "voidptr") return undefined;
   return alias;
-}
-
-function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }

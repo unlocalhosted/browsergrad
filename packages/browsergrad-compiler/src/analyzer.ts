@@ -23,6 +23,7 @@ import {
   type SourceSpan,
 } from "./types.js";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
+import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
@@ -1384,11 +1385,6 @@ function validateArrayInitializer(
       validateScalarOperand(info, element.span, diagnostics);
     }
   }
-}
-
-function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }
 
 function flattenSequenceExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {

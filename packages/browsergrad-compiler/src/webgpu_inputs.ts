@@ -3,6 +3,7 @@ import {
   type WgslStorageBufferMetadata,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
+import { flattenCudaLiteInitializerExpressions as flattenInitializer } from "./ast_initializers.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
@@ -288,11 +289,6 @@ function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray 
   }
   if (global.valueType === "half") return createWgslFloat16Array(padded);
   return Float32Array.from(padded);
-}
-
-function flattenInitializer(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenInitializer(element));
 }
 
 function evaluateInitializerNumber(expression: CudaLiteExpression): number {
