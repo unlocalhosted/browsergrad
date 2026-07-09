@@ -38,6 +38,13 @@ import {
   semanticBf162VectorReturnType,
   semanticHalf2VectorReturnType,
 } from "./semantic_vector_intrinsics.js";
+import {
+  SEMANTIC_CURAND_CALLS,
+  SEMANTIC_CURAND_DISTRIBUTION_CALLS,
+  SEMANTIC_CURAND_STATE_ONLY_CALLS,
+  SEMANTIC_CURAND_VECTOR_CALLS,
+  SEMANTIC_CURAND_VECTOR_RETURN_TYPES,
+} from "./semantic_curand_intrinsics.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
@@ -160,51 +167,6 @@ const SEMANTIC_NOOP_CALLS = new Set([
   "__nanosleep",
   "__prof_trigger",
   "__trap",
-]);
-const SEMANTIC_CURAND_CALLS = new Set([
-  "curand_init",
-  "curand",
-  "curand_uniform",
-  "curand_uniform4",
-  "curand_uniform_double",
-  "curand_normal",
-  "curand_normal2",
-  "curand_normal4",
-  "curand_normal_double",
-  "curand_log_normal",
-  "curand_log_normal2",
-  "curand_log_normal4",
-  "curand_log_normal_double",
-  "curand_poisson",
-  "curand_poisson4",
-  "skipahead",
-]);
-const SEMANTIC_CURAND_VECTOR_RETURN_TYPES = new Map<string, CudaLiteScalarType>([
-  ["curand_uniform4", "float4"],
-  ["curand_normal2", "float2"],
-  ["curand_normal4", "float4"],
-  ["curand_log_normal2", "float2"],
-  ["curand_log_normal4", "float4"],
-  ["curand_poisson4", "uint4"],
-]);
-const SEMANTIC_CURAND_VECTOR_CALLS = new Set(SEMANTIC_CURAND_VECTOR_RETURN_TYPES.keys());
-const SEMANTIC_CURAND_STATE_ONLY_CALLS = new Set([
-  "curand",
-  "curand_uniform",
-  "curand_uniform4",
-  "curand_uniform_double",
-  "curand_normal",
-  "curand_normal2",
-  "curand_normal4",
-  "curand_normal_double",
-]);
-const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
-  "curand_log_normal",
-  "curand_log_normal2",
-  "curand_log_normal4",
-  "curand_log_normal_double",
-  "curand_poisson",
-  "curand_poisson4",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_SUBGROUP_CALLS = new Set([
