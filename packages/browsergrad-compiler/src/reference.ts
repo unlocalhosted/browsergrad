@@ -974,6 +974,15 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmArithmetic(op.op, left, right), context);
     return;
   }
+  if (op?.kind === "minmax-b32") {
+    const label = `${op.op}.${op.signed ? "s32" : "u32"}`;
+    if (statement.inputs.length !== 2) throw compilerFailure(`${label} inline asm expects two inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
+    const right = valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmMinMax(op.op, left, right, op.signed), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1095,6 +1104,13 @@ function evalInlineAsmArithmetic(op: "add" | "sub" | "mul-lo", left: number, rig
   if (op === "add") return (left + right) >>> 0;
   if (op === "sub") return (left - right) >>> 0;
   return Math.imul(left, right) >>> 0;
+}
+
+function evalInlineAsmMinMax(op: "min" | "max", left: number, right: number, signed: boolean): number {
+  const leftValue = signed ? left | 0 : left >>> 0;
+  const rightValue = signed ? right | 0 : right >>> 0;
+  const takeLeft = op === "min" ? leftValue <= rightValue : leftValue >= rightValue;
+  return (takeLeft ? left : right) >>> 0;
 }
 
 function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {

@@ -2727,6 +2727,34 @@ __global__ void ptxArithmeticB32(uint *out, uint *a, uint *b) {
   out[idx + 4] = (uint)sub_ptx((int)a[idx], (int)b[idx]);
   out[idx + 8] = mul_lo_ptx(a[idx], b[idx]);
 }`,
+  ptxMinMaxB32: `
+__device__ unsigned int min_u_ptx(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("min.u32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ unsigned int max_u_ptx(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("max.u32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ int min_s_ptx(int a, int b) {
+  int ret;
+  asm volatile("min.s32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ int max_s_ptx(int a, int b) {
+  int ret;
+  asm volatile("max.s32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__global__ void ptxMinMaxB32(uint *out, uint *a, uint *b) {
+  int idx = threadIdx.x;
+  out[idx] = min_u_ptx(a[idx], b[idx]);
+  out[idx + 4] = max_u_ptx(a[idx], b[idx]);
+  out[idx + 8] = (uint)min_s_ptx((int)a[idx], (int)b[idx]);
+  out[idx + 12] = (uint)max_s_ptx((int)a[idx], (int)b[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -14120,6 +14148,24 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [3, 1, 0x80000002, 0x99999999, 0xffffffff, 0xfffffffd, 0x7ffffffe, 0x8acf1357, 2, 0xfffffffe, 0, 0x70b88d78],
+            },
+          },
+          {
+            name: "inline-asm:minmax-b32",
+            source: SOURCES.ptxMinMaxB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                a: new Uint32Array([1, 0xffffffff, 0x80000000, 0x7fffffff]),
+                b: new Uint32Array([2, 2, 0x7fffffff, 0x80000000]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [1, 2, 0x7fffffff, 0x7fffffff, 2, 0xffffffff, 0x80000000, 0x80000000, 1, 0xffffffff, 0x80000000, 0x80000000, 2, 2, 0x7fffffff, 0x7fffffff],
             },
           },
           {
