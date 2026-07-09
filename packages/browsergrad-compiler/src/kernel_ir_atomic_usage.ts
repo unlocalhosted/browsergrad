@@ -1,4 +1,4 @@
-import { statementsUseCall } from "./ir_usage.js";
+import { kernelIrUsesCall } from "./kernel_ir_usage.js";
 import {
   semanticAtomicCallNamesForOperation,
   type SemanticAtomicOp,
@@ -18,6 +18,5 @@ export function kernelIrUsesAtomicOperations(ir: KernelIrModule, ops: readonly S
 }
 
 function kernelIrUsesAnyCall(ir: KernelIrModule, names: ReadonlySet<string>): boolean {
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }

@@ -1,8 +1,12 @@
-import { statementsUseCall, statementsUseIdentifier } from "./ir_usage.js";
 import {
   kernelIrUsesAtomicOperation,
   kernelIrUsesAtomicOperations,
 } from "./kernel_ir_atomic_usage.js";
+import {
+  kernelIrStatements,
+  kernelIrUsesCall,
+  kernelIrUsesIdentifier,
+} from "./kernel_ir_usage.js";
 import type { SemanticAtomicOp } from "./semantic_atomic_intrinsics.js";
 import {
   type CudaLiteStatement,
@@ -222,36 +226,30 @@ export function usesCurand(ir: KernelIrModule): boolean {
     "curand_poisson4",
     "skipahead",
   ]);
-  return statementsUseCall(ir.body, curandCalls) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, curandCalls));
+  return kernelIrUsesCall(ir, curandCalls);
 }
 
 export function usesCuComplexRobustMath(ir: KernelIrModule): boolean {
   const calls = new Set(["cuCabsf", "cuCdivf", "cuCabs", "cuCdiv"]);
-  return statementsUseCall(ir.body, calls) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, calls));
+  return kernelIrUsesCall(ir, calls);
 }
 
 export function usesFrexp(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["frexp", "frexpf"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["frexp", "frexpf"])));
+  return kernelIrUsesCall(ir, new Set(["frexp", "frexpf"]));
 }
 
 export function usesModf(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["modf", "modff"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["modf", "modff"])));
+  return kernelIrUsesCall(ir, new Set(["modf", "modff"]));
 }
 
 export function usesGammaIntrinsics(ir: KernelIrModule): boolean {
   const names = new Set(["tgamma", "tgammaf", "lgamma", "lgammaf"]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }
 
 export function usesInverseDistributionIntrinsics(ir: KernelIrModule): boolean {
   const names = new Set(["erfinv", "erfinvf", "erfcinv", "erfcinvf", "normcdfinv", "normcdfinvf"]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }
 
 export function usesRoundingMathIntrinsics(ir: KernelIrModule): boolean {
@@ -262,10 +260,8 @@ export function usesRoundingMathIntrinsics(ir: KernelIrModule): boolean {
     "__float2int_rn", "__float2uint_rn", "__half2int_rn", "__half2uint_rn",
     "__bfloat162int_rn", "__bfloat162uint_rn", "__bfloat162ll_rn", "__bfloat162ull_rn", "__bfloat162short_rn", "__bfloat162ushort_rn",
   ]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names)) ||
-    statementsUseRoundEvenInlineAsm(ir.body) ||
-    ir.functions.some((fn) => statementsUseRoundEvenInlineAsm(fn.body));
+  return kernelIrUsesCall(ir, names) ||
+    kernelIrStatements(ir).some(statementsUseRoundEvenInlineAsm);
 }
 
 function statementsUseRoundEvenInlineAsm(statements: readonly CudaLiteStatement[]): boolean {
@@ -285,26 +281,22 @@ function statementsUseRoundEvenInlineAsm(statements: readonly CudaLiteStatement[
 
 export function usesNextafterIntrinsics(ir: KernelIrModule): boolean {
   const names = new Set(["nextafter", "nextafterf", "nexttoward", "nexttowardf"]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }
 
 export function usesFunnelShiftIntrinsics(ir: KernelIrModule): boolean {
   const names = new Set(["__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc"]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }
 
 export function usesSpecialFloatNamedConstants(ir: KernelIrModule): boolean {
   const names = new Set(["INFINITY", "NAN"]);
-  return statementsUseIdentifier(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseIdentifier(fn.body, names));
+  return kernelIrUsesIdentifier(ir, names);
 }
 
 export function usesFp8Intrinsics(ir: KernelIrModule): boolean {
   const names = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }
 
 export function usesHalfConversionIntrinsics(ir: KernelIrModule): boolean {
@@ -315,8 +307,7 @@ export function usesHalfConversionIntrinsics(ir: KernelIrModule): boolean {
     "__short2half_rn", "__short2half_rz", "__short2half_ru", "__short2half_rd",
     "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
   ]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }
 
 export function usesBfloatConversionIntrinsics(ir: KernelIrModule): boolean {
@@ -334,8 +325,7 @@ export function usesBfloatConversionIntrinsics(ir: KernelIrModule): boolean {
     "__bfloat162ull_rn", "__bfloat162ull_rz", "__bfloat162ull_ru", "__bfloat162ull_rd",
     "__bfloat162char_rz", "__bfloat162uchar_rz",
   ]);
-  return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+  return kernelIrUsesCall(ir, names);
 }
 
 export function wgslUniformScalar(type: CudaLiteScalarType): string {
