@@ -1,5 +1,7 @@
 export {
   classifyInlineAsm,
+  expectedInlineAsmF32SourceInputs,
+  expectedInlineAsmSourceInputs,
   inlineAsmSupportedList,
 } from "./features/inline_ptx/model.js";
 export type {

@@ -276,6 +276,27 @@ export function inlineAsmSupportedList(): string {
   ].join(", ");
 }
 
+export function expectedInlineAsmF32SourceInputs(
+  sources: readonly (InlineAsmF32Source | InlineAsmIntSource)[] | undefined,
+  outputCount: number,
+): number | undefined {
+  if (sources === undefined) return 2;
+  return expectedInlineAsmSourceInputs(sources, outputCount);
+}
+
+export function expectedInlineAsmSourceInputs(
+  sources: readonly (InlineAsmF32Source | InlineAsmIntSource)[],
+  outputCount: number,
+): number | undefined {
+  let maxInputIndex = -1;
+  for (const source of sources) {
+    if (source.kind === "immediate") continue;
+    if (!Number.isInteger(source.index) || source.index < 0) return undefined;
+    if (source.index >= outputCount) maxInputIndex = Math.max(maxInputIndex, source.index - outputCount);
+  }
+  return maxInputIndex + 1;
+}
+
 function parseInlineAsmImmediate(value: string): number {
   return value.startsWith("0x") || value.startsWith("0X") ? Number.parseInt(value, 16) : Number.parseInt(value, 10);
 }

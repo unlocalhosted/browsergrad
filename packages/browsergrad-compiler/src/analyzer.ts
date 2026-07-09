@@ -37,7 +37,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
+import { classifyInlineAsm, expectedInlineAsmF32SourceInputs, inlineAsmSupportedList, type InlineAsmF32Source } from "./features/inline_ptx/model.js";
 import { collectCudaAllowedTrapCallSpanStarts } from "./trap_preconditions.js";
 import { sizeofCudaType } from "./type_layout.js";
 import {
@@ -1671,20 +1671,6 @@ function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined,
 }
 
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;
-
-function expectedInlineAsmF32SourceInputs(
-  sources: readonly (InlineAsmF32Source | InlineAsmIntSource)[] | undefined,
-  outputCount: number,
-): number | undefined {
-  if (sources === undefined) return 2;
-  let maxInputIndex = -1;
-  for (const source of sources) {
-    if (source.kind === "immediate") continue;
-    if (!Number.isInteger(source.index) || source.index < 0) return undefined;
-    if (source.index >= outputCount) maxInputIndex = Math.max(maxInputIndex, source.index - outputCount);
-  }
-  return maxInputIndex + 1;
-}
 
 function validateInlineAsmStatement(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,

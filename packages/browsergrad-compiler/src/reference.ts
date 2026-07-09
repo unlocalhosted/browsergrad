@@ -36,7 +36,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
+import { classifyInlineAsm, expectedInlineAsmF32SourceInputs, expectedInlineAsmSourceInputs, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
@@ -1165,26 +1165,6 @@ function execInlineAsm(
   const b = values[1]!;
   const c = values[2]!;
   writeLValue(target, c + a * b, context);
-}
-
-function expectedInlineAsmF32SourceInputs(
-  sources: readonly InlineAsmF32Source[],
-  outputCount: number,
-): number | undefined {
-  return expectedInlineAsmSourceInputs(sources, outputCount);
-}
-
-function expectedInlineAsmSourceInputs(
-  sources: readonly (InlineAsmF32Source | InlineAsmIntSource)[],
-  outputCount: number,
-): number | undefined {
-  let maxInputIndex = -1;
-  for (const source of sources) {
-    if (source.kind === "immediate") continue;
-    if (!Number.isInteger(source.index) || source.index < 0) return undefined;
-    if (source.index >= outputCount) maxInputIndex = Math.max(maxInputIndex, source.index - outputCount);
-  }
-  return maxInputIndex + 1;
 }
 
 function evalInlineAsmIntSource(
