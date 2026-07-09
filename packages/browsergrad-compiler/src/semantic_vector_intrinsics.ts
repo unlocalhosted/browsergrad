@@ -1,4 +1,5 @@
 import type { CudaLiteScalarType } from "./types.js";
+import { isCudaVectorType } from "./vector_types.js";
 
 export const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
@@ -124,4 +125,8 @@ export function isSemanticHalf2MaskComparisonCall(name: string): boolean {
 
 export function isSemanticHalf2BooleanComparisonCall(name: string): boolean {
   return SEMANTIC_HALF2_BOOL_COMPARISON_CALLS.has(name);
+}
+
+export function isSemanticFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
+  return isCudaVectorType(valueType);
 }
