@@ -119,6 +119,10 @@ import {
 import { isSemanticMathCallName, semanticMathCallArity } from "./semantic_math_intrinsics.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
+  semanticLocalArrayFillCallSupported,
+  semanticLocalArrayInitSupported as semanticLocalArrayInitContractSupported,
+} from "./semantic_local_arrays.js";
+import {
   semanticFunctionArgSupported as semanticFunctionArgContractSupported,
   semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
   semanticFunctionLocalParamValueTypesSupported,
@@ -528,11 +532,7 @@ function semanticReferenceLocalArrayInitSupported(
   targetValueType: CudaLiteScalarType | undefined,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  const expected = isSemanticFloatVectorType(targetValueType) ? "any" : "scalar";
-  if (expression.kind === "initializer") {
-    return flattenInitializerExpressions(expression).every((item) => semanticReferenceExpressionSupported(item, expected, compiled));
-  }
-  return semanticReferenceExpressionSupported(expression, expected, compiled);
+  return semanticLocalArrayInitContractSupported(expression, targetValueType, (item, expected) => semanticReferenceExpressionSupported(item, expected, compiled));
 }
 
 function semanticReferenceMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -758,20 +758,15 @@ function semanticReferenceCallSupported(
     }, compiled);
   }
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
-  if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
-  const [target, value] = operation.args;
-  const symbol = target?.kind === "symbol"
-    ? compiled.kernelIr.memory.find((item) =>
+  return semanticLocalArrayFillCallSupported(
+    operation,
+    (name) => compiled.kernelIr.memory.find((item) =>
       item.kind === "local" &&
-      item.name === target.name &&
+      item.name === name &&
       item.dimensions.length > 0
-    )
-    : undefined;
-  return target?.kind === "symbol" &&
-    target.addressSpace === "local" &&
-    symbol !== undefined &&
-    value !== undefined &&
-    semanticReferenceExpressionSupported(value, isSemanticFloatVectorType(symbol.valueType) ? "any" : "scalar", compiled);
+    ),
+    (item, expected) => semanticReferenceExpressionSupported(item, expected, compiled),
+  );
 }
 
 function semanticReferencePrintfSupported(

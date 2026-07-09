@@ -120,6 +120,10 @@ import {
 } from "./semantic_math_intrinsics.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
+  semanticLocalArrayFillCallSupported,
+  semanticLocalArrayInitSupported as semanticLocalArrayInitContractSupported,
+} from "./semantic_local_arrays.js";
+import {
   semanticFunctionArgSupported as semanticFunctionArgContractSupported,
   semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
   semanticFunctionLocalParamValueTypesSupported,
@@ -1062,11 +1066,7 @@ function semanticWgslLocalArrayInitSupported(
   targetValueType: CudaLiteScalarType | undefined,
   ir: SemanticKernelIrModule,
 ): boolean {
-  const expected = isSemanticFloatVectorType(targetValueType) ? "any" : "scalar";
-  if (expression.kind === "initializer") {
-    return flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, expected, ir));
-  }
-  return semanticWgslExpressionSupported(expression, expected, ir);
+  return semanticLocalArrayInitContractSupported(expression, targetValueType, (item, expected) => semanticWgslExpressionSupported(item, expected, ir));
 }
 
 function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1286,14 +1286,11 @@ function semanticWgslCallSupported(
     }, ir);
   }
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
-  if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
-  const [target, value] = operation.args;
-  const symbol = target?.kind === "symbol" ? localArraySymbol(ir, target.name) : undefined;
-  return target?.kind === "symbol" &&
-    target.addressSpace === "local" &&
-    symbol !== undefined &&
-    value !== undefined &&
-    semanticWgslExpressionSupported(value, isSemanticFloatVectorType(symbol.valueType) ? "any" : "scalar", ir);
+  return semanticLocalArrayFillCallSupported(
+    operation,
+    (name) => localArraySymbol(ir, name),
+    (item, expected) => semanticWgslExpressionSupported(item, expected, ir),
+  );
 }
 
 function semanticWgslPrintfSupported(
