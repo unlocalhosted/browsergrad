@@ -23,6 +23,7 @@ import type {
 import { CudaLiteCompilerError } from "./types.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
+import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
 import { emitBfloatConversionHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers } from "./wgsl_support_helpers.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import {
@@ -202,7 +203,6 @@ export interface SemanticKernelIrWgslOutput {
 export interface EmitSemanticKernelIrWgslOptions extends SemanticTextureDescriptorOptions {}
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
-const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 
@@ -1549,11 +1549,11 @@ function semanticWgslExpressionSupported(
         expression.addressSpace === "constant" ||
         expression.addressSpace === "device-global" ||
         expression.addressSpace === "shared" ||
-        BUILTIN_VECTOR_NAMES.has(expression.name);
+        isCudaBuiltinVectorSymbolName(expression.name);
     case "member":
       if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return expression.object.kind === "symbol" &&
-        BUILTIN_VECTOR_NAMES.has(expression.object.name) &&
+        isCudaBuiltinVectorSymbolName(expression.object.name) &&
         (expression.property === "x" || expression.property === "y" || expression.property === "z") ||
         semanticWgslVectorMemberSupported(expression, ir);
     case "index":
@@ -5361,7 +5361,7 @@ function semanticAtomicCallValueType(expression: SemanticExpression): CudaLiteSc
 }
 
 function nameFor(name: string, names: ReadonlyMap<string, string>): string {
-  if (BUILTIN_VECTOR_NAMES.has(name)) return name;
+  if (isCudaBuiltinVectorSymbolName(name)) return name;
   return names.get(name) ?? safeWgslIdentifier(name);
 }
 

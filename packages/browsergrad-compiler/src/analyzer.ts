@@ -25,6 +25,10 @@ import {
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import {
+  isCudaBuiltinVectorSymbolName,
+  isCudaUniformBuiltinVectorSymbolName,
+} from "./cuda_builtin_symbols.js";
+import {
   isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
 } from "./cuda_cp_async.js";
@@ -116,7 +120,6 @@ import {
 } from "./semantic_atomic_intrinsics.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
-const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
   ["__vibmax_s32", [3, 3]],
@@ -4569,7 +4572,7 @@ function lookupSymbol(name: string, scope: Scope, span: SourceSpan): SymbolInfo 
     if (symbol) return symbol;
     cursor = cursor.parent;
   }
-  if (BUILTIN_VECTORS.has(name)) return { name, kind: "builtin-vector", span };
+  if (isCudaBuiltinVectorSymbolName(name)) return { name, kind: "builtin-vector", span };
   if (BUILTIN_CALLS.has(name)) return { name, kind: "builtin-call", span };
   return undefined;
 }
@@ -4659,7 +4662,7 @@ function validateDeclaredSymbolName(
   span: SourceSpan,
   diagnostics: CudaLiteDiagnostic[],
 ): void {
-  if (BUILTIN_VECTORS.has(name)) {
+  if (isCudaBuiltinVectorSymbolName(name)) {
     diagnostics.push(error("reserved-symbol", `symbol '${name}' conflicts with a CUDA-lite builtin`, span));
   }
 }
@@ -5037,7 +5040,7 @@ function expressionMayBeNonUniformBeforeBarrier(
     const param = context.params.get(expression.name);
     if (param) return param.pointer;
     if (context.locals.has(expression.name)) return context.locals.get(expression.name) ?? true;
-    return !BUILTIN_VECTORS.has(expression.name);
+    return !isCudaBuiltinVectorSymbolName(expression.name);
   }
   if (expression.kind === "call") {
     const callee = expression.callee;
@@ -5054,7 +5057,7 @@ function expressionMayBeNonUniformBeforeBarrier(
   }
   if (expression.kind === "member" && expression.object.kind === "identifier") {
     const name = expression.object.name;
-    return name !== "blockIdx" && name !== "blockDim" && name !== "gridDim";
+    return !isCudaUniformBuiltinVectorSymbolName(name);
   }
   let nonUniform = false;
   forEachExpressionChild(expression, (child) => {

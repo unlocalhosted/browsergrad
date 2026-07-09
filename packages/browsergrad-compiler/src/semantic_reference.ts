@@ -10,6 +10,7 @@ import {
   roundFloat32ToBfloat16,
   roundFloat32ToBfloat16Bits,
 } from "./bfloat_rounding.js";
+import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
 import { roundFloat32ToFloat16 } from "./half_rounding.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
@@ -1280,7 +1281,7 @@ function isNullLiteral(expression: SemanticExpression): boolean {
 }
 
 function isBuiltinVectorSymbol(name: string): boolean {
-  return name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim";
+  return isCudaBuiltinVectorSymbolName(name);
 }
 
 function isBuiltinVectorMember(expression: Extract<SemanticExpression, { kind: "member" }>): boolean {

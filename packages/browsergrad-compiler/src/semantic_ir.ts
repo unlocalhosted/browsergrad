@@ -18,6 +18,7 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
+import { cudaBuiltinVectorMemberValueType } from "./cuda_builtin_symbols.js";
 import {
   cudaLiteDimensionStride as dimensionStride,
   cudaLiteTotalElements as totalElements,
@@ -2498,8 +2499,9 @@ function paramAddressSpace(param: CudaLiteParam): SemanticAddressSpace {
 }
 
 function memberValueType(object: SemanticExpression, property: string): CudaLiteScalarType | undefined {
-  if (property === "x" || property === "y" || property === "z") {
-    if (object.kind === "symbol" && (object.name === "threadIdx" || object.name === "blockIdx" || object.name === "blockDim" || object.name === "gridDim")) return "uint";
+  if (object.kind === "symbol") {
+    const builtinType = cudaBuiltinVectorMemberValueType(object.name, property);
+    if (builtinType) return builtinType;
   }
   const objectType = expressionValueType(object);
   const swizzleType = cudaVectorSwizzleType(objectType, property);

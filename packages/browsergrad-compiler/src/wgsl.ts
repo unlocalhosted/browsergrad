@@ -5,6 +5,10 @@ import {
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import {
+  isCudaBuiltinVectorSymbolName,
+  isCudaUniformBuiltinVectorSymbolName,
+} from "./cuda_builtin_symbols.js";
+import {
   cudaLiteDimensionStride as dimensionStride,
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
@@ -3946,7 +3950,7 @@ function expressionIsUniformForLoopBound(expression: CudaLiteExpression, context
       return context.paramFor(expression.name) !== undefined;
     case "member":
       return expression.object.kind === "identifier" &&
-        (expression.object.name === "blockIdx" || expression.object.name === "blockDim" || expression.object.name === "gridDim");
+        isCudaUniformBuiltinVectorSymbolName(expression.object.name);
     case "unary":
       return expressionIsUniformForLoopBound(expression.argument, context);
     case "cast":
@@ -4429,10 +4433,7 @@ function expressionIsLocalConstantSafe(expression: CudaLiteExpression, context: 
     case "member":
       return expressionIsLocalConstantSafe(expression.object, context) ||
         (expression.object.kind === "identifier" &&
-          (expression.object.name === "threadIdx" ||
-            expression.object.name === "blockIdx" ||
-            expression.object.name === "blockDim" ||
-            expression.object.name === "gridDim"));
+          isCudaBuiltinVectorSymbolName(expression.object.name));
     case "cast":
       return expressionIsLocalConstantSafe(expression.expression, context);
     case "unary":
@@ -5420,7 +5421,7 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
   if (name === "nullptr") return "0u";
   const namedConstant = CUDA_NAMED_CONSTANTS.get(name);
   if (namedConstant) return namedConstant.wgsl;
-  if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
+  if (isCudaBuiltinVectorSymbolName(name)) return name;
   if (context.isAtomicShared(name) && mode === "value") {
     const shared = sharedDeclarationFor(name, context);
     const loaded = `atomicLoad(&${context.nameFor(name)})`;
@@ -5772,7 +5773,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
   if (expression.kind === "member") {
     if (expression.property === "size") return "int";
     const objectName = expressionName(expression.object);
-    if ((objectName === "threadIdx" || objectName === "blockIdx" || objectName === "blockDim" || objectName === "gridDim") &&
+    if (isCudaBuiltinVectorSymbolName(objectName) &&
       (expression.property === "x" || expression.property === "y" || expression.property === "z")) {
       return "int";
     }
