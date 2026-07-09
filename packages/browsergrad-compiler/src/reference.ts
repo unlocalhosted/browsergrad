@@ -106,6 +106,20 @@ import {
   referenceCurandPoissonDraw as curandPoissonDraw,
 } from "./reference_curand.js";
 import {
+  isCudaBf162BooleanComparisonCallName as isBf162BooleanComparisonIntrinsic,
+  isCudaBf162MaskComparisonCallName as isBf162ComparisonMaskIntrinsic,
+  isCudaBf162MinMaxCallName as isBf162MinMaxIntrinsic,
+  isCudaBf162OnlyVectorCallName as isBf162OnlyVectorIntrinsic,
+  isCudaBf162UnaryMathCallName as isBf162UnaryMathIntrinsic,
+  isCudaBf162VectorComparisonCallName as isBf162VectorComparisonIntrinsic,
+  isCudaBf162VectorOperationCallName as isBf162VectorIntrinsic,
+  isCudaHalf2BooleanComparisonCallName as isHalf2BooleanComparisonIntrinsic,
+  isCudaHalf2MaskComparisonCallName as isHalf2ComparisonMaskIntrinsic,
+  isCudaHalf2UnaryCallName as isHalf2UnaryIntrinsic,
+  isCudaHalf2VectorComparisonCallName as isHalf2VectorComparisonIntrinsic,
+  isCudaHalf2VectorOperationCallName as isHalf2VectorIntrinsic,
+} from "./cuda_vector_intrinsics.js";
+import {
   referenceEvalI16x2I8x2DotAdd as evalI16x2I8x2DotAdd,
   referenceEvalI8x4DotAdd as evalI8x4DotAdd,
   referenceEvalU16x2U8x2DotAdd as evalU16x2U8x2DotAdd,
@@ -4043,99 +4057,6 @@ function unorderedBfloatCompare(left: number, right: number, compare: (left: num
   return Number.isNaN(left) || Number.isNaN(right) || compare(left, right) ? 1 : 0;
 }
 
-function isHalf2VectorIntrinsic(name: string | undefined): boolean {
-  return isHalf2UnaryIntrinsic(name) ||
-    isHalf2VectorComparisonIntrinsic(name) ||
-    name === "__hadd2" ||
-    name === "__hadd2_rn" ||
-    name === "__hadd2_sat" ||
-    name === "__hsub2" ||
-    name === "__hsub2_rn" ||
-    name === "__hsub2_sat" ||
-    name === "__hmul2" ||
-    name === "__hmul2_rn" ||
-    name === "__hmul2_sat" ||
-    name === "__hfma2" ||
-    name === "__hfma2_rn" ||
-    name === "__hfma2_sat" ||
-    name === "__hmin2" ||
-    name === "__hmax2" ||
-    name === "__hmin2_nan" ||
-    name === "__hmax2_nan";
-}
-
-function isBf162VectorArithmeticIntrinsic(name: string | undefined): boolean {
-  return isBf162UnaryMathIntrinsic(name) ||
-    name === "__habs2" ||
-    name === "__hneg2" ||
-    name === "__hadd2" ||
-    name === "__hadd2_rn" ||
-    name === "__hadd2_sat" ||
-    name === "__hsub2" ||
-    name === "__hsub2_rn" ||
-    name === "__hsub2_sat" ||
-    name === "__hmul2" ||
-    name === "__hmul2_rn" ||
-    name === "__hmul2_sat" ||
-    name === "__h2div" ||
-    name === "__hfma2" ||
-    name === "__hfma2_rn" ||
-    name === "__hfma2_sat" ||
-    name === "__hfma2_relu" ||
-    name === "__hcmadd";
-}
-
-function isBf162VectorIntrinsic(name: string | undefined): boolean {
-  return isBf162VectorArithmeticIntrinsic(name) ||
-    isBf162VectorComparisonIntrinsic(name) ||
-    isBf162MinMaxIntrinsic(name);
-}
-
-function isBf162MinMaxIntrinsic(name: string | undefined): boolean {
-  return name === "__hmin2" ||
-    name === "__hmax2" ||
-    name === "__hmin2_nan" ||
-    name === "__hmax2_nan";
-}
-
-function isBf162VectorComparisonIntrinsic(name: string | undefined): boolean {
-  return name === "__hisnan2" || isHalf2VectorComparisonIntrinsic(name);
-}
-
-function isBf162ComparisonMaskIntrinsic(name: string | undefined): boolean {
-  return isHalf2ComparisonMaskIntrinsic(name);
-}
-
-function isBf162BooleanComparisonIntrinsic(name: string | undefined): boolean {
-  return isHalf2BooleanComparisonIntrinsic(name);
-}
-
-function isBf162OnlyVectorIntrinsic(name: string | undefined): boolean {
-  return isBf162UnaryMathIntrinsic(name) || name === "__h2div" || name === "__hfma2_relu" || name === "__hcmadd";
-}
-
-function isBf162UnaryMathIntrinsic(name: string | undefined): boolean {
-  return name === "__habs2" ||
-    name === "__hneg2" ||
-    name === "h2ceil" ||
-    name === "h2floor" ||
-    name === "h2rcp" ||
-    name === "h2rsqrt" ||
-    name === "h2sqrt" ||
-    name === "h2trunc" ||
-    name === "h2exp" ||
-    name === "h2exp2" ||
-    name === "h2exp10" ||
-    name === "h2log" ||
-    name === "h2log2" ||
-    name === "h2log10" ||
-    name === "h2sin" ||
-    name === "h2cos" ||
-    name === "h2tanh" ||
-    name === "h2tanh_approx" ||
-    name === "h2rint";
-}
-
 function evalBf162UnaryMathLane(name: string | undefined, value: number): number {
   switch (name) {
     case "__habs2": return Math.abs(value);
@@ -4159,63 +4080,6 @@ function evalBf162UnaryMathLane(name: string | undefined, value: number): number
     case "h2rint": return roundTiesToEvenNumber(value);
     default: throw compilerFailure(`unsupported bf162 unary intrinsic '${name ?? "<expr>"}'`);
   }
-}
-
-function isHalf2UnaryIntrinsic(name: string | undefined): boolean {
-  return name === "__habs2" ||
-    name === "__hceil2" ||
-    name === "__hfloor2" ||
-    name === "__hneg2" ||
-    name === "__hrcp2" ||
-    name === "__hrsqrt2" ||
-    name === "__hsqrt2" ||
-    name === "__htrunc2" ||
-    name === "__hisnan2";
-}
-
-function isHalf2VectorComparisonIntrinsic(name: string | undefined): boolean {
-  return name === "__heq2" ||
-    name === "__hne2" ||
-    name === "__hgt2" ||
-    name === "__hge2" ||
-    name === "__hlt2" ||
-    name === "__hle2" ||
-    name === "__hequ2" ||
-    name === "__hneu2" ||
-    name === "__hgtu2" ||
-    name === "__hgeu2" ||
-    name === "__hltu2" ||
-    name === "__hleu2";
-}
-
-function isHalf2ComparisonMaskIntrinsic(name: string | undefined): boolean {
-  return name === "__heq2_mask" ||
-    name === "__hne2_mask" ||
-    name === "__hgt2_mask" ||
-    name === "__hge2_mask" ||
-    name === "__hlt2_mask" ||
-    name === "__hle2_mask" ||
-    name === "__hequ2_mask" ||
-    name === "__hneu2_mask" ||
-    name === "__hgtu2_mask" ||
-    name === "__hgeu2_mask" ||
-    name === "__hltu2_mask" ||
-    name === "__hleu2_mask";
-}
-
-function isHalf2BooleanComparisonIntrinsic(name: string | undefined): boolean {
-  return name === "__hbeq2" ||
-    name === "__hbne2" ||
-    name === "__hbgt2" ||
-    name === "__hbge2" ||
-    name === "__hblt2" ||
-    name === "__hble2" ||
-    name === "__hbequ2" ||
-    name === "__hbneu2" ||
-    name === "__hbgtu2" ||
-    name === "__hbgeu2" ||
-    name === "__hbltu2" ||
-    name === "__hbleu2";
 }
 
 function half2IntrinsicOperator(name: string | undefined): (left: number, right: number) => number {
