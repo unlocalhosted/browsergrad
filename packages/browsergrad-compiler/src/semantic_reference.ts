@@ -28,6 +28,10 @@ import {
   type MutableReferenceTrace,
 } from "./reference_trace.js";
 import {
+  referenceFloat32ToUintBits as float32ToUintBits,
+  referenceUintBitsToFloat32 as uintBitsToFloat32,
+} from "./reference_bitcasts.js";
+import {
   referenceVectorFromTuple,
   type ReferenceVector3,
 } from "./reference_vectors.js";
@@ -1794,7 +1798,7 @@ function semanticAtomicValue(
         ? operation.target?.valueType
         : semanticAtomicCallTarget(operation)?.valueType;
       const matches = targetType === "float" || targetType === "double"
-        ? semanticBitsFromFloat(oldValue) === semanticBitsFromFloat(value)
+        ? float32ToUintBits(oldValue) === float32ToUintBits(value)
         : oldValue === value;
       return matches ? evalNumber(replacement, context) : oldValue;
     }
@@ -1807,14 +1811,6 @@ function semanticAtomicTargetType(
   return operation.kind === "atomic"
     ? operation.target?.valueType
     : semanticAtomicCallTarget(operation)?.valueType;
-}
-
-const semanticF32Scratch = new Float32Array(1);
-const semanticU32Scratch = new Uint32Array(semanticF32Scratch.buffer);
-
-function semanticBitsFromFloat(value: number): number {
-  semanticF32Scratch[0] = value;
-  return semanticU32Scratch[0] ?? 0;
 }
 
 function execSemanticLoop(
@@ -2861,20 +2857,6 @@ function orderedCompare(left: number, right: number, compare: (left: number, rig
 
 function unorderedCompare(left: number, right: number, compare: (left: number, right: number) => boolean): number {
   return Number.isNaN(left) || Number.isNaN(right) || compare(left, right) ? 1 : 0;
-}
-
-function uintBitsToFloat32(bits: number): number {
-  const buffer = new ArrayBuffer(4);
-  const view = new DataView(buffer);
-  view.setUint32(0, Math.trunc(bits) >>> 0, true);
-  return view.getFloat32(0, true);
-}
-
-function float32ToUintBits(value: number): number {
-  const buffer = new ArrayBuffer(4);
-  const view = new DataView(buffer);
-  view.setFloat32(0, value, true);
-  return view.getUint32(0, true);
 }
 
 function curandNext(state: number): number {

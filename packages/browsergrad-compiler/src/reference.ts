@@ -47,6 +47,11 @@ import {
   type MutableReferenceTrace,
 } from "./reference_trace.js";
 import {
+  referenceFloat32ToUintBits as bitsFromFloat,
+  referenceUintBitsToFloat32 as floatFromBits,
+  referenceUintBitsToInt32 as intFromBits,
+} from "./reference_bitcasts.js";
+import {
   referenceByteView as byteView,
   referenceElementByteSize as elementByteSize,
   referenceRawStorageIndexFromByteOffset as rawStorageIndexFromByteOffset,
@@ -6182,26 +6187,6 @@ function evalConstantBinary(operator: string, left: number, right: number): numb
     default:
       throw compilerFailure(`unsupported constant initializer operator '${operator}'`);
   }
-}
-
-const BITCAST_BUFFER = new ArrayBuffer(4);
-const BITCAST_FLOAT = new Float32Array(BITCAST_BUFFER);
-const BITCAST_UINT = new Uint32Array(BITCAST_BUFFER);
-const BITCAST_INT = new Int32Array(BITCAST_BUFFER);
-
-function bitsFromFloat(value: number): number {
-  BITCAST_FLOAT[0] = value;
-  return BITCAST_UINT[0] ?? 0;
-}
-
-function floatFromBits(value: number): number {
-  BITCAST_UINT[0] = value >>> 0;
-  return BITCAST_FLOAT[0] ?? 0;
-}
-
-function intFromBits(value: number): number {
-  BITCAST_UINT[0] = value >>> 0;
-  return BITCAST_INT[0] ?? 0;
 }
 
 function vectorFromExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): ReferenceVector3 {
