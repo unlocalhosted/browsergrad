@@ -1014,6 +1014,44 @@ __global__ void stream_capture_graph(uint *graphOut, int *statusOut) {
     expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
   });
 
+  it("runs CUDA stream capture info v2 query on WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void stream_capture_info_v2(uint *out, int *statusOut) {
+  cudaStream_t stream;
+  cudaStreamCaptureStatus captureStatus = cudaStreamCaptureStatusActive;
+  cudaGraph_t graph = 7u;
+  uint captureId = 4u;
+  uint dependencyCount = 3u;
+  if (threadIdx.x < 1) {
+    cudaStreamCreate(&stream);
+    int status = cudaStreamGetCaptureInfo_v2(stream, &captureStatus, &captureId, &graph, NULL, NULL, &dependencyCount);
+    cudaStreamDestroy(stream);
+    out[0] = (uint)captureStatus;
+    out[1] = captureId;
+    out[2] = graph;
+    out[3] = dependencyCount;
+    statusOut[0] = status;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        out: new Uint32Array([99, 99, 99, 99]),
+        statusOut: new Int32Array([-1]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
+  });
+
   it("runs CUDA graph create and instantiate lifecycle no-ops on WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

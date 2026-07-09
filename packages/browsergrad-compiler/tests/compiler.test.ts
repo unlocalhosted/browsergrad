@@ -4466,6 +4466,7 @@ __global__ void unsupported(float* x) {
       "cudaStreamGetPriority",
       "cudaStreamIsCapturing",
       "cudaStreamGetCaptureInfo",
+      "cudaStreamGetCaptureInfo_v2",
       "cudaStreamBeginCapture",
       "cudaStreamEndCapture",
       "cudaStreamUpdateCaptureDependencies",
@@ -14059,15 +14060,20 @@ __global__ void stream_queries(float *out) {
     int device = -1;
     uint streamId = 9u;
     cudaStreamCaptureStatus captureInfoStatus = cudaStreamCaptureStatusActive;
+    cudaStreamCaptureStatus captureInfoV2Status = cudaStreamCaptureStatusActive;
     uint captureId = 4u;
+    uint captureIdV2 = 5u;
     uint dependencyCount = 3u;
+    uint dependencyCountV2 = 6u;
+    cudaGraph_t graphV2 = 8u;
     cudaStreamCreate(&stream);
     int deviceStatus = cudaStreamGetDevice(stream, &device);
     int idStatus = cudaStreamGetId(stream, &streamId);
     int captureStatusResult = cudaStreamIsCapturing(stream, &captureStatus);
     int captureInfoResult = cudaStreamGetCaptureInfo(stream, &captureInfoStatus, &captureId, &graph, NULL, NULL, &dependencyCount);
+    int captureInfoV2Result = cudaStreamGetCaptureInfo_v2(stream, &captureInfoV2Status, &captureIdV2, &graphV2, NULL, NULL, &dependencyCountV2);
     cudaStreamDestroy(stream);
-    out[0] = (float)(device + (int)streamId + captureStatus + captureInfoStatus + (int)captureId + (int)graph + (int)dependencyCount + deviceStatus + idStatus + captureStatusResult + captureInfoResult);
+    out[0] = (float)(device + (int)streamId + captureStatus + captureInfoStatus + captureInfoV2Status + (int)captureId + (int)captureIdV2 + (int)graph + (int)graphV2 + (int)dependencyCount + (int)dependencyCountV2 + deviceStatus + idStatus + captureStatusResult + captureInfoResult + captureInfoV2Result);
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -14081,7 +14087,9 @@ __global__ void stream_queries(float *out) {
     expect(compiled.wgsl).toContain("streamId = 0;");
     expect(compiled.wgsl).toContain("captureStatus = 0;");
     expect(compiled.wgsl).toContain("captureInfoStatus = 0;");
+    expect(compiled.wgsl).toContain("captureInfoV2Status = 0;");
     expect(compiled.wgsl).toContain("dependencyCount = 0;");
+    expect(compiled.wgsl).toContain("dependencyCountV2 = 0;");
     expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
     expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Float32Array([-1]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
     expect([...result.buffers.out as Float32Array]).toEqual([0]);

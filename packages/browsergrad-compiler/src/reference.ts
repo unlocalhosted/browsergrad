@@ -2955,6 +2955,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamGetCaptureInfo_v2" ||
     name === "cudaStreamEndCapture" ||
     name === "cudaGraphCreate" ||
     name === "cudaGraphInstantiate" ||
@@ -3000,7 +3001,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       if (target) writeLValue(resolvePointerArgument(target, context), 0, context);
       return 0;
     }
-    if (name === "cudaStreamGetCaptureInfo") {
+    if (name === "cudaStreamGetCaptureInfo" || name === "cudaStreamGetCaptureInfo_v2") {
       for (const target of expression.args.slice(1)) {
         if (!target || isNullPointerLiteral(target)) continue;
         writeLValue(resolvePointerArgument(target, context), 0, context);
@@ -4296,6 +4297,7 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamGetCaptureInfo_v2" ||
     name === "cudaStreamQuery" ||
     name === "cudaStreamSynchronize" ||
     name === "cudaStreamWaitEvent" ||

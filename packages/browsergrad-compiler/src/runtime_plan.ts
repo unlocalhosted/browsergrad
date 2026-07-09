@@ -488,6 +488,7 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamGetCaptureInfo_v2" ||
     name === "cudaStreamBeginCapture" ||
     name === "cudaStreamEndCapture" ||
     name === "cudaStreamUpdateCaptureDependencies" ||

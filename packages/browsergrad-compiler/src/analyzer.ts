@@ -294,6 +294,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaStreamGetPriority", [2, 2]],
   ["cudaStreamIsCapturing", [2, 2]],
   ["cudaStreamGetCaptureInfo", [2, 7]],
+  ["cudaStreamGetCaptureInfo_v2", [2, 7]],
   ["cudaStreamQuery", [1, 1]],
   ["cudaStreamSynchronize", [1, 1]],
   ["cudaStreamWaitEvent", [2, 3]],
@@ -1884,6 +1885,7 @@ function validateCallExpression(
     callName === "cudaStreamGetPriority" ||
     callName === "cudaStreamIsCapturing" ||
     callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaStreamGetCaptureInfo_v2" ||
     callName === "cudaStreamEndCapture" ||
     callName === "cudaGraphCreate" ||
     callName === "cudaGraphInstantiate" ||
@@ -2592,7 +2594,7 @@ function validateCudaIntegerRuntimeQuery(
     validateRuntimeQueryPointerTarget(callName, streamTarget, expected, scope, diagnostics, walkExpression);
     return;
   }
-  if (callName === "cudaStreamGetCaptureInfo") {
+  if (callName === "cudaStreamGetCaptureInfo" || callName === "cudaStreamGetCaptureInfo_v2") {
     validateScalarOperand(walkExpression(target, scope), target.span, diagnostics);
     for (const [index, arg] of expression.args.entries()) {
       if (index === 0 || !arg || isNullPointerExpression(arg)) continue;
@@ -3265,6 +3267,7 @@ function isHostManagedRuntimeNoopCall(callName: string): boolean {
     callName === "cudaStreamGetPriority" ||
     callName === "cudaStreamIsCapturing" ||
     callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaStreamGetCaptureInfo_v2" ||
     callName === "cudaStreamQuery" ||
     callName === "cudaStreamSynchronize" ||
     callName === "cudaStreamWaitEvent" ||
@@ -5250,6 +5253,7 @@ function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
     callName === "cudaStreamGetPriority" ||
     callName === "cudaStreamIsCapturing" ||
     callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaStreamGetCaptureInfo_v2" ||
     callName === "cudaStreamEndCapture" ||
     callName === "cudaGraphCreate" ||
     callName === "cudaGraphInstantiate" ||

@@ -1622,7 +1622,7 @@ function emitVarInitWithCudaIntegerRuntimeQuery(
   if (callName === "cudaDeviceGetStreamPriorityRange") {
     return emitVarInitWithCudaDeviceGetStreamPriorityRange(statement, init, context, indentLevel, activeFlag);
   }
-  if (callName === "cudaStreamGetCaptureInfo") {
+  if (callName === "cudaStreamGetCaptureInfo" || callName === "cudaStreamGetCaptureInfo_v2") {
     return emitVarInitWithCudaStreamGetCaptureInfo(statement, init, context, indentLevel, activeFlag);
   }
   if (callName === "cudaGraphInstantiate") {
@@ -4706,7 +4706,7 @@ function emitCudaRuntimeQueryWrites(
   if (!isCudaIntegerRuntimeQueryCall(callName)) return undefined;
   if (callName === "cudaMemGetInfo") return emitCudaMemGetInfoWrites(expression, context, indentLevel);
   if (callName === "cudaDeviceGetStreamPriorityRange") return emitCudaDeviceGetStreamPriorityRangeWrites(expression, context, indentLevel);
-  if (callName === "cudaStreamGetCaptureInfo") return emitCudaStreamGetCaptureInfoWrites(expression, context, indentLevel);
+  if (callName === "cudaStreamGetCaptureInfo" || callName === "cudaStreamGetCaptureInfo_v2") return emitCudaStreamGetCaptureInfoWrites(expression, context, indentLevel);
   if (callName === "cudaGraphInstantiate") return emitCudaGraphInstantiateWrites(expression, context, indentLevel);
   if (callName === "cudaGraphExecUpdate") return emitCudaGraphExecUpdateWrites(expression, context, indentLevel);
   if (callName === "cudaOccupancyAvailableDynamicSMemPerBlock") return emitCudaOccupancyAvailableDynamicSmemWrite(expression, context, indentLevel);
@@ -5015,6 +5015,7 @@ function isCudaIntegerRuntimeQueryCall(name: string | undefined): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamGetCaptureInfo_v2" ||
     name === "cudaStreamEndCapture" ||
     name === "cudaGraphCreate" ||
     name === "cudaGraphInstantiate" ||
@@ -6647,6 +6648,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "cudaStreamGetPriority":
     case "cudaStreamIsCapturing":
     case "cudaStreamGetCaptureInfo":
+    case "cudaStreamGetCaptureInfo_v2":
     case "cudaStreamBeginCapture":
     case "cudaStreamEndCapture":
     case "cudaStreamUpdateCaptureDependencies":
@@ -8299,6 +8301,7 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
     case "cudaStreamGetPriority":
     case "cudaStreamIsCapturing":
     case "cudaStreamGetCaptureInfo":
+    case "cudaStreamGetCaptureInfo_v2":
     case "cudaGraphUpload":
     case "cudaGraphExecUpdate":
     case "cudaStreamQuery":
@@ -8402,6 +8405,7 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamGetCaptureInfo_v2" ||
     name === "cudaStreamQuery" ||
     name === "cudaStreamSynchronize" ||
     name === "cudaStreamWaitEvent" ||

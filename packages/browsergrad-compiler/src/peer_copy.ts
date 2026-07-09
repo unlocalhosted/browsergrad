@@ -688,6 +688,7 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamGetCaptureInfo_v2" ||
     name === "cudaStreamBeginCapture" ||
     name === "cudaStreamEndCapture" ||
     name === "cudaStreamUpdateCaptureDependencies" ||
@@ -751,6 +752,7 @@ function isRuntimeQueryWriteCall(name: string): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamGetCaptureInfo_v2" ||
     name === "cudaStreamEndCapture" ||
     name === "cudaGraphCreate" ||
     name === "cudaGraphInstantiate" ||
