@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T18:35:57Z
+Last updated: 2026-07-09T18:41:33Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: semantic WGSL memory layout type/rank/stride emission moved into a focused helper Module |
+| Active work item | Architecture split: semantic WGSL storage-pointer naming/compatibility and offset discovery moved into a focused helper Module |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: extracted `semantic_wgsl_pointers.ts` for semantic WGSL function storage-pointer params, storage buffer IDs, pointer helper names, pointer/storage value compatibility, pointer base/buffer param names, and storage-offset discovery; `semantic_wgsl.ts` dropped repeated pointer naming/compat and offset-walk implementation while keeping emission behavior unchanged; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `6918` lines
 - Architecture split: extracted `semantic_wgsl_memory_layout.ts` for semantic WGSL array type emission, flat ranked memory indexes, and local-array flat-to-ranked indexes; shared/constant/device-global/local memory layout checks now sit behind one semantic WGSL memory layout Module instead of repeated stride/rank implementation inside `semantic_wgsl.ts`; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`
 - Architecture split: routed legacy `wgsl.ts` local-pointer-array sizing, WMMA tile base indexing, array `sizeof`, and local-array flat-index lowering through `cuda_lite_values.ts`; the older WGSL backend now uses the same CUDA-lite value Module as semantic/reference paths for row-major dimension math; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + selected storage/pointer WebGPU `125/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`
 - Architecture split: routed backend/semantic dimension element-count and row-major stride math through `cuda_lite_values.ts` across WGSL storage, WGSL IR analysis, device pointer argument lowering, peer-copy device globals, matrix tile storage, and semantic IR sizeof/flat-index lowering; this keeps array layout math behind one CUDA-lite value Module instead of scattered reducers in backend callers; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + selected storage/pointer WebGPU `125/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map still shows the largest pressure points as `wgsl.ts`, `semantic_wgsl.ts`, `reference.ts`, and `analyzer.ts`
