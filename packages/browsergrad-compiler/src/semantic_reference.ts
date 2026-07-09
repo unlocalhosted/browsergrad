@@ -20,6 +20,10 @@ import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
 } from "./reference_trace.js";
+import {
+  referenceVectorFromTuple,
+  type ReferenceVector3,
+} from "./reference_vectors.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
   CompiledCudaLiteKernel,
@@ -79,17 +83,11 @@ import { isSemanticMathCallName, semanticMathCallArity } from "./semantic_math_i
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
-type SemanticValue = number | Vector3 | number[];
+type SemanticValue = number | ReferenceVector3 | number[];
 type SemanticControl = "fallthrough" | "return" | "break" | "continue";
 type SemanticCurandState =
   | { readonly kind: "local"; readonly name: string; readonly span: SourceSpan }
   | { readonly kind: "memory"; readonly ref: SemanticMemoryRef };
-interface Vector3 {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}
-
 interface SemanticReferenceContext {
   readonly compiled: CompiledCudaLiteKernel;
   readonly buffers: Map<string, WgslTypedArray>;
@@ -102,10 +100,10 @@ interface SemanticReferenceContext {
   readonly storageOffsets: Map<string, number>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, SemanticValue>;
-  readonly blockIdx: Vector3;
-  readonly threadIdx: Vector3;
-  readonly blockDim: Vector3;
-  readonly gridDim: Vector3;
+  readonly blockIdx: ReferenceVector3;
+  readonly threadIdx: ReferenceVector3;
+  readonly blockDim: ReferenceVector3;
+  readonly gridDim: ReferenceVector3;
   readonly blockContexts: readonly SemanticReferenceContext[];
   readonly trace: MutableTrace;
   returnValue?: SemanticValue;
@@ -142,8 +140,8 @@ export function runCompiledKernelSemanticReference(
   const deviceGlobals = cloneReferenceBuffers(deviceGlobalBufferInputs(compiled, input));
   const surfaces = cloneReferenceSurfaces(input.surfaces ?? {});
   const traces: MutableTrace[] = [];
-  const blockDim = vectorFromTuple(launch.blockDim);
-  const gridDim = vectorFromTuple(launch.gridDim);
+  const blockDim = referenceVectorFromTuple(launch.blockDim);
+  const gridDim = referenceVectorFromTuple(launch.gridDim);
   const scalars = input.scalars ?? {};
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
@@ -174,8 +172,8 @@ export function runCompiledKernelSemanticReference(
                 storageOffsets: new Map(),
                 scalars,
                 locals: new Map(),
-                blockIdx: { x: bx, y: by, z: bz },
-                threadIdx: { x: tx, y: ty, z: tz },
+                blockIdx: referenceVectorFromTuple([bx, by, bz]),
+                threadIdx: referenceVectorFromTuple([tx, ty, tz]),
                 blockDim,
                 gridDim,
                 blockContexts,
@@ -4639,10 +4637,6 @@ function flatIndexForDimensions(dimensions: readonly number[], indices: readonly
     const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
     return sum + index * stride;
   }, 0);
-}
-
-function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
-  return { x: value[0], y: value[1], z: value[2] };
 }
 
 function truthy(value: number): boolean {

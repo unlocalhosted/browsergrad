@@ -38,6 +38,11 @@ import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
 } from "./reference_trace.js";
+import {
+  isReferenceVector3,
+  referenceVectorFromTuple,
+  type ReferenceVector3,
+} from "./reference_vectors.js";
 import type {
   CudaLiteSemanticSymbol,
   SemanticExpression,
@@ -107,12 +112,7 @@ import {
 } from "./types.js";
 
 type EvalValue = number | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | SurfaceHandleValue;
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | SurfaceHandleValue | LocalArrayValue | LocalPointerArrayValue;
-interface Vector3 {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}
+type LocalValue = number | ReferenceVector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | SurfaceHandleValue | LocalArrayValue | LocalPointerArrayValue;
 
 interface AddressValue {
   readonly kind: "address";
@@ -169,10 +169,10 @@ interface LValue {
 }
 
 interface ThreadContext {
-  readonly blockIdx: Vector3;
-  readonly threadIdx: Vector3;
-  readonly blockDim: Vector3;
-  readonly gridDim: Vector3;
+  readonly blockIdx: ReferenceVector3;
+  readonly threadIdx: ReferenceVector3;
+  readonly blockDim: ReferenceVector3;
+  readonly gridDim: ReferenceVector3;
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly constantDimensions: Map<string, readonly number[]>;
@@ -288,7 +288,7 @@ export function runCompiledKernelReference(
   const traces: MutableTrace[] = [];
 
   if (usesGridSync(backendIr.body)) {
-    runGrid(backendIr.body, compiled, backendIr.sharedDeclarations, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+    runGrid(backendIr.body, compiled, backendIr.sharedDeclarations, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, referenceVectorFromTuple(launch.blockDim), referenceVectorFromTuple(launch.gridDim), traces);
   } else {
     for (let bz = 0; bz < launch.gridDim[2]; bz++) {
       for (let by = 0; by < launch.gridDim[1]; by++) {
@@ -297,7 +297,7 @@ export function runCompiledKernelReference(
             x: bx,
             y: by,
             z: bz,
-          }, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+          }, referenceVectorFromTuple(launch.blockDim), referenceVectorFromTuple(launch.gridDim), traces);
         }
       }
     }
@@ -386,9 +386,9 @@ function runBlock(
   kernels: ReadonlyMap<string, CudaLiteKernel>,
   scalars: Readonly<Record<string, number>>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
-  blockIdx: Vector3,
-  blockDim: Vector3,
-  gridDim: Vector3,
+  blockIdx: ReferenceVector3,
+  blockDim: ReferenceVector3,
+  gridDim: ReferenceVector3,
   traces: MutableTrace[],
 ): void {
   const shared = allocateShared(sharedDeclarationsFor(body, sharedDeclarations));
@@ -631,8 +631,8 @@ function runGrid(
   kernels: ReadonlyMap<string, CudaLiteKernel>,
   scalars: Readonly<Record<string, number>>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
-  blockDim: Vector3,
-  gridDim: Vector3,
+  blockDim: ReferenceVector3,
+  gridDim: ReferenceVector3,
   traces: MutableTrace[],
 ): void {
   const generators: BarrierGenerator[] = [];
@@ -1742,9 +1742,9 @@ function runChildBlock(
   parent: ThreadContext,
   seedLocals: Map<string, LocalValue>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
-  blockIdx: Vector3,
-  blockDim: Vector3,
-  gridDim: Vector3,
+  blockIdx: ReferenceVector3,
+  blockDim: ReferenceVector3,
+  gridDim: ReferenceVector3,
 ): void {
   const shared = allocateShared(sharedDeclarationsFor(body, []));
   const generators: BarrierGenerator[] = [];
@@ -2536,7 +2536,7 @@ function setReferenceValueType(context: ThreadContext, name: string, valueType: 
   }
 }
 
-function readMemberObject(expression: CudaLiteExpression, context: ThreadContext): Vector3 | ComplexValue | CudaVectorValue {
+function readMemberObject(expression: CudaLiteExpression, context: ThreadContext): ReferenceVector3 | ComplexValue | CudaVectorValue {
   if (expression.kind === "identifier") {
     const value = readIdentifier(expression.name, context);
     if (isComplex(value)) return value;
@@ -6239,11 +6239,7 @@ function intFromBits(value: number): number {
   return BITCAST_INT[0] ?? 0;
 }
 
-function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
-  return { x: value[0], y: value[1], z: value[2] };
-}
-
-function vectorFromExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): Vector3 {
+function vectorFromExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): ReferenceVector3 {
   return {
     x: Math.trunc(expressions[0] ? evalNumber(expressions[0], context) : 1),
     y: Math.trunc(expressions[1] ? evalNumber(expressions[1], context) : 1),
@@ -6251,21 +6247,12 @@ function vectorFromExpressions(expressions: readonly CudaLiteExpression[], conte
   };
 }
 
-function vectorFromLaunchExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): Vector3 {
+function vectorFromLaunchExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): ReferenceVector3 {
   if (expressions.length === 1 && expressions[0]?.kind === "identifier") {
     const local = context.locals.get(expressions[0].name);
-    if (isVector3(local)) return local;
+    if (isReferenceVector3(local)) return local;
   }
   return vectorFromExpressions(expressions, context);
-}
-
-function isVector3(value: LocalValue | undefined): value is Vector3 {
-  return value !== undefined &&
-    typeof value !== "number" &&
-    !("kind" in value) &&
-    typeof value.x === "number" &&
-    typeof value.y === "number" &&
-    typeof value.z === "number";
 }
 
 function sharedDeclarationsFor(
