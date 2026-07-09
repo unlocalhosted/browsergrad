@@ -47,6 +47,12 @@ import {
   type MutableReferenceTrace,
 } from "./reference_trace.js";
 import {
+  referenceByteView as byteView,
+  referenceElementByteSize as elementByteSize,
+  referenceRawStorageIndexFromByteOffset as rawStorageIndexFromByteOffset,
+  referenceRawStorageUnitByteSize as rawStorageUnitByteSize,
+} from "./reference_memory_bytes.js";
+import {
   isReferenceVector3,
   referenceVectorFromTuple,
   type ReferenceVector3,
@@ -2267,31 +2273,6 @@ function isFloatLikeScalarType(valueType: CudaLiteScalarType | undefined): boole
 
 function isIntegerScalarType(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "int" || valueType === "uint" || valueType === "bool";
-}
-
-function byteView(buffer: WgslTypedArray): Uint8Array {
-  return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-}
-
-function elementByteSize(valueType: CudaLiteScalarType): number {
-  const vector = cudaVectorLaneCount(valueType);
-  if (vector > 1) return vector * scalarByteSize(cudaVectorScalarType(valueType));
-  return scalarByteSize(valueType);
-}
-
-function scalarByteSize(valueType: CudaLiteScalarType | undefined): number {
-  if (valueType === "half") return 2;
-  if (valueType === "bf16") return 2;
-  if (valueType === "complex64") return 8;
-  return 4;
-}
-
-function rawStorageUnitByteSize(valueType: CudaLiteScalarType | undefined): number {
-  return scalarByteSize(valueType === undefined ? undefined : cudaVectorScalarType(valueType) ?? valueType);
-}
-
-function rawStorageIndexFromByteOffset(byteOffset: number, valueType: CudaLiteScalarType | undefined): number {
-  return Math.trunc(byteOffset / rawStorageUnitByteSize(valueType));
 }
 
 function rootIdentifierFromExpression(expression: CudaLiteExpression): string | undefined {

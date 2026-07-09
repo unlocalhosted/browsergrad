@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T18:47:56Z
+Last updated: 2026-07-09T18:52:50Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: semantic WGSL CUDA-to-WGSL type mapping and zero values moved into a focused helper Module |
+| Active work item | Architecture split: reference interpreter byte-view and storage byte-size math moved into a focused helper Module |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: extracted `reference_memory_bytes.ts` for CPU reference byte views, scalar/vector element byte sizes, raw storage unit sizes, and byte-offset-to-index conversion; runtime copy, pointer difference, pool pointer offsets, shared byte storage, and raw storage code now share one reference byte-layout Module instead of local byte-size helpers in `reference.ts`; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6819` lines
 - Architecture split: extracted `semantic_wgsl_types.ts` for semantic WGSL scalar/vector/binding/atomic/uniform type mapping and zero-value emission; `semantic_wgsl.ts` now consumes one type-mapping Module instead of carrying local CUDA-to-WGSL type conversion tables next to expression emission; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `6843` lines
 - Architecture split: extracted `semantic_wgsl_pointers.ts` for semantic WGSL function storage-pointer params, storage buffer IDs, pointer helper names, pointer/storage value compatibility, pointer base/buffer param names, and storage-offset discovery; `semantic_wgsl.ts` dropped repeated pointer naming/compat and offset-walk implementation while keeping emission behavior unchanged; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `6918` lines
 - Architecture split: extracted `semantic_wgsl_memory_layout.ts` for semantic WGSL array type emission, flat ranked memory indexes, and local-array flat-to-ranked indexes; shared/constant/device-global/local memory layout checks now sit behind one semantic WGSL memory layout Module instead of repeated stride/rank implementation inside `semantic_wgsl.ts`; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`
