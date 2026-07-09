@@ -4,6 +4,7 @@ import type {
   CudaLiteScalarType,
   CudaLiteVarDecl,
 } from "./types.js";
+import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 
 export type MatrixTileRole = "matrix_a" | "matrix_b" | "accumulator";
 export type MatrixTileLayout = "row_major" | "col_major" | "mem_row_major" | "mem_col_major";
@@ -121,7 +122,7 @@ export function matrixTileElementCount(tile: MatrixTileResolvedSpec): number {
 export function matrixTileStorageDimensions(declaration: CudaLiteVarDecl): readonly number[] {
   const spec = declaration.matrixTile ? resolveMatrixTileSpec(declaration.matrixTile) : undefined;
   if (!spec) return declaration.dimensions;
-  const leading = declaration.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const leading = totalElements(declaration.dimensions);
   return [Math.max(1, leading) * matrixTileElementCount(spec)];
 }
 

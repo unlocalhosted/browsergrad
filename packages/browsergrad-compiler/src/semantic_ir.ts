@@ -18,6 +18,10 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
+import {
+  cudaLiteDimensionStride as dimensionStride,
+  cudaLiteTotalElements as totalElements,
+} from "./cuda_lite_values.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -1520,7 +1524,7 @@ function semanticSizeofAlignofValue(
     if (elementLayout === undefined) return undefined;
     if (kind === "alignof") return elementLayout;
     if (symbol.pointer && symbol.dimensions.length === 0) return sizeofCudaType("voidptr") ?? 4;
-    const elements = symbol.dimensions.reduce((product, dimension) => product * dimension, 1);
+    const elements = totalElements(symbol.dimensions);
     return elementLayout * Math.max(1, elements);
   }
   const valueType = expressionValueType(lowerExpression(expression, scope));
@@ -2429,7 +2433,7 @@ function flatIndexExpressionForDimensions(
 ): SemanticExpression {
   let flat = zeroExpression(span);
   for (const [offset, index] of indices.entries()) {
-    const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(dimensions, offset);
     const term = stride === 1 ? index : multiplyIndexExpression(index, stride, span);
     flat = addIndexExpressions(flat, term, span);
   }

@@ -1,4 +1,5 @@
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { cudaLiteDimensionStride as dimensionStride } from "./cuda_lite_values.js";
 import { cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import { localPointerHandleStorageName } from "./wgsl_context.js";
 import { wgslElementByteSize } from "./wgsl_storage.js";
@@ -443,7 +444,7 @@ function constantPointerArgumentParts(
   if (indexes.length === 0) return { buffer: `${id}u`, base: "0u" };
   const dimensions = constant.dimensions.length === 0 ? [1] : constant.dimensions;
   const terms = indexes.map((index, axis) => {
-    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(dimensions, axis);
     const value = `u32(${callbacks.emitExpression(index, context)})`;
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });
@@ -468,7 +469,7 @@ function sharedPointerArgumentParts(
   if (!declaration) return undefined;
   if (indexes.length === 0) return { buffer: `${id}u`, base: "0u" };
   const terms = indexes.map((index, axis) => {
-    const stride = declaration.dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(declaration.dimensions, axis);
     const value = `u32(${callbacks.emitExpression(index, context)})`;
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });
@@ -497,7 +498,7 @@ function deviceGlobalPointerArgumentParts(
   if (indexes.length === 0) return { buffer: `${id}u`, base: "0u" };
   const dimensions = global.dimensions.length === 0 ? [1] : global.dimensions;
   const terms = indexes.map((index, axis) => {
-    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(dimensions, axis);
     const value = `u32(${callbacks.emitExpression(index, context)})`;
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });

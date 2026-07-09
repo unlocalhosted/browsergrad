@@ -1,5 +1,6 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { cudaLiteDimensionStride as dimensionStride } from "./cuda_lite_values.js";
 import { matrixTileStorageDimensions } from "./matrix_tiles.js";
 import {
   type CudaLiteCallExpression,
@@ -583,7 +584,7 @@ export function flatLocalArrayIndexExpression(
 ): CudaLiteExpression {
   if (indices.length === 0) return zeroExpression(span);
   const terms = indices.map((index, axis) => {
-    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(dimensions, axis);
     if (stride === 1) return index;
     return {
       kind: "binary",

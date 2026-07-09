@@ -5,6 +5,10 @@ import {
   cudaVectorScalarType,
   isCudaVectorType,
 } from "./vector_types.js";
+import {
+  cudaLiteDimensionStride as dimensionStride,
+  cudaLiteTotalElements as totalElements,
+} from "./cuda_lite_values.js";
 import { matrixTileStorageDimensions } from "./matrix_tiles.js";
 import { emitVectorLaneSetExpression } from "./wgsl_value_conversion.js";
 import type {
@@ -112,7 +116,7 @@ export function emitSharedFlatAccess(name: string, dimensions: readonly number[]
   if (dimensions.length === 0) return name;
   if (dimensions.length <= 1) return `${name}[${index}]`;
   return dimensions.reduce((expr, dimension, axis) => {
-    const stride = dimensions.slice(axis + 1).reduce((product, item) => product * item, 1);
+    const stride = dimensionStride(dimensions, axis);
     const rawAxisIndex = stride === 1
       ? `(${index} % ${dimension}u)`
       : `(((${index}) / ${stride}u) % ${dimension}u)`;
@@ -1014,8 +1018,6 @@ export function emitConstantVectorFlatRead(
 
 export function externalConstantDimensions(constant: CudaLiteGlobalConstant): readonly number[] {
   if (!isCudaVectorType(constant.valueType)) return constant.dimensions;
-  const elements = constant.dimensions.length === 0
-    ? 1
-    : constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const elements = totalElements(constant.dimensions);
   return [elements * cudaVectorLaneCount(constant.valueType)];
 }

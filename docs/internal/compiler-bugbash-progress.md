@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T15:46:02Z
+Last updated: 2026-07-09T15:51:41Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: AST/shared dimension element-count and index math now route through shared CUDA-lite value helpers across analyzer, reference, WGSL declarations, and WebGPU inputs |
+| Active work item | Architecture split: backend/semantic dimension element-count and stride math now route through shared CUDA-lite value helpers across WGSL storage, device pointers, peer copy, matrix tiles, and semantic IR |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: routed backend/semantic dimension element-count and row-major stride math through `cuda_lite_values.ts` across WGSL storage, WGSL IR analysis, device pointer argument lowering, peer-copy device globals, matrix tile storage, and semantic IR sizeof/flat-index lowering; this keeps array layout math behind one CUDA-lite value Module instead of scattered reducers in backend callers; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + selected storage/pointer WebGPU `125/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map still shows the largest pressure points as `wgsl.ts`, `semantic_wgsl.ts`, `reference.ts`, and `analyzer.ts`
 - Architecture split: routed AST/shared array element counts, device-global default sizing, constant validation sizing, shared-address stride math, and local-array element access through `cuda_lite_values.ts`; analyzer/reference/WGSL declarations/WebGPU inputs now share the same dimension helpers instead of open-coded reducers and index loops; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + runtime/inline-asm WebGPU slice `62/0/0` + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`
 - Architecture split: extracted `ast_initializers.ts` for recursive AST initializer flattening and removed duplicate frontend initializer walkers from parser, analyzer, reference, WGSL declarations, and WebGPU input defaults; this deepens the AST initializer Module and keeps initializer compatibility fixes local instead of spread across parser/analyzer/reference/backend callers; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + runtime/inline-asm WebGPU slice `62/0/0` + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows parser `2156`, analyzer `5394`, reference `6837`
 - Architecture split: moved CUDA-lite dimension stride, flat-index, and flat-indices math into `cuda_lite_values.ts`; semantic reference and semantic WGSL now share the same row-major layout math for local/shared/constant/device-global lowering instead of duplicating stride reducers; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_reference.ts` down to `4667` lines and `semantic_wgsl.ts` down to `6991`

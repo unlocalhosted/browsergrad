@@ -1,5 +1,6 @@
 import type { WgslResidentBuffer, WgslTypedArray, WgslValueType } from "@unlocalhosted/browsergrad-kernels";
 import { expressionName } from "./analyzer.js";
+import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import { isCudaPeerCopyHostNoopCall } from "./cuda_host_silent_calls.js";
 import {
   cudaRuntimeCopyShapeForCall,
@@ -608,9 +609,7 @@ function copyDeviceGlobalView(global: CudaLiteDeviceGlobal): CopyBufferView | un
   const valueType = copyValueTypeForCuda(global.valueType);
   if (!valueType) return undefined;
   const lanes = isCudaVectorType(global.valueType) ? cudaVectorLaneCount(global.valueType) : 1;
-  const elements = global.dimensions.length === 0
-    ? 1
-    : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const elements = totalElements(global.dimensions);
   return { valueType, elementSize: 4, elementLength: elements * lanes };
 }
 
