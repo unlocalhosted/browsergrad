@@ -12350,6 +12350,47 @@ __global__ void convertKernel(uint *out, uint *input) {
     ]);
   });
 
+  it("lowers inline PTX mov b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int mov_u_ptx(unsigned int value) {
+  unsigned int ret;
+  asm volatile("mov.u32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__device__ int mov_s_ptx(int value) {
+  int ret;
+  asm volatile("mov.s32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__global__ void moveKernel(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = mov_u_ptx(input[idx]);
+  out[idx + 4] = (uint)mov_s_ptx((int)input[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(8),
+          input: new Uint32Array([0, 1, 0xffffffff, 0x80000000]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("u32(");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0,
+      1,
+      0xffffffff,
+      0x80000000,
+      0,
+      1,
+      0xffffffff,
+      0x80000000,
+    ]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {

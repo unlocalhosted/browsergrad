@@ -29,6 +29,7 @@ export const runtimeScopeCases = [
   "inline-asm:select-b32",
   "inline-asm:compare-b32",
   "inline-asm:convert-b32",
+  "inline-asm:move-b32",
   "inline-asm:special-reg-single-percent",
   "runtime:unreachable-texture-surface-compat-diagnostics",
   "runtime:unreachable-constant-binding",

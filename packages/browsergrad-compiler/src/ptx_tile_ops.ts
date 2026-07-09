@@ -20,6 +20,7 @@ export type InlineAsmOp =
   | { readonly kind: "unary-int-b32"; readonly op: "neg" | "abs"; readonly signed: boolean }
   | { readonly kind: "select-b32"; readonly signed: boolean }
   | { readonly kind: "compare-b32"; readonly op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; readonly signed: boolean }
+  | { readonly kind: "move-b32"; readonly signed: boolean }
   | { readonly kind: "convert-b32"; readonly fromSigned: boolean; readonly toSigned: boolean }
   | { readonly kind: "u8x4-sad-add" }
   | { readonly kind: "cp-async-fence"; readonly fence: "commit_group" | "wait_group" | "wait_all" }
@@ -86,6 +87,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (selp) return { kind: "select-b32", signed: selp[1] === "s32" };
   const setp = /\bsetp\.(eq|ne|lt|le|gt|ge)\.(u32|s32)\b/u.exec(template);
   if (setp) return { kind: "compare-b32", op: setp[1] as "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: setp[2] === "s32" };
+  const mov = /\bmov\.(b32|u32|s32)\b/u.exec(template);
+  if (mov) return { kind: "move-b32", signed: mov[1] === "s32" };
   const cvt = /\bcvt\.(u32|s32)\.(u32|s32)\b/u.exec(template);
   if (cvt) return { kind: "convert-b32", toSigned: cvt[1] === "s32", fromSigned: cvt[2] === "s32" };
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
@@ -142,6 +145,7 @@ export function inlineAsmSupportedList(): string {
     "abs.s32",
     "selp.{b32,u32,s32}",
     "setp.{eq,ne,lt,le,gt,ge}.{u32,s32}",
+    "mov.{b32,u32,s32}",
     "cvt.{u32,s32}.{u32,s32}",
     "vabsdiff4.u32.u32.u32.add",
     "cp.async.{commit_group,wait_group,wait_all}",

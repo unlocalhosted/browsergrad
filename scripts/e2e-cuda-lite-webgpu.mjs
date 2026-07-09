@@ -2831,6 +2831,22 @@ __global__ void ptxConvertB32(uint *out, uint *input) {
   out[idx] = cvt_u_s((int)input[idx]);
   out[idx + 4] = (uint)cvt_s_u(input[idx]);
 }`,
+  ptxMoveB32: `
+__device__ unsigned int mov_u_ptx(unsigned int value) {
+  unsigned int ret;
+  asm volatile("mov.u32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__device__ int mov_s_ptx(int value) {
+  int ret;
+  asm volatile("mov.s32 %0, %1;" : "=r"(ret) : "r"(value));
+  return ret;
+}
+__global__ void ptxMoveB32(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = mov_u_ptx(input[idx]);
+  out[idx + 4] = (uint)mov_s_ptx((int)input[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -14302,6 +14318,23 @@ const html = String.raw`<!doctype html>
           {
             name: "inline-asm:convert-b32",
             source: SOURCES.ptxConvertB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+                input: new Uint32Array([0, 1, 0xffffffff, 0x80000000]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0, 1, 0xffffffff, 0x80000000, 0, 1, 0xffffffff, 0x80000000],
+            },
+          },
+          {
+            name: "inline-asm:move-b32",
+            source: SOURCES.ptxMoveB32,
             options: { workgroupSize: [4, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
             input: () => ({
