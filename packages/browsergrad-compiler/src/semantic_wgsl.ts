@@ -72,7 +72,10 @@ import {
   isCudaBarrierCallName,
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
-import { cudaVoteOpForCall } from "./cuda_subgroup_calls.js";
+import {
+  cudaArithmeticReduceOpForCall,
+  cudaVoteOpForCall,
+} from "./cuda_subgroup_calls.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
   emitSemanticFlatArrayType,
@@ -3780,9 +3783,10 @@ function emitSemanticSubgroupCall(
     const width = widthArg ? emitSemanticExpressionAs(widthArg, ir, names, "u32", options, textureSpecializations) : "32u";
     return `${helper.name}(${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(valueType), options, textureSpecializations)}, ${index}, ${width}, local_id)`;
   }
-  if (name === "__reduce_add_sync" || name === "__reduce_min_sync" || name === "__reduce_max_sync") {
+  const arithmeticReduceOp = cudaArithmeticReduceOpForCall(name);
+  if (arithmeticReduceOp !== undefined) {
     const scalar = semanticExpressionWgslScalar(value);
-    const wgslCall = name === "__reduce_add_sync" ? "subgroupAdd" : name === "__reduce_min_sync" ? "subgroupMin" : "subgroupMax";
+    const wgslCall = arithmeticReduceOp === "add" ? "subgroupAdd" : arithmeticReduceOp === "min" ? "subgroupMin" : "subgroupMax";
     return `${wgslCall}(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
   }
   throw semanticWgslError(`semantic WGSL does not support subgroup call '${name}'`, expression.span);

@@ -35,6 +35,8 @@ import {
   CUDA_FENCE_CALL_NAMES,
 } from "./cuda_sync_calls.js";
 import {
+  isCudaArithmeticReduceCallName,
+  isCudaBitwiseReduceCallName,
   isCudaLegacyShuffleCallName as legacyShuffleCall,
   isCudaShuffleCallName,
   isCudaVoteCallName,
@@ -916,12 +918,8 @@ function lowerExpression(
           : expression.callee.kind === "identifier" && isCudaVoteCallName(expression.callee.name)
             ? "uint"
           : expression.callee.kind === "identifier" && (
-              expression.callee.name === "__reduce_add_sync" ||
-              expression.callee.name === "__reduce_min_sync" ||
-              expression.callee.name === "__reduce_max_sync" ||
-              expression.callee.name === "__reduce_and_sync" ||
-              expression.callee.name === "__reduce_or_sync" ||
-              expression.callee.name === "__reduce_xor_sync" ||
+              isCudaArithmeticReduceCallName(expression.callee.name) ||
+              isCudaBitwiseReduceCallName(expression.callee.name) ||
               isCudaShuffleCallName(expression.callee.name)
             )
             ? expressionValueType(legacyShuffleCall(expression.callee.name) ? args[0] : args[1]) ?? "uint"

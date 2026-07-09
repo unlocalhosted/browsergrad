@@ -2,9 +2,22 @@ export const CUDA_LEGACY_VOTE_CALL_NAMES = ["__any", "__all", "__ballot"] as con
 export const CUDA_SYNC_VOTE_CALL_NAMES = ["__any_sync", "__all_sync", "__ballot_sync", "__match_any_sync"] as const;
 export const CUDA_LEGACY_SHUFFLE_CALL_NAMES = ["__shfl", "__shfl_down", "__shfl_up", "__shfl_xor"] as const;
 export const CUDA_SYNC_SHUFFLE_CALL_NAMES = ["__shfl_sync", "__shfl_down_sync", "__shfl_up_sync", "__shfl_xor_sync"] as const;
+export const CUDA_ARITHMETIC_REDUCE_CALL_NAMES = ["__reduce_add_sync", "__reduce_min_sync", "__reduce_max_sync"] as const;
+export const CUDA_BITWISE_REDUCE_CALL_NAMES = ["__reduce_and_sync", "__reduce_or_sync", "__reduce_xor_sync"] as const;
+export const CUDA_SUBGROUP_CALL_NAMES = [
+  "__activemask",
+  ...CUDA_LEGACY_VOTE_CALL_NAMES,
+  ...CUDA_SYNC_VOTE_CALL_NAMES,
+  ...CUDA_ARITHMETIC_REDUCE_CALL_NAMES,
+  ...CUDA_BITWISE_REDUCE_CALL_NAMES,
+  ...CUDA_LEGACY_SHUFFLE_CALL_NAMES,
+  ...CUDA_SYNC_SHUFFLE_CALL_NAMES,
+] as const;
 
 export type CudaShuffleOp = "sync" | "down" | "up" | "xor";
 export type CudaVoteOp = "any" | "all" | "ballot" | "match-any";
+export type CudaArithmeticReduceOp = "add" | "min" | "max";
+export type CudaBitwiseReduceOp = "and" | "or" | "xor";
 
 export function isCudaLegacyVoteCallName(name: string | undefined): boolean {
   return name === "__any" || name === "__all" || name === "__ballot";
@@ -44,4 +57,26 @@ export function cudaShuffleOpForCall(name: string | undefined): CudaShuffleOp | 
   if (name === "__shfl_up" || name === "__shfl_up_sync") return "up";
   if (name === "__shfl_xor" || name === "__shfl_xor_sync") return "xor";
   return undefined;
+}
+
+export function cudaArithmeticReduceOpForCall(name: string | undefined): CudaArithmeticReduceOp | undefined {
+  if (name === "__reduce_add_sync") return "add";
+  if (name === "__reduce_min_sync") return "min";
+  if (name === "__reduce_max_sync") return "max";
+  return undefined;
+}
+
+export function cudaBitwiseReduceOpForCall(name: string | undefined): CudaBitwiseReduceOp | undefined {
+  if (name === "__reduce_and_sync") return "and";
+  if (name === "__reduce_or_sync") return "or";
+  if (name === "__reduce_xor_sync") return "xor";
+  return undefined;
+}
+
+export function isCudaArithmeticReduceCallName(name: string | undefined): boolean {
+  return cudaArithmeticReduceOpForCall(name) !== undefined;
+}
+
+export function isCudaBitwiseReduceCallName(name: string | undefined): boolean {
+  return cudaBitwiseReduceOpForCall(name) !== undefined;
 }

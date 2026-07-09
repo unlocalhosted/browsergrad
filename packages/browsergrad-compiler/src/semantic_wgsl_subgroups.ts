@@ -9,9 +9,11 @@ import {
   semanticExpressionChildren,
 } from "./semantic_ir_walk.js";
 import {
+  cudaBitwiseReduceOpForCall,
   cudaShuffleOpForCall,
   isCudaLegacyShuffleCallName as legacyShuffleCall,
   isCudaLegacyVoteCallName as legacyVoteCall,
+  type CudaBitwiseReduceOp,
   type CudaShuffleOp,
 } from "./cuda_subgroup_calls.js";
 import { safeWgslIdentifier } from "./wgsl_names.js";
@@ -35,7 +37,7 @@ export interface SemanticMatchAnyHelper {
   readonly tileSize: number;
 }
 
-export type SemanticBitwiseReduceOp = "and" | "or" | "xor";
+export type SemanticBitwiseReduceOp = CudaBitwiseReduceOp;
 
 export interface SemanticBitwiseReduceHelper {
   readonly key: string;
@@ -273,10 +275,7 @@ function collectSemanticBitwiseReduceExpressionHelpers(
 }
 
 export function semanticBitwiseReduceOpForCall(name: string): SemanticBitwiseReduceOp | undefined {
-  if (name === "__reduce_and_sync") return "and";
-  if (name === "__reduce_or_sync") return "or";
-  if (name === "__reduce_xor_sync") return "xor";
-  return undefined;
+  return cudaBitwiseReduceOpForCall(name);
 }
 
 export function semanticBitwiseReduceHelper(

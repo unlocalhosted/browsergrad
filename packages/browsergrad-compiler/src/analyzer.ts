@@ -42,6 +42,8 @@ import {
   isCudaSyncthreadsPredicateCallName as isSyncthreadsPredicateBuiltin,
 } from "./cuda_sync_calls.js";
 import {
+  isCudaArithmeticReduceCallName as isMaskedWarpReductionBuiltin,
+  isCudaBitwiseReduceCallName as isMaskedWarpBitwiseReductionBuiltin,
   isCudaShuffleCallName as isShuffleBuiltin,
   isCudaVoteCallName as isVoteBuiltin,
 } from "./cuda_subgroup_calls.js";
@@ -4119,14 +4121,6 @@ function pointerArrayElementAliasKey(expression: Extract<CudaLiteExpression, { k
 
 function isAtomicBuiltin(callName: string): boolean {
   return isSemanticAtomicCallName(callName);
-}
-
-function isMaskedWarpReductionBuiltin(callName: string): boolean {
-  return callName === "__reduce_add_sync" || callName === "__reduce_min_sync" || callName === "__reduce_max_sync";
-}
-
-function isMaskedWarpBitwiseReductionBuiltin(callName: string): boolean {
-  return callName === "__reduce_and_sync" || callName === "__reduce_or_sync" || callName === "__reduce_xor_sync";
 }
 
 function isWarpReductionBuiltin(callName: string): boolean {

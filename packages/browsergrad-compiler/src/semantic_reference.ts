@@ -27,6 +27,8 @@ import {
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
 import {
+  cudaArithmeticReduceOpForCall,
+  cudaBitwiseReduceOpForCall,
   cudaShuffleOpForCall,
   cudaVoteOpForCall,
   isCudaLegacyShuffleCallName as legacyShuffleCall,
@@ -1914,12 +1916,14 @@ function evalSemanticSubgroupCall(
     }
     return mask >>> 0;
   }
-  if (name === "__reduce_add_sync") return peers.reduce((sum, peer) => sum + evalNumber(value, peer), 0);
-  if (name === "__reduce_min_sync") return Math.min(...peers.map((peer) => evalNumber(value, peer)));
-  if (name === "__reduce_max_sync") return Math.max(...peers.map((peer) => evalNumber(value, peer)));
-  if (name === "__reduce_and_sync") return peers.reduce((acc, peer) => acc & (evalNumber(value, peer) | 0), -1) >>> 0;
-  if (name === "__reduce_or_sync") return peers.reduce((acc, peer) => acc | (evalNumber(value, peer) | 0), 0) >>> 0;
-  if (name === "__reduce_xor_sync") return peers.reduce((acc, peer) => acc ^ (evalNumber(value, peer) | 0), 0) >>> 0;
+  const arithmeticReduceOp = cudaArithmeticReduceOpForCall(name);
+  if (arithmeticReduceOp === "add") return peers.reduce((sum, peer) => sum + evalNumber(value, peer), 0);
+  if (arithmeticReduceOp === "min") return Math.min(...peers.map((peer) => evalNumber(value, peer)));
+  if (arithmeticReduceOp === "max") return Math.max(...peers.map((peer) => evalNumber(value, peer)));
+  const bitwiseReduceOp = cudaBitwiseReduceOpForCall(name);
+  if (bitwiseReduceOp === "and") return peers.reduce((acc, peer) => acc & (evalNumber(value, peer) | 0), -1) >>> 0;
+  if (bitwiseReduceOp === "or") return peers.reduce((acc, peer) => acc | (evalNumber(value, peer) | 0), 0) >>> 0;
+  if (bitwiseReduceOp === "xor") return peers.reduce((acc, peer) => acc ^ (evalNumber(value, peer) | 0), 0) >>> 0;
   if (isCudaShuffleCallName(name)) {
     const indexArg = legacyShuffleCall(name) ? expression.args[1] : expression.args[2];
     const widthArg = legacyShuffleCall(name) ? expression.args[2] : expression.args[3];
