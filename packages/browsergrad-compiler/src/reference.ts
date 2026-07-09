@@ -55,6 +55,11 @@ import {
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
 import {
+  isCudaNanPayloadCallName as isNanPayloadCallName,
+  isCudaSincosCallName as isSincosCallName,
+  isCudaSincosPiCallName as isSincosPiCallName,
+} from "./cuda_math_calls.js";
+import {
   isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
 } from "./cuda_cp_async.js";
@@ -4443,18 +4448,10 @@ function roundTiesToEvenNumber(value: number): number {
 function evalSincos(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
   const name = expressionName(expression.callee);
   const rawValue = evalNumber(expression.args[0]!, context);
-  const value = name === "sincospi" || name === "sincospif" ? Math.PI * rawValue : rawValue;
+  const value = isSincosPiCallName(name) ? Math.PI * rawValue : rawValue;
   writeLValue(resolvePointerArgument(expression.args[1]!, context), Math.sin(value), context);
   writeLValue(resolvePointerArgument(expression.args[2]!, context), Math.cos(value), context);
   return 0;
-}
-
-function isSincosCallName(name: string | undefined): boolean {
-  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
-}
-
-function isNanPayloadCallName(name: string | undefined): boolean {
-  return name === "nan" || name === "nanf" || name === "__builtin_nan" || name === "__builtin_nanf";
 }
 
 function evalVectorMinMaxCall(

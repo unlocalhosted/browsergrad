@@ -22,6 +22,10 @@ import {
   cudaLiteDimensionStride as dimensionStride,
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
+import {
+  isCudaSincosCallName as isSincosCallName,
+  isCudaSincosPiCallName as isSincosPiCallName,
+} from "./cuda_math_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -1622,14 +1626,6 @@ function roundTiesToEvenNumber(value: number): number {
   if (diff < 0.5) return floor;
   if (diff > 0.5) return floor + 1;
   return floor % 2 === 0 ? floor : floor + 1;
-}
-
-function isSincosCallName(name: string): boolean {
-  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
-}
-
-function isSincosPiCallName(name: string): boolean {
-  return name === "sincospi" || name === "sincospif";
 }
 
 function isModfCallName(name: string): boolean {

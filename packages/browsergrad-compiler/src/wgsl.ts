@@ -12,6 +12,11 @@ import {
   isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
 } from "./cuda_cp_async.js";
+import {
+  isCudaNanPayloadCallName as isNanPayloadCallName,
+  isCudaSincosCallName as isSincosCallName,
+  isCudaSincosPiCallName as isSincosPiCallName,
+} from "./cuda_math_calls.js";
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import {
@@ -1854,14 +1859,6 @@ function emitSincosOutputWrite(
   );
 }
 
-function isSincosCallName(name: string | undefined): boolean {
-  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
-}
-
-function isNanPayloadCallName(name: string | undefined): boolean {
-  return name === "nan" || name === "nanf" || name === "__builtin_nan" || name === "__builtin_nanf";
-}
-
 function emitModfDecomposeLines(value: string, fractionTarget: string, intpartTarget: string, indentLevel: number): string[] {
   const prefix = indent(indentLevel);
   return [
@@ -3610,7 +3607,7 @@ function emitSincosExpressionStatement(
   const cosTarget = expression.args[2];
   if (!sinTarget || !cosTarget) return undefined;
   const rawValue = expression.args[0] ? emitExpressionAsValueType(expression.args[0], "float", context) : "0.0";
-  const value = name === "sincospi" || name === "sincospif" ? `(3.141592653589793 * ${rawValue})` : rawValue;
+  const value = isSincosPiCallName(name) ? `(3.141592653589793 * ${rawValue})` : rawValue;
   const sinTemp = context.nameFor(`bg_sincos_sin_${expression.span.start}`);
   const cosTemp = context.nameFor(`bg_sincos_cos_${expression.span.start}`);
   const prefix = indent(indentLevel);

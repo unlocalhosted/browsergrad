@@ -29,6 +29,10 @@ import {
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
 } from "./cuda_cp_async.js";
 import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
+import {
+  isCudaNanPayloadCallName as isNanPayloadCallName,
+  isCudaSincosCallName as isSincosCallName,
+} from "./cuda_math_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
@@ -2472,14 +2476,6 @@ function isVibMinMaxCallName(name: string): boolean {
     name === "__vibmin_s16x2" ||
     name === "__vibmax_u16x2" ||
     name === "__vibmin_u16x2";
-}
-
-function isSincosCallName(name: string | undefined): boolean {
-  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
-}
-
-function isNanPayloadCallName(name: string | undefined): boolean {
-  return name === "nan" || name === "nanf" || name === "__builtin_nan" || name === "__builtin_nanf";
 }
 
 function validateCudaIntegerRuntimeQuery(
