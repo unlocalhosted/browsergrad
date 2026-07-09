@@ -2330,6 +2330,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "select-b32" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpression(statement.inputs, context), context)}`;
   }
+  if (op?.kind === "compare-b32" && statement.inputs.length === 2 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineCompareExpression(statement.inputs, op.op, op.signed, context), context)}`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2484,6 +2487,13 @@ function emitInlineSelectExpression(inputs: readonly CudaLiteExpression[], conte
   const falseValue = `u32(${emitExpression(inputs[1]!, context)})`;
   const predicate = `u32(${emitExpression(inputs[2]!, context)})`;
   return `select(${falseValue}, ${trueValue}, (${predicate} != 0u))`;
+}
+
+function emitInlineCompareExpression(inputs: readonly CudaLiteExpression[], op: "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: boolean, context: EmitContext): string {
+  const left = signed ? `bitcast<i32>(u32(${emitExpression(inputs[0]!, context)}))` : `u32(${emitExpression(inputs[0]!, context)})`;
+  const right = signed ? `bitcast<i32>(u32(${emitExpression(inputs[1]!, context)}))` : `u32(${emitExpression(inputs[1]!, context)})`;
+  const operator = op === "eq" ? "==" : op === "ne" ? "!=" : op === "lt" ? "<" : op === "le" ? "<=" : op === "gt" ? ">" : ">=";
+  return `select(0u, 1u, (${left} ${operator} ${right}))`;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {

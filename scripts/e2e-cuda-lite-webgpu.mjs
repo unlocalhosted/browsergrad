@@ -2793,6 +2793,28 @@ __global__ void ptxSelectB32(uint *out, uint *a, uint *b, uint *pred) {
   out[idx] = selp_u_ptx(a[idx], b[idx], pred[idx]);
   out[idx + 4] = (uint)selp_s_ptx((int)a[idx], (int)b[idx], pred[idx]);
 }`,
+  ptxCompareB32: `
+__device__ unsigned int setp_eq_u(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("setp.eq.u32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ unsigned int setp_lt_u(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("setp.lt.u32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ unsigned int setp_ge_s(int a, int b) {
+  unsigned int ret;
+  asm volatile("setp.ge.s32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__global__ void ptxCompareB32(uint *out, uint *a, uint *b) {
+  int idx = threadIdx.x;
+  out[idx] = setp_eq_u(a[idx], b[idx]);
+  out[idx + 4] = setp_lt_u(a[idx], b[idx]);
+  out[idx + 8] = setp_ge_s((int)a[idx], (int)b[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -14241,6 +14263,24 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [2, 0xffffffff, 0x80000000, 0x87654321, 2, 0xffffffff, 0x80000000, 0x87654321],
+            },
+          },
+          {
+            name: "inline-asm:compare-b32",
+            source: SOURCES.ptxCompareB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(12),
+                a: new Uint32Array([1, 0xffffffff, 0x80000000, 4]),
+                b: new Uint32Array([1, 2, 0x7fffffff, 5]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
             },
           },
           {

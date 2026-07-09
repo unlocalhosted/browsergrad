@@ -1003,6 +1003,15 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), predicate !== 0 ? trueValue : falseValue, context);
     return;
   }
+  if (op?.kind === "compare-b32") {
+    const label = `setp.${op.op}.${op.signed ? "s32" : "u32"}`;
+    if (statement.inputs.length !== 2) throw compilerFailure(`${label} inline asm expects two inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
+    const right = valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmCompare(op.op, left, right, op.signed) ? 1 : 0, context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1138,6 +1147,17 @@ function evalInlineAsmUnaryInt(op: "neg" | "abs", value: number): number {
   if (op === "neg") return (0 - value) >>> 0;
   const mask = (value & 0x80000000) === 0 ? 0 : 0xffffffff;
   return ((value ^ mask) - mask) >>> 0;
+}
+
+function evalInlineAsmCompare(op: "eq" | "ne" | "lt" | "le" | "gt" | "ge", left: number, right: number, signed: boolean): boolean {
+  const leftValue = signed ? left | 0 : left >>> 0;
+  const rightValue = signed ? right | 0 : right >>> 0;
+  if (op === "eq") return leftValue === rightValue;
+  if (op === "ne") return leftValue !== rightValue;
+  if (op === "lt") return leftValue < rightValue;
+  if (op === "le") return leftValue <= rightValue;
+  if (op === "gt") return leftValue > rightValue;
+  return leftValue >= rightValue;
 }
 
 function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {
