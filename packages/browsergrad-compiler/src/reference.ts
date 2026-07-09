@@ -937,6 +937,17 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmBytePerm(x, y, selector), context);
     return;
   }
+  if (op?.kind === "lop3-b32") {
+    const expectedInputs = op.immLut === undefined ? 4 : 3;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`lop3.b32 inline asm expects ${expectedInputs} inputs`);
+    if (outputs.length !== 1) throw compilerFailure("lop3.b32 inline asm expects one output operand");
+    const a = valueAsNumber(evalExpression(statement.inputs[0]!, context), "lop3.b32") >>> 0;
+    const b = valueAsNumber(evalExpression(statement.inputs[1]!, context), "lop3.b32") >>> 0;
+    const c = valueAsNumber(evalExpression(statement.inputs[2]!, context), "lop3.b32") >>> 0;
+    const immLut = op.immLut ?? (valueAsNumber(evalExpression(statement.inputs[3]!, context), "lop3.b32") & 0xff);
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmLop3(a, b, c, immLut), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1021,6 +1032,18 @@ function evalInlineAsmBytePerm(x: number, y: number, selector: number): number {
     const byte = (input >>> ((source & 3) * 8)) & 0xff;
     const value = (control & 0x8) === 0 ? byte : (byte & 0x80) === 0 ? 0 : 0xff;
     out |= value << (lane * 8);
+  }
+  return out >>> 0;
+}
+
+function evalInlineAsmLop3(a: number, b: number, c: number, immLut: number): number {
+  let out = 0;
+  for (let row = 0; row < 8; row++) {
+    if (((immLut >>> row) & 1) === 0) continue;
+    const aMask = (row & 0x4) === 0 ? ~a : a;
+    const bMask = (row & 0x2) === 0 ? ~b : b;
+    const cMask = (row & 0x1) === 0 ? ~c : c;
+    out |= aMask & bMask & cMask;
   }
   return out >>> 0;
 }

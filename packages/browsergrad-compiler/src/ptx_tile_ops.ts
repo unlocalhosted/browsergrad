@@ -12,6 +12,7 @@ export type InlineAsmOp =
   | { readonly kind: "clz-b32" }
   | { readonly kind: "brev-b32" }
   | { readonly kind: "prmt-b32" }
+  | { readonly kind: "lop3-b32"; readonly immLut?: number }
   | { readonly kind: "u8x4-sad-add" }
   | { readonly kind: "cp-async-fence"; readonly fence: "commit_group" | "wait_group" | "wait_all" }
   | { readonly kind: "membar"; readonly scope: "cta" | "gl" | "sys" }
@@ -55,6 +56,9 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\bclz\.b32\b/u.test(template)) return { kind: "clz-b32" };
   if (/\bbrev\.b32\b/u.test(template)) return { kind: "brev-b32" };
   if (/\bprmt\.b32\b/u.test(template)) return { kind: "prmt-b32" };
+  const lop3 = /\blop3\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|\d+)\s*;?/u.exec(template);
+  if (lop3) return { kind: "lop3-b32", immLut: parseInlineAsmImmediate(lop3[1]!) & 0xff };
+  if (/\blop3\.b32\b/u.test(template)) return { kind: "lop3-b32" };
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
   const cpAsyncFence = /\bcp\.async\.(commit_group|wait_group|wait_all)\b/u.exec(template);
   if (cpAsyncFence) return { kind: "cp-async-fence", fence: cpAsyncFence[1] as "commit_group" | "wait_group" | "wait_all" };
@@ -96,6 +100,7 @@ export function inlineAsmSupportedList(): string {
     "clz.b32",
     "brev.b32",
     "prmt.b32",
+    "lop3.b32",
     "vabsdiff4.u32.u32.u32.add",
     "cp.async.{commit_group,wait_group,wait_all}",
     "membar.{cta,gl,sys}",
@@ -103,4 +108,8 @@ export function inlineAsmSupportedList(): string {
     "ldmatrix.sync.aligned.x{1,2,4}.m8n8.shared.b16",
     "mma.sync.aligned.m16n8k16.row.col.{f16,f32}.f16.f16.{f16,f32}",
   ].join(", ");
+}
+
+function parseInlineAsmImmediate(value: string): number {
+  return value.startsWith("0x") || value.startsWith("0X") ? Number.parseInt(value, 16) : Number.parseInt(value, 10);
 }

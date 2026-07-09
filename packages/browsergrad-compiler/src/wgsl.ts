@@ -2309,6 +2309,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "prmt-b32" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpression(statement.inputs, context), context)}`;
   }
+  if (op?.kind === "lop3-b32" && statement.inputs.length === (op.immLut === undefined ? 4 : 3) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context), context)}`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2401,6 +2404,21 @@ function emitInlineBytePermExpression(inputs: readonly CudaLiteExpression[], con
     return `(select(${byte}, ${sign}, ((${control} & 0x8u) != 0u)) << ${lane * 8}u)`;
   });
   return `(${lanes.join(" | ")})`;
+}
+
+function emitInlineLop3Expression(inputs: readonly CudaLiteExpression[], immLut: number | undefined, context: EmitContext): string {
+  const a = `u32(${emitExpression(inputs[0]!, context)})`;
+  const b = `u32(${emitExpression(inputs[1]!, context)})`;
+  const c = `u32(${emitExpression(inputs[2]!, context)})`;
+  const lut = immLut === undefined ? `(u32(${emitExpression(inputs[3]!, context)}) & 0xffu)` : `${immLut & 0xff}u`;
+  const rows = Array.from({ length: 8 }, (_, row) => {
+    const aMask = (row & 0x4) === 0 ? `(~${a})` : a;
+    const bMask = (row & 0x2) === 0 ? `(~${b})` : b;
+    const cMask = (row & 0x1) === 0 ? `(~${c})` : c;
+    const rowMask = `(${aMask} & ${bMask} & ${cMask})`;
+    return `select(0u, ${rowMask}, ((${lut} & ${1 << row}u) != 0u))`;
+  });
+  return `(${rows.join(" | ")})`;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {

@@ -11876,6 +11876,50 @@ __global__ void prmtKernel(uint *out, uint *selector) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0x80112233, 0x66f72233, 0x445566f7, 0x33333333, 0xff112233]);
   });
 
+  it("lowers inline PTX lop3.b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int choose_ptx(unsigned int a, unsigned int b, unsigned int c) {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, %1, %2, %3, 0xca;" : "=r"(ret) : "r"(a), "r"(b), "r"(c));
+  return ret;
+}
+__device__ unsigned int xor_ptx(unsigned int a, unsigned int b, unsigned int c) {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, %1, %2, %3, %4;" : "=r"(ret) : "r"(a), "r"(b), "r"(c), "n"(0x96));
+  return ret;
+}
+__global__ void lop3Kernel(uint *out, uint *a, uint *b, uint *c) {
+  int idx = threadIdx.x;
+  out[idx] = choose_ptx(a[idx], b[idx], c[idx]);
+  out[idx + 4] = xor_ptx(a[idx], b[idx], c[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(8),
+          a: new Uint32Array([0xffffffff, 0, 0xf0f0f0f0, 0xaaaaaaaa]),
+          b: new Uint32Array([0x12345678, 0x12345678, 0x0f0f0f0f, 0x55555555]),
+          c: new Uint32Array([0x87654321, 0x87654321, 0xffffffff, 0x33333333]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("202u");
+    expect(compiled.wgsl).toContain("0x96");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0x12345678,
+      0x87654321,
+      0x0f0f0f0f,
+      0x11111111,
+      0x6aaeeaa6,
+      0x95511559,
+      0x00000000,
+      0xcccccccc,
+    ]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {

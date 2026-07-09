@@ -2639,6 +2639,22 @@ __global__ void ptxPrmtB32(uint *out, uint *selector) {
   int idx = threadIdx.x;
   out[idx] = prmt_ptx(0x80112233u, 0x445566f7u, selector[idx]);
 }`,
+  ptxLop3B32: `
+__device__ unsigned int choose_ptx(unsigned int a, unsigned int b, unsigned int c) {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, %1, %2, %3, 0xca;" : "=r"(ret) : "r"(a), "r"(b), "r"(c));
+  return ret;
+}
+__device__ unsigned int xor_ptx(unsigned int a, unsigned int b, unsigned int c) {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, %1, %2, %3, %4;" : "=r"(ret) : "r"(a), "r"(b), "r"(c), "n"(0x96));
+  return ret;
+}
+__global__ void ptxLop3B32(uint *out, uint *a, uint *b, uint *c) {
+  int idx = threadIdx.x;
+  out[idx] = choose_ptx(a[idx], b[idx], c[idx]);
+  out[idx + 4] = xor_ptx(a[idx], b[idx], c[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -13966,6 +13982,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0x80112233, 0x66f72233, 0x445566f7, 0x33333333, 0xff112233] },
+          },
+          {
+            name: "inline-asm:lop3-b32",
+            source: SOURCES.ptxLop3B32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+                a: new Uint32Array([0xffffffff, 0, 0xf0f0f0f0, 0xaaaaaaaa]),
+                b: new Uint32Array([0x12345678, 0x12345678, 0x0f0f0f0f, 0x55555555]),
+                c: new Uint32Array([0x87654321, 0x87654321, 0xffffffff, 0x33333333]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0x12345678, 0x87654321, 0x0f0f0f0f, 0x11111111, 0x6aaeeaa6, 0x95511559, 0, 0xcccccccc] },
           },
           {
             name: "inline-asm:special-reg-single-percent",
