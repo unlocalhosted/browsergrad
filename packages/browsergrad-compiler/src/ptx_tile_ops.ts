@@ -17,7 +17,7 @@ export type InlineAsmOp =
   | { readonly kind: "shift-b32"; readonly op: "shl" | "shr"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "arithmetic-b32"; readonly op: "add" | "sub" | "mul-lo" | "mad-lo"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "minmax-b32"; readonly op: "min" | "max"; readonly signed: boolean; readonly immediate?: number }
-  | { readonly kind: "unary-int-b32"; readonly op: "neg" | "abs"; readonly signed: boolean }
+  | { readonly kind: "unary-int-b32"; readonly op: "neg" | "abs"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "select-b32"; readonly signed: boolean; readonly trueImmediate?: number; readonly falseImmediate?: number }
   | { readonly kind: "compare-b32"; readonly op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "move-b32"; readonly signed: boolean; readonly immediate?: number }
@@ -70,6 +70,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\blop3\.b32\b/u.test(template)) return { kind: "lop3-b32" };
   const bitwiseImmediate = /\b(and|or|xor)\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
   if (bitwiseImmediate) return { kind: "bitwise-b32", op: bitwiseImmediate[1] as "and" | "or" | "xor", immediate: parseInlineAsmImmediate(bitwiseImmediate[2]!) >>> 0 };
+  const notImmediate = /\bnot\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (notImmediate) return { kind: "bitwise-b32", op: "not", immediate: parseInlineAsmImmediate(notImmediate[1]!) >>> 0 };
   const bitwise = /\b(and|or|xor|not)\.b32\b/u.exec(template);
   if (bitwise) return { kind: "bitwise-b32", op: bitwise[1] as "and" | "or" | "xor" | "not" };
   const shiftImmediate = /\b(shl|shr)\.(b32|u32|s32)\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
@@ -92,8 +94,12 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (minmaxImmediate) return { kind: "minmax-b32", op: minmaxImmediate[1] as "min" | "max", signed: minmaxImmediate[2] === "s32", immediate: parseInlineAsmImmediate(minmaxImmediate[3]!) >>> 0 };
   const minmax = /\b(min|max)\.(u32|s32)\b/u.exec(template);
   if (minmax) return { kind: "minmax-b32", op: minmax[1] as "min" | "max", signed: minmax[2] === "s32" };
+  const negImmediate = /\bneg\.(b32|s32)\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (negImmediate) return { kind: "unary-int-b32", op: "neg", signed: negImmediate[1] === "s32", immediate: parseInlineAsmImmediate(negImmediate[2]!) >>> 0 };
   const neg = /\bneg\.(b32|s32)\b/u.exec(template);
   if (neg) return { kind: "unary-int-b32", op: "neg", signed: neg[1] === "s32" };
+  const absImmediate = /\babs\.s32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (absImmediate) return { kind: "unary-int-b32", op: "abs", signed: true, immediate: parseInlineAsmImmediate(absImmediate[1]!) >>> 0 };
   if (/\babs\.s32\b/u.test(template)) return { kind: "unary-int-b32", op: "abs", signed: true };
   const selp = /\bselp\.(b32|u32|s32)\b\s+([^;]+)/u.exec(template);
   if (selp) {

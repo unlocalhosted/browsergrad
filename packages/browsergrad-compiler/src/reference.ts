@@ -949,10 +949,12 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "bitwise-b32") {
-    const expectedInputs = op.op === "not" || op.immediate !== undefined ? 1 : 2;
+    const expectedInputs = op.op === "not" ? (op.immediate === undefined ? 1 : 0) : (op.immediate === undefined ? 2 : 1);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
-    const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
+    const left = op.op === "not" && op.immediate !== undefined
+      ? op.immediate
+      : valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
     const right = op.op === "not"
       ? 0
       : op.immediate ?? valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0;
@@ -997,9 +999,10 @@ function execInlineAsm(
   }
   if (op?.kind === "unary-int-b32") {
     const label = `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"}`;
-    if (statement.inputs.length !== 1) throw compilerFailure(`${label} inline asm expects one input`);
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
-    const value = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
+    const value = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmUnaryInt(op.op, value), context);
     return;
   }

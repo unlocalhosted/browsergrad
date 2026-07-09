@@ -1784,7 +1784,7 @@ function validateInlineAsmStatement(
     asmDiagnostics.push(error("invalid-inline-asm-operands", "lop3.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "bitwise-b32") {
-    const expectedInputs = op.op === "not" || op.immediate !== undefined ? 1 : 2;
+    const expectedInputs = op.op === "not" ? (op.immediate === undefined ? 1 : 0) : (op.immediate === undefined ? 2 : 1);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
@@ -1821,8 +1821,11 @@ function validateInlineAsmStatement(
   if (op?.kind === "minmax-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.signed ? "s32" : "u32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
-  if (op?.kind === "unary-int-b32" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"} inline PTX expects one output operand and one input operand`, statement.span));
+  if (op?.kind === "unary-int-b32") {
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
+    }
   }
   if (op?.kind === "unary-int-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));

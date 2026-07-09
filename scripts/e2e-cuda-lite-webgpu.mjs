@@ -2705,6 +2705,28 @@ __global__ void ptxBitwiseImmediateB32(uint *out, uint *a) {
   out[idx + 4] = or_imm_ptx(a[idx]);
   out[idx + 8] = xor_imm_ptx(a[idx]);
 }`,
+  ptxUnaryImmediateB32: `
+__device__ unsigned int not_imm_ptx() {
+  unsigned int ret;
+  asm volatile("not.b32 %0, 0x0f0f0f0f;" : "=r"(ret));
+  return ret;
+}
+__device__ int neg_imm_ptx() {
+  int ret;
+  asm volatile("neg.s32 %0, -5;" : "=r"(ret));
+  return ret;
+}
+__device__ int abs_imm_ptx() {
+  int ret;
+  asm volatile("abs.s32 %0, -8;" : "=r"(ret));
+  return ret;
+}
+__global__ void ptxUnaryImmediateB32(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = not_imm_ptx();
+  out[idx + 4] = (uint)neg_imm_ptx();
+  out[idx + 8] = (uint)abs_imm_ptx();
+}`,
   ptxShiftB32: `
 __device__ unsigned int shl_ptx(unsigned int value, unsigned int shift) {
   unsigned int ret;
@@ -14400,6 +14422,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [0x0f0f0f0f, 0x02040608, 0, 0x0a0a0a0a, 0xffffffff, 0x13355779, 0xf1f1f1f1, 0xbbbbbbbb, 0, 0xedcba987, 0x0f0f0f0f, 0x55555555],
+            },
+          },
+          {
+            name: "inline-asm:unary-immediate-b32",
+            source: SOURCES.ptxUnaryImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(12),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0xf0f0f0f0, 0xf0f0f0f0, 0xf0f0f0f0, 0xf0f0f0f0, 5, 5, 5, 5, 8, 8, 8, 8],
             },
           },
           {

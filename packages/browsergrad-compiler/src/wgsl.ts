@@ -2312,7 +2312,7 @@ function emitInlineAsmStatement(
   if (op?.kind === "lop3-b32" && statement.inputs.length === (op.immLut === undefined ? 4 : 3) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context), context)}`;
   }
-  if (op?.kind === "bitwise-b32" && statement.inputs.length === (op.op === "not" || op.immediate !== undefined ? 1 : 2) && outputs.length === 1) {
+  if (op?.kind === "bitwise-b32" && statement.inputs.length === (op.op === "not" ? (op.immediate === undefined ? 1 : 0) : (op.immediate === undefined ? 2 : 1)) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBitwiseExpression(statement.inputs, op.op, context, op.immediate), context)}`;
   }
   if (op?.kind === "shift-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
@@ -2324,8 +2324,8 @@ function emitInlineAsmStatement(
   if (op?.kind === "minmax-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineMinMaxExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
   }
-  if (op?.kind === "unary-int-b32" && statement.inputs.length === 1 && outputs.length === 1) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpression(statement.inputs[0]!, op.op, context), context)}`;
+  if (op?.kind === "unary-int-b32" && statement.inputs.length === (op.immediate === undefined ? 1 : 0) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpression(statement.inputs[0], op.op, context, op.immediate), context)}`;
   }
   if (op?.kind === "select-b32" && statement.inputs.length === 3 - (op.trueImmediate === undefined ? 0 : 1) - (op.falseImmediate === undefined ? 0 : 1) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpression(statement.inputs, context, op.trueImmediate, op.falseImmediate), context)}`;
@@ -2453,7 +2453,7 @@ function emitInlineLop3Expression(inputs: readonly CudaLiteExpression[], immLut:
 }
 
 function emitInlineBitwiseExpression(inputs: readonly CudaLiteExpression[], op: "and" | "or" | "xor" | "not", context: EmitContext, immediate?: number): string {
-  const left = `u32(${emitExpression(inputs[0]!, context)})`;
+  const left = op === "not" && immediate !== undefined ? `${immediate >>> 0}u` : `u32(${emitExpression(inputs[0]!, context)})`;
   if (op === "not") return `(~${left})`;
   const right = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
   const operator = op === "and" ? "&" : op === "or" ? "|" : "^";
@@ -2485,8 +2485,8 @@ function emitInlineMinMaxExpression(inputs: readonly CudaLiteExpression[], op: "
   return `bitcast<u32>(${op}(bitcast<i32>(${left}), bitcast<i32>(${right})))`;
 }
 
-function emitInlineUnaryIntExpression(input: CudaLiteExpression, op: "neg" | "abs", context: EmitContext): string {
-  const value = `u32(${emitExpression(input, context)})`;
+function emitInlineUnaryIntExpression(input: CudaLiteExpression | undefined, op: "neg" | "abs", context: EmitContext, immediate?: number): string {
+  const value = immediate === undefined ? `u32(${emitExpression(input!, context)})` : `${immediate >>> 0}u`;
   if (op === "neg") return `(0u - ${value})`;
   const mask = `select(0u, 0xffffffffu, ((${value} & 0x80000000u) != 0u))`;
   return `((${value} ^ ${mask}) - ${mask})`;
