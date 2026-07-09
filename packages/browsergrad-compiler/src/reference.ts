@@ -4,10 +4,9 @@ import {
   float32ToFloat16Bits,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
-import { collectKernelLaunchCallees } from "./ast_queries.js";
 import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
-import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
+import { expressionName } from "./analyzer.js";
 import {
   cudaRuntimeCopyShapeForCall,
   isCudaRuntimeCopyCall,
@@ -59,6 +58,12 @@ import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
 } from "./reference_trace.js";
+import {
+  collectReferenceFunctions,
+  collectReferenceKernels,
+  referenceKernelIrFor,
+  resolveReferenceDeviceFunction,
+} from "./reference_kernels.js";
 import {
   referenceFloat32ToUintBits as bitsFromFloat,
   referenceUintBitsToFloat32 as floatFromBits,
@@ -142,7 +147,6 @@ import {
   type CudaLiteTextureDescriptor,
   type CudaLiteVarDecl,
   type KernelLaunch,
-  type KernelIrModule,
   type ReferenceKernelResult,
 } from "./types.js";
 
@@ -346,58 +350,6 @@ export function runCompiledKernelReference(
     result[name] = cloneReferenceTypedArray(buffer);
   }
   return { buffers: result, trace: traces.map(freezeReferenceTrace) };
-}
-
-function collectReferenceKernels(compiled: CompiledCudaLiteKernel): Map<string, CudaLiteKernel> {
-  const kernels = new Map(compiled.ast.kernels.map((kernel) => [kernel.name, kernel] as const));
-  const launched = new Set<string>();
-  for (const kernel of compiled.ast.kernels) {
-    for (const name of collectKernelLaunchCallees(kernel.body)) launched.add(name);
-  }
-  for (const fn of compiled.ast.functions) {
-    for (const name of collectKernelLaunchCallees(fn.body)) launched.add(name);
-  }
-  for (const fn of compiled.ast.functions) {
-    if (launched.has(fn.name)) kernels.set(fn.name, deviceFunctionAsKernel(fn));
-  }
-  return kernels;
-}
-
-function collectReferenceFunctions(functions: readonly CudaLiteDeviceFunction[]): Map<string, readonly CudaLiteDeviceFunction[]> {
-  const byName = new Map<string, CudaLiteDeviceFunction[]>();
-  for (const fn of functions) {
-    const overloads = byName.get(fn.name);
-    if (overloads) overloads.push(fn);
-    else byName.set(fn.name, [fn]);
-  }
-  return byName;
-}
-
-function resolveReferenceDeviceFunction(
-  functions: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>,
-  name: string,
-  argCount: number,
-): CudaLiteDeviceFunction | undefined {
-  const overloads = functions.get(name);
-  if (!overloads || overloads.length === 0) return undefined;
-  return overloads.find((fn) => fn.params.length === argCount) ?? overloads[0];
-}
-
-function deviceFunctionAsKernel(fn: CudaLiteDeviceFunction): CudaLiteKernel {
-  return {
-    kind: "kernel",
-    name: fn.name,
-    params: fn.params,
-    body: fn.body,
-    span: fn.span,
-  };
-}
-
-function referenceKernelIrFor(compiled: CompiledCudaLiteKernel): KernelIrModule {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
 }
 
 function runBlock(
