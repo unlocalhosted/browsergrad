@@ -3137,6 +3137,34 @@ __global__ void ptxConvertF32ToInt(uint *out, float *input) {
   out[idx + 12] = (uint)cvt_rpi_s(value);
   out[idx + 16] = cvt_rpi_u_imm();
 }`,
+  ptxConvertIntToF32: `
+__device__ float cvt_rn_f32_u(unsigned int value) {
+  float ret;
+  asm volatile("cvt.rn.f32.u32 %0, %1;" : "=f"(ret) : "r"(value));
+  return ret;
+}
+__device__ float cvt_rn_f32_s(int value) {
+  float ret;
+  asm volatile("cvt.rn.f32.s32 %0, %1;" : "=f"(ret) : "r"(value));
+  return ret;
+}
+__device__ float cvt_rn_f32_u_imm() {
+  float ret;
+  asm volatile("cvt.rn.f32.u32 %0, 16777217;" : "=f"(ret));
+  return ret;
+}
+__device__ float cvt_rn_f32_s_imm() {
+  float ret;
+  asm volatile("cvt.rn.f32.s32 %0, -7;" : "=f"(ret));
+  return ret;
+}
+__global__ void ptxConvertIntToF32(float *out, uint *uints, int *ints) {
+  int idx = threadIdx.x;
+  out[idx] = cvt_rn_f32_u(uints[idx]);
+  out[idx + 4] = cvt_rn_f32_s(ints[idx]);
+  out[idx + 8] = cvt_rn_f32_u_imm();
+  out[idx + 12] = cvt_rn_f32_s_imm();
+}`,
   ptxMoveB32: `
 __device__ unsigned int mov_u_ptx(unsigned int value) {
   unsigned int ret;
@@ -14900,6 +14928,41 @@ const html = String.raw`<!doctype html>
                 3,
                 3,
                 3,
+              ],
+            },
+          },
+          {
+            name: "inline-asm:convert-int-to-f32",
+            source: SOURCES.ptxConvertIntToF32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(16),
+                uints: new Uint32Array([0, 1, 16777217, 0xffffffff]),
+                ints: new Int32Array([-1, -16777217, 2147483647, -2147483648]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                0,
+                1,
+                16777216,
+                4294967296,
+                -1,
+                -16777216,
+                2147483648,
+                -2147483648,
+                16777216,
+                16777216,
+                16777216,
+                16777216,
+                -7,
+                -7,
+                -7,
+                -7,
               ],
             },
           },

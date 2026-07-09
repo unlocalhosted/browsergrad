@@ -36,7 +36,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, type InlineAsmF32Source, type InlineAsmFloatToIntRounding } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./ptx_tile_ops.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
@@ -1069,6 +1069,20 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmFloatToInt(value, op.rounding, op.toSigned), context);
     return;
   }
+  if (op?.kind === "convert-int-to-f32") {
+    const label = `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"}`;
+    const expectedInputs = op.source === undefined
+      ? 1
+      : expectedInlineAsmSourceInputs([op.source], outputs.length);
+    if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs ?? 1} inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    const value = op.source === undefined
+      ? valueAsNumber(evalExpression(statement.inputs[0]!, context), label)
+      : evalInlineAsmIntSource(op.source, statement, outputs, context);
+    const integer = op.fromSigned ? value | 0 : value >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), Math.fround(integer), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1143,6 +1157,13 @@ function expectedInlineAsmF32SourceInputs(
   sources: readonly InlineAsmF32Source[],
   outputCount: number,
 ): number | undefined {
+  return expectedInlineAsmSourceInputs(sources, outputCount);
+}
+
+function expectedInlineAsmSourceInputs(
+  sources: readonly (InlineAsmF32Source | InlineAsmIntSource)[],
+  outputCount: number,
+): number | undefined {
   let maxInputIndex = -1;
   for (const source of sources) {
     if (source.kind === "immediate") continue;
@@ -1150,6 +1171,20 @@ function expectedInlineAsmF32SourceInputs(
     if (source.index >= outputCount) maxInputIndex = Math.max(maxInputIndex, source.index - outputCount);
   }
   return maxInputIndex + 1;
+}
+
+function evalInlineAsmIntSource(
+  source: InlineAsmIntSource,
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  outputs: readonly CudaLiteExpression[],
+  context: ThreadContext,
+): number {
+  if (source.kind === "immediate") return source.value;
+  if (source.index < outputs.length) {
+    const lvalue = resolveLValue(outputs[source.index]!, context);
+    return valueAsNumber(readLValue(lvalue, context), lvalue.name);
+  }
+  return valueAsNumber(evalExpression(statement.inputs[source.index - outputs.length]!, context), "inline asm integer source");
 }
 
 function evalInlineAsmF32Source(

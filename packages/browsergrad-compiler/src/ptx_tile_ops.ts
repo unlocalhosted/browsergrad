@@ -2,6 +2,10 @@ export type InlineAsmF32Source =
   | { readonly kind: "operand"; readonly index: number }
   | { readonly kind: "immediate"; readonly value: number; readonly raw: string };
 
+export type InlineAsmIntSource =
+  | { readonly kind: "operand"; readonly index: number }
+  | { readonly kind: "immediate"; readonly value: number; readonly raw: string };
+
 export type InlineAsmFloatToIntRounding = "rn" | "rz" | "rm" | "rp";
 
 export type InlineAsmOp =
@@ -29,6 +33,7 @@ export type InlineAsmOp =
   | { readonly kind: "move-b32"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "convert-b32"; readonly fromSigned: boolean; readonly toSigned: boolean; readonly immediate?: number }
   | { readonly kind: "convert-f32-to-int"; readonly rounding: InlineAsmFloatToIntRounding; readonly toSigned: boolean; readonly source?: InlineAsmF32Source }
+  | { readonly kind: "convert-int-to-f32"; readonly fromSigned: boolean; readonly source?: InlineAsmIntSource }
   | { readonly kind: "u8x4-sad-add" }
   | { readonly kind: "cp-async-fence"; readonly fence: "commit_group" | "wait_group" | "wait_all" }
   | { readonly kind: "membar"; readonly scope: "cta" | "gl" | "sys" }
@@ -169,6 +174,16 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
       ...(source === undefined ? {} : { source }),
     };
   }
+  const cvtIntToFloat = /\bcvt\.rn\.f32\.(u32|s32)\b\s+([^;]+)/u.exec(template);
+  if (cvtIntToFloat) {
+    const operands = cvtIntToFloat[2]!.split(",").map((operand) => operand.trim());
+    const source = parseInlineAsmIntSourceOperand(operands[1]);
+    return {
+      kind: "convert-int-to-f32",
+      fromSigned: cvtIntToFloat[1] === "s32",
+      ...(source === undefined ? {} : { source }),
+    };
+  }
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
   const cpAsyncFence = /\bcp\.async\.(commit_group|wait_group|wait_all)\b/u.exec(template);
   if (cpAsyncFence) return { kind: "cp-async-fence", fence: cpAsyncFence[1] as "commit_group" | "wait_group" | "wait_all" };
@@ -238,6 +253,7 @@ export function inlineAsmSupportedList(): string {
     "mov.{b32,u32,s32}",
     "cvt.{u32,s32}.{u32,s32}",
     "cvt.{rni,rzi,rmi,rpi}.{u32,s32}.f32",
+    "cvt.rn.f32.{u32,s32}",
     "vabsdiff4.u32.u32.u32.add",
     "cp.async.{commit_group,wait_group,wait_all}",
     "membar.{cta,gl,sys}",
@@ -254,6 +270,14 @@ function parseInlineAsmImmediate(value: string): number {
 function parseInlineAsmImmediateOperand(value: string | undefined): number | undefined {
   if (value === undefined || !/^(?:0x[0-9a-fA-F]+|-?\d+)$/u.test(value)) return undefined;
   return parseInlineAsmImmediate(value) >>> 0;
+}
+
+function parseInlineAsmIntSourceOperand(value: string | undefined): InlineAsmIntSource | undefined {
+  if (value === undefined) return undefined;
+  const operand = /^%(\d+)$/u.exec(value);
+  if (operand) return { kind: "operand", index: Number.parseInt(operand[1]!, 10) };
+  if (!/^(?:0x[0-9a-fA-F]+|-?\d+)$/u.test(value)) return undefined;
+  return { kind: "immediate", value: parseInlineAsmImmediate(value) >>> 0, raw: value };
 }
 
 function parseInlineAsmF32SourceOperand(value: string | undefined): InlineAsmF32Source | undefined {

@@ -18,7 +18,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmFloatToIntRounding } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./ptx_tile_ops.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
@@ -2353,6 +2353,12 @@ function emitInlineAsmStatement(
       : emitInlineAsmF32Source(op.source, statement, outputs, context);
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineF32ToIntConvertExpression(source, op.rounding, op.toSigned, outputs[0]!, context)}`;
   }
+  if (op?.kind === "convert-int-to-f32" && statement.inputs.length === (op.source === undefined ? 1 : expectedInlineAsmSourceInputs([op.source], outputs.length)) && outputs.length === 1) {
+    const source = op.source === undefined
+      ? emitExpression(statement.inputs[0]!, context)
+      : emitInlineAsmIntSource(op.source, statement, outputs, context);
+    return `${emitExpression(outputs[0]!, context)} = f32(${op.fromSigned ? `i32(${source})` : `u32(${source})`})`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2396,6 +2402,13 @@ function expectedInlineAsmF32SourceInputs(
   sources: readonly InlineAsmF32Source[],
   outputCount: number,
 ): number | undefined {
+  return expectedInlineAsmSourceInputs(sources, outputCount);
+}
+
+function expectedInlineAsmSourceInputs(
+  sources: readonly (InlineAsmF32Source | InlineAsmIntSource)[],
+  outputCount: number,
+): number | undefined {
   let maxInputIndex = -1;
   for (const source of sources) {
     if (source.kind === "immediate") continue;
@@ -2403,6 +2416,17 @@ function expectedInlineAsmF32SourceInputs(
     if (source.index >= outputCount) maxInputIndex = Math.max(maxInputIndex, source.index - outputCount);
   }
   return maxInputIndex + 1;
+}
+
+function emitInlineAsmIntSource(
+  source: InlineAsmIntSource,
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  outputs: readonly CudaLiteExpression[],
+  context: EmitContext,
+): string {
+  if (source.kind === "immediate") return source.raw.startsWith("-") ? `${source.value | 0}` : `${source.value >>> 0}u`;
+  if (source.index < outputs.length) return emitExpression(outputs[source.index]!, context);
+  return emitExpression(statement.inputs[source.index - outputs.length]!, context);
 }
 
 function emitInlineAsmF32Source(
