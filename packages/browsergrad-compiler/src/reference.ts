@@ -11,10 +11,12 @@ import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import {
+  cudaRuntimeCopyShapeForCall,
   isCudaRuntimeCopyCall,
   isCudaRuntimeMemset2DCall,
   isCudaRuntimeMemsetCall,
   isCudaRuntimeSymbolMemsetCall,
+  type CudaRuntimeCopyShape,
 } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
@@ -2088,25 +2090,10 @@ function execCudaRuntimeMemset2D(
   }
 }
 
-type CudaRuntimeCopyShape =
-  | { readonly kind: "copy1d"; readonly srcIndex: number; readonly countIndex: number }
-  | { readonly kind: "copy2d"; readonly srcIndex: number }
-  | { readonly kind: "symbol"; readonly direction: "to-symbol" | "from-symbol"; readonly symbolIndex: number; readonly pointerIndex: number; readonly srcIndex: number; readonly countIndex: number; readonly offsetIndex?: number };
-
 function cudaRuntimeCopyShape(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
 ): CudaRuntimeCopyShape | undefined {
-  const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { kind: "copy1d", srcIndex: 1, countIndex: 2 };
-  if (name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync") return { kind: "copy2d", srcIndex: 2 };
-  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { kind: "copy1d", srcIndex: 2, countIndex: 4 };
-  if (name === "cudaMemcpyToSymbol" || name === "cudaMemcpyToSymbolAsync") {
-    return { kind: "symbol", direction: "to-symbol", symbolIndex: 0, pointerIndex: 1, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
-  }
-  if (name === "cudaMemcpyFromSymbol" || name === "cudaMemcpyFromSymbolAsync") {
-    return { kind: "symbol", direction: "from-symbol", symbolIndex: 1, pointerIndex: 0, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
-  }
-  return undefined;
+  return cudaRuntimeCopyShapeForCall(expressionName(expression.callee), expression.args[3] !== undefined);
 }
 
 interface PointerByteView {

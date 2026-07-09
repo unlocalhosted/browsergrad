@@ -2,6 +2,13 @@ import type { WgslResidentBuffer, WgslTypedArray, WgslValueType } from "@unlocal
 import { expressionName } from "./analyzer.js";
 import { isCudaPeerCopyHostNoopCall } from "./cuda_host_silent_calls.js";
 import {
+  cudaRuntimeCopyShapeForCall,
+  isCudaRuntimeMemset2DCall,
+  isCudaRuntimeMemsetCall,
+  isCudaRuntimeSymbolMemsetCall,
+  type CudaRuntimeCopyShape,
+} from "./cuda_runtime_copies.js";
+import {
   evaluateHostNumber,
   evaluatePointerArgument,
   evaluateVectorExpressions,
@@ -668,14 +675,12 @@ function isPeerCopyCall(expression: CudaLiteExpression): expression is CudaLiteC
 
 function isRuntimeMemsetCall(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
-  const name = expressionName(expression.callee);
-  return name === "cudaMemset" || name === "cudaMemsetAsync" || isRuntimeMemset2DCall(expression);
+  return isCudaRuntimeMemsetCall(expressionName(expression.callee));
 }
 
 function isRuntimeMemset2DCall(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
-  const name = expressionName(expression.callee);
-  return name === "cudaMemset2D" || name === "cudaMemset2DAsync";
+  return isCudaRuntimeMemset2DCall(expressionName(expression.callee));
 }
 
 function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean {
@@ -692,28 +697,12 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
   return isCudaPeerCopyHostNoopCall(expressionName(expression.callee));
 }
 
-type CudaRuntimeCopyShape =
-  | { readonly kind: "copy1d"; readonly srcIndex: number; readonly countIndex: number }
-  | { readonly kind: "copy2d"; readonly srcIndex: number }
-  | { readonly kind: "symbol"; readonly direction: "to-symbol" | "from-symbol"; readonly symbolIndex: number; readonly pointerIndex: number; readonly srcIndex: number; readonly countIndex: number; readonly offsetIndex?: number };
-
 function cudaRuntimeCopyShape(
   expression: CudaLiteCallExpression,
 ): CudaRuntimeCopyShape | undefined {
-  const name = expressionName(expression.callee);
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { kind: "copy1d", srcIndex: 1, countIndex: 2 };
-  if (name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync") return { kind: "copy2d", srcIndex: 2 };
-  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { kind: "copy1d", srcIndex: 2, countIndex: 4 };
-  if (name === "cudaMemcpyToSymbol" || name === "cudaMemcpyToSymbolAsync") {
-    return { kind: "symbol", direction: "to-symbol", symbolIndex: 0, pointerIndex: 1, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
-  }
-  if (name === "cudaMemcpyFromSymbol" || name === "cudaMemcpyFromSymbolAsync") {
-    return { kind: "symbol", direction: "from-symbol", symbolIndex: 1, pointerIndex: 0, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
-  }
-  return undefined;
+  return cudaRuntimeCopyShapeForCall(expressionName(expression.callee), expression.args[3] !== undefined);
 }
 
 function isRuntimeSymbolMemsetCall(expression: CudaLiteCallExpression): boolean {
-  const name = expressionName(expression.callee);
-  return name === "cudaMemsetToSymbol" || name === "cudaMemsetToSymbolAsync";
+  return isCudaRuntimeSymbolMemsetCall(expressionName(expression.callee));
 }
