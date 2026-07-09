@@ -121,6 +121,7 @@ import {
   semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
   semanticFunctionLocalParamValueTypesSupported,
   semanticFunctionParamContractSupported,
+  semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
@@ -790,32 +791,7 @@ function semanticReferenceFunctionBodyShapeSupported(operations: readonly Semant
 }
 
 function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
-  const pointerParams = new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "storage").map((param) => param.name));
-  return pointerParams.size > 0 && fn.body.every((operation) => semanticReferencePointerFunctionOperationSupported(operation, pointerParams));
-}
-
-function semanticReferencePointerFunctionOperationSupported(
-  operation: SemanticKernelIrOperation,
-  pointerParams: ReadonlySet<string>,
-): boolean {
-  if (operation.kind === "atomic") return operation.target !== undefined && pointerParams.has(operation.target.base);
-  if (operation.kind === "store") return pointerParams.has(operation.target.base) && operation.target.fields.length > 0;
-  if (operation.kind === "return" && operation.value) return semanticReferencePointerFunctionExpressionSupported(operation.value, pointerParams);
-  if (operation.kind === "expression" && operation.expression.kind === "update") {
-    const ref = memoryRefFromIndexExpression(operation.expression.argument);
-    return ref !== undefined && pointerParams.has(ref.base);
-  }
-  if (operation.kind === "expression") return semanticReferencePointerFunctionExpressionSupported(operation.expression, pointerParams);
-  return false;
-}
-
-function semanticReferencePointerFunctionExpressionSupported(
-  expression: SemanticExpression,
-  pointerParams: ReadonlySet<string>,
-): boolean {
-  if (expression.kind !== "call") return false;
-  const target = semanticAtomicCallTarget(expression);
-  return target !== undefined && pointerParams.has(target.base);
+  return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget);
 }
 
 function semanticReferenceAtomicCallSupported(

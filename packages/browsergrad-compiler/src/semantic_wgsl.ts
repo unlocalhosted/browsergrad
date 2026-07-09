@@ -118,6 +118,7 @@ import {
   semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
   semanticFunctionLocalParamValueTypesSupported,
   semanticFunctionParamContractSupported,
+  semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import {
   semanticConstantMemorySymbols as constantMemorySymbols,
@@ -1310,32 +1311,7 @@ function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKer
 }
 
 function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["functions"][number]): boolean {
-  const pointerParams = new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "storage").map((param) => param.name));
-  return pointerParams.size > 0 && fn.body.every((operation) => semanticWgslPointerFunctionOperationSupported(operation, pointerParams));
-}
-
-function semanticWgslPointerFunctionOperationSupported(
-  operation: SemanticKernelIrOperation,
-  pointerParams: ReadonlySet<string>,
-): boolean {
-  if (operation.kind === "atomic") return operation.target !== undefined && pointerParams.has(operation.target.base);
-  if (operation.kind === "store") return pointerParams.has(operation.target.base) && operation.target.fields.length > 0;
-  if (operation.kind === "return" && operation.value) return semanticWgslPointerFunctionExpressionSupported(operation.value, pointerParams);
-  if (operation.kind === "expression" && operation.expression.kind === "update") {
-    const ref = memoryRefFromIndexExpression(operation.expression.argument);
-    return ref !== undefined && pointerParams.has(ref.base);
-  }
-  if (operation.kind === "expression") return semanticWgslPointerFunctionExpressionSupported(operation.expression, pointerParams);
-  return false;
-}
-
-function semanticWgslPointerFunctionExpressionSupported(
-  expression: SemanticExpression,
-  pointerParams: ReadonlySet<string>,
-): boolean {
-  if (expression.kind !== "call") return false;
-  const target = semanticAtomicCallTarget(expression);
-  return target !== undefined && pointerParams.has(target.base);
+  return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget);
 }
 
 function semanticWgslAtomicCallSupported(

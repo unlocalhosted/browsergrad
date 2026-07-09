@@ -76,3 +76,40 @@ export function semanticFunctionBodyShapeSupported(
     return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
   });
 }
+
+export function semanticPointerFunctionBodySupported(
+  fn: CudaLiteSemanticFunction,
+  memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
+  atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+): boolean {
+  const pointerParams = new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "storage").map((param) => param.name));
+  return pointerParams.size > 0 &&
+    fn.body.every((operation) => semanticPointerFunctionOperationSupported(operation, pointerParams, memoryRefFromIndex, atomicCallTarget));
+}
+
+function semanticPointerFunctionOperationSupported(
+  operation: SemanticKernelIrOperation,
+  pointerParams: ReadonlySet<string>,
+  memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
+  atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+): boolean {
+  if (operation.kind === "atomic") return operation.target !== undefined && pointerParams.has(operation.target.base);
+  if (operation.kind === "store") return pointerParams.has(operation.target.base) && operation.target.fields.length > 0;
+  if (operation.kind === "return" && operation.value) return semanticPointerFunctionExpressionSupported(operation.value, pointerParams, atomicCallTarget);
+  if (operation.kind === "expression" && operation.expression.kind === "update") {
+    const ref = memoryRefFromIndex(operation.expression.argument);
+    return ref !== undefined && pointerParams.has(ref.base);
+  }
+  if (operation.kind === "expression") return semanticPointerFunctionExpressionSupported(operation.expression, pointerParams, atomicCallTarget);
+  return false;
+}
+
+function semanticPointerFunctionExpressionSupported(
+  expression: SemanticExpression,
+  pointerParams: ReadonlySet<string>,
+  atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+): boolean {
+  if (expression.kind !== "call") return false;
+  const target = atomicCallTarget(expression);
+  return target !== undefined && pointerParams.has(target.base);
+}
