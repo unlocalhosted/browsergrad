@@ -2318,6 +2318,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "shift-b32" && statement.inputs.length === 2 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineShiftExpression(statement.inputs, op.op, op.signed, context), context)}`;
   }
+  if (op?.kind === "arithmetic-b32" && statement.inputs.length === 2 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineArithmeticExpression(statement.inputs, op.op, context), context)}`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2442,6 +2445,14 @@ function emitInlineShiftExpression(inputs: readonly CudaLiteExpression[], op: "s
   if (op === "shl") return `select((${value} << ${clamped}), 0u, (${amount} >= 32u))`;
   if (!signed) return `select((${value} >> ${clamped}), 0u, (${amount} >= 32u))`;
   return `u32(i32(${value}) >> ${clamped})`;
+}
+
+function emitInlineArithmeticExpression(inputs: readonly CudaLiteExpression[], op: "add" | "sub" | "mul-lo", context: EmitContext): string {
+  const left = `u32(${emitExpression(inputs[0]!, context)})`;
+  const right = `u32(${emitExpression(inputs[1]!, context)})`;
+  if (op === "add") return `(${left} + ${right})`;
+  if (op === "sub") return `(${left} - ${right})`;
+  return `(${left} * ${right})`;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
