@@ -14110,6 +14110,7 @@ __global__ void graph_lifecycle(uint *handles, int *statusOut) {
     expect(compiled.wgsl).toContain("var instantiateFlags: i32 = 0;");
     expect(compiled.wgsl).toContain("execWithFlags = 0;");
     expect(compiled.wgsl).toContain("var destroyExec: i32 = i32(0);");
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
     expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { handles: new Uint32Array(4), statusOut: new Int32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
     expect([...result.buffers.handles as Uint32Array]).toEqual([0, 0, 0, 0]);
     expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);

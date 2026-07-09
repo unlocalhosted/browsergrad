@@ -487,6 +487,14 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamBeginCapture" ||
+    name === "cudaStreamEndCapture" ||
+    name === "cudaStreamUpdateCaptureDependencies" ||
+    name === "cudaGraphCreate" ||
+    name === "cudaGraphInstantiate" ||
+    name === "cudaGraphInstantiateWithFlags" ||
+    name === "cudaGraphDestroy" ||
+    name === "cudaGraphExecDestroy" ||
     name === "cudaStreamQuery" ||
     name === "cudaStreamSynchronize" ||
     name === "cudaStreamWaitEvent" ||
