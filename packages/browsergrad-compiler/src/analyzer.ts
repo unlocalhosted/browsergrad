@@ -121,7 +121,11 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaStreamBeginCapture", [2, 2]],
   ["cudaStreamEndCapture", [2, 2]],
   ["cudaStreamUpdateCaptureDependencies", [4, 4]],
+  ["cudaGraphCreate", [2, 2]],
+  ["cudaGraphInstantiate", [5, 5]],
+  ["cudaGraphInstantiateWithFlags", [3, 3]],
   ["cudaGraphDestroy", [1, 1]],
+  ["cudaGraphExecDestroy", [1, 1]],
   ["cudaMemset", [3, 3]],
   ["cudaMemsetAsync", [4, 4]],
   ["cudaMemset2D", [5, 5]],
@@ -1873,6 +1877,10 @@ function validateCallExpression(
     callName === "cudaStreamGetPriority" ||
     callName === "cudaStreamIsCapturing" ||
     callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaStreamEndCapture" ||
+    callName === "cudaGraphCreate" ||
+    callName === "cudaGraphInstantiate" ||
+    callName === "cudaGraphInstantiateWithFlags" ||
     callName === "cudaRuntimeGetVersion" ||
     callName === "cudaDriverGetVersion") {
     validateCudaIntegerRuntimeQuery(expression, callName, scope, diagnostics, walkExpression);
@@ -2585,6 +2593,28 @@ function validateCudaIntegerRuntimeQuery(
     }
     return;
   }
+  if (callName === "cudaGraphCreate") {
+    validateRuntimeQueryPointerTarget(callName, target, "uint", scope, diagnostics, walkExpression);
+    const flags = expression.args[1];
+    if (flags) validateScalarOperand(walkExpression(flags, scope), flags.span, diagnostics);
+    return;
+  }
+  if (callName === "cudaGraphInstantiate" || callName === "cudaGraphInstantiateWithFlags") {
+    validateRuntimeQueryPointerTarget(callName, target, "uint", scope, diagnostics, walkExpression);
+    const graph = expression.args[1];
+    if (graph) validateScalarOperand(walkExpression(graph, scope), graph.span, diagnostics);
+    if (callName === "cudaGraphInstantiate") {
+      const errorNode = expression.args[2];
+      if (errorNode && !isNullPointerExpression(errorNode)) {
+        validateRuntimeQueryPointerTarget(callName, errorNode, "uint", scope, diagnostics, walkExpression);
+      }
+      for (const arg of expression.args.slice(3)) walkExpression(arg, scope);
+    } else {
+      const flags = expression.args[2];
+      if (flags) validateScalarOperand(walkExpression(flags, scope), flags.span, diagnostics);
+    }
+    return;
+  }
   if (callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags") {
     validateRuntimeQueryPointerTarget(callName, target, "int", scope, diagnostics, walkExpression);
     for (const arg of expression.args.slice(2)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
@@ -3188,6 +3218,7 @@ function isHostManagedRuntimeNoopCall(callName: string): boolean {
     callName === "cudaStreamEndCapture" ||
     callName === "cudaStreamUpdateCaptureDependencies" ||
     callName === "cudaGraphDestroy" ||
+    callName === "cudaGraphExecDestroy" ||
     callName === "cudaStreamCreate" ||
     callName === "cudaStreamCreateWithFlags" ||
     callName === "cudaStreamCreateWithPriority" ||

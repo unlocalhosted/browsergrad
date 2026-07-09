@@ -1625,6 +1625,9 @@ function emitVarInitWithCudaIntegerRuntimeQuery(
   if (callName === "cudaStreamGetCaptureInfo") {
     return emitVarInitWithCudaStreamGetCaptureInfo(statement, init, context, indentLevel, activeFlag);
   }
+  if (callName === "cudaGraphInstantiate") {
+    return emitVarInitWithCudaGraphInstantiate(statement, init, context, indentLevel, activeFlag);
+  }
   if (callName === "cudaOccupancyMaxPotentialBlockSize" || callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags") {
     return emitVarInitWithCudaOccupancyMaxPotentialBlockSize(statement, init, context, indentLevel, activeFlag);
   }
@@ -1660,6 +1663,22 @@ function emitVarInitWithCudaOccupancyMaxPotentialBlockSize(
   const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
   if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
   lines.push(...emitCudaOccupancyMaxPotentialBlockSizeWrites(init, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithCudaGraphInstantiate(
+  statement: CudaLiteVarDecl,
+  init: CudaLiteCallExpression,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitCudaGraphInstantiateWrites(init, context, bodyIndent));
   if (activeFlag) lines.push(`${prefix}}`);
   return lines;
 }
@@ -4669,6 +4688,7 @@ function emitCudaRuntimeQueryWrites(
   if (callName === "cudaMemGetInfo") return emitCudaMemGetInfoWrites(expression, context, indentLevel);
   if (callName === "cudaDeviceGetStreamPriorityRange") return emitCudaDeviceGetStreamPriorityRangeWrites(expression, context, indentLevel);
   if (callName === "cudaStreamGetCaptureInfo") return emitCudaStreamGetCaptureInfoWrites(expression, context, indentLevel);
+  if (callName === "cudaGraphInstantiate") return emitCudaGraphInstantiateWrites(expression, context, indentLevel);
   if (callName === "cudaOccupancyMaxPotentialBlockSize" || callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags") return emitCudaOccupancyMaxPotentialBlockSizeWrites(expression, context, indentLevel);
   const target = cudaIntegerRuntimeQueryTarget(expression);
   if (!target) return [];
@@ -4721,7 +4741,10 @@ function cudaIntegerRuntimeQueryTargetValueType(callName: string | undefined): C
     callName === "cudaGetDeviceFlags" ||
     callName === "cudaStreamGetFlags" ||
     callName === "cudaStreamGetId" ||
-    callName === "cudaStreamEndCapture"
+    callName === "cudaStreamEndCapture" ||
+    callName === "cudaGraphCreate" ||
+    callName === "cudaGraphInstantiate" ||
+    callName === "cudaGraphInstantiateWithFlags"
     ? "uint"
     : "int";
 }
@@ -4757,6 +4780,40 @@ function emitCudaStreamGetCaptureInfoWrites(
       "unsupported-cuda-runtime",
       `cudaStreamGetCaptureInfo expects a modeled ${cudaStreamGetCaptureInfoTargetType(targetIndex)} pointer target`,
       cudaStreamGetCaptureInfoTargetType(targetIndex),
+    ));
+  }
+  return lines;
+}
+
+function emitCudaGraphInstantiateWrites(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const lines: string[] = [];
+  const value = { kind: "number" as const, value: 0, raw: "0", span: expression.span };
+  const execTarget = expression.args[0];
+  const errorNodeTarget = expression.args[2];
+  if (execTarget) {
+    lines.push(...emitIntPointerWrite(
+      execTarget,
+      value,
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaGraphInstantiate expects a modeled uint pointer target",
+      "uint",
+    ));
+  }
+  if (errorNodeTarget && !isNullPointerExpression(errorNodeTarget)) {
+    lines.push(...emitIntPointerWrite(
+      errorNodeTarget,
+      value,
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaGraphInstantiate expects a modeled uint error-node pointer target",
+      "uint",
     ));
   }
   return lines;
@@ -4875,6 +4932,9 @@ function isCudaIntegerRuntimeQueryCall(name: string | undefined): boolean {
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
     name === "cudaStreamEndCapture" ||
+    name === "cudaGraphCreate" ||
+    name === "cudaGraphInstantiate" ||
+    name === "cudaGraphInstantiateWithFlags" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion";
 }
@@ -6501,7 +6561,11 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "cudaStreamBeginCapture":
     case "cudaStreamEndCapture":
     case "cudaStreamUpdateCaptureDependencies":
+    case "cudaGraphCreate":
+    case "cudaGraphInstantiate":
+    case "cudaGraphInstantiateWithFlags":
     case "cudaGraphDestroy":
+    case "cudaGraphExecDestroy":
     case "cudaStreamQuery":
     case "cudaStreamSynchronize":
     case "cudaStreamWaitEvent":
@@ -8232,6 +8296,7 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaStreamEndCapture" ||
     name === "cudaStreamUpdateCaptureDependencies" ||
     name === "cudaGraphDestroy" ||
+    name === "cudaGraphExecDestroy" ||
     name === "cudaStreamCreate" ||
     name === "cudaStreamCreateWithFlags" ||
     name === "cudaStreamCreateWithPriority" ||

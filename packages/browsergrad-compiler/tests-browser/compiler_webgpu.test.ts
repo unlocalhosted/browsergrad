@@ -1014,6 +1014,45 @@ __global__ void stream_capture_graph(uint *graphOut, int *statusOut) {
     expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
   });
 
+  it("runs CUDA graph create and instantiate lifecycle no-ops on WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void graph_lifecycle(uint *handles, int *statusOut) {
+  cudaGraph_t graph = 7u;
+  cudaGraphExec_t exec = 8u;
+  cudaGraphExec_t execWithFlags = 9u;
+  cudaGraphNode_t errorNode = 10u;
+  if (threadIdx.x < 1) {
+    int create = cudaGraphCreate(&graph, 0);
+    int instantiate = cudaGraphInstantiate(&exec, graph, &errorNode, NULL, 0);
+    int instantiateFlags = cudaGraphInstantiateWithFlags(&execWithFlags, graph, 0);
+    int destroyExec = cudaGraphExecDestroy(exec);
+    int destroyGraph = cudaGraphDestroy(graph);
+    handles[0] = graph;
+    handles[1] = exec;
+    handles[2] = execWithFlags;
+    handles[3] = errorNode;
+    statusOut[0] = create + instantiate + instantiateFlags + destroyExec + destroyGraph;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        handles: new Uint32Array([99, 99, 99, 99]),
+        statusOut: new Int32Array([-1]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.handles as Uint32Array]).toEqual([...expected.buffers.handles as Uint32Array]);
+    expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
+  });
+
   it("runs host-lifted cudaMemcpyPeerAsync through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `

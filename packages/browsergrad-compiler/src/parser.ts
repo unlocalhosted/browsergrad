@@ -62,6 +62,7 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["cudaGraphConditionalHandle", "uint"],
   ["cudaGraph_t", "uint"],
   ["cudaGraphNode_t", "uint"],
+  ["cudaGraphExec_t", "uint"],
   ["cudaStreamCaptureStatus", "int"],
   ["cudaStreamCaptureMode", "int"],
   ["__nv_fp8_storage_t", "uint"],
@@ -123,6 +124,7 @@ const TYPE_START_KEYWORDS = new Set([
   "cudaStream_t",
   "cudaGraph_t",
   "cudaGraphNode_t",
+  "cudaGraphExec_t",
   "cudaStreamCaptureStatus",
   "cudaStreamCaptureMode",
   "DevicePool",
@@ -1537,7 +1539,8 @@ class Parser {
       token.value === "cudaEvent_t" ||
       token.value === "cudaStream_t" ||
       token.value === "cudaGraph_t" ||
-      token.value === "cudaGraphNode_t"
+      token.value === "cudaGraphNode_t" ||
+      token.value === "cudaGraphExec_t"
     ) return "uint";
     if (token.value === "cudaStreamCaptureStatus" || token.value === "cudaStreamCaptureMode") return "int";
     if (token.value === "DevicePool") return "devicepool";
