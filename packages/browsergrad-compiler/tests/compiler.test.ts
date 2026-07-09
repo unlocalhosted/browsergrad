@@ -4568,8 +4568,9 @@ __global__ void unsupported(float* x) {
     const consumerChecks = [
       ["analyzer.ts", "isCudaIntegerRuntimeQueryCall"],
       ["wgsl.ts", "isCudaIntegerRuntimeQueryCall"],
-      ["dynamic_launch.ts", "isCudaRuntimeQueryWriteCall"],
-      ["peer_copy.ts", "isCudaRuntimeQueryWriteCall"],
+      ["dynamic_launch.ts", "isCudaHostDynamicNoopCall"],
+      ["peer_copy.ts", "isCudaPeerCopyHostNoopCall"],
+      ["cuda_host_silent_calls.ts", "isCudaRuntimeQueryWriteCall"],
       ["webgpu_orchestration.ts", "isCudaRuntimeQueryWriteCall"],
     ] as const;
     const missingConsumers = consumerChecks

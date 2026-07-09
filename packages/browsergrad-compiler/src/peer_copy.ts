@@ -1,6 +1,6 @@
 import type { WgslResidentBuffer, WgslTypedArray, WgslValueType } from "@unlocalhosted/browsergrad-kernels";
 import { expressionName } from "./analyzer.js";
-import { isCudaRuntimeQueryWriteCall } from "./cuda_runtime_queries.js";
+import { isCudaPeerCopyHostNoopCall } from "./cuda_host_silent_calls.js";
 import {
   evaluateHostNumber,
   evaluatePointerArgument,
@@ -689,86 +689,7 @@ function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean
 
 function isHostNoopExpression(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
-  const name = expressionName(expression.callee);
-  if (isCudaRuntimeQueryWriteCall(name)) return false;
-  return name === "cudaDeviceSynchronize" ||
-    name === "cudaCtxResetPersistingL2Cache" ||
-    name === "cudaDeviceReset" ||
-    name === "cudaThreadExit" ||
-    name === "cudaThreadSynchronize" ||
-    name === "cudaDeviceGetAttribute" ||
-    name === "cudaDeviceGetLimit" ||
-    name === "cudaThreadGetLimit" ||
-    name === "cudaDeviceSetLimit" ||
-    name === "cudaThreadSetLimit" ||
-    name === "cudaDeviceCanAccessPeer" ||
-    name === "cudaDeviceEnablePeerAccess" ||
-    name === "cudaDeviceDisablePeerAccess" ||
-    name === "cudaGetDeviceFlags" ||
-    name === "cudaSetDeviceFlags" ||
-    name === "cudaMemGetInfo" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    name === "cudaOccupancyMaxPotentialBlockSize" ||
-    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    name === "cudaDeviceGetCacheConfig" ||
-    name === "cudaDeviceSetCacheConfig" ||
-    name === "cudaDeviceGetSharedMemConfig" ||
-    name === "cudaThreadGetCacheConfig" ||
-    name === "cudaDeviceSetSharedMemConfig" ||
-    name === "cudaThreadSetCacheConfig" ||
-    name === "cudaThreadExchangeStreamCaptureMode" ||
-    name === "cudaDeviceGetStreamPriorityRange" ||
-    name === "cudaFree" ||
-    name === "cudaFreeAsync" ||
-    name === "cudaMemAdvise" ||
-    name === "cudaMemPrefetchAsync" ||
-    name === "cudaStreamAttachMemAsync" ||
-    name === "cudaStreamCreate" ||
-    name === "cudaStreamCreateWithFlags" ||
-    name === "cudaStreamCreateWithPriority" ||
-    name === "cudaStreamDestroy" ||
-    name === "cudaStreamGetDevice" ||
-    name === "cudaStreamGetFlags" ||
-    name === "cudaStreamGetId" ||
-    name === "cudaStreamGetPriority" ||
-    name === "cudaStreamIsCapturing" ||
-    name === "cudaStreamGetCaptureInfo" ||
-    name === "cudaStreamGetCaptureInfo_v2" ||
-    name === "cudaStreamBeginCapture" ||
-    name === "cudaStreamEndCapture" ||
-    name === "cudaStreamUpdateCaptureDependencies" ||
-    name === "cudaGraphCreate" ||
-    name === "cudaGraphInstantiate" ||
-    name === "cudaGraphInstantiateWithFlags" ||
-    name === "cudaGraphUpload" ||
-    name === "cudaGraphExecUpdate" ||
-    name === "cudaGraphDestroy" ||
-    name === "cudaGraphExecDestroy" ||
-    name === "cudaStreamQuery" ||
-    name === "cudaStreamSynchronize" ||
-    name === "cudaStreamWaitEvent" ||
-    name === "cudaSetDevice" ||
-    name === "cudaGetDevice" ||
-    name === "cudaGetDeviceCount" ||
-    name === "cudaRuntimeGetVersion" ||
-    name === "cudaDriverGetVersion" ||
-    name === "cudaFuncSetAttribute" ||
-    name === "cudaFuncSetCacheConfig" ||
-    name === "cudaFuncSetSharedMemConfig" ||
-    name === "cudaGetLastError" ||
-    name === "cudaPeekAtLastError" ||
-    name === "cudaProfilerStart" ||
-    name === "cudaProfilerStop" ||
-    name === "cudaEventCreate" ||
-    name === "cudaEventCreateWithFlags" ||
-    name === "cudaEventDestroy" ||
-    name === "cudaEventQuery" ||
-    name === "cudaEventRecord" ||
-    name === "cudaEventRecordWithFlags" ||
-    name === "cudaEventSynchronize" ||
-    name === "printf";
+  return isCudaPeerCopyHostNoopCall(expressionName(expression.callee));
 }
 
 type CudaRuntimeCopyShape =

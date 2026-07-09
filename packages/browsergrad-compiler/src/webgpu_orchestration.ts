@@ -8,6 +8,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
+import { isCudaHostSideEffectFreeRuntimeCall } from "./cuda_host_silent_calls.js";
 import { isCudaRuntimeQueryWriteCall } from "./cuda_runtime_queries.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
 import { createCudaLaunchValidationDiagnostics } from "./launch.js";
@@ -101,86 +102,7 @@ const peerFillProgramCache = new Map<"float" | "int" | "uint", WgslKernelProgram
 let peerByteCopyProgramCache: WgslKernelProgram | undefined;
 let peerByteFillProgramCache: WgslKernelProgram | undefined;
 const DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH = 8;
-const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
-  "cudaDeviceSynchronize",
-  "cudaCtxResetPersistingL2Cache",
-  "cudaDeviceReset",
-  "cudaThreadExit",
-  "cudaThreadSynchronize",
-  "cudaDeviceGetAttribute",
-  "cudaDeviceGetLimit",
-  "cudaThreadGetLimit",
-  "cudaDeviceSetLimit",
-  "cudaThreadSetLimit",
-  "cudaDeviceCanAccessPeer",
-  "cudaDeviceEnablePeerAccess",
-  "cudaDeviceDisablePeerAccess",
-  "cudaGetDeviceFlags",
-  "cudaSetDeviceFlags",
-  "cudaMemGetInfo",
-  "cudaOccupancyMaxActiveBlocksPerMultiprocessor",
-  "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
-  "cudaOccupancyMaxPotentialBlockSize",
-  "cudaOccupancyMaxPotentialBlockSizeWithFlags",
-  "cudaOccupancyAvailableDynamicSMemPerBlock",
-  "cudaDeviceGetCacheConfig",
-  "cudaDeviceSetCacheConfig",
-  "cudaDeviceGetSharedMemConfig",
-  "cudaThreadGetCacheConfig",
-  "cudaDeviceSetSharedMemConfig",
-  "cudaThreadSetCacheConfig",
-  "cudaThreadExchangeStreamCaptureMode",
-  "cudaDeviceGetStreamPriorityRange",
-  "cudaFree",
-  "cudaFreeAsync",
-  "cudaMemAdvise",
-  "cudaMemPrefetchAsync",
-  "cudaStreamAttachMemAsync",
-  "cudaStreamCreate",
-  "cudaStreamCreateWithFlags",
-  "cudaStreamCreateWithPriority",
-  "cudaStreamDestroy",
-  "cudaStreamGetDevice",
-  "cudaStreamGetFlags",
-  "cudaStreamGetId",
-  "cudaStreamGetPriority",
-  "cudaStreamIsCapturing",
-  "cudaStreamGetCaptureInfo",
-  "cudaStreamGetCaptureInfo_v2",
-  "cudaStreamBeginCapture",
-  "cudaStreamEndCapture",
-  "cudaStreamUpdateCaptureDependencies",
-  "cudaGraphCreate",
-  "cudaGraphInstantiate",
-  "cudaGraphInstantiateWithFlags",
-  "cudaGraphUpload",
-  "cudaGraphExecUpdate",
-  "cudaGraphDestroy",
-  "cudaGraphExecDestroy",
-  "cudaStreamQuery",
-  "cudaStreamSynchronize",
-  "cudaStreamWaitEvent",
-  "cudaSetDevice",
-  "cudaGetDevice",
-  "cudaGetDeviceCount",
-  "cudaRuntimeGetVersion",
-  "cudaDriverGetVersion",
-  "cudaFuncSetAttribute",
-  "cudaFuncSetCacheConfig",
-  "cudaFuncSetSharedMemConfig",
-  "cudaGetLastError",
-  "cudaPeekAtLastError",
-  "cudaProfilerStart",
-  "cudaProfilerStop",
-  "cudaEventCreate",
-  "cudaEventCreateWithFlags",
-  "cudaEventDestroy",
-  "cudaEventQuery",
-  "cudaEventRecord",
-  "cudaEventRecordWithFlags",
-  "cudaEventSynchronize",
-  "cudaMemsetToSymbol",
-  "cudaMemsetToSymbolAsync",
+const HOST_LOCAL_SIDE_EFFECT_FREE_CALLS = new Set([
   "deviceAllocate",
   "max",
   "min",
@@ -566,7 +488,7 @@ function expressionNeedsParentDispatch(expression: SemanticExpression): boolean 
 
 function semanticCallNeedsParentDispatch(name: string | undefined, args: readonly SemanticExpression[]): boolean {
   if (isCudaRuntimeQueryWriteCall(name)) return true;
-  if (name !== undefined && HOST_SIDE_EFFECT_FREE_CALLS.has(name)) {
+  if (isCudaHostSideEffectFreeRuntimeCall(name) || (name !== undefined && HOST_LOCAL_SIDE_EFFECT_FREE_CALLS.has(name))) {
     return args.some(expressionNeedsParentDispatch);
   }
   return true;
