@@ -493,6 +493,8 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaGraphCreate" ||
     name === "cudaGraphInstantiate" ||
     name === "cudaGraphInstantiateWithFlags" ||
+    name === "cudaGraphUpload" ||
+    name === "cudaGraphExecUpdate" ||
     name === "cudaGraphDestroy" ||
     name === "cudaGraphExecDestroy" ||
     name === "cudaStreamQuery" ||

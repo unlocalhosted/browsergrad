@@ -14116,6 +14116,44 @@ __global__ void graph_lifecycle(uint *handles, int *statusOut) {
     expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);
   });
 
+  it("models CUDA graph upload and exec-update lifecycle calls as host-managed no-ops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void graph_update_lifecycle(uint *handles, int *statusOut) {
+  cudaGraph_t graph = 7u;
+  cudaGraphExec_t exec = 8u;
+  cudaGraphNode_t errorNode = 10u;
+  cudaGraphExecUpdateResult updateResult = cudaGraphExecUpdateErrorTopologyChanged;
+  if (threadIdx.x < 1) {
+    int create = cudaGraphCreate(&graph, 0);
+    int instantiate = cudaGraphInstantiateWithFlags(&exec, graph, 0);
+    int upload = cudaGraphUpload(exec, 0);
+    int update = cudaGraphExecUpdate(exec, graph, &errorNode, &updateResult);
+    int destroyExec = cudaGraphExecDestroy(exec);
+    int destroyGraph = cudaGraphDestroy(graph);
+    handles[0] = graph;
+    handles[1] = exec;
+    handles[2] = errorNode;
+    handles[3] = updateResult;
+    statusOut[0] = create + instantiate + upload + update + destroyExec + destroyGraph + (updateResult == cudaGraphExecUpdateSuccess ? 0 : 100);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { handles: new Uint32Array([99, 99, 99, 99]), statusOut: new Int32Array([-1]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var upload: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var update: i32 = 0;");
+    expect(compiled.wgsl).toContain("errorNode = 0;");
+    expect(compiled.wgsl).toContain("updateResult = 0;");
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { handles: new Uint32Array(4), statusOut: new Int32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.handles as Uint32Array]).toEqual([0, 0, 0, 0]);
+    expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);
+  });
+
   it("treats CUDA unified-memory advice and prefetch calls as WebGPU-safe no-ops", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void unified_memory_hints(float *x, int n) {

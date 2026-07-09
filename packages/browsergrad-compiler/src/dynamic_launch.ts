@@ -489,6 +489,8 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
     name === "cudaGraphCreate" ||
     name === "cudaGraphInstantiate" ||
     name === "cudaGraphInstantiateWithFlags" ||
+    name === "cudaGraphUpload" ||
+    name === "cudaGraphExecUpdate" ||
     name === "cudaGraphDestroy" ||
     name === "cudaGraphExecDestroy" ||
     name === "cudaStreamQuery" ||
@@ -556,6 +558,7 @@ function isRuntimeQueryWriteCall(name: string): boolean {
     name === "cudaGraphCreate" ||
     name === "cudaGraphInstantiate" ||
     name === "cudaGraphInstantiateWithFlags" ||
+    name === "cudaGraphExecUpdate" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion" ||
     name === "cudaEventElapsedTime";

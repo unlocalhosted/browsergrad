@@ -58,6 +58,7 @@ const TYPE_SIZE_BYTES = new Map<string, number>([
   ["cudaGraph_t", 4],
   ["cudaGraphNode_t", 4],
   ["cudaGraphExec_t", 4],
+  ["cudaGraphExecUpdateResult", 4],
   ["cudaStreamCaptureStatus", 4],
   ["cudaStreamCaptureMode", 4],
   ["void", 4],

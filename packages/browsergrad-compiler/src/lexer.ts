@@ -383,6 +383,7 @@ function normalizeAliasType(sourceType: string | undefined, defines: ReadonlyMap
     type === "cudaGraph_t" ||
     type === "cudaGraphNode_t" ||
     type === "cudaGraphExec_t" ||
+    type === "cudaGraphExecUpdateResult" ||
     type === "__nv_fp8_storage_t"
   ) return "uint";
   if (type === "cudaStreamCaptureStatus" || type === "cudaStreamCaptureMode") return "int";

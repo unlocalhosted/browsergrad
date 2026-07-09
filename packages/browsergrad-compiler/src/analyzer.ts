@@ -124,6 +124,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaGraphCreate", [2, 2]],
   ["cudaGraphInstantiate", [5, 5]],
   ["cudaGraphInstantiateWithFlags", [3, 3]],
+  ["cudaGraphUpload", [2, 2]],
+  ["cudaGraphExecUpdate", [4, 4]],
   ["cudaGraphDestroy", [1, 1]],
   ["cudaGraphExecDestroy", [1, 1]],
   ["cudaMemset", [3, 3]],
@@ -1881,6 +1883,7 @@ function validateCallExpression(
     callName === "cudaGraphCreate" ||
     callName === "cudaGraphInstantiate" ||
     callName === "cudaGraphInstantiateWithFlags" ||
+    callName === "cudaGraphExecUpdate" ||
     callName === "cudaRuntimeGetVersion" ||
     callName === "cudaDriverGetVersion") {
     validateCudaIntegerRuntimeQuery(expression, callName, scope, diagnostics, walkExpression);
@@ -2615,6 +2618,20 @@ function validateCudaIntegerRuntimeQuery(
     }
     return;
   }
+  if (callName === "cudaGraphExecUpdate") {
+    validateScalarOperand(walkExpression(target, scope), target.span, diagnostics);
+    const graph = expression.args[1];
+    if (graph) validateScalarOperand(walkExpression(graph, scope), graph.span, diagnostics);
+    const errorNode = expression.args[2];
+    if (errorNode && !isNullPointerExpression(errorNode)) {
+      validateRuntimeQueryPointerTarget(callName, errorNode, "uint", scope, diagnostics, walkExpression);
+    }
+    const updateResult = expression.args[3];
+    if (updateResult && !isNullPointerExpression(updateResult)) {
+      validateRuntimeQueryPointerTarget(callName, updateResult, "uint", scope, diagnostics, walkExpression);
+    }
+    return;
+  }
   if (callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags") {
     validateRuntimeQueryPointerTarget(callName, target, "int", scope, diagnostics, walkExpression);
     for (const arg of expression.args.slice(2)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
@@ -3217,6 +3234,7 @@ function isHostManagedRuntimeNoopCall(callName: string): boolean {
     callName === "cudaStreamBeginCapture" ||
     callName === "cudaStreamEndCapture" ||
     callName === "cudaStreamUpdateCaptureDependencies" ||
+    callName === "cudaGraphUpload" ||
     callName === "cudaGraphDestroy" ||
     callName === "cudaGraphExecDestroy" ||
     callName === "cudaStreamCreate" ||
@@ -5212,6 +5230,10 @@ function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
     callName === "cudaStreamIsCapturing" ||
     callName === "cudaStreamGetCaptureInfo" ||
     callName === "cudaStreamEndCapture" ||
+    callName === "cudaGraphCreate" ||
+    callName === "cudaGraphInstantiate" ||
+    callName === "cudaGraphInstantiateWithFlags" ||
+    callName === "cudaGraphExecUpdate" ||
     callName === "cudaRuntimeGetVersion" ||
     callName === "cudaDriverGetVersion";
 }

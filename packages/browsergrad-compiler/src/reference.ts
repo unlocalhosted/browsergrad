@@ -2955,6 +2955,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     name === "cudaGraphCreate" ||
     name === "cudaGraphInstantiate" ||
     name === "cudaGraphInstantiateWithFlags" ||
+    name === "cudaGraphExecUpdate" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion") {
     if (name === "cudaMemGetInfo") {
@@ -3010,6 +3011,13 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       if (execTarget) writeLValue(resolvePointerArgument(execTarget, context), 0, context);
       const errorNodeTarget = name === "cudaGraphInstantiate" ? expression.args[2] : undefined;
       if (errorNodeTarget && !isNullPointerLiteral(errorNodeTarget)) writeLValue(resolvePointerArgument(errorNodeTarget, context), 0, context);
+      return 0;
+    }
+    if (name === "cudaGraphExecUpdate") {
+      const errorNodeTarget = expression.args[2];
+      if (errorNodeTarget && !isNullPointerLiteral(errorNodeTarget)) writeLValue(resolvePointerArgument(errorNodeTarget, context), 0, context);
+      const updateResultTarget = expression.args[3];
+      if (updateResultTarget && !isNullPointerLiteral(updateResultTarget)) writeLValue(resolvePointerArgument(updateResultTarget, context), 0, context);
       return 0;
     }
     if (name === "cudaThreadExchangeStreamCaptureMode") {
@@ -4258,6 +4266,7 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaStreamBeginCapture" ||
     name === "cudaStreamEndCapture" ||
     name === "cudaStreamUpdateCaptureDependencies" ||
+    name === "cudaGraphUpload" ||
     name === "cudaGraphDestroy" ||
     name === "cudaGraphExecDestroy" ||
     name === "cudaStreamCreate" ||
