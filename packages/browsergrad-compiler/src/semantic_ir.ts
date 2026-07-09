@@ -24,6 +24,10 @@ import {
 } from "./cuda_lite_values.js";
 import { cudaBfloat16IntrinsicReturnType } from "./cuda_bfloat16_intrinsics.js";
 import {
+  isCudaSemanticSurfaceWriteCallName,
+  isCudaTexture2DReadCallName,
+} from "./cuda_texture_surface_calls.js";
+import {
   cudaVibMinMaxInfo,
   isCudaFrexpCallName as isFrexpCallName,
   isCudaModfCallName as isModfCallName,
@@ -467,9 +471,6 @@ const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, "grid.sync", "cg::sync"]);
 const FENCE_CALLS: ReadonlySet<string> = new Set(CUDA_FENCE_CALL_NAMES);
 const ATOMIC_CALL_PREFIX = "atomic";
-const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
-const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite", "surf3Dwrite"]);
-
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
   const constants = analysis.constants.map(symbolForConstant);
@@ -693,7 +694,7 @@ function lowerStatement(
         }
       }
       if (expression.kind === "call" && expression.callee.kind === "symbol") {
-        if (SURFACE_WRITE_CALLS.has(expression.callee.name) && expression.args.length >= 4) {
+        if (isCudaSemanticSurfaceWriteCallName(expression.callee.name) && expression.args.length >= 4) {
           return {
             kind: "surface-write",
             value: expression.args[0]!,
@@ -884,7 +885,7 @@ function lowerExpression(
       }
       if (
         expression.callee.kind === "identifier" &&
-        TEXTURE_2D_READ_CALLS.has(expression.callee.name) &&
+        isCudaTexture2DReadCallName(expression.callee.name) &&
         args.length >= 3
       ) {
         return {

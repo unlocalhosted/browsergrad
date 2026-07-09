@@ -2,6 +2,7 @@ import type {
   CudaLiteTextureAddressMode,
   CudaLiteTextureDescriptor,
 } from "./types.js";
+import { isCudaTextureReadCallName } from "./cuda_texture_surface_calls.js";
 
 export interface ReferenceTextureDescriptorInput {
   readonly width: number;
@@ -66,13 +67,7 @@ export function referenceTextureDescriptorFromInput(texture: ReferenceTextureDes
 }
 
 export function referenceIsTextureReadCall(name: string): boolean {
-  return name === "tex1D" ||
-    name === "tex1Dfetch" ||
-    name === "tex2D" ||
-    name === "tex2DLod" ||
-    name === "tex2DLayered" ||
-    name === "tex3D" ||
-    name === "texCubemap";
+  return isCudaTextureReadCallName(name);
 }
 
 export function referenceTextureChannels(texture: { readonly width: number; readonly data: Float32Array; readonly channels?: number }): number {

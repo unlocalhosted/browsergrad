@@ -56,6 +56,10 @@ import {
   isCudaVoteCallName as isVoteBuiltin,
 } from "./cuda_subgroup_calls.js";
 import {
+  isCudaSurfaceWriteCallName as isSurfaceWriteCall,
+  isCudaTextureReadCallName as isTextureReadCall,
+} from "./cuda_texture_surface_calls.js";
+import {
   isCudaBf162BooleanComparisonCallName as isBf162BooleanComparisonIntrinsic,
   isCudaBf162MaskComparisonCallName as isBf162ComparisonMaskIntrinsic,
   isCudaBf162OnlyVectorCallName as isBf162OnlyVectorIntrinsic,
@@ -2253,7 +2257,7 @@ function validateCallExpression(
       : callName === "surf2DLayeredread" || callName === "surf3Dread" ? expression.args.length <= 4 : expression.args.length <= 3;
     return returnForm ? expressionInfoForTextureRead(expression) : { kind: "scalar", valueType: "voidptr" };
   }
-  if (callName === "surf2Dwrite" || callName === "surf1Dwrite" || callName === "surf2DLayeredwrite" || callName === "surf3Dwrite") {
+  if (isSurfaceWriteCall(callName)) {
     validateSurf2DWrite(expression, callName, scope, diagnostics, walkExpression, compatibilityDiagnosticsReachable);
     return { kind: "scalar", valueType: "float" };
   }
@@ -4500,16 +4504,6 @@ function expressionInfoForTextureRead(expression: Extract<CudaLiteExpression, { 
   return isCudaVectorType(valueType)
     ? { kind: "vector", valueType }
     : { kind: "scalar", valueType };
-}
-
-function isTextureReadCall(name: string): boolean {
-  return name === "tex1D" ||
-    name === "tex1Dfetch" ||
-    name === "tex2D" ||
-    name === "tex2DLod" ||
-    name === "tex2DLayered" ||
-    name === "tex3D" ||
-    name === "texCubemap";
 }
 
 function textureCoordinateArgs(expression: Extract<CudaLiteExpression, { kind: "call" }>, callName: string): readonly CudaLiteExpression[] {
