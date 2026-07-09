@@ -69,6 +69,17 @@ export function isSemanticAtomicCallName(callee: string | undefined): boolean {
   return semanticAtomicOperation(callee) !== undefined;
 }
 
+export function semanticAtomicRequiredArgumentCount(op: SemanticAtomicOp | undefined): 2 | 3 | undefined {
+  if (op === undefined) return undefined;
+  return op === "cas" ? 3 : 2;
+}
+
+export function semanticAtomicScalarArgumentIndices(op: SemanticAtomicOp | undefined): readonly number[] {
+  const requiredArgs = semanticAtomicRequiredArgumentCount(op);
+  if (requiredArgs === undefined) return [];
+  return Array.from({ length: requiredArgs - 1 }, (_, index) => index + 1);
+}
+
 export function semanticAtomicSupportsFloat(op: SemanticAtomicOp | undefined): boolean {
   return op === "add" || op === "sub" || op === "min" || op === "max" || op === "exchange" || op === "cas";
 }
@@ -78,6 +89,16 @@ export function semanticAtomicSupportsBfloatAdd(
   targetType: CudaLiteScalarType | undefined,
 ): boolean {
   return targetType === "bf16" && semanticAtomicOperation(callee) === "add";
+}
+
+export function semanticAtomicReferenceValueTypeSupported(
+  op: SemanticAtomicOp | undefined,
+  valueType: CudaLiteScalarType | undefined,
+): boolean {
+  return valueType === "uint" ||
+    valueType === "int" ||
+    valueType === "float" && semanticAtomicSupportsFloat(op) ||
+    valueType === "bf16" && op === "add";
 }
 
 export function semanticAtomicSupportsDevicePointer(

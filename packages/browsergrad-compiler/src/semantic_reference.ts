@@ -105,7 +105,8 @@ import {
 import {
   SEMANTIC_ATOMIC_OPS,
   semanticAtomicOperation,
-  semanticAtomicSupportsFloat,
+  semanticAtomicReferenceValueTypeSupported,
+  semanticAtomicScalarArgumentIndices,
   type SemanticAtomicOp,
 } from "./semantic_atomic_intrinsics.js";
 import {
@@ -504,18 +505,13 @@ function semanticReferenceAtomicSupported(
   const atomicOp = semanticAtomicOperation(operation.callee);
   if (!atomicOp) return false;
   if (!operation.target || !semanticReferenceAtomicMemoryRefSupported(operation.target, compiled)) return false;
-  if (
-    operation.target.valueType !== "uint" &&
-    operation.target.valueType !== "int" &&
-    !(operation.target.valueType === "float" && semanticAtomicSupportsFloat(atomicOp)) &&
-    !(operation.target.valueType === "bf16" && atomicOp === "add")
-  ) return false;
+  if (!semanticAtomicReferenceValueTypeSupported(atomicOp, operation.target.valueType)) return false;
   if (!semanticReferenceAtomicTargetRootSupported(operation.target, compiled)) {
     return false;
   }
-  const expectedArgs = atomicOp === "cas" ? 3 : 2;
-  return operation.args.length >= expectedArgs &&
-    operation.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+  const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
+  return operation.args.length >= scalarArgIndices.length + 1 &&
+    scalarArgIndices.every((index) => semanticReferenceExpressionSupported(operation.args[index]!, "scalar"));
 }
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
@@ -803,18 +799,13 @@ function semanticReferenceAtomicCallSupported(
   if (!atomicOp) return false;
   const target = semanticAtomicCallTarget(expression);
   if (!target || !semanticReferenceAtomicMemoryRefSupported(target, compiled)) return false;
-  if (
-    target.valueType !== "uint" &&
-    target.valueType !== "int" &&
-    !(target.valueType === "float" && semanticAtomicSupportsFloat(atomicOp)) &&
-    !(target.valueType === "bf16" && atomicOp === "add")
-  ) return false;
+  if (!semanticAtomicReferenceValueTypeSupported(atomicOp, target.valueType)) return false;
   if (!semanticReferenceAtomicTargetRootSupported(target, compiled)) {
     return false;
   }
-  const expectedArgs = atomicOp === "cas" ? 3 : 2;
-  return expression.args.length >= expectedArgs &&
-    expression.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+  const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
+  return expression.args.length >= scalarArgIndices.length + 1 &&
+    scalarArgIndices.every((index) => semanticReferenceExpressionSupported(expression.args[index]!, "scalar"));
 }
 
 function semanticReferenceAtomicMemoryRefSupported(

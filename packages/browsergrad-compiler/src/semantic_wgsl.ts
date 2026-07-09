@@ -63,6 +63,7 @@ import {
 import {
   isSemanticAtomicCallName,
   semanticAtomicOperation,
+  semanticAtomicScalarArgumentIndices,
   semanticAtomicSupportsBfloatAdd,
   semanticAtomicSupportsFloat,
 } from "./semantic_atomic_intrinsics.js";
@@ -952,9 +953,9 @@ function semanticWgslAtomicSupported(
   if (!semanticWgslAtomicTargetRootSupported(operation.target, ir)) {
     return false;
   }
-  const expectedArgs = atomicOp === "cas" ? 3 : 2;
-  return operation.args.length >= expectedArgs &&
-    operation.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
+  const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
+  return operation.args.length >= scalarArgIndices.length + 1 &&
+    scalarArgIndices.every((index) => semanticWgslExpressionSupported(operation.args[index]!, "scalar"));
 }
 
 function semanticWgslStoreValueSupported(
@@ -1328,9 +1329,9 @@ function semanticWgslAtomicCallSupported(
   if (target.fields.length > 0) return false;
   if (!semanticWgslAtomicValueTypeSupported(expression.callee.name, target.valueType)) return false;
   if (!semanticWgslAtomicTargetRootSupported(target, ir)) return false;
-  const expectedArgs = atomicOp === "cas" ? 3 : 2;
-  return expression.args.length >= expectedArgs &&
-    expression.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
+  const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
+  return expression.args.length >= scalarArgIndices.length + 1 &&
+    scalarArgIndices.every((index) => semanticWgslExpressionSupported(expression.args[index]!, "scalar"));
 }
 
 function semanticWgslAtomicMemoryRefSupported(
