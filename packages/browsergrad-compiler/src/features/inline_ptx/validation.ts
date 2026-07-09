@@ -66,3 +66,22 @@ export function inlineAsmInputCountMatches(op: InlineAsmOp, outputCount: number,
   const expected = inlineAsmExpectedInputCount(op, outputCount);
   return expected !== undefined && actualInputCount === expected;
 }
+
+export function inlineAsmExpectedOutputCount(op: InlineAsmOp): number {
+  switch (op.kind) {
+    case "cp-async-fence":
+    case "membar":
+    case "bar-sync":
+      return 0;
+    case "ldmatrix":
+      return op.matrices;
+    case "mma-m16n8k16":
+      return op.accumulator === "f32" ? 4 : 2;
+    default:
+      return 1;
+  }
+}
+
+export function inlineAsmOutputCountMatches(op: InlineAsmOp, actualOutputCount: number): boolean {
+  return actualOutputCount === inlineAsmExpectedOutputCount(op);
+}
