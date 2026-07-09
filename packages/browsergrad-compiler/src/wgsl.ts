@@ -19,7 +19,9 @@ import {
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import {
+  emitInlineAsmAddressPredicateWgsl,
   emitInlineAsmStatementWgsl,
+  emitInlineAsmSpecialRegisterWgsl,
   type InlineAsmWgslStatementCallbacks,
 } from "./features/inline_ptx/wgsl.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -2253,8 +2255,8 @@ const inlineAsmWgslCallbacks: InlineAsmWgslStatementCallbacks<CudaLiteExpression
   emitExpressionAsValueType: (expression, valueType, context) => emitExpressionAsValueType(expression, valueType, context),
   emitLocalLinearRank: (context) => emitLocalLinearRank(context),
   emitU32Output: (target, expression, context) => emitInlineU32Output(target, expression, context),
-  emitSpecialRegister: (register, context) => emitInlineAsmSpecialRegister(register, context),
-  emitAddressPredicate: (space, expression, context) => emitInlineAsmAddressPredicate(space, expression, context),
+  emitSpecialRegister: (register, context) => emitInlineAsmSpecialRegisterWgsl(register, context.ir.workgroupSize, context.ir.span, (code, message, span) => featureError(code, message, span)),
+  emitAddressPredicate: (space, expression, context) => emitInlineAsmAddressPredicateWgsl(space, addressPredicateSpaceForEmit(expression, context)),
   emitGlobalTimerTick: (context) => `((workgroup_id.x * ${context.ir.workgroupSize[0]}u) + u32(${emitLocalLinearRank(context)}))`,
   wgslScalarTypeForExpression: (expression, context) => {
     const type = expressionValueTypeForEmit(expression, context);
@@ -6337,30 +6339,6 @@ function addressPredicateSpaceForEmit(
   if (context.poolPointerFor(root) || context.externalPoolNames.includes(root)) return "pool";
   if (localArrayForStorageView(root, expression.span, context) || context.localValueTypeFor(root) !== undefined) return "local";
   return undefined;
-}
-
-function emitInlineAsmAddressPredicate(
-  space: "global" | "shared" | "const" | "local",
-  target: CudaLiteExpression,
-  context: EmitContext,
-): string {
-  const actual = addressPredicateSpaceForEmit(target, context);
-  const matches =
-    space === "global" ? actual === "global" :
-      space === "shared" ? actual === "shared" :
-        space === "const" ? actual === "constant" :
-          actual === "local";
-  return matches ? "1u" : "0u";
-}
-
-function emitInlineAsmSpecialRegister(register: string, context: EmitContext): string {
-  const [root, axis] = register.split(".");
-  const axisIndex = axis === "x" ? 0 : axis === "y" ? 1 : 2;
-  if (root === "tid") return context.ir.workgroupSize[axisIndex] === 1 ? "0u" : `local_id.${axis}`;
-  if (root === "ctaid") return `workgroup_id.${axis}`;
-  if (root === "ntid") return `${context.ir.workgroupSize[axisIndex]}u`;
-  if (root === "nctaid") return `num_workgroups.${axis}`;
-  throw featureError("unsupported-inline-asm", `unsupported inline PTX special register '${register}'`, context.ir.span);
 }
 
 function emitCall(expression: CudaLiteCallExpression, context: EmitContext): string {

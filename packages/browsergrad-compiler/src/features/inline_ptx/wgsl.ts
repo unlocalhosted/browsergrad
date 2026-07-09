@@ -32,6 +32,35 @@ export interface InlineAsmWgslStatementCallbacks<TExpression, TContext, TSpan> e
   readonly featureError: (code: string, message: string, span: TSpan) => unknown;
 }
 
+export type InlineAsmAddressPredicateSpace = "global" | "shared" | "constant" | "local" | "pool";
+
+export function emitInlineAsmAddressPredicateWgsl(
+  space: "global" | "shared" | "const" | "local",
+  actual: InlineAsmAddressPredicateSpace | undefined,
+): string {
+  const matches =
+    space === "global" ? actual === "global" :
+      space === "shared" ? actual === "shared" :
+        space === "const" ? actual === "constant" :
+          actual === "local";
+  return matches ? "1u" : "0u";
+}
+
+export function emitInlineAsmSpecialRegisterWgsl<TSpan>(
+  register: string,
+  workgroupSize: readonly [number, number, number],
+  span: TSpan,
+  featureError: (code: string, message: string, span: TSpan) => unknown,
+): string {
+  const [root, axis] = register.split(".");
+  const axisIndex = axis === "x" ? 0 : axis === "y" ? 1 : 2;
+  if (root === "tid") return workgroupSize[axisIndex] === 1 ? "0u" : `local_id.${axis}`;
+  if (root === "ctaid") return `workgroup_id.${axis}`;
+  if (root === "ntid") return `${workgroupSize[axisIndex]}u`;
+  if (root === "nctaid") return `num_workgroups.${axis}`;
+  throw featureError("unsupported-inline-asm", `unsupported inline PTX special register '${register}'`, span);
+}
+
 export function emitInlineAsmStatementWgsl<TExpression, TContext, TSpan>(
   statement: InlineAsmWgslStatement<TExpression, TSpan>,
   context: TContext,
