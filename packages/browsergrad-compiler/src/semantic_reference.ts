@@ -64,7 +64,6 @@ import type {
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
 import type {
-  SemanticAddressSpace,
   SemanticExpression,
   SemanticKernelIrOperation,
   SemanticMemoryRef,
@@ -100,6 +99,7 @@ import {
   SEMANTIC_LOCAL_ARRAY_FILL_CALLS,
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
+  semanticAddressPredicateAddressSpace,
 } from "./semantic_builtin_calls.js";
 import {
   SEMANTIC_ATOMIC_OPS,
@@ -1968,21 +1968,6 @@ function evalSemanticAddressPredicateCall(expression: Extract<SemanticExpression
   if (kind === "global") return addressSpace === "storage" || addressSpace === "device-global" ? 1 : 0;
   if (kind !== undefined) return addressSpace === kind ? 1 : 0;
   throw semanticReferenceError(`semantic reference does not support address predicate '${expression.callee.name}'`, expression.span);
-}
-
-function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {
-  if (!expression) return undefined;
-  if (expression.kind === "symbol") return expression.addressSpace;
-  if (expression.kind === "index") return expression.addressSpace;
-  if (expression.kind === "member") return semanticAddressPredicateAddressSpace(expression.object);
-  if (expression.kind === "cast" && expression.pointer) return semanticAddressPredicateAddressSpace(expression.expression);
-  if (expression.kind === "unary" && expression.operator === "&") return semanticAddressPredicateAddressSpace(expression.argument);
-  if (expression.kind === "conditional") {
-    const consequent = semanticAddressPredicateAddressSpace(expression.consequent);
-    const alternate = semanticAddressPredicateAddressSpace(expression.alternate);
-    return consequent === alternate ? consequent : undefined;
-  }
-  return undefined;
 }
 
 function evalSemanticExpression(expression: SemanticExpression, context: SemanticReferenceContext): SemanticValue {

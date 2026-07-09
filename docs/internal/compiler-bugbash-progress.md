@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T22:13:13Z
+Last updated: 2026-07-09T22:16:34Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: cuRAND call support contract shared across semantic reference/WGSL |
+| Active work item | Architecture split: address predicate address-space contract shared across semantic reference/WGSL |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: moved address predicate address-space resolution into `semantic_builtin_calls.ts`, then rewired semantic reference and semantic WGSL support/emission checks to consume the shared contract instead of carrying duplicate recursive resolvers; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4575`, `semantic_wgsl.ts` down to `5345`, and semantic-IR bucket down to `15562`
 - Architecture split: expanded `semantic_curand_intrinsics.ts` with cuRAND arity lookup, state-argument index, and scalar-argument index helpers, then rewired semantic reference and semantic WGSL support checks to consume that support contract instead of duplicating arity/state/scalar argument rules; cuRAND call support validation now has one semantic Module interface across CPU reference and native WGSL readiness checks; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_reference.ts` down to `4590`, `semantic_wgsl.ts` down to `5360`, and semantic-IR bucket down to `15573`
 - Architecture split: added cuRAND semantic predicate helpers (`isSemanticCurand*CallName`) plus poisson call classification to `semantic_curand_intrinsics.ts`, then rewired analyzer, semantic reference, and semantic WGSL support checks to consume those predicates instead of local string/set checks; cuRAND feature branching now has one semantic Module interface for call family decisions across frontend validation, CPU reference support checks, and native WGSL support checks; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows semantic-IR bucket at `15591`
 - Architecture split: expanded `semantic_curand_intrinsics.ts` to own cuRAND arities and return-type metadata, then rewired analyzer builtin arity registration and call validation to consume it; cuRAND compatibility recognition now has one semantic metadata Module instead of duplicated arity lists and return-type branches in frontend validation; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `analyzer.ts` down to `5095`, frontend bucket down to `7740`, and semantic-IR bucket at `15552`

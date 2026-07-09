@@ -4,7 +4,6 @@ import {
   type WgslValueType,
 } from "@unlocalhosted/browsergrad-kernels";
 import type {
-  SemanticAddressSpace,
   SemanticExpression,
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
@@ -58,6 +57,7 @@ import {
   SEMANTIC_LOCAL_ARRAY_FILL_CALLS,
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
+  semanticAddressPredicateAddressSpace,
 } from "./semantic_builtin_calls.js";
 import {
   isSemanticAtomicCallName,
@@ -3773,21 +3773,6 @@ function emitSemanticSubgroupCall(
     return `${wgslCall}(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
   }
   throw semanticWgslError(`semantic WGSL does not support subgroup call '${name}'`, expression.span);
-}
-
-function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {
-  if (!expression) return undefined;
-  if (expression.kind === "symbol") return expression.addressSpace;
-  if (expression.kind === "index") return expression.addressSpace;
-  if (expression.kind === "member") return semanticAddressPredicateAddressSpace(expression.object);
-  if (expression.kind === "cast" && expression.pointer) return semanticAddressPredicateAddressSpace(expression.expression);
-  if (expression.kind === "unary" && expression.operator === "&") return semanticAddressPredicateAddressSpace(expression.argument);
-  if (expression.kind === "conditional") {
-    const consequent = semanticAddressPredicateAddressSpace(expression.consequent);
-    const alternate = semanticAddressPredicateAddressSpace(expression.alternate);
-    return consequent === alternate ? consequent : undefined;
-  }
-  return undefined;
 }
 
 function emitSemanticMathCall(
