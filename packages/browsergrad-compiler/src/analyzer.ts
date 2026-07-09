@@ -91,6 +91,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", [5, 5]],
   ["cudaOccupancyMaxPotentialBlockSize", [3, 5]],
   ["cudaOccupancyMaxPotentialBlockSizeWithFlags", [6, 6]],
+  ["cudaOccupancyAvailableDynamicSMemPerBlock", [4, 4]],
   ["cudaSetDevice", [1, 1]],
   ["cudaGetDevice", [1, 1]],
   ["cudaGetDeviceCount", [1, 1]],
@@ -1868,6 +1869,7 @@ function validateCallExpression(
     callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     callName === "cudaOccupancyMaxPotentialBlockSize" ||
     callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    callName === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     callName === "cudaDeviceGetCacheConfig" ||
     callName === "cudaDeviceGetSharedMemConfig" ||
     callName === "cudaThreadGetCacheConfig" ||
@@ -2654,6 +2656,11 @@ function validateCudaIntegerRuntimeQuery(
     for (const arg of expression.args.slice(3)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return;
   }
+  if (callName === "cudaOccupancyAvailableDynamicSMemPerBlock") {
+    validateRuntimeQueryPointerTarget(callName, target, "uint", scope, diagnostics, walkExpression);
+    for (const arg of expression.args.slice(2)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return;
+  }
   const info = validateReadPointerExpression(target, scope, diagnostics, walkExpression);
   if (info.kind !== "address" && info.kind !== "pointer" && info.kind !== "unknown") {
     diagnostics.push(error("unsupported-cuda-runtime", `${callName} expects an int pointer target`, target.span));
@@ -3230,6 +3237,7 @@ function isHostManagedRuntimeNoopCall(callName: string): boolean {
     callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     callName === "cudaOccupancyMaxPotentialBlockSize" ||
     callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    callName === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     callName === "cudaDeviceGetCacheConfig" ||
     callName === "cudaDeviceSetCacheConfig" ||
     callName === "cudaDeviceGetSharedMemConfig" ||

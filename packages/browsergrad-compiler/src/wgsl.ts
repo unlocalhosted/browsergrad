@@ -4709,6 +4709,7 @@ function emitCudaRuntimeQueryWrites(
   if (callName === "cudaStreamGetCaptureInfo") return emitCudaStreamGetCaptureInfoWrites(expression, context, indentLevel);
   if (callName === "cudaGraphInstantiate") return emitCudaGraphInstantiateWrites(expression, context, indentLevel);
   if (callName === "cudaGraphExecUpdate") return emitCudaGraphExecUpdateWrites(expression, context, indentLevel);
+  if (callName === "cudaOccupancyAvailableDynamicSMemPerBlock") return emitCudaOccupancyAvailableDynamicSmemWrite(expression, context, indentLevel);
   if (callName === "cudaOccupancyMaxPotentialBlockSize" || callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags") return emitCudaOccupancyMaxPotentialBlockSizeWrites(expression, context, indentLevel);
   const target = cudaIntegerRuntimeQueryTarget(expression);
   if (!target) return [];
@@ -4755,6 +4756,24 @@ function emitCudaOccupancyMaxPotentialBlockSizeWrites(
   return lines;
 }
 
+function emitCudaOccupancyAvailableDynamicSmemWrite(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const target = expression.args[0];
+  if (!target) return [];
+  return emitIntPointerWrite(
+    target,
+    { kind: "number", value: 49152, raw: "49152", span: expression.span },
+    context,
+    indentLevel,
+    "unsupported-cuda-runtime",
+    "cudaOccupancyAvailableDynamicSMemPerBlock expects a modeled uint pointer target",
+    "uint",
+  );
+}
+
 function cudaIntegerRuntimeQueryTargetValueType(callName: string | undefined): CudaLiteScalarType {
   return callName === "cudaDeviceGetLimit" ||
     callName === "cudaThreadGetLimit" ||
@@ -4769,6 +4788,7 @@ function cudaIntegerRuntimeQueryTargetValueType(callName: string | undefined): C
     callName === "cudaGraphInstantiate" ||
     callName === "cudaGraphInstantiateWithFlags" ||
     callName === "cudaGraphExecUpdate" ||
+    callName === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     callName === "cudaEventCreate" ||
     callName === "cudaEventCreateWithFlags"
     ? "uint"
@@ -4980,6 +5000,7 @@ function isCudaIntegerRuntimeQueryCall(name: string | undefined): boolean {
     name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     name === "cudaOccupancyMaxPotentialBlockSize" ||
     name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     name === "cudaDeviceGetCacheConfig" ||
     name === "cudaDeviceGetSharedMemConfig" ||
     name === "cudaThreadGetCacheConfig" ||
@@ -5012,6 +5033,7 @@ function cudaIntegerRuntimeQueryValue(expression: Extract<CudaLiteExpression, { 
   if (name === "cudaDeviceGetLimit" || name === "cudaThreadGetLimit") return cudaDeviceLimitValue(constantIntegerExpression(expression.args[1]) ?? 0);
   if (name === "cudaDeviceCanAccessPeer") return 1;
   if (name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags") return 1;
+  if (name === "cudaOccupancyAvailableDynamicSMemPerBlock") return 49152;
   if (name === "cudaRuntimeGetVersion" || name === "cudaDriverGetVersion") return 12000;
   return 0;
 }
@@ -6602,6 +6624,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags":
     case "cudaOccupancyMaxPotentialBlockSize":
     case "cudaOccupancyMaxPotentialBlockSizeWithFlags":
+    case "cudaOccupancyAvailableDynamicSMemPerBlock":
     case "cudaDeviceGetCacheConfig":
     case "cudaDeviceSetCacheConfig":
     case "cudaDeviceGetSharedMemConfig":
@@ -8242,6 +8265,7 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
     case "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags":
     case "cudaOccupancyMaxPotentialBlockSize":
     case "cudaOccupancyMaxPotentialBlockSizeWithFlags":
+    case "cudaOccupancyAvailableDynamicSMemPerBlock":
       return `${expressionName(expression.callee)} omitted: WebGPU occupancy is compiler-modeled`;
     case "cudaDeviceGetCacheConfig":
     case "cudaThreadGetCacheConfig":

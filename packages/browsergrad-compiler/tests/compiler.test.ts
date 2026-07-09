@@ -4442,6 +4442,7 @@ __global__ void unsupported(float* x) {
       "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
       "cudaOccupancyMaxPotentialBlockSize",
       "cudaOccupancyMaxPotentialBlockSizeWithFlags",
+      "cudaOccupancyAvailableDynamicSMemPerBlock",
       "cudaDeviceGetCacheConfig",
       "cudaDeviceSetCacheConfig",
       "cudaDeviceGetSharedMemConfig",
@@ -14562,7 +14563,7 @@ __global__ void runtime_mem_info(uint *out) {
 
   it("models CUDA occupancy runtime queries", () => {
     const compiled = compileCudaLiteKernel(`
-__global__ void runtime_occupancy(int *out) {
+__global__ void runtime_occupancy(int *out, unsigned int *smemOut) {
   if (threadIdx.x < 1) {
     int active = -1;
     int activeFlags = -1;
@@ -14570,12 +14571,15 @@ __global__ void runtime_occupancy(int *out) {
     int blockSize = -1;
     int minGridFlags = -1;
     int blockSizeFlags = -1;
+    unsigned int dynamicSmem = 0u;
     int activeStatus = cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active, runtime_occupancy, 128, 0);
     int activeFlagsStatus = cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&activeFlags, runtime_occupancy, 128, 0, cudaOccupancyDisableCachingOverride);
     int potentialStatus = cudaOccupancyMaxPotentialBlockSize(&minGrid, &blockSize, runtime_occupancy, 0, 0);
     int potentialFlagsStatus = cudaOccupancyMaxPotentialBlockSizeWithFlags(&minGridFlags, &blockSizeFlags, runtime_occupancy, 0, 0, cudaOccupancyDefault);
+    int dynamicSmemStatus = cudaOccupancyAvailableDynamicSMemPerBlock(&dynamicSmem, runtime_occupancy, 1, 128);
     cudaOccupancyMaxActiveBlocksPerMultiprocessor(&out[10], runtime_occupancy, 128, 0);
     cudaOccupancyMaxPotentialBlockSize(&out[11], &out[12], runtime_occupancy, 0, 0);
+    cudaOccupancyAvailableDynamicSMemPerBlock(&smemOut[1], runtime_occupancy, 1, 128);
     out[0] = active;
     out[1] = activeStatus;
     out[2] = activeFlags;
@@ -14586,11 +14590,13 @@ __global__ void runtime_occupancy(int *out) {
     out[7] = minGridFlags;
     out[8] = blockSizeFlags;
     out[9] = potentialFlagsStatus;
+    out[13] = dynamicSmemStatus;
+    smemOut[0] = dynamicSmem;
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Int32Array(13).fill(-1) } },
+      { buffers: { out: new Int32Array(14).fill(-1), smemOut: new Uint32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
@@ -14603,11 +14609,14 @@ __global__ void runtime_occupancy(int *out) {
     expect(compiled.wgsl).toContain("blockSize = 256;");
     expect(compiled.wgsl).toContain("minGridFlags = 1;");
     expect(compiled.wgsl).toContain("blockSizeFlags = 256;");
+    expect(compiled.wgsl).toContain("dynamicSmem = 49152;");
     expect(compiled.wgsl).toContain("out[10] = i32(1);");
     expect(compiled.wgsl).toContain("out[11] = i32(1);");
     expect(compiled.wgsl).toContain("out[12] = i32(256);");
-    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(13) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
-    expect([...result.buffers.out as Int32Array]).toEqual([1, 0, 1, 0, 1, 256, 0, 1, 256, 0, 1, 1, 256]);
+    expect(compiled.wgsl).toContain("smemOut[1] = 49152u;");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(14), smemOut: new Uint32Array(2) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Int32Array]).toEqual([1, 0, 1, 0, 1, 256, 0, 1, 256, 0, 1, 1, 256, 0]);
+    expect([...result.buffers.smemOut as Uint32Array]).toEqual([49152, 49152]);
   });
 
   it("validates CUDA graph conditional setters as host-managed scheduler side effects", () => {

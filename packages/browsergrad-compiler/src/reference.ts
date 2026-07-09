@@ -2940,6 +2940,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     name === "cudaOccupancyMaxPotentialBlockSize" ||
     name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     name === "cudaDeviceGetCacheConfig" ||
     name === "cudaDeviceGetSharedMemConfig" ||
     name === "cudaThreadGetCacheConfig" ||
@@ -2975,6 +2976,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       const blockSizeTarget = expression.args[1];
       if (minGridSizeTarget) writeLValue(resolvePointerArgument(minGridSizeTarget, context), 1, context);
       if (blockSizeTarget) writeLValue(resolvePointerArgument(blockSizeTarget, context), 256, context);
+      return 0;
+    }
+    if (name === "cudaOccupancyAvailableDynamicSMemPerBlock") {
+      const dynamicSmemTarget = expression.args[0];
+      if (dynamicSmemTarget) writeLValue(resolvePointerArgument(dynamicSmemTarget, context), 49152, context);
       return 0;
     }
     if (name === "cudaDeviceGetStreamPriorityRange") {
@@ -4262,6 +4268,7 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     name === "cudaOccupancyMaxPotentialBlockSize" ||
     name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     name === "cudaDeviceGetCacheConfig" ||
     name === "cudaDeviceSetCacheConfig" ||
     name === "cudaDeviceGetSharedMemConfig" ||

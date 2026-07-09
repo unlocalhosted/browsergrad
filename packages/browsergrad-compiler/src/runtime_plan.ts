@@ -464,6 +464,7 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     name === "cudaOccupancyMaxPotentialBlockSize" ||
     name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     name === "cudaDeviceGetCacheConfig" ||
     name === "cudaDeviceSetCacheConfig" ||
     name === "cudaDeviceGetSharedMemConfig" ||

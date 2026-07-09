@@ -1053,6 +1053,36 @@ __global__ void graph_lifecycle(uint *handles, int *statusOut) {
     expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
   });
 
+  it("runs CUDA occupancy dynamic shared-memory query on WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void occupancy_dynamic_smem(uint *smemOut, int *statusOut) {
+  if (threadIdx.x < 1) {
+    unsigned int dynamicSmem = 0u;
+    int status = cudaOccupancyAvailableDynamicSMemPerBlock(&dynamicSmem, occupancy_dynamic_smem, 1, 128);
+    cudaOccupancyAvailableDynamicSMemPerBlock(&smemOut[1], occupancy_dynamic_smem, 1, 128);
+    smemOut[0] = dynamicSmem;
+    statusOut[0] = status;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        smemOut: new Uint32Array([0, 0]),
+        statusOut: new Int32Array([-1]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.smemOut as Uint32Array]).toEqual([...expected.buffers.smemOut as Uint32Array]);
+    expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
+  });
+
   it("runs host-lifted cudaMemcpyPeerAsync through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `

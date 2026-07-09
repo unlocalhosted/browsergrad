@@ -664,6 +664,7 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
     name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     name === "cudaOccupancyMaxPotentialBlockSize" ||
     name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     name === "cudaDeviceGetCacheConfig" ||
     name === "cudaDeviceSetCacheConfig" ||
     name === "cudaDeviceGetSharedMemConfig" ||
@@ -735,6 +736,7 @@ function isRuntimeQueryWriteCall(name: string): boolean {
     name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
     name === "cudaOccupancyMaxPotentialBlockSize" ||
     name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
     name === "cudaDeviceGetCacheConfig" ||
     name === "cudaDeviceGetSharedMemConfig" ||
     name === "cudaThreadGetCacheConfig" ||
