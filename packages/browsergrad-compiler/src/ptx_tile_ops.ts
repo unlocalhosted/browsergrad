@@ -18,6 +18,7 @@ export type InlineAsmOp =
   | { readonly kind: "arithmetic-b32"; readonly op: "add" | "sub" | "mul-lo" | "mad-lo"; readonly signed: boolean }
   | { readonly kind: "minmax-b32"; readonly op: "min" | "max"; readonly signed: boolean }
   | { readonly kind: "unary-int-b32"; readonly op: "neg" | "abs"; readonly signed: boolean }
+  | { readonly kind: "select-b32"; readonly signed: boolean }
   | { readonly kind: "u8x4-sad-add" }
   | { readonly kind: "cp-async-fence"; readonly fence: "commit_group" | "wait_group" | "wait_all" }
   | { readonly kind: "membar"; readonly scope: "cta" | "gl" | "sys" }
@@ -79,6 +80,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   const neg = /\bneg\.(b32|s32)\b/u.exec(template);
   if (neg) return { kind: "unary-int-b32", op: "neg", signed: neg[1] === "s32" };
   if (/\babs\.s32\b/u.test(template)) return { kind: "unary-int-b32", op: "abs", signed: true };
+  const selp = /\bselp\.(b32|u32|s32)\b/u.exec(template);
+  if (selp) return { kind: "select-b32", signed: selp[1] === "s32" };
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
   const cpAsyncFence = /\bcp\.async\.(commit_group|wait_group|wait_all)\b/u.exec(template);
   if (cpAsyncFence) return { kind: "cp-async-fence", fence: cpAsyncFence[1] as "commit_group" | "wait_group" | "wait_all" };
@@ -131,6 +134,7 @@ export function inlineAsmSupportedList(): string {
     "{min,max}.{u32,s32}",
     "neg.{b32,s32}",
     "abs.s32",
+    "selp.{b32,u32,s32}",
     "vabsdiff4.u32.u32.u32.add",
     "cp.async.{commit_group,wait_group,wait_all}",
     "membar.{cta,gl,sys}",

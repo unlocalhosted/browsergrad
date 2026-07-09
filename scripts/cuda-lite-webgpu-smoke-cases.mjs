@@ -26,6 +26,7 @@ export const runtimeScopeCases = [
   "inline-asm:arithmetic-b32",
   "inline-asm:minmax-b32",
   "inline-asm:unary-int-b32",
+  "inline-asm:select-b32",
   "inline-asm:special-reg-single-percent",
   "runtime:unreachable-texture-surface-compat-diagnostics",
   "runtime:unreachable-constant-binding",

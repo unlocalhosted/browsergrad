@@ -12214,6 +12214,49 @@ __global__ void unaryIntKernel(uint *out, uint *input) {
     ]);
   });
 
+  it("lowers inline PTX selp b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int selp_u_ptx(unsigned int a, unsigned int b, unsigned int p) {
+  unsigned int ret;
+  asm volatile("selp.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(a), "r"(b), "r"(p));
+  return ret;
+}
+__device__ int selp_s_ptx(int a, int b, unsigned int p) {
+  int ret;
+  asm volatile("selp.s32 %0, %1, %2, %3;" : "=r"(ret) : "r"(a), "r"(b), "r"(p));
+  return ret;
+}
+__global__ void selectKernel(uint *out, uint *a, uint *b, uint *pred) {
+  int idx = threadIdx.x;
+  out[idx] = selp_u_ptx(a[idx], b[idx], pred[idx]);
+  out[idx + 4] = (uint)selp_s_ptx((int)a[idx], (int)b[idx], pred[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(8),
+          a: new Uint32Array([1, 0xffffffff, 0x80000000, 0x12345678]),
+          b: new Uint32Array([2, 3, 0x7fffffff, 0x87654321]),
+          pred: new Uint32Array([0, 1, 2, 0]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("select(");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      2,
+      0xffffffff,
+      0x80000000,
+      0x87654321,
+      2,
+      0xffffffff,
+      0x80000000,
+      0x87654321,
+    ]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {

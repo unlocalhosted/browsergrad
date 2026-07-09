@@ -993,6 +993,16 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmUnaryInt(op.op, value), context);
     return;
   }
+  if (op?.kind === "select-b32") {
+    const label = `selp.${op.signed ? "s32" : "b32"}`;
+    if (statement.inputs.length !== 3) throw compilerFailure(`${label} inline asm expects three inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    const trueValue = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
+    const falseValue = valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
+    const predicate = valueAsNumber(evalExpression(statement.inputs[2]!, context), label) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), predicate !== 0 ? trueValue : falseValue, context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
