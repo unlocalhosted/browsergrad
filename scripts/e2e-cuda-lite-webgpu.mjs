@@ -2593,6 +2593,17 @@ __global__ void ptxIsspacepPredicates(float *global, int *out) {
     out[3] = sg;
   }
 }`,
+  ptxFmaImmediateF32: `
+__global__ void ptxFmaImmediateF32(float *out, const float *a, const float *b) {
+  int idx = threadIdx.x;
+  float sum = out[idx];
+  float direct;
+  float literalMix;
+  asm volatile("fma.rn.f32 %0, %1, 2.0f, %0;" : "+f"(sum) : "f"(a[idx]));
+  asm volatile("fma.rn.f32 %0, 3.0f, %1, 1.0f;" : "=f"(direct) : "f"(b[idx]));
+  asm volatile("fma.rn.f32 %0, 4.0f, 0.5f, %1;" : "=f"(literalMix) : "f"(a[idx]));
+  out[idx] = sum + direct + literalMix;
+}`,
   ptxPopcB32: `
 __device__ unsigned int popc_ptx(unsigned int word) {
   unsigned int ret;
@@ -14369,6 +14380,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [1, 1, 1, 0] },
+          },
+          {
+            name: "inline-asm:fma-immediate-f32",
+            source: SOURCES.ptxFmaImmediateF32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array([10, 20, 30, 40]),
+                a: new Float32Array([2, 3, 4, 5]),
+                b: new Float32Array([4, 5, 6, 7]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [31, 47, 63, 79] },
           },
           {
             name: "inline-asm:warpid",

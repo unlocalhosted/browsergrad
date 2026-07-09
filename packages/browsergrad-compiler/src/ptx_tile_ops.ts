@@ -1,5 +1,9 @@
+export type InlineAsmF32Source =
+  | { readonly kind: "operand"; readonly index: number }
+  | { readonly kind: "immediate"; readonly value: number; readonly raw: string };
+
 export type InlineAsmOp =
-  | { readonly kind: "fma-rn-f32" }
+  | { readonly kind: "fma-rn-f32"; readonly sources?: readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source] }
   | { readonly kind: "laneid" }
   | { readonly kind: "warpid" }
   | { readonly kind: "lanemask-lt" }
@@ -157,6 +161,18 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (membar) return { kind: "membar", scope: membar[1] as "cta" | "gl" | "sys" };
   const barSync = /\bbar\.sync\s+(0|%0)\s*;/u.exec(template);
   if (barSync) return { kind: "bar-sync", operand: barSync[1] === "%0" ? "input0" : "literal0" };
+  const fma = /\bfma\.rn\.f32\b\s+([^;]+)/u.exec(template);
+  if (fma) {
+    const operands = fma[1]!.split(",").map((operand) => operand.trim());
+    const sources = [
+      parseInlineAsmF32SourceOperand(operands[1]),
+      parseInlineAsmF32SourceOperand(operands[2]),
+      parseInlineAsmF32SourceOperand(operands[3]),
+    ] as const;
+    return sources.every((source) => source !== undefined)
+      ? { kind: "fma-rn-f32", sources: sources as readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source] }
+      : { kind: "fma-rn-f32" };
+  }
   if (/\bfma\.rn\.f32\b/u.test(template)) return { kind: "fma-rn-f32" };
   const ldmatrix = /\bldmatrix\.sync\.aligned\.x([124])(\.trans)?\.m8n8\.shared\.b16\b/u.exec(template);
   if (ldmatrix) {
@@ -222,4 +238,13 @@ function parseInlineAsmImmediate(value: string): number {
 function parseInlineAsmImmediateOperand(value: string | undefined): number | undefined {
   if (value === undefined || !/^(?:0x[0-9a-fA-F]+|-?\d+)$/u.test(value)) return undefined;
   return parseInlineAsmImmediate(value) >>> 0;
+}
+
+function parseInlineAsmF32SourceOperand(value: string | undefined): InlineAsmF32Source | undefined {
+  if (value === undefined) return undefined;
+  const operand = /^%(\d+)$/u.exec(value);
+  if (operand) return { kind: "operand", index: Number.parseInt(operand[1]!, 10) };
+  if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?[fF]?$/u.test(value)) return undefined;
+  const parsed = Number.parseFloat(value.replace(/[fF]$/u, ""));
+  return Number.isFinite(parsed) ? { kind: "immediate", value: parsed, raw: value } : undefined;
 }

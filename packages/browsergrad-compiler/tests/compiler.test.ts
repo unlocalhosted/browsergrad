@@ -11593,6 +11593,36 @@ __global__ void asmFma(const float *A, const float *B, float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([18, 35]);
   });
 
+  it("lowers inline PTX fma.rn.f32 literal source statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void asmFmaImmediate(const float *A, const float *B, float *out) {
+  int idx = threadIdx.x;
+  float sum = out[idx];
+  float direct;
+  float literalMix;
+  asm volatile("fma.rn.f32 %0, %1, 2.0f, %0;" : "+f"(sum) : "f"(A[idx]));
+  asm volatile("fma.rn.f32 %0, 3.0f, %1, 1.0f;" : "=f"(direct) : "f"(B[idx]));
+  asm volatile("fma.rn.f32 %0, 4.0f, 0.5f, %1;" : "=f"(literalMix) : "f"(A[idx]));
+  out[idx] = sum + direct + literalMix;
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          A: new Float32Array([2, 3]),
+          B: new Float32Array([4, 5]),
+          out: new Float32Array([10, 20]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("sum = fma(A[idx], 2.0, sum);");
+    expect(compiled.wgsl).toContain("direct = fma(3.0, B[idx], 1.0);");
+    expect(compiled.wgsl).toContain("literalMix = fma(4.0, 0.5, A[idx]);");
+    expect([...result.buffers.out as Float32Array]).toEqual([31, 47]);
+  });
+
   it("lowers output-only inline PTX lane id statements", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void laneId(int *out) {

@@ -36,7 +36,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, type InlineAsmF32Source } from "./ptx_tile_ops.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
@@ -1108,15 +1108,49 @@ function execInlineAsm(
   if (op?.kind !== "fma-rn-f32") {
     throw compilerFailure("unsupported inline asm template");
   }
-  if (statement.inputs.length !== 2) {
-    throw compilerFailure("fma.rn.f32 inline asm expects two inputs");
+  const sources = op.sources ?? [
+    { kind: "operand", index: outputs.length },
+    { kind: "operand", index: outputs.length + 1 },
+    { kind: "operand", index: 0 },
+  ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source];
+  const expectedInputs = expectedInlineAsmF32SourceInputs(sources, outputs.length);
+  if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
+    throw compilerFailure(`fma.rn.f32 inline asm expects ${expectedInputs ?? 2} inputs`);
   }
   if (outputs.length !== 1) throw compilerFailure("fma.rn.f32 inline asm expects one output operand");
   const target = resolveLValue(outputs[0]!, context);
-  const current = valueAsNumber(readLValue(target, context), target.name);
-  const a = evalNumber(statement.inputs[0]!, context);
-  const b = evalNumber(statement.inputs[1]!, context);
-  writeLValue(target, current + a * b, context);
+  const values = sources.map((source) => evalInlineAsmF32Source(source, statement, outputs, context));
+  const a = values[0]!;
+  const b = values[1]!;
+  const c = values[2]!;
+  writeLValue(target, c + a * b, context);
+}
+
+function expectedInlineAsmF32SourceInputs(
+  sources: readonly InlineAsmF32Source[],
+  outputCount: number,
+): number | undefined {
+  let maxInputIndex = -1;
+  for (const source of sources) {
+    if (source.kind === "immediate") continue;
+    if (!Number.isInteger(source.index) || source.index < 0) return undefined;
+    if (source.index >= outputCount) maxInputIndex = Math.max(maxInputIndex, source.index - outputCount);
+  }
+  return maxInputIndex + 1;
+}
+
+function evalInlineAsmF32Source(
+  source: InlineAsmF32Source,
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  outputs: readonly CudaLiteExpression[],
+  context: ThreadContext,
+): number {
+  if (source.kind === "immediate") return source.value;
+  if (source.index < outputs.length) {
+    const lvalue = resolveLValue(outputs[source.index]!, context);
+    return valueAsNumber(readLValue(lvalue, context), lvalue.name);
+  }
+  return evalNumber(statement.inputs[source.index - outputs.length]!, context);
 }
 
 function evalInlineAsmAddressPredicate(

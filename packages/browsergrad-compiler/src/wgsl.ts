@@ -18,7 +18,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source } from "./ptx_tile_ops.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
@@ -2370,11 +2370,44 @@ function emitInlineAsmStatement(
   if (op?.kind === "mma-m16n8k16") {
     return emitMmaM16N8K16Statement(statement, outputs, op.accumulator, context);
   }
-  if (op?.kind !== "fma-rn-f32" || statement.inputs.length !== 2 || outputs.length !== 1) {
+  const fmaSources = op?.kind === "fma-rn-f32"
+    ? op.sources ?? [
+      { kind: "operand", index: outputs.length },
+      { kind: "operand", index: outputs.length + 1 },
+      { kind: "operand", index: 0 },
+    ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source]
+    : undefined;
+  const expectedFmaInputs = fmaSources === undefined ? undefined : expectedInlineAsmF32SourceInputs(fmaSources, outputs.length);
+  if (op?.kind !== "fma-rn-f32" || fmaSources === undefined || expectedFmaInputs === undefined || statement.inputs.length !== expectedFmaInputs || outputs.length !== 1) {
     throw featureError("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in WGSL output`, statement.span);
   }
   const target = emitExpression(outputs[0]!, context);
-  return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;
+  const [a, b, c] = fmaSources.map((source) => emitInlineAsmF32Source(source, statement, outputs, context));
+  return `${target} = fma(${a}, ${b}, ${c})`;
+}
+
+function expectedInlineAsmF32SourceInputs(
+  sources: readonly InlineAsmF32Source[],
+  outputCount: number,
+): number | undefined {
+  let maxInputIndex = -1;
+  for (const source of sources) {
+    if (source.kind === "immediate") continue;
+    if (!Number.isInteger(source.index) || source.index < 0) return undefined;
+    if (source.index >= outputCount) maxInputIndex = Math.max(maxInputIndex, source.index - outputCount);
+  }
+  return maxInputIndex + 1;
+}
+
+function emitInlineAsmF32Source(
+  source: InlineAsmF32Source,
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  outputs: readonly CudaLiteExpression[],
+  context: EmitContext,
+): string {
+  if (source.kind === "immediate") return emitNumberLiteral(source.raw);
+  if (source.index < outputs.length) return emitExpression(outputs[source.index]!, context);
+  return emitExpression(statement.inputs[source.index - outputs.length]!, context);
 }
 
 function emitMmaM16N8K16Statement(

@@ -16,6 +16,7 @@ export const runtimeScopeCases = [
   "intrinsic:inline-asm-cp-async-fence",
   "intrinsic:inline-asm-membar-fence",
   "intrinsic:inline-asm-bar-sync",
+  "inline-asm:fma-immediate-f32",
   "inline-asm:popc-b32",
   "inline-asm:ffs-b32",
   "inline-asm:clz-brev-b32",
