@@ -4,6 +4,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { flattenCudaLiteInitializerExpressions as flattenInitializer } from "./ast_initializers.js";
+import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
@@ -276,9 +277,7 @@ function semanticExpressionName(expression: SemanticExpression): string | undefi
 }
 
 function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {
-  const total = global.dimensions.length === 0
-    ? 1
-    : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const total = totalElements(global.dimensions);
   const values = global.init === undefined
     ? []
     : flattenInitializer(global.init).map(evaluateInitializerNumber);

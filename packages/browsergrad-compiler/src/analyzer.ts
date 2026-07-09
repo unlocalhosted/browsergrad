@@ -24,6 +24,7 @@ import {
 } from "./types.js";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
+import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
@@ -1259,7 +1260,7 @@ function validateGlobalConstantInitializer(
   if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType) && values.length > cudaVectorLaneCount(constant.valueType)) {
     diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' vector initializer has more than ${cudaVectorLaneCount(constant.valueType)} values`, constant.init.span));
   }
-  const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const expected = totalElements(constant.dimensions);
   if (constant.dimensions.length > 0 && values.length > expected) {
     diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' initializer has more than ${expected} values`, constant.init.span));
   }
@@ -1277,7 +1278,7 @@ function validateDeviceGlobalInitializer(
   if (global.dimensions.length === 0 && values.length > 1) {
     diagnostics.push(error("invalid-device-global-initializer", `device global '${global.name}' scalar initializer must have one value`, global.init.span));
   }
-  const expected = global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const expected = totalElements(global.dimensions);
   if (global.dimensions.length > 0 && values.length > expected) {
     diagnostics.push(error("invalid-device-global-initializer", `device global '${global.name}' initializer has more than ${expected} values`, global.init.span));
   }

@@ -38,7 +38,10 @@ import {
   cloneReferenceSurfaces,
   cloneReferenceTypedArray,
 } from "./reference_inputs.js";
-import { cudaLiteTruthy as truthy } from "./cuda_lite_values.js";
+import {
+  cudaLiteTotalElements as totalElements,
+  cudaLiteTruthy as truthy,
+} from "./cuda_lite_values.js";
 import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
@@ -4547,16 +4550,16 @@ function referenceAlignofValue(expression: CudaLiteExpression, context: ThreadCo
 
 function referenceArraySizeofValue(name: string, context: ThreadContext): number | undefined {
   const local = context.locals.get(name);
-  if (isLocalArray(local)) return local.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(local.valueType) ?? 4);
-  if (isLocalPointerArray(local)) return local.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType("voidptr") ?? 4);
+  if (isLocalArray(local)) return totalElements(local.dimensions) * (sizeofCudaType(local.valueType) ?? 4);
+  if (isLocalPointerArray(local)) return totalElements(local.dimensions) * (sizeofCudaType("voidptr") ?? 4);
   const shared = context.shared.get(name);
-  if (shared) return shared.dimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(shared.valueType) ?? 4);
+  if (shared) return totalElements(shared.dimensions) * (sizeofCudaType(shared.valueType) ?? 4);
   const constantDimensions = context.constantDimensions.get(name);
   const constantType = context.valueTypes.get(name);
-  if (constantDimensions && constantDimensions.length > 0 && constantType) return constantDimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(constantType) ?? 4);
+  if (constantDimensions && constantDimensions.length > 0 && constantType) return totalElements(constantDimensions) * (sizeofCudaType(constantType) ?? 4);
   const globalDimensions = context.deviceGlobalDimensions.get(name);
   const globalType = context.valueTypes.get(name);
-  if (globalDimensions && globalDimensions.length > 0 && globalType) return globalDimensions.reduce((product, dimension) => product * dimension, 1) * (sizeofCudaType(globalType) ?? 4);
+  if (globalDimensions && globalDimensions.length > 0 && globalType) return totalElements(globalDimensions) * (sizeofCudaType(globalType) ?? 4);
   return undefined;
 }
 
@@ -5473,7 +5476,7 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
 function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, SharedArrayValue> {
   const shared = new Map<string, SharedArrayValue>();
   for (const declaration of declarations) {
-    const elements = declaration.dimensions.reduce((product, item) => product * item, 1);
+    const elements = totalElements(declaration.dimensions);
     const length = elements * valueStorageWidth(declaration.valueType);
     const scalarType = cudaVectorScalarType(declaration.valueType);
     const data = declaration.valueType === "uchar"
@@ -5503,7 +5506,7 @@ function allocateLocalArray(declaration: CudaLiteVarDecl): LocalArrayValue {
 }
 
 function allocateLocalPointerArray(declaration: CudaLiteVarDecl): LocalPointerArrayValue {
-  const length = declaration.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const length = totalElements(declaration.dimensions);
   return {
     kind: "local-pointer-array",
     dimensions: declaration.dimensions,
@@ -5528,7 +5531,7 @@ function initializeLocalArray(
 }
 
 function allocateTypedArray(valueType: CudaLiteScalarType, dimensions: readonly number[]): WgslTypedArray {
-  const elements = dimensions.reduce((product, item) => product * item, 1);
+  const elements = totalElements(dimensions);
   const length = elements * valueStorageWidth(valueType);
   const scalarType = cudaVectorScalarType(valueType);
   return valueType === "int" || scalarType === "int"
@@ -6094,7 +6097,7 @@ function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTy
   }
   const values = flattenConstantInitializer(constant.init).map(evaluateConstantNumber);
   if (constant.dimensions.length === 0) return values[0] ?? 0;
-  const total = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const total = totalElements(constant.dimensions);
   const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
   if (constant.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
   if (constant.valueType === "uint" || constant.valueType === "bool" || constant.valueType === "voidptr") {
@@ -6126,9 +6129,7 @@ function typedVectorConstantValues(valueType: CudaLiteScalarType, values: readon
 }
 
 function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {
-  const total = global.dimensions.length === 0
-    ? 1
-    : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const total = totalElements(global.dimensions);
   const values = global.init === undefined
     ? []
     : flattenConstantInitializer(global.init).map(evaluateConstantNumber);
@@ -6708,7 +6709,7 @@ function validateInputs(
     } else {
       if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);
       validateTypedConstant(constant.name, valueType, value);
-      const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+      const expected = totalElements(constant.dimensions);
       if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
     }
   }
@@ -6716,7 +6717,7 @@ function validateInputs(
     const value = input.deviceGlobals?.[global.name];
     if (value === undefined) continue;
     validateTypedDeviceGlobal(global.name, semanticSymbolValueType(global), value);
-    const expected = global.dimensions.length === 0 ? 1 : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+    const expected = totalElements(global.dimensions);
     if (value.length < expected) throw compilerFailure(`device global '${global.name}' expects at least ${expected} elements`);
   }
   for (const texture of kernelIr.memory.filter((symbol) => symbol.kind === "texture")) {

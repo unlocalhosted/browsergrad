@@ -1,6 +1,11 @@
 import { matrixTileStorageDimensions } from "./matrix_tiles.js";
 import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import {
+  cudaLiteDimensionStride as dimensionStride,
+  cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
+  cudaLiteTotalElements as totalElements,
+} from "./cuda_lite_values.js";
+import {
   cudaVectorLaneCount,
   cudaVectorScalarType,
   isCudaVectorType,
@@ -34,14 +39,14 @@ export function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): 
     const scalar = cudaVectorScalarType(statement.valueType) ?? "uint";
     const element = scalar === "float" || scalar === "bf16" ? "atomic<u32>" : `atomic<${wgslScalar(scalar)}>`;
     const lanes = cudaVectorLaneCount(statement.valueType);
-    const total = statement.dimensions.reduce((product, dimension) => product * dimension, 1) * lanes;
+    const total = totalElements(statement.dimensions) * lanes;
     return `array<${element}, ${total}>`;
   }
   let type = ir.atomicShared.includes(statement.name)
     ? `atomic<${statement.valueType === "float" || statement.valueType === "bf16" ? "u32" : wgslScalar(statement.valueType)}>`
     : wgslScalar(statement.valueType);
   if (statement.valueType === "uchar" && statement.dimensions.length > 0) {
-    const totalBytes = statement.dimensions.reduce((product, item) => product * item, 1);
+    const totalBytes = totalElements(statement.dimensions);
     return `array<atomic<u32>, ${Math.ceil(totalBytes / 4)}>`;
   }
   for (let i = statement.dimensions.length - 1; i >= 0; i--) {
@@ -70,20 +75,14 @@ export function emitLocalArrayInitializer(
   const elements = flattenInitializerExpressions(statement.init);
   if (elements.length === 0) return [];
   const prefix = indent(indentLevel);
-  const totalElements = statement.dimensions.reduce((product, item) => product * item, 1);
+  const total = totalElements(statement.dimensions);
   return elements.map((element, flatIndex) =>
     `${prefix}${emitLocalArrayElementAccess(context.nameFor(statement.name), statement.dimensions, flatIndex)} = ${emitExpression(element)};`,
-  ).slice(0, totalElements);
+  ).slice(0, total);
 }
 
 export function emitLocalArrayElementAccess(name: string, dimensions: readonly number[], flatIndex: number): string {
-  let remainder = flatIndex;
-  const indices: number[] = [];
-  for (let i = dimensions.length - 1; i >= 0; i--) {
-    const size = dimensions[i]!;
-    indices.unshift(remainder % size);
-    remainder = Math.trunc(remainder / size);
-  }
+  const indices = flatIndicesForDimensions(dimensions, flatIndex);
   return indices.reduce((expr, index) => `${expr}[${index}]`, name);
 }
 
@@ -123,7 +122,7 @@ export function emitInitializedConstant(
     return `const ${context.nameFor(constant.name)}: ${wgslScalar(constant.valueType)} = ${emitConstantInitializerExpression(constant.init, emitExpression)};`;
   }
   const type = emitConstantArrayType(constant);
-  const total = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const total = totalElements(constant.dimensions);
   const values = flattenInitializerExpressions(constant.init)
     .slice(0, total)
     .map((expression) => emitConstantInitializerExpression(expression, emitExpression));
@@ -197,7 +196,7 @@ export function emitSharedAddressIndex(
   if (indexes.length === 0) return "0u";
   const terms: string[] = [];
   for (let i = 0; i < indexes.length; i++) {
-    const stride = declaration.dimensions.slice(i + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(declaration.dimensions, i);
     const value = `u32(${emitExpression(indexes[i]!)})`;
     terms.push(stride === 1 ? value : `(${value} * ${stride}u)`);
   }
