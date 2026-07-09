@@ -2915,6 +2915,28 @@ __global__ void ptxCompareB32(uint *out, uint *a, uint *b) {
   out[idx + 4] = setp_lt_u(a[idx], b[idx]);
   out[idx + 8] = setp_ge_s((int)a[idx], (int)b[idx]);
 }`,
+  ptxCompareImmediateB32: `
+__device__ unsigned int setp_eq_u_imm(unsigned int a) {
+  unsigned int ret;
+  asm volatile("setp.eq.u32 %0, %1, 0x7fffffff;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int setp_lt_u_imm(unsigned int a) {
+  unsigned int ret;
+  asm volatile("setp.lt.u32 %0, %1, 2;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int setp_ge_s_imm(int a) {
+  unsigned int ret;
+  asm volatile("setp.ge.s32 %0, %1, -8;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__global__ void ptxCompareImmediateB32(uint *out, uint *a) {
+  int idx = threadIdx.x;
+  out[idx] = setp_eq_u_imm(a[idx]);
+  out[idx + 4] = setp_lt_u_imm(a[idx]);
+  out[idx + 8] = setp_ge_s_imm((int)a[idx]);
+}`,
   ptxConvertB32: `
 __device__ unsigned int cvt_u_s(int value) {
   unsigned int ret;
@@ -14498,6 +14520,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
+            },
+          },
+          {
+            name: "inline-asm:compare-immediate-b32",
+            source: SOURCES.ptxCompareImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(12),
+                a: new Uint32Array([1, 0xffffffff, 0x80000000, 4]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1],
             },
           },
           {

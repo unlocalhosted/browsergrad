@@ -2330,8 +2330,8 @@ function emitInlineAsmStatement(
   if (op?.kind === "select-b32" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpression(statement.inputs, context), context)}`;
   }
-  if (op?.kind === "compare-b32" && statement.inputs.length === 2 && outputs.length === 1) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineCompareExpression(statement.inputs, op.op, op.signed, context), context)}`;
+  if (op?.kind === "compare-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineCompareExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
   }
   if (op?.kind === "move-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitExpression(statement.inputs[0]!, context)})`, context)}`;
@@ -2498,9 +2498,10 @@ function emitInlineSelectExpression(inputs: readonly CudaLiteExpression[], conte
   return `select(${falseValue}, ${trueValue}, (${predicate} != 0u))`;
 }
 
-function emitInlineCompareExpression(inputs: readonly CudaLiteExpression[], op: "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: boolean, context: EmitContext): string {
+function emitInlineCompareExpression(inputs: readonly CudaLiteExpression[], op: "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: boolean, context: EmitContext, immediate?: number): string {
   const left = signed ? `bitcast<i32>(u32(${emitExpression(inputs[0]!, context)}))` : `u32(${emitExpression(inputs[0]!, context)})`;
-  const right = signed ? `bitcast<i32>(u32(${emitExpression(inputs[1]!, context)}))` : `u32(${emitExpression(inputs[1]!, context)})`;
+  const rightU32 = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
+  const right = signed ? `bitcast<i32>(${rightU32})` : rightU32;
   const operator = op === "eq" ? "==" : op === "ne" ? "!=" : op === "lt" ? "<" : op === "le" ? "<=" : op === "gt" ? ">" : ">=";
   return `select(0u, 1u, (${left} ${operator} ${right}))`;
 }

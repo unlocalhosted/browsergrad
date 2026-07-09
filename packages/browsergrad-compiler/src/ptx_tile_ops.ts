@@ -19,7 +19,7 @@ export type InlineAsmOp =
   | { readonly kind: "minmax-b32"; readonly op: "min" | "max"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "unary-int-b32"; readonly op: "neg" | "abs"; readonly signed: boolean }
   | { readonly kind: "select-b32"; readonly signed: boolean }
-  | { readonly kind: "compare-b32"; readonly op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; readonly signed: boolean }
+  | { readonly kind: "compare-b32"; readonly op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "move-b32"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "convert-b32"; readonly fromSigned: boolean; readonly toSigned: boolean }
   | { readonly kind: "u8x4-sad-add" }
@@ -97,6 +97,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\babs\.s32\b/u.test(template)) return { kind: "unary-int-b32", op: "abs", signed: true };
   const selp = /\bselp\.(b32|u32|s32)\b/u.exec(template);
   if (selp) return { kind: "select-b32", signed: selp[1] === "s32" };
+  const setpImmediate = /\bsetp\.(eq|ne|lt|le|gt|ge)\.(u32|s32)\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
+  if (setpImmediate) return { kind: "compare-b32", op: setpImmediate[1] as "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: setpImmediate[2] === "s32", immediate: parseInlineAsmImmediate(setpImmediate[3]!) >>> 0 };
   const setp = /\bsetp\.(eq|ne|lt|le|gt|ge)\.(u32|s32)\b/u.exec(template);
   if (setp) return { kind: "compare-b32", op: setp[1] as "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: setp[2] === "s32" };
   const movImmediate = /\bmov\.(b32|u32|s32)\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?/u.exec(template);

@@ -12544,6 +12544,59 @@ __global__ void compareKernel(uint *out, uint *a, uint *b) {
     ]);
   });
 
+  it("lowers inline PTX setp integer immediate comparisons", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int setp_eq_u_imm(unsigned int a) {
+  unsigned int ret;
+  asm volatile("setp.eq.u32 %0, %1, 0x7fffffff;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int setp_lt_u_imm(unsigned int a) {
+  unsigned int ret;
+  asm volatile("setp.lt.u32 %0, %1, 2;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int setp_ge_s_imm(int a) {
+  unsigned int ret;
+  asm volatile("setp.ge.s32 %0, %1, -8;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__global__ void compareImmediateKernel(uint *out, uint *a) {
+  int idx = threadIdx.x;
+  out[idx] = setp_eq_u_imm(a[idx]);
+  out[idx + 4] = setp_lt_u_imm(a[idx]);
+  out[idx + 8] = setp_ge_s_imm((int)a[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(12),
+          a: new Uint32Array([1, 0xffffffff, 0x80000000, 4]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("2147483647u");
+    expect(compiled.wgsl).toContain("4294967288u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      0,
+      1,
+    ]);
+  });
+
   it("lowers inline PTX cvt b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int cvt_u_s(int value) {

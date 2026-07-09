@@ -32,6 +32,7 @@ export const runtimeScopeCases = [
   "inline-asm:unary-int-b32",
   "inline-asm:select-b32",
   "inline-asm:compare-b32",
+  "inline-asm:compare-immediate-b32",
   "inline-asm:convert-b32",
   "inline-asm:move-b32",
   "inline-asm:move-immediate-b32",
