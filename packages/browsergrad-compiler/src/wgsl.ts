@@ -17,6 +17,10 @@ import {
   isCudaSincosCallName as isSincosCallName,
   isCudaSincosPiCallName as isSincosPiCallName,
 } from "./cuda_math_calls.js";
+import {
+  cudaAddressSpacePredicateKind,
+  isCudaAddressSpacePredicateCallName as isAddressSpacePredicateCall,
+} from "./cuda_pointer_calls.js";
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import {
@@ -6187,10 +6191,6 @@ function curandStateAddressSpace(
   return "function";
 }
 
-function isAddressSpacePredicateCall(name: string | undefined): name is "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal" {
-  return name === "__isGlobal" || name === "__isShared" || name === "__isConstant" || name === "__isLocal";
-}
-
 function isSyncthreadsPredicateCall(name: string | undefined): name is "__syncthreads_count" | "__syncthreads_and" | "__syncthreads_or" {
   return name === "__syncthreads_count" || name === "__syncthreads_and" || name === "__syncthreads_or";
 }
@@ -6201,11 +6201,7 @@ function emitAddressSpacePredicateCall(
   context: EmitContext,
 ): string {
   const space = addressPredicateSpaceForEmit(target, context);
-  const matches =
-    name === "__isGlobal" ? space === "global" :
-      name === "__isShared" ? space === "shared" :
-        name === "__isConstant" ? space === "constant" :
-          space === "local";
+  const matches = cudaAddressSpacePredicateKind(name) === space;
   return matches ? "1" : "0";
 }
 

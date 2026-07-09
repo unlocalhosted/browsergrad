@@ -67,6 +67,7 @@ import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
+import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
   emitSemanticFlatArrayType,
@@ -3727,12 +3728,11 @@ function emitSemanticPointerAtomicCall(
 function emitSemanticAddressPredicateCall(expression: Extract<SemanticExpression, { readonly kind: "call" }>): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL address predicate requires symbol callee", expression.span);
   const addressSpace = semanticAddressPredicateAddressSpace(expression.args[0]);
+  const kind = cudaAddressSpacePredicateKind(expression.callee.name);
   const matches =
-    expression.callee.name === "__isGlobal" ? addressSpace === "storage" || addressSpace === "device-global" :
-      expression.callee.name === "__isShared" ? addressSpace === "shared" :
-        expression.callee.name === "__isConstant" ? addressSpace === "constant" :
-          expression.callee.name === "__isLocal" ? addressSpace === "local" :
-            false;
+    kind === "global" ? addressSpace === "storage" || addressSpace === "device-global" :
+      kind !== undefined ? addressSpace === kind :
+        false;
   return matches ? "1" : "0";
 }
 

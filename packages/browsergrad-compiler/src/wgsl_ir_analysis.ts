@@ -1,6 +1,7 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { cudaLiteDimensionStride as dimensionStride } from "./cuda_lite_values.js";
+import { isCudaPointerIdentityCallName as isPointerIdentityCall } from "./cuda_pointer_calls.js";
 import { matrixTileStorageDimensions } from "./matrix_tiles.js";
 import {
   type CudaLiteCallExpression,
@@ -603,9 +604,7 @@ export function flatLocalArrayIndexExpression(
   }), zeroExpression(span));
 }
 
-export function isPointerIdentityCall(name: string | undefined): boolean {
-  return name === "__builtin_assume_aligned" || name === "ct::assume_aligned";
-}
+export { isPointerIdentityCall };
 
 export function zeroExpression(span: CudaLiteExpression["span"]): CudaLiteExpression {
   return { kind: "number", value: 0, raw: "0", span };

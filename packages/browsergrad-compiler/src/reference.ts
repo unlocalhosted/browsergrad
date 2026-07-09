@@ -60,6 +60,11 @@ import {
   isCudaSincosPiCallName as isSincosPiCallName,
 } from "./cuda_math_calls.js";
 import {
+  cudaAddressSpacePredicateKind,
+  isCudaAddressSpacePredicateCallName as isAddressSpacePredicateCall,
+  isCudaPointerIdentityCallName as isPointerIdentityCall,
+} from "./cuda_pointer_calls.js";
+import {
   isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
 } from "./cuda_cp_async.js";
@@ -1309,10 +1314,6 @@ function execCpAsyncStatement(expression: CudaLiteExpression, context: ThreadCon
   return true;
 }
 
-function isPointerIdentityCall(name: string | undefined): boolean {
-  return name === "__builtin_assume_aligned" || name === "ct::assume_aligned";
-}
-
 function cpAsyncElementCount(bytes: CudaLiteExpression | undefined, valueType: CudaLiteScalarType, context: ThreadContext): number {
   const byteCount = bytes === undefined ? elementByteSize(valueType) : Math.trunc(evalNumber(bytes, context));
   const elementBytes = elementByteSize(valueType);
@@ -1836,20 +1837,15 @@ function addressWithValueType(value: AddressValue, valueType: CudaLiteScalarType
   };
 }
 
-function isAddressSpacePredicateCall(name: string | undefined): name is "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal" {
-  return name === "__isGlobal" || name === "__isShared" || name === "__isConstant" || name === "__isLocal";
-}
-
 function evalAddressSpacePredicateCall(
   name: "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal",
   target: CudaLiteExpression,
   context: ThreadContext,
 ): number {
   const space = addressPredicateSpace(target, context);
-  if (name === "__isGlobal") return space === "buffer" || space === "device-global" ? 1 : 0;
-  if (name === "__isShared") return space === "shared" ? 1 : 0;
-  if (name === "__isConstant") return space === "constant" ? 1 : 0;
-  return space === "local" ? 1 : 0;
+  const kind = cudaAddressSpacePredicateKind(name);
+  if (kind === "global") return space === "buffer" || space === "device-global" ? 1 : 0;
+  return space === kind ? 1 : 0;
 }
 
 function addressPredicateSpace(expression: CudaLiteExpression, context: ThreadContext): LValue["space"] | undefined {

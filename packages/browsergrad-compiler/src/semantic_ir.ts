@@ -26,6 +26,10 @@ import {
   isCudaSincosCallName as isSincosCallName,
   isCudaSincosPiCallName as isSincosPiCallName,
 } from "./cuda_math_calls.js";
+import {
+  isCudaAddressSpacePredicateCallName as isAddressSpacePredicateName,
+  isCudaPointerIdentityCallName,
+} from "./cuda_pointer_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -2069,7 +2073,7 @@ function localPointerAliasForInitializer(
 
 function localPointerIdentityCallName(expression: CudaLiteExpression): string | undefined {
   if (expression.kind === "identifier") {
-    return expression.name === "__builtin_assume_aligned" || expression.name === "ct::assume_aligned" ? expression.name : undefined;
+    return isCudaPointerIdentityCallName(expression.name) ? expression.name : undefined;
   }
   return undefined;
 }
@@ -2084,10 +2088,6 @@ function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement
 
 function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "storage" {
   return addressSpace === "local" || addressSpace === "storage";
-}
-
-function isAddressSpacePredicateName(name: string): boolean {
-  return name === "__isGlobal" || name === "__isShared" || name === "__isConstant" || name === "__isLocal";
 }
 
 function isNullPointerLiteral(expression: CudaLiteExpression): boolean {

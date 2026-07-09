@@ -33,6 +33,10 @@ import {
   isCudaNanPayloadCallName as isNanPayloadCallName,
   isCudaSincosCallName as isSincosCallName,
 } from "./cuda_math_calls.js";
+import {
+  isCudaAddressSpacePredicateCallName as isAddressSpacePredicateCall,
+  isCudaPointerIdentityCallName as isPointerIdentityCall,
+} from "./cuda_pointer_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
@@ -2746,14 +2750,6 @@ function validateVectorMathBuiltin(
     return { kind: "vector", valueType: isCudaVectorType(firstType) ? firstType : undefined };
   }
   return { kind: "scalar", valueType: "float" };
-}
-
-function isPointerIdentityCall(callName: string | undefined): boolean {
-  return callName === "__builtin_assume_aligned" || callName === "ct::assume_aligned";
-}
-
-function isAddressSpacePredicateCall(callName: string | undefined): callName is "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal" {
-  return callName === "__isGlobal" || callName === "__isShared" || callName === "__isConstant" || callName === "__isLocal";
 }
 
 function validateAddressSpacePredicateCall(

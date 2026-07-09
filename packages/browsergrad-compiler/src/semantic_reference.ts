@@ -21,6 +21,7 @@ import {
   cudaLiteTotalElements as totalElements,
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
+import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
 import { referenceTypedArrayForScalar as typedArrayForScalar } from "./reference_scalars.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
@@ -1973,10 +1974,9 @@ function evalSemanticAddressPredicateCall(expression: Extract<SemanticExpression
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic address predicate requires symbol callee", expression.span);
   const addressSpace = semanticAddressPredicateAddressSpace(expression.args[0]);
   if (!addressSpace) return 0;
-  if (expression.callee.name === "__isGlobal") return addressSpace === "storage" || addressSpace === "device-global" ? 1 : 0;
-  if (expression.callee.name === "__isShared") return addressSpace === "shared" ? 1 : 0;
-  if (expression.callee.name === "__isConstant") return addressSpace === "constant" ? 1 : 0;
-  if (expression.callee.name === "__isLocal") return addressSpace === "local" ? 1 : 0;
+  const kind = cudaAddressSpacePredicateKind(expression.callee.name);
+  if (kind === "global") return addressSpace === "storage" || addressSpace === "device-global" ? 1 : 0;
+  if (kind !== undefined) return addressSpace === kind ? 1 : 0;
   throw semanticReferenceError(`semantic reference does not support address predicate '${expression.callee.name}'`, expression.span);
 }
 
