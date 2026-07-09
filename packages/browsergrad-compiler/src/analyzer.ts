@@ -1673,7 +1673,7 @@ function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined,
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;
 
 function expectedInlineAsmF32SourceInputs(
-  sources: readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source] | undefined,
+  sources: readonly InlineAsmF32Source[] | undefined,
   outputCount: number,
 ): number | undefined {
   if (sources === undefined) return 2;
@@ -1903,6 +1903,29 @@ function validateInlineAsmStatement(
   }
   if (op?.kind === "convert-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.toSigned ? "s32" : "u32"}.${op.fromSigned ? "s32" : "u32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
+  }
+  if (op?.kind === "convert-f32-to-int") {
+    const expectedInputs = op.source === undefined
+      ? 1
+      : expectedInlineAsmF32SourceInputs([op.source], outputs.length);
+    if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32 inline PTX expects one output operand and ${expectedInputs ?? 1} input operands`, statement.span));
+    }
+    const inputIndex = op.source === undefined
+      ? 0
+      : op.source.kind === "operand"
+      ? op.source.index - outputs.length
+      : undefined;
+    const input = inputIndex === undefined ? undefined : statement.inputs[inputIndex];
+    if (input) {
+      const inputInfo = walkExpression(input, scope);
+      if (inputInfo.kind !== "unknown" && inputInfo.valueType !== undefined && inputInfo.valueType !== "float") {
+        asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32 inline PTX expects an f32 input operand`, input.span));
+      }
+    }
+  }
+  if (op?.kind === "convert-f32-to-int" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "u8x4-sad-add" && (outputs.length !== 1 || statement.inputs.length !== 3)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects one output operand and three input operands", statement.span));

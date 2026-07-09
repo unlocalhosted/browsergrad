@@ -2,6 +2,8 @@ export type InlineAsmF32Source =
   | { readonly kind: "operand"; readonly index: number }
   | { readonly kind: "immediate"; readonly value: number; readonly raw: string };
 
+export type InlineAsmFloatToIntRounding = "rn" | "rz" | "rm" | "rp";
+
 export type InlineAsmOp =
   | { readonly kind: "fma-rn-f32"; readonly sources?: readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source] }
   | { readonly kind: "laneid" }
@@ -26,6 +28,7 @@ export type InlineAsmOp =
   | { readonly kind: "compare-b32"; readonly op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "move-b32"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "convert-b32"; readonly fromSigned: boolean; readonly toSigned: boolean; readonly immediate?: number }
+  | { readonly kind: "convert-f32-to-int"; readonly rounding: InlineAsmFloatToIntRounding; readonly toSigned: boolean; readonly source?: InlineAsmF32Source }
   | { readonly kind: "u8x4-sad-add" }
   | { readonly kind: "cp-async-fence"; readonly fence: "commit_group" | "wait_group" | "wait_all" }
   | { readonly kind: "membar"; readonly scope: "cta" | "gl" | "sys" }
@@ -154,6 +157,18 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (cvtImmediate) return { kind: "convert-b32", toSigned: cvtImmediate[1] === "s32", fromSigned: cvtImmediate[2] === "s32", immediate: parseInlineAsmImmediate(cvtImmediate[3]!) >>> 0 };
   const cvt = /\bcvt\.(u32|s32)\.(u32|s32)\b/u.exec(template);
   if (cvt) return { kind: "convert-b32", toSigned: cvt[1] === "s32", fromSigned: cvt[2] === "s32" };
+  const cvtFloat = /\bcvt\.(rni|rzi|rmi|rpi|rn|rz|rm|rp)\.(u32|s32)\.f32\b\s+([^;]+)/u.exec(template);
+  if (cvtFloat) {
+    const operands = cvtFloat[3]!.split(",").map((operand) => operand.trim());
+    const source = parseInlineAsmF32SourceOperand(operands[1]);
+    const rawRounding = cvtFloat[1]!;
+    return {
+      kind: "convert-f32-to-int",
+      rounding: rawRounding.slice(0, 2) as InlineAsmFloatToIntRounding,
+      toSigned: cvtFloat[2] === "s32",
+      ...(source === undefined ? {} : { source }),
+    };
+  }
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
   const cpAsyncFence = /\bcp\.async\.(commit_group|wait_group|wait_all)\b/u.exec(template);
   if (cpAsyncFence) return { kind: "cp-async-fence", fence: cpAsyncFence[1] as "commit_group" | "wait_group" | "wait_all" };
@@ -222,6 +237,7 @@ export function inlineAsmSupportedList(): string {
     "setp.{eq,ne,lt,le,gt,ge}.{u32,s32}",
     "mov.{b32,u32,s32}",
     "cvt.{u32,s32}.{u32,s32}",
+    "cvt.{rni,rzi,rmi,rpi}.{u32,s32}.f32",
     "vabsdiff4.u32.u32.u32.add",
     "cp.async.{commit_group,wait_group,wait_all}",
     "membar.{cta,gl,sys}",

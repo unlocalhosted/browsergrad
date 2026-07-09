@@ -36,7 +36,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, type InlineAsmF32Source } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, type InlineAsmF32Source, type InlineAsmFloatToIntRounding } from "./ptx_tile_ops.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
@@ -1056,6 +1056,19 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), value, context);
     return;
   }
+  if (op?.kind === "convert-f32-to-int") {
+    const label = `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32`;
+    const expectedInputs = op.source === undefined
+      ? 1
+      : expectedInlineAsmF32SourceInputs([op.source], outputs.length);
+    if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs ?? 1} inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    const value = op.source === undefined
+      ? valueAsNumber(evalExpression(statement.inputs[0]!, context), label)
+      : evalInlineAsmF32Source(op.source, statement, outputs, context);
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmFloatToInt(value, op.rounding, op.toSigned), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1236,6 +1249,18 @@ function evalInlineAsmCompare(op: "eq" | "ne" | "lt" | "le" | "gt" | "ge", left:
   if (op === "le") return leftValue <= rightValue;
   if (op === "gt") return leftValue > rightValue;
   return leftValue >= rightValue;
+}
+
+function evalInlineAsmFloatToInt(value: number, rounding: InlineAsmFloatToIntRounding, signed: boolean): number {
+  const rounded = rounding === "rn"
+    ? roundTiesToEvenNumber(value)
+    : rounding === "rz"
+    ? Math.trunc(value)
+    : rounding === "rm"
+    ? Math.floor(value)
+    : Math.ceil(value);
+  if (signed) return Math.max(-2147483648, Math.min(2147483520, rounded)) | 0;
+  return Math.max(0, Math.min(4294967040, rounded)) >>> 0;
 }
 
 function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {

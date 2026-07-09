@@ -41,6 +41,7 @@ export const runtimeScopeCases = [
   "inline-asm:compare-immediate-b32",
   "inline-asm:convert-b32",
   "inline-asm:convert-immediate-b32",
+  "inline-asm:convert-f32-to-int",
   "inline-asm:move-b32",
   "inline-asm:move-immediate-b32",
   "inline-asm:special-reg-single-percent",

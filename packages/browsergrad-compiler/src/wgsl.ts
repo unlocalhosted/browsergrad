@@ -18,7 +18,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmFloatToIntRounding } from "./ptx_tile_ops.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
@@ -2347,6 +2347,12 @@ function emitInlineAsmStatement(
     const value = op.immediate === undefined ? `u32(${emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, value, context)}`;
   }
+  if (op?.kind === "convert-f32-to-int" && statement.inputs.length === (op.source === undefined ? 1 : expectedInlineAsmF32SourceInputs([op.source], outputs.length)) && outputs.length === 1) {
+    const source = op.source === undefined
+      ? emitExpressionAsValueType(statement.inputs[0]!, "float", context)
+      : emitInlineAsmF32Source(op.source, statement, outputs, context);
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineF32ToIntConvertExpression(source, op.rounding, op.toSigned, outputs[0]!, context)}`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2549,6 +2555,26 @@ function emitInlineCompareExpression(inputs: readonly CudaLiteExpression[], op: 
   const right = signed ? `bitcast<i32>(${rightU32})` : rightU32;
   const operator = op === "eq" ? "==" : op === "ne" ? "!=" : op === "lt" ? "<" : op === "le" ? "<=" : op === "gt" ? ">" : ">=";
   return `select(0u, 1u, (${left} ${operator} ${right}))`;
+}
+
+function emitInlineF32ToIntConvertExpression(
+  source: string,
+  rounding: InlineAsmFloatToIntRounding,
+  toSigned: boolean,
+  target: CudaLiteExpression,
+  context: EmitContext,
+): string {
+  const rounded = rounding === "rn"
+    ? `bg_round_even_f32(${source})`
+    : rounding === "rz"
+    ? `trunc(${source})`
+    : rounding === "rm"
+    ? `floor(${source})`
+    : `ceil(${source})`;
+  const targetType = expressionValueTypeForEmit(target, context);
+  if (toSigned && targetType !== "uint") return `i32(clamp(${rounded}, -2147483648.0, 2147483520.0))`;
+  if (toSigned) return `bitcast<u32>(i32(clamp(${rounded}, -2147483648.0, 2147483520.0)))`;
+  return `u32(clamp(${rounded}, 0.0, 4294967040.0))`;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {

@@ -13004,6 +13004,79 @@ __global__ void convertImmediateKernel(uint *out) {
     ]);
   });
 
+  it("lowers inline PTX f32-to-int cvt statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int cvt_rni_s(float value) {
+  int ret;
+  asm volatile("cvt.rni.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ int cvt_rzi_s(float value) {
+  int ret;
+  asm volatile("cvt.rzi.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ int cvt_rmi_s(float value) {
+  int ret;
+  asm volatile("cvt.rmi.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ int cvt_rpi_s(float value) {
+  int ret;
+  asm volatile("cvt.rpi.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ unsigned int cvt_rpi_u_imm() {
+  unsigned int ret;
+  asm volatile("cvt.rpi.u32.f32 %0, 2.25;" : "=r"(ret));
+  return ret;
+}
+__global__ void convertF32Kernel(uint *out, float *input) {
+  int idx = threadIdx.x;
+  float value = input[idx];
+  out[idx] = (uint)cvt_rni_s(value);
+  out[idx + 4] = (uint)cvt_rzi_s(value);
+  out[idx + 8] = (uint)cvt_rmi_s(value);
+  out[idx + 12] = (uint)cvt_rpi_s(value);
+  out[idx + 16] = cvt_rpi_u_imm();
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(20),
+          input: new Float32Array([1.5, 2.5, -1.5, -2.5]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("bg_round_even_f32");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      2,
+      2,
+      0xfffffffe,
+      0xfffffffe,
+      1,
+      2,
+      0xffffffff,
+      0xfffffffe,
+      1,
+      2,
+      0xfffffffe,
+      0xfffffffd,
+      2,
+      3,
+      0xffffffff,
+      0xfffffffe,
+      3,
+      3,
+      3,
+      3,
+    ]);
+  });
+
   it("lowers inline PTX mov b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int mov_u_ptx(unsigned int value) {

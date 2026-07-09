@@ -3102,6 +3102,41 @@ __global__ void ptxConvertImmediateB32(uint *out) {
   out[idx] = cvt_u_s_imm();
   out[idx + 4] = (uint)cvt_s_u_imm();
 }`,
+  ptxConvertF32ToInt: `
+__device__ int cvt_rni_s(float value) {
+  int ret;
+  asm volatile("cvt.rni.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ int cvt_rzi_s(float value) {
+  int ret;
+  asm volatile("cvt.rzi.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ int cvt_rmi_s(float value) {
+  int ret;
+  asm volatile("cvt.rmi.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ int cvt_rpi_s(float value) {
+  int ret;
+  asm volatile("cvt.rpi.s32.f32 %0, %1;" : "=r"(ret) : "f"(value));
+  return ret;
+}
+__device__ unsigned int cvt_rpi_u_imm() {
+  unsigned int ret;
+  asm volatile("cvt.rpi.u32.f32 %0, 2.25;" : "=r"(ret));
+  return ret;
+}
+__global__ void ptxConvertF32ToInt(uint *out, float *input) {
+  int idx = threadIdx.x;
+  float value = input[idx];
+  out[idx] = (uint)cvt_rni_s(value);
+  out[idx + 4] = (uint)cvt_rzi_s(value);
+  out[idx + 8] = (uint)cvt_rmi_s(value);
+  out[idx + 12] = (uint)cvt_rpi_s(value);
+  out[idx + 16] = cvt_rpi_u_imm();
+}`,
   ptxMoveB32: `
 __device__ unsigned int mov_u_ptx(unsigned int value) {
   unsigned int ret;
@@ -14828,6 +14863,44 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x80000000, 0x80000000, 0x80000000, 0x80000000],
+            },
+          },
+          {
+            name: "inline-asm:convert-f32-to-int",
+            source: SOURCES.ptxConvertF32ToInt,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(20),
+                input: new Float32Array([1.5, 2.5, -1.5, -2.5]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                2,
+                2,
+                0xfffffffe,
+                0xfffffffe,
+                1,
+                2,
+                0xffffffff,
+                0xfffffffe,
+                1,
+                2,
+                0xfffffffe,
+                0xfffffffd,
+                2,
+                3,
+                0xffffffff,
+                0xfffffffe,
+                3,
+                3,
+                3,
+                3,
+              ],
             },
           },
           {

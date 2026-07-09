@@ -1,5 +1,6 @@
 import { statementsUseCall, statementsUseIdentifier } from "./ir_usage.js";
 import {
+  type CudaLiteStatement,
   type CudaLiteDeviceGlobal,
   type CudaLiteParam,
   type CudaLiteScalarType,
@@ -9,6 +10,7 @@ import { cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import { isSubgroupCallName } from "./wgsl_control_analysis.js";
 import type { WgslIntViewAtomicEmitKind } from "./wgsl_atomic_helpers.js";
 import { wgslScalar } from "./wgsl_storage.js";
+import { classifyInlineAsm } from "./ptx_tile_ops.js";
 
 export function effectiveF16Mode(
   ir: KernelIrModule,
@@ -278,7 +280,24 @@ export function usesRoundingMathIntrinsics(ir: KernelIrModule): boolean {
     "__bfloat162int_rn", "__bfloat162uint_rn", "__bfloat162ll_rn", "__bfloat162ull_rn", "__bfloat162short_rn", "__bfloat162ushort_rn",
   ]);
   return statementsUseCall(ir.body, names) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+    ir.functions.some((fn) => statementsUseCall(fn.body, names)) ||
+    statementsUseRoundEvenInlineAsm(ir.body) ||
+    ir.functions.some((fn) => statementsUseRoundEvenInlineAsm(fn.body));
+}
+
+function statementsUseRoundEvenInlineAsm(statements: readonly CudaLiteStatement[]): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "asm") {
+      const op = classifyInlineAsm(statement.template);
+      if (op?.kind === "convert-f32-to-int" && op.rounding === "rn") return true;
+    }
+    if (statement.kind === "if" && (
+      statementsUseRoundEvenInlineAsm(statement.consequent) ||
+      statementsUseRoundEvenInlineAsm(statement.alternate ?? [])
+    )) return true;
+    if ((statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while" || statement.kind === "block") && statementsUseRoundEvenInlineAsm(statement.body)) return true;
+  }
+  return false;
 }
 
 export function usesNextafterIntrinsics(ir: KernelIrModule): boolean {
