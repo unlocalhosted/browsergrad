@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T19:07:16Z
+Last updated: 2026-07-09T19:14:29Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: reference constant/device-global initializer semantics moved into a focused Module |
+| Active work item | Architecture split: semantic WGSL usage scans and IR walk helpers moved into focused Modules |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: extracted `semantic_ir_walk.ts` for reusable semantic-IR operation/expression traversal and `semantic_wgsl_usage.ts` for WGSL helper/memory-symbol usage scans; `semantic_wgsl.ts` now consumes focused Modules for feature-helper decisions (`fp8`, half conversion, bf16 helper, curand, generic surface read/write) and memory symbol partitioning instead of carrying scan recursion beside emission; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `6611` lines
 - Architecture split: extracted `reference_initializers.ts` for AST reference constant memory and device-global initializer evaluation, padding, numeric constant-expression casts, vector constructor initializers, and typed-array materialization; `reference.ts` now consumes one initializer Module instead of carrying constant expression evaluation beside runtime execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6666` lines
 - Architecture split: extracted `reference_bitcasts.ts` for bit-preserving f32/u32/i32 reinterpretation; legacy reference and semantic reference now share one bitcast Module instead of separate scratch buffers/DataViews, keeping atomic float compare, packed bf16/half carriers, storage reads/writes, and math bitcasts on one implementation; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6792` lines and `semantic_reference.ts` down to `4649`
 - Architecture split: extracted `reference_value_types.ts` for CPU reference number-literal syntax classification and scalar value-type family checks; expression type inference, binary promotion, and inline literal handling now share one reference value-type Module instead of local helpers in `reference.ts`; typecheck passed via changed-fast, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6807` lines

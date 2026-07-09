@@ -11,6 +11,11 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import { walkSemanticOperations } from "./semantic_ir.js";
+import {
+  isSemanticKernelIrOperation,
+  semanticExpressionChildren,
+  semanticOperationExpressions,
+} from "./semantic_ir_walk.js";
 import type {
   CudaLiteDiagnostic,
   CudaLiteTextureDescriptor,
@@ -94,12 +99,23 @@ import {
   zeroForType,
 } from "./semantic_wgsl_types.js";
 import {
-  SEMANTIC_BFLOAT_HELPER_CALLS,
-  SEMANTIC_FP8_CALLS,
-  SEMANTIC_HALF_CONVERSION_CALLS,
   SEMANTIC_MATH_CALLS,
   semanticMathCallArity,
 } from "./semantic_math_intrinsics.js";
+import {
+  semanticConstantMemorySymbols as constantMemorySymbols,
+  semanticDeviceGlobalMemorySymbols as deviceGlobalMemorySymbols,
+  semanticLocalMemorySymbols as localMemorySymbols,
+  semanticSharedMemorySymbols as sharedMemorySymbols,
+  semanticSurfaceSymbols as surfaceSymbols,
+  semanticTextureSymbols as textureSymbols,
+  semanticUsesBfloatHelper,
+  semanticUsesCurand,
+  semanticUsesFp8,
+  semanticUsesGenericSurfaceRead,
+  semanticUsesGenericSurfaceWrite,
+  semanticUsesHalfConversion,
+} from "./semantic_wgsl_usage.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
@@ -1415,25 +1431,6 @@ function collectSemanticTextureDescriptorSpecializationsFromOperations(
     }
   }
   return changed;
-}
-
-function semanticOperationExpressions(operation: SemanticKernelIrOperation): readonly SemanticExpression[] {
-  const expressions: SemanticExpression[] = [];
-  if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
-  if (operation.kind === "store") expressions.push(...operation.target.indices, operation.value);
-  if (operation.kind === "surface-write") expressions.push(operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
-  if (operation.kind === "surface-read-store") expressions.push(operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
-  if (operation.kind === "atomic") expressions.push(...operation.args, ...(operation.target?.indices ?? []));
-  if (operation.kind === "call") expressions.push(...operation.args);
-  if (operation.kind === "expression") expressions.push(operation.expression);
-  if (operation.kind === "branch") expressions.push(operation.condition);
-  if (operation.kind === "loop") {
-    if (operation.init && !isSemanticKernelIrOperation(operation.init)) expressions.push(operation.init);
-    if (operation.condition) expressions.push(operation.condition);
-    if (operation.update) expressions.push(operation.update);
-  }
-  if (operation.kind === "return" && operation.value) expressions.push(operation.value);
-  return expressions;
 }
 
 function collectSemanticTextureDescriptorSpecializationsFromExpression(
@@ -6005,170 +6002,9 @@ function unsupportedMemoryRef(span: SourceSpan): SemanticMemoryRef {
   return { base: "", addressSpace: "unknown", indices: [], fields: [], span };
 }
 
-function sharedMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
-  return ir.memory.filter((symbol) => symbol.kind === "shared");
-}
-
-function constantMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
-  return ir.memory.filter((symbol) => symbol.kind === "constant");
-}
-
-function deviceGlobalMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
-  return ir.memory.filter((symbol) => symbol.kind === "device-global");
-}
-
-function textureSymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
-  const byName = new Map<string, SemanticKernelIrModule["memory"][number]>();
-  for (const param of ir.params.filter((symbol) => symbol.addressSpace === "texture")) byName.set(param.name, param);
-  for (const symbol of ir.memory.filter((item) => item.kind === "texture")) byName.set(symbol.name, symbol);
-  return [...byName.values()];
-}
-
-function surfaceSymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["params"][number][] {
-  return ir.params.filter((symbol) => symbol.addressSpace === "surface");
-}
-
 function surfaceHandleForName(name: string, ir: SemanticKernelIrModule): number | undefined {
   const index = surfaceSymbols(ir).findIndex((surface) => surface.name === name);
   return index < 0 ? undefined : index;
-}
-
-function semanticUsesGenericSurfaceRead(ir: SemanticKernelIrModule): boolean {
-  return ir.functions.some((fn) => fn.params.some((param) => param.addressSpace === "surface") && semanticOperationsUseSurfaceParamRead(fn.body, new Set(fn.params.filter((param) => param.addressSpace === "surface").map((param) => param.name))));
-}
-
-function semanticUsesGenericSurfaceWrite(ir: SemanticKernelIrModule): boolean {
-  return ir.functions.some((fn) => fn.params.some((param) => param.addressSpace === "surface") && semanticOperationsUseSurfaceParamWrite(fn.body, new Set(fn.params.filter((param) => param.addressSpace === "surface").map((param) => param.name))));
-}
-
-function semanticUsesFp8(ir: SemanticKernelIrModule): boolean {
-  return semanticOperationsUseFp8(ir.operations) || ir.functions.some((fn) => semanticOperationsUseFp8(fn.body));
-}
-
-function semanticUsesHalfConversion(ir: SemanticKernelIrModule): boolean {
-  return semanticOperationsUseHalfConversion(ir.operations) || ir.functions.some((fn) => semanticOperationsUseHalfConversion(fn.body));
-}
-
-function semanticUsesBfloatHelper(ir: SemanticKernelIrModule): boolean {
-  return ir.params.some((param) => param.valueType === "bf16" || param.valueType === "bf162") ||
-    ir.memory.some((memory) => memory.valueType === "bf16" || memory.valueType === "bf162") ||
-    semanticOperationsUseBfloatHelper(ir.operations) ||
-    ir.functions.some((fn) =>
-      fn.params.some((param) => param.valueType === "bf16" || param.valueType === "bf162") ||
-      semanticOperationsUseBfloatHelper(fn.body));
-}
-
-function semanticUsesCurand(ir: SemanticKernelIrModule): boolean {
-  return semanticOperationsUseCurand(ir.operations) || ir.functions.some((fn) => semanticOperationsUseCurand(fn.body));
-}
-
-function semanticOperationsUseCurand(operations: readonly SemanticKernelIrOperation[]): boolean {
-  for (const operation of operations) {
-    if (operation.kind === "call" && SEMANTIC_CURAND_CALLS.has(operation.callee)) return true;
-    if (semanticOperationExpressions(operation).some(semanticExpressionUsesCurand)) return true;
-    if (operation.kind === "branch" && (semanticOperationsUseCurand(operation.consequent) || semanticOperationsUseCurand(operation.alternate))) return true;
-    if (operation.kind === "loop" && semanticOperationsUseCurand(operation.body)) return true;
-    if (operation.kind === "block" && semanticOperationsUseCurand(operation.body)) return true;
-  }
-  return false;
-}
-
-function semanticExpressionUsesCurand(expression: SemanticExpression): boolean {
-  if (expression.kind === "call" && expression.callee.kind === "symbol" && SEMANTIC_CURAND_CALLS.has(expression.callee.name)) return true;
-  return semanticExpressionChildren(expression).some(semanticExpressionUsesCurand);
-}
-
-function semanticOperationsUseFp8(operations: readonly SemanticKernelIrOperation[]): boolean {
-  for (const operation of operations) {
-    if (semanticOperationExpressions(operation).some(semanticExpressionUsesFp8)) return true;
-    if (operation.kind === "branch" && (semanticOperationsUseFp8(operation.consequent) || semanticOperationsUseFp8(operation.alternate))) return true;
-    if (operation.kind === "loop" && semanticOperationsUseFp8(operation.body)) return true;
-    if (operation.kind === "block" && semanticOperationsUseFp8(operation.body)) return true;
-  }
-  return false;
-}
-
-function semanticExpressionUsesFp8(expression: SemanticExpression): boolean {
-  if (expression.kind === "call" && expression.callee.kind === "symbol" && SEMANTIC_FP8_CALLS.has(expression.callee.name)) return true;
-  return semanticExpressionChildren(expression).some(semanticExpressionUsesFp8);
-}
-
-function semanticOperationsUseHalfConversion(operations: readonly SemanticKernelIrOperation[]): boolean {
-  for (const operation of operations) {
-    if (semanticOperationExpressions(operation).some(semanticExpressionUsesHalfConversion)) return true;
-    if (operation.kind === "branch" && (semanticOperationsUseHalfConversion(operation.consequent) || semanticOperationsUseHalfConversion(operation.alternate))) return true;
-    if (operation.kind === "loop" && semanticOperationsUseHalfConversion(operation.body)) return true;
-    if (operation.kind === "block" && semanticOperationsUseHalfConversion(operation.body)) return true;
-  }
-  return false;
-}
-
-function semanticExpressionUsesHalfConversion(expression: SemanticExpression): boolean {
-  if (expression.kind === "call" && expression.callee.kind === "symbol" && SEMANTIC_HALF_CONVERSION_CALLS.has(expression.callee.name)) return true;
-  return semanticExpressionChildren(expression).some(semanticExpressionUsesHalfConversion);
-}
-
-function semanticOperationsUseBfloatHelper(operations: readonly SemanticKernelIrOperation[]): boolean {
-  for (const operation of operations) {
-    if (operation.kind === "declare" && (operation.target.valueType === "bf16" || operation.target.valueType === "bf162")) return true;
-    if (semanticOperationExpressions(operation).some(semanticExpressionUsesBfloatHelper)) return true;
-    if (operation.kind === "branch" && (semanticOperationsUseBfloatHelper(operation.consequent) || semanticOperationsUseBfloatHelper(operation.alternate))) return true;
-    if (operation.kind === "loop" && semanticOperationsUseBfloatHelper(operation.body)) return true;
-    if (operation.kind === "block" && semanticOperationsUseBfloatHelper(operation.body)) return true;
-  }
-  return false;
-}
-
-function semanticExpressionUsesBfloatHelper(expression: SemanticExpression): boolean {
-  const valueType = semanticExpressionValueType(expression);
-  if (valueType === "bf16" || valueType === "bf162") return true;
-  if (expression.kind === "call" && expression.callee.kind === "symbol" && SEMANTIC_BFLOAT_HELPER_CALLS.has(expression.callee.name)) return true;
-  return semanticExpressionChildren(expression).some(semanticExpressionUsesBfloatHelper);
-}
-
-function semanticOperationsUseSurfaceParamWrite(
-  operations: readonly SemanticKernelIrOperation[],
-  surfaceParams: ReadonlySet<string>,
-): boolean {
-  for (const operation of operations) {
-    if (operation.kind === "surface-write" && operation.surface.kind === "symbol" && surfaceParams.has(operation.surface.name)) return true;
-    if (operation.kind === "branch" && (semanticOperationsUseSurfaceParamWrite(operation.consequent, surfaceParams) || semanticOperationsUseSurfaceParamWrite(operation.alternate, surfaceParams))) return true;
-    if (operation.kind === "loop" && semanticOperationsUseSurfaceParamWrite(operation.body, surfaceParams)) return true;
-  }
-  return false;
-}
-
-function semanticOperationsUseSurfaceParamRead(
-  operations: readonly SemanticKernelIrOperation[],
-  surfaceParams: ReadonlySet<string>,
-): boolean {
-  for (const operation of operations) {
-    if (operation.kind === "return" && operation.value && semanticExpressionUsesSurfaceParamRead(operation.value, surfaceParams)) return true;
-    if (operation.kind === "expression" && semanticExpressionUsesSurfaceParamRead(operation.expression, surfaceParams)) return true;
-    if (operation.kind === "declare" && operation.init && semanticExpressionUsesSurfaceParamRead(operation.init, surfaceParams)) return true;
-    if (operation.kind === "store" && semanticExpressionUsesSurfaceParamRead(operation.value, surfaceParams)) return true;
-    if (operation.kind === "branch" && (semanticOperationsUseSurfaceParamRead(operation.consequent, surfaceParams) || semanticOperationsUseSurfaceParamRead(operation.alternate, surfaceParams))) return true;
-    if (operation.kind === "loop" && semanticOperationsUseSurfaceParamRead(operation.body, surfaceParams)) return true;
-  }
-  return false;
-}
-
-function semanticExpressionUsesSurfaceParamRead(
-  expression: SemanticExpression,
-  surfaceParams: ReadonlySet<string>,
-): boolean {
-  if (expression.kind === "surface-read") return expression.surface.kind === "symbol" && surfaceParams.has(expression.surface.name);
-  if (expression.kind === "call") return expression.args.some((arg) => semanticExpressionUsesSurfaceParamRead(arg, surfaceParams));
-  if (expression.kind === "member") return semanticExpressionUsesSurfaceParamRead(expression.object, surfaceParams);
-  if (expression.kind === "index") return semanticExpressionUsesSurfaceParamRead(expression.target, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.index, surfaceParams);
-  if (expression.kind === "cast") return semanticExpressionUsesSurfaceParamRead(expression.expression, surfaceParams);
-  if (expression.kind === "unary" || expression.kind === "update") return semanticExpressionUsesSurfaceParamRead(expression.argument, surfaceParams);
-  if (expression.kind === "binary") return semanticExpressionUsesSurfaceParamRead(expression.left, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.right, surfaceParams);
-  if (expression.kind === "conditional") return semanticExpressionUsesSurfaceParamRead(expression.condition, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.consequent, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.alternate, surfaceParams);
-  if (expression.kind === "assignment") return semanticExpressionUsesSurfaceParamRead(expression.target, surfaceParams) || semanticExpressionUsesSurfaceParamRead(expression.value, surfaceParams);
-  if (expression.kind === "initializer") return expression.elements.some((item) => semanticExpressionUsesSurfaceParamRead(item, surfaceParams));
-  if (expression.kind === "sequence") return expression.expressions.some((item) => semanticExpressionUsesSurfaceParamRead(item, surfaceParams));
-  return false;
 }
 
 function surfaceWidthField(name: string): string {
@@ -6181,10 +6017,6 @@ function surfaceHeightField(name: string): string {
 
 function surfaceReadHelperName(name: string, names: ReadonlyMap<string, string>): string {
   return `bg_sem_surf2dread_${nameFor(name, names)}`;
-}
-
-function localMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
-  return ir.memory.filter((symbol) => symbol.kind === "local" && symbol.dimensions.length > 0);
 }
 
 function localArraySymbol(ir: SemanticKernelIrModule, name: string): SemanticKernelIrModule["memory"][number] | undefined {
@@ -6707,39 +6539,6 @@ function semanticAtomicNamesFromExpression(
   return names;
 }
 
-function semanticExpressionChildren(expression: SemanticExpression): readonly SemanticExpression[] {
-  switch (expression.kind) {
-    case "literal":
-    case "symbol":
-      return [];
-    case "member":
-      return [expression.object];
-    case "index":
-      return [expression.target, expression.index];
-    case "call":
-      return [expression.callee, ...expression.args];
-    case "texture-read":
-      return [expression.texture, expression.x, expression.y];
-    case "surface-read":
-      return [expression.surface, expression.xBytes, expression.y, ...(expression.z ? [expression.z] : [])];
-    case "cast":
-      return [expression.expression];
-    case "unary":
-    case "update":
-      return [expression.argument];
-    case "binary":
-      return [expression.left, expression.right];
-    case "conditional":
-      return [expression.condition, expression.consequent, expression.alternate];
-    case "assignment":
-      return [expression.target, expression.value];
-    case "initializer":
-      return expression.elements;
-    case "sequence":
-      return expression.expressions;
-  }
-}
-
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
   if (
     expression.callee.kind !== "symbol" ||
@@ -6808,35 +6607,4 @@ function semanticWgslError(message: string, span: SourceSpan): CudaLiteCompilerE
     span,
   };
   return new CudaLiteCompilerError(message, [diagnostic]);
-}
-
-function isSemanticKernelIrOperation(
-  value: SemanticKernelIrOperation | SemanticExpression,
-): value is SemanticKernelIrOperation {
-  switch (value.kind) {
-    case "declare":
-    case "dim3-declare":
-    case "cooperative-group-declare":
-    case "load":
-    case "store":
-    case "surface-write":
-    case "surface-read-store":
-    case "atomic":
-    case "expression":
-    case "branch":
-    case "loop":
-    case "barrier":
-    case "fence":
-    case "device-launch":
-    case "inline-asm":
-    case "return":
-    case "continue":
-    case "break":
-    case "block":
-      return true;
-    case "call":
-      return typeof value.callee === "string";
-    default:
-      return false;
-  }
 }
