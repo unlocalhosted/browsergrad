@@ -21,6 +21,7 @@ import {
   cudaLiteTotalElements as totalElements,
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
+import { cudaVibMinMaxInfo } from "./cuda_math_calls.js";
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
 import {
   isCudaBarrierCallName,
@@ -2267,6 +2268,12 @@ function evalSemanticMathCall(
 ): number {
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference math call requires symbol callee", expression.span);
   const args = expression.args.map((arg) => evalNumber(arg, context));
+  const vib = cudaVibMinMaxInfo(expression.callee.name);
+  if (vib) {
+    return vib.packed
+      ? viMinMax16x2(args.slice(0, 2), vib.signed, vib.choose, false)
+      : viMinMaxScalar(args.slice(0, 2), vib.signed, vib.choose, false);
+  }
   switch (expression.callee.name) {
     case "clock":
     case "clock64":
@@ -2685,14 +2692,6 @@ function evalSemanticMathCall(
     case "__vimin3_s16x2_relu": return viMinMax16x2(args, true, "min", true);
     case "__vimax3_u16x2": return viMinMax16x2(args, false, "max", false);
     case "__vimin3_u16x2": return viMinMax16x2(args, false, "min", false);
-    case "__vibmax_s32": return viMinMaxScalar(args.slice(0, 2), true, "max", false);
-    case "__vibmin_s32": return viMinMaxScalar(args.slice(0, 2), true, "min", false);
-    case "__vibmax_u32": return viMinMaxScalar(args.slice(0, 2), false, "max", false);
-    case "__vibmin_u32": return viMinMaxScalar(args.slice(0, 2), false, "min", false);
-    case "__vibmax_s16x2": return viMinMax16x2(args.slice(0, 2), true, "max", false);
-    case "__vibmin_s16x2": return viMinMax16x2(args.slice(0, 2), true, "min", false);
-    case "__vibmax_u16x2": return viMinMax16x2(args.slice(0, 2), false, "max", false);
-    case "__vibmin_u16x2": return viMinMax16x2(args.slice(0, 2), false, "min", false);
     case "__vadd2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a + b);
     case "__vsub2": return u16x2Binary(args[0] ?? 0, args[1] ?? 0, (a, b) => a - b);
     case "__vabs2": return packedUnary(args[0] ?? 0, 16, true, (a) => Math.abs(a));

@@ -23,11 +23,13 @@ import {
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
 import {
+  cudaVibMinMaxInfo,
   isCudaFrexpCallName as isFrexpCallName,
   isCudaModfCallName as isModfCallName,
   isCudaRemquoCallName as isRemquoCallName,
   isCudaSincosCallName as isSincosCallName,
   isCudaSincosPiCallName as isSincosPiCallName,
+  isCudaVibMinMaxCallName as isVibMinMaxCallName,
 } from "./cuda_math_calls.js";
 import {
   isCudaAddressSpacePredicateCallName as isAddressSpacePredicateName,
@@ -1265,17 +1267,15 @@ function semanticVibMinMaxCallResult(
   const right = expression.args[1];
   if (!left || !right || !semanticExpressionSideEffectFree(left) || !semanticExpressionSideEffectFree(right)) return undefined;
   const name = expression.callee.name;
-  const choose: "max" | "min" = name.startsWith("__vibmax") ? "max" : "min";
-  const signed = name.includes("_s");
-  const packed = name.includes("16x2");
+  const vib = cudaVibMinMaxInfo(name);
+  if (!vib) return undefined;
   const predicateArgs = source.args.slice(2);
   const predicateTargets = predicateArgs.map((arg) => mathOutTargetExpressionFromSource(arg, scope));
   if (predicateTargets.some((target) => target === undefined)) return undefined;
-  const valueType: Exclude<CudaLiteScalarType, "void"> = name.includes("_s32") ? "int" : "uint";
-  const value = semanticCallExpression(name, [left, right], valueType, expression.span);
-  if (packed) {
-    const lo = vibLanePredicateExpression(left, right, signed, choose, 0, expression.span);
-    const hi = vibLanePredicateExpression(left, right, signed, choose, 16, expression.span);
+  const value = semanticCallExpression(name, [left, right], vib.valueType, expression.span);
+  if (vib.packed) {
+    const lo = vibLanePredicateExpression(left, right, vib.signed, vib.choose, 0, expression.span);
+    const hi = vibLanePredicateExpression(left, right, vib.signed, vib.choose, 16, expression.span);
     const [hiTarget, loTarget] = predicateTargets;
     if (!hiTarget || !loTarget) return undefined;
     return {
@@ -1289,7 +1289,7 @@ function semanticVibMinMaxCallResult(
   const [predicateTarget] = predicateTargets;
   if (!predicateTarget) return undefined;
   return {
-    sideEffects: [mathOutStoreOrAssignOperation(predicateTarget, vibScalarPredicateExpression(left, right, signed, choose, expression.span), span)],
+    sideEffects: [mathOutStoreOrAssignOperation(predicateTarget, vibScalarPredicateExpression(left, right, vib.signed, vib.choose, expression.span), span)],
     value,
   };
 }
@@ -1625,17 +1625,6 @@ function roundTiesToEvenNumber(value: number): number {
   if (diff < 0.5) return floor;
   if (diff > 0.5) return floor + 1;
   return floor % 2 === 0 ? floor : floor + 1;
-}
-
-function isVibMinMaxCallName(name: string): boolean {
-  return name === "__vibmax_s32" ||
-    name === "__vibmin_s32" ||
-    name === "__vibmax_u32" ||
-    name === "__vibmin_u32" ||
-    name === "__vibmax_s16x2" ||
-    name === "__vibmin_s16x2" ||
-    name === "__vibmax_u16x2" ||
-    name === "__vibmin_u16x2";
 }
 
 function pointerAliasValueExpression(

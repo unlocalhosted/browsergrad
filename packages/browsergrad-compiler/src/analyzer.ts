@@ -30,6 +30,7 @@ import {
 } from "./cuda_cp_async.js";
 import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import {
+  cudaVibMinMaxInfo,
   isCudaFloatDecomposeCallName as isFloatDecomposeCallName,
   isCudaFrexpCallName as isFrexpCallName,
   isCudaModfCallName as isModfCallName,
@@ -2462,7 +2463,8 @@ function validateVibMinMaxCall(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): ExpressionInfo | undefined {
-  if (!callName || !isVibMinMaxCallName(callName)) return undefined;
+  const vib = cudaVibMinMaxInfo(callName);
+  if (!vib) return undefined;
   const [left, right] = expression.args;
   if (left) validateScalarOperand(walkExpression(left, scope), left.span, diagnostics);
   if (right) validateScalarOperand(walkExpression(right, scope), right.span, diagnostics);
@@ -2477,22 +2479,11 @@ function validateVibMinMaxCall(
       diagnostics.push(error("unsupported-call", `${callName} predicate output must point to bool storage`, target.span));
     }
   }
-  return { kind: "scalar", valueType: callName.includes("_s32") ? "int" : "uint" };
+  return { kind: "scalar", valueType: vib.valueType };
 }
 
 function isMathOutPointerInfo(info: ExpressionInfo): boolean {
   return info.kind === "address" || info.kind === "pointer" || info.kind === "pool-pointer" || info.kind === "unknown";
-}
-
-function isVibMinMaxCallName(name: string): boolean {
-  return name === "__vibmax_s32" ||
-    name === "__vibmin_s32" ||
-    name === "__vibmax_u32" ||
-    name === "__vibmin_u32" ||
-    name === "__vibmax_s16x2" ||
-    name === "__vibmin_s16x2" ||
-    name === "__vibmax_u16x2" ||
-    name === "__vibmin_u16x2";
 }
 
 function validateCudaIntegerRuntimeQuery(
