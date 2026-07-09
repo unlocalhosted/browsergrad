@@ -37,8 +37,8 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmOp } from "./features/inline_ptx/model.js";
-import { inlineAsmExpectedInputCount, inlineAsmOutputValueContract, inlineAsmOutputValueTypeMatches } from "./features/inline_ptx/validation.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmOp } from "./features/inline_ptx/model.js";
+import { inlineAsmExpectedInputCount, inlineAsmInputValueContracts, inlineAsmInputValueTypeMatches, inlineAsmOutputValueContract, inlineAsmOutputValueTypeMatches } from "./features/inline_ptx/validation.js";
 import { collectCudaAllowedTrapCallSpanStarts } from "./trap_preconditions.js";
 import { sizeofCudaType } from "./type_layout.js";
 import {
@@ -1690,6 +1690,23 @@ function validateInlineAsmOutputValueTypes(
   }
 }
 
+function validateInlineAsmInputValueTypes(
+  op: InlineAsmOp,
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  outputCount: number,
+  scope: Scope,
+  walkExpression: ExpressionWalker,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  for (const contract of inlineAsmInputValueContracts(op, outputCount)) {
+    const input = statement.inputs[contract.inputIndex];
+    if (!input) continue;
+    const inputInfo = walkExpression(input, scope);
+    if (inputInfo.kind === "unknown" || inlineAsmInputValueTypeMatches(contract, inputInfo.valueType)) continue;
+    diagnostics.push(error("invalid-inline-asm-operands", `${contract.label} inline PTX expects ${contract.description}`, input.span));
+  }
+}
+
 function validateInlineAsmStatement(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   scope: Scope,
@@ -1710,6 +1727,7 @@ function validateInlineAsmStatement(
     validateScalarOperand(outputInfos[index]!, output.span, diagnostics);
   }
   if (op) validateInlineAsmOutputValueTypes(op, outputInfos, outputs, statement.span, asmDiagnostics);
+  if (op) validateInlineAsmInputValueTypes(op, statement, outputs.length, scope, walkExpression, asmDiagnostics);
   if (op?.kind === "fma-rn-f32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
@@ -1720,19 +1738,6 @@ function validateInlineAsmStatement(
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.rn.f32 inline PTX expects one output operand and ${expectedInputs ?? 2} input operands`, statement.span));
-    }
-    const sources = op.sources ?? [
-      { kind: "operand", index: outputs.length },
-      { kind: "operand", index: outputs.length + 1 },
-    ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
-    for (const source of sources) {
-      if (source.kind !== "operand" || source.index < outputs.length) continue;
-      const input = statement.inputs[source.index - outputs.length];
-      if (!input) continue;
-      const inputInfo = walkExpression(input, scope);
-      if (inputInfo.kind !== "unknown" && inputInfo.valueType !== undefined && inputInfo.valueType !== "float") {
-        asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.rn.f32 inline PTX expects f32 input operands`, input.span));
-      }
     }
   }
   if (op?.kind === "laneid" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
@@ -1865,35 +1870,11 @@ function validateInlineAsmStatement(
     if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32 inline PTX expects one output operand and ${expectedInputs ?? 1} input operands`, statement.span));
     }
-    const inputIndex = op.source === undefined
-      ? 0
-      : op.source.kind === "operand"
-      ? op.source.index - outputs.length
-      : undefined;
-    const input = inputIndex === undefined ? undefined : statement.inputs[inputIndex];
-    if (input) {
-      const inputInfo = walkExpression(input, scope);
-      if (inputInfo.kind !== "unknown" && inputInfo.valueType !== undefined && inputInfo.valueType !== "float") {
-        asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32 inline PTX expects an f32 input operand`, input.span));
-      }
-    }
   }
   if (op?.kind === "convert-int-to-f32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs ?? 1} input operands`, statement.span));
-    }
-    const inputIndex = op.source === undefined
-      ? 0
-      : op.source.kind === "operand"
-      ? op.source.index - outputs.length
-      : undefined;
-    const input = inputIndex === undefined ? undefined : statement.inputs[inputIndex];
-    if (input) {
-      const inputInfo = walkExpression(input, scope);
-      if (inputInfo.kind !== "unknown" && inputInfo.valueType !== undefined && inputInfo.valueType !== "uint" && inputInfo.valueType !== "int") {
-        asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"} inline PTX expects an integer input operand`, input.span));
-      }
     }
   }
   if (op?.kind === "u8x4-sad-add" && (outputs.length !== 1 || statement.inputs.length !== 3)) {

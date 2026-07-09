@@ -1,16 +1,26 @@
 import {
   expectedInlineAsmF32SourceInputs,
   expectedInlineAsmSourceInputs,
+  type InlineAsmF32Source,
+  type InlineAsmIntSource,
   type InlineAsmOp,
 } from "./model.js";
 
 export type InlineAsmOutputValueType = "bool" | "float" | "int" | "uint";
+export type InlineAsmInputValueType = "float" | "int" | "uint";
 
 export interface InlineAsmOutputValueContract {
   readonly label: string;
   readonly description: string;
   readonly allowed: readonly InlineAsmOutputValueType[];
   readonly allOutputs?: boolean;
+}
+
+export interface InlineAsmInputValueContract {
+  readonly inputIndex: number;
+  readonly label: string;
+  readonly description: string;
+  readonly allowed: readonly InlineAsmInputValueType[];
 }
 
 export function inlineAsmExpectedInputCount(op: InlineAsmOp, outputCount: number): number | undefined {
@@ -162,4 +172,53 @@ export function inlineAsmOutputValueContract(op: InlineAsmOp): InlineAsmOutputVa
 
 export function inlineAsmOutputValueTypeMatches(contract: InlineAsmOutputValueContract, valueType: string | undefined): boolean {
   return valueType === undefined || contract.allowed.includes(valueType as InlineAsmOutputValueType);
+}
+
+export function inlineAsmInputValueContracts(op: InlineAsmOp, outputCount: number): readonly InlineAsmInputValueContract[] {
+  switch (op.kind) {
+    case "float-binary-rn-f32": {
+      const sources = op.sources ?? [
+        { kind: "operand", index: outputCount },
+        { kind: "operand", index: outputCount + 1 },
+      ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
+      return inputContractsForSources(sources, outputCount, {
+        label: `${op.op}.rn.f32`,
+        description: "f32 input operands",
+        allowed: ["float"],
+      });
+    }
+    case "convert-f32-to-int":
+      return op.source === undefined
+        ? [{ inputIndex: 0, label: `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32`, description: "an f32 input operand", allowed: ["float"] }]
+        : inputContractsForSources([op.source], outputCount, {
+          label: `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32`,
+          description: "an f32 input operand",
+          allowed: ["float"],
+        });
+    case "convert-int-to-f32":
+      return op.source === undefined
+        ? [{ inputIndex: 0, label: `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"}`, description: "an integer input operand", allowed: ["uint", "int"] }]
+        : inputContractsForSources([op.source], outputCount, {
+          label: `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"}`,
+          description: "an integer input operand",
+          allowed: ["uint", "int"],
+        });
+    default:
+      return [];
+  }
+}
+
+export function inlineAsmInputValueTypeMatches(contract: InlineAsmInputValueContract, valueType: string | undefined): boolean {
+  return valueType === undefined || contract.allowed.includes(valueType as InlineAsmInputValueType);
+}
+
+function inputContractsForSources(
+  sources: readonly (InlineAsmF32Source | InlineAsmIntSource)[],
+  outputCount: number,
+  contract: Omit<InlineAsmInputValueContract, "inputIndex">,
+): readonly InlineAsmInputValueContract[] {
+  return sources.flatMap((source) => {
+    if (source.kind !== "operand" || source.index < outputCount) return [];
+    return [{ ...contract, inputIndex: source.index - outputCount }];
+  });
 }
