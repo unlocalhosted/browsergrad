@@ -6,10 +6,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectKernelLaunchCallees } from "./ast_queries.js";
-import {
-  flattenCudaLiteInitializerExpressions as flattenConstantInitializer,
-  flattenCudaLiteInitializerExpressions as flattenInitializerExpressions,
-} from "./ast_initializers.js";
+import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
 import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import {
@@ -38,6 +35,10 @@ import {
   cloneReferenceSurfaces,
   cloneReferenceTypedArray,
 } from "./reference_inputs.js";
+import {
+  referenceConstantInitialValue as constantInitialValue,
+  referenceDeviceGlobalInitialValue as deviceGlobalInitialValue,
+} from "./reference_initializers.js";
 import {
   cudaLiteTotalElements as totalElements,
   cudaLiteTruthy as truthy,
@@ -121,9 +122,7 @@ import {
   type CudaLiteCallExpression,
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
-  type CudaLiteDeviceGlobal,
   type CudaLiteExpression,
-  type CudaLiteGlobalConstant,
   type CudaLiteKernel,
   type CudaLiteParam,
   type CudaLiteScalarType,
@@ -6062,131 +6061,6 @@ function cloneDeviceGlobals(
   const out = new Map<string, WgslTypedArray>();
   for (const [name, value] of Object.entries(globals)) out.set(name, cloneReferenceTypedArray(value));
   return out;
-}
-
-function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTypedArray {
-  if (!constant.init) throw compilerFailure(`constant '${constant.name}' has no initializer`);
-  if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType)) {
-    return typedVectorConstantValues(constant.valueType, constantVectorInitializerValues(constant.init, constant.valueType));
-  }
-  const values = flattenConstantInitializer(constant.init).map(evaluateConstantNumber);
-  if (constant.dimensions.length === 0) return values[0] ?? 0;
-  const total = totalElements(constant.dimensions);
-  const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
-  if (constant.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
-  if (constant.valueType === "uint" || constant.valueType === "bool" || constant.valueType === "voidptr") {
-    return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
-  }
-  if (constant.valueType === "half") return createWgslFloat16Array(padded);
-  if (constant.valueType === "float" || constant.valueType === "double") return Float32Array.from(padded);
-  if (constant.valueType === "complex64") return Float32Array.from(padded);
-  return Float32Array.from(padded);
-}
-
-function constantVectorInitializerValues(
-  expression: CudaLiteExpression,
-  valueType: CudaLiteScalarType,
-): readonly number[] {
-  if (expression.kind === "call" && expressionName(expression.callee) === `make_${valueType}`) {
-    return expression.args.map(evaluateConstantNumber);
-  }
-  return flattenConstantInitializer(expression).map(evaluateConstantNumber);
-}
-
-function typedVectorConstantValues(valueType: CudaLiteScalarType, values: readonly number[]): WgslTypedArray {
-  const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, index) => values[index] ?? 0);
-  const scalar = cudaVectorScalarType(valueType);
-  if (scalar === "int") return Int32Array.from(lanes.map((value) => Math.trunc(value)));
-  if (scalar === "uint") return Uint32Array.from(lanes.map((value) => Math.trunc(value) >>> 0));
-  if (scalar === "half") return createWgslFloat16Array(lanes);
-  return Float32Array.from(lanes);
-}
-
-function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {
-  const total = totalElements(global.dimensions);
-  const values = global.init === undefined
-    ? []
-    : flattenConstantInitializer(global.init).map(evaluateConstantNumber);
-  const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
-  if (global.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
-  if (global.valueType === "uint" || global.valueType === "uchar" || global.valueType === "bool" || global.valueType === "voidptr") {
-    return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
-  }
-  if (global.valueType === "half") return createWgslFloat16Array(padded);
-  if (global.valueType === "float" || global.valueType === "double") return Float32Array.from(padded);
-  if (global.valueType === "complex64") return Float32Array.from(padded);
-  return Float32Array.from(padded);
-}
-
-function evaluateConstantNumber(expression: CudaLiteExpression): number {
-  switch (expression.kind) {
-    case "number":
-      return expression.value;
-    case "identifier": {
-      const named = CUDA_NAMED_CONSTANTS.get(expression.name);
-      if (named) return named.value;
-      throw compilerFailure(`constant initializer unknown symbol '${expression.name}'`);
-    }
-    case "cast":
-      return valueAsNumber(castNumber(expression.valueType, evaluateConstantNumber(expression.expression)), "constant initializer");
-    case "unary": {
-      const value = evaluateConstantNumber(expression.argument);
-      if (expression.operator === "-") return -value;
-      if (expression.operator === "+") return value;
-      return truthy(value) ? 0 : 1;
-    }
-    case "binary":
-      return evalConstantBinary(expression.operator, evaluateConstantNumber(expression.left), evaluateConstantNumber(expression.right));
-    case "conditional":
-      return truthy(evaluateConstantNumber(expression.condition))
-        ? evaluateConstantNumber(expression.consequent)
-        : evaluateConstantNumber(expression.alternate);
-    default:
-      throw compilerFailure("constant initializer must be a numeric constant expression");
-  }
-}
-
-function evalConstantBinary(operator: string, left: number, right: number): number {
-  switch (operator) {
-    case "+":
-      return left + right;
-    case "-":
-      return left - right;
-    case "*":
-      return left * right;
-    case "/":
-      return right === 0 ? 0 : left / right;
-    case "%":
-      return right === 0 ? 0 : left % right;
-    case "<<":
-      return Math.trunc(left) << Math.trunc(right);
-    case ">>":
-      return Math.trunc(left) >> Math.trunc(right);
-    case "&":
-      return Math.trunc(left) & Math.trunc(right);
-    case "^":
-      return Math.trunc(left) ^ Math.trunc(right);
-    case "|":
-      return Math.trunc(left) | Math.trunc(right);
-    case "<":
-      return left < right ? 1 : 0;
-    case "<=":
-      return left <= right ? 1 : 0;
-    case ">":
-      return left > right ? 1 : 0;
-    case ">=":
-      return left >= right ? 1 : 0;
-    case "==":
-      return left === right ? 1 : 0;
-    case "!=":
-      return left !== right ? 1 : 0;
-    case "&&":
-      return truthy(left) && truthy(right) ? 1 : 0;
-    case "||":
-      return truthy(left) || truthy(right) ? 1 : 0;
-    default:
-      throw compilerFailure(`unsupported constant initializer operator '${operator}'`);
-  }
 }
 
 function vectorFromExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): ReferenceVector3 {
