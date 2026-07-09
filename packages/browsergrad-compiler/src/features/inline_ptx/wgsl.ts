@@ -1,9 +1,181 @@
-import type { InlineAsmFloatToIntRounding } from "./model.js";
+import {
+  classifyInlineAsm,
+  inlineAsmSupportedList,
+  type InlineAsmF32Source,
+  type InlineAsmFloatToIntRounding,
+  type InlineAsmIntSource,
+} from "./model.js";
+import { inlineAsmExpectedInputCount, inlineAsmInputCountMatches, inlineAsmOutputCountMatches } from "./validation.js";
 
 export interface InlineAsmWgslExpressionCallbacks<TExpression, TContext> {
   readonly emitExpression: (expression: TExpression, context: TContext) => string;
   readonly emitNumberLiteral: (literal: string) => string;
   readonly expressionValueTypeForEmit: (expression: TExpression, context: TContext) => string | undefined;
+}
+
+export interface InlineAsmWgslStatement<TExpression, TSpan> {
+  readonly template: string;
+  readonly output?: TExpression;
+  readonly outputs?: readonly TExpression[];
+  readonly inputs: readonly TExpression[];
+  readonly span: TSpan;
+}
+
+export interface InlineAsmWgslStatementCallbacks<TExpression, TContext, TSpan> extends InlineAsmWgslExpressionCallbacks<TExpression, TContext> {
+  readonly emitExpressionAsValueType: (expression: TExpression, valueType: "float", context: TContext) => string;
+  readonly emitLocalLinearRank: (context: TContext) => string;
+  readonly emitU32Output: (target: TExpression, expression: string, context: TContext) => string;
+  readonly emitSpecialRegister: (register: string, context: TContext) => string;
+  readonly emitAddressPredicate: (space: "global" | "shared" | "const" | "local", expression: TExpression, context: TContext) => string;
+  readonly emitGlobalTimerTick: (context: TContext) => string;
+  readonly emitMmaM16N8K16: (
+    statement: InlineAsmWgslStatement<TExpression, TSpan>,
+    outputs: readonly TExpression[],
+    accumulator: "f16" | "f32",
+    context: TContext,
+  ) => string;
+  readonly featureError: (code: string, message: string, span: TSpan) => unknown;
+}
+
+export function emitInlineAsmStatementWgsl<TExpression, TContext, TSpan>(
+  statement: InlineAsmWgslStatement<TExpression, TSpan>,
+  context: TContext,
+  callbacks: InlineAsmWgslStatementCallbacks<TExpression, TContext, TSpan>,
+): string {
+  const op = classifyInlineAsm(statement.template);
+  const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+  const inputCountMatches = op === undefined ? false : inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length);
+  const outputCountMatches = op === undefined ? false : inlineAsmOutputCountMatches(op, outputs.length);
+  if (op?.kind === "laneid" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `u32(${callbacks.emitLocalLinearRank(context)} % 32)`, context)}`;
+  }
+  if (op?.kind === "warpid" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `u32(${callbacks.emitLocalLinearRank(context)} / 32)`, context)}`;
+  }
+  if (op?.kind === "lanemask-lt" && inputCountMatches && outputCountMatches) {
+    const lane = `u32(${callbacks.emitLocalLinearRank(context)} & 31)`;
+    const mask = `select(0u, ((1u << ${lane}) - 1u), ${lane} > 0u)`;
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, mask, context)}`;
+  }
+  if (op?.kind === "special-register-u32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, callbacks.emitSpecialRegister(op.register, context), context)}`;
+  }
+  if (op?.kind === "globaltimer-u64" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, callbacks.emitGlobalTimerTick(context), context)}`;
+  }
+  if (op?.kind === "isspacep" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, callbacks.emitAddressPredicate(op.space, statement.inputs[0]!, context), context)}`;
+  }
+  if (op?.kind === "bfind-u32" && inputCountMatches && outputCountMatches) {
+    const value = op.immediate === undefined ? `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
+    return `${callbacks.emitExpression(outputs[0]!, context)} = (31u - countLeadingZeros(${value}))`;
+  }
+  if (op?.kind === "ffs-b32" && inputCountMatches && outputCountMatches) {
+    const value = op.immediate === undefined ? `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `select(0u, (countTrailingZeros(${value}) + 1u), (${value} != 0u))`, context)}`;
+  }
+  if (op?.kind === "popc-b32" && inputCountMatches && outputCountMatches) {
+    const value = op.immediate === undefined ? `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `countOneBits(${value})`, context)}`;
+  }
+  if (op?.kind === "clz-b32" && inputCountMatches && outputCountMatches) {
+    const value = op.immediate === undefined ? `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `countLeadingZeros(${value})`, context)}`;
+  }
+  if (op?.kind === "brev-b32" && inputCountMatches && outputCountMatches) {
+    const value = op.immediate === undefined ? `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `reverseBits(${value})`, context)}`;
+  }
+  if (op?.kind === "prmt-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineBytePermExpressionWgsl(statement.inputs, context, callbacks, op.selectorImmediate), context)}`;
+  }
+  if (op?.kind === "lop3-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineLop3ExpressionWgsl(statement.inputs, op.immLut, context, callbacks, op.dataImmediates), context)}`;
+  }
+  if (op?.kind === "bitwise-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineBitwiseExpressionWgsl(statement.inputs, op.op, context, callbacks, op.immediate), context)}`;
+  }
+  if (op?.kind === "shift-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineShiftExpressionWgsl(statement.inputs, op.op, op.signed, context, callbacks, op.immediate), context)}`;
+  }
+  if (op?.kind === "arithmetic-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineArithmeticExpressionWgsl(statement.inputs, op.op, context, callbacks, op.immediate), context)}`;
+  }
+  if (op?.kind === "minmax-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineMinMaxExpressionWgsl(statement.inputs, op.op, op.signed, context, callbacks, op.immediate), context)}`;
+  }
+  if (op?.kind === "unary-int-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineUnaryIntExpressionWgsl(statement.inputs[0], op.op, context, callbacks, op.immediate), context)}`;
+  }
+  if (op?.kind === "select-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineSelectExpressionWgsl(statement.inputs, context, callbacks, op.trueImmediate, op.falseImmediate), context)}`;
+  }
+  if (op?.kind === "compare-b32" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitInlineCompareExpressionWgsl(statement.inputs, op.op, op.signed, context, callbacks, op.immediate), context)}`;
+  }
+  if (op?.kind === "move-b32" && inputCountMatches && op.immediate === undefined && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})`, context)}`;
+  }
+  if (op?.kind === "move-b32" && inputCountMatches && op.immediate !== undefined && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, `${op.immediate >>> 0}u`, context)}`;
+  }
+  if (op?.kind === "convert-b32" && inputCountMatches && outputCountMatches) {
+    const value = op.immediate === undefined ? `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})` : `${op.immediate >>> 0}u`;
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, value, context)}`;
+  }
+  if (op?.kind === "convert-f32-to-int" && inputCountMatches && outputCountMatches) {
+    const source = op.source === undefined
+      ? callbacks.emitExpressionAsValueType(statement.inputs[0]!, "float", context)
+      : emitInlineAsmF32SourceWgsl(op.source, statement, outputs, context, callbacks);
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${emitInlineF32ToIntConvertExpressionWgsl(source, op.rounding, op.toSigned, outputs[0]!, context, callbacks)}`;
+  }
+  if (op?.kind === "convert-int-to-f32" && inputCountMatches && outputCountMatches) {
+    const source = op.source === undefined
+      ? callbacks.emitExpression(statement.inputs[0]!, context)
+      : emitInlineAsmIntSourceWgsl(op.source, statement, outputs, context, callbacks);
+    return `${callbacks.emitExpression(outputs[0]!, context)} = f32(${op.fromSigned ? `i32(${source})` : `u32(${source})`})`;
+  }
+  if (op?.kind === "float-binary-rn-f32") {
+    const sources = op.sources ?? [
+      { kind: "operand", index: outputs.length },
+      { kind: "operand", index: outputs.length + 1 },
+    ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
+    if (inputCountMatches && outputCountMatches) {
+      const left = emitInlineAsmF32SourceWgsl(sources[0]!, statement, outputs, context, callbacks);
+      const right = emitInlineAsmF32SourceWgsl(sources[1]!, statement, outputs, context, callbacks);
+      const operator = op.op === "add" ? "+" : op.op === "sub" ? "-" : op.op === "mul" ? "*" : "/";
+      return `${callbacks.emitExpression(outputs[0]!, context)} = (${left} ${operator} ${right})`;
+    }
+  }
+  if (op?.kind === "u8x4-sad-add" && inputCountMatches && outputCountMatches) {
+    return `${callbacks.emitExpression(outputs[0]!, context)} = ${callbacks.emitU32Output(outputs[0]!, emitU8x4SadAddExpressionWgsl(statement.inputs, context, callbacks), context)}`;
+  }
+  if (op?.kind === "ldmatrix" && inputCountMatches && outputCountMatches) {
+    const base = `u32(${callbacks.emitExpression(statement.inputs[0]!, context)})`;
+    const tag = op.transposed ? "0x80000000u" : "0u";
+    return outputs.map((output, index) => {
+      const carrier = `(${tag} + ${base} + ${index * 2}u)`;
+      return `${callbacks.emitExpression(output, context)} = ${callbacks.emitU32Output(output, carrier, context)}`;
+    }).join("\n");
+  }
+  if (op?.kind === "cp-async-fence" && inputCountMatches && outputCountMatches) return `// cp.async inline asm fence omitted`;
+  if (op?.kind === "membar" && inputCountMatches && outputCountMatches) return `storageBarrier();`;
+  if (op?.kind === "bar-sync" && inputCountMatches && outputCountMatches) return `workgroupBarrier();`;
+  if (op?.kind === "mma-m16n8k16") return callbacks.emitMmaM16N8K16(statement, outputs, op.accumulator, context);
+  const fmaSources = op?.kind === "fma-rn-f32"
+    ? op.sources ?? [
+      { kind: "operand", index: outputs.length },
+      { kind: "operand", index: outputs.length + 1 },
+      { kind: "operand", index: 0 },
+    ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source]
+    : undefined;
+  const expectedFmaInputs = op?.kind === "fma-rn-f32" ? inlineAsmExpectedInputCount(op, outputs.length) : undefined;
+  if (op?.kind !== "fma-rn-f32" || fmaSources === undefined || expectedFmaInputs === undefined || statement.inputs.length !== expectedFmaInputs || !outputCountMatches) {
+    throw callbacks.featureError("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in WGSL output`, statement.span);
+  }
+  const target = callbacks.emitExpression(outputs[0]!, context);
+  const [a, b, c] = fmaSources.map((source) => emitInlineAsmF32SourceWgsl(source, statement, outputs, context, callbacks));
+  return `${target} = fma(${a}, ${b}, ${c})`;
 }
 
 export function emitInlineBytePermWgsl(x: string, y: string, selector: string): string {
@@ -231,4 +403,28 @@ export function emitU8x4SadAddExpressionWgsl<TExpression, TContext>(
   const b = `u32(${callbacks.emitExpression(inputs[1]!, context)})`;
   const c = `u32(${callbacks.emitExpression(inputs[2]!, context)})`;
   return emitU8x4SadAddWgsl(a, b, c);
+}
+
+function emitInlineAsmIntSourceWgsl<TExpression, TContext, TSpan>(
+  source: InlineAsmIntSource,
+  statement: InlineAsmWgslStatement<TExpression, TSpan>,
+  outputs: readonly TExpression[],
+  context: TContext,
+  callbacks: InlineAsmWgslExpressionCallbacks<TExpression, TContext>,
+): string {
+  if (source.kind === "immediate") return source.raw.startsWith("-") ? `${source.value | 0}` : `${source.value >>> 0}u`;
+  if (source.index < outputs.length) return callbacks.emitExpression(outputs[source.index]!, context);
+  return callbacks.emitExpression(statement.inputs[source.index - outputs.length]!, context);
+}
+
+function emitInlineAsmF32SourceWgsl<TExpression, TContext, TSpan>(
+  source: InlineAsmF32Source,
+  statement: InlineAsmWgslStatement<TExpression, TSpan>,
+  outputs: readonly TExpression[],
+  context: TContext,
+  callbacks: InlineAsmWgslExpressionCallbacks<TExpression, TContext>,
+): string {
+  if (source.kind === "immediate") return callbacks.emitNumberLiteral(source.raw);
+  if (source.index < outputs.length) return callbacks.emitExpression(outputs[source.index]!, context);
+  return callbacks.emitExpression(statement.inputs[source.index - outputs.length]!, context);
 }
