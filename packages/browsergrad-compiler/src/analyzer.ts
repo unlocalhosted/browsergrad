@@ -26,7 +26,7 @@ import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queri
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
-import { isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
+import { cudaIntegerRuntimeQueryTargetValueType, cudaStreamGetCaptureInfoTargetValueType, isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
 import {
   type WmmaBuiltin,
   isMatrixTileByteValueType,
@@ -2538,7 +2538,7 @@ function validateCudaIntegerRuntimeQuery(
     validateScalarOperand(walkExpression(target, scope), target.span, diagnostics);
     for (const [index, arg] of expression.args.entries()) {
       if (index === 0 || !arg || isNullPointerExpression(arg)) continue;
-      validateRuntimeQueryPointerTarget(callName, arg, cudaStreamGetCaptureInfoTargetType(index), scope, diagnostics, walkExpression);
+      validateRuntimeQueryPointerTarget(callName, arg, cudaStreamGetCaptureInfoTargetValueType(index), scope, diagnostics, walkExpression);
     }
     return;
   }
@@ -2608,7 +2608,7 @@ function validateCudaIntegerRuntimeQuery(
     diagnostics.push(error("unsupported-cuda-runtime", `${callName} expects an int pointer target`, target.span));
     return;
   }
-  const expectedValueType = callName === "cudaDeviceGetLimit" || callName === "cudaThreadGetLimit" || callName === "cudaMemGetInfo" || callName === "cudaGetDeviceFlags" ? "uint" : "int";
+  const expectedValueType = cudaIntegerRuntimeQueryTargetValueType(callName);
   if (info.valueType !== undefined && info.valueType !== expectedValueType) {
     diagnostics.push(error("unsupported-cuda-runtime", `${callName} target must point to ${expectedValueType} storage`, target.span));
   }
@@ -2653,10 +2653,6 @@ function validateRuntimeQueryPointerTarget(
   } else if (info.valueType !== undefined && info.valueType !== expectedValueType) {
     diagnostics.push(error("unsupported-cuda-runtime", `${callName} target must point to ${expectedValueType} storage`, target.span));
   }
-}
-
-function cudaStreamGetCaptureInfoTargetType(index: number): Exclude<CudaLiteScalarType, "void"> {
-  return index === 1 ? "int" : "uint";
 }
 
 function isNullPointerExpression(expression: CudaLiteExpression): boolean {

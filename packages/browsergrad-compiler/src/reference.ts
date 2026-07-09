@@ -8,8 +8,6 @@ import {
 import { collectKernelLaunchCallees } from "./ast_queries.js";
 import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
 import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
-import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
-import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import {
   cudaRuntimeCopyShapeForCall,
   isCudaRuntimeCopyCall,
@@ -19,7 +17,12 @@ import {
   type CudaRuntimeCopyShape,
 } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
-import { isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
+import {
+  cudaIntegerRuntimeQueryValue,
+  cudaRuntimeAvailableDynamicSmemBytes,
+  cudaRuntimeMemInfoBytes,
+  isCudaIntegerRuntimeQueryCall,
+} from "./cuda_runtime_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
@@ -3187,8 +3190,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (name === "cudaMemGetInfo") {
       const freeTarget = expression.args[0];
       const totalTarget = expression.args[1];
-      if (freeTarget) writeLValue(resolvePointerArgument(freeTarget, context), 268435456, context);
-      if (totalTarget) writeLValue(resolvePointerArgument(totalTarget, context), 268435456, context);
+      if (freeTarget) writeLValue(resolvePointerArgument(freeTarget, context), cudaRuntimeMemInfoBytes(), context);
+      if (totalTarget) writeLValue(resolvePointerArgument(totalTarget, context), cudaRuntimeMemInfoBytes(), context);
       return 0;
     }
     if (name === "cudaOccupancyMaxPotentialBlockSize" || name === "cudaOccupancyMaxPotentialBlockSizeWithFlags") {
@@ -3200,7 +3203,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     }
     if (name === "cudaOccupancyAvailableDynamicSMemPerBlock") {
       const dynamicSmemTarget = expression.args[0];
-      if (dynamicSmemTarget) writeLValue(resolvePointerArgument(dynamicSmemTarget, context), 49152, context);
+      if (dynamicSmemTarget) writeLValue(resolvePointerArgument(dynamicSmemTarget, context), cudaRuntimeAvailableDynamicSmemBytes(), context);
       return 0;
     }
     if (name === "cudaDeviceGetStreamPriorityRange") {
@@ -3262,19 +3265,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return 0;
     }
     const target = expression.args[0];
-    const value = name === "cudaGetDeviceCount"
-      ? 1
-      : name === "cudaDeviceGetAttribute"
-        ? cudaDeviceAttributeValue(expression.args[1] ? evalNumber(expression.args[1], context) : 0)
-        : name === "cudaDeviceGetLimit" || name === "cudaThreadGetLimit"
-        ? cudaDeviceLimitValue(expression.args[1] ? evalNumber(expression.args[1], context) : 0)
-        : name === "cudaDeviceCanAccessPeer"
-          ? 1
-        : name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags"
-          ? 1
-        : name === "cudaRuntimeGetVersion" || name === "cudaDriverGetVersion"
-          ? 12000
-          : 0;
+    const value = cudaIntegerRuntimeQueryValue(name, (index) => expression.args[index] ? evalNumber(expression.args[index]!, context) : undefined);
     if (target) writeLValue(resolvePointerArgument(target, context), value, context);
     return 0;
   }

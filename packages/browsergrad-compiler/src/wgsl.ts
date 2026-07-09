@@ -4,11 +4,16 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
-import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
-import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
-import { isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
+import {
+  cudaIntegerRuntimeQueryTargetValueType,
+  cudaIntegerRuntimeQueryValue as modeledCudaIntegerRuntimeQueryValue,
+  cudaRuntimeAvailableDynamicSmemBytes,
+  cudaRuntimeMemInfoBytes,
+  cudaStreamGetCaptureInfoTargetValueType,
+  isCudaIntegerRuntimeQueryCall,
+} from "./cuda_runtime_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import {
   type MatrixTileLayout,
@@ -4663,34 +4668,13 @@ function emitCudaOccupancyAvailableDynamicSmemWrite(
   if (!target) return [];
   return emitIntPointerWrite(
     target,
-    { kind: "number", value: 49152, raw: "49152", span: expression.span },
+    { kind: "number", value: cudaRuntimeAvailableDynamicSmemBytes(), raw: String(cudaRuntimeAvailableDynamicSmemBytes()), span: expression.span },
     context,
     indentLevel,
     "unsupported-cuda-runtime",
     "cudaOccupancyAvailableDynamicSMemPerBlock expects a modeled uint pointer target",
     "uint",
   );
-}
-
-function cudaIntegerRuntimeQueryTargetValueType(callName: string | undefined): CudaLiteScalarType {
-  return callName === "cudaDeviceGetLimit" ||
-    callName === "cudaThreadGetLimit" ||
-    callName === "cudaGetDeviceFlags" ||
-    callName === "cudaStreamCreate" ||
-    callName === "cudaStreamCreateWithFlags" ||
-    callName === "cudaStreamCreateWithPriority" ||
-    callName === "cudaStreamGetFlags" ||
-    callName === "cudaStreamGetId" ||
-    callName === "cudaStreamEndCapture" ||
-    callName === "cudaGraphCreate" ||
-    callName === "cudaGraphInstantiate" ||
-    callName === "cudaGraphInstantiateWithFlags" ||
-    callName === "cudaGraphExecUpdate" ||
-    callName === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    callName === "cudaEventCreate" ||
-    callName === "cudaEventCreateWithFlags"
-    ? "uint"
-    : "int";
 }
 
 function cudaIntegerRuntimeQueryTarget(expression: Extract<CudaLiteExpression, { kind: "call" }>): CudaLiteExpression | undefined {
@@ -4722,8 +4706,8 @@ function emitCudaStreamGetCaptureInfoWrites(
       context,
       indentLevel,
       "unsupported-cuda-runtime",
-      `cudaStreamGetCaptureInfo expects a modeled ${cudaStreamGetCaptureInfoTargetType(targetIndex)} pointer target`,
-      cudaStreamGetCaptureInfoTargetType(targetIndex),
+      `cudaStreamGetCaptureInfo expects a modeled ${cudaStreamGetCaptureInfoTargetValueType(targetIndex)} pointer target`,
+      cudaStreamGetCaptureInfoTargetValueType(targetIndex),
     ));
   }
   return lines;
@@ -4797,10 +4781,6 @@ function emitCudaGraphExecUpdateWrites(
   return lines;
 }
 
-function cudaStreamGetCaptureInfoTargetType(index: number): CudaLiteScalarType {
-  return index === 1 ? "int" : "uint";
-}
-
 function emitCudaDeviceGetStreamPriorityRangeWrites(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: EmitContext,
@@ -4859,7 +4839,7 @@ function emitCudaMemGetInfoWrites(
   const lines: string[] = [];
   const freeTarget = expression.args[0];
   const totalTarget = expression.args[1];
-  const value = { kind: "number" as const, value: 268435456, raw: "268435456", span: expression.span };
+  const value = { kind: "number" as const, value: cudaRuntimeMemInfoBytes(), raw: String(cudaRuntimeMemInfoBytes()), span: expression.span };
   if (freeTarget) {
     lines.push(...emitIntPointerWrite(
       freeTarget,
@@ -4886,15 +4866,7 @@ function emitCudaMemGetInfoWrites(
 }
 
 function cudaIntegerRuntimeQueryValue(expression: Extract<CudaLiteExpression, { kind: "call" }>): number {
-  const name = expressionName(expression.callee);
-  if (name === "cudaGetDeviceCount") return 1;
-  if (name === "cudaDeviceGetAttribute") return cudaDeviceAttributeValue(constantIntegerExpression(expression.args[1]) ?? 0);
-  if (name === "cudaDeviceGetLimit" || name === "cudaThreadGetLimit") return cudaDeviceLimitValue(constantIntegerExpression(expression.args[1]) ?? 0);
-  if (name === "cudaDeviceCanAccessPeer") return 1;
-  if (name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags") return 1;
-  if (name === "cudaOccupancyAvailableDynamicSMemPerBlock") return 49152;
-  if (name === "cudaRuntimeGetVersion" || name === "cudaDriverGetVersion") return 12000;
-  return 0;
+  return modeledCudaIntegerRuntimeQueryValue(expressionName(expression.callee), (index) => constantIntegerExpression(expression.args[index]));
 }
 
 function constantIntegerExpression(expression: CudaLiteExpression | undefined): number | undefined {
