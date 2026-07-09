@@ -22,6 +22,10 @@ import {
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
+import {
+  isCudaBarrierCallName,
+  isCudaFenceCallName,
+} from "./cuda_sync_calls.js";
 import { referenceTypedArrayForScalar as typedArrayForScalar } from "./reference_scalars.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
@@ -282,14 +286,10 @@ function unsupportedSemanticReferenceOperation(
         if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "any", compiled))) return operation;
         break;
       case "barrier":
-        if (operation.callee !== "__syncthreads" && operation.callee !== "__syncwarp") return operation;
+        if (!isCudaBarrierCallName(operation.callee)) return operation;
         break;
       case "fence":
-        if (
-          operation.callee !== "__threadfence" &&
-          operation.callee !== "__threadfence_block" &&
-          operation.callee !== "__threadfence_system"
-        ) return operation;
+        if (!isCudaFenceCallName(operation.callee)) return operation;
         break;
       case "inline-asm":
         {

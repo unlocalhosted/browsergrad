@@ -64,6 +64,7 @@ import {
   isCudaAddressSpacePredicateCallName as isAddressSpacePredicateCall,
   isCudaPointerIdentityCallName as isPointerIdentityCall,
 } from "./cuda_pointer_calls.js";
+import { cudaSyncthreadsCollectiveOp } from "./cuda_sync_calls.js";
 import {
   isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
@@ -1466,13 +1467,7 @@ function syncthreadsPredicateCollective(
   args: readonly CudaLiteExpression[],
   context: ThreadContext,
 ): CollectiveYield | undefined {
-  const op = name === "__syncthreads_count"
-    ? "sum"
-    : name === "__syncthreads_and"
-      ? "all"
-      : name === "__syncthreads_or"
-        ? "any"
-        : undefined;
+  const op = cudaSyncthreadsCollectiveOp(name);
   if (!op) return undefined;
   const predicate = args[0];
   if (!predicate) return undefined;

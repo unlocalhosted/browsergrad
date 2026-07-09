@@ -1,5 +1,6 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { isCudaBarrierCallName } from "./cuda_sync_calls.js";
 import {
   type CudaLiteCallExpression,
   type CudaLiteExpression,
@@ -219,8 +220,7 @@ export function isSubgroupCallName(name: string): boolean {
 export function isBarrierCall(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  return name === "__syncthreads" ||
-    name === "__syncwarp" ||
+  return isCudaBarrierCallName(name) ||
     name === "bg_grid_sync" ||
     name?.endsWith("::sync") === true ||
     expression.callee.kind === "member" && expression.callee.property === "sync";

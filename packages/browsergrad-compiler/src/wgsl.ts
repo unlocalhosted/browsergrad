@@ -21,6 +21,12 @@ import {
   cudaAddressSpacePredicateKind,
   isCudaAddressSpacePredicateCallName as isAddressSpacePredicateCall,
 } from "./cuda_pointer_calls.js";
+import {
+  cudaSyncthreadsPredicateReduction,
+  isCudaBarrierCallName,
+  isCudaFenceCallName,
+  isCudaSyncthreadsPredicateCallName,
+} from "./cuda_sync_calls.js";
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import {
@@ -5687,7 +5693,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor") {
       return expression.args[0] ? expressionValueTypeForEmit(expression.args[0], context) : undefined;
     }
-    if (isSyncthreadsPredicateCall(name)) return "int";
+    if (isCudaSyncthreadsPredicateCallName(name)) return "int";
     if (isAddressSpacePredicateCall(name)) return "int";
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
     if (expression.callee.kind === "member" && expression.callee.property === "ballot") return "uint";
@@ -6191,10 +6197,6 @@ function curandStateAddressSpace(
   return "function";
 }
 
-function isSyncthreadsPredicateCall(name: string | undefined): name is "__syncthreads_count" | "__syncthreads_and" | "__syncthreads_or" {
-  return name === "__syncthreads_count" || name === "__syncthreads_and" || name === "__syncthreads_or";
-}
-
 function emitAddressSpacePredicateCall(
   name: "__isGlobal" | "__isShared" | "__isConstant" | "__isLocal",
   target: CudaLiteExpression,
@@ -6359,20 +6361,13 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     return `u32(${parts.base})`;
   }
   if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return "0";
+  if (isCudaBarrierCallName(name)) return "workgroupBarrier()";
+  if (isCudaFenceCallName(name)) return "storageBarrier()";
+  const syncthreadsReduction = cudaSyncthreadsPredicateReduction(name);
+  if (syncthreadsReduction !== undefined) {
+    return emitWorkgroupPredicateReduceCall(syncthreadsReduction, expression.args[0], context, cooperativeCallbacks(context));
+  }
   switch (name) {
-    case "__syncthreads":
-    case "__syncwarp":
-      return "workgroupBarrier()";
-    case "__threadfence":
-    case "__threadfence_block":
-    case "__threadfence_system":
-      return "storageBarrier()";
-    case "__syncthreads_count":
-      return emitWorkgroupPredicateReduceCall("count", expression.args[0], context, cooperativeCallbacks(context));
-    case "__syncthreads_and":
-      return emitWorkgroupPredicateReduceCall("and", expression.args[0], context, cooperativeCallbacks(context));
-    case "__syncthreads_or":
-      return emitWorkgroupPredicateReduceCall("or", expression.args[0], context, cooperativeCallbacks(context));
     case "__nanosleep":
     case "__prof_trigger":
       return "0";

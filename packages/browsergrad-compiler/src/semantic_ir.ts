@@ -30,6 +30,10 @@ import {
   isCudaAddressSpacePredicateCallName as isAddressSpacePredicateName,
   isCudaPointerIdentityCallName,
 } from "./cuda_pointer_calls.js";
+import {
+  CUDA_BARRIER_CALL_NAMES,
+  CUDA_FENCE_CALL_NAMES,
+} from "./cuda_sync_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -447,8 +451,8 @@ export function isSemanticKernelIrOperation(
 const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
-const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::sync"]);
-const FENCE_CALLS = new Set(["__threadfence", "__threadfence_block", "__threadfence_system"]);
+const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, "grid.sync", "cg::sync"]);
+const FENCE_CALLS: ReadonlySet<string> = new Set(CUDA_FENCE_CALL_NAMES);
 const ATOMIC_CALL_PREFIX = "atomic";
 const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
 const SURFACE_WRITE_CALLS = new Set(["surf2Dwrite", "surf2DLayeredwrite", "surf3Dwrite"]);

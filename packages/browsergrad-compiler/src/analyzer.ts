@@ -37,6 +37,10 @@ import {
   isCudaAddressSpacePredicateCallName as isAddressSpacePredicateCall,
   isCudaPointerIdentityCallName as isPointerIdentityCall,
 } from "./cuda_pointer_calls.js";
+import {
+  isCudaBarrierCallName,
+  isCudaSyncthreadsPredicateCallName as isSyncthreadsPredicateBuiltin,
+} from "./cuda_sync_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
@@ -1818,7 +1822,7 @@ function validateCallExpression(
   if (wmma) return validateWmmaBuiltin(expression, wmma, scope, diagnostics, walkExpression);
 
   if (callName === "bg_subgroup_add") requiredFeatures.add("subgroups");
-  if (callName === "__syncthreads" || callName === "__syncwarp") {
+  if (isCudaBarrierCallName(callName)) {
     diagnostics.push(error("barrier-expression", `${callName}() must be used as a standalone statement`, expression.span));
   }
   if (callName === "printf") {
@@ -4134,10 +4138,6 @@ function isVoteBuiltin(callName: string): boolean {
     callName === "__match_any_sync";
 }
 
-function isSyncthreadsPredicateBuiltin(callName: string): boolean {
-  return callName === "__syncthreads_count" || callName === "__syncthreads_and" || callName === "__syncthreads_or";
-}
-
 function isMaskedWarpReductionBuiltin(callName: string): boolean {
   return callName === "__reduce_add_sync" || callName === "__reduce_min_sync" || callName === "__reduce_max_sync";
 }
@@ -5103,7 +5103,7 @@ function expressionIsDivergent(
 function isBarrierCall(expression: CudaLiteExpression): expression is Extract<CudaLiteExpression, { kind: "call" }> {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  return name === "__syncthreads" || name === "__syncwarp";
+  return isCudaBarrierCallName(name);
 }
 
 function isInlineAsmBarrier(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { kind: "asm" }> {
