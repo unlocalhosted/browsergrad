@@ -24,6 +24,19 @@ export function referenceSharedDeclarationsFor(
   return out;
 }
 
+export function referenceBlockScopedNames(statements: readonly CudaLiteStatement[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const statement of statements) {
+    if ((statement.kind === "var" && statement.storage === "local") || statement.kind === "dim3" || statement.kind === "cooperative-group") {
+      names.add(statement.name);
+    }
+    if (statement.kind === "for" && statement.init?.kind === "var" && statement.init.storage === "local") {
+      names.add(statement.init.name);
+    }
+  }
+  return names;
+}
+
 export function referenceUsesGridSync(statements: readonly CudaLiteStatement[]): boolean {
   const gridGroups = new Set<string>();
   const visitExpression = (expression: CudaLiteExpression): boolean => {

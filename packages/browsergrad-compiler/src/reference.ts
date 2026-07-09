@@ -43,6 +43,7 @@ import {
   referenceDeviceGlobalInitialValue as deviceGlobalInitialValue,
 } from "./reference_initializers.js";
 import {
+  referenceBlockScopedNames as blockScopedNames,
   referenceSharedDeclarationsFor as sharedDeclarationsFor,
   referenceUsesGridSync as usesGridSync,
 } from "./reference_ast_scans.js";
@@ -879,19 +880,6 @@ function* execStatements(
         return { kind: "break" };
     }
   }
-}
-
-function blockScopedNames(statements: readonly CudaLiteStatement[]): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const statement of statements) {
-    if ((statement.kind === "var" && statement.storage === "local") || statement.kind === "dim3" || statement.kind === "cooperative-group") {
-      names.add(statement.name);
-    }
-    if (statement.kind === "for" && statement.init?.kind === "var" && statement.init.storage === "local") {
-      names.add(statement.init.name);
-    }
-  }
-  return names;
 }
 
 function execInlineAsm(
