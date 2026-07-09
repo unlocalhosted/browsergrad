@@ -76,6 +76,9 @@ export const SEMANTIC_CURAND_ARITIES: readonly (readonly [string, readonly [min:
   ["skipahead", [2, 2]],
 ];
 
+const SEMANTIC_CURAND_ARITY_BY_NAME: ReadonlyMap<string, number> =
+  new Map(SEMANTIC_CURAND_ARITIES.map(([name, [arity]]) => [name, arity]));
+
 export function isSemanticCurandCallName(name: string | undefined): boolean {
   return name !== undefined && SEMANTIC_CURAND_CALLS.has(name);
 }
@@ -102,6 +105,25 @@ export function isSemanticCurandPoissonCallName(name: string | undefined): boole
 
 export function isSemanticCurandVectorCallName(name: string | undefined): boolean {
   return name !== undefined && SEMANTIC_CURAND_VECTOR_RETURN_TYPES.has(name);
+}
+
+export function semanticCurandStateArgumentIndex(name: string | undefined): 0 | 1 | 3 | undefined {
+  if (isSemanticCurandInitCallName(name)) return 3;
+  if (isSemanticCurandSkipaheadCallName(name)) return 1;
+  if (isSemanticCurandStateOnlyCallName(name) || isSemanticCurandDistributionCallName(name)) return 0;
+  return undefined;
+}
+
+export function semanticCurandScalarArgumentIndices(name: string | undefined): readonly number[] {
+  if (isSemanticCurandInitCallName(name)) return [0, 1, 2];
+  if (isSemanticCurandSkipaheadCallName(name)) return [0];
+  if (isSemanticCurandPoissonCallName(name)) return [1];
+  if (isSemanticCurandDistributionCallName(name)) return [1, 2];
+  return [];
+}
+
+export function semanticCurandArity(name: string | undefined): number | undefined {
+  return name === undefined ? undefined : SEMANTIC_CURAND_ARITY_BY_NAME.get(name);
 }
 
 export function semanticCurandReturnType(name: string | undefined): SemanticCurandReturnType | undefined {

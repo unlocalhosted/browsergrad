@@ -49,11 +49,9 @@ import {
 import {
   SEMANTIC_CURAND_CALLS,
   SEMANTIC_CURAND_VECTOR_CALLS,
-  isSemanticCurandDistributionCallName,
-  isSemanticCurandInitCallName,
-  isSemanticCurandPoissonCallName,
-  isSemanticCurandSkipaheadCallName,
-  isSemanticCurandStateOnlyCallName,
+  semanticCurandArity,
+  semanticCurandScalarArgumentIndices,
+  semanticCurandStateArgumentIndex,
 } from "./semantic_curand_intrinsics.js";
 import {
   SEMANTIC_ADDRESS_PREDICATE_CALLS,
@@ -1068,30 +1066,12 @@ function semanticWgslCurandCallSupported(
   ir?: SemanticKernelIrModule,
 ): boolean {
   if (expression.callee.kind !== "symbol" || !SEMANTIC_CURAND_CALLS.has(expression.callee.name)) return false;
-  if (isSemanticCurandInitCallName(expression.callee.name)) {
-    return expression.args.length === 4 &&
-      expression.args.slice(0, 3).every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir)) &&
-      semanticCurandStateAddressSpace(expression.args[3]!) !== undefined;
-  }
-  if (isSemanticCurandStateOnlyCallName(expression.callee.name)) {
-    return expression.args.length === 1 && semanticCurandStateAddressSpace(expression.args[0]!) !== undefined;
-  }
-  if (isSemanticCurandPoissonCallName(expression.callee.name)) {
-    return expression.args.length === 2 &&
-      semanticCurandStateAddressSpace(expression.args[0]!) !== undefined &&
-      semanticWgslExpressionSupported(expression.args[1]!, "scalar", ir);
-  }
-  if (isSemanticCurandSkipaheadCallName(expression.callee.name)) {
-    return expression.args.length === 2 &&
-      semanticWgslExpressionSupported(expression.args[0]!, "scalar", ir) &&
-      semanticCurandStateAddressSpace(expression.args[1]!) !== undefined;
-  }
-  if (isSemanticCurandDistributionCallName(expression.callee.name)) {
-    return expression.args.length === 3 &&
-      semanticCurandStateAddressSpace(expression.args[0]!) !== undefined &&
-      expression.args.slice(1).every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-  }
-  return false;
+  const stateIndex = semanticCurandStateArgumentIndex(expression.callee.name);
+  return stateIndex !== undefined &&
+    expression.args.length === semanticCurandArity(expression.callee.name) &&
+    semanticCurandStateAddressSpace(expression.args[stateIndex]!) !== undefined &&
+    semanticCurandScalarArgumentIndices(expression.callee.name)
+      .every((index) => semanticWgslExpressionSupported(expression.args[index]!, "scalar", ir));
 }
 
 function semanticWgslSubgroupCallSupported(

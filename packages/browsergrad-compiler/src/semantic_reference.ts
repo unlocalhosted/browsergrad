@@ -91,11 +91,9 @@ import {
 } from "./semantic_vector_intrinsics.js";
 import {
   isSemanticCurandCallName,
-  isSemanticCurandDistributionCallName,
-  isSemanticCurandInitCallName,
-  isSemanticCurandPoissonCallName,
-  isSemanticCurandSkipaheadCallName,
-  isSemanticCurandStateOnlyCallName,
+  semanticCurandArity,
+  semanticCurandScalarArgumentIndices,
+  semanticCurandStateArgumentIndex,
 } from "./semantic_curand_intrinsics.js";
 import {
   SEMANTIC_ADDRESS_PREDICATE_CALLS,
@@ -543,30 +541,12 @@ function semanticReferenceCurandCallSupported(
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
   if (expression.callee.kind !== "symbol" || !isSemanticCurandCallName(expression.callee.name)) return false;
-  if (isSemanticCurandInitCallName(expression.callee.name)) {
-    return expression.args.length === 4 &&
-      expression.args.slice(0, 3).every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled)) &&
-      semanticCurandState(expression.args[3]!) !== undefined;
-  }
-  if (isSemanticCurandStateOnlyCallName(expression.callee.name)) {
-    return expression.args.length === 1 && semanticCurandState(expression.args[0]!) !== undefined;
-  }
-  if (isSemanticCurandPoissonCallName(expression.callee.name)) {
-    return expression.args.length === 2 &&
-      semanticCurandState(expression.args[0]!) !== undefined &&
-      semanticReferenceExpressionSupported(expression.args[1]!, "scalar", compiled);
-  }
-  if (isSemanticCurandSkipaheadCallName(expression.callee.name)) {
-    return expression.args.length === 2 &&
-      semanticReferenceExpressionSupported(expression.args[0]!, "scalar", compiled) &&
-      semanticCurandState(expression.args[1]!) !== undefined;
-  }
-  if (isSemanticCurandDistributionCallName(expression.callee.name)) {
-    return expression.args.length === 3 &&
-      semanticCurandState(expression.args[0]!) !== undefined &&
-      expression.args.slice(1).every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
-  }
-  return false;
+  const stateIndex = semanticCurandStateArgumentIndex(expression.callee.name);
+  return stateIndex !== undefined &&
+    expression.args.length === semanticCurandArity(expression.callee.name) &&
+    semanticCurandState(expression.args[stateIndex]!) !== undefined &&
+    semanticCurandScalarArgumentIndices(expression.callee.name)
+      .every((index) => semanticReferenceExpressionSupported(expression.args[index]!, "scalar", compiled));
 }
 
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
