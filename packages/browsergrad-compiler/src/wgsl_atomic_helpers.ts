@@ -2,8 +2,19 @@ import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
 
 export type WgslAtomicAddressSpace = "storage" | "workgroup";
 export type WgslAtomicIntegerScalar = "i32" | "u32";
+export type WgslAtomicCallee =
+  | "atomicAdd"
+  | "atomicSub"
+  | "atomicMin"
+  | "atomicMax"
+  | "atomicAnd"
+  | "atomicOr"
+  | "atomicXor"
+  | "atomicExchange"
+  | "atomicCompareExchangeWeak";
 export type WgslIntViewAtomicKind = "Add" | "Sub" | "Min" | "Max" | "And" | "Or" | "Xor" | "Exchange";
 export type WgslIntViewAtomicEmitKind = WgslIntViewAtomicKind | "CompareExchange";
+export type WgslIntegerLoopAtomicKind = "Inc" | "Dec";
 
 export interface WgslIntegerAtomicLoopTarget {
   readonly valueType: string;
@@ -46,6 +57,29 @@ export function isAtomicExchangeCallName(name: string | undefined): boolean {
 export function isAtomicReturnCallName(name: string | undefined): boolean {
   const op = semanticAtomicOperation(name);
   return op !== undefined && op !== "cas";
+}
+
+export function wgslAtomicCalleeForCudaAtomic(name: string | undefined): WgslAtomicCallee | undefined {
+  switch (semanticAtomicOperation(name)) {
+    case "add": return "atomicAdd";
+    case "sub": return "atomicSub";
+    case "min": return "atomicMin";
+    case "max": return "atomicMax";
+    case "and": return "atomicAnd";
+    case "or": return "atomicOr";
+    case "xor": return "atomicXor";
+    case "exchange": return "atomicExchange";
+    case "cas": return "atomicCompareExchangeWeak";
+    default: return undefined;
+  }
+}
+
+export function wgslIntegerLoopAtomicKindForCudaAtomic(name: string | undefined): WgslIntegerLoopAtomicKind | undefined {
+  switch (semanticAtomicOperation(name)) {
+    case "inc": return "Inc";
+    case "dec": return "Dec";
+    default: return undefined;
+  }
 }
 
 export function emitFloatAtomicAddHelper(addressSpace: WgslAtomicAddressSpace): string[] {
