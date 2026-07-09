@@ -1744,6 +1744,12 @@ function validateInlineAsmStatement(
   if (op?.kind === "bfind-u32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", outputs[0]?.span ?? statement.span));
   }
+  if (op?.kind === "popc-b32" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "popc.b32 inline PTX expects one output operand and one input operand", statement.span));
+  }
+  if (op?.kind === "popc-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "popc.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+  }
   if (op?.kind === "u8x4-sad-add" && (outputs.length !== 1 || statement.inputs.length !== 3)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects one output operand and three input operands", statement.span));
   }

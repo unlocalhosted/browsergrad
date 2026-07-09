@@ -2593,6 +2593,16 @@ __global__ void ptxIsspacepPredicates(float *global, int *out) {
     out[3] = sg;
   }
 }`,
+  ptxPopcB32: `
+__device__ unsigned int popc_ptx(unsigned int word) {
+  unsigned int ret;
+  asm volatile("popc.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void ptxPopcB32(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = popc_ptx(input[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -13864,6 +13874,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [...new Array(32).fill(0), ...new Array(32).fill(1)] },
+          },
+          {
+            name: "inline-asm:popc-b32",
+            source: SOURCES.ptxPopcB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+                input: new Uint32Array([0, 1, 0xf0f0f0f0, 0xffffffff]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 1, 16, 32] },
           },
           {
             name: "inline-asm:special-reg-single-percent",

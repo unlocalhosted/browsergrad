@@ -11785,6 +11785,27 @@ __global__ void bfindKernel(uint *out, uint *input) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0xffffffff, 0, 4, 31]);
   });
 
+  it("lowers inline PTX popc.b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int popc_ptx(unsigned int word) {
+  unsigned int ret;
+  asm volatile("popc.b32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void popcKernel(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = popc_ptx(input[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4), input: new Uint32Array([0, 1, 0xf0f0f0f0, 0xffffffff]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("countOneBits");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 16, 32]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {

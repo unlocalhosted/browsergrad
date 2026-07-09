@@ -892,6 +892,18 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), found, context);
     return;
   }
+  if (op?.kind === "popc-b32") {
+    if (statement.inputs.length !== 1) throw compilerFailure("popc.b32 inline asm expects one input");
+    if (outputs.length !== 1) throw compilerFailure("popc.b32 inline asm expects one output operand");
+    let bits = valueAsNumber(evalExpression(statement.inputs[0]!, context), "popc.b32") >>> 0;
+    let count = 0;
+    while (bits !== 0) {
+      bits &= bits - 1;
+      count++;
+    }
+    writeLValue(resolveLValue(outputs[0]!, context), count, context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
