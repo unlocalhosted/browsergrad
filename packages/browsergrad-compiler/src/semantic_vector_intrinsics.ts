@@ -13,6 +13,25 @@ export const SEMANTIC_HALF2_SCALAR_CALLS = new Set([
   "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2", "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
 ]);
 
+export const SEMANTIC_HALF2_UNARY_CALLS = new Set([
+  "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2", "__hisnan2",
+]);
+
+export const SEMANTIC_HALF2_VECTOR_COMPARISON_CALLS = new Set([
+  "__heq2", "__hne2", "__hgt2", "__hge2", "__hlt2", "__hle2",
+  "__hequ2", "__hneu2", "__hgtu2", "__hgeu2", "__hltu2", "__hleu2",
+]);
+
+export const SEMANTIC_HALF2_MASK_COMPARISON_CALLS = new Set([
+  "__heq2_mask", "__hne2_mask", "__hgt2_mask", "__hge2_mask", "__hlt2_mask", "__hle2_mask",
+  "__hequ2_mask", "__hneu2_mask", "__hgtu2_mask", "__hgeu2_mask", "__hltu2_mask", "__hleu2_mask",
+]);
+
+export const SEMANTIC_HALF2_BOOL_COMPARISON_CALLS = new Set([
+  "__hbeq2", "__hbne2", "__hbgt2", "__hbge2", "__hblt2", "__hble2",
+  "__hbequ2", "__hbneu2", "__hbgtu2", "__hbgeu2", "__hbltu2", "__hbleu2",
+]);
+
 export const SEMANTIC_BF162_UNARY_VECTOR_CALLS = new Set([
   "__habs2", "__hneg2",
   "h2ceil", "h2floor", "h2rcp", "h2rsqrt", "h2sqrt", "h2trunc",
@@ -83,4 +102,26 @@ export function isSemanticBf162OverloadedVectorCall(name: string): boolean {
     SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name) ||
     SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name) ||
     SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name);
+}
+
+export function isSemanticHalf2UnaryCall(name: string): boolean {
+  return SEMANTIC_HALF2_UNARY_CALLS.has(name);
+}
+
+export function isSemanticHalf2ComparisonCall(name: string): boolean {
+  return isSemanticHalf2VectorComparisonCall(name) ||
+    isSemanticHalf2MaskComparisonCall(name) ||
+    isSemanticHalf2BooleanComparisonCall(name);
+}
+
+export function isSemanticHalf2VectorComparisonCall(name: string): boolean {
+  return SEMANTIC_HALF2_VECTOR_COMPARISON_CALLS.has(name);
+}
+
+export function isSemanticHalf2MaskComparisonCall(name: string): boolean {
+  return SEMANTIC_HALF2_MASK_COMPARISON_CALLS.has(name);
+}
+
+export function isSemanticHalf2BooleanComparisonCall(name: string): boolean {
+  return SEMANTIC_HALF2_BOOL_COMPARISON_CALLS.has(name);
 }

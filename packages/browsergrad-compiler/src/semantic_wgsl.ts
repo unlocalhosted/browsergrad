@@ -35,6 +35,10 @@ import {
   SEMANTIC_BF162_VECTOR_COMPARISON_CALLS,
   SEMANTIC_HALF2_SCALAR_CALLS,
   SEMANTIC_HALF2_VECTOR_CALLS,
+  isSemanticHalf2BooleanComparisonCall,
+  isSemanticHalf2ComparisonCall,
+  isSemanticHalf2MaskComparisonCall,
+  isSemanticHalf2UnaryCall,
   semanticBf162VectorReturnType,
   semanticHalf2VectorReturnType,
 } from "./semantic_vector_intrinsics.js";
@@ -4738,18 +4742,6 @@ function emitSemanticHalf2Call(
   throw semanticWgslError(`semantic WGSL does not support half2 call '${name}'`, expression.span);
 }
 
-function isSemanticHalf2UnaryCall(name: string): boolean {
-  return name === "__habs2" ||
-    name === "__hceil2" ||
-    name === "__hfloor2" ||
-    name === "__hneg2" ||
-    name === "__hrcp2" ||
-    name === "__hrsqrt2" ||
-    name === "__hsqrt2" ||
-    name === "__htrunc2" ||
-    name === "__hisnan2";
-}
-
 function emitSemanticHalf2UnaryCall(name: string, value: string): string {
   switch (name) {
     case "__habs2": return `abs(${value})`;
@@ -4763,57 +4755,6 @@ function emitSemanticHalf2UnaryCall(name: string, value: string): string {
     case "__hisnan2": return `select(vec2<f16>(0.0), vec2<f16>(1.0), ${emitSemanticHalf2IsNanPredicate(value)})`;
     default: return value;
   }
-}
-
-function isSemanticHalf2ComparisonCall(name: string): boolean {
-  return isSemanticHalf2VectorComparisonCall(name) ||
-    isSemanticHalf2MaskComparisonCall(name) ||
-    isSemanticHalf2BooleanComparisonCall(name);
-}
-
-function isSemanticHalf2VectorComparisonCall(name: string): boolean {
-  return name === "__heq2" ||
-    name === "__hne2" ||
-    name === "__hgt2" ||
-    name === "__hge2" ||
-    name === "__hlt2" ||
-    name === "__hle2" ||
-    name === "__hequ2" ||
-    name === "__hneu2" ||
-    name === "__hgtu2" ||
-    name === "__hgeu2" ||
-    name === "__hltu2" ||
-    name === "__hleu2";
-}
-
-function isSemanticHalf2MaskComparisonCall(name: string): boolean {
-  return name === "__heq2_mask" ||
-    name === "__hne2_mask" ||
-    name === "__hgt2_mask" ||
-    name === "__hge2_mask" ||
-    name === "__hlt2_mask" ||
-    name === "__hle2_mask" ||
-    name === "__hequ2_mask" ||
-    name === "__hneu2_mask" ||
-    name === "__hgtu2_mask" ||
-    name === "__hgeu2_mask" ||
-    name === "__hltu2_mask" ||
-    name === "__hleu2_mask";
-}
-
-function isSemanticHalf2BooleanComparisonCall(name: string): boolean {
-  return name === "__hbeq2" ||
-    name === "__hbne2" ||
-    name === "__hbgt2" ||
-    name === "__hbge2" ||
-    name === "__hblt2" ||
-    name === "__hble2" ||
-    name === "__hbequ2" ||
-    name === "__hbneu2" ||
-    name === "__hbgtu2" ||
-    name === "__hbgeu2" ||
-    name === "__hbltu2" ||
-    name === "__hbleu2";
 }
 
 function emitSemanticHalf2ComparisonCall(name: string, left: string, right: string): string {
