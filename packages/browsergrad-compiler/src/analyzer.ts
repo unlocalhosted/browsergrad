@@ -42,6 +42,10 @@ import {
   isCudaPointerIdentityCallName as isPointerIdentityCall,
 } from "./cuda_pointer_calls.js";
 import {
+  isCudaBfloat16ScalarArithmeticCallName as isBfloat16ScalarArithmetic,
+  isCudaBfloat16ScalarPredicateCallName as isBfloat16ScalarPredicate,
+} from "./cuda_bfloat16_intrinsics.js";
+import {
   isCudaBarrierCallName,
   isCudaSyncthreadsPredicateCallName as isSyncthreadsPredicateBuiltin,
 } from "./cuda_sync_calls.js";
@@ -2808,55 +2812,6 @@ function validatePointerIdentityCall(
   return info.kind === "pointer" || info.kind === "pool-pointer"
     ? info
     : { kind: "pointer", valueType: info.valueType ?? "float", symbol: info.symbol };
-}
-
-function isBfloat16ScalarArithmetic(name: string): boolean {
-  return name === "__habs" ||
-    name === "__hceil" ||
-    name === "__hfloor" ||
-    name === "__hrcp" ||
-    name === "__hrsqrt" ||
-    name === "hrsqrt" ||
-    name === "__hsqrt" ||
-    name === "__htrunc" ||
-    name === "__hneg" ||
-    name === "hexp" ||
-    name === "__hadd" ||
-    name === "__hadd_rn" ||
-    name === "__hadd_sat" ||
-    name === "__hsub" ||
-    name === "__hsub_rn" ||
-    name === "__hsub_sat" ||
-    name === "__hmul" ||
-    name === "__hmul_rn" ||
-    name === "__hmul_sat" ||
-    name === "__hdiv" ||
-    name === "__hdiv_rn" ||
-    name === "__hfma" ||
-    name === "__hfma_rn" ||
-    name === "__hfma_sat" ||
-    name === "__hfma_relu" ||
-    name === "__hmin" ||
-    name === "__hmax" ||
-    name === "__hmin_nan" ||
-    name === "__hmax_nan";
-}
-
-function isBfloat16ScalarPredicate(name: string): boolean {
-  return name === "__hisnan" ||
-    name === "__hisinf" ||
-    name === "__heq" ||
-    name === "__hne" ||
-    name === "__hgt" ||
-    name === "__hge" ||
-    name === "__hlt" ||
-    name === "__hle" ||
-    name === "__hequ" ||
-    name === "__hneu" ||
-    name === "__hgtu" ||
-    name === "__hgeu" ||
-    name === "__hltu" ||
-    name === "__hleu";
 }
 
 function isFillRegsBuiltin(name: string): boolean {
