@@ -30,6 +30,9 @@ import {
 } from "./cuda_cp_async.js";
 import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import {
+  isCudaFloatDecomposeCallName as isFloatDecomposeCallName,
+  isCudaFrexpCallName as isFrexpCallName,
+  isCudaModfCallName as isModfCallName,
   isCudaNanPayloadCallName as isNanPayloadCallName,
   isCudaSincosCallName as isSincosCallName,
 } from "./cuda_math_calls.js";
@@ -2132,9 +2135,9 @@ function validateCallExpression(
   }
   const vectorMath = validateVectorMinMaxCall(expression, callName, scope, diagnostics, requiredFeatures, walkExpression);
   if (vectorMath) return vectorMath;
-  if (callName === "frexp" || callName === "frexpf" || callName === "modf" || callName === "modff" || callName === "remquo" || callName === "remquof") {
-    if (callName === "frexp" || callName === "frexpf") validateFrexp(expression, scope, diagnostics, walkExpression);
-    else if (callName === "modf" || callName === "modff") validateModf(expression, scope, diagnostics, walkExpression);
+  if (isFloatDecomposeCallName(callName)) {
+    if (isFrexpCallName(callName)) validateFrexp(expression, scope, diagnostics, walkExpression);
+    else if (isModfCallName(callName)) validateModf(expression, scope, diagnostics, walkExpression);
     else validateRemquo(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "float" };
   }

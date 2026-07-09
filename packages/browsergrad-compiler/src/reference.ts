@@ -55,7 +55,10 @@ import {
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
 import {
+  isCudaFrexpCallName as isFrexpCallName,
+  isCudaModfCallName as isModfCallName,
   isCudaNanPayloadCallName as isNanPayloadCallName,
+  isCudaRemquoCallName as isRemquoCallName,
   isCudaSincosCallName as isSincosCallName,
   isCudaSincosPiCallName as isSincosPiCallName,
 } from "./cuda_math_calls.js";
@@ -3864,9 +3867,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   );
   const vectorMinMax = evalVectorMinMaxCall(name, expression, context);
   if (vectorMinMax !== undefined) return vectorMinMax;
-  if (name === "frexp" || name === "frexpf") return evalFrexp(expression, context);
-  if (name === "modf" || name === "modff") return evalModf(expression, context);
-  if (name === "remquo" || name === "remquof") return evalRemquo(expression, context);
+  if (isFrexpCallName(name)) return evalFrexp(expression, context);
+  if (isModfCallName(name)) return evalModf(expression, context);
+  if (isRemquoCallName(name)) return evalRemquo(expression, context);
   if (isSincosCallName(name)) return evalSincos(expression, context);
   if (isNanPayloadCallName(name)) return Number.NaN;
   const args = expression.args.map((arg) => evalNumber(arg, context));

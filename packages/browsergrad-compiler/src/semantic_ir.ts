@@ -23,6 +23,9 @@ import {
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
 import {
+  isCudaFrexpCallName as isFrexpCallName,
+  isCudaModfCallName as isModfCallName,
+  isCudaRemquoCallName as isRemquoCallName,
   isCudaSincosCallName as isSincosCallName,
   isCudaSincosPiCallName as isSincosPiCallName,
 } from "./cuda_math_calls.js";
@@ -1622,18 +1625,6 @@ function roundTiesToEvenNumber(value: number): number {
   if (diff < 0.5) return floor;
   if (diff > 0.5) return floor + 1;
   return floor % 2 === 0 ? floor : floor + 1;
-}
-
-function isModfCallName(name: string): boolean {
-  return name === "modf" || name === "modff";
-}
-
-function isRemquoCallName(name: string): boolean {
-  return name === "remquo" || name === "remquof";
-}
-
-function isFrexpCallName(name: string): boolean {
-  return name === "frexp" || name === "frexpf";
 }
 
 function isVibMinMaxCallName(name: string): boolean {

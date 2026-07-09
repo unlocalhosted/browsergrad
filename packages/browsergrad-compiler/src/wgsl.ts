@@ -13,7 +13,10 @@ import {
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
 } from "./cuda_cp_async.js";
 import {
+  isCudaFrexpCallName as isFrexpCallName,
+  isCudaModfCallName as isModfCallName,
   isCudaNanPayloadCallName as isNanPayloadCallName,
+  isCudaRemquoCallName as isRemquoCallName,
   isCudaSincosCallName as isSincosCallName,
   isCudaSincosPiCallName as isSincosPiCallName,
 } from "./cuda_math_calls.js";
@@ -1565,7 +1568,7 @@ function emitVarInitWithFrexpPointerExponent(
   if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
   if (statement.valueType !== "float" || statement.init?.kind !== "call") return undefined;
   const name = expressionName(statement.init.callee);
-  if (name !== "frexp" && name !== "frexpf") return undefined;
+  if (!isFrexpCallName(name)) return undefined;
   const exponent = statement.init.args[1];
   if (!exponent || (exponent.kind === "unary" && exponent.operator === "&" && exponent.argument.kind === "identifier")) return undefined;
   const value = statement.init.args[0] ? emitExpressionAsValueType(statement.init.args[0], "float", context) : "0.0";
@@ -1593,7 +1596,7 @@ function emitVarInitWithModfIntpart(
   if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
   if (statement.valueType !== "float" || statement.init?.kind !== "call") return undefined;
   const name = expressionName(statement.init.callee);
-  if (name !== "modf" && name !== "modff") return undefined;
+  if (!isModfCallName(name)) return undefined;
   const intpart = statement.init.args[1];
   if (!intpart || (intpart.kind === "unary" && intpart.operator === "&" && intpart.argument.kind === "identifier")) return undefined;
   const value = statement.init.args[0] ? emitExpressionAsValueType(statement.init.args[0], "float", context) : "0.0";
@@ -1620,7 +1623,7 @@ function emitVarInitWithRemquoQuotient(
   if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
   if (statement.valueType !== "float" || statement.init?.kind !== "call") return undefined;
   const name = expressionName(statement.init.callee);
-  if (name !== "remquo" && name !== "remquof") return undefined;
+  if (!isRemquoCallName(name)) return undefined;
   const quotient = statement.init.args[2];
   if (!quotient) return undefined;
   const x = statement.init.args[0] ? emitExpressionAsValueType(statement.init.args[0], "float", context) : "0.0";
@@ -3567,7 +3570,7 @@ function emitModfExpressionStatement(
 ): string[] | undefined {
   if (expression.kind !== "call") return undefined;
   const name = expressionName(expression.callee);
-  if (name !== "modf" && name !== "modff") return undefined;
+  if (!isModfCallName(name)) return undefined;
   const intpart = expression.args[1];
   if (!intpart || (intpart.kind === "unary" && intpart.operator === "&" && intpart.argument.kind === "identifier")) return undefined;
   const intpartTemp = context.nameFor(`bg_modf_int_${expression.span.start}`);
@@ -3589,7 +3592,7 @@ function emitRemquoExpressionStatement(
 ): string[] | undefined {
   if (expression.kind !== "call") return undefined;
   const name = expressionName(expression.callee);
-  if (name !== "remquo" && name !== "remquof") return undefined;
+  if (!isRemquoCallName(name)) return undefined;
   const quotient = expression.args[2];
   if (!quotient) return undefined;
   const quotientTemp = context.nameFor(`bg_remquo_quo_${expression.span.start}`);
@@ -4167,7 +4170,7 @@ function emitAssignmentWithFrexpPointerExponent(
 ): string[] | undefined {
   if (expression.operator !== "=" || expression.right.kind !== "call") return undefined;
   const name = expressionName(expression.right.callee);
-  if (name !== "frexp" && name !== "frexpf") return undefined;
+  if (!isFrexpCallName(name)) return undefined;
   const exponent = expression.right.args[1];
   if (!exponent || (exponent.kind === "unary" && exponent.operator === "&" && exponent.argument.kind === "identifier")) return undefined;
   const exponentTemp = context.nameFor(`bg_frexp_exp_${expression.right.span.start}`);
@@ -4196,7 +4199,7 @@ function emitAssignmentWithModfIntpart(
 ): string[] | undefined {
   if (expression.operator !== "=" || expression.right.kind !== "call") return undefined;
   const name = expressionName(expression.right.callee);
-  if (name !== "modf" && name !== "modff") return undefined;
+  if (!isModfCallName(name)) return undefined;
   const intpart = expression.right.args[1];
   if (!intpart || (intpart.kind === "unary" && intpart.operator === "&" && intpart.argument.kind === "identifier")) return undefined;
   const intpartTemp = context.nameFor(`bg_modf_int_${expression.right.span.start}`);
@@ -4219,7 +4222,7 @@ function emitAssignmentWithRemquoQuotient(
 ): string[] | undefined {
   if (expression.operator !== "=" || expression.right.kind !== "call") return undefined;
   const name = expressionName(expression.right.callee);
-  if (name !== "remquo" && name !== "remquof") return undefined;
+  if (!isRemquoCallName(name)) return undefined;
   const quotient = expression.right.args[2];
   if (!quotient) return undefined;
   const quotientTemp = context.nameFor(`bg_remquo_quo_${expression.right.span.start}`);
@@ -6273,9 +6276,9 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (vectorMinMax !== undefined) return vectorMinMax;
   const vectorLerp = emitVectorLerpCall(expression, name, context);
   if (vectorLerp !== undefined) return vectorLerp;
-  if (name === "frexp" || name === "frexpf") return emitFrexpCall(expression, context);
-  if (name === "modf" || name === "modff") return emitModfCall(expression, context);
-  if (name === "remquo" || name === "remquof") {
+  if (isFrexpCallName(name)) return emitFrexpCall(expression, context);
+  if (isModfCallName(name)) return emitModfCall(expression, context);
+  if (isRemquoCallName(name)) {
     throw featureError("unsupported-remquo-quotient", "remquo quotient output must target modeled integer storage", expression.args[2]?.span ?? expression.span);
   }
   if (isSincosCallName(name)) return "0";
