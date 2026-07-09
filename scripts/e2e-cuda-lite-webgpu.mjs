@@ -2847,6 +2847,22 @@ __global__ void ptxMoveB32(uint *out, uint *input) {
   out[idx] = mov_u_ptx(input[idx]);
   out[idx + 4] = (uint)mov_s_ptx((int)input[idx]);
 }`,
+  ptxMoveImmediateB32: `
+__device__ unsigned int mov_u_imm_ptx() {
+  unsigned int ret;
+  asm volatile("mov.u32 %0, 0xffffffff;" : "=r"(ret));
+  return ret;
+}
+__device__ int mov_s_imm_ptx() {
+  int ret;
+  asm volatile("mov.s32 %0, -2147483648;" : "=r"(ret));
+  return ret;
+}
+__global__ void ptxMoveImmediateB32(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = mov_u_imm_ptx();
+  out[idx + 4] = (uint)mov_s_imm_ptx();
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -14347,6 +14363,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [0, 1, 0xffffffff, 0x80000000, 0, 1, 0xffffffff, 0x80000000],
+            },
+          },
+          {
+            name: "inline-asm:move-immediate-b32",
+            source: SOURCES.ptxMoveImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x80000000, 0x80000000, 0x80000000, 0x80000000],
             },
           },
           {

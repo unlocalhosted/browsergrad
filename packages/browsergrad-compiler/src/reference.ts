@@ -1014,9 +1014,12 @@ function execInlineAsm(
   }
   if (op?.kind === "move-b32") {
     const label = `mov.${op.signed ? "s32" : "b32"}`;
-    if (statement.inputs.length !== 1) throw compilerFailure(`${label} inline asm expects one input`);
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs === 0 ? "no inputs" : "one input"}`);
     if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
-    const value = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
+    const value = op.immediate === undefined
+      ? valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0
+      : op.immediate >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), value, context);
     return;
   }

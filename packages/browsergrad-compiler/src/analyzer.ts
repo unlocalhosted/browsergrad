@@ -1833,8 +1833,11 @@ function validateInlineAsmStatement(
   if (op?.kind === "compare-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int" && outputInfos[0]?.valueType !== "bool") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `setp.${op.op}.${op.signed ? "s32" : "u32"} inline PTX writes an integer predicate output operand`, outputs[0]?.span ?? statement.span));
   }
-  if (op?.kind === "move-b32" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `mov.${op.signed ? "s32" : "b32"} inline PTX expects one output operand and one input operand`, statement.span));
+  if (op?.kind === "move-b32") {
+    const expectedInputs = op.immediate === undefined ? 1 : 0;
+    if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `mov.${op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs === 0 ? "no input operands" : "one input operand"}`, statement.span));
+    }
   }
   if (op?.kind === "move-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `mov.${op.signed ? "s32" : "b32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));

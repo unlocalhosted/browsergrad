@@ -2336,6 +2336,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "move-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitExpression(statement.inputs[0]!, context)})`, context)}`;
   }
+  if (op?.kind === "move-b32" && op.immediate !== undefined && statement.inputs.length === 0 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `${op.immediate >>> 0}u`, context)}`;
+  }
   if (op?.kind === "convert-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitExpression(statement.inputs[0]!, context)})`, context)}`;
   }

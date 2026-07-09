@@ -12391,6 +12391,48 @@ __global__ void moveKernel(uint *out, uint *input) {
     ]);
   });
 
+  it("lowers inline PTX mov b32 immediate statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int mov_u_imm_ptx() {
+  unsigned int ret;
+  asm volatile("mov.u32 %0, 0xffffffff;" : "=r"(ret));
+  return ret;
+}
+__device__ int mov_s_imm_ptx() {
+  int ret;
+  asm volatile("mov.s32 %0, -2147483648;" : "=r"(ret));
+  return ret;
+}
+__global__ void moveImmediateKernel(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = mov_u_imm_ptx();
+  out[idx + 4] = (uint)mov_s_imm_ptx();
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(8),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("4294967295u");
+    expect(compiled.wgsl).toContain("2147483648u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0xffffffff,
+      0xffffffff,
+      0xffffffff,
+      0xffffffff,
+      0x80000000,
+      0x80000000,
+      0x80000000,
+      0x80000000,
+    ]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {
