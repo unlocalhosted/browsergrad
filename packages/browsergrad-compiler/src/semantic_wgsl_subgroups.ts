@@ -8,11 +8,17 @@ import {
   isSemanticKernelIrOperation,
   semanticExpressionChildren,
 } from "./semantic_ir_walk.js";
+import {
+  cudaShuffleOpForCall,
+  isCudaLegacyShuffleCallName as legacyShuffleCall,
+  isCudaLegacyVoteCallName as legacyVoteCall,
+  type CudaShuffleOp,
+} from "./cuda_subgroup_calls.js";
 import { safeWgslIdentifier } from "./wgsl_names.js";
 import { wgslValueScalar } from "./semantic_wgsl_types.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 
-export type SemanticShuffleOp = "sync" | "down" | "up" | "xor";
+export type SemanticShuffleOp = CudaShuffleOp;
 
 export interface SemanticWarpShuffleHelper {
   readonly key: string;
@@ -325,11 +331,7 @@ export function emitSemanticBitwiseReduceHelper(
 }
 
 export function semanticShuffleOpForCall(name: string): SemanticShuffleOp | undefined {
-  if (name === "__shfl" || name === "__shfl_sync") return "sync";
-  if (name === "__shfl_down" || name === "__shfl_down_sync") return "down";
-  if (name === "__shfl_up" || name === "__shfl_up_sync") return "up";
-  if (name === "__shfl_xor" || name === "__shfl_xor_sync") return "xor";
-  return undefined;
+  return cudaShuffleOpForCall(name);
 }
 
 export function semanticWarpShuffleHelper(
@@ -411,10 +413,4 @@ function semanticLocalLinearRank(ir: SemanticKernelIrModule): string {
   return `(local_id.x + local_id.y * ${ir.workgroupSize[0]}u + local_id.z * ${ir.workgroupSize[0] * ir.workgroupSize[1]}u)`;
 }
 
-export function legacyVoteCall(name: string): boolean {
-  return name === "__all" || name === "__any" || name === "__ballot";
-}
-
-export function legacyShuffleCall(name: string): boolean {
-  return name === "__shfl" || name === "__shfl_up" || name === "__shfl_down" || name === "__shfl_xor";
-}
+export { legacyShuffleCall, legacyVoteCall };

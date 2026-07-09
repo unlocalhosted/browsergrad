@@ -72,6 +72,7 @@ import {
   isCudaBarrierCallName,
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
+import { cudaVoteOpForCall } from "./cuda_subgroup_calls.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
   emitSemanticFlatArrayType,
@@ -3748,13 +3749,14 @@ function emitSemanticSubgroupCall(
   if (name === "__activemask") return "subgroupBallot(true).x";
   const value = expression.args[legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
-  if (name === "__any" || name === "__all" || name === "__ballot" || name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync") {
+  const voteOp = cudaVoteOpForCall(name);
+  if (voteOp === "any" || voteOp === "all" || voteOp === "ballot") {
     const predicate = emitTruthiness(value, ir, names, options);
-    if (name === "__any" || name === "__any_sync") return `select(0u, 1u, subgroupAny(${predicate}))`;
-    if (name === "__all" || name === "__all_sync") return `select(0u, 1u, subgroupAll(${predicate}))`;
+    if (voteOp === "any") return `select(0u, 1u, subgroupAny(${predicate}))`;
+    if (voteOp === "all") return `select(0u, 1u, subgroupAll(${predicate}))`;
     return `subgroupBallot(${predicate}).x`;
   }
-  if (name === "__match_any_sync") {
+  if (voteOp === "match-any") {
     const valueType = semanticExpressionValueType(value);
     if (!valueType || valueType === "void") throw semanticWgslError(`${name} expects scalar value operand`, expression.span);
     const helper = semanticMatchAnyHelper(valueType, 32);

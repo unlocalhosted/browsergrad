@@ -41,6 +41,10 @@ import {
   isCudaBarrierCallName,
   isCudaSyncthreadsPredicateCallName as isSyncthreadsPredicateBuiltin,
 } from "./cuda_sync_calls.js";
+import {
+  isCudaShuffleCallName as isShuffleBuiltin,
+  isCudaVoteCallName as isVoteBuiltin,
+} from "./cuda_subgroup_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
@@ -4115,27 +4119,6 @@ function pointerArrayElementAliasKey(expression: Extract<CudaLiteExpression, { k
 
 function isAtomicBuiltin(callName: string): boolean {
   return isSemanticAtomicCallName(callName);
-}
-
-function isShuffleBuiltin(callName: string): boolean {
-  return callName === "__shfl" ||
-    callName === "__shfl_down" ||
-    callName === "__shfl_up" ||
-    callName === "__shfl_xor" ||
-    callName === "__shfl_sync" ||
-    callName === "__shfl_down_sync" ||
-    callName === "__shfl_up_sync" ||
-    callName === "__shfl_xor_sync";
-}
-
-function isVoteBuiltin(callName: string): boolean {
-  return callName === "__any" ||
-    callName === "__all" ||
-    callName === "__ballot" ||
-    callName === "__any_sync" ||
-    callName === "__all_sync" ||
-    callName === "__ballot_sync" ||
-    callName === "__match_any_sync";
 }
 
 function isMaskedWarpReductionBuiltin(callName: string): boolean {

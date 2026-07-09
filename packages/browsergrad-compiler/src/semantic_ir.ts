@@ -34,6 +34,11 @@ import {
   CUDA_BARRIER_CALL_NAMES,
   CUDA_FENCE_CALL_NAMES,
 } from "./cuda_sync_calls.js";
+import {
+  isCudaLegacyShuffleCallName as legacyShuffleCall,
+  isCudaShuffleCallName,
+  isCudaVoteCallName,
+} from "./cuda_subgroup_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -908,15 +913,7 @@ function lowerExpression(
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
         ...optionalValueType(expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
           ? "uint"
-          : expression.callee.kind === "identifier" && (
-              expression.callee.name === "__any" ||
-              expression.callee.name === "__all" ||
-              expression.callee.name === "__ballot" ||
-              expression.callee.name === "__any_sync" ||
-              expression.callee.name === "__all_sync" ||
-              expression.callee.name === "__ballot_sync" ||
-              expression.callee.name === "__match_any_sync"
-            )
+          : expression.callee.kind === "identifier" && isCudaVoteCallName(expression.callee.name)
             ? "uint"
           : expression.callee.kind === "identifier" && (
               expression.callee.name === "__reduce_add_sync" ||
@@ -925,14 +922,7 @@ function lowerExpression(
               expression.callee.name === "__reduce_and_sync" ||
               expression.callee.name === "__reduce_or_sync" ||
               expression.callee.name === "__reduce_xor_sync" ||
-              expression.callee.name === "__shfl" ||
-              expression.callee.name === "__shfl_down" ||
-              expression.callee.name === "__shfl_up" ||
-              expression.callee.name === "__shfl_xor" ||
-              expression.callee.name === "__shfl_sync" ||
-              expression.callee.name === "__shfl_down_sync" ||
-              expression.callee.name === "__shfl_up_sync" ||
-              expression.callee.name === "__shfl_xor_sync"
+              isCudaShuffleCallName(expression.callee.name)
             )
             ? expressionValueType(legacyShuffleCall(expression.callee.name) ? args[0] : args[1]) ?? "uint"
           : expression.callee.kind === "identifier" && (expression.callee.name === "clock" || expression.callee.name === "clock64")
@@ -2750,10 +2740,6 @@ function vectorArrayIndexInfo(
 
 function optionalValueType(valueType: CudaLiteScalarType | undefined): { readonly valueType?: CudaLiteScalarType } {
   return valueType === undefined ? {} : { valueType };
-}
-
-function legacyShuffleCall(name: string): boolean {
-  return name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor";
 }
 
 function numberLiteralType(raw: string): CudaLiteScalarType {

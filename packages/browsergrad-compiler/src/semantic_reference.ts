@@ -26,6 +26,13 @@ import {
   isCudaBarrierCallName,
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
+import {
+  cudaShuffleOpForCall,
+  cudaVoteOpForCall,
+  isCudaLegacyShuffleCallName as legacyShuffleCall,
+  isCudaLegacyVoteCallName as legacyVoteCall,
+  isCudaShuffleCallName,
+} from "./cuda_subgroup_calls.js";
 import { referenceTypedArrayForScalar as typedArrayForScalar } from "./reference_scalars.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
@@ -575,14 +582,6 @@ function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpr
       expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
   }
   return expression.args.length === 2 && semanticReferenceExpressionSupported(expression.args[1]!, "scalar");
-}
-
-function legacyVoteCall(name: string): boolean {
-  return name === "__any" || name === "__all" || name === "__ballot";
-}
-
-function legacyShuffleCall(name: string): boolean {
-  return name === "__shfl" || name === "__shfl_down" || name === "__shfl_up" || name === "__shfl_xor";
 }
 
 function semanticReferenceAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1889,15 +1888,16 @@ function evalSemanticSubgroupCall(
   if (name === "__activemask") return semanticReferenceActiveMask(context);
   const value = expression.args[legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
+  const voteOp = cudaVoteOpForCall(name);
   if (context.compiled.subgroupMode === "scalar") {
     const scalar = evalNumber(value, context);
-    if (name === "__any" || name === "__all" || name === "__ballot" || name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync" || name === "__match_any_sync") return truthy(scalar) ? 1 : 0;
+    if (voteOp !== undefined) return truthy(scalar) ? 1 : 0;
     return scalar;
   }
   const peers = semanticWarpContexts(context);
-  if (name === "__any" || name === "__any_sync") return peers.some((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
-  if (name === "__all" || name === "__all_sync") return peers.every((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
-  if (name === "__ballot" || name === "__ballot_sync") {
+  if (voteOp === "any") return peers.some((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
+  if (voteOp === "all") return peers.every((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
+  if (voteOp === "ballot") {
     let mask = 0;
     for (const peer of peers) {
       if (!truthy(evalNumber(value, peer))) continue;
@@ -1905,7 +1905,7 @@ function evalSemanticSubgroupCall(
     }
     return mask >>> 0;
   }
-  if (name === "__match_any_sync") {
+  if (voteOp === "match-any") {
     const current = evalNumber(value, context);
     let mask = 0;
     for (const peer of peers) {
@@ -1920,7 +1920,7 @@ function evalSemanticSubgroupCall(
   if (name === "__reduce_and_sync") return peers.reduce((acc, peer) => acc & (evalNumber(value, peer) | 0), -1) >>> 0;
   if (name === "__reduce_or_sync") return peers.reduce((acc, peer) => acc | (evalNumber(value, peer) | 0), 0) >>> 0;
   if (name === "__reduce_xor_sync") return peers.reduce((acc, peer) => acc ^ (evalNumber(value, peer) | 0), 0) >>> 0;
-  if (legacyShuffleCall(name) || name === "__shfl_sync" || name === "__shfl_down_sync" || name === "__shfl_up_sync" || name === "__shfl_xor_sync") {
+  if (isCudaShuffleCallName(name)) {
     const indexArg = legacyShuffleCall(name) ? expression.args[1] : expression.args[2];
     const widthArg = legacyShuffleCall(name) ? expression.args[2] : expression.args[3];
     const index = indexArg ? Math.trunc(evalNumber(indexArg, context)) : 0;
@@ -1953,9 +1953,10 @@ function semanticShuffleWidth(width: number): number {
 
 function semanticShuffleTargetLane(name: string, lane: number, index: number, width: number): number {
   const operand = Math.max(0, Math.trunc(index));
-  if (name === "__shfl" || name === "__shfl_sync") return operand % width;
-  if (name === "__shfl_down" || name === "__shfl_down_sync") return lane + operand < width ? lane + operand : lane;
-  if (name === "__shfl_up" || name === "__shfl_up_sync") return lane >= operand ? lane - operand : lane;
+  const op = cudaShuffleOpForCall(name);
+  if (op === "sync") return operand % width;
+  if (op === "down") return lane + operand < width ? lane + operand : lane;
+  if (op === "up") return lane >= operand ? lane - operand : lane;
   const xorLane = lane ^ operand;
   return xorLane < width ? xorLane : lane;
 }
