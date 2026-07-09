@@ -8,7 +8,7 @@ export const SEMANTIC_HALF_CONVERSION_CALLS: ReadonlySet<string> = new Set([
   "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
 ]);
 
-export const SEMANTIC_BFLOAT_HELPER_CALLS: ReadonlySet<string> = new Set([
+export const SEMANTIC_BFLOAT_CONVERSION_CALLS: ReadonlySet<string> = new Set([
   "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd", "__double2bfloat16",
   "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
   "__ll2bfloat16_rn", "__ll2bfloat16_rz", "__ll2bfloat16_ru", "__ll2bfloat16_rd",
@@ -21,6 +21,10 @@ export const SEMANTIC_BFLOAT_HELPER_CALLS: ReadonlySet<string> = new Set([
   "__bfloat162ll_rn", "__bfloat162ll_rz", "__bfloat162ll_ru", "__bfloat162ll_rd",
   "__bfloat162ull_rn", "__bfloat162ull_rz", "__bfloat162ull_ru", "__bfloat162ull_rd",
   "__bfloat162char_rz", "__bfloat162uchar_rz",
+]);
+
+export const SEMANTIC_BFLOAT_HELPER_CALLS: ReadonlySet<string> = new Set([
+  ...SEMANTIC_BFLOAT_CONVERSION_CALLS,
   "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "hexp",
   "__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat",
   "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu",

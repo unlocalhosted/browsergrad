@@ -7,6 +7,12 @@ import {
   kernelIrUsesCall,
   kernelIrUsesIdentifier,
 } from "./kernel_ir_usage.js";
+import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
+import {
+  SEMANTIC_BFLOAT_CONVERSION_CALLS,
+  SEMANTIC_FP8_CALLS,
+  SEMANTIC_HALF_CONVERSION_CALLS,
+} from "./semantic_math_intrinsics.js";
 import type { SemanticAtomicOp } from "./semantic_atomic_intrinsics.js";
 import {
   type CudaLiteStatement,
@@ -208,25 +214,7 @@ function atomicStorageScalarType(valueType: CudaLiteScalarType): "i32" | "u32" {
 }
 
 export function usesCurand(ir: KernelIrModule): boolean {
-  const curandCalls = new Set([
-    "curand_init",
-    "curand",
-    "curand_uniform",
-    "curand_uniform4",
-    "curand_uniform_double",
-    "curand_normal",
-    "curand_normal2",
-    "curand_normal4",
-    "curand_normal_double",
-    "curand_log_normal",
-    "curand_log_normal2",
-    "curand_log_normal4",
-    "curand_log_normal_double",
-    "curand_poisson",
-    "curand_poisson4",
-    "skipahead",
-  ]);
-  return kernelIrUsesCall(ir, curandCalls);
+  return kernelIrUsesCall(ir, SEMANTIC_CURAND_CALLS);
 }
 
 export function usesCuComplexRobustMath(ir: KernelIrModule): boolean {
@@ -295,37 +283,15 @@ export function usesSpecialFloatNamedConstants(ir: KernelIrModule): boolean {
 }
 
 export function usesFp8Intrinsics(ir: KernelIrModule): boolean {
-  const names = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
-  return kernelIrUsesCall(ir, names);
+  return kernelIrUsesCall(ir, SEMANTIC_FP8_CALLS);
 }
 
 export function usesHalfConversionIntrinsics(ir: KernelIrModule): boolean {
-  const names = new Set([
-    "__float2half", "__float2half_rn", "__float2half_rz", "__float2half_ru", "__float2half_rd",
-    "__int2half_rn", "__int2half_rz", "__int2half_ru", "__int2half_rd",
-    "__uint2half_rn", "__uint2half_rz", "__uint2half_ru", "__uint2half_rd",
-    "__short2half_rn", "__short2half_rz", "__short2half_ru", "__short2half_rd",
-    "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
-  ]);
-  return kernelIrUsesCall(ir, names);
+  return kernelIrUsesCall(ir, SEMANTIC_HALF_CONVERSION_CALLS);
 }
 
 export function usesBfloatConversionIntrinsics(ir: KernelIrModule): boolean {
-  const names = new Set([
-    "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd", "__double2bfloat16",
-    "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
-    "__ll2bfloat16_rn", "__ll2bfloat16_rz", "__ll2bfloat16_ru", "__ll2bfloat16_rd",
-    "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
-    "__ull2bfloat16_rn", "__ull2bfloat16_rz", "__ull2bfloat16_ru", "__ull2bfloat16_rd",
-    "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
-    "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
-    "__bfloat162short_rn", "__bfloat162short_rz", "__bfloat162short_ru", "__bfloat162short_rd",
-    "__bfloat162ushort_rn", "__bfloat162ushort_rz", "__bfloat162ushort_ru", "__bfloat162ushort_rd",
-    "__bfloat162ll_rn", "__bfloat162ll_rz", "__bfloat162ll_ru", "__bfloat162ll_rd",
-    "__bfloat162ull_rn", "__bfloat162ull_rz", "__bfloat162ull_ru", "__bfloat162ull_rd",
-    "__bfloat162char_rz", "__bfloat162uchar_rz",
-  ]);
-  return kernelIrUsesCall(ir, names);
+  return kernelIrUsesCall(ir, SEMANTIC_BFLOAT_CONVERSION_CALLS);
 }
 
 export function wgslUniformScalar(type: CudaLiteScalarType): string {
