@@ -132,9 +132,9 @@ import {
 } from "./semantic_atomic_intrinsics.js";
 import {
   SEMANTIC_CURAND_ARITIES,
-  SEMANTIC_CURAND_DISTRIBUTION_CALLS,
-  SEMANTIC_CURAND_STATE_ONLY_CALLS,
-  SEMANTIC_CURAND_VECTOR_RETURN_TYPES,
+  isSemanticCurandDistributionCallName,
+  isSemanticCurandStateOnlyCallName,
+  isSemanticCurandVectorCallName,
   semanticCurandReturnType,
 } from "./semantic_curand_intrinsics.js";
 
@@ -2295,18 +2295,18 @@ function validateCallExpression(
     validateCurandInit(expression, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "uint" };
   }
-  if (SEMANTIC_CURAND_STATE_ONLY_CALLS.has(callName)) {
+  if (isSemanticCurandStateOnlyCallName(callName)) {
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     const valueType = semanticCurandReturnType(callName);
-    return SEMANTIC_CURAND_VECTOR_RETURN_TYPES.has(callName)
+    return isSemanticCurandVectorCallName(callName)
       ? { kind: "vector", valueType }
       : { kind: "scalar", valueType };
   }
-  if (SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(callName)) {
+  if (isSemanticCurandDistributionCallName(callName)) {
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     const valueType = semanticCurandReturnType(callName);
-    return SEMANTIC_CURAND_VECTOR_RETURN_TYPES.has(callName)
+    return isSemanticCurandVectorCallName(callName)
       ? { kind: "vector", valueType }
       : { kind: "scalar", valueType };
   }

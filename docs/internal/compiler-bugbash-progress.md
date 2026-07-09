@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T22:03:28Z
+Last updated: 2026-07-09T22:08:27Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: cuRAND arity and return metadata shared with analyzer |
+| Active work item | Architecture split: cuRAND semantic predicates shared across stages |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: added cuRAND semantic predicate helpers (`isSemanticCurand*CallName`) plus poisson call classification to `semantic_curand_intrinsics.ts`, then rewired analyzer, semantic reference, and semantic WGSL support checks to consume those predicates instead of local string/set checks; cuRAND feature branching now has one semantic Module interface for call family decisions across frontend validation, CPU reference support checks, and native WGSL support checks; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows semantic-IR bucket at `15591`
 - Architecture split: expanded `semantic_curand_intrinsics.ts` to own cuRAND arities and return-type metadata, then rewired analyzer builtin arity registration and call validation to consume it; cuRAND compatibility recognition now has one semantic metadata Module instead of duplicated arity lists and return-type branches in frontend validation; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `analyzer.ts` down to `5095`, frontend bucket down to `7740`, and semantic-IR bucket at `15552`
 - Architecture split: moved bf16 conversion call classification into `semantic_math_intrinsics.ts` and reused existing semantic cuRAND/fp8/half conversion call sets in WGSL feature planning; helper-emission decisions now consume semantic intrinsic Modules instead of re-listing cuRAND, fp8, half, and bf16 conversion names in `wgsl_feature_usage.ts`; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows wgsl-backend bucket down to `16993` and semantic-IR bucket at `15520`
 - Architecture split: extracted `kernel_ir_usage.ts` for whole-Kernel IR call/identifier/statement usage queries and rewired `kernel_ir_atomic_usage.ts` plus WGSL feature planning to use it; feature helper decisions now share one Module for scanning kernel body + device functions instead of repeating `ir.body`/`ir.functions` traversal across CURAND, cuComplex, decomposed math, gamma, inverse distribution, rounding, fp8, half/bf16 conversion, and atomic usage paths; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + WGSL modules `16/0` + full WebGPU smoke `610/0/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows wgsl-backend bucket down to `17027` and support bucket up to `5775` with the new shared Module

@@ -52,6 +52,11 @@ export const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
   "curand_poisson4",
 ]);
 
+export const SEMANTIC_CURAND_POISSON_CALLS = new Set([
+  "curand_poisson",
+  "curand_poisson4",
+]);
+
 export const SEMANTIC_CURAND_ARITIES: readonly (readonly [string, readonly [min: number, max: number]])[] = [
   ["curand_init", [4, 4]],
   ["curand", [1, 1]],
@@ -70,6 +75,34 @@ export const SEMANTIC_CURAND_ARITIES: readonly (readonly [string, readonly [min:
   ["curand_poisson4", [2, 2]],
   ["skipahead", [2, 2]],
 ];
+
+export function isSemanticCurandCallName(name: string | undefined): boolean {
+  return name !== undefined && SEMANTIC_CURAND_CALLS.has(name);
+}
+
+export function isSemanticCurandInitCallName(name: string | undefined): boolean {
+  return name === "curand_init";
+}
+
+export function isSemanticCurandSkipaheadCallName(name: string | undefined): boolean {
+  return name === "skipahead";
+}
+
+export function isSemanticCurandStateOnlyCallName(name: string | undefined): boolean {
+  return name !== undefined && SEMANTIC_CURAND_STATE_ONLY_CALLS.has(name);
+}
+
+export function isSemanticCurandDistributionCallName(name: string | undefined): boolean {
+  return name !== undefined && SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(name);
+}
+
+export function isSemanticCurandPoissonCallName(name: string | undefined): boolean {
+  return name !== undefined && SEMANTIC_CURAND_POISSON_CALLS.has(name);
+}
+
+export function isSemanticCurandVectorCallName(name: string | undefined): boolean {
+  return name !== undefined && SEMANTIC_CURAND_VECTOR_RETURN_TYPES.has(name);
+}
 
 export function semanticCurandReturnType(name: string | undefined): SemanticCurandReturnType | undefined {
   if (name === "curand_init" || name === "curand" || name === "skipahead" || name === "curand_poisson") return "uint";
