@@ -18,19 +18,20 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
 import {
-  emitInlineArithmeticWgsl,
-  emitInlineBitwiseWgsl,
-  emitInlineBytePermWgsl,
-  emitInlineCompareWgsl,
-  emitInlineF32ToIntConvertWgsl,
-  emitInlineLop3Wgsl,
-  emitInlineMinMaxWgsl,
-  emitInlineSelectWgsl,
-  emitInlineShiftWgsl,
-  emitInlineUnaryIntWgsl,
-  emitU8x4SadAddWgsl,
+  emitInlineArithmeticExpressionWgsl,
+  emitInlineBitwiseExpressionWgsl,
+  emitInlineBytePermExpressionWgsl,
+  emitInlineCompareExpressionWgsl,
+  emitInlineF32ToIntConvertExpressionWgsl,
+  emitInlineLop3ExpressionWgsl,
+  emitInlineMinMaxExpressionWgsl,
+  emitInlineSelectExpressionWgsl,
+  emitInlineShiftExpressionWgsl,
+  emitInlineUnaryIntExpressionWgsl,
+  emitU8x4SadAddExpressionWgsl,
+  type InlineAsmWgslExpressionCallbacks,
 } from "./features/inline_ptx/wgsl.js";
 import { inlineAsmExpectedInputCount, inlineAsmInputCountMatches, inlineAsmOutputCountMatches } from "./features/inline_ptx/validation.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -2257,6 +2258,12 @@ function functionsToEmit(ir: KernelIrModule): readonly CudaLiteDeviceFunction[] 
   return ir.functions.filter((fn) => fn.name !== ir.name && reachable.has(deviceFunctionLinkName(fn, ir)));
 }
 
+const inlineAsmWgslCallbacks: InlineAsmWgslExpressionCallbacks<CudaLiteExpression, EmitContext> = {
+  emitExpression: (expression, context) => emitExpression(expression, context),
+  emitNumberLiteral: (literal) => emitNumberLiteral(literal),
+  expressionValueTypeForEmit: (expression, context) => expressionValueTypeForEmit(expression, context),
+};
+
 function deviceFunctionParamNeedsMutableBinding(
   fn: CudaLiteDeviceFunction,
   paramName: string,
@@ -2327,31 +2334,31 @@ function emitInlineAsmStatement(
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `reverseBits(${value})`, context)}`;
   }
   if (op?.kind === "prmt-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpression(statement.inputs, context, op.selectorImmediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpressionWgsl(statement.inputs, context, inlineAsmWgslCallbacks, op.selectorImmediate), context)}`;
   }
   if (op?.kind === "lop3-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context, op.dataImmediates), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3ExpressionWgsl(statement.inputs, op.immLut, context, inlineAsmWgslCallbacks, op.dataImmediates), context)}`;
   }
   if (op?.kind === "bitwise-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBitwiseExpression(statement.inputs, op.op, context, op.immediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBitwiseExpressionWgsl(statement.inputs, op.op, context, inlineAsmWgslCallbacks, op.immediate), context)}`;
   }
   if (op?.kind === "shift-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineShiftExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineShiftExpressionWgsl(statement.inputs, op.op, op.signed, context, inlineAsmWgslCallbacks, op.immediate), context)}`;
   }
   if (op?.kind === "arithmetic-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineArithmeticExpression(statement.inputs, op.op, context, op.immediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineArithmeticExpressionWgsl(statement.inputs, op.op, context, inlineAsmWgslCallbacks, op.immediate), context)}`;
   }
   if (op?.kind === "minmax-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineMinMaxExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineMinMaxExpressionWgsl(statement.inputs, op.op, op.signed, context, inlineAsmWgslCallbacks, op.immediate), context)}`;
   }
   if (op?.kind === "unary-int-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpression(statement.inputs[0], op.op, context, op.immediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpressionWgsl(statement.inputs[0], op.op, context, inlineAsmWgslCallbacks, op.immediate), context)}`;
   }
   if (op?.kind === "select-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpression(statement.inputs, context, op.trueImmediate, op.falseImmediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpressionWgsl(statement.inputs, context, inlineAsmWgslCallbacks, op.trueImmediate, op.falseImmediate), context)}`;
   }
   if (op?.kind === "compare-b32" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineCompareExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineCompareExpressionWgsl(statement.inputs, op.op, op.signed, context, inlineAsmWgslCallbacks, op.immediate), context)}`;
   }
   if (op?.kind === "move-b32" && inputCountMatches && op.immediate === undefined && outputCountMatches) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitExpression(statement.inputs[0]!, context)})`, context)}`;
@@ -2367,7 +2374,7 @@ function emitInlineAsmStatement(
     const source = op.source === undefined
       ? emitExpressionAsValueType(statement.inputs[0]!, "float", context)
       : emitInlineAsmF32Source(op.source, statement, outputs, context);
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineF32ToIntConvertExpression(source, op.rounding, op.toSigned, outputs[0]!, context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineF32ToIntConvertExpressionWgsl(source, op.rounding, op.toSigned, outputs[0]!, context, inlineAsmWgslCallbacks)}`;
   }
   if (op?.kind === "convert-int-to-f32" && inputCountMatches && outputCountMatches) {
     const source = op.source === undefined
@@ -2388,7 +2395,7 @@ function emitInlineAsmStatement(
     }
   }
   if (op?.kind === "u8x4-sad-add" && inputCountMatches && outputCountMatches) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpressionWgsl(statement.inputs, context, inlineAsmWgslCallbacks), context)}`;
   }
   if (op?.kind === "ldmatrix" && inputCountMatches && outputCountMatches) {
     const base = `u32(${emitExpression(statement.inputs[0]!, context)})`;
@@ -2495,92 +2502,6 @@ function emitMmaF32AccumulatorOutput(target: CudaLiteExpression, value: string, 
   if (scalar === "i32") return `bitcast<i32>(${value})`;
   if (scalar === "f16") return `f16(${value})`;
   return value;
-}
-
-function emitInlineBytePermExpression(inputs: readonly CudaLiteExpression[], context: EmitContext, selectorImmediate?: number): string {
-  const x = `u32(${emitExpression(inputs[0]!, context)})`;
-  const y = `u32(${emitExpression(inputs[1]!, context)})`;
-  const selector = selectorImmediate === undefined ? `u32(${emitExpression(inputs[2]!, context)})` : `${selectorImmediate >>> 0}u`;
-  return emitInlineBytePermWgsl(x, y, selector);
-}
-
-function emitInlineLop3Expression(
-  inputs: readonly CudaLiteExpression[],
-  immLut: number | undefined,
-  context: EmitContext,
-  dataImmediates: readonly [number | undefined, number | undefined, number | undefined] = [undefined, undefined, undefined],
-): string {
-  let inputIndex = 0;
-  const a = dataImmediates[0] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[0] >>> 0}u`;
-  const b = dataImmediates[1] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[1] >>> 0}u`;
-  const c = dataImmediates[2] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[2] >>> 0}u`;
-  const lut = immLut === undefined ? `(u32(${emitExpression(inputs[inputIndex]!, context)}) & 0xffu)` : `${immLut & 0xff}u`;
-  return emitInlineLop3Wgsl(a, b, c, lut);
-}
-
-function emitInlineBitwiseExpression(inputs: readonly CudaLiteExpression[], op: "and" | "or" | "xor" | "not", context: EmitContext, immediate?: number): string {
-  const left = op === "not" && immediate !== undefined ? `${immediate >>> 0}u` : `u32(${emitExpression(inputs[0]!, context)})`;
-  const right = op === "not" ? "0u" : immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
-  return emitInlineBitwiseWgsl(op, left, right);
-}
-
-function emitInlineShiftExpression(inputs: readonly CudaLiteExpression[], op: "shl" | "shr", signed: boolean, context: EmitContext, immediate?: number): string {
-  const value = `u32(${emitExpression(inputs[0]!, context)})`;
-  const amount = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
-  return emitInlineShiftWgsl(op, value, amount, signed);
-}
-
-function emitInlineArithmeticExpression(inputs: readonly CudaLiteExpression[], op: "add" | "sub" | "mul-lo" | "mad-lo", context: EmitContext, immediate?: number): string {
-  const left = `u32(${emitExpression(inputs[0]!, context)})`;
-  const right = immediate !== undefined && op !== "mad-lo" ? `${immediate >>> 0}u` : `u32(${emitExpression(inputs[1]!, context)})`;
-  const addend = op === "mad-lo"
-    ? immediate === undefined ? `u32(${emitExpression(inputs[2]!, context)})` : `${immediate >>> 0}u`
-    : "0u";
-  return emitInlineArithmeticWgsl(op, left, right, addend);
-}
-
-function emitInlineMinMaxExpression(inputs: readonly CudaLiteExpression[], op: "min" | "max", signed: boolean, context: EmitContext, immediate?: number): string {
-  const left = `u32(${emitExpression(inputs[0]!, context)})`;
-  const right = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
-  return emitInlineMinMaxWgsl(op, left, right, signed);
-}
-
-function emitInlineUnaryIntExpression(input: CudaLiteExpression | undefined, op: "neg" | "abs", context: EmitContext, immediate?: number): string {
-  const value = immediate === undefined ? `u32(${emitExpression(input!, context)})` : `${immediate >>> 0}u`;
-  return emitInlineUnaryIntWgsl(op, value);
-}
-
-function emitInlineSelectExpression(inputs: readonly CudaLiteExpression[], context: EmitContext, trueImmediate?: number, falseImmediate?: number): string {
-  let inputIndex = 0;
-  const trueValue = trueImmediate === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${trueImmediate >>> 0}u`;
-  const falseValue = falseImmediate === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${falseImmediate >>> 0}u`;
-  const predicate = `u32(${emitExpression(inputs[inputIndex]!, context)})`;
-  return emitInlineSelectWgsl(trueValue, falseValue, predicate);
-}
-
-function emitInlineCompareExpression(inputs: readonly CudaLiteExpression[], op: "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: boolean, context: EmitContext, immediate?: number): string {
-  const left = signed ? `bitcast<i32>(u32(${emitExpression(inputs[0]!, context)}))` : `u32(${emitExpression(inputs[0]!, context)})`;
-  const rightU32 = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
-  const right = signed ? `bitcast<i32>(${rightU32})` : rightU32;
-  return emitInlineCompareWgsl(op, left, right);
-}
-
-function emitInlineF32ToIntConvertExpression(
-  source: string,
-  rounding: InlineAsmFloatToIntRounding,
-  toSigned: boolean,
-  target: CudaLiteExpression,
-  context: EmitContext,
-): string {
-  const targetType = expressionValueTypeForEmit(target, context);
-  return emitInlineF32ToIntConvertWgsl(source, rounding, toSigned, targetType === "uint");
-}
-
-function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
-  const a = `u32(${emitExpression(inputs[0]!, context)})`;
-  const b = `u32(${emitExpression(inputs[1]!, context)})`;
-  const c = `u32(${emitExpression(inputs[2]!, context)})`;
-  return emitU8x4SadAddWgsl(a, b, c);
 }
 
 function emitDp4aExpression(expression: Extract<CudaLiteExpression, { readonly kind: "call" }>, context: EmitContext): string {
