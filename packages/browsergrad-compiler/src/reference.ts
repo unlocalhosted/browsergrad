@@ -29,6 +29,11 @@ import {
   canRunCompiledKernelSemanticReference,
   runCompiledKernelSemanticReference,
 } from "./semantic_reference.js";
+import {
+  cloneReferenceBuffers,
+  cloneReferenceSurfaces,
+  cloneReferenceTypedArray,
+} from "./reference_inputs.js";
 import type {
   CudaLiteSemanticSymbol,
   SemanticExpression,
@@ -259,7 +264,7 @@ export function runCompiledKernelReference(
   if (canRunCompiledKernelSemanticReference(compiled)) {
     return runCompiledKernelSemanticReference(compiled, input, launch);
   }
-  const buffers = cloneBuffers(input.buffers);
+  const buffers = cloneReferenceBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
   for (const constant of backendIr.constants) {
     if (constant.init !== undefined && !constants.has(constant.name)) {
@@ -275,7 +280,7 @@ export function runCompiledKernelReference(
   }
   const deviceGlobalDimensions = new Map(backendIr.deviceGlobals.map((global) => [global.name, global.dimensions]));
   const textures = input.textures ?? {};
-  const surfaces = cloneSurfaces(input.surfaces ?? {});
+  const surfaces = cloneReferenceSurfaces(input.surfaces ?? {});
   const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
   const functions = collectReferenceFunctions(backendIr.functions);
   const kernels = collectReferenceKernels(compiled);
@@ -313,7 +318,7 @@ export function runCompiledKernelReference(
   for (const name of readback) {
     const buffer = buffers.get(name) ?? deviceGlobals.get(name) ?? surfaces[name]?.data ?? memoryPools.get(name)?.data;
     if (!buffer) throw compilerFailure(`missing readback buffer '${name}'`);
-    result[name] = cloneTypedArray(buffer);
+    result[name] = cloneReferenceTypedArray(buffer);
   }
   return { buffers: result, trace: traces.map(freezeTrace) };
 }
@@ -6056,30 +6061,6 @@ function cooperativeSyncKind(expression: CudaLiteExpression, context: ThreadCont
   return value.groupKind === "grid" ? "grid" : "block";
 }
 
-function cloneBuffers(
-  buffers: Readonly<Record<string, WgslTypedArray>>,
-): Map<string, WgslTypedArray> {
-  const out = new Map<string, WgslTypedArray>();
-  for (const [name, buffer] of Object.entries(buffers)) {
-    out.set(name, cloneTypedArray(buffer));
-  }
-  return out;
-}
-
-function cloneSurfaces(
-  surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
-): Record<string, { readonly width: number; readonly height: number; readonly data: Float32Array }> {
-  const out: Record<string, { readonly width: number; readonly height: number; readonly data: Float32Array }> = {};
-  for (const [name, surface] of Object.entries(surfaces)) {
-    out[name] = {
-      width: surface.width,
-      height: surface.height,
-      data: new Float32Array(surface.data),
-    };
-  }
-  return out;
-}
-
 function cloneMemoryPools(
   pools: NonNullable<CompiledKernelInput["memoryPools"]>,
 ): Map<string, MemoryPoolValue> {
@@ -6098,7 +6079,7 @@ function cloneConstants(
 ): Map<string, number | WgslTypedArray> {
   const out = new Map<string, number | WgslTypedArray>();
   for (const [name, value] of Object.entries(constants)) {
-    out.set(name, typeof value === "number" ? value : cloneTypedArray(value));
+    out.set(name, typeof value === "number" ? value : cloneReferenceTypedArray(value));
   }
   return out;
 }
@@ -6107,7 +6088,7 @@ function cloneDeviceGlobals(
   globals: Readonly<Record<string, WgslTypedArray>>,
 ): Map<string, WgslTypedArray> {
   const out = new Map<string, WgslTypedArray>();
-  for (const [name, value] of Object.entries(globals)) out.set(name, cloneTypedArray(value));
+  for (const [name, value] of Object.entries(globals)) out.set(name, cloneReferenceTypedArray(value));
   return out;
 }
 
@@ -6241,10 +6222,6 @@ function evalConstantBinary(operator: string, left: number, right: number): numb
     default:
       throw compilerFailure(`unsupported constant initializer operator '${operator}'`);
   }
-}
-
-function cloneTypedArray<T extends WgslTypedArray>(value: T): T {
-  return value.slice() as T;
 }
 
 const BITCAST_BUFFER = new ArrayBuffer(4);

@@ -12,6 +12,10 @@ import {
 } from "./bfloat_rounding.js";
 import { roundFloat32ToFloat16 } from "./half_rounding.js";
 import { validateCudaKernelLaunch } from "./launch.js";
+import {
+  cloneReferenceBuffers,
+  cloneReferenceSurfaces,
+} from "./reference_inputs.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
   CompiledCudaLiteKernel,
@@ -138,10 +142,10 @@ export function runCompiledKernelSemanticReference(
   validateCudaKernelLaunch(launch, compiled.kernelIr.workgroupSize);
   validateSemanticReferenceInput(compiled, input);
 
-  const buffers = cloneBuffers(input.buffers);
+  const buffers = cloneReferenceBuffers(input.buffers);
   const constants = semanticReferenceConstants(compiled, input);
-  const deviceGlobals = cloneBuffers(deviceGlobalBufferInputs(compiled, input));
-  const surfaces = cloneSurfaces(input.surfaces ?? {});
+  const deviceGlobals = cloneReferenceBuffers(deviceGlobalBufferInputs(compiled, input));
+  const surfaces = cloneReferenceSurfaces(input.surfaces ?? {});
   const traces: MutableTrace[] = [];
   const blockDim = vectorFromTuple(launch.blockDim);
   const gridDim = vectorFromTuple(launch.gridDim);
@@ -4624,24 +4628,6 @@ function typedArrayForScalar(valueType: CudaLiteScalarType | undefined, length: 
   if (valueType === "int") return new Int32Array(length);
   if (valueType === "uint") return new Uint32Array(length);
   return new Float32Array(length);
-}
-
-function cloneBuffers(buffers: Readonly<Record<string, WgslTypedArray>>): Map<string, WgslTypedArray> {
-  return new Map(Object.entries(buffers).map(([name, buffer]) => [name, cloneTypedArray(buffer)] as const));
-}
-
-function cloneTypedArray(buffer: WgslTypedArray): WgslTypedArray {
-  if (buffer instanceof Float32Array) return new Float32Array(buffer);
-  if (buffer instanceof Int32Array) return new Int32Array(buffer);
-  if (buffer instanceof Uint32Array) return new Uint32Array(buffer);
-  return new Float32Array(buffer as Float32Array);
-}
-
-function cloneSurfaces(surfaces: NonNullable<CompiledKernelInput["surfaces"]>): Record<string, WgslTexture2DInput> {
-  return Object.fromEntries(Object.entries(surfaces).map(([name, surface]) => [
-    name,
-    { ...surface, data: new Float32Array(surface.data) },
-  ]));
 }
 
 function totalElements(dimensions: readonly number[]): number {
