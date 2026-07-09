@@ -19,6 +19,19 @@ import {
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { classifyInlineAsm, expectedInlineAsmF32SourceInputs, expectedInlineAsmSourceInputs, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmFloatToIntRounding, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
+import {
+  emitInlineArithmeticWgsl,
+  emitInlineBitwiseWgsl,
+  emitInlineBytePermWgsl,
+  emitInlineCompareWgsl,
+  emitInlineF32ToIntConvertWgsl,
+  emitInlineLop3Wgsl,
+  emitInlineMinMaxWgsl,
+  emitInlineSelectWgsl,
+  emitInlineShiftWgsl,
+  emitInlineUnaryIntWgsl,
+  emitU8x4SadAddWgsl,
+} from "./features/inline_ptx/wgsl.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
@@ -2486,15 +2499,7 @@ function emitInlineBytePermExpression(inputs: readonly CudaLiteExpression[], con
   const x = `u32(${emitExpression(inputs[0]!, context)})`;
   const y = `u32(${emitExpression(inputs[1]!, context)})`;
   const selector = selectorImmediate === undefined ? `u32(${emitExpression(inputs[2]!, context)})` : `${selectorImmediate >>> 0}u`;
-  const lanes = [0, 1, 2, 3].map((lane) => {
-    const control = `((${selector} >> ${lane * 4}u) & 0xfu)`;
-    const source = `(${control} & 0x7u)`;
-    const shift = `((${source} & 0x3u) * 8u)`;
-    const byte = `(select((${x} >> ${shift}), (${y} >> ${shift}), (${source} >= 4u)) & 0xffu)`;
-    const sign = `select(0u, 0xffu, ((${byte} & 0x80u) != 0u))`;
-    return `(select(${byte}, ${sign}, ((${control} & 0x8u) != 0u)) << ${lane * 8}u)`;
-  });
-  return `(${lanes.join(" | ")})`;
+  return emitInlineBytePermWgsl(x, y, selector);
 }
 
 function emitInlineLop3Expression(
@@ -2508,54 +2513,39 @@ function emitInlineLop3Expression(
   const b = dataImmediates[1] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[1] >>> 0}u`;
   const c = dataImmediates[2] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[2] >>> 0}u`;
   const lut = immLut === undefined ? `(u32(${emitExpression(inputs[inputIndex]!, context)}) & 0xffu)` : `${immLut & 0xff}u`;
-  const rows = Array.from({ length: 8 }, (_, row) => {
-    const aMask = (row & 0x4) === 0 ? `(~${a})` : a;
-    const bMask = (row & 0x2) === 0 ? `(~${b})` : b;
-    const cMask = (row & 0x1) === 0 ? `(~${c})` : c;
-    const rowMask = `(${aMask} & ${bMask} & ${cMask})`;
-    return `select(0u, ${rowMask}, ((${lut} & ${1 << row}u) != 0u))`;
-  });
-  return `(${rows.join(" | ")})`;
+  return emitInlineLop3Wgsl(a, b, c, lut);
 }
 
 function emitInlineBitwiseExpression(inputs: readonly CudaLiteExpression[], op: "and" | "or" | "xor" | "not", context: EmitContext, immediate?: number): string {
   const left = op === "not" && immediate !== undefined ? `${immediate >>> 0}u` : `u32(${emitExpression(inputs[0]!, context)})`;
-  if (op === "not") return `(~${left})`;
-  const right = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
-  const operator = op === "and" ? "&" : op === "or" ? "|" : "^";
-  return `(${left} ${operator} ${right})`;
+  const right = op === "not" ? "0u" : immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
+  return emitInlineBitwiseWgsl(op, left, right);
 }
 
 function emitInlineShiftExpression(inputs: readonly CudaLiteExpression[], op: "shl" | "shr", signed: boolean, context: EmitContext, immediate?: number): string {
   const value = `u32(${emitExpression(inputs[0]!, context)})`;
   const amount = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
-  const clamped = `min(${amount}, 31u)`;
-  if (op === "shl") return `select((${value} << ${clamped}), 0u, (${amount} >= 32u))`;
-  if (!signed) return `select((${value} >> ${clamped}), 0u, (${amount} >= 32u))`;
-  return `u32(i32(${value}) >> ${clamped})`;
+  return emitInlineShiftWgsl(op, value, amount, signed);
 }
 
 function emitInlineArithmeticExpression(inputs: readonly CudaLiteExpression[], op: "add" | "sub" | "mul-lo" | "mad-lo", context: EmitContext, immediate?: number): string {
   const left = `u32(${emitExpression(inputs[0]!, context)})`;
   const right = immediate !== undefined && op !== "mad-lo" ? `${immediate >>> 0}u` : `u32(${emitExpression(inputs[1]!, context)})`;
-  if (op === "add") return `(${left} + ${right})`;
-  if (op === "sub") return `(${left} - ${right})`;
-  if (op === "mad-lo") return `((${left} * ${right}) + ${immediate === undefined ? `u32(${emitExpression(inputs[2]!, context)})` : `${immediate >>> 0}u`})`;
-  return `(${left} * ${right})`;
+  const addend = op === "mad-lo"
+    ? immediate === undefined ? `u32(${emitExpression(inputs[2]!, context)})` : `${immediate >>> 0}u`
+    : "0u";
+  return emitInlineArithmeticWgsl(op, left, right, addend);
 }
 
 function emitInlineMinMaxExpression(inputs: readonly CudaLiteExpression[], op: "min" | "max", signed: boolean, context: EmitContext, immediate?: number): string {
   const left = `u32(${emitExpression(inputs[0]!, context)})`;
   const right = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
-  if (!signed) return `${op}(${left}, ${right})`;
-  return `bitcast<u32>(${op}(bitcast<i32>(${left}), bitcast<i32>(${right})))`;
+  return emitInlineMinMaxWgsl(op, left, right, signed);
 }
 
 function emitInlineUnaryIntExpression(input: CudaLiteExpression | undefined, op: "neg" | "abs", context: EmitContext, immediate?: number): string {
   const value = immediate === undefined ? `u32(${emitExpression(input!, context)})` : `${immediate >>> 0}u`;
-  if (op === "neg") return `(0u - ${value})`;
-  const mask = `select(0u, 0xffffffffu, ((${value} & 0x80000000u) != 0u))`;
-  return `((${value} ^ ${mask}) - ${mask})`;
+  return emitInlineUnaryIntWgsl(op, value);
 }
 
 function emitInlineSelectExpression(inputs: readonly CudaLiteExpression[], context: EmitContext, trueImmediate?: number, falseImmediate?: number): string {
@@ -2563,15 +2553,14 @@ function emitInlineSelectExpression(inputs: readonly CudaLiteExpression[], conte
   const trueValue = trueImmediate === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${trueImmediate >>> 0}u`;
   const falseValue = falseImmediate === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${falseImmediate >>> 0}u`;
   const predicate = `u32(${emitExpression(inputs[inputIndex]!, context)})`;
-  return `select(${falseValue}, ${trueValue}, (${predicate} != 0u))`;
+  return emitInlineSelectWgsl(trueValue, falseValue, predicate);
 }
 
 function emitInlineCompareExpression(inputs: readonly CudaLiteExpression[], op: "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: boolean, context: EmitContext, immediate?: number): string {
   const left = signed ? `bitcast<i32>(u32(${emitExpression(inputs[0]!, context)}))` : `u32(${emitExpression(inputs[0]!, context)})`;
   const rightU32 = immediate === undefined ? `u32(${emitExpression(inputs[1]!, context)})` : `${immediate >>> 0}u`;
   const right = signed ? `bitcast<i32>(${rightU32})` : rightU32;
-  const operator = op === "eq" ? "==" : op === "ne" ? "!=" : op === "lt" ? "<" : op === "le" ? "<=" : op === "gt" ? ">" : ">=";
-  return `select(0u, 1u, (${left} ${operator} ${right}))`;
+  return emitInlineCompareWgsl(op, left, right);
 }
 
 function emitInlineF32ToIntConvertExpression(
@@ -2581,29 +2570,15 @@ function emitInlineF32ToIntConvertExpression(
   target: CudaLiteExpression,
   context: EmitContext,
 ): string {
-  const rounded = rounding === "rn"
-    ? `bg_round_even_f32(${source})`
-    : rounding === "rz"
-    ? `trunc(${source})`
-    : rounding === "rm"
-    ? `floor(${source})`
-    : `ceil(${source})`;
   const targetType = expressionValueTypeForEmit(target, context);
-  if (toSigned && targetType !== "uint") return `i32(clamp(${rounded}, -2147483648.0, 2147483520.0))`;
-  if (toSigned) return `bitcast<u32>(i32(clamp(${rounded}, -2147483648.0, 2147483520.0)))`;
-  return `u32(clamp(${rounded}, 0.0, 4294967040.0))`;
+  return emitInlineF32ToIntConvertWgsl(source, rounding, toSigned, targetType === "uint");
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
   const a = `u32(${emitExpression(inputs[0]!, context)})`;
   const b = `u32(${emitExpression(inputs[1]!, context)})`;
   const c = `u32(${emitExpression(inputs[2]!, context)})`;
-  const lanes = [0, 8, 16, 24].map((shift) => {
-    const left = `((${a} >> ${shift}u) & 0xffu)`;
-    const right = `((${b} >> ${shift}u) & 0xffu)`;
-    return `(max(${left}, ${right}) - min(${left}, ${right}))`;
-  });
-  return `(${c} + ${lanes.join(" + ")})`;
+  return emitU8x4SadAddWgsl(a, b, c);
 }
 
 function emitDp4aExpression(expression: Extract<CudaLiteExpression, { readonly kind: "call" }>, context: EmitContext): string {
