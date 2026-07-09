@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T15:32:56Z
+Last updated: 2026-07-09T15:36:55Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: semantic initializer flattening now has one semantic-IR helper, shared CUDA scalar helpers no longer live behind reference naming, and reference-only typed-array allocation stays in the reference helper module |
+| Active work item | Architecture split: CUDA-lite dimension stride and flat-index math now live in shared value helpers instead of duplicated semantic reference/WGSL helpers |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: moved CUDA-lite dimension stride, flat-index, and flat-indices math into `cuda_lite_values.ts`; semantic reference and semantic WGSL now share the same row-major layout math for local/shared/constant/device-global lowering instead of duplicating stride reducers; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_reference.ts` down to `4667` lines and `semantic_wgsl.ts` down to `6991`
 - Architecture split: extracted `cuda_lite_values.ts` for shared CUDA scalar truthiness/element-count helpers and `semantic_initializers.ts` for semantic-IR initializer flattening, leaving `reference_scalars.ts` reference-only; semantic reference and semantic WGSL now share initializer flattening instead of carrying duplicate recursive helpers; typecheck passed, lint passed, compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_reference.ts` down to `4673` lines and `semantic_wgsl.ts` down to `6994`
 - Architecture split: extracted shared reference scalar/value helpers into `reference_scalars.ts`, removed duplicate CUDA truthiness/element-count/typed-array helpers from reference and semantic stages, and routed semantic WGSL bf16 atomic-add helper selection through `semanticAtomicSupportsBfloatAdd`; typecheck passed, lint passed, compiler unit passed `749/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed, and architecture map now shows `semantic_reference.ts` down to `4677` lines, `semantic_wgsl.ts` down to `6998`, and `reference.ts` down to `6843`
 - Inline PTX f32 division slice: `div.rn.f32` now classifies modeled f32 source operands including literals, validates f32 outputs and inputs, preserves f32 division semantics in CPU reference with `Math.fround`, emits native WGSL division, and executes in browser WebGPU as `single-dispatch`; focused compiler proof passed `749/0`; exact native WebGPU case `inline-asm:f32-division` passed `1/0/0`, skips `0`; changed-fast passed typecheck, compiler unit `733/0`, WGSL modules `16/0`, WebGPU smoke `610/0/0`, selected storage/pointer WebGPU `125/0/0`, fixture/test-scope, slow-smoke-hot `78/0/0`, and fast auto-corpus `32/0/0`; lint passed

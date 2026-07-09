@@ -60,7 +60,11 @@ import {
   semanticAtomicSupportsBfloatAdd,
   semanticAtomicSupportsFloat,
 } from "./semantic_atomic_intrinsics.js";
-import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
+import {
+  cudaLiteDimensionStride as dimensionStride,
+  cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
+  cudaLiteTotalElements as totalElements,
+} from "./cuda_lite_values.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
   SEMANTIC_BFLOAT_HELPER_CALLS,
@@ -6298,13 +6302,6 @@ function semanticPointerBaseParamName(base: string): string {
   return `${base}_base`;
 }
 
-function flatIndicesForDimensions(dimensions: readonly number[], flatIndex: number): readonly number[] {
-  return dimensions.map((_, offset) => {
-    const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
-    return Math.floor(flatIndex / stride) % Math.max(1, dimensions[offset] ?? 1);
-  });
-}
-
 function emitFlatStorageIndex(
   ref: SemanticMemoryRef,
   ir: SemanticKernelIrModule,
@@ -6378,7 +6375,7 @@ function emitFlatSharedIndex(
     throw semanticWgslError(`shared memory '${symbol.name}' index rank mismatch`, symbol.span);
   }
   const terms = indices.map((index, offset) => {
-    const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(symbol.dimensions, offset);
     const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
     return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
   });
@@ -6400,7 +6397,7 @@ function emitFlatDeviceGlobalIndex(
     throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
   }
   const terms = indices.map((index, offset) => {
-    const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(symbol.dimensions, offset);
     const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
     return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
   });
@@ -6422,7 +6419,7 @@ function emitFlatConstantIndex(
     throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
   }
   const terms = indices.map((index, offset) => {
-    const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const stride = dimensionStride(symbol.dimensions, offset);
     const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
     return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
   });
@@ -6431,7 +6428,7 @@ function emitFlatConstantIndex(
 
 function emitFlatLocalArrayIndexes(flat: string, dimensions: readonly number[]): string {
   return dimensions.map((dimension, offset) => {
-    const stride = dimensions.slice(offset + 1).reduce((product, item) => product * item, 1);
+    const stride = dimensionStride(dimensions, offset);
     const quotient = stride === 1 ? flat : `(${flat} / ${stride}u)`;
     return `[${dimension > 1 ? `(${quotient} % ${Math.max(1, dimension)}u)` : "0u"}]`;
   }).join("");

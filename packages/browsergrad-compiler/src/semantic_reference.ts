@@ -17,6 +17,7 @@ import {
   cloneReferenceSurfaces,
 } from "./reference_inputs.js";
 import {
+  cudaLiteFlatIndexForDimensions as flatIndexForDimensions,
   cudaLiteTotalElements as totalElements,
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
@@ -4621,13 +4622,6 @@ function evalConstantInitNumber(expression: SemanticExpression): number {
     default:
       return 0;
   }
-}
-
-function flatIndexForDimensions(dimensions: readonly number[], indices: readonly number[]): number {
-  return indices.reduce((sum, index, offset) => {
-    const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
-    return sum + index * stride;
-  }, 0);
 }
 
 function semanticReferenceError(message: string, span: SourceSpan): CudaLiteCompilerError {
