@@ -1784,7 +1784,7 @@ function validateInlineAsmStatement(
     asmDiagnostics.push(error("invalid-inline-asm-operands", "lop3.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "bitwise-b32") {
-    const expectedInputs = op.op === "not" ? 1 : 2;
+    const expectedInputs = op.op === "not" || op.immediate !== undefined ? 1 : 2;
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }

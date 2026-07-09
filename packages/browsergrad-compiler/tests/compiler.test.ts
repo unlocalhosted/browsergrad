@@ -11985,6 +11985,59 @@ __global__ void bitwiseKernel(uint *out, uint *a, uint *b) {
     ]);
   });
 
+  it("lowers inline PTX bitwise b32 immediate statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int and_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("and.b32 %0, %1, 0x0f0f0f0f;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int or_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("or.b32 %0, %1, 0x11111111;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int xor_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("xor.b32 %0, %1, 0xffffffff;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__global__ void bitwiseImmediateKernel(uint *out, uint *a) {
+  int idx = threadIdx.x;
+  out[idx] = and_imm_ptx(a[idx]);
+  out[idx + 4] = or_imm_ptx(a[idx]);
+  out[idx + 8] = xor_imm_ptx(a[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(12),
+          a: new Uint32Array([0xffffffff, 0x12345678, 0xf0f0f0f0, 0xaaaaaaaa]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("252645135u");
+    expect(compiled.wgsl).toContain("4294967295u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0x0f0f0f0f,
+      0x02040608,
+      0,
+      0x0a0a0a0a,
+      0xffffffff,
+      0x13355779,
+      0xf1f1f1f1,
+      0xbbbbbbbb,
+      0,
+      0xedcba987,
+      0x0f0f0f0f,
+      0x55555555,
+    ]);
+  });
+
   it("lowers inline PTX shift b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int shl_ptx(unsigned int value, unsigned int shift) {

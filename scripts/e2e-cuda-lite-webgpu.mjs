@@ -2683,6 +2683,28 @@ __global__ void ptxBitwiseB32(uint *out, uint *a, uint *b) {
   out[idx + 8] = xor_ptx(a[idx], b[idx]);
   out[idx + 12] = not_ptx(a[idx]);
 }`,
+  ptxBitwiseImmediateB32: `
+__device__ unsigned int and_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("and.b32 %0, %1, 0x0f0f0f0f;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int or_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("or.b32 %0, %1, 0x11111111;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__device__ unsigned int xor_imm_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("xor.b32 %0, %1, 0xffffffff;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__global__ void ptxBitwiseImmediateB32(uint *out, uint *a) {
+  int idx = threadIdx.x;
+  out[idx] = and_imm_ptx(a[idx]);
+  out[idx + 4] = or_imm_ptx(a[idx]);
+  out[idx + 8] = xor_imm_ptx(a[idx]);
+}`,
   ptxShiftB32: `
 __device__ unsigned int shl_ptx(unsigned int value, unsigned int shift) {
   unsigned int ret;
@@ -14273,6 +14295,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [0, 0x02244220, 0, 0, 0xffffffff, 0x97755779, 0xffffffff, 0xffffffff, 0xffffffff, 0x95511559, 0xffffffff, 0xffffffff, 0, 0xedcba987, 0x0f0f0f0f, 0x55555555],
+            },
+          },
+          {
+            name: "inline-asm:bitwise-immediate-b32",
+            source: SOURCES.ptxBitwiseImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(12),
+                a: new Uint32Array([0xffffffff, 0x12345678, 0xf0f0f0f0, 0xaaaaaaaa]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0x0f0f0f0f, 0x02040608, 0, 0x0a0a0a0a, 0xffffffff, 0x13355779, 0xf1f1f1f1, 0xbbbbbbbb, 0, 0xedcba987, 0x0f0f0f0f, 0x55555555],
             },
           },
           {

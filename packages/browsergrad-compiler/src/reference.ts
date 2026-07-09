@@ -949,11 +949,13 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "bitwise-b32") {
-    const expectedInputs = op.op === "not" ? 1 : 2;
+    const expectedInputs = op.op === "not" || op.immediate !== undefined ? 1 : 2;
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
     const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
-    const right = op.op === "not" ? 0 : valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0;
+    const right = op.op === "not"
+      ? 0
+      : op.immediate ?? valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmBitwise(op.op, left, right), context);
     return;
   }
