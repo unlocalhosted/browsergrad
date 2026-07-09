@@ -130,6 +130,13 @@ import {
   semanticAtomicSupportsDevicePointer,
   semanticAtomicSupportsFloat,
 } from "./semantic_atomic_intrinsics.js";
+import {
+  SEMANTIC_CURAND_ARITIES,
+  SEMANTIC_CURAND_DISTRIBUTION_CALLS,
+  SEMANTIC_CURAND_STATE_ONLY_CALLS,
+  SEMANTIC_CURAND_VECTOR_RETURN_TYPES,
+  semanticCurandReturnType,
+} from "./semantic_curand_intrinsics.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
@@ -303,22 +310,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["vec_at", [2, 2]],
   ["deviceAllocate", [2, 4]],
   ["streamOrderedAllocate", [2, 4]],
-  ["curand_init", [4, 4]],
-  ["curand", [1, 1]],
-  ["curand_uniform", [1, 1]],
-  ["curand_uniform4", [1, 1]],
-  ["curand_uniform_double", [1, 1]],
-  ["curand_normal", [1, 1]],
-  ["curand_normal2", [1, 1]],
-  ["curand_normal4", [1, 1]],
-  ["curand_normal_double", [1, 1]],
-  ["curand_log_normal", [3, 3]],
-  ["curand_log_normal2", [3, 3]],
-  ["curand_log_normal4", [3, 3]],
-  ["curand_log_normal_double", [3, 3]],
-  ["curand_poisson", [2, 2]],
-  ["curand_poisson4", [2, 2]],
-  ["skipahead", [2, 2]],
+  ...SEMANTIC_CURAND_ARITIES,
   ["make_cuComplex", [2, 2]],
   ["make_cuFloatComplex", [2, 2]],
   ["make_cuDoubleComplex", [2, 2]],
@@ -2303,52 +2295,20 @@ function validateCallExpression(
     validateCurandInit(expression, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "uint" };
   }
-  if (callName === "curand") {
+  if (SEMANTIC_CURAND_STATE_ONLY_CALLS.has(callName)) {
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
-    return { kind: "scalar", valueType: "uint" };
+    const valueType = semanticCurandReturnType(callName);
+    return SEMANTIC_CURAND_VECTOR_RETURN_TYPES.has(callName)
+      ? { kind: "vector", valueType }
+      : { kind: "scalar", valueType };
   }
-  if (callName === "curand_uniform4" || callName === "curand_normal4") {
+  if (SEMANTIC_CURAND_DISTRIBUTION_CALLS.has(callName)) {
     validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
-    return { kind: "vector", valueType: "float4" };
-  }
-  if (callName === "curand_normal2") {
-    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
-    return { kind: "vector", valueType: "float2" };
-  }
-  if (callName === "curand_log_normal2" || callName === "curand_log_normal4") {
-    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
-    for (const arg of expression.args.slice(1)) {
-      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
-    }
-    return { kind: "vector", valueType: callName === "curand_log_normal2" ? "float2" : "float4" };
-  }
-  if (
-    callName === "curand_uniform" ||
-    callName === "curand_uniform_double" ||
-    callName === "curand_normal" ||
-    callName === "curand_normal_double" ||
-    callName === "curand_log_normal" ||
-    callName === "curand_log_normal_double"
-  ) {
-    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
-    for (const arg of expression.args.slice(1)) {
-      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
-    }
-    return { kind: "scalar", valueType: "float" };
-  }
-  if (callName === "curand_poisson") {
-    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
-    for (const arg of expression.args.slice(1)) {
-      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
-    }
-    return { kind: "scalar", valueType: "uint" };
-  }
-  if (callName === "curand_poisson4") {
-    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
-    for (const arg of expression.args.slice(1)) {
-      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
-    }
-    return { kind: "vector", valueType: "uint4" };
+    for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    const valueType = semanticCurandReturnType(callName);
+    return SEMANTIC_CURAND_VECTOR_RETURN_TYPES.has(callName)
+      ? { kind: "vector", valueType }
+      : { kind: "scalar", valueType };
   }
   if (callName === "skipahead") {
     const count = expression.args[0];

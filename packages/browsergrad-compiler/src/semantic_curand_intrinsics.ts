@@ -1,5 +1,7 @@
 import type { CudaLiteScalarType } from "./types.js";
 
+type SemanticCurandReturnType = Exclude<CudaLiteScalarType, "void">;
+
 export const SEMANTIC_CURAND_CALLS = new Set([
   "curand_init",
   "curand",
@@ -19,7 +21,7 @@ export const SEMANTIC_CURAND_CALLS = new Set([
   "skipahead",
 ]);
 
-export const SEMANTIC_CURAND_VECTOR_RETURN_TYPES = new Map<string, CudaLiteScalarType>([
+export const SEMANTIC_CURAND_VECTOR_RETURN_TYPES = new Map<string, SemanticCurandReturnType>([
   ["curand_uniform4", "float4"],
   ["curand_normal2", "float2"],
   ["curand_normal4", "float4"],
@@ -49,3 +51,33 @@ export const SEMANTIC_CURAND_DISTRIBUTION_CALLS = new Set([
   "curand_poisson",
   "curand_poisson4",
 ]);
+
+export const SEMANTIC_CURAND_ARITIES: readonly (readonly [string, readonly [min: number, max: number]])[] = [
+  ["curand_init", [4, 4]],
+  ["curand", [1, 1]],
+  ["curand_uniform", [1, 1]],
+  ["curand_uniform4", [1, 1]],
+  ["curand_uniform_double", [1, 1]],
+  ["curand_normal", [1, 1]],
+  ["curand_normal2", [1, 1]],
+  ["curand_normal4", [1, 1]],
+  ["curand_normal_double", [1, 1]],
+  ["curand_log_normal", [3, 3]],
+  ["curand_log_normal2", [3, 3]],
+  ["curand_log_normal4", [3, 3]],
+  ["curand_log_normal_double", [3, 3]],
+  ["curand_poisson", [2, 2]],
+  ["curand_poisson4", [2, 2]],
+  ["skipahead", [2, 2]],
+];
+
+export function semanticCurandReturnType(name: string | undefined): SemanticCurandReturnType | undefined {
+  if (name === "curand_init" || name === "curand" || name === "skipahead" || name === "curand_poisson") return "uint";
+  if (SEMANTIC_CURAND_VECTOR_RETURN_TYPES.has(name ?? "")) return SEMANTIC_CURAND_VECTOR_RETURN_TYPES.get(name ?? "");
+  if (name === "curand_uniform" || name === "curand_uniform_double" ||
+    name === "curand_normal" || name === "curand_normal_double" ||
+    name === "curand_log_normal" || name === "curand_log_normal_double") {
+    return "float";
+  }
+  return undefined;
+}
