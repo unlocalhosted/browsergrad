@@ -73,18 +73,16 @@ import {
   SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
   SEMANTIC_BF162_MASK_COMPARISON_CALLS,
   SEMANTIC_BF162_MINMAX_VECTOR_CALLS,
-  SEMANTIC_BF162_SCALAR_CALLS,
   SEMANTIC_BF162_TERNARY_VECTOR_CALLS,
   SEMANTIC_BF162_UNARY_VECTOR_CALLS,
-  SEMANTIC_BF162_VECTOR_CALLS,
   SEMANTIC_BF162_VECTOR_COMPARISON_CALLS,
-  SEMANTIC_HALF2_SCALAR_CALLS,
-  SEMANTIC_HALF2_VECTOR_CALLS,
+  semanticBf162CallArgumentsSupported,
   isSemanticHalf2BooleanComparisonCall,
   isSemanticHalf2ComparisonCall,
   isSemanticHalf2MaskComparisonCall,
   isSemanticHalf2UnaryCall,
   isSemanticFloatVectorType,
+  semanticHalf2CallArgumentsSupported,
   semanticExpressionValueType,
   semanticExpressionVectorValueType,
 } from "./semantic_vector_intrinsics.js";
@@ -675,51 +673,12 @@ function semanticReferenceHalf2CallSupported(
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
   if (expression.callee.kind !== "symbol") return false;
-  const name = expression.callee.name;
-  if (!SEMANTIC_HALF2_VECTOR_CALLS.has(name) && !SEMANTIC_HALF2_SCALAR_CALLS.has(name)) return false;
-  if (isSemanticHalf2UnaryCall(name)) {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  if (isSemanticHalf2ComparisonCall(name)) {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (name === "__hadd2" || name === "__hadd2_rn" || name === "__hadd2_sat" || name === "__hsub2" || name === "__hsub2_rn" || name === "__hsub2_sat" || name === "__hmul2" || name === "__hmul2_rn" || name === "__hmul2_sat" || name === "__hmin2" || name === "__hmax2" || name === "__hmin2_nan" || name === "__hmax2_nan") {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat") {
-    return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (name === "__half22float2" || name === "__half2_as_uint" || name === "__low2half" || name === "__high2half" || name === "__low2float" || name === "__high2float" || name === "__low2half2" || name === "__high2half2" || name === "__lowhigh2highlow") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  if (name === "__halves2half2") {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
-  }
-  if (name === "__half2half2") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticReferenceExpressionSupported(arg, "scalar", compiled);
-  }
-  if (name === "__lows2half2" || name === "__highs2half2") {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "half2" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (name === "__uint_as_half2") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticReferenceExpressionSupported(arg, "scalar", compiled);
-  }
-  if (name === "__float22half2_rn") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "float2" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  if (name === "__float2half2_rn") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticReferenceExpressionSupported(arg, "scalar", compiled);
-  }
-  if (name === "__floats2half2_rn") {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
-  }
-  return false;
+  return semanticHalf2CallArgumentsSupported(
+    expression.callee.name,
+    expression.args,
+    semanticExpressionVectorValueType,
+    (arg, expected) => semanticReferenceExpressionSupported(arg, expected, compiled),
+  );
 }
 
 function semanticReferenceBf162CallSupported(
@@ -727,59 +686,12 @@ function semanticReferenceBf162CallSupported(
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
   if (expression.callee.kind !== "symbol") return false;
-  const name = expression.callee.name;
-  if (!SEMANTIC_BF162_VECTOR_CALLS.has(name) && !SEMANTIC_BF162_SCALAR_CALLS.has(name)) return false;
-  if (SEMANTIC_BF162_UNARY_VECTOR_CALLS.has(name)) {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  if (SEMANTIC_BF162_BINARY_VECTOR_CALLS.has(name)) {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (SEMANTIC_BF162_TERNARY_VECTOR_CALLS.has(name)) {
-    return expression.args.length === 3 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (SEMANTIC_BF162_MINMAX_VECTOR_CALLS.has(name)) {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (SEMANTIC_BF162_VECTOR_COMPARISON_CALLS.has(name)) {
-    const arity = name === "__hisnan2" ? 1 : 2;
-    return expression.args.length === arity && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (SEMANTIC_BF162_MASK_COMPARISON_CALLS.has(name) || SEMANTIC_BF162_BOOL_COMPARISON_CALLS.has(name)) {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (name === "__bfloat1622float2") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  if (name === "__float22bfloat162_rn") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "float2" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  if (name === "__halves2bfloat162" || name === "__floats2bfloat162_rn") {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
-  }
-  if (name === "__bfloat162bfloat162" || name === "__float2bfloat162_rn") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticReferenceExpressionSupported(arg, "scalar", compiled);
-  }
-  if (name === "__low2bfloat16" || name === "__high2bfloat16" || name === "__low2float" || name === "__high2float" || name === "__low2bfloat162" || name === "__high2bfloat162" || name === "__lowhigh2highlow") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  if (name === "__lows2bfloat162" || name === "__highs2bfloat162") {
-    return expression.args.length === 2 && expression.args.every((arg) => semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled));
-  }
-  if (name === "__uint_as_bfloat162" || name === "__uint_as_nv_bfloat162") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticReferenceExpressionSupported(arg, "scalar", compiled);
-  }
-  if (name === "__bfloat162_as_uint" || name === "__nv_bfloat162_as_uint") {
-    const [arg] = expression.args;
-    return expression.args.length === 1 && arg !== undefined && semanticExpressionVectorValueType(arg) === "bf162" && semanticReferenceExpressionSupported(arg, "any", compiled);
-  }
-  return false;
+  return semanticBf162CallArgumentsSupported(
+    expression.callee.name,
+    expression.args,
+    semanticExpressionVectorValueType,
+    (arg, expected) => semanticReferenceExpressionSupported(arg, expected, compiled),
+  );
 }
 
 function semanticReferenceFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {

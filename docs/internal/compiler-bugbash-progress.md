@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T22:51:17Z
+Last updated: 2026-07-09T22:56:20Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: atomic arity/value contract shared across semantic reference/WGSL |
+| Active work item | Architecture split: half2/bf162 call-argument contract shared across semantic reference/WGSL |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: expanded `semantic_vector_intrinsics.ts` with shared half2/bf162 call-argument contracts covering vector/scalar arity, source vector type expectations, lane extraction/packing, conversion, arithmetic, comparison, and min/max call families, then rewired semantic reference and semantic WGSL half2/bf162 readiness checks to consume that contract instead of duplicating long call-name branches; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4414`, `semantic_wgsl.ts` down to `5202`, with semantic-IR bucket down to `15575`
 - Architecture split: expanded `semantic_atomic_intrinsics.ts` with shared atomic required-argument/scalar-argument helpers plus reference value-type support, then rewired semantic reference atomic operation/call checks and semantic WGSL atomic operation/call arity checks to consume that contract instead of repeating CAS/non-CAS arity and reference value-type rules; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4502`, `semantic_wgsl.ts` at `5286`, with semantic-IR bucket at `15614`
 - Architecture split: expanded `semantic_function_calls.ts` to own shared storage-pointer device-function body validation, including permitted atomic/store/return/update expression shapes over pointer params, then rewired semantic reference and semantic WGSL pointer-function readiness checks to consume that contract instead of duplicating operation/expression walkers; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4511`, `semantic_wgsl.ts` down to `5285`, with semantic-IR bucket at `15601`
 - Architecture split: expanded `semantic_function_calls.ts` to own shared device-function body-shape validation with explicit target options for reference blocks and WGSL barrier/fence bodies, then rewired semantic reference and semantic WGSL readiness checks to consume that contract instead of duplicating recursive operation-shape rules; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map now shows `semantic_reference.ts` down to `4535`, `semantic_wgsl.ts` down to `5309`, with semantic-IR bucket at `15612`
