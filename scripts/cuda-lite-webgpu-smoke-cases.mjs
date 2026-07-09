@@ -21,6 +21,7 @@ export const runtimeScopeCases = [
   "inline-asm:clz-brev-b32",
   "inline-asm:prmt-b32",
   "inline-asm:lop3-b32",
+  "inline-asm:bitwise-b32",
   "inline-asm:special-reg-single-percent",
   "runtime:unreachable-texture-surface-compat-diagnostics",
   "runtime:unreachable-constant-binding",

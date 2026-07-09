@@ -948,6 +948,15 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmLop3(a, b, c, immLut), context);
     return;
   }
+  if (op?.kind === "bitwise-b32") {
+    const expectedInputs = op.op === "not" ? 1 : 2;
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.b32 inline asm expects ${expectedInputs} inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
+    const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
+    const right = op.op === "not" ? 0 : valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmBitwise(op.op, left, right), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1046,6 +1055,13 @@ function evalInlineAsmLop3(a: number, b: number, c: number, immLut: number): num
     out |= aMask & bMask & cMask;
   }
   return out >>> 0;
+}
+
+function evalInlineAsmBitwise(op: "and" | "or" | "xor" | "not", left: number, right: number): number {
+  if (op === "and") return (left & right) >>> 0;
+  if (op === "or") return (left | right) >>> 0;
+  if (op === "xor") return (left ^ right) >>> 0;
+  return (~left) >>> 0;
 }
 
 function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {

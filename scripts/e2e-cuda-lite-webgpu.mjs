@@ -2655,6 +2655,34 @@ __global__ void ptxLop3B32(uint *out, uint *a, uint *b, uint *c) {
   out[idx] = choose_ptx(a[idx], b[idx], c[idx]);
   out[idx + 4] = xor_ptx(a[idx], b[idx], c[idx]);
 }`,
+  ptxBitwiseB32: `
+__device__ unsigned int and_ptx(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("and.b32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ unsigned int or_ptx(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("or.b32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ unsigned int xor_ptx(unsigned int a, unsigned int b) {
+  unsigned int ret;
+  asm volatile("xor.b32 %0, %1, %2;" : "=r"(ret) : "r"(a), "r"(b));
+  return ret;
+}
+__device__ unsigned int not_ptx(unsigned int a) {
+  unsigned int ret;
+  asm volatile("not.b32 %0, %1;" : "=r"(ret) : "r"(a));
+  return ret;
+}
+__global__ void ptxBitwiseB32(uint *out, uint *a, uint *b) {
+  int idx = threadIdx.x;
+  out[idx] = and_ptx(a[idx], b[idx]);
+  out[idx + 4] = or_ptx(a[idx], b[idx]);
+  out[idx + 8] = xor_ptx(a[idx], b[idx]);
+  out[idx + 12] = not_ptx(a[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -13998,6 +14026,24 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0x12345678, 0x87654321, 0x0f0f0f0f, 0x11111111, 0x6aaeeaa6, 0x95511559, 0, 0xcccccccc] },
+          },
+          {
+            name: "inline-asm:bitwise-b32",
+            source: SOURCES.ptxBitwiseB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                a: new Uint32Array([0xffffffff, 0x12345678, 0xf0f0f0f0, 0xaaaaaaaa]),
+                b: new Uint32Array([0, 0x87654321, 0x0f0f0f0f, 0x55555555]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0, 0x02244220, 0, 0, 0xffffffff, 0x97755779, 0xffffffff, 0xffffffff, 0xffffffff, 0x95511559, 0xffffffff, 0xffffffff, 0, 0xedcba987, 0x0f0f0f0f, 0x55555555],
+            },
           },
           {
             name: "inline-asm:special-reg-single-percent",

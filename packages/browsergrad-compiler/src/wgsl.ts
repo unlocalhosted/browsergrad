@@ -2312,6 +2312,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "lop3-b32" && statement.inputs.length === (op.immLut === undefined ? 4 : 3) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context), context)}`;
   }
+  if (op?.kind === "bitwise-b32" && statement.inputs.length === (op.op === "not" ? 1 : 2) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBitwiseExpression(statement.inputs, op.op, context), context)}`;
+  }
   if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
@@ -2419,6 +2422,14 @@ function emitInlineLop3Expression(inputs: readonly CudaLiteExpression[], immLut:
     return `select(0u, ${rowMask}, ((${lut} & ${1 << row}u) != 0u))`;
   });
   return `(${rows.join(" | ")})`;
+}
+
+function emitInlineBitwiseExpression(inputs: readonly CudaLiteExpression[], op: "and" | "or" | "xor" | "not", context: EmitContext): string {
+  const left = `u32(${emitExpression(inputs[0]!, context)})`;
+  if (op === "not") return `(~${left})`;
+  const right = `u32(${emitExpression(inputs[1]!, context)})`;
+  const operator = op === "and" ? "&" : op === "or" ? "|" : "^";
+  return `(${left} ${operator} ${right})`;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
