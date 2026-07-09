@@ -2975,6 +2975,22 @@ __global__ void ptxConvertB32(uint *out, uint *input) {
   out[idx] = cvt_u_s((int)input[idx]);
   out[idx + 4] = (uint)cvt_s_u(input[idx]);
 }`,
+  ptxConvertImmediateB32: `
+__device__ unsigned int cvt_u_s_imm() {
+  unsigned int ret;
+  asm volatile("cvt.u32.s32 %0, -1;" : "=r"(ret));
+  return ret;
+}
+__device__ int cvt_s_u_imm() {
+  int ret;
+  asm volatile("cvt.s32.u32 %0, 0x80000000;" : "=r"(ret));
+  return ret;
+}
+__global__ void ptxConvertImmediateB32(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = cvt_u_s_imm();
+  out[idx + 4] = (uint)cvt_s_u_imm();
+}`,
   ptxMoveB32: `
 __device__ unsigned int mov_u_ptx(unsigned int value) {
   unsigned int ret;
@@ -14595,6 +14611,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [0, 1, 0xffffffff, 0x80000000, 0, 1, 0xffffffff, 0x80000000],
+            },
+          },
+          {
+            name: "inline-asm:convert-immediate-b32",
+            source: SOURCES.ptxConvertImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0x80000000, 0x80000000, 0x80000000, 0x80000000],
             },
           },
           {

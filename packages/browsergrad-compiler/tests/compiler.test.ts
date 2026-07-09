@@ -12694,6 +12694,44 @@ __global__ void convertKernel(uint *out, uint *input) {
     ]);
   });
 
+  it("lowers inline PTX cvt b32 immediate statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int cvt_u_s_imm() {
+  unsigned int ret;
+  asm volatile("cvt.u32.s32 %0, -1;" : "=r"(ret));
+  return ret;
+}
+__device__ int cvt_s_u_imm() {
+  int ret;
+  asm volatile("cvt.s32.u32 %0, 0x80000000;" : "=r"(ret));
+  return ret;
+}
+__global__ void convertImmediateKernel(uint *out) {
+  int idx = threadIdx.x;
+  out[idx] = cvt_u_s_imm();
+  out[idx + 4] = (uint)cvt_s_u_imm();
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("4294967295u");
+    expect(compiled.wgsl).toContain("2147483648u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0xffffffff,
+      0xffffffff,
+      0xffffffff,
+      0xffffffff,
+      0x80000000,
+      0x80000000,
+      0x80000000,
+      0x80000000,
+    ]);
+  });
+
   it("lowers inline PTX mov b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int mov_u_ptx(unsigned int value) {
