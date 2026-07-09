@@ -19206,6 +19206,36 @@ __global__ void trap_kernel(int* out) {
 }`, { workgroupSize: [1, 1, 1] })).toThrow(/unsupported-device-trap/u);
   });
 
+  it("models scalar-guarded CUDA traps as launch preconditions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void guarded_trap(int* out, int C) {
+  if (C % (32 * 4) != 0) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+      printf("bad shape");
+    }
+    __trap();
+  }
+  if (threadIdx.x < 1) {
+    out[0] = 1;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const okInput = { buffers: { out: new Int32Array(1) }, scalars: { C: 128 } };
+    const badInput = { buffers: { out: new Int32Array(1) }, scalars: { C: 127 } };
+    const missingScalarInput = { buffers: { out: new Int32Array(1) } };
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-device-trap");
+    expect(createCudaWebGpuExecutionPlan(compiled, okInput, launch).supported).toBe(true);
+    expect([...runCompiledKernelReference(compiled, okInput, launch).buffers.out as Int32Array]).toEqual([1]);
+    const badPlan = createCudaWebGpuExecutionPlan(compiled, badInput, launch);
+    if (badPlan.supported) throw new Error("expected bad scalar trap precondition plan to be unsupported");
+    expect(badPlan.diagnostics.map((diagnostic) => diagnostic.code)).toContain("cuda-launch-precondition-failed");
+    expect(() => runCompiledKernelReference(compiled, badInput, launch)).toThrow(/guarded __trap would execute/u);
+    const unknownPlan = createCudaWebGpuExecutionPlan(compiled, missingScalarInput, launch);
+    if (unknownPlan.supported) throw new Error("expected unknown scalar trap precondition plan to be unsupported");
+    expect(unknownPlan.diagnostics.map((diagnostic) => diagnostic.code)).toContain("cuda-launch-precondition-unknown");
+  });
+
   it("ignores CUDA device trap in unreachable helpers for selected kernels", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void trap_helper() {

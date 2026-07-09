@@ -38,6 +38,7 @@ import {
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { classifyInlineAsm, inlineAsmSupportedList } from "./ptx_tile_ops.js";
+import { collectCudaAllowedTrapCallSpanStarts } from "./trap_preconditions.js";
 import { sizeofCudaType } from "./type_layout.js";
 import {
   CUDA_VECTOR_TYPES,
@@ -417,6 +418,7 @@ export function analyzeCudaLite(
   let activeAtomicDeviceGlobals = atomicDeviceGlobals;
   let activeStatementsReachable = true;
   const params = new Map(kernel.params.map((param) => [param.name, param]));
+  const allowedTrapCallSpanStarts = collectCudaAllowedTrapCallSpanStarts(kernel);
   const declaredNames = new Set<string>();
   const rootScope = createScope();
 
@@ -487,6 +489,7 @@ export function analyzeCudaLite(
         walkExpression,
         options,
         activeStatementsReachable,
+        allowedTrapCallSpanStarts,
       );
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression, activeRequiredFeatures);
@@ -1801,6 +1804,7 @@ function validateCallExpression(
   walkExpression: ExpressionWalker,
   options: CudaLiteAnalyzeOptions,
   compatibilityDiagnosticsReachable: boolean,
+  allowedTrapCallSpanStarts: ReadonlySet<number>,
 ): ExpressionInfo {
   const callName = expressionName(expression.callee);
   const namespaceCooperativeCall = cooperativeNamespaceCall(expression, scope);
@@ -1979,7 +1983,7 @@ function validateCallExpression(
     return { kind: "scalar", valueType: "uint" };
   }
   if (callName === "__trap") {
-    if (compatibilityDiagnosticsReachable) {
+    if (compatibilityDiagnosticsReachable && !allowedTrapCallSpanStarts.has(expression.span.start)) {
       diagnostics.push(error("unsupported-device-trap", "__trap cannot be lowered to WebGPU without an explicit device abort contract", expression.span));
     }
     return { kind: "scalar", valueType: "int" };

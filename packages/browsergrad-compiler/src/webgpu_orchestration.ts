@@ -14,6 +14,7 @@ import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.
 import { poolOffsetName } from "./pool_bindings.js";
 import { deviceLaunchTreeIsExternallySilent } from "./runtime_elision.js";
 import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
+import { createCudaTrapLaunchPreconditionDiagnostics } from "./trap_preconditions.js";
 import type {
   SemanticExpression,
   SemanticKernelIrOperation,
@@ -247,6 +248,16 @@ export function createCudaWebGpuExecutionPlan(
       reason: formatWebGpuBlockers(launchBlockers),
       blockers: launchBlockers,
       diagnostics: launchDiagnostics,
+    };
+  }
+  const preconditionDiagnostics = createCudaTrapLaunchPreconditionDiagnostics(compiled, input.scalars ?? {});
+  if (preconditionDiagnostics.length > 0) {
+    const preconditionBlockers = preconditionDiagnostics.map((diagnostic) => webGpuBlocker("launch", diagnostic.code, diagnostic.message));
+    return {
+      supported: false,
+      reason: formatWebGpuBlockers(preconditionBlockers),
+      blockers: preconditionBlockers,
+      diagnostics: preconditionDiagnostics,
     };
   }
   const runtimePlan = createCudaRuntimePlan(compiled);

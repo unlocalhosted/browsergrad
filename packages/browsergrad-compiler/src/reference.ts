@@ -37,6 +37,7 @@ import {
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { classifyInlineAsm } from "./ptx_tile_ops.js";
+import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
@@ -226,12 +227,13 @@ export function runCompiledKernelReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
-  if (canRunCompiledKernelSemanticReference(compiled)) {
-    return runCompiledKernelSemanticReference(compiled, input, launch);
-  }
   const backendIr = referenceKernelIrFor(compiled);
   validateCudaKernelLaunch(launch, backendIr.workgroupSize);
   validateInputs(input, compiled.kernelIr);
+  assertCudaTrapLaunchPreconditions(compiled, input.scalars ?? {});
+  if (canRunCompiledKernelSemanticReference(compiled)) {
+    return runCompiledKernelSemanticReference(compiled, input, launch);
+  }
   const buffers = cloneBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
   for (const constant of backendIr.constants) {
