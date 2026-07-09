@@ -1005,11 +1005,13 @@ function execInlineAsm(
   }
   if (op?.kind === "select-b32") {
     const label = `selp.${op.signed ? "s32" : "b32"}`;
-    if (statement.inputs.length !== 3) throw compilerFailure(`${label} inline asm expects three inputs`);
+    const expectedInputs = 3 - (op.trueImmediate === undefined ? 0 : 1) - (op.falseImmediate === undefined ? 0 : 1);
+    if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
-    const trueValue = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
-    const falseValue = valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
-    const predicate = valueAsNumber(evalExpression(statement.inputs[2]!, context), label) >>> 0;
+    let inputIndex = 0;
+    const trueValue = op.trueImmediate ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), label) >>> 0;
+    const falseValue = op.falseImmediate ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), label) >>> 0;
+    const predicate = valueAsNumber(evalExpression(statement.inputs[inputIndex]!, context), label) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), predicate !== 0 ? trueValue : falseValue, context);
     return;
   }

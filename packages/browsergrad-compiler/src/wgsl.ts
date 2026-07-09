@@ -2327,8 +2327,8 @@ function emitInlineAsmStatement(
   if (op?.kind === "unary-int-b32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineUnaryIntExpression(statement.inputs[0]!, op.op, context), context)}`;
   }
-  if (op?.kind === "select-b32" && statement.inputs.length === 3 && outputs.length === 1) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpression(statement.inputs, context), context)}`;
+  if (op?.kind === "select-b32" && statement.inputs.length === 3 - (op.trueImmediate === undefined ? 0 : 1) - (op.falseImmediate === undefined ? 0 : 1) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineSelectExpression(statement.inputs, context, op.trueImmediate, op.falseImmediate), context)}`;
   }
   if (op?.kind === "compare-b32" && statement.inputs.length === (op.immediate === undefined ? 2 : 1) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineCompareExpression(statement.inputs, op.op, op.signed, context, op.immediate), context)}`;
@@ -2491,10 +2491,11 @@ function emitInlineUnaryIntExpression(input: CudaLiteExpression, op: "neg" | "ab
   return `((${value} ^ ${mask}) - ${mask})`;
 }
 
-function emitInlineSelectExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
-  const trueValue = `u32(${emitExpression(inputs[0]!, context)})`;
-  const falseValue = `u32(${emitExpression(inputs[1]!, context)})`;
-  const predicate = `u32(${emitExpression(inputs[2]!, context)})`;
+function emitInlineSelectExpression(inputs: readonly CudaLiteExpression[], context: EmitContext, trueImmediate?: number, falseImmediate?: number): string {
+  let inputIndex = 0;
+  const trueValue = trueImmediate === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${trueImmediate >>> 0}u`;
+  const falseValue = falseImmediate === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${falseImmediate >>> 0}u`;
+  const predicate = `u32(${emitExpression(inputs[inputIndex]!, context)})`;
   return `select(${falseValue}, ${trueValue}, (${predicate} != 0u))`;
 }
 

@@ -2893,6 +2893,28 @@ __global__ void ptxSelectB32(uint *out, uint *a, uint *b, uint *pred) {
   out[idx] = selp_u_ptx(a[idx], b[idx], pred[idx]);
   out[idx + 4] = (uint)selp_s_ptx((int)a[idx], (int)b[idx], pred[idx]);
 }`,
+  ptxSelectImmediateB32: `
+__device__ unsigned int selp_true_imm_ptx(unsigned int b, unsigned int p) {
+  unsigned int ret;
+  asm volatile("selp.u32 %0, 0xaaaa0001, %1, %2;" : "=r"(ret) : "r"(b), "r"(p));
+  return ret;
+}
+__device__ unsigned int selp_false_imm_ptx(unsigned int a, unsigned int p) {
+  unsigned int ret;
+  asm volatile("selp.u32 %0, %1, 0xbbbb0002, %2;" : "=r"(ret) : "r"(a), "r"(p));
+  return ret;
+}
+__device__ int selp_both_imm_ptx(unsigned int p) {
+  int ret;
+  asm volatile("selp.s32 %0, -8, 7, %1;" : "=r"(ret) : "r"(p));
+  return ret;
+}
+__global__ void ptxSelectImmediateB32(uint *out, uint *a, uint *b, uint *pred) {
+  int idx = threadIdx.x;
+  out[idx] = selp_true_imm_ptx(b[idx], pred[idx]);
+  out[idx + 4] = selp_false_imm_ptx(a[idx], pred[idx]);
+  out[idx + 8] = (uint)selp_both_imm_ptx(pred[idx]);
+}`,
   ptxCompareB32: `
 __device__ unsigned int setp_eq_u(unsigned int a, unsigned int b) {
   unsigned int ret;
@@ -14502,6 +14524,25 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: [2, 0xffffffff, 0x80000000, 0x87654321, 2, 0xffffffff, 0x80000000, 0x87654321],
+            },
+          },
+          {
+            name: "inline-asm:select-immediate-b32",
+            source: SOURCES.ptxSelectImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(12),
+                a: new Uint32Array([1, 0xffffffff, 0x80000000, 0x12345678]),
+                b: new Uint32Array([2, 3, 0x7fffffff, 0x87654321]),
+                pred: new Uint32Array([0, 1, 2, 0]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [2, 0xaaaa0001, 0xaaaa0001, 0x87654321, 0xbbbb0002, 0xffffffff, 0x80000000, 0xbbbb0002, 7, 0xfffffff8, 0xfffffff8, 7],
             },
           },
           {
