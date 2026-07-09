@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T19:39:14Z
+Last updated: 2026-07-09T19:43:21Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: semantic WGSL numeric helper catalog moved into a focused Module |
+| Active work item | Architecture split: semantic WGSL texture descriptor helper emission moved into the texture descriptor Module |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: moved semantic WGSL texture descriptor helper function emission into `semantic_wgsl_texture_descriptors.ts`; texture descriptor specialization, helper naming, coordinate/index policy, and generated helper WGSL now live behind one texture-descriptor Module while `semantic_wgsl.ts` only asks for helpers to emit; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `5371` lines
 - Architecture split: extracted `semantic_wgsl_numeric_helpers.ts` for semantic WGSL numeric helper function source (`round_even`, CUDA math approximations, packed integer helper functions, and dp2a/dp4a helpers); `semantic_wgsl.ts` now consumes one numeric-helper catalog Module instead of carrying helper WGSL source beside expression lowering; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `5414` lines
 - Architecture split: extracted `semantic_wgsl_texture_descriptors.ts` for semantic WGSL texture descriptor specialization, helper naming, texture coordinate/index rules, and specialized function option propagation; `semantic_wgsl.ts` now consumes one texture-descriptor Module instead of carrying descriptor scan/hash/planning beside general emission, and specialized function emission now preserves `f16Mode`; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `5855` lines
 - Architecture split: extracted `semantic_wgsl_packed_math.ts` for semantic WGSL packed SIMD expression templates plus bf16/half rounding, saturating, and conversion helper wrappers; `semantic_wgsl.ts` now consumes one packed-math Module instead of carrying lane bit-twiddling and rounding string builders beside general expression emission; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `semantic_wgsl.ts` down to `6062` lines

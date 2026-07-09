@@ -103,7 +103,48 @@ export function semanticTextureDescriptorHelperName(
   return `bg_sem_tex2d_${safeWgslIdentifier(textureWgslNameFor(textureName, names))}_${semanticStableHash(semanticTextureDescriptorKey(descriptor))}`;
 }
 
-export function semanticTextureScaledCoord(
+export function emitSemanticTextureDescriptorHelper(
+  textureName: string,
+  descriptor: CudaLiteTextureDescriptor,
+  names: ReadonlyMap<string, string>,
+): readonly string[] {
+  const texture = "bg_texture";
+  const helper = semanticTextureDescriptorHelperName(textureName, names, descriptor);
+  if (descriptor.filterMode === "linear") {
+    return [
+      `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> vec4<f32> {`,
+      `  let dims = textureDimensions(${texture});`,
+      `  let sx = ${semanticTextureScaledCoord("x", "dims.x", descriptor)};`,
+      `  let sy = ${semanticTextureScaledCoord("y", "dims.y", descriptor)};`,
+      "  let xb = sx - 0.5;",
+      "  let yb = sy - 0.5;",
+      "  let x0f = floor(xb);",
+      "  let y0f = floor(yb);",
+      "  let ax = xb - x0f;",
+      "  let ay = yb - y0f;",
+      `  let x0 = ${semanticTextureIndex("i32(x0f)", "dims.x", descriptor, "x")};`,
+      `  let x1 = ${semanticTextureIndex("(i32(x0f) + 1)", "dims.x", descriptor, "x")};`,
+      `  let y0 = ${semanticTextureIndex("i32(y0f)", "dims.y", descriptor, "y")};`,
+      `  let y1 = ${semanticTextureIndex("(i32(y0f) + 1)", "dims.y", descriptor, "y")};`,
+      `  let v00 = textureLoad(${texture}, vec2<i32>(x0, y0), 0);`,
+      `  let v10 = textureLoad(${texture}, vec2<i32>(x1, y0), 0);`,
+      `  let v01 = textureLoad(${texture}, vec2<i32>(x0, y1), 0);`,
+      `  let v11 = textureLoad(${texture}, vec2<i32>(x1, y1), 0);`,
+      "  return mix(mix(v00, v10, ax), mix(v01, v11, ax), ay);",
+      "}",
+    ];
+  }
+  return [
+    `fn ${helper}(${texture}: texture_2d<f32>, x: f32, y: f32) -> vec4<f32> {`,
+    `  let dims = textureDimensions(${texture});`,
+    `  let ix = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("x", "dims.x", descriptor)}))`, "dims.x", descriptor, "x")};`,
+    `  let iy = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("y", "dims.y", descriptor)}))`, "dims.y", descriptor, "y")};`,
+    `  return textureLoad(${texture}, vec2<i32>(ix, iy), 0);`,
+    "}",
+  ];
+}
+
+function semanticTextureScaledCoord(
   value: string,
   extent: string,
   descriptor: CudaLiteTextureDescriptor,
@@ -111,7 +152,7 @@ export function semanticTextureScaledCoord(
   return descriptor.normalizedCoords ? `(${value} * f32(${extent}))` : value;
 }
 
-export function semanticTextureIndex(
+function semanticTextureIndex(
   value: string,
   extent: string,
   descriptor: CudaLiteTextureDescriptor,
