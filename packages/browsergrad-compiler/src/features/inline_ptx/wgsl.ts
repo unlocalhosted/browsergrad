@@ -28,12 +28,7 @@ export interface InlineAsmWgslStatementCallbacks<TExpression, TContext, TSpan> e
   readonly emitSpecialRegister: (register: string, context: TContext) => string;
   readonly emitAddressPredicate: (space: "global" | "shared" | "const" | "local", expression: TExpression, context: TContext) => string;
   readonly emitGlobalTimerTick: (context: TContext) => string;
-  readonly emitMmaM16N8K16: (
-    statement: InlineAsmWgslStatement<TExpression, TSpan>,
-    outputs: readonly TExpression[],
-    accumulator: "f16" | "f32",
-    context: TContext,
-  ) => string;
+  readonly wgslScalarTypeForExpression: (expression: TExpression, context: TContext) => string | undefined;
   readonly featureError: (code: string, message: string, span: TSpan) => unknown;
 }
 
@@ -161,7 +156,7 @@ export function emitInlineAsmStatementWgsl<TExpression, TContext, TSpan>(
   if (op?.kind === "cp-async-fence" && inputCountMatches && outputCountMatches) return `// cp.async inline asm fence omitted`;
   if (op?.kind === "membar" && inputCountMatches && outputCountMatches) return `storageBarrier();`;
   if (op?.kind === "bar-sync" && inputCountMatches && outputCountMatches) return `workgroupBarrier();`;
-  if (op?.kind === "mma-m16n8k16") return callbacks.emitMmaM16N8K16(statement, outputs, op.accumulator, context);
+  if (op?.kind === "mma-m16n8k16") return emitMmaM16N8K16StatementWgsl(statement, outputs, op.accumulator, context, callbacks);
   const fmaSources = op?.kind === "fma-rn-f32"
     ? op.sources ?? [
       { kind: "operand", index: outputs.length },
@@ -427,4 +422,61 @@ function emitInlineAsmF32SourceWgsl<TExpression, TContext, TSpan>(
   if (source.kind === "immediate") return callbacks.emitNumberLiteral(source.raw);
   if (source.index < outputs.length) return callbacks.emitExpression(outputs[source.index]!, context);
   return callbacks.emitExpression(statement.inputs[source.index - outputs.length]!, context);
+}
+
+function emitMmaM16N8K16StatementWgsl<TExpression, TContext, TSpan>(
+  statement: InlineAsmWgslStatement<TExpression, TSpan>,
+  outputs: readonly TExpression[],
+  accumulator: "f16" | "f32",
+  context: TContext,
+  callbacks: InlineAsmWgslStatementCallbacks<TExpression, TContext, TSpan>,
+): string {
+  if (accumulator === "f16") {
+    if (outputs.length !== 2 || statement.inputs.length !== 8) {
+      throw callbacks.featureError("invalid-inline-asm-operands", "mma.m16n8k16 f16 inline PTX operand mismatch", statement.span);
+    }
+    return outputs.map((output, index) => {
+      const a = `u32(${callbacks.emitExpression(statement.inputs[index % 4]!, context)})`;
+      const b = `u32(${callbacks.emitExpression(statement.inputs[4 + (index % 2)]!, context)})`;
+      const c = `u32(${callbacks.emitExpression(statement.inputs[6 + index]!, context)})`;
+      const value = `pack2x16float(unpack2x16float(${c}) + (unpack2x16float(${a}) * unpack2x16float(${b})))`;
+      return `${callbacks.emitExpression(output, context)} = ${callbacks.emitU32Output(output, value, context)}`;
+    }).join("\n");
+  }
+  if (outputs.length !== 4 || statement.inputs.length !== 10) {
+    throw callbacks.featureError("invalid-inline-asm-operands", "mma.m16n8k16 f32 inline PTX operand mismatch", statement.span);
+  }
+  return outputs.map((output, index) => {
+    const a = `u32(${callbacks.emitExpression(statement.inputs[index % 4]!, context)})`;
+    const b = `u32(${callbacks.emitExpression(statement.inputs[4 + (index % 2)]!, context)})`;
+    const c = emitMmaF32AccumulatorInputWgsl(statement.inputs[6 + index]!, context, callbacks);
+    const value = `(${c} + dot(unpack2x16float(${a}), unpack2x16float(${b})))`;
+    return `${callbacks.emitExpression(output, context)} = ${emitMmaF32AccumulatorOutputWgsl(output, value, context, callbacks)}`;
+  }).join("\n");
+}
+
+function emitMmaF32AccumulatorInputWgsl<TExpression, TContext, TSpan>(
+  expression: TExpression,
+  context: TContext,
+  callbacks: InlineAsmWgslStatementCallbacks<TExpression, TContext, TSpan>,
+): string {
+  const value = callbacks.emitExpression(expression, context);
+  const scalar = callbacks.wgslScalarTypeForExpression(expression, context);
+  if (scalar === "u32") return `bitcast<f32>(${value})`;
+  if (scalar === "i32") return `bitcast<f32>(u32(${value}))`;
+  if (scalar === "f16") return `f32(${value})`;
+  return value;
+}
+
+function emitMmaF32AccumulatorOutputWgsl<TExpression, TContext, TSpan>(
+  target: TExpression,
+  value: string,
+  context: TContext,
+  callbacks: InlineAsmWgslStatementCallbacks<TExpression, TContext, TSpan>,
+): string {
+  const scalar = callbacks.wgslScalarTypeForExpression(target, context);
+  if (scalar === "u32") return `bitcast<u32>(${value})`;
+  if (scalar === "i32") return `bitcast<i32>(${value})`;
+  if (scalar === "f16") return `f16(${value})`;
+  return value;
 }

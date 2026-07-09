@@ -2256,7 +2256,10 @@ const inlineAsmWgslCallbacks: InlineAsmWgslStatementCallbacks<CudaLiteExpression
   emitSpecialRegister: (register, context) => emitInlineAsmSpecialRegister(register, context),
   emitAddressPredicate: (space, expression, context) => emitInlineAsmAddressPredicate(space, expression, context),
   emitGlobalTimerTick: (context) => `((workgroup_id.x * ${context.ir.workgroupSize[0]}u) + u32(${emitLocalLinearRank(context)}))`,
-  emitMmaM16N8K16: (statement, outputs, accumulator, context) => emitMmaM16N8K16Statement(statement as Extract<CudaLiteStatement, { kind: "asm" }>, outputs, accumulator, context),
+  wgslScalarTypeForExpression: (expression, context) => {
+    const type = expressionValueTypeForEmit(expression, context);
+    return type === undefined || isCudaVectorType(type) ? undefined : cudaScalarWgslType(type);
+  },
   featureError: (code, message, span) => featureError(code, message, span),
 };
 
@@ -2285,55 +2288,6 @@ function emitInlineAsmStatement(
   context: EmitContext,
 ): string {
   return emitInlineAsmStatementWgsl(statement, context, inlineAsmWgslCallbacks);
-}
-
-function emitMmaM16N8K16Statement(
-  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
-  outputs: readonly CudaLiteExpression[],
-  accumulator: "f16" | "f32",
-  context: EmitContext,
-): string {
-  if (accumulator === "f16") {
-    if (outputs.length !== 2 || statement.inputs.length !== 8) {
-      throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f16 inline PTX operand mismatch", statement.span);
-    }
-    return outputs.map((output, index) => {
-      const a = `u32(${emitExpression(statement.inputs[index % 4]!, context)})`;
-      const b = `u32(${emitExpression(statement.inputs[4 + (index % 2)]!, context)})`;
-      const c = `u32(${emitExpression(statement.inputs[6 + index]!, context)})`;
-      const value = `pack2x16float(unpack2x16float(${c}) + (unpack2x16float(${a}) * unpack2x16float(${b})))`;
-      return `${emitExpression(output, context)} = ${emitInlineU32Output(output, value, context)}`;
-    }).join("\n");
-  }
-  if (outputs.length !== 4 || statement.inputs.length !== 10) {
-    throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f32 inline PTX operand mismatch", statement.span);
-  }
-  return outputs.map((output, index) => {
-    const a = `u32(${emitExpression(statement.inputs[index % 4]!, context)})`;
-    const b = `u32(${emitExpression(statement.inputs[4 + (index % 2)]!, context)})`;
-    const c = emitMmaF32AccumulatorInput(statement.inputs[6 + index]!, context);
-    const value = `(${c} + dot(unpack2x16float(${a}), unpack2x16float(${b})))`;
-    return `${emitExpression(output, context)} = ${emitMmaF32AccumulatorOutput(output, value, context)}`;
-  }).join("\n");
-}
-
-function emitMmaF32AccumulatorInput(expression: CudaLiteExpression, context: EmitContext): string {
-  const value = emitExpression(expression, context);
-  const type = expressionValueTypeForEmit(expression, context);
-  const scalar = type === undefined || isCudaVectorType(type) ? undefined : cudaScalarWgslType(type);
-  if (scalar === "u32") return `bitcast<f32>(${value})`;
-  if (scalar === "i32") return `bitcast<f32>(u32(${value}))`;
-  if (scalar === "f16") return `f32(${value})`;
-  return value;
-}
-
-function emitMmaF32AccumulatorOutput(target: CudaLiteExpression, value: string, context: EmitContext): string {
-  const type = expressionValueTypeForEmit(target, context);
-  const scalar = type === undefined || isCudaVectorType(type) ? undefined : cudaScalarWgslType(type);
-  if (scalar === "u32") return `bitcast<u32>(${value})`;
-  if (scalar === "i32") return `bitcast<i32>(${value})`;
-  if (scalar === "f16") return `f16(${value})`;
-  return value;
 }
 
 function emitDp4aExpression(expression: Extract<CudaLiteExpression, { readonly kind: "call" }>, context: EmitContext): string {
