@@ -14100,9 +14100,24 @@ __global__ void maxKernel(const float *input, float *result, int N) {
       },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([1, 9, 3, 7]),
+          result: new Float32Array([2]),
+        },
+        scalars: { N: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("bg_atomicMax_f32");
     expect([...result.buffers.result as Float32Array]).toEqual([9]);
+    expect([...semanticResult.buffers.result as Float32Array]).toEqual([9]);
   });
 
   it("lowers f32 atomic min and sub helpers through CAS semantics", () => {

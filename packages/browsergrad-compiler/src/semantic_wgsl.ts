@@ -54,6 +54,12 @@ import {
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
 } from "./semantic_builtin_calls.js";
+import {
+  isSemanticAtomicCallName,
+  semanticAtomicOperation,
+  semanticAtomicSupportsBfloatAdd,
+  semanticAtomicSupportsFloat,
+} from "./semantic_atomic_intrinsics.js";
 import { semanticMathCallArity } from "./semantic_math_intrinsics.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
@@ -1488,21 +1494,17 @@ function semanticWgslAtomicSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
-  if (!WGSL_ATOMIC_CALLEES.has(operation.callee) && !SEMANTIC_INTEGER_LOOP_ATOMIC_CALLEES.has(operation.callee)) return false;
+  const atomicOp = semanticAtomicOperation(operation.callee);
+  if (!atomicOp) return false;
   if (!operation.target || (operation.target.addressSpace !== "storage" && operation.target.addressSpace !== "device-global" && operation.target.addressSpace !== "shared")) return false;
   if (!semanticWgslAtomicMemoryRefSupported(operation.target, ir)) return false;
   if (operation.target.addressSpace === "storage" && operation.target.indices.length !== 1 && !semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) return false;
   if (operation.target.fields.length > 0) return false;
-  if (
-    operation.target.valueType !== "uint" &&
-    operation.target.valueType !== "int" &&
-    !(operation.target.valueType === "float" && semanticWgslFloatAtomicCallKind(operation.callee) !== undefined) &&
-    !(operation.target.valueType === "bf16" && (operation.callee === "atomicAdd" || operation.callee === "atomicAdd_system"))
-  ) return false;
+  if (!semanticWgslAtomicValueTypeSupported(operation.callee, operation.target.valueType)) return false;
   if (!semanticWgslAtomicTargetRootSupported(operation.target, ir)) {
     return false;
   }
-  const expectedArgs = operation.callee === "atomicCAS" || operation.callee === "atomicCAS_system" ? 3 : 2;
+  const expectedArgs = atomicOp === "cas" ? 3 : 2;
   return operation.args.length >= expectedArgs &&
     operation.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
 }
@@ -2148,19 +2150,17 @@ function semanticWgslAtomicCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
-  if (expression.callee.kind !== "symbol" || (!WGSL_ATOMIC_CALLEES.has(expression.callee.name) && !SEMANTIC_INTEGER_LOOP_ATOMIC_CALLEES.has(expression.callee.name))) return false;
+  if (expression.callee.kind !== "symbol") return false;
+  const atomicOp = semanticAtomicOperation(expression.callee.name);
+  if (!atomicOp) return false;
   const target = semanticAtomicCallTarget(expression);
   if (!target || (target.addressSpace !== "storage" && target.addressSpace !== "device-global" && target.addressSpace !== "shared")) return false;
   if (!semanticWgslAtomicMemoryRefSupported(target, ir)) return false;
   if (target.addressSpace === "storage" && target.indices.length !== 1 && !semanticWgslFunctionStoragePointerParam(ir, target.base)) return false;
   if (target.fields.length > 0) return false;
-  if (
-    target.valueType !== "uint" &&
-    target.valueType !== "int" &&
-    !(target.valueType === "float" && semanticWgslFloatAtomicCallKind(expression.callee.name) !== undefined)
-  ) return false;
+  if (!semanticWgslAtomicValueTypeSupported(expression.callee.name, target.valueType)) return false;
   if (!semanticWgslAtomicTargetRootSupported(target, ir)) return false;
-  const expectedArgs = expression.callee.name === "atomicCAS" || expression.callee.name === "atomicCAS_system" ? 3 : 2;
+  const expectedArgs = atomicOp === "cas" ? 3 : 2;
   return expression.args.length >= expectedArgs &&
     expression.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
 }
@@ -3029,7 +3029,7 @@ function emitSemanticAtomic(
 ): string {
   const wgslCallee = WGSL_ATOMIC_CALLEES.get(operation.callee);
   const loopAtomicKind = SEMANTIC_INTEGER_LOOP_ATOMIC_CALLEES.get(operation.callee);
-  if (!operation.target || (!wgslCallee && !loopAtomicKind)) {
+  if (!operation.target || (!wgslCallee && !loopAtomicKind && !semanticWgslAtomicValueTypeSupported(operation.callee, operation.target.valueType))) {
     throw semanticWgslError(`semantic WGSL does not support atomic '${operation.callee}'`, operation.span);
   }
   const target = emitSemanticMemoryRef(operation.target, ir, names, options);
@@ -3069,13 +3069,25 @@ function emitSemanticAtomic(
 type SemanticFloatAtomicKind = "Add" | "Sub" | "Min" | "Max" | "Exchange" | "CompareExchange";
 
 function semanticWgslFloatAtomicCallKind(callee: string): SemanticFloatAtomicKind | undefined {
-  if (callee === "atomicAdd" || callee === "atomicAdd_system") return "Add";
-  if (callee === "atomicSub" || callee === "atomicSub_system") return "Sub";
-  if (callee === "atomicMin" || callee === "atomicMin_system") return "Min";
-  if (callee === "atomicMax" || callee === "atomicMax_system" || callee === "atomicMaxFloat") return "Max";
-  if (callee === "atomicExch" || callee === "atomicExch_system") return "Exchange";
-  if (callee === "atomicCAS" || callee === "atomicCAS_system") return "CompareExchange";
-  return undefined;
+  switch (semanticAtomicOperation(callee)) {
+    case "add": return "Add";
+    case "sub": return "Sub";
+    case "min": return "Min";
+    case "max": return "Max";
+    case "exchange": return "Exchange";
+    case "cas": return "CompareExchange";
+    default: return undefined;
+  }
+}
+
+function semanticWgslAtomicValueTypeSupported(callee: string, valueType: CudaLiteScalarType | undefined): boolean {
+  const atomicOp = semanticAtomicOperation(callee);
+  if (!atomicOp) return false;
+  if (valueType === "uint" || valueType === "int") {
+    return WGSL_ATOMIC_CALLEES.has(callee) || SEMANTIC_INTEGER_LOOP_ATOMIC_CALLEES.has(callee);
+  }
+  if (valueType === "float") return semanticAtomicSupportsFloat(atomicOp);
+  return semanticAtomicSupportsBfloatAdd(callee, valueType);
 }
 
 function semanticWgslAtomicAddressSpace(ref: SemanticMemoryRef): WgslAtomicAddressSpace {
@@ -5293,7 +5305,9 @@ function emitSemanticAtomicCall(
   const wgslCallee = WGSL_ATOMIC_CALLEES.get(expression.callee.name);
   const loopAtomicKind = SEMANTIC_INTEGER_LOOP_ATOMIC_CALLEES.get(expression.callee.name);
   const target = semanticAtomicCallTarget(expression);
-  if ((!wgslCallee && !loopAtomicKind) || !target) throw semanticWgslError(`semantic WGSL does not support atomic '${expression.callee.name}'`, expression.span);
+  if (!target || (!wgslCallee && !loopAtomicKind && !semanticWgslAtomicValueTypeSupported(expression.callee.name, target.valueType))) {
+    throw semanticWgslError(`semantic WGSL does not support atomic '${expression.callee.name}'`, expression.span);
+  }
   const pointerAtomic = emitSemanticPointerAtomicCall(expression, target, ir, names, options, textureSpecializations);
   if (pointerAtomic) return pointerAtomic;
   const memoryRef = emitSemanticMemoryRef(target, ir, names, options);
@@ -7453,7 +7467,7 @@ function semanticExpressionChildren(expression: SemanticExpression): readonly Se
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
   if (
     expression.callee.kind !== "symbol" ||
-    (!WGSL_ATOMIC_CALLEES.has(expression.callee.name) && !SEMANTIC_INTEGER_LOOP_ATOMIC_CALLEES.has(expression.callee.name))
+    !isSemanticAtomicCallName(expression.callee.name)
   ) return undefined;
   const firstArg = expression.args[0];
   if (!firstArg) return undefined;

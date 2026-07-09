@@ -61,6 +61,14 @@ import {
   isCudaVectorType,
   type CudaLiteVectorType,
 } from "./vector_types.js";
+import {
+  SEMANTIC_ATOMIC_ARITIES,
+  isSemanticAtomicCallName,
+  semanticAtomicOperation,
+  semanticAtomicSupportsBfloatAdd,
+  semanticAtomicSupportsDevicePointer,
+  semanticAtomicSupportsFloat,
+} from "./semantic_atomic_intrinsics.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
@@ -214,29 +222,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["wmma::store_matrix_sync", [4, 4]],
   ["nvcuda::wmma::store_matrix_sync", [4, 4]],
   ["bg_subgroup_add", [1, 1]],
-  ["atomicAdd", [2, 2]],
-  ["atomicAdd_system", [2, 2]],
-  ["atomicSub", [2, 2]],
-  ["atomicSub_system", [2, 2]],
-  ["atomicMin", [2, 2]],
-  ["atomicMin_system", [2, 2]],
-  ["atomicMax", [2, 2]],
-  ["atomicMax_system", [2, 2]],
-  ["atomicMaxFloat", [2, 2]],
-  ["atomicAnd", [2, 2]],
-  ["atomicAnd_system", [2, 2]],
-  ["atomicOr", [2, 2]],
-  ["atomicOr_system", [2, 2]],
-  ["atomicXor", [2, 2]],
-  ["atomicXor_system", [2, 2]],
-  ["atomicInc", [2, 2]],
-  ["atomicInc_system", [2, 2]],
-  ["atomicDec", [2, 2]],
-  ["atomicDec_system", [2, 2]],
-  ["atomicExch", [2, 2]],
-  ["atomicExch_system", [2, 2]],
-  ["atomicCAS", [3, 3]],
-  ["atomicCAS_system", [3, 3]],
+  ...SEMANTIC_ATOMIC_ARITIES,
   ["tex1D", [2, 2]],
   ["tex2D", [3, 3]],
   ["tex2DLod", [4, 4]],
@@ -3821,7 +3807,7 @@ function validateAtomicBuiltin(
     const targetInfo = target ? validateReadPointerOperand(target, scope, walkExpression) : undefined;
     const targetType = targetInfo?.valueType ?? symbol?.valueType ?? storageSymbol?.valueType;
     if (storageSymbol?.kind === "shared") {
-      if (((targetType === "float" || targetType === "double") && isSupportedFloatAtomic(callName)) || isSupportedBfloatAtomic(callName, targetType)) {
+      if (((targetType === "float" || targetType === "double") && semanticAtomicSupportsFloat(semanticAtomicOperation(callName))) || semanticAtomicSupportsBfloatAdd(callName, targetType)) {
         atomicShared.add(storageSymbol.name);
       } else if (targetType === "half" || targetType === "bf16" || targetType === "bool" || targetType === "complex64" || targetType === "float" || targetType === "double") {
         diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets, CAS-backed float add/sub/min/max/exch/cas, and CAS-backed bf16 add in CUDA-lite", targetExpression.span));
@@ -3829,7 +3815,7 @@ function validateAtomicBuiltin(
         atomicShared.add(storageSymbol.name);
       }
     } else if (storageSymbol?.kind === "device-global") {
-      if (((targetType === "float" || targetType === "double") && isSupportedFloatAtomic(callName)) || isSupportedBfloatAtomic(callName, targetType)) {
+      if (((targetType === "float" || targetType === "double") && semanticAtomicSupportsFloat(semanticAtomicOperation(callName))) || semanticAtomicSupportsBfloatAdd(callName, targetType)) {
         atomicDeviceGlobals.add(storageSymbol.name);
       } else if (targetType === "half" || targetType === "bf16" || targetType === "bool" || targetType === "complex64" || targetType === "float" || targetType === "double") {
         diagnostics.push(error("unsupported-atomic-target", "device global atomics support int/uint targets, CAS-backed float add/sub/min/max/exch/cas, and CAS-backed bf16 add in CUDA-lite", targetExpression.span));
@@ -3840,33 +3826,19 @@ function validateAtomicBuiltin(
       if (symbol.constant) {
         diagnostics.push(error("const-pointer-write", `cannot ${callName ?? "atomic operation"} through const pointer '${symbol.name}'`, expression.span));
       }
-      if (targetType && isSupportedDevicePointerAtomic(callName, targetType)) {
+      if (targetType && semanticAtomicSupportsDevicePointer(callName, targetType)) {
         // Exact storage roots for helper pointer atomics are marked after validation.
       } else {
         diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} through device pointer supports int/uint read-modify-write atomics including inc/dec, CAS-backed float add/sub/min/max/exch/cas, and CAS-backed bf16 add in CUDA-lite`, targetExpression.span));
       }
     } else if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} target must resolve to storage or shared memory`, targetExpression.span));
-    } else if (isSupportedBfloatAtomic(callName, targetType)) {
+    } else if (semanticAtomicSupportsBfloatAdd(callName, targetType)) {
       atomicParams.add(param.name);
       if (param.constant) {
         diagnostics.push(error("const-pointer-write", `cannot ${callName} through const pointer '${param.name}'`, expression.span));
       }
-    } else if ((targetType === "float" || targetType === "double") && (
-      callName === "atomicAdd" ||
-      callName === "atomicAdd_system" ||
-      callName === "atomicSub" ||
-      callName === "atomicSub_system" ||
-      callName === "atomicMin" ||
-      callName === "atomicMin_system" ||
-      callName === "atomicMax" ||
-      callName === "atomicMax_system" ||
-      callName === "atomicMaxFloat" ||
-      callName === "atomicExch" ||
-      callName === "atomicExch_system" ||
-      callName === "atomicCAS" ||
-      callName === "atomicCAS_system"
-    )) {
+    } else if ((targetType === "float" || targetType === "double") && semanticAtomicSupportsFloat(semanticAtomicOperation(callName))) {
       atomicParams.add(param.name);
       if (param.constant) {
         diagnostics.push(error("const-pointer-write", `cannot ${callName} through const pointer '${param.name}'`, expression.span));
@@ -4158,77 +4130,7 @@ function pointerArrayElementAliasKey(expression: Extract<CudaLiteExpression, { k
 }
 
 function isAtomicBuiltin(callName: string): boolean {
-  return callName === "atomicAdd" ||
-    callName === "atomicAdd_system" ||
-    callName === "atomicSub" ||
-    callName === "atomicSub_system" ||
-    callName === "atomicMin" ||
-    callName === "atomicMin_system" ||
-    callName === "atomicMax" ||
-    callName === "atomicMax_system" ||
-    callName === "atomicMaxFloat" ||
-    callName === "atomicAnd" ||
-    callName === "atomicAnd_system" ||
-    callName === "atomicOr" ||
-    callName === "atomicOr_system" ||
-    callName === "atomicXor" ||
-    callName === "atomicXor_system" ||
-    callName === "atomicInc" ||
-    callName === "atomicInc_system" ||
-    callName === "atomicDec" ||
-    callName === "atomicDec_system" ||
-    callName === "atomicExch" ||
-    callName === "atomicExch_system" ||
-    callName === "atomicCAS" ||
-    callName === "atomicCAS_system";
-}
-
-function isSupportedFloatAtomic(callName: string | undefined): boolean {
-  return callName === "atomicAdd" ||
-    callName === "atomicAdd_system" ||
-    callName === "atomicSub" ||
-    callName === "atomicMin" ||
-    callName === "atomicMin_system" ||
-    callName === "atomicMax" ||
-    callName === "atomicMax_system" ||
-    callName === "atomicMaxFloat" ||
-    callName === "atomicExch" ||
-    callName === "atomicExch_system" ||
-    callName === "atomicCAS" ||
-    callName === "atomicCAS_system";
-}
-
-function isSupportedBfloatAtomic(callName: string | undefined, targetType: CudaLiteScalarType | undefined): boolean {
-  return targetType === "bf16" && (callName === "atomicAdd" || callName === "atomicAdd_system");
-}
-
-function isSupportedDevicePointerAtomic(
-  callName: string | undefined,
-  targetType: CudaLiteScalarType,
-): boolean {
-  if (isSupportedBfloatAtomic(callName, targetType)) return true;
-  if (targetType !== "float" && targetType !== "double" && targetType !== "int" && targetType !== "uint") return false;
-  if (callName === "atomicAdd" || callName === "atomicAdd_system") return true;
-  if (callName === "atomicSub" || callName === "atomicSub_system") return true;
-  if (callName === "atomicMin" || callName === "atomicMin_system") return true;
-  if (callName === "atomicMax" || callName === "atomicMax_system" || callName === "atomicMaxFloat") return true;
-  if (callName === "atomicExch" || callName === "atomicExch_system") return true;
-  if (callName === "atomicCAS" || callName === "atomicCAS_system") return true;
-  if (targetType === "int" || targetType === "uint") {
-    return callName === "atomicAnd" ||
-      callName === "atomicAnd_system" ||
-      callName === "atomicOr" ||
-      callName === "atomicOr_system" ||
-      callName === "atomicXor" ||
-      callName === "atomicXor_system" ||
-      callName === "atomicInc" ||
-      callName === "atomicInc_system" ||
-      callName === "atomicDec" ||
-      callName === "atomicDec_system" ||
-      callName === "atomicCAS" ||
-      callName === "atomicCAS_system";
-  }
-  return false;
+  return isSemanticAtomicCallName(callName);
 }
 
 function isShuffleBuiltin(callName: string): boolean {

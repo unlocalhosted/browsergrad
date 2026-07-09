@@ -63,41 +63,21 @@ import {
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
 } from "./semantic_builtin_calls.js";
+import {
+  SEMANTIC_ATOMIC_OPS,
+  semanticAtomicOperation,
+  semanticAtomicSupportsFloat,
+  type SemanticAtomicOp,
+} from "./semantic_atomic_intrinsics.js";
 import { semanticMathCallArity } from "./semantic_math_intrinsics.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | Vector3 | number[];
-type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas" | "inc" | "dec";
 type SemanticControl = "fallthrough" | "return" | "break" | "continue";
 type SemanticCurandState =
   | { readonly kind: "local"; readonly name: string; readonly span: SourceSpan }
   | { readonly kind: "memory"; readonly ref: SemanticMemoryRef };
-
-const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
-  ["atomicAdd", "add"],
-  ["atomicAdd_system", "add"],
-  ["atomicSub", "sub"],
-  ["atomicSub_system", "sub"],
-  ["atomicMin", "min"],
-  ["atomicMin_system", "min"],
-  ["atomicMax", "max"],
-  ["atomicMax_system", "max"],
-  ["atomicAnd", "and"],
-  ["atomicAnd_system", "and"],
-  ["atomicOr", "or"],
-  ["atomicOr_system", "or"],
-  ["atomicXor", "xor"],
-  ["atomicXor_system", "xor"],
-  ["atomicExch", "exchange"],
-  ["atomicExch_system", "exchange"],
-  ["atomicCAS", "cas"],
-  ["atomicCAS_system", "cas"],
-  ["atomicInc", "inc"],
-  ["atomicInc_system", "inc"],
-  ["atomicDec", "dec"],
-  ["atomicDec_system", "dec"],
-]);
 const SEMANTIC_MATH_CALLS = new Set([
   "clock", "clock64",
   "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
@@ -567,13 +547,13 @@ function semanticReferenceAtomicSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  const atomicOp = SEMANTIC_ATOMIC_OPS.get(operation.callee);
+  const atomicOp = semanticAtomicOperation(operation.callee);
   if (!atomicOp) return false;
   if (!operation.target || !semanticReferenceAtomicMemoryRefSupported(operation.target, compiled)) return false;
   if (
     operation.target.valueType !== "uint" &&
     operation.target.valueType !== "int" &&
-    !(operation.target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp)) &&
+    !(operation.target.valueType === "float" && semanticAtomicSupportsFloat(atomicOp)) &&
     !(operation.target.valueType === "bf16" && atomicOp === "add")
   ) return false;
   if (!semanticReferenceAtomicTargetRootSupported(operation.target, compiled)) {
@@ -582,10 +562,6 @@ function semanticReferenceAtomicSupported(
   const expectedArgs = atomicOp === "cas" ? 3 : 2;
   return operation.args.length >= expectedArgs &&
     operation.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
-}
-
-function semanticReferenceFloatAtomicOpSupported(atomicOp: SemanticAtomicOp): boolean {
-  return atomicOp === "add" || atomicOp === "sub" || atomicOp === "min" || atomicOp === "max" || atomicOp === "exchange" || atomicOp === "cas";
 }
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
@@ -968,14 +944,14 @@ function semanticReferenceAtomicCallSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (expression.callee.kind !== "symbol") return false;
-  const atomicOp = SEMANTIC_ATOMIC_OPS.get(expression.callee.name);
+  const atomicOp = semanticAtomicOperation(expression.callee.name);
   if (!atomicOp) return false;
   const target = semanticAtomicCallTarget(expression);
   if (!target || !semanticReferenceAtomicMemoryRefSupported(target, compiled)) return false;
   if (
     target.valueType !== "uint" &&
     target.valueType !== "int" &&
-    !(target.valueType === "float" && semanticReferenceFloatAtomicOpSupported(atomicOp)) &&
+    !(target.valueType === "float" && semanticAtomicSupportsFloat(atomicOp)) &&
     !(target.valueType === "bf16" && atomicOp === "add")
   ) return false;
   if (!semanticReferenceAtomicTargetRootSupported(target, compiled)) {
@@ -1627,7 +1603,7 @@ function execSemanticAtomic(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
   context: SemanticReferenceContext,
 ): void {
-  const atomicOp = SEMANTIC_ATOMIC_OPS.get(operation.callee);
+  const atomicOp = semanticAtomicOperation(operation.callee);
   if (!operation.target || !atomicOp) {
     throw semanticReferenceError(`semantic reference does not support atomic '${operation.callee}'`, operation.span);
   }
@@ -2344,7 +2320,7 @@ function evalSemanticAtomicCall(
   context: SemanticReferenceContext,
 ): number {
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference atomic call requires symbol callee", expression.span);
-  const atomicOp = SEMANTIC_ATOMIC_OPS.get(expression.callee.name);
+  const atomicOp = semanticAtomicOperation(expression.callee.name);
   const target = semanticAtomicCallTarget(expression);
   const value = expression.args[1];
   if (!atomicOp || !target || !value) {
