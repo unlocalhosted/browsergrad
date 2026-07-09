@@ -2683,6 +2683,28 @@ __global__ void ptxBitwiseB32(uint *out, uint *a, uint *b) {
   out[idx + 8] = xor_ptx(a[idx], b[idx]);
   out[idx + 12] = not_ptx(a[idx]);
 }`,
+  ptxShiftB32: `
+__device__ unsigned int shl_ptx(unsigned int value, unsigned int shift) {
+  unsigned int ret;
+  asm volatile("shl.b32 %0, %1, %2;" : "=r"(ret) : "r"(value), "r"(shift));
+  return ret;
+}
+__device__ unsigned int shr_u_ptx(unsigned int value, unsigned int shift) {
+  unsigned int ret;
+  asm volatile("shr.u32 %0, %1, %2;" : "=r"(ret) : "r"(value), "r"(shift));
+  return ret;
+}
+__device__ int shr_s_ptx(int value, unsigned int shift) {
+  int ret;
+  asm volatile("shr.s32 %0, %1, %2;" : "=r"(ret) : "r"(value), "r"(shift));
+  return ret;
+}
+__global__ void ptxShiftB32(uint *out, uint *input, uint *amount) {
+  int idx = threadIdx.x;
+  out[idx] = shl_ptx(input[idx], amount[idx]);
+  out[idx + 5] = shr_u_ptx(input[idx], amount[idx]);
+  out[idx + 10] = (uint)shr_s_ptx((int)input[idx], amount[idx]);
+}`,
   inlineAsmWarpId: `
 __global__ void inlineAsmWarpId(uint *out) {
   unsigned int warp;
@@ -14044,6 +14066,21 @@ const html = String.raw`<!doctype html>
               type: "Uint32Array",
               data: [0, 0x02244220, 0, 0, 0xffffffff, 0x97755779, 0xffffffff, 0xffffffff, 0xffffffff, 0x95511559, 0xffffffff, 0xffffffff, 0, 0xedcba987, 0x0f0f0f0f, 0x55555555],
             },
+          },
+          {
+            name: "inline-asm:shift-b32",
+            source: SOURCES.ptxShiftB32,
+            options: { workgroupSize: [5, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [5, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(15),
+                input: new Uint32Array([1, 0x80000000, 0xf0000000, 0x7fffffff, 0x12345678]),
+                amount: new Uint32Array([0, 1, 4, 31, 32]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 0, 0, 0x80000000, 0, 1, 0x40000000, 0x0f000000, 0, 0, 1, 0xc0000000, 0xff000000, 0, 0] },
           },
           {
             name: "inline-asm:special-reg-single-percent",

@@ -11985,6 +11985,62 @@ __global__ void bitwiseKernel(uint *out, uint *a, uint *b) {
     ]);
   });
 
+  it("lowers inline PTX shift b32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int shl_ptx(unsigned int value, unsigned int shift) {
+  unsigned int ret;
+  asm volatile("shl.b32 %0, %1, %2;" : "=r"(ret) : "r"(value), "r"(shift));
+  return ret;
+}
+__device__ unsigned int shr_u_ptx(unsigned int value, unsigned int shift) {
+  unsigned int ret;
+  asm volatile("shr.u32 %0, %1, %2;" : "=r"(ret) : "r"(value), "r"(shift));
+  return ret;
+}
+__device__ int shr_s_ptx(int value, unsigned int shift) {
+  int ret;
+  asm volatile("shr.s32 %0, %1, %2;" : "=r"(ret) : "r"(value), "r"(shift));
+  return ret;
+}
+__global__ void shiftKernel(uint *out, uint *input, uint *amount) {
+  int idx = threadIdx.x;
+  out[idx] = shl_ptx(input[idx], amount[idx]);
+  out[idx + 5] = shr_u_ptx(input[idx], amount[idx]);
+  out[idx + 10] = (uint)shr_s_ptx((int)input[idx], amount[idx]);
+}`, { workgroupSize: [5, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(15),
+          input: new Uint32Array([1, 0x80000000, 0xf0000000, 0x7fffffff, 0x12345678]),
+          amount: new Uint32Array([0, 1, 4, 31, 32]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [5, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("min(");
+    expect(compiled.wgsl).toContain(">= 32u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      1,
+      0,
+      0,
+      0x80000000,
+      0,
+      1,
+      0x40000000,
+      0x0f000000,
+      0,
+      0,
+      1,
+      0xc0000000,
+      0xff000000,
+      0,
+      0,
+    ]);
+  });
+
   it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {

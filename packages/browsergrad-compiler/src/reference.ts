@@ -957,6 +957,14 @@ function execInlineAsm(
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmBitwise(op.op, left, right), context);
     return;
   }
+  if (op?.kind === "shift-b32") {
+    if (statement.inputs.length !== 2) throw compilerFailure(`${op.op}.b32 inline asm expects two inputs`);
+    if (outputs.length !== 1) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
+    const value = valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
+    const amount = valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmShift(op.op, value, amount, op.signed), context);
+    return;
+  }
   if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
     if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
@@ -1062,6 +1070,16 @@ function evalInlineAsmBitwise(op: "and" | "or" | "xor" | "not", left: number, ri
   if (op === "or") return (left | right) >>> 0;
   if (op === "xor") return (left ^ right) >>> 0;
   return (~left) >>> 0;
+}
+
+function evalInlineAsmShift(op: "shl" | "shr", value: number, amount: number, signed: boolean): number {
+  if (amount >= 32) {
+    if (op === "shr" && signed) return (value & 0x80000000) === 0 ? 0 : 0xffffffff;
+    return 0;
+  }
+  if (op === "shl") return (value << amount) >>> 0;
+  if (signed) return (value >> amount) >>> 0;
+  return value >>> amount;
 }
 
 function inlineAsmSpecialRegisterValue(register: string, context: ThreadContext): number {
