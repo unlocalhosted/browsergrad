@@ -687,6 +687,16 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamBeginCapture" ||
+    name === "cudaStreamEndCapture" ||
+    name === "cudaStreamUpdateCaptureDependencies" ||
+    name === "cudaGraphCreate" ||
+    name === "cudaGraphInstantiate" ||
+    name === "cudaGraphInstantiateWithFlags" ||
+    name === "cudaGraphUpload" ||
+    name === "cudaGraphExecUpdate" ||
+    name === "cudaGraphDestroy" ||
+    name === "cudaGraphExecDestroy" ||
     name === "cudaStreamQuery" ||
     name === "cudaStreamSynchronize" ||
     name === "cudaStreamWaitEvent" ||
@@ -730,12 +740,22 @@ function isRuntimeQueryWriteCall(name: string): boolean {
     name === "cudaThreadGetCacheConfig" ||
     name === "cudaThreadExchangeStreamCaptureMode" ||
     name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaStreamCreate" ||
+    name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamCreateWithPriority" ||
     name === "cudaStreamGetDevice" ||
     name === "cudaStreamGetFlags" ||
     name === "cudaStreamGetId" ||
     name === "cudaStreamGetPriority" ||
     name === "cudaStreamIsCapturing" ||
     name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamEndCapture" ||
+    name === "cudaGraphCreate" ||
+    name === "cudaGraphInstantiate" ||
+    name === "cudaGraphInstantiateWithFlags" ||
+    name === "cudaGraphExecUpdate" ||
+    name === "cudaEventCreate" ||
+    name === "cudaEventCreateWithFlags" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion" ||
     name === "cudaEventElapsedTime";

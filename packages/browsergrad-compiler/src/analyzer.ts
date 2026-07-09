@@ -1873,6 +1873,9 @@ function validateCallExpression(
     callName === "cudaThreadGetCacheConfig" ||
     callName === "cudaThreadExchangeStreamCaptureMode" ||
     callName === "cudaDeviceGetStreamPriorityRange" ||
+    callName === "cudaStreamCreate" ||
+    callName === "cudaStreamCreateWithFlags" ||
+    callName === "cudaStreamCreateWithPriority" ||
     callName === "cudaStreamGetDevice" ||
     callName === "cudaStreamGetFlags" ||
     callName === "cudaStreamGetId" ||
@@ -1884,6 +1887,8 @@ function validateCallExpression(
     callName === "cudaGraphInstantiate" ||
     callName === "cudaGraphInstantiateWithFlags" ||
     callName === "cudaGraphExecUpdate" ||
+    callName === "cudaEventCreate" ||
+    callName === "cudaEventCreateWithFlags" ||
     callName === "cudaRuntimeGetVersion" ||
     callName === "cudaDriverGetVersion") {
     validateCudaIntegerRuntimeQuery(expression, callName, scope, diagnostics, walkExpression);
@@ -2557,6 +2562,11 @@ function validateCudaIntegerRuntimeQuery(
   if (!target) return;
   if (callName === "cudaThreadExchangeStreamCaptureMode") {
     validateRuntimeQueryPointerTarget(callName, target, "int", scope, diagnostics, walkExpression);
+    return;
+  }
+  if (callName === "cudaStreamCreate" || callName === "cudaStreamCreateWithFlags" || callName === "cudaStreamCreateWithPriority" || callName === "cudaEventCreate" || callName === "cudaEventCreateWithFlags") {
+    validateRuntimeQueryPointerTarget(callName, target, "uint", scope, diagnostics, walkExpression);
+    for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return;
   }
   if (callName === "cudaStreamGetFlags" || callName === "cudaStreamGetPriority") {
@@ -5223,6 +5233,9 @@ function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
     callName === "cudaThreadGetCacheConfig" ||
     callName === "cudaThreadExchangeStreamCaptureMode" ||
     callName === "cudaDeviceGetStreamPriorityRange" ||
+    callName === "cudaStreamCreate" ||
+    callName === "cudaStreamCreateWithFlags" ||
+    callName === "cudaStreamCreateWithPriority" ||
     callName === "cudaStreamGetDevice" ||
     callName === "cudaStreamGetFlags" ||
     callName === "cudaStreamGetId" ||
@@ -5234,6 +5247,8 @@ function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
     callName === "cudaGraphInstantiate" ||
     callName === "cudaGraphInstantiateWithFlags" ||
     callName === "cudaGraphExecUpdate" ||
+    callName === "cudaEventCreate" ||
+    callName === "cudaEventCreateWithFlags" ||
     callName === "cudaRuntimeGetVersion" ||
     callName === "cudaDriverGetVersion";
 }

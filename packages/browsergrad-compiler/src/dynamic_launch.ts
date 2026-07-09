@@ -548,6 +548,9 @@ function isRuntimeQueryWriteCall(name: string): boolean {
     name === "cudaThreadGetCacheConfig" ||
     name === "cudaThreadExchangeStreamCaptureMode" ||
     name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaStreamCreate" ||
+    name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamCreateWithPriority" ||
     name === "cudaStreamGetDevice" ||
     name === "cudaStreamGetFlags" ||
     name === "cudaStreamGetId" ||
@@ -559,6 +562,8 @@ function isRuntimeQueryWriteCall(name: string): boolean {
     name === "cudaGraphInstantiate" ||
     name === "cudaGraphInstantiateWithFlags" ||
     name === "cudaGraphExecUpdate" ||
+    name === "cudaEventCreate" ||
+    name === "cudaEventCreateWithFlags" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion" ||
     name === "cudaEventElapsedTime";

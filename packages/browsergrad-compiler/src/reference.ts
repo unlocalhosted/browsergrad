@@ -2945,6 +2945,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     name === "cudaThreadGetCacheConfig" ||
     name === "cudaThreadExchangeStreamCaptureMode" ||
     name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaStreamCreate" ||
+    name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamCreateWithPriority" ||
     name === "cudaStreamGetDevice" ||
     name === "cudaStreamGetFlags" ||
     name === "cudaStreamGetId" ||
@@ -2956,6 +2959,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     name === "cudaGraphInstantiate" ||
     name === "cudaGraphInstantiateWithFlags" ||
     name === "cudaGraphExecUpdate" ||
+    name === "cudaEventCreate" ||
+    name === "cudaEventCreateWithFlags" ||
     name === "cudaRuntimeGetVersion" ||
     name === "cudaDriverGetVersion") {
     if (name === "cudaMemGetInfo") {
@@ -3021,6 +3026,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return 0;
     }
     if (name === "cudaThreadExchangeStreamCaptureMode") {
+      const target = expression.args[0];
+      if (target) writeLValue(resolvePointerArgument(target, context), 0, context);
+      return 0;
+    }
+    if (name === "cudaStreamCreate" || name === "cudaStreamCreateWithFlags" || name === "cudaStreamCreateWithPriority" || name === "cudaEventCreate" || name === "cudaEventCreateWithFlags") {
       const target = expression.args[0];
       if (target) writeLValue(resolvePointerArgument(target, context), 0, context);
       return 0;

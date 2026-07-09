@@ -14003,6 +14003,41 @@ __global__ void syncOnly(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([9]);
   });
 
+  it("models CUDA stream and event creation as deterministic handle writes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void stream_event_create_handles(uint *handles, int *statusOut) {
+  cudaStream_t stream = 7u;
+  cudaStream_t priorityStream = 8u;
+  cudaEvent_t event = 9u;
+  if (threadIdx.x < 1) {
+    int streamStatus = cudaStreamCreate(&stream);
+    int priorityStatus = cudaStreamCreateWithPriority(&priorityStream, cudaStreamNonBlocking, 0);
+    int eventStatus = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+    handles[0] = stream;
+    handles[1] = priorityStream;
+    handles[2] = event;
+    statusOut[0] = streamStatus + priorityStatus + eventStatus;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { handles: new Uint32Array([99, 99, 99]), statusOut: new Int32Array([-1]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var streamStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("stream = 0;");
+    expect(compiled.wgsl).toContain("var priorityStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("priorityStream = 0;");
+    expect(compiled.wgsl).toContain("var eventStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("event = 0;");
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { handles: new Uint32Array(3), statusOut: new Int32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.handles as Uint32Array]).toEqual([0, 0, 0]);
+    expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);
+  });
+
   it("models CUDA stream device/id/capture queries as deterministic zero-state writes", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void stream_queries(float *out) {
