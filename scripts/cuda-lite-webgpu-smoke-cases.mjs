@@ -23,6 +23,7 @@ export const runtimeScopeCases = [
   "inline-asm:prmt-b32",
   "inline-asm:prmt-immediate-b32",
   "inline-asm:lop3-b32",
+  "inline-asm:lop3-immediate-b32",
   "inline-asm:bitwise-b32",
   "inline-asm:bitwise-immediate-b32",
   "inline-asm:unary-immediate-b32",

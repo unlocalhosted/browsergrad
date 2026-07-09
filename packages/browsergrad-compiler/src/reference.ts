@@ -943,13 +943,16 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "lop3-b32") {
-    const expectedInputs = op.immLut === undefined ? 4 : 3;
+    const dataImmediates = op.dataImmediates ?? [undefined, undefined, undefined] as const;
+    const dataImmediateCount = dataImmediates.filter((value) => value !== undefined).length;
+    const expectedInputs = 3 - dataImmediateCount + (op.immLut === undefined ? 1 : 0);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`lop3.b32 inline asm expects ${expectedInputs} inputs`);
     if (outputs.length !== 1) throw compilerFailure("lop3.b32 inline asm expects one output operand");
-    const a = valueAsNumber(evalExpression(statement.inputs[0]!, context), "lop3.b32") >>> 0;
-    const b = valueAsNumber(evalExpression(statement.inputs[1]!, context), "lop3.b32") >>> 0;
-    const c = valueAsNumber(evalExpression(statement.inputs[2]!, context), "lop3.b32") >>> 0;
-    const immLut = op.immLut ?? (valueAsNumber(evalExpression(statement.inputs[3]!, context), "lop3.b32") & 0xff);
+    let inputIndex = 0;
+    const a = dataImmediates[0] ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), "lop3.b32") >>> 0;
+    const b = dataImmediates[1] ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), "lop3.b32") >>> 0;
+    const c = dataImmediates[2] ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), "lop3.b32") >>> 0;
+    const immLut = op.immLut ?? (valueAsNumber(evalExpression(statement.inputs[inputIndex]!, context), "lop3.b32") & 0xff);
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmLop3(a, b, c, immLut), context);
     return;
   }

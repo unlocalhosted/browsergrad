@@ -12,7 +12,7 @@ export type InlineAsmOp =
   | { readonly kind: "clz-b32"; readonly immediate?: number }
   | { readonly kind: "brev-b32"; readonly immediate?: number }
   | { readonly kind: "prmt-b32"; readonly selectorImmediate?: number }
-  | { readonly kind: "lop3-b32"; readonly immLut?: number }
+  | { readonly kind: "lop3-b32"; readonly immLut?: number; readonly dataImmediates?: readonly [number | undefined, number | undefined, number | undefined] }
   | { readonly kind: "bitwise-b32"; readonly op: "and" | "or" | "xor" | "not"; readonly immediate?: number }
   | { readonly kind: "shift-b32"; readonly op: "shl" | "shr"; readonly signed: boolean; readonly immediate?: number }
   | { readonly kind: "arithmetic-b32"; readonly op: "add" | "sub" | "mul-lo" | "mad-lo"; readonly signed: boolean; readonly immediate?: number }
@@ -77,8 +77,21 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   const prmtImmediate = /\bprmt\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
   if (prmtImmediate) return { kind: "prmt-b32", selectorImmediate: parseInlineAsmImmediate(prmtImmediate[1]!) >>> 0 };
   if (/\bprmt\.b32\b/u.test(template)) return { kind: "prmt-b32" };
-  const lop3 = /\blop3\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|\d+)\s*;?/u.exec(template);
-  if (lop3) return { kind: "lop3-b32", immLut: parseInlineAsmImmediate(lop3[1]!) & 0xff };
+  const lop3 = /\blop3\.b32\b\s+([^;]+)/u.exec(template);
+  if (lop3) {
+    const operands = lop3[1]!.split(",").map((operand) => operand.trim());
+    const dataImmediates = [
+      parseInlineAsmImmediateOperand(operands[1]),
+      parseInlineAsmImmediateOperand(operands[2]),
+      parseInlineAsmImmediateOperand(operands[3]),
+    ] as const;
+    const immLut = parseInlineAsmImmediateOperand(operands[4]);
+    return {
+      kind: "lop3-b32",
+      ...(immLut === undefined ? {} : { immLut: immLut & 0xff }),
+      ...(dataImmediates.some((value) => value !== undefined) ? { dataImmediates } : {}),
+    };
+  }
   if (/\blop3\.b32\b/u.test(template)) return { kind: "lop3-b32" };
   const bitwiseImmediate = /\b(and|or|xor)\.b32\b[\s\S]*,\s*(0x[0-9a-fA-F]+|-?\d+)\s*;?\s*$/u.exec(template);
   if (bitwiseImmediate) return { kind: "bitwise-b32", op: bitwiseImmediate[1] as "and" | "or" | "xor", immediate: parseInlineAsmImmediate(bitwiseImmediate[2]!) >>> 0 };

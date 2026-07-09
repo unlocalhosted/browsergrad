@@ -2313,8 +2313,8 @@ function emitInlineAsmStatement(
   if (op?.kind === "prmt-b32" && statement.inputs.length === (op.selectorImmediate === undefined ? 3 : 2) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBytePermExpression(statement.inputs, context, op.selectorImmediate), context)}`;
   }
-  if (op?.kind === "lop3-b32" && statement.inputs.length === (op.immLut === undefined ? 4 : 3) && outputs.length === 1) {
-    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context), context)}`;
+  if (op?.kind === "lop3-b32" && statement.inputs.length === (3 - (op.dataImmediates?.filter((value) => value !== undefined).length ?? 0) + (op.immLut === undefined ? 1 : 0)) && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineLop3Expression(statement.inputs, op.immLut, context, op.dataImmediates), context)}`;
   }
   if (op?.kind === "bitwise-b32" && statement.inputs.length === (op.op === "not" ? (op.immediate === undefined ? 1 : 0) : (op.immediate === undefined ? 2 : 1)) && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitInlineBitwiseExpression(statement.inputs, op.op, context, op.immediate), context)}`;
@@ -2441,11 +2441,17 @@ function emitInlineBytePermExpression(inputs: readonly CudaLiteExpression[], con
   return `(${lanes.join(" | ")})`;
 }
 
-function emitInlineLop3Expression(inputs: readonly CudaLiteExpression[], immLut: number | undefined, context: EmitContext): string {
-  const a = `u32(${emitExpression(inputs[0]!, context)})`;
-  const b = `u32(${emitExpression(inputs[1]!, context)})`;
-  const c = `u32(${emitExpression(inputs[2]!, context)})`;
-  const lut = immLut === undefined ? `(u32(${emitExpression(inputs[3]!, context)}) & 0xffu)` : `${immLut & 0xff}u`;
+function emitInlineLop3Expression(
+  inputs: readonly CudaLiteExpression[],
+  immLut: number | undefined,
+  context: EmitContext,
+  dataImmediates: readonly [number | undefined, number | undefined, number | undefined] = [undefined, undefined, undefined],
+): string {
+  let inputIndex = 0;
+  const a = dataImmediates[0] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[0] >>> 0}u`;
+  const b = dataImmediates[1] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[1] >>> 0}u`;
+  const c = dataImmediates[2] === undefined ? `u32(${emitExpression(inputs[inputIndex++]!, context)})` : `${dataImmediates[2] >>> 0}u`;
+  const lut = immLut === undefined ? `(u32(${emitExpression(inputs[inputIndex]!, context)}) & 0xffu)` : `${immLut & 0xff}u`;
   const rows = Array.from({ length: 8 }, (_, row) => {
     const aMask = (row & 0x4) === 0 ? `(~${a})` : a;
     const bMask = (row & 0x2) === 0 ? `(~${b})` : b;

@@ -2705,6 +2705,22 @@ __global__ void ptxLop3B32(uint *out, uint *a, uint *b, uint *c) {
   out[idx] = choose_ptx(a[idx], b[idx], c[idx]);
   out[idx + 4] = xor_ptx(a[idx], b[idx], c[idx]);
 }`,
+  ptxLop3ImmediateB32: `
+__device__ unsigned int choose_literal_b_ptx(unsigned int a, unsigned int c) {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, %1, 0x55555555, %2, 0xca;" : "=r"(ret) : "r"(a), "r"(c));
+  return ret;
+}
+__device__ unsigned int choose_all_literal_ptx() {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, 0xffffffff, 0x12345678, 0x87654321, 0xca;" : "=r"(ret));
+  return ret;
+}
+__global__ void ptxLop3ImmediateB32(uint *out, uint *a) {
+  int idx = threadIdx.x;
+  out[idx] = choose_literal_b_ptx(a[idx], 0x33333333u);
+  out[idx + 4] = choose_all_literal_ptx();
+}`,
   ptxBitwiseB32: `
 __device__ unsigned int and_ptx(unsigned int a, unsigned int b) {
   unsigned int ret;
@@ -14467,6 +14483,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0x12345678, 0x87654321, 0x0f0f0f0f, 0x11111111, 0x6aaeeaa6, 0x95511559, 0, 0xcccccccc] },
+          },
+          {
+            name: "inline-asm:lop3-immediate-b32",
+            source: SOURCES.ptxLop3ImmediateB32,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+                a: new Uint32Array([0xffffffff, 0, 0xf0f0f0f0, 0xaaaaaaaa]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0x55555555, 0x33333333, 0x53535353, 0x11111111, 0x12345678, 0x12345678, 0x12345678, 0x12345678] },
           },
           {
             name: "inline-asm:bitwise-b32",

@@ -1793,7 +1793,8 @@ function validateInlineAsmStatement(
     asmDiagnostics.push(error("invalid-inline-asm-operands", "prmt.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "lop3-b32") {
-    const expectedInputs = op.immLut === undefined ? 4 : 3;
+    const dataImmediateCount = op.dataImmediates?.filter((value) => value !== undefined).length ?? 0;
+    const expectedInputs = 3 - dataImmediateCount + (op.immLut === undefined ? 1 : 0);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `lop3.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }

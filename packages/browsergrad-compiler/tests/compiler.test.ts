@@ -12027,6 +12027,44 @@ __global__ void lop3Kernel(uint *out, uint *a, uint *b, uint *c) {
     ]);
   });
 
+  it("lowers inline PTX lop3.b32 immediate data statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int choose_literal_b_ptx(unsigned int a, unsigned int c) {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, %1, 0x55555555, %2, 0xca;" : "=r"(ret) : "r"(a), "r"(c));
+  return ret;
+}
+__device__ unsigned int choose_all_literal_ptx() {
+  unsigned int ret;
+  asm volatile("lop3.b32 %0, 0xffffffff, 0x12345678, 0x87654321, 0xca;" : "=r"(ret));
+  return ret;
+}
+__global__ void lop3ImmediateKernel(uint *out, uint *a) {
+  int idx = threadIdx.x;
+  out[idx] = choose_literal_b_ptx(a[idx], 0x33333333u);
+  out[idx + 4] = choose_all_literal_ptx();
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(8), a: new Uint32Array([0xffffffff, 0, 0xf0f0f0f0, 0xaaaaaaaa]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("1431655765u");
+    expect(compiled.wgsl).toContain("202u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      0x55555555,
+      0x33333333,
+      0x53535353,
+      0x11111111,
+      0x12345678,
+      0x12345678,
+      0x12345678,
+      0x12345678,
+    ]);
+  });
+
   it("lowers inline PTX bitwise b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int and_ptx(unsigned int a, unsigned int b) {
