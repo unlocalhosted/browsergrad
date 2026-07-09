@@ -31,8 +31,12 @@ import {
 } from "./semantic_reference.js";
 import {
   cloneReferenceBuffers,
+  cloneReferenceConstants,
+  cloneReferenceDeviceGlobals,
+  cloneReferenceMemoryPools,
   cloneReferenceSurfaces,
   cloneReferenceTypedArray,
+  type ReferenceMemoryPoolValue as MemoryPoolValue,
 } from "./reference_inputs.js";
 import {
   referenceConstantInitialValue as constantInitialValue,
@@ -222,11 +226,6 @@ interface ThreadContext {
   readonly trace: MutableTrace;
 }
 
-interface MemoryPoolValue {
-  readonly data: Uint32Array;
-  offset: number;
-}
-
 interface SharedArrayValue {
   readonly dimensions: readonly number[];
   readonly valueType: CudaLiteScalarType;
@@ -290,14 +289,14 @@ export function runCompiledKernelReference(
     return runCompiledKernelSemanticReference(compiled, input, launch);
   }
   const buffers = cloneReferenceBuffers(input.buffers);
-  const constants = cloneConstants(input.constants ?? {});
+  const constants = cloneReferenceConstants(input.constants ?? {});
   for (const constant of backendIr.constants) {
     if (constant.init !== undefined && !constants.has(constant.name)) {
       constants.set(constant.name, constantInitialValue(constant));
     }
   }
   const constantDimensions = new Map(backendIr.constants.map((constant) => [constant.name, constant.dimensions]));
-  const deviceGlobals = cloneDeviceGlobals(input.deviceGlobals ?? {});
+  const deviceGlobals = cloneReferenceDeviceGlobals(input.deviceGlobals ?? {});
   for (const global of backendIr.deviceGlobals) {
     if (!deviceGlobals.has(global.name)) {
       deviceGlobals.set(global.name, deviceGlobalInitialValue(global));
@@ -306,7 +305,7 @@ export function runCompiledKernelReference(
   const deviceGlobalDimensions = new Map(backendIr.deviceGlobals.map((global) => [global.name, global.dimensions]));
   const textures = input.textures ?? {};
   const surfaces = cloneReferenceSurfaces(input.surfaces ?? {});
-  const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
+  const memoryPools = cloneReferenceMemoryPools(input.memoryPools ?? {});
   const functions = collectReferenceFunctions(backendIr.functions);
   const kernels = collectReferenceKernels(compiled);
   const scalars = input.scalars ?? {};
@@ -5983,37 +5982,6 @@ function cooperativeSyncKind(expression: CudaLiteExpression, context: ThreadCont
   const value = context.locals.get(expression.callee.object.name);
   if (!isCooperativeGroup(value)) return undefined;
   return value.groupKind === "grid" ? "grid" : "block";
-}
-
-function cloneMemoryPools(
-  pools: NonNullable<CompiledKernelInput["memoryPools"]>,
-): Map<string, MemoryPoolValue> {
-  const out = new Map<string, MemoryPoolValue>();
-  for (const [name, pool] of Object.entries(pools)) {
-    out.set(name, {
-      data: new Uint32Array(pool.data),
-      offset: pool.offset?.[0] ?? 0,
-    });
-  }
-  return out;
-}
-
-function cloneConstants(
-  constants: Readonly<Record<string, number | WgslTypedArray>>,
-): Map<string, number | WgslTypedArray> {
-  const out = new Map<string, number | WgslTypedArray>();
-  for (const [name, value] of Object.entries(constants)) {
-    out.set(name, typeof value === "number" ? value : cloneReferenceTypedArray(value));
-  }
-  return out;
-}
-
-function cloneDeviceGlobals(
-  globals: Readonly<Record<string, WgslTypedArray>>,
-): Map<string, WgslTypedArray> {
-  const out = new Map<string, WgslTypedArray>();
-  for (const [name, value] of Object.entries(globals)) out.set(name, cloneReferenceTypedArray(value));
-  return out;
 }
 
 function vectorFromExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): ReferenceVector3 {
