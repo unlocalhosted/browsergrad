@@ -69,7 +69,7 @@ import {
   semanticAtomicSupportsFloat,
   type SemanticAtomicOp,
 } from "./semantic_atomic_intrinsics.js";
-import { semanticMathCallArity } from "./semantic_math_intrinsics.js";
+import { isSemanticMathCallName, semanticMathCallArity } from "./semantic_math_intrinsics.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
@@ -78,87 +78,6 @@ type SemanticControl = "fallthrough" | "return" | "break" | "continue";
 type SemanticCurandState =
   | { readonly kind: "local"; readonly name: string; readonly span: SourceSpan }
   | { readonly kind: "memory"; readonly ref: SemanticMemoryRef };
-const SEMANTIC_MATH_CALLS = new Set([
-  "clock", "clock64",
-  "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
-  "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
-  "erf", "erff", "erfc", "erfcf", "erfcx", "erfcxf", "erfinv", "erfinvf", "erfcinv", "erfcinvf",
-  "normcdf", "normcdff", "normcdfinv", "normcdfinvf", "tgamma", "tgammaf", "lgamma", "lgammaf",
-  "log", "logf", "__logf", "log2", "log2f", "__log2f", "log10", "log10f", "__log10f", "log1p", "log1pf",
-  "fabs", "fabsf", "abs",
-  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "round", "roundf", "rint", "rintf", "nearbyint", "nearbyintf",
-  "sin", "sinf", "__sinf", "sinpi", "sinpif", "cos", "cosf", "__cosf", "cospi", "cospif",
-  "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf", "atan", "atanf", "atan2", "atan2f",
-  "sinh", "sinhf", "cosh", "coshf", "tanh", "tanhf", "__tanhf", "asinh", "asinhf", "acosh", "acoshf", "atanh", "atanhf",
-  "cbrt", "cbrtf", "rcbrt", "rcbrtf", "__frcp_rn",
-  "ldexp", "ldexpf", "scalbn", "scalbnf", "scalbln", "scalblnf",
-  "fmod", "fmodf", "remainder", "remainderf", "logb", "logbf", "ilogb", "ilogbf", "fdim", "fdimf",
-  "nextafter", "nextafterf", "nexttoward", "nexttowardf",
-  "hypot", "hypotf", "rhypot", "rhypotf", "norm3df", "norm4df", "rnorm3df", "rnorm4df",
-  "lrint", "lrintf", "llrint", "llrintf", "lround", "lroundf", "llround", "llroundf",
-  "__float2int_rn", "__float2int_rz", "__float2int_ru", "__float2int_rd",
-  "__float2uint_rn", "__float2uint_rz", "__float2uint_ru", "__float2uint_rd",
-  "__int2float_rn", "__int2float_rz", "__int2float_ru", "__int2float_rd",
-  "__uint2float_rn", "__uint2float_rz", "__uint2float_ru", "__uint2float_rd",
-  "__half2float", "__float2half", "__float2half_rn", "__float2half_rz", "__float2half_ru", "__float2half_rd",
-  "__int2half_rn", "__int2half_rz", "__int2half_ru", "__int2half_rd",
-  "__uint2half_rn", "__uint2half_rz", "__uint2half_ru", "__uint2half_rd",
-  "__short2half_rn", "__short2half_rz", "__short2half_ru", "__short2half_rd",
-  "__ushort2half_rn", "__ushort2half_rz", "__ushort2half_ru", "__ushort2half_rd",
-  "__half_as_short", "__half_as_ushort", "__short_as_half", "__ushort_as_half",
-  "__half2int_rn", "__half2int_rz", "__half2int_ru", "__half2int_rd",
-  "__half2short_rn", "__half2short_rz", "__half2short_ru", "__half2short_rd",
-  "__half2uint_rn", "__half2uint_rz", "__half2uint_ru", "__half2uint_rd",
-  "__half2ushort_rn", "__half2ushort_rz", "__half2ushort_ru", "__half2ushort_rd",
-  "__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8",
-  "__habs", "__hceil", "__hfloor", "__hrcp", "__hrsqrt", "hrsqrt", "__hsqrt", "__htrunc", "__hneg", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat", "__hdiv", "__hdiv_rn", "__hfma", "__hfma_rn", "__hfma_sat", "__hfma_relu", "hexp", "__hmin", "__hmax", "__hmin_nan", "__hmax_nan",
-  "__hisnan", "__hisinf", "__heq", "__hne", "__hgt", "__hge", "__hlt", "__hle", "__hequ", "__hneu", "__hgtu", "__hgeu", "__hltu", "__hleu",
-  "__bfloat162float", "__float2bfloat16", "__float2bfloat16_rn", "__float2bfloat16_rz", "__float2bfloat16_ru", "__float2bfloat16_rd", "__double2bfloat16",
-  "__int2bfloat16_rn", "__int2bfloat16_rz", "__int2bfloat16_ru", "__int2bfloat16_rd",
-  "__ll2bfloat16_rn", "__ll2bfloat16_rz", "__ll2bfloat16_ru", "__ll2bfloat16_rd",
-  "__uint2bfloat16_rn", "__uint2bfloat16_rz", "__uint2bfloat16_ru", "__uint2bfloat16_rd",
-  "__ull2bfloat16_rn", "__ull2bfloat16_rz", "__ull2bfloat16_ru", "__ull2bfloat16_rd",
-  "__short2bfloat16_rn", "__short2bfloat16_rz", "__short2bfloat16_ru", "__short2bfloat16_rd",
-  "__ushort2bfloat16_rn", "__ushort2bfloat16_rz", "__ushort2bfloat16_ru", "__ushort2bfloat16_rd",
-  "__bfloat16_as_short", "__bfloat16_as_ushort", "__nv_bfloat16_as_ushort", "__short_as_bfloat16", "__ushort_as_bfloat16",
-  "__bfloat162int_rn", "__bfloat162int_rz", "__bfloat162int_ru", "__bfloat162int_rd",
-  "__bfloat162ll_rn", "__bfloat162ll_rz", "__bfloat162ll_ru", "__bfloat162ll_rd",
-  "__bfloat162uint_rn", "__bfloat162uint_rz", "__bfloat162uint_ru", "__bfloat162uint_rd",
-  "__bfloat162ull_rn", "__bfloat162ull_rz", "__bfloat162ull_ru", "__bfloat162ull_rd",
-  "__bfloat162short_rn", "__bfloat162short_rz", "__bfloat162short_ru", "__bfloat162short_rd",
-  "__bfloat162ushort_rn", "__bfloat162ushort_rz", "__bfloat162ushort_ru", "__bfloat162ushort_rd",
-  "__bfloat162char_rz", "__bfloat162uchar_rz",
-  "wmma::__float_to_tf32", "isNan",
-  "__clz", "__clzll", "__ffs", "__ffsll", "__popc", "__popcll", "__brev", "__brevll",
-  "__mul24", "__umul24", "__mulhi", "__umulhi", "__mul64hi", "__umul64hi", "__byte_perm",
-  "__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc",
-  "__rhadd", "__uhadd", "__urhadd", "__hadd", "__float_as_int", "__float_as_uint",
-  "__sad", "__usad", "__usad4",
-  "__viaddmax_s32", "__viaddmax_s32_relu", "__viaddmin_s32", "__viaddmin_s32_relu", "__viaddmax_u32", "__viaddmin_u32",
-  "__viaddmax_s16x2", "__viaddmax_s16x2_relu", "__viaddmin_s16x2", "__viaddmin_s16x2_relu", "__viaddmax_u16x2", "__viaddmin_u16x2",
-  "__vimax_s32_relu", "__vimin_s32_relu", "__vimax_s16x2_relu", "__vimin_s16x2_relu",
-  "__vimax3_s32", "__vimax3_s32_relu", "__vimin3_s32", "__vimin3_s32_relu", "__vimax3_u32", "__vimin3_u32",
-  "__vimax3_s16x2", "__vimax3_s16x2_relu", "__vimin3_s16x2", "__vimin3_s16x2_relu", "__vimax3_u16x2", "__vimin3_u16x2",
-  "__vibmax_s32", "__vibmin_s32", "__vibmax_u32", "__vibmin_u32", "__vibmax_s16x2", "__vibmin_s16x2", "__vibmax_u16x2", "__vibmin_u16x2",
-  "__vadd2", "__vsub2", "__vabs2", "__vabsss2", "__vneg2", "__vnegss2", "__vaddss2", "__vsubss2", "__vaddus2", "__vsubus2", "__vabsdiffu2", "__vabsdiffs2", "__vsads2", "__vsadu2", "__vhaddu2", "__vavgs2", "__vavgu2", "__vminu2", "__vmaxu2", "__vmins2", "__vmaxs2",
-  "__vcmpeq2", "__vcmpne2", "__vcmpges2", "__vcmpgeu2", "__vcmpgts2", "__vcmpgtu2", "__vcmples2", "__vcmpleu2", "__vcmplts2", "__vcmpltu2",
-  "__vseteq2", "__vsetne2", "__vsetges2", "__vsetgeu2", "__vsetgts2", "__vsetgtu2", "__vsetles2", "__vsetleu2", "__vsetlts2", "__vsetltu2",
-  "__vadd4", "__vsub4", "__vabs4", "__vabsss4", "__vneg4", "__vnegss4", "__vaddss4", "__vsubss4", "__vaddus4", "__vsubus4", "__vabsdiffu4", "__vabsdiffs4", "__vsads4", "__vsadu4", "__vhaddu4", "__vavgs4", "__vavgu4", "__vminu4", "__vmaxu4", "__vmins4", "__vmaxs4",
-  "__vcmpeq4", "__vcmpne4", "__vcmpges4", "__vcmpgeu4", "__vcmpgts4", "__vcmpgtu4", "__vcmples4", "__vcmpleu4", "__vcmplts4", "__vcmpltu4",
-  "__vseteq4", "__vsetne4", "__vsetges4", "__vsetgeu4", "__vsetgts4", "__vsetgtu4", "__vsetles4", "__vsetleu4", "__vsetlts4", "__vsetltu4",
-  "__dp4a", "__dp2a_lo", "__dp2a_hi", "IMAD", "UMUL", "UMAD", "umin", "assert",
-  "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
-  "__powf", "__fdividef", "fdividef", "__fadd_rn", "__fsub_rn", "__fmul_rn", "__fdiv_rn",
-  "__builtin_inff", "__builtin_huge_valf", "__uint_as_float", "__int_as_float",
-  "__saturatef", "copysign", "copysignf", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
-  "isinf", "isinff", "__isinff", "isfinite", "isfinitef", "finite", "finitef", "__finitef",
-  "isnan", "isnanf", "__isnanf", "signbit", "signbitf", "isnormal",
-  "isgreater", "isgreaterequal", "isless", "islessequal", "islessgreater", "isunordered",
-  "__bg_modf_intpart", "__bg_modf_fraction",
-  "__bg_frexp_exponent", "__bg_frexp_mantissa",
-  "__bg_remquo_quotient", "__bg_remquo_remainder",
-  "__bg_i16_lane", "__bg_u16_lane",
-]);
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -585,7 +504,7 @@ function semanticReferenceLocalArrayInitSupported(
 }
 
 function semanticReferenceMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
-  if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
+  if (expression.callee.kind !== "symbol" || !isSemanticMathCallName(expression.callee.name)) return false;
   const arity = semanticMathCallArity(expression.callee.name);
   return expression.args.length === arity && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
 }
