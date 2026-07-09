@@ -114,6 +114,11 @@ import {
 } from "./semantic_math_intrinsics.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
+  semanticFunctionArgSupported as semanticFunctionArgContractSupported,
+  semanticFunctionLocalParamValueTypesSupported,
+  semanticFunctionParamContractSupported,
+} from "./semantic_function_calls.js";
+import {
   semanticConstantMemorySymbols as constantMemorySymbols,
   semanticDeviceGlobalMemorySymbols as deviceGlobalMemorySymbols,
   semanticLocalMemorySymbols as localMemorySymbols,
@@ -585,8 +590,7 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
 function semanticWgslFunctionParamSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): boolean {
-  if (param.pointer) return param.addressSpace === "storage" && semanticWgslValueTypeSupported(param.valueType);
-  return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";
+  return semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
 }
 
 function operationsContainDeclare(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -1133,7 +1137,7 @@ function semanticWgslFunctionCallSupported(
   if (!fn || !semanticWgslValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => !semanticWgslFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticWgslPointerFunctionBodySupported(fn)) return false;
-  if (fn.params.some((param) => param.addressSpace === "local" && !semanticWgslValueTypeSupported(param.valueType))) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslValueTypeSupported)) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
@@ -1145,14 +1149,7 @@ function semanticWgslFunctionArgSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number] | undefined,
   ir: SemanticKernelIrModule,
 ): boolean {
-  if (!param) return false;
-  if (param.pointer) {
-    const ref = semanticPointerArgMemoryRef(arg);
-    return param.addressSpace === "storage" && ref?.addressSpace === "storage";
-  }
-  if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
-  if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
-  return semanticWgslExpressionSupported(arg, isSemanticFloatVectorType(param.valueType) ? "any" : "scalar", ir);
+  return semanticFunctionArgContractSupported(arg, param, semanticPointerArgMemoryRef, (item, mode) => semanticWgslExpressionSupported(item, mode, ir));
 }
 
 function semanticWgslVectorConstructorSupported(
@@ -1432,6 +1429,7 @@ function semanticWgslVoidFunctionCallSupported(
   if (!fn || fn.returnType !== "void") return false;
   if (fn.params.some((param) => !semanticWgslFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticWgslPointerFunctionBodySupported(fn)) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslValueTypeSupported)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
     semanticWgslFunctionBodyShapeSupported(fn.body) &&

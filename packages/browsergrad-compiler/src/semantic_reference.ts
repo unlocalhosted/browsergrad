@@ -116,6 +116,11 @@ import {
 } from "./reference_curand.js";
 import { isSemanticMathCallName, semanticMathCallArity } from "./semantic_math_intrinsics.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
+import {
+  semanticFunctionArgSupported as semanticFunctionArgContractSupported,
+  semanticFunctionLocalParamValueTypesSupported,
+  semanticFunctionParamContractSupported,
+} from "./semantic_function_calls.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
@@ -399,8 +404,7 @@ function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["
 function semanticReferenceFunctionParamSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number],
 ): boolean {
-  if (param.pointer) return param.addressSpace === "storage" && semanticReferenceValueTypeSupported(param.valueType);
-  return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";
+  return semanticFunctionParamContractSupported(param, semanticReferenceValueTypeSupported);
 }
 
 function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel): boolean {
@@ -602,7 +606,7 @@ function semanticReferenceFunctionCallSupported(
   if (!fn || !semanticReferenceValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
-  if (fn.params.some((param) => param.addressSpace === "local" && !semanticReferenceValueTypeSupported(param.valueType))) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceValueTypeSupported)) return false;
   if (!semanticReferenceFunctionBodyShapeSupported(fn.body)) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
@@ -614,14 +618,7 @@ function semanticReferenceFunctionArgSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number] | undefined,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  if (!param) return false;
-  if (param.pointer) {
-    const ref = semanticPointerArgMemoryRef(arg);
-    return param.addressSpace === "storage" && ref?.addressSpace === "storage";
-  }
-  if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
-  if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
-  return semanticReferenceExpressionSupported(arg, isSemanticFloatVectorType(param.valueType) ? "any" : "scalar", compiled);
+  return semanticFunctionArgContractSupported(arg, param, semanticPointerArgMemoryRef, (item, mode) => semanticReferenceExpressionSupported(item, mode, compiled));
 }
 
 function semanticReferenceVectorConstructorSupported(
@@ -924,6 +921,7 @@ function semanticReferenceVoidFunctionCallSupported(
   if (!fn || fn.returnType !== "void") return false;
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceValueTypeSupported)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
     semanticReferenceFunctionBodyShapeSupported(fn.body) &&
