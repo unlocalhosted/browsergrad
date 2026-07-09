@@ -53,6 +53,12 @@ import {
   referenceRawStorageUnitByteSize as rawStorageUnitByteSize,
 } from "./reference_memory_bytes.js";
 import {
+  referenceIsFloatLikeScalarType as isFloatLikeScalarType,
+  referenceIsIntegerScalarType as isIntegerScalarType,
+  referenceNumberLiteralHasFloatSyntax as numberLiteralHasFloatSyntax,
+  referenceNumberLiteralHasUnsignedSuffix as numberLiteralHasUnsignedSuffix,
+} from "./reference_value_types.js";
+import {
   isReferenceVector3,
   referenceVectorFromTuple,
   type ReferenceVector3,
@@ -2234,16 +2240,6 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
   return undefined;
 }
 
-function numberLiteralHasFloatSyntax(raw: string): boolean {
-  if (/^0x/iu.test(raw)) return false;
-  const value = raw.replace(/[uUlL]+$/u, "");
-  return /[.eE]/u.test(value) || /[fF]$/u.test(value);
-}
-
-function numberLiteralHasUnsignedSuffix(raw: string): boolean {
-  return /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw);
-}
-
 function binaryExpressionValueType(expression: Extract<CudaLiteExpression, { readonly kind: "binary" }>, context: ThreadContext): CudaLiteScalarType | undefined {
   if (
     expression.operator === "==" ||
@@ -2265,14 +2261,6 @@ function binaryExpressionValueType(expression: Extract<CudaLiteExpression, { rea
     return left === "uint" || right === "uint" ? "uint" : "int";
   }
   return left ?? right;
-}
-
-function isFloatLikeScalarType(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" || valueType === "half" || valueType === "bf16";
-}
-
-function isIntegerScalarType(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "int" || valueType === "uint" || valueType === "bool";
 }
 
 function rootIdentifierFromExpression(expression: CudaLiteExpression): string | undefined {
