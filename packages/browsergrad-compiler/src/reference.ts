@@ -48,7 +48,7 @@ import {
   evalInlineAsmShift,
   evalInlineAsmUnaryInt,
 } from "./features/inline_ptx/reference.js";
-import { inlineAsmExpectedInputCount, inlineAsmInputCountMatches } from "./features/inline_ptx/validation.js";
+import { inlineAsmExpectedInputCount, inlineAsmInputCountMatches, inlineAsmOutputCountMatches } from "./features/inline_ptx/validation.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
@@ -757,13 +757,16 @@ function* execStatements(
         execKernelLaunch(statement, context);
         break;
       case "asm":
-        if (classifyInlineAsm(statement.template)?.kind === "bar-sync") {
+        {
+          const op = classifyInlineAsm(statement.template);
+          if (op?.kind !== "bar-sync") {
+            execInlineAsm(statement, context);
+            break;
+          }
           const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
-          if (outputs.length !== 0 || statement.inputs.length > 1) throw compilerFailure("bar.sync inline asm operand mismatch");
+          if (!inlineAsmOutputCountMatches(op, outputs.length) || !inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length)) throw compilerFailure("bar.sync inline asm operand mismatch");
           for (const input of statement.inputs) evalNumber(input, context);
           yield "barrier";
-        } else {
-          execInlineAsm(statement, context);
         }
         break;
       case "expr":
@@ -857,20 +860,20 @@ function execInlineAsm(
   const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
   if (op?.kind === "laneid") {
     if (statement.inputs.length !== 0) throw compilerFailure("laneid inline asm expects no inputs");
-    if (outputs.length !== 1) throw compilerFailure("laneid inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("laneid inline asm expects one output operand");
     const target = resolveLValue(outputs[0]!, context);
     writeLValue(target, localLinearRank(context) % 32, context);
     return;
   }
   if (op?.kind === "warpid") {
     if (statement.inputs.length !== 0) throw compilerFailure("warpid inline asm expects no inputs");
-    if (outputs.length !== 1) throw compilerFailure("warpid inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("warpid inline asm expects one output operand");
     writeLValue(resolveLValue(outputs[0]!, context), Math.floor(localLinearRank(context) / 32), context);
     return;
   }
   if (op?.kind === "lanemask-lt") {
     if (statement.inputs.length !== 0) throw compilerFailure("lanemask_lt inline asm expects no inputs");
-    if (outputs.length !== 1) throw compilerFailure("lanemask_lt inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("lanemask_lt inline asm expects one output operand");
     const lane = localLinearRank(context) & 31;
     const mask = lane === 0 ? 0 : (1 << lane) - 1;
     writeLValue(resolveLValue(outputs[0]!, context), mask >>> 0, context);
@@ -878,27 +881,27 @@ function execInlineAsm(
   }
   if (op?.kind === "special-register-u32") {
     if (statement.inputs.length !== 0) throw compilerFailure(`${op.register} inline asm expects no inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${op.register} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${op.register} inline asm expects one output operand`);
     writeLValue(resolveLValue(outputs[0]!, context), inlineAsmSpecialRegisterValue(op.register, context), context);
     return;
   }
   if (op?.kind === "globaltimer-u64") {
     if (statement.inputs.length !== 0) throw compilerFailure("globaltimer inline asm expects no inputs");
-    if (outputs.length !== 1) throw compilerFailure("globaltimer inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("globaltimer inline asm expects one output operand");
     const tick = (context.blockIdx.x * context.blockDim.x + localLinearRank(context)) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), tick, context);
     return;
   }
   if (op?.kind === "isspacep") {
     if (statement.inputs.length !== 1) throw compilerFailure(`isspacep.${op.space} inline asm expects one input`);
-    if (outputs.length !== 1) throw compilerFailure(`isspacep.${op.space} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`isspacep.${op.space} inline asm expects one output operand`);
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmAddressPredicate(op.space, statement.inputs[0]!, context), context);
     return;
   }
   if (op?.kind === "bfind-u32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`bfind.u32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("bfind.u32 inline asm expects one output operand");
     const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "bfind.u32") >>> 0;
     const found = bits === 0 ? 0xffffffff : 31 - Math.clz32(bits);
     writeLValue(resolveLValue(outputs[0]!, context), found, context);
@@ -907,7 +910,7 @@ function execInlineAsm(
   if (op?.kind === "ffs-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`ffs.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure("ffs.b32 inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("ffs.b32 inline asm expects one output operand");
     const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "ffs.b32") >>> 0;
     const firstSet = bits === 0 ? 0 : 32 - Math.clz32(bits & -bits);
     writeLValue(resolveLValue(outputs[0]!, context), firstSet, context);
@@ -916,7 +919,7 @@ function execInlineAsm(
   if (op?.kind === "popc-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`popc.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure("popc.b32 inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("popc.b32 inline asm expects one output operand");
     let bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "popc.b32") >>> 0;
     let count = 0;
     while (bits !== 0) {
@@ -929,7 +932,7 @@ function execInlineAsm(
   if (op?.kind === "clz-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`clz.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure("clz.b32 inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("clz.b32 inline asm expects one output operand");
     const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "clz.b32") >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), Math.clz32(bits), context);
     return;
@@ -937,7 +940,7 @@ function execInlineAsm(
   if (op?.kind === "brev-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`brev.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure("brev.b32 inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("brev.b32 inline asm expects one output operand");
     const bits = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), "brev.b32") >>> 0;
     let reversed = 0;
     for (let bit = 0; bit < 32; bit++) reversed = ((reversed << 1) | ((bits >>> bit) & 1)) >>> 0;
@@ -947,7 +950,7 @@ function execInlineAsm(
   if (op?.kind === "prmt-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`prmt.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure("prmt.b32 inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("prmt.b32 inline asm expects one output operand");
     const x = valueAsNumber(evalExpression(statement.inputs[0]!, context), "prmt.b32") >>> 0;
     const y = valueAsNumber(evalExpression(statement.inputs[1]!, context), "prmt.b32") >>> 0;
     const selector = op.selectorImmediate ?? valueAsNumber(evalExpression(statement.inputs[2]!, context), "prmt.b32") >>> 0;
@@ -958,7 +961,7 @@ function execInlineAsm(
     const dataImmediates = op.dataImmediates ?? [undefined, undefined, undefined] as const;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`lop3.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure("lop3.b32 inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("lop3.b32 inline asm expects one output operand");
     let inputIndex = 0;
     const a = dataImmediates[0] ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), "lop3.b32") >>> 0;
     const b = dataImmediates[1] ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), "lop3.b32") >>> 0;
@@ -970,7 +973,7 @@ function execInlineAsm(
   if (op?.kind === "bitwise-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
     const left = op.op === "not" && op.immediate !== undefined
       ? op.immediate
       : valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
@@ -983,7 +986,7 @@ function execInlineAsm(
   if (op?.kind === "shift-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.b32 inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${op.op}.b32 inline asm expects one output operand`);
     const value = valueAsNumber(evalExpression(statement.inputs[0]!, context), `${op.op}.b32`) >>> 0;
     const amount = op.immediate === undefined
       ? valueAsNumber(evalExpression(statement.inputs[1]!, context), `${op.op}.b32`) >>> 0
@@ -995,7 +998,7 @@ function execInlineAsm(
     const label = op.op === "mul-lo" ? "mul.lo.b32" : op.op === "mad-lo" ? "mad.lo.b32" : `${op.op}.b32`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
     const right = op.immediate !== undefined && op.op !== "mad-lo"
       ? op.immediate >>> 0
@@ -1010,7 +1013,7 @@ function execInlineAsm(
     const label = `${op.op}.${op.signed ? "s32" : "u32"}`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
     const right = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmMinMax(op.op, left, right, op.signed), context);
@@ -1020,7 +1023,7 @@ function execInlineAsm(
     const label = `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"}`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const value = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmUnaryInt(op.op, value), context);
     return;
@@ -1029,7 +1032,7 @@ function execInlineAsm(
     const label = `selp.${op.signed ? "s32" : "b32"}`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     let inputIndex = 0;
     const trueValue = op.trueImmediate ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), label) >>> 0;
     const falseValue = op.falseImmediate ?? valueAsNumber(evalExpression(statement.inputs[inputIndex++]!, context), label) >>> 0;
@@ -1041,7 +1044,7 @@ function execInlineAsm(
     const label = `setp.${op.op}.${op.signed ? "s32" : "u32"}`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const left = valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
     const right = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[1]!, context), label) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), evalInlineAsmCompare(op.op, left, right, op.signed) ? 1 : 0, context);
@@ -1051,7 +1054,7 @@ function execInlineAsm(
     const label = `mov.${op.signed ? "s32" : "b32"}`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs === 0 ? "no inputs" : "one input"}`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const value = op.immediate === undefined
       ? valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0
       : op.immediate >>> 0;
@@ -1062,7 +1065,7 @@ function execInlineAsm(
     const label = `cvt.${op.toSigned ? "s32" : "u32"}.${op.fromSigned ? "s32" : "u32"}`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const value = op.immediate ?? valueAsNumber(evalExpression(statement.inputs[0]!, context), label) >>> 0;
     writeLValue(resolveLValue(outputs[0]!, context), value, context);
     return;
@@ -1071,7 +1074,7 @@ function execInlineAsm(
     const label = `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs ?? 1} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const value = op.source === undefined
       ? valueAsNumber(evalExpression(statement.inputs[0]!, context), label)
       : evalInlineAsmF32Source(op.source, statement, outputs, context);
@@ -1082,7 +1085,7 @@ function execInlineAsm(
     const label = `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"}`;
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) throw compilerFailure(`${label} inline asm expects ${expectedInputs ?? 1} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${label} inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${label} inline asm expects one output operand`);
     const value = op.source === undefined
       ? valueAsNumber(evalExpression(statement.inputs[0]!, context), label)
       : evalInlineAsmIntSource(op.source, statement, outputs, context);
@@ -1097,7 +1100,7 @@ function execInlineAsm(
     ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source];
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) throw compilerFailure(`${op.op}.rn.f32 inline asm expects ${expectedInputs ?? 2} inputs`);
-    if (outputs.length !== 1) throw compilerFailure(`${op.op}.rn.f32 inline asm expects one output operand`);
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure(`${op.op}.rn.f32 inline asm expects one output operand`);
     const left = evalInlineAsmF32Source(sources[0]!, statement, outputs, context);
     const right = evalInlineAsmF32Source(sources[1]!, statement, outputs, context);
     const value = op.op === "add" ? left + right : op.op === "sub" ? left - right : op.op === "mul" ? left * right : left / right;
@@ -1106,7 +1109,7 @@ function execInlineAsm(
   }
   if (op?.kind === "u8x4-sad-add") {
     if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length)) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
-    if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
+    if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
     const a = evalNumber(statement.inputs[0]!, context) >>> 0;
     const b = evalNumber(statement.inputs[1]!, context) >>> 0;
     let out = evalNumber(statement.inputs[2]!, context) >>> 0;
@@ -1117,7 +1120,7 @@ function execInlineAsm(
     return;
   }
   if (op?.kind === "ldmatrix") {
-    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || outputs.length !== op.matrices) {
+    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || !inlineAsmOutputCountMatches(op, outputs.length)) {
       throw compilerFailure(`ldmatrix.x${op.matrices} inline asm operand mismatch`);
     }
     const base = evalNumber(statement.inputs[0]!, context) >>> 0;
@@ -1129,20 +1132,20 @@ function execInlineAsm(
   }
   if (op?.kind === "cp-async-fence") {
     const maxInputs = op.fence === "wait_group" ? 1 : 0;
-    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || outputs.length !== 0) {
+    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || !inlineAsmOutputCountMatches(op, outputs.length)) {
       throw compilerFailure(`${op.fence === "wait_group" ? "cp.async.wait_group" : "cp.async fence"} inline asm expects no output operands${maxInputs === 0 ? " and no input operands" : " and at most one input operand"}`);
     }
     for (const input of statement.inputs) evalNumber(input, context);
     return;
   }
   if (op?.kind === "membar") {
-    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || outputs.length !== 0) {
+    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || !inlineAsmOutputCountMatches(op, outputs.length)) {
       throw compilerFailure(`membar.${op.scope} inline asm expects no operands`);
     }
     return;
   }
   if (op?.kind === "bar-sync") {
-    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || outputs.length !== 0) {
+    if (!inlineAsmInputCountMatches(op, outputs.length, statement.inputs.length) || !inlineAsmOutputCountMatches(op, outputs.length)) {
       throw compilerFailure("bar.sync inline asm operand mismatch");
     }
     for (const input of statement.inputs) evalNumber(input, context);
@@ -1164,7 +1167,7 @@ function execInlineAsm(
   if (expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
     throw compilerFailure(`fma.rn.f32 inline asm expects ${expectedInputs ?? 2} inputs`);
   }
-  if (outputs.length !== 1) throw compilerFailure("fma.rn.f32 inline asm expects one output operand");
+  if (!inlineAsmOutputCountMatches(op, outputs.length)) throw compilerFailure("fma.rn.f32 inline asm expects one output operand");
   const target = resolveLValue(outputs[0]!, context);
   const values = sources.map((source) => evalInlineAsmF32Source(source, statement, outputs, context));
   const a = values[0]!;
