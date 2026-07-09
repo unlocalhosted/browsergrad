@@ -34,7 +34,7 @@ export type InlineAsmOp =
   | { readonly kind: "convert-b32"; readonly fromSigned: boolean; readonly toSigned: boolean; readonly immediate?: number }
   | { readonly kind: "convert-f32-to-int"; readonly rounding: InlineAsmFloatToIntRounding; readonly toSigned: boolean; readonly source?: InlineAsmF32Source }
   | { readonly kind: "convert-int-to-f32"; readonly fromSigned: boolean; readonly source?: InlineAsmIntSource }
-  | { readonly kind: "float-binary-rn-f32"; readonly op: "add" | "sub" | "mul"; readonly sources?: readonly [InlineAsmF32Source, InlineAsmF32Source] }
+  | { readonly kind: "float-binary-rn-f32"; readonly op: "add" | "sub" | "mul" | "div"; readonly sources?: readonly [InlineAsmF32Source, InlineAsmF32Source] }
   | { readonly kind: "u8x4-sad-add" }
   | { readonly kind: "cp-async-fence"; readonly fence: "commit_group" | "wait_group" | "wait_all" }
   | { readonly kind: "membar"; readonly scope: "cta" | "gl" | "sys" }
@@ -185,7 +185,7 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
       ...(source === undefined ? {} : { source }),
     };
   }
-  const floatBinary = /\b(add|sub|mul)\.rn\.f32\b\s+([^;]+)/u.exec(template);
+  const floatBinary = /\b(add|sub|mul|div)\.rn\.f32\b\s+([^;]+)/u.exec(template);
   if (floatBinary) {
     const operands = floatBinary[2]!.split(",").map((operand) => operand.trim());
     const sources = [
@@ -193,8 +193,8 @@ export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
       parseInlineAsmF32SourceOperand(operands[2]),
     ] as const;
     return sources.every((source) => source !== undefined)
-      ? { kind: "float-binary-rn-f32", op: floatBinary[1] as "add" | "sub" | "mul", sources: sources as readonly [InlineAsmF32Source, InlineAsmF32Source] }
-      : { kind: "float-binary-rn-f32", op: floatBinary[1] as "add" | "sub" | "mul" };
+      ? { kind: "float-binary-rn-f32", op: floatBinary[1] as "add" | "sub" | "mul" | "div", sources: sources as readonly [InlineAsmF32Source, InlineAsmF32Source] }
+      : { kind: "float-binary-rn-f32", op: floatBinary[1] as "add" | "sub" | "mul" | "div" };
   }
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
   const cpAsyncFence = /\bcp\.async\.(commit_group|wait_group|wait_all)\b/u.exec(template);
@@ -266,7 +266,7 @@ export function inlineAsmSupportedList(): string {
     "cvt.{u32,s32}.{u32,s32}",
     "cvt.{rni,rzi,rmi,rpi}.{u32,s32}.f32",
     "cvt.rn.f32.{u32,s32}",
-    "{add,sub,mul}.rn.f32",
+    "{add,sub,mul,div}.rn.f32",
     "vabsdiff4.u32.u32.u32.add",
     "cp.async.{commit_group,wait_group,wait_all}",
     "membar.{cta,gl,sys}",

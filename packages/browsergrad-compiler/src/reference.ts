@@ -1093,7 +1093,7 @@ function execInlineAsm(
     if (outputs.length !== 1) throw compilerFailure(`${op.op}.rn.f32 inline asm expects one output operand`);
     const left = evalInlineAsmF32Source(sources[0]!, statement, outputs, context);
     const right = evalInlineAsmF32Source(sources[1]!, statement, outputs, context);
-    const value = op.op === "add" ? left + right : op.op === "sub" ? left - right : left * right;
+    const value = op.op === "add" ? left + right : op.op === "sub" ? left - right : op.op === "mul" ? left * right : left / right;
     writeLValue(resolveLValue(outputs[0]!, context), Math.fround(value), context);
     return;
   }

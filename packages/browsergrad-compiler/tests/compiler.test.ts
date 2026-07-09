@@ -13191,6 +13191,37 @@ __global__ void f32ArithmeticKernel(float *out, float *input) {
     ]);
   });
 
+  it("lowers inline PTX f32 division statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float ptx_div(float value) {
+  float ret;
+  asm volatile("div.rn.f32 %0, %1, 2.0;" : "=f"(ret) : "f"(value));
+  return ret;
+}
+__global__ void f32DivisionKernel(float *out, float *input) {
+  int idx = threadIdx.x;
+  out[idx] = ptx_div(input[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Float32Array(4),
+          input: new Float32Array([1, -3, 7, -9]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect([...result.buffers.out as Float32Array]).toEqual([
+      0.5,
+      -1.5,
+      3.5,
+      -4.5,
+    ]);
+  });
+
   it("lowers inline PTX mov b32 statements", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int mov_u_ptx(unsigned int value) {

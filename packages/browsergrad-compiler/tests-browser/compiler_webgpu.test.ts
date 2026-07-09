@@ -2911,6 +2911,7 @@ __global__ void doubleCompat(double* result, double* out, double a) {
   });
 
   it("runs scalar half unordered comparison and NaN predicates in f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void halfUnordered(const half* input, half* output, int* flags) {
   half finite = input[0];
@@ -2950,6 +2951,7 @@ __global__ void halfUnordered(const half* input, half* output, int* flags) {
   });
 
   it("runs half2 lane extraction and packing helpers through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void half2LaneHelpers(const half2 *input, half2 *out, half *scalar) {
   half2 x = input[0];
@@ -2983,6 +2985,7 @@ __global__ void half2LaneHelpers(const half2 *input, half2 *out, half *scalar) {
   });
 
   it("runs scalar half short conversion and bitcast helpers through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void halfShortConvert(const half* input, int* out, uint* uout, half* h) {
   half pos = input[0];
@@ -3022,6 +3025,7 @@ __global__ void halfShortConvert(const half* input, int* out, uint* uout, half* 
   });
 
   it("runs directed half conversion aliases through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void halfDirectedConvert(half* out) {
   out[0] = __float2half_rn(2049.0f);
@@ -3051,6 +3055,7 @@ __global__ void halfDirectedConvert(half* out) {
   });
 
   it("runs directed bf16 conversion aliases on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
   if (threadIdx.x < 1) {
@@ -3125,6 +3130,7 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
   });
 
   it("runs double to bf16 through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void bf16DoubleCompat(float *out, double d) {
   if (threadIdx.x < 1) {
@@ -3144,6 +3150,7 @@ __global__ void bf16DoubleCompat(float *out, double d) {
   });
 
   it("runs scalar bf16 arithmetic and predicates on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void bf16ScalarAliases(const __nv_bfloat16 *input, const float *seed, __nv_bfloat16 *output, uint *flags) {
   if (threadIdx.x < 1) {
@@ -3209,6 +3216,7 @@ __global__ void bf16ScalarAliases(const __nv_bfloat16 *input, const float *seed,
   });
 
   it("runs bf162 lane and vector conversion aliases on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void bf162Move(float *out, uint *bits) {
   if (threadIdx.x < 1) {

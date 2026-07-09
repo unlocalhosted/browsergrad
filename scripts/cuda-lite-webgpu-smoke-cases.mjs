@@ -44,6 +44,7 @@ export const runtimeScopeCases = [
   "inline-asm:convert-f32-to-int",
   "inline-asm:convert-int-to-f32",
   "inline-asm:f32-arithmetic",
+  "inline-asm:f32-division",
   "inline-asm:move-b32",
   "inline-asm:move-immediate-b32",
   "inline-asm:special-reg-single-percent",

@@ -3188,6 +3188,16 @@ __global__ void ptxF32Arithmetic(float *out, float *input) {
   out[idx + 4] = ptx_sub(value);
   out[idx + 8] = ptx_mul(value);
 }`,
+  ptxF32Division: `
+__device__ float ptx_div(float value) {
+  float ret;
+  asm volatile("div.rn.f32 %0, %1, 2.0;" : "=f"(ret) : "f"(value));
+  return ret;
+}
+__global__ void ptxF32Division(float *out, float *input) {
+  int idx = threadIdx.x;
+  out[idx] = ptx_div(input[idx]);
+}`,
   ptxMoveB32: `
 __device__ unsigned int mov_u_ptx(unsigned int value) {
   unsigned int ret;
@@ -15016,6 +15026,28 @@ const html = String.raw`<!doctype html>
                 4,
                 -8,
                 16,
+              ],
+            },
+          },
+          {
+            name: "inline-asm:f32-division",
+            source: SOURCES.ptxF32Division,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+                input: new Float32Array([1, -3, 7, -9]),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                0.5,
+                -1.5,
+                3.5,
+                -4.5,
               ],
             },
           },

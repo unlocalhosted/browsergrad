@@ -2368,7 +2368,7 @@ function emitInlineAsmStatement(
     if (statement.inputs.length === expectedInputs && outputs.length === 1) {
       const left = emitInlineAsmF32Source(sources[0]!, statement, outputs, context);
       const right = emitInlineAsmF32Source(sources[1]!, statement, outputs, context);
-      const operator = op.op === "add" ? "+" : op.op === "sub" ? "-" : "*";
+      const operator = op.op === "add" ? "+" : op.op === "sub" ? "-" : op.op === "mul" ? "*" : "/";
       return `${emitExpression(outputs[0]!, context)} = (${left} ${operator} ${right})`;
     }
   }
