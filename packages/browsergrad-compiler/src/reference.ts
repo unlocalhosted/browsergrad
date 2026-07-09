@@ -34,7 +34,7 @@ import {
   cloneReferenceSurfaces,
   cloneReferenceTypedArray,
 } from "./reference_inputs.js";
-import { cudaLiteTruthy as truthy } from "./reference_scalars.js";
+import { cudaLiteTruthy as truthy } from "./cuda_lite_values.js";
 import {
   freezeReferenceTrace,
   type MutableReferenceTrace,

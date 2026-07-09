@@ -60,7 +60,8 @@ import {
   semanticAtomicSupportsBfloatAdd,
   semanticAtomicSupportsFloat,
 } from "./semantic_atomic_intrinsics.js";
-import { cudaLiteTotalElements as totalElements } from "./reference_scalars.js";
+import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
+import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
   SEMANTIC_BFLOAT_HELPER_CALLS,
   SEMANTIC_FP8_CALLS,
@@ -6295,11 +6296,6 @@ function semanticPointerBufferParamName(base: string): string {
 
 function semanticPointerBaseParamName(base: string): string {
   return `${base}_base`;
-}
-
-function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }
 
 function flatIndicesForDimensions(dimensions: readonly number[], flatIndex: number): readonly number[] {

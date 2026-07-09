@@ -19,8 +19,9 @@ import {
 import {
   cudaLiteTotalElements as totalElements,
   cudaLiteTruthy as truthy,
-  referenceTypedArrayForScalar as typedArrayForScalar,
-} from "./reference_scalars.js";
+} from "./cuda_lite_values.js";
+import { referenceTypedArrayForScalar as typedArrayForScalar } from "./reference_scalars.js";
+import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
   freezeReferenceTrace,
   type MutableReferenceTrace,
@@ -4620,11 +4621,6 @@ function evalConstantInitNumber(expression: SemanticExpression): number {
     default:
       return 0;
   }
-}
-
-function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
-  if (expression.kind !== "initializer") return [expression];
-  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }
 
 function flatIndexForDimensions(dimensions: readonly number[], indices: readonly number[]): number {
