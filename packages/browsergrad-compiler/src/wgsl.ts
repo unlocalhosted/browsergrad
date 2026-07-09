@@ -6,6 +6,7 @@ import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queri
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
+import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import {
@@ -4521,20 +4522,7 @@ function expressionContainsSideEffectingCall(expression: CudaLiteExpression, con
       name !== undefined &&
       (name.startsWith("atomic") ||
         CUDA_CACHE_HINT_STORES.has(name) ||
-        name === "cudaMemcpy" ||
-        name === "cudaMemcpyAsync" ||
-        name === "cudaMemcpy2D" ||
-        name === "cudaMemcpy2DAsync" ||
-        name === "cudaMemcpyPeer" ||
-        name === "cudaMemcpyPeerAsync" ||
-        name === "cudaMemcpyToSymbol" ||
-        name === "cudaMemcpyToSymbolAsync" ||
-        name === "cudaMemcpyFromSymbol" ||
-        name === "cudaMemcpyFromSymbolAsync" ||
-        name === "cudaMemset" ||
-        name === "cudaMemsetAsync" ||
-        name === "cudaMemset2D" ||
-        name === "cudaMemset2DAsync")
+        isCudaRuntimeCopyCall(name))
     ) {
       found = true;
     }

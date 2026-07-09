@@ -1,5 +1,6 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
+import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import type {
   SemanticExpression,
@@ -425,25 +426,6 @@ function uniqueRuntimeOperations(operations: readonly CudaRuntimeOperation[]): r
     out.push(operation);
   }
   return out;
-}
-
-function isCudaRuntimeCopyCall(name: string): boolean {
-  return name === "cudaMemcpy" ||
-    name === "cudaMemcpyAsync" ||
-    name === "cudaMemcpy2D" ||
-    name === "cudaMemcpy2DAsync" ||
-    name === "cudaMemcpyPeer" ||
-    name === "cudaMemcpyPeerAsync" ||
-    name === "cudaMemcpyToSymbol" ||
-    name === "cudaMemcpyToSymbolAsync" ||
-    name === "cudaMemcpyFromSymbol" ||
-    name === "cudaMemcpyFromSymbolAsync" ||
-    name === "cudaMemset" ||
-    name === "cudaMemsetAsync" ||
-    name === "cudaMemset2D" ||
-    name === "cudaMemset2DAsync" ||
-    name === "cudaMemsetToSymbol" ||
-    name === "cudaMemsetToSymbolAsync";
 }
 
 function collectCooperativeGroups(

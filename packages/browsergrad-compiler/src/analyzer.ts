@@ -24,6 +24,7 @@ import {
 } from "./types.js";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import {
   type WmmaBuiltin,
@@ -3157,29 +3158,6 @@ function validateRuntimeCopyCall(
       kindArg?.span ?? expression.span,
     ));
   }
-}
-
-function isCudaRuntimeCopyCall(callName: string): boolean {
-  return callName === "cudaMemcpy" ||
-    callName === "cudaMemcpyAsync" ||
-    callName === "cudaMemcpy2D" ||
-    callName === "cudaMemcpy2DAsync" ||
-    callName === "cudaMemcpyPeer" ||
-    callName === "cudaMemcpyPeerAsync" ||
-    isCudaRuntimeSymbolCopyCall(callName) ||
-    callName === "cudaMemset" ||
-    callName === "cudaMemsetAsync" ||
-    callName === "cudaMemset2D" ||
-    callName === "cudaMemset2DAsync" ||
-    callName === "cudaMemsetToSymbol" ||
-    callName === "cudaMemsetToSymbolAsync";
-}
-
-function isCudaRuntimeSymbolCopyCall(callName: string): boolean {
-  return callName === "cudaMemcpyToSymbol" ||
-    callName === "cudaMemcpyToSymbolAsync" ||
-    callName === "cudaMemcpyFromSymbol" ||
-    callName === "cudaMemcpyFromSymbolAsync";
 }
 
 function validateCudaGraphSetConditionalCall(

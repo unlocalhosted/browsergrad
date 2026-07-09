@@ -10,6 +10,12 @@ import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
 import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
+import {
+  isCudaRuntimeCopyCall,
+  isCudaRuntimeMemset2DCall,
+  isCudaRuntimeMemsetCall,
+  isCudaRuntimeSymbolMemsetCall,
+} from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
@@ -2102,25 +2108,6 @@ function cudaRuntimeCopyShape(
   return undefined;
 }
 
-function isCudaRuntimeMemsetCall(name: string | undefined): boolean {
-  return name === "cudaMemset" || name === "cudaMemsetAsync" || isCudaRuntimeMemset2DCall(name);
-}
-
-function isCudaRuntimeSymbolMemsetCall(name: string | undefined): boolean {
-  return name === "cudaMemsetToSymbol" || name === "cudaMemsetToSymbolAsync";
-}
-
-function isCudaRuntimeMemset2DCall(name: string | undefined): boolean {
-  return name === "cudaMemset2D" || name === "cudaMemset2DAsync";
-}
-
-function isCudaRuntimeSymbolCopyCall(name: string | undefined): boolean {
-  return name === "cudaMemcpyToSymbol" ||
-    name === "cudaMemcpyToSymbolAsync" ||
-    name === "cudaMemcpyFromSymbol" ||
-    name === "cudaMemcpyFromSymbolAsync";
-}
-
 interface PointerByteView {
   readonly name: string;
   readonly bytes: Uint8Array;
@@ -3345,7 +3332,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     return 0;
   }
   if (name !== undefined && isHostManagedRuntimeNoopCall(name)) return 0;
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync" || name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeSymbolCopyCall(name) || isCudaRuntimeMemsetCall(name) || isCudaRuntimeSymbolMemsetCall(name)) {
+  if (name !== undefined && isCudaRuntimeCopyCall(name)) {
     execCudaRuntimeCopy(expression, context);
     return 0;
   }
