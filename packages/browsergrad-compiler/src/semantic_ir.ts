@@ -19,7 +19,7 @@ import type {
 } from "./types.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
-import { classifyInlineAsm, type PtxSpecialU32Register } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 

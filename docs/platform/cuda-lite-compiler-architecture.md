@@ -38,6 +38,11 @@ resident buffers, and readback mechanics.
 - `src/launch.ts`: shared launch-shape diagnostics for reference/WebGPU parity.
 - `src/runner.ts`: public compile/run/prepare APIs.
 - `src/compatibility.ts`: diagnostic to semantic-family mapping.
+- `src/features/*`: vertical compiler capability modules. Feature-specific
+  parsing/model facts should move here before the same capability grows more
+  analyzer/reference/WGSL code.
+- `scripts/compiler-architecture-map.mjs`: line-count/import/function map for
+  finding shallow or oversized modules before each extraction batch.
 
 If a feature needs support in multiple files, add it in this order:
 
@@ -206,6 +211,18 @@ Feature families:
 New support should add a semantic primitive, not a string match against one
 lesson. If a corpus gap is broad, add a plan or compatibility family first, then
 lower concrete cases.
+
+Vertical feature modules should grow in this order:
+
+1. Move feature model/classification facts behind `src/features/<feature>/`.
+2. Move analyzer validation for that feature.
+3. Move reference execution helpers.
+4. Move WGSL emission helpers.
+5. Move fixtures/status metadata close to the feature or generate registries
+   from the feature catalog.
+
+Keep old import paths as thin compatibility shims only while internal callers
+migrate. Compiler internals should import the vertical module directly.
 
 ## Evidence Gates
 

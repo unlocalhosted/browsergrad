@@ -37,7 +37,7 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmIntSource } from "./ptx_tile_ops.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmIntSource } from "./features/inline_ptx/model.js";
 import { collectCudaAllowedTrapCallSpanStarts } from "./trap_preconditions.js";
 import { sizeofCudaType } from "./type_layout.js";
 import {

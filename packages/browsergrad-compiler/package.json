@@ -73,6 +73,7 @@
     "e2e:webgpu:last-failures": "node ../../scripts/run-cuda-lite-last-failures.mjs",
     "bugbash:status": "node ../../scripts/cuda-lite-bugbash-status.mjs",
     "bugbash:status:json": "node ../../scripts/cuda-lite-bugbash-status.mjs --json",
+    "architecture:map": "node ../../scripts/compiler-architecture-map.mjs",
     "verify:changed:plan": "node ../../scripts/cuda-lite-test-scope.mjs",
     "verify:changed": "node ../../scripts/cuda-lite-test-scope.mjs --run",
     "verify:changed:compile": "node ../../scripts/cuda-lite-test-scope.mjs --run --include-compile-corpus",

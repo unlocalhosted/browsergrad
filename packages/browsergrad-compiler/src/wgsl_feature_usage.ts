@@ -10,7 +10,7 @@ import { cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import { isSubgroupCallName } from "./wgsl_control_analysis.js";
 import type { WgslIntViewAtomicEmitKind } from "./wgsl_atomic_helpers.js";
 import { wgslScalar } from "./wgsl_storage.js";
-import { classifyInlineAsm } from "./ptx_tile_ops.js";
+import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 
 export function effectiveF16Mode(
   ir: KernelIrModule,
