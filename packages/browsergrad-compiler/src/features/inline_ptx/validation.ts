@@ -4,6 +4,15 @@ import {
   type InlineAsmOp,
 } from "./model.js";
 
+export type InlineAsmOutputValueType = "bool" | "float" | "int" | "uint";
+
+export interface InlineAsmOutputValueContract {
+  readonly label: string;
+  readonly description: string;
+  readonly allowed: readonly InlineAsmOutputValueType[];
+  readonly allOutputs?: boolean;
+}
+
 export function inlineAsmExpectedInputCount(op: InlineAsmOp, outputCount: number): number | undefined {
   switch (op.kind) {
     case "fma-rn-f32":
@@ -84,4 +93,73 @@ export function inlineAsmExpectedOutputCount(op: InlineAsmOp): number {
 
 export function inlineAsmOutputCountMatches(op: InlineAsmOp, actualOutputCount: number): boolean {
   return actualOutputCount === inlineAsmExpectedOutputCount(op);
+}
+
+export function inlineAsmOutputValueContract(op: InlineAsmOp): InlineAsmOutputValueContract | undefined {
+  switch (op.kind) {
+    case "fma-rn-f32":
+      return { label: "fma.rn.f32", description: "an f32 output operand", allowed: ["float"] };
+    case "float-binary-rn-f32":
+      return { label: `${op.op}.rn.f32`, description: "an f32 output operand", allowed: ["float"] };
+    case "laneid":
+      return { label: "laneid", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "warpid":
+      return { label: "warpid", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "lanemask-lt":
+      return { label: "lanemask_lt", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "special-register-u32":
+      return { label: op.register, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "globaltimer-u64":
+      return { label: "globaltimer", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "isspacep":
+      return { label: `isspacep.${op.space}`, description: "an integer predicate output operand", allowed: ["uint", "int", "bool"] };
+    case "bfind-u32":
+      return { label: "bfind.u32", description: "a uint output operand", allowed: ["uint"] };
+    case "ffs-b32":
+      return { label: "ffs.b32", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "popc-b32":
+      return { label: "popc.b32", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "clz-b32":
+      return { label: "clz.b32", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "brev-b32":
+      return { label: "brev.b32", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "prmt-b32":
+      return { label: "prmt.b32", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "lop3-b32":
+      return { label: "lop3.b32", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "bitwise-b32":
+      return { label: `${op.op}.b32`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "shift-b32":
+      return { label: `${op.op}.b32`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "arithmetic-b32": {
+      const label = op.op === "mul-lo" ? "mul.lo.b32" : op.op === "mad-lo" ? "mad.lo.b32" : `${op.op}.b32`;
+      return { label, description: "an integer output operand", allowed: ["uint", "int"] };
+    }
+    case "minmax-b32":
+      return { label: `${op.op}.${op.signed ? "s32" : "u32"}`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "unary-int-b32":
+      return { label: `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"}`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "select-b32":
+      return { label: `selp.${op.signed ? "s32" : "b32"}`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "compare-b32":
+      return { label: `setp.${op.op}.${op.signed ? "s32" : "u32"}`, description: "an integer predicate output operand", allowed: ["uint", "int", "bool"] };
+    case "move-b32":
+      return { label: `mov.${op.signed ? "s32" : "b32"}`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "convert-b32":
+      return { label: `cvt.${op.toSigned ? "s32" : "u32"}.${op.fromSigned ? "s32" : "u32"}`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "convert-f32-to-int":
+      return { label: `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32`, description: "an integer output operand", allowed: ["uint", "int"] };
+    case "convert-int-to-f32":
+      return { label: `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"}`, description: "an f32 output operand", allowed: ["float"] };
+    case "u8x4-sad-add":
+      return { label: "vabsdiff4.u32.u32.u32.add", description: "an integer output operand", allowed: ["uint", "int"] };
+    case "ldmatrix":
+      return { label: "ldmatrix", description: "integer register carrier operands", allowed: ["uint", "int"], allOutputs: true };
+    default:
+      return undefined;
+  }
+}
+
+export function inlineAsmOutputValueTypeMatches(contract: InlineAsmOutputValueContract, valueType: string | undefined): boolean {
+  return valueType === undefined || contract.allowed.includes(valueType as InlineAsmOutputValueType);
 }

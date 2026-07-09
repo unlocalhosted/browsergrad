@@ -37,8 +37,8 @@ import {
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source } from "./features/inline_ptx/model.js";
-import { inlineAsmExpectedInputCount } from "./features/inline_ptx/validation.js";
+import { classifyInlineAsm, inlineAsmSupportedList, type InlineAsmF32Source, type InlineAsmOp } from "./features/inline_ptx/model.js";
+import { inlineAsmExpectedInputCount, inlineAsmOutputValueContract, inlineAsmOutputValueTypeMatches } from "./features/inline_ptx/validation.js";
 import { collectCudaAllowedTrapCallSpanStarts } from "./trap_preconditions.js";
 import { sizeofCudaType } from "./type_layout.js";
 import {
@@ -1673,6 +1673,23 @@ function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined,
 
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;
 
+function validateInlineAsmOutputValueTypes(
+  op: InlineAsmOp,
+  outputInfos: readonly ExpressionInfo[],
+  outputs: readonly CudaLiteExpression[],
+  fallbackSpan: SourceSpan,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  const contract = inlineAsmOutputValueContract(op);
+  if (!contract) return;
+  const count = contract.allOutputs ? outputs.length : Math.min(outputs.length, 1);
+  for (let index = 0; index < count; index++) {
+    const valueType = outputInfos[index]?.valueType;
+    if (inlineAsmOutputValueTypeMatches(contract, valueType)) continue;
+    diagnostics.push(error("invalid-inline-asm-operands", `${contract.label} inline PTX writes ${contract.description}`, outputs[index]?.span ?? fallbackSpan));
+  }
+}
+
 function validateInlineAsmStatement(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   scope: Scope,
@@ -1692,6 +1709,7 @@ function validateInlineAsmStatement(
     validateLValueExpression(output, scope, diagnostics, walkExpression);
     validateScalarOperand(outputInfos[index]!, output.span, diagnostics);
   }
+  if (op) validateInlineAsmOutputValueTypes(op, outputInfos, outputs, statement.span, asmDiagnostics);
   if (op?.kind === "fma-rn-f32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
@@ -1717,44 +1735,23 @@ function validateInlineAsmStatement(
       }
     }
   }
-  if (op?.kind === "float-binary-rn-f32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "float") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.rn.f32 inline PTX writes an f32 output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "laneid" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects one output operand and no input operands", statement.span));
-  }
-  if (op?.kind === "laneid" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "warpid" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "warpid inline PTX expects one output operand and no input operands", statement.span));
   }
-  if (op?.kind === "warpid" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "warpid inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "lanemask-lt" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX expects one output operand and no input operands", statement.span));
-  }
-  if (op?.kind === "lanemask-lt" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "special-register-u32" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.register} inline PTX expects one output operand and no input operands`, statement.span));
   }
-  if (op?.kind === "special-register-u32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.register} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "globaltimer-u64" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX expects one output operand and no input operands", statement.span));
   }
-  if (op?.kind === "globaltimer-u64" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "isspacep" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", `isspacep.${op.space} inline PTX expects one output operand and one pointer input operand`, statement.span));
-  }
-  if (op?.kind === "isspacep" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int" && outputInfos[0]?.valueType !== "bool") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `isspacep.${op.space} inline PTX writes an integer predicate output operand`, outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "isspacep") {
     const input = statement.inputs[0];
@@ -1772,17 +1769,11 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `bfind.u32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "bfind-u32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "ffs-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `ffs.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
-  }
-  if (op?.kind === "ffs-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "ffs.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "popc-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
@@ -1790,17 +1781,11 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `popc.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "popc-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "popc.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "clz-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `clz.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
-  }
-  if (op?.kind === "clz-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "clz.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "brev-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
@@ -1808,17 +1793,11 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `brev.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "brev-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "brev.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "prmt-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `prmt.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
-  }
-  if (op?.kind === "prmt-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "prmt.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "lop3-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
@@ -1826,26 +1805,17 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `lop3.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "lop3-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "lop3.b32 inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "bitwise-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "bitwise-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.b32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "shift-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
-  }
-  if (op?.kind === "shift-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.b32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "arithmetic-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
@@ -1854,18 +1824,11 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${opLabel}.b32 inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "arithmetic-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    const opLabel = op.op === "mul-lo" ? "mul.lo" : op.op === "mad-lo" ? "mad.lo" : op.op;
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${opLabel}.b32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "minmax-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.signed ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
-  }
-  if (op?.kind === "minmax-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.signed ? "s32" : "u32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "unary-int-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
@@ -1873,17 +1836,11 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "unary-int-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `${op.op}.${op.op === "abs" || op.signed ? "s32" : "b32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "select-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `selp.${op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
-  }
-  if (op?.kind === "select-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `selp.${op.signed ? "s32" : "b32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "compare-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
@@ -1891,26 +1848,17 @@ function validateInlineAsmStatement(
       asmDiagnostics.push(error("invalid-inline-asm-operands", `setp.${op.op}.${op.signed ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
   }
-  if (op?.kind === "compare-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int" && outputInfos[0]?.valueType !== "bool") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `setp.${op.op}.${op.signed ? "s32" : "u32"} inline PTX writes an integer predicate output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "move-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `mov.${op.signed ? "s32" : "b32"} inline PTX expects one output operand and ${expectedInputs === 0 ? "no input operands" : "one input operand"}`, statement.span));
     }
   }
-  if (op?.kind === "move-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `mov.${op.signed ? "s32" : "b32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "convert-b32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || statement.inputs.length !== expectedInputs) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.toSigned ? "s32" : "u32"}.${op.fromSigned ? "s32" : "u32"} inline PTX expects one output operand and ${expectedInputs} input operands`, statement.span));
     }
-  }
-  if (op?.kind === "convert-b32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.toSigned ? "s32" : "u32"}.${op.fromSigned ? "s32" : "u32"} inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "convert-f32-to-int") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
@@ -1930,9 +1878,6 @@ function validateInlineAsmStatement(
       }
     }
   }
-  if (op?.kind === "convert-f32-to-int" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.${op.rounding}i.${op.toSigned ? "s32" : "u32"}.f32 inline PTX writes an integer output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "convert-int-to-f32") {
     const expectedInputs = inlineAsmExpectedInputCount(op, outputs.length);
     if (outputs.length !== 1 || expectedInputs === undefined || statement.inputs.length !== expectedInputs) {
@@ -1951,14 +1896,8 @@ function validateInlineAsmStatement(
       }
     }
   }
-  if (op?.kind === "convert-int-to-f32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "float") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", `cvt.rn.f32.${op.fromSigned ? "s32" : "u32"} inline PTX writes an f32 output operand`, outputs[0]?.span ?? statement.span));
-  }
   if (op?.kind === "u8x4-sad-add" && (outputs.length !== 1 || statement.inputs.length !== 3)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects one output operand and three input operands", statement.span));
-  }
-  if (op?.kind === "u8x4-sad-add" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    asmDiagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "cp-async-fence") {
     const maxInputs = op.fence === "wait_group" ? 1 : 0;
@@ -1982,12 +1921,6 @@ function validateInlineAsmStatement(
   if (op?.kind === "ldmatrix") {
     if (outputs.length !== op.matrices || statement.inputs.length !== 1) {
       asmDiagnostics.push(error("invalid-inline-asm-operands", `ldmatrix.x${op.matrices} inline PTX expects ${op.matrices} output operand(s) and one shared-address input operand`, statement.span));
-    }
-    for (let index = 0; index < outputs.length; index++) {
-      const type = outputInfos[index]?.valueType;
-      if (type !== undefined && type !== "uint" && type !== "int") {
-        asmDiagnostics.push(error("invalid-inline-asm-operands", "ldmatrix inline PTX writes integer register carrier operands", outputs[index]?.span ?? statement.span));
-      }
     }
   }
   if (op?.kind === "mma-m16n8k16") {
