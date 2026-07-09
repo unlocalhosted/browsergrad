@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-09T20:07:47Z
+Last updated: 2026-07-09T20:12:34Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: reference kernel/function catalog moved into focused Module |
+| Active work item | Architecture split: reference numeric helper island moved into focused Module |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: extracted `reference_numeric.ts` for reference signed-average, packed dot-add helpers, half rounding/saturation, and bf16 rounding/saturation/relu helpers while preserving the legacy bf16 rounding implementation exactly; `reference.ts` now consumes one numeric-helper Module instead of carrying scalar bit math beside expression execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6224` lines
 - Architecture split: extracted `reference_kernels.ts` for reference backend-IR selection, launched-kernel catalog construction, device-function overload catalogs, and reference device-function resolution; `reference.ts` now consumes a focused reference kernel/function Module instead of mixing catalog construction into execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6294` lines
 - Architecture split: moved block-local declaration-name discovery into `reference_ast_scans.ts` beside shared-declaration and grid-sync scans; `reference.ts` now keeps block-scope shadowing logic behind the AST scan Module instead of mixing syntax traversal into statement execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6342` lines
 - Architecture split: consolidated reference input cloning in `reference_inputs.ts`, including constants, device globals, surfaces, buffers, typed-array readback clones, and external DevicePool state; `reference.ts` now consumes one reference input Module for host-state isolation before/after CPU execution; typecheck passed, lint passed, focused compiler unit passed `733/0`, changed-fast passed typecheck + compiler unit `733/0` + fast auto-corpus WebGPU `32/0/0` with skips `0`, full `verify:compiler` passed with unit `749/0`, and architecture map now shows `reference.ts` down to `6354` lines
