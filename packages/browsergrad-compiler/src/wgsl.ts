@@ -8,6 +8,7 @@ import {
   isCudaBuiltinVectorSymbolName,
   isCudaUniformBuiltinVectorSymbolName,
 } from "./cuda_builtin_symbols.js";
+import { cudaComplexCallReturnType as cuComplexCallReturnType } from "./cuda_complex_intrinsics.js";
 import {
   cudaLiteDimensionStride as dimensionStride,
   cudaLiteTotalElements as totalElements,
@@ -5644,31 +5645,6 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
   const valueType = uncachedExpressionValueTypeForEmit(expression, context);
   context.expressionValueTypes.set(expression, valueType);
   return valueType;
-}
-
-function cuComplexCallReturnType(name: string | undefined): CudaLiteScalarType | undefined {
-  if (name === "cuCrealf" || name === "cuCimagf" || name === "cuCabsf" ||
-    name === "cuCreal" || name === "cuCimag" || name === "cuCabs") return "float";
-  if (
-    name === "make_cuComplex" ||
-    name === "make_cuFloatComplex" ||
-    name === "make_cuDoubleComplex" ||
-    name === "cuConjf" ||
-    name === "cuCaddf" ||
-    name === "cuCsubf" ||
-    name === "cuCmulf" ||
-    name === "cuCdivf" ||
-    name === "cuCfmaf" ||
-    name === "cuConj" ||
-    name === "cuCadd" ||
-    name === "cuCsub" ||
-    name === "cuCmul" ||
-    name === "cuCdiv" ||
-    name === "cuCfma"
-  ) {
-    return "complex64";
-  }
-  return undefined;
 }
 
 function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType | undefined {

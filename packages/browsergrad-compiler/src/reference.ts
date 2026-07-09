@@ -8,6 +8,10 @@ import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions 
 import { roundFloat32ToBfloat16 } from "./bfloat_rounding.js";
 import { expressionName } from "./analyzer.js";
 import {
+  isCudaComplexCallName as isCuComplexBuiltin,
+  isCudaComplexConstructorCallName as isCuComplexConstructorBuiltin,
+} from "./cuda_complex_intrinsics.js";
+import {
   cudaRuntimeCopyShapeForCall,
   isCudaRuntimeCopyCall,
   isCudaRuntimeMemset2DCall,
@@ -3025,7 +3029,7 @@ function evalCuComplexBuiltin(
   name: string | undefined,
   context: ThreadContext,
 ): EvalValue | undefined {
-  if (name === "make_cuComplex" || name === "make_cuFloatComplex" || name === "make_cuDoubleComplex") {
+  if (isCuComplexConstructorBuiltin(name)) {
     return {
       kind: "complex64",
       x: evalNumber(expression.args[0]!, context),
@@ -3059,27 +3063,6 @@ function divCuComplex(a: ComplexValue, b: ComplexValue): ComplexValue {
   const bis = b.y * oos;
   const scale = 1 / (brs * brs + bis * bis);
   return { kind: "complex64", x: (ars * brs + ais * bis) * scale, y: (ais * brs - ars * bis) * scale };
-}
-
-function isCuComplexBuiltin(name: string | undefined): boolean {
-  return name === "cuCrealf" ||
-    name === "cuCreal" ||
-    name === "cuCimagf" ||
-    name === "cuCimag" ||
-    name === "cuCabsf" ||
-    name === "cuCabs" ||
-    name === "cuConjf" ||
-    name === "cuConj" ||
-    name === "cuCaddf" ||
-    name === "cuCadd" ||
-    name === "cuCsubf" ||
-    name === "cuCsub" ||
-    name === "cuCmulf" ||
-    name === "cuCmul" ||
-    name === "cuCdivf" ||
-    name === "cuCdiv" ||
-    name === "cuCfmaf" ||
-    name === "cuCfma";
 }
 
 function matrixTileRowsCols(tile: MatrixTileResolvedSpec): readonly [number, number] {

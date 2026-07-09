@@ -29,6 +29,12 @@ import {
   isCudaUniformBuiltinVectorSymbolName,
 } from "./cuda_builtin_symbols.js";
 import {
+  isCudaComplexCallName as isCuComplexBuiltin,
+  isCudaComplexConstructorCallName as isCuComplexConstructorBuiltin,
+  isCudaComplexScalarCallName as isCuComplexScalarBuiltin,
+  isCudaDoubleComplexCallName as isCuDoubleComplexBuiltin,
+} from "./cuda_complex_intrinsics.js";
+import {
   isCudaCpAsyncCopyCall as isCpAsyncCopyCall,
   isCudaCpAsyncFenceCall as isCpAsyncFenceCall,
 } from "./cuda_cp_async.js";
@@ -3538,7 +3544,7 @@ function validateCuComplexBuiltin(
   if (isCuDoubleComplexBuiltin(callName)) {
     validateF64Type("double", expression.span, diagnostics, options);
   }
-  if (callName === "make_cuComplex" || callName === "make_cuFloatComplex" || callName === "make_cuDoubleComplex") {
+  if (isCuComplexConstructorBuiltin(callName)) {
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return;
   }
@@ -3547,48 +3553,6 @@ function validateCuComplexBuiltin(
     if (info.kind === "unknown" || info.kind === "complex" || isFloat2ComplexCompatible("complex64", info)) continue;
     diagnostics.push(error("unsupported-cufft", `${callName} expects cuComplex/cuFloatComplex/cuDoubleComplex or float2 operands`, arg.span));
   }
-}
-
-function isCuComplexBuiltin(callName: string): boolean {
-  return callName === "make_cuComplex" ||
-    callName === "make_cuFloatComplex" ||
-    callName === "make_cuDoubleComplex" ||
-    callName === "cuCrealf" ||
-    callName === "cuCimagf" ||
-    callName === "cuCabsf" ||
-    callName === "cuConjf" ||
-    callName === "cuCaddf" ||
-    callName === "cuCsubf" ||
-    callName === "cuCmulf" ||
-    callName === "cuCdivf" ||
-    callName === "cuCfmaf" ||
-    callName === "cuCreal" ||
-    callName === "cuCimag" ||
-    callName === "cuCabs" ||
-    callName === "cuConj" ||
-    callName === "cuCadd" ||
-    callName === "cuCsub" ||
-    callName === "cuCmul" ||
-    callName === "cuCdiv" ||
-    callName === "cuCfma";
-}
-
-function isCuComplexScalarBuiltin(callName: string): boolean {
-  return callName === "cuCrealf" || callName === "cuCimagf" || callName === "cuCabsf" ||
-    callName === "cuCreal" || callName === "cuCimag" || callName === "cuCabs";
-}
-
-function isCuDoubleComplexBuiltin(callName: string): boolean {
-  return callName === "make_cuDoubleComplex" ||
-    callName === "cuCreal" ||
-    callName === "cuCimag" ||
-    callName === "cuCabs" ||
-    callName === "cuConj" ||
-    callName === "cuCadd" ||
-    callName === "cuCsub" ||
-    callName === "cuCmul" ||
-    callName === "cuCdiv" ||
-    callName === "cuCfma";
 }
 
 function validateAtomicBuiltin(
