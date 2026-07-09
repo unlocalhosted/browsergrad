@@ -33,7 +33,6 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import {
-  isSemanticBf162OverloadedVectorCall,
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
   SEMANTIC_BF162_MASK_COMPARISON_CALLS,
@@ -50,14 +49,13 @@ import {
   isSemanticHalf2MaskComparisonCall,
   isSemanticHalf2UnaryCall,
   isSemanticFloatVectorType,
-  semanticBf162VectorReturnType,
-  semanticHalf2VectorReturnType,
+  semanticExpressionValueType,
+  semanticExpressionVectorValueType,
 } from "./semantic_vector_intrinsics.js";
 import {
   SEMANTIC_CURAND_CALLS,
   SEMANTIC_CURAND_DISTRIBUTION_CALLS,
   SEMANTIC_CURAND_STATE_ONLY_CALLS,
-  SEMANTIC_CURAND_VECTOR_RETURN_TYPES,
 } from "./semantic_curand_intrinsics.js";
 import {
   SEMANTIC_ADDRESS_PREDICATE_CALLS,
@@ -1386,27 +1384,6 @@ function semanticReferenceVectorMemberSupported(
   return semanticReferenceExpressionSupported(expression.object, "any", compiled) &&
     isCudaVectorType(valueType) &&
     cudaVectorSwizzleType(valueType, expression.property) !== undefined;
-}
-
-function semanticExpressionValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
-  return "valueType" in expression ? expression.valueType : undefined;
-}
-
-function semanticExpressionVectorValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
-  if (expression.kind === "call" && expression.callee.kind === "symbol") {
-    if (isSemanticBf162OverloadedVectorCall(expression.callee.name)) {
-      const explicitType = semanticExpressionValueType(expression);
-      if (explicitType === "half2" || explicitType === "bf162") return explicitType;
-    }
-    const curandVectorType = SEMANTIC_CURAND_VECTOR_RETURN_TYPES.get(expression.callee.name);
-    if (curandVectorType) return curandVectorType;
-    const half2VectorType = semanticHalf2VectorReturnType(expression.callee.name);
-    if (half2VectorType) return half2VectorType;
-    const bf162VectorType = semanticBf162VectorReturnType(expression.callee.name);
-    if (bf162VectorType) return bf162VectorType;
-    return cudaVectorConstructorType(expression.callee.name) ?? semanticExpressionValueType(expression);
-  }
-  return semanticExpressionValueType(expression);
 }
 
 function execSemanticOperations(

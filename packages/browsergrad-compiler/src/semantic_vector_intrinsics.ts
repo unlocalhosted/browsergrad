@@ -1,5 +1,7 @@
 import type { CudaLiteScalarType } from "./types.js";
-import { isCudaVectorType } from "./vector_types.js";
+import type { SemanticExpression } from "./semantic_ir.js";
+import { SEMANTIC_CURAND_VECTOR_RETURN_TYPES } from "./semantic_curand_intrinsics.js";
+import { cudaVectorConstructorType, isCudaVectorType } from "./vector_types.js";
 
 export const SEMANTIC_HALF2_VECTOR_CALLS = new Set([
   "__habs2", "__hceil2", "__hfloor2", "__hneg2", "__hrcp2", "__hrsqrt2", "__hsqrt2", "__htrunc2",
@@ -129,4 +131,34 @@ export function isSemanticHalf2BooleanComparisonCall(name: string): boolean {
 
 export function isSemanticFloatVectorType(valueType: CudaLiteScalarType | undefined): boolean {
   return isCudaVectorType(valueType);
+}
+
+interface SemanticCallableReturn {
+  readonly name: string;
+  readonly returnType?: CudaLiteScalarType;
+}
+
+export function semanticExpressionValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
+  return "valueType" in expression ? expression.valueType : undefined;
+}
+
+export function semanticExpressionVectorValueType(
+  expression: SemanticExpression,
+  functions?: readonly SemanticCallableReturn[],
+): CudaLiteScalarType | undefined {
+  if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    const calleeName = expression.callee.name;
+    if (isSemanticBf162OverloadedVectorCall(calleeName)) {
+      const explicitType = semanticExpressionValueType(expression);
+      if (explicitType === "half2" || explicitType === "bf162") return explicitType;
+    }
+    const curandVectorType = SEMANTIC_CURAND_VECTOR_RETURN_TYPES.get(calleeName);
+    if (curandVectorType) return curandVectorType;
+    const half2VectorType = semanticHalf2VectorReturnType(calleeName);
+    if (half2VectorType) return half2VectorType;
+    const bf162VectorType = semanticBf162VectorReturnType(calleeName);
+    if (bf162VectorType) return bf162VectorType;
+    return cudaVectorConstructorType(calleeName) ?? functions?.find((fn) => fn.name === calleeName)?.returnType ?? semanticExpressionValueType(expression);
+  }
+  return semanticExpressionValueType(expression);
 }
