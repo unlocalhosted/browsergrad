@@ -17,6 +17,7 @@ import {
   isCudaRuntimeSymbolMemsetCall,
 } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
+import { isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
@@ -3195,43 +3196,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     fillLocalArray(expression, context);
     return 0;
   }
-  if (name === "cudaGetDevice" ||
-    name === "cudaGetDeviceCount" ||
-    name === "cudaDeviceGetAttribute" ||
-    name === "cudaDeviceGetLimit" ||
-    name === "cudaThreadGetLimit" ||
-    name === "cudaDeviceCanAccessPeer" ||
-    name === "cudaGetDeviceFlags" ||
-    name === "cudaMemGetInfo" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    name === "cudaOccupancyMaxPotentialBlockSize" ||
-    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    name === "cudaDeviceGetCacheConfig" ||
-    name === "cudaDeviceGetSharedMemConfig" ||
-    name === "cudaThreadGetCacheConfig" ||
-    name === "cudaThreadExchangeStreamCaptureMode" ||
-    name === "cudaDeviceGetStreamPriorityRange" ||
-    name === "cudaStreamCreate" ||
-    name === "cudaStreamCreateWithFlags" ||
-    name === "cudaStreamCreateWithPriority" ||
-    name === "cudaStreamGetDevice" ||
-    name === "cudaStreamGetFlags" ||
-    name === "cudaStreamGetId" ||
-    name === "cudaStreamGetPriority" ||
-    name === "cudaStreamIsCapturing" ||
-    name === "cudaStreamGetCaptureInfo" ||
-    name === "cudaStreamGetCaptureInfo_v2" ||
-    name === "cudaStreamEndCapture" ||
-    name === "cudaGraphCreate" ||
-    name === "cudaGraphInstantiate" ||
-    name === "cudaGraphInstantiateWithFlags" ||
-    name === "cudaGraphExecUpdate" ||
-    name === "cudaEventCreate" ||
-    name === "cudaEventCreateWithFlags" ||
-    name === "cudaRuntimeGetVersion" ||
-    name === "cudaDriverGetVersion") {
+  if (isCudaIntegerRuntimeQueryCall(name)) {
     if (name === "cudaMemGetInfo") {
       const freeTarget = expression.args[0];
       const totalTarget = expression.args[1];

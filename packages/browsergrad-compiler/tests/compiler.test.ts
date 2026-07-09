@@ -304,24 +304,6 @@ function compilerSourceText(file: string): string {
   return fs.readFileSync(path.join(packageRoot, "src", file), "utf8");
 }
 
-function compilerFunctionText(file: string, functionName: string): string {
-  const source = compilerSourceText(file);
-  const functionStart = source.indexOf(`function ${functionName}`);
-  if (functionStart < 0) throw new Error(`Missing function ${functionName} in ${file}`);
-  const bodyStart = source.indexOf("{", functionStart);
-  if (bodyStart < 0) throw new Error(`Missing body for function ${functionName} in ${file}`);
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "{") depth += 1;
-    else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(functionStart, index + 1);
-    }
-  }
-  throw new Error(`Unterminated function ${functionName} in ${file}`);
-}
-
 function compilerExampleText(file: string): string {
   return fs.readFileSync(path.join(packageRoot, "examples", file), "utf8");
 }
@@ -4576,21 +4558,26 @@ __global__ void unsupported(float* x) {
       "cudaEventCreateWithFlags",
       "cudaRuntimeGetVersion",
       "cudaDriverGetVersion",
+      "cudaEventElapsedTime",
     ];
-    const functionChecks = [
+    const registrySource = compilerSourceText("cuda_runtime_queries.ts");
+    const missing = runtimeQueryWriteCalls
+      .filter((call) => !registrySource.includes(`"${call}"`))
+      .map((call) => `cuda_runtime_queries.ts:${call}`);
+
+    const consumerChecks = [
       ["analyzer.ts", "isCudaIntegerRuntimeQueryCall"],
       ["wgsl.ts", "isCudaIntegerRuntimeQueryCall"],
-      ["dynamic_launch.ts", "isRuntimeQueryWriteCall"],
-      ["peer_copy.ts", "isRuntimeQueryWriteCall"],
+      ["dynamic_launch.ts", "isCudaRuntimeQueryWriteCall"],
+      ["peer_copy.ts", "isCudaRuntimeQueryWriteCall"],
+      ["webgpu_orchestration.ts", "isCudaRuntimeQueryWriteCall"],
     ] as const;
-    const missing = functionChecks.flatMap(([file, functionName]) => {
-      const source = compilerFunctionText(file, functionName);
-      return runtimeQueryWriteCalls
-        .filter((call) => !source.includes(`"${call}"`))
-        .map((call) => `${file}:${functionName}:${call}`);
-    });
+    const missingConsumers = consumerChecks
+      .filter(([file, helper]) => !compilerSourceText(file).includes(helper))
+      .map(([file, helper]) => `${file}:${helper}`);
 
     expect(missing).toEqual([]);
+    expect(missingConsumers).toEqual([]);
   });
 
   it("reports unsupported C++ CUDA object-model gaps with stable diagnostic codes", () => {

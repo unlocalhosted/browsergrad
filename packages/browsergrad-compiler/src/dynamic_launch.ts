@@ -1,5 +1,6 @@
 import type { WgslResidentBuffer, WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { isCudaRuntimeQueryWriteCall } from "./cuda_runtime_queries.js";
 import {
   evaluateHostNumber,
   evaluatePointerArgument,
@@ -439,7 +440,7 @@ function containsKernelLaunch(statements: readonly CudaLiteStatement[]): boolean
 function isHostNoopExpression(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  if (name !== undefined && isRuntimeQueryWriteCall(name)) return false;
+  if (isCudaRuntimeQueryWriteCall(name)) return false;
   return name === "cudaDeviceSynchronize" ||
     name === "cudaCtxResetPersistingL2Cache" ||
     name === "cudaDeviceReset" ||
@@ -532,47 +533,6 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
     name === "cudaMemsetToSymbol" ||
     name === "cudaMemsetToSymbolAsync" ||
     name === "printf";
-}
-
-function isRuntimeQueryWriteCall(name: string): boolean {
-  return name === "cudaGetDevice" ||
-    name === "cudaGetDeviceCount" ||
-    name === "cudaDeviceGetAttribute" ||
-    name === "cudaDeviceGetLimit" ||
-    name === "cudaThreadGetLimit" ||
-    name === "cudaDeviceCanAccessPeer" ||
-    name === "cudaGetDeviceFlags" ||
-    name === "cudaMemGetInfo" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    name === "cudaOccupancyMaxPotentialBlockSize" ||
-    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    name === "cudaDeviceGetCacheConfig" ||
-    name === "cudaDeviceGetSharedMemConfig" ||
-    name === "cudaThreadGetCacheConfig" ||
-    name === "cudaThreadExchangeStreamCaptureMode" ||
-    name === "cudaDeviceGetStreamPriorityRange" ||
-    name === "cudaStreamCreate" ||
-    name === "cudaStreamCreateWithFlags" ||
-    name === "cudaStreamCreateWithPriority" ||
-    name === "cudaStreamGetDevice" ||
-    name === "cudaStreamGetFlags" ||
-    name === "cudaStreamGetId" ||
-    name === "cudaStreamGetPriority" ||
-    name === "cudaStreamIsCapturing" ||
-    name === "cudaStreamGetCaptureInfo" ||
-    name === "cudaStreamGetCaptureInfo_v2" ||
-    name === "cudaStreamEndCapture" ||
-    name === "cudaGraphCreate" ||
-    name === "cudaGraphInstantiate" ||
-    name === "cudaGraphInstantiateWithFlags" ||
-    name === "cudaGraphExecUpdate" ||
-    name === "cudaEventCreate" ||
-    name === "cudaEventCreateWithFlags" ||
-    name === "cudaRuntimeGetVersion" ||
-    name === "cudaDriverGetVersion" ||
-    name === "cudaEventElapsedTime";
 }
 
 function createChildKernelInput(

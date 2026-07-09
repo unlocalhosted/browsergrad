@@ -8,6 +8,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
+import { isCudaRuntimeQueryWriteCall } from "./cuda_runtime_queries.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
 import { createCudaLaunchValidationDiagnostics } from "./launch.js";
 import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.js";
@@ -191,47 +192,6 @@ const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "streamOrderedAllocate",
   ...CUDA_INTRINSICS.map((intrinsic) => intrinsic.name),
 ]);
-const HOST_RUNTIME_QUERY_WRITE_CALLS = new Set([
-  "cudaGetDevice",
-  "cudaGetDeviceCount",
-  "cudaDeviceGetAttribute",
-  "cudaDeviceGetLimit",
-  "cudaThreadGetLimit",
-  "cudaDeviceCanAccessPeer",
-  "cudaGetDeviceFlags",
-  "cudaMemGetInfo",
-  "cudaOccupancyMaxActiveBlocksPerMultiprocessor",
-  "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
-  "cudaOccupancyMaxPotentialBlockSize",
-  "cudaOccupancyMaxPotentialBlockSizeWithFlags",
-  "cudaOccupancyAvailableDynamicSMemPerBlock",
-  "cudaDeviceGetCacheConfig",
-  "cudaDeviceGetSharedMemConfig",
-  "cudaThreadGetCacheConfig",
-  "cudaThreadExchangeStreamCaptureMode",
-  "cudaDeviceGetStreamPriorityRange",
-  "cudaStreamCreate",
-  "cudaStreamCreateWithFlags",
-  "cudaStreamCreateWithPriority",
-  "cudaStreamGetDevice",
-  "cudaStreamGetFlags",
-  "cudaStreamGetId",
-  "cudaStreamGetPriority",
-  "cudaStreamIsCapturing",
-  "cudaStreamGetCaptureInfo",
-  "cudaStreamGetCaptureInfo_v2",
-  "cudaStreamEndCapture",
-  "cudaGraphCreate",
-  "cudaGraphInstantiate",
-  "cudaGraphInstantiateWithFlags",
-  "cudaGraphExecUpdate",
-  "cudaEventCreate",
-  "cudaEventCreateWithFlags",
-  "cudaRuntimeGetVersion",
-  "cudaDriverGetVersion",
-  "cudaEventElapsedTime",
-]);
-
 type DynamicChildCompileResult =
   | { readonly compiled: CompiledCudaLiteKernel }
   | { readonly blocker: CudaWebGpuExecutionBlocker };
@@ -605,7 +565,7 @@ function expressionNeedsParentDispatch(expression: SemanticExpression): boolean 
 }
 
 function semanticCallNeedsParentDispatch(name: string | undefined, args: readonly SemanticExpression[]): boolean {
-  if (name !== undefined && HOST_RUNTIME_QUERY_WRITE_CALLS.has(name)) return true;
+  if (isCudaRuntimeQueryWriteCall(name)) return true;
   if (name !== undefined && HOST_SIDE_EFFECT_FREE_CALLS.has(name)) {
     return args.some(expressionNeedsParentDispatch);
   }

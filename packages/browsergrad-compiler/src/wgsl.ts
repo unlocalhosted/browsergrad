@@ -8,6 +8,7 @@ import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
+import { isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import {
   type MatrixTileLayout,
@@ -4882,46 +4883,6 @@ function emitCudaMemGetInfoWrites(
     ));
   }
   return lines;
-}
-
-function isCudaIntegerRuntimeQueryCall(name: string | undefined): boolean {
-  return name === "cudaGetDevice" ||
-    name === "cudaGetDeviceCount" ||
-    name === "cudaDeviceGetAttribute" ||
-    name === "cudaDeviceGetLimit" ||
-    name === "cudaThreadGetLimit" ||
-    name === "cudaDeviceCanAccessPeer" ||
-    name === "cudaGetDeviceFlags" ||
-    name === "cudaMemGetInfo" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    name === "cudaOccupancyMaxPotentialBlockSize" ||
-    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    name === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    name === "cudaDeviceGetCacheConfig" ||
-    name === "cudaDeviceGetSharedMemConfig" ||
-    name === "cudaThreadGetCacheConfig" ||
-    name === "cudaThreadExchangeStreamCaptureMode" ||
-    name === "cudaDeviceGetStreamPriorityRange" ||
-    name === "cudaStreamCreate" ||
-    name === "cudaStreamCreateWithFlags" ||
-    name === "cudaStreamCreateWithPriority" ||
-    name === "cudaStreamGetDevice" ||
-    name === "cudaStreamGetFlags" ||
-    name === "cudaStreamGetId" ||
-    name === "cudaStreamGetPriority" ||
-    name === "cudaStreamIsCapturing" ||
-    name === "cudaStreamGetCaptureInfo" ||
-    name === "cudaStreamGetCaptureInfo_v2" ||
-    name === "cudaStreamEndCapture" ||
-    name === "cudaGraphCreate" ||
-    name === "cudaGraphInstantiate" ||
-    name === "cudaGraphInstantiateWithFlags" ||
-    name === "cudaGraphExecUpdate" ||
-    name === "cudaEventCreate" ||
-    name === "cudaEventCreateWithFlags" ||
-    name === "cudaRuntimeGetVersion" ||
-    name === "cudaDriverGetVersion";
 }
 
 function cudaIntegerRuntimeQueryValue(expression: Extract<CudaLiteExpression, { kind: "call" }>): number {

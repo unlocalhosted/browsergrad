@@ -26,6 +26,7 @@ import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queri
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { isCudaRuntimeCopyCall, isCudaRuntimeSymbolCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
+import { isCudaIntegerRuntimeQueryCall } from "./cuda_runtime_queries.js";
 import {
   type WmmaBuiltin,
   isMatrixTileByteValueType,
@@ -1833,43 +1834,7 @@ function validateCallExpression(
     }
     return { kind: "scalar" };
   }
-  if (callName === "cudaGetDevice" ||
-    callName === "cudaGetDeviceCount" ||
-    callName === "cudaDeviceGetAttribute" ||
-    callName === "cudaDeviceGetLimit" ||
-    callName === "cudaThreadGetLimit" ||
-    callName === "cudaDeviceCanAccessPeer" ||
-    callName === "cudaGetDeviceFlags" ||
-    callName === "cudaMemGetInfo" ||
-    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    callName === "cudaOccupancyMaxPotentialBlockSize" ||
-    callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    callName === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    callName === "cudaDeviceGetCacheConfig" ||
-    callName === "cudaDeviceGetSharedMemConfig" ||
-    callName === "cudaThreadGetCacheConfig" ||
-    callName === "cudaThreadExchangeStreamCaptureMode" ||
-    callName === "cudaDeviceGetStreamPriorityRange" ||
-    callName === "cudaStreamCreate" ||
-    callName === "cudaStreamCreateWithFlags" ||
-    callName === "cudaStreamCreateWithPriority" ||
-    callName === "cudaStreamGetDevice" ||
-    callName === "cudaStreamGetFlags" ||
-    callName === "cudaStreamGetId" ||
-    callName === "cudaStreamGetPriority" ||
-    callName === "cudaStreamIsCapturing" ||
-    callName === "cudaStreamGetCaptureInfo" ||
-    callName === "cudaStreamGetCaptureInfo_v2" ||
-    callName === "cudaStreamEndCapture" ||
-    callName === "cudaGraphCreate" ||
-    callName === "cudaGraphInstantiate" ||
-    callName === "cudaGraphInstantiateWithFlags" ||
-    callName === "cudaGraphExecUpdate" ||
-    callName === "cudaEventCreate" ||
-    callName === "cudaEventCreateWithFlags" ||
-    callName === "cudaRuntimeGetVersion" ||
-    callName === "cudaDriverGetVersion") {
+  if (isCudaIntegerRuntimeQueryCall(callName)) {
     validateCudaIntegerRuntimeQuery(expression, callName, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "int" };
   }
@@ -5109,46 +5074,6 @@ function isSideEffectingCudaRuntimeCallName(name: string | undefined): boolean {
     isCudaRuntimeCopyCall(name) ||
     isHostManagedRuntimeNoopCall(name)
   );
-}
-
-function isCudaIntegerRuntimeQueryCall(callName: string): boolean {
-  return callName === "cudaGetDevice" ||
-    callName === "cudaGetDeviceCount" ||
-    callName === "cudaDeviceGetAttribute" ||
-    callName === "cudaDeviceGetLimit" ||
-    callName === "cudaThreadGetLimit" ||
-    callName === "cudaDeviceCanAccessPeer" ||
-    callName === "cudaGetDeviceFlags" ||
-    callName === "cudaMemGetInfo" ||
-    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
-    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
-    callName === "cudaOccupancyMaxPotentialBlockSize" ||
-    callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
-    callName === "cudaOccupancyAvailableDynamicSMemPerBlock" ||
-    callName === "cudaDeviceGetCacheConfig" ||
-    callName === "cudaDeviceGetSharedMemConfig" ||
-    callName === "cudaThreadGetCacheConfig" ||
-    callName === "cudaThreadExchangeStreamCaptureMode" ||
-    callName === "cudaDeviceGetStreamPriorityRange" ||
-    callName === "cudaStreamCreate" ||
-    callName === "cudaStreamCreateWithFlags" ||
-    callName === "cudaStreamCreateWithPriority" ||
-    callName === "cudaStreamGetDevice" ||
-    callName === "cudaStreamGetFlags" ||
-    callName === "cudaStreamGetId" ||
-    callName === "cudaStreamGetPriority" ||
-    callName === "cudaStreamIsCapturing" ||
-    callName === "cudaStreamGetCaptureInfo" ||
-    callName === "cudaStreamGetCaptureInfo_v2" ||
-    callName === "cudaStreamEndCapture" ||
-    callName === "cudaGraphCreate" ||
-    callName === "cudaGraphInstantiate" ||
-    callName === "cudaGraphInstantiateWithFlags" ||
-    callName === "cudaGraphExecUpdate" ||
-    callName === "cudaEventCreate" ||
-    callName === "cudaEventCreateWithFlags" ||
-    callName === "cudaRuntimeGetVersion" ||
-    callName === "cudaDriverGetVersion";
 }
 
 function validateBarrierStatement(
