@@ -24,7 +24,7 @@ export function semanticAssignmentBinaryOperator(operator: string): string | und
 
 /** Vector writes remain limited to operators with modeled lane semantics. */
 export function semanticVectorAssignmentOperatorSupported(operator: string): boolean {
-  return operator === "=" || operator === "+=" || operator === "-=";
+  return operator === "=" || operator === "+=" || operator === "-=" || operator === "*=" || operator === "/=";
 }
 
 export function semanticVectorBinaryOperatorSupported(operator: string): boolean {

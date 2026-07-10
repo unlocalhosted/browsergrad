@@ -3142,6 +3142,29 @@ __global__ void half2Assignment(half2 *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([10, 18]);
   });
 
+  it("runs float4 multiply and divide assignments through semantic WGSL on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void scale(float4 *value) {
+  *value /= 2.0f;
+  *value *= 3.0f;
+}
+__global__ void vectorCompound(float4 *out) {
+  float4 value = make_float4(8.0f, 16.0f, 24.0f, 32.0f);
+  value /= 4.0f;
+  value *= 2.0f;
+  out[0] = value;
+  scale(&out[0]);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs half2 comparison intrinsics through f32 compatibility mode on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

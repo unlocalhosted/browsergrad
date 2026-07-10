@@ -1499,20 +1499,21 @@ function storeValueExpression(
     return evalVectorFieldAssignment(operation.operator, left, right, operation.span);
   }
   if (isSemanticFloatVectorType(operation.target.valueType)) {
-    if (operation.operator !== "=") throw semanticReferenceError("semantic reference supports only direct vector assignment", operation.span);
-    return evalSemanticExpression(operation.value, context);
+    const right = evalSemanticExpression(operation.value, context);
+    if (operation.operator === "=") return right;
+    const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
+    if (binaryOperator === undefined) throw semanticReferenceError(`semantic reference does not support assignment '${operation.operator}'`, operation.span);
+    return evalVectorBinary(binaryOperator, readMemoryValue(operation.target, context), right, operation.span);
   }
   const right = evalNumber(operation.value, context);
   return applySemanticScalarAssignment(operation.operator, readMemory(operation.target, context), right, operation.span);
 }
 
 function evalVectorFieldAssignment(operator: string, left: SemanticValue, right: SemanticValue, span: SourceSpan): SemanticValue {
-  if (operator === "+=") return Array.isArray(left) || Array.isArray(right)
-    ? evalVectorBinary("+", left, right, span)
-    : Number(left) + Number(right);
-  if (operator === "-=") return Array.isArray(left) || Array.isArray(right)
-    ? evalVectorBinary("-", left, right, span)
-    : Number(left) - Number(right);
+  const binaryOperator = semanticAssignmentBinaryOperator(operator);
+  if (binaryOperator !== undefined) return Array.isArray(left) || Array.isArray(right)
+    ? evalVectorBinary(binaryOperator, left, right, span)
+    : evalBinary(binaryOperator, Number(left), Number(right));
   throw semanticReferenceError(`semantic reference does not support assignment '${operator}'`, span);
 }
 
@@ -3810,7 +3811,8 @@ function assignLocalVectorMember(
   if (lane === undefined) throw semanticReferenceError("semantic reference vector assignment requires modeled lane", expression.target.span);
   const right = evalNumber(expression.value, context);
   const left = Number(current[lane] ?? 0);
-  const value = expression.operator === "+=" ? left + right : expression.operator === "-=" ? left - right : right;
+  const binaryOperator = semanticAssignmentBinaryOperator(expression.operator);
+  const value = binaryOperator === undefined ? right : evalBinary(binaryOperator, left, right);
   current[lane] = value;
   context.locals.set(expression.target.object.name, current);
   return value;

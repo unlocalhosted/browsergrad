@@ -1279,9 +1279,10 @@ function semanticWgslStoreValueSupported(
       : semanticWgslScalarStoreValueSupported(operation.value, ir);
   }
   if (isSemanticFloatVectorType(targetVectorType)) {
-    return operation.operator === "=" &&
-      valueVectorType === targetVectorType &&
-      semanticWgslExpressionSupported(operation.value, "any", ir);
+    return semanticVectorAssignmentOperatorSupported(operation.operator) &&
+      (valueVectorType === targetVectorType
+        ? semanticWgslExpressionSupported(operation.value, "any", ir)
+        : semanticWgslExpressionSupported(operation.value, "scalar", ir));
   }
   return semanticWgslScalarStoreValueSupported(operation.value, ir);
 }
@@ -2174,12 +2175,18 @@ function emitSemanticStore(
     return `atomicStore(&${target}, ${atomicValue})`;
   }
   if (isSemanticFloatVectorType(operation.target.valueType)) {
-    if (operation.operator !== "=") throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
+    const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
+    if (operation.operator !== "=" && binaryOperator === undefined) {
+      throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
+    }
+    const value = emitSemanticVectorOperand(operation.value, operation.target.valueType as CudaLiteScalarType, ir, names, options, textureSpecializations);
     if (operation.target.addressSpace === "local") {
-      return `${emitSemanticMemoryRef(operation.target, ir, names, options)} = ${emitSemanticExpression(operation.value, ir, names, options, textureSpecializations)}`;
+      const access = emitSemanticMemoryRef(operation.target, ir, names, options);
+      return `${access} = ${operation.operator === "=" ? value : `(${access} ${binaryOperator} ${value})`}`;
     }
     if (semanticWgslSharedVectorMemoryRef(operation.target, ir)) {
-      return `${emitSemanticMemoryRef(operation.target, ir, names, options)} = ${emitSemanticExpression(operation.value, ir, names, options, textureSpecializations)}`;
+      const access = emitSemanticMemoryRef(operation.target, ir, names, options);
+      return `${access} = ${operation.operator === "=" ? value : `(${access} ${binaryOperator} ${value})`}`;
     }
     return emitSemanticVectorMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
   }
@@ -2217,7 +2224,9 @@ function emitSemanticPointerMemoryStore(
     : emitFlatStorageIndex(operation.target, ir, names, options);
   const buffer = nameFor(semanticPointerBufferParamName(operation.target.base), names);
   const read = `${semanticPointerReadHelperName(valueType)}(${buffer}, ${index})`;
-  const value = isCudaVectorType(valueType)
+  const value = isSemanticFloatVectorType(valueType)
+    ? emitSemanticVectorOperand(operation.value, valueType as CudaLiteScalarType, ir, names, options, textureSpecializations)
+    : isCudaVectorType(valueType)
     ? emitSemanticExpression(operation.value, ir, names, options, textureSpecializations)
     : emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
   const assigned = operation.operator === "=" ? value : `(${read} ${operation.operator.slice(0, -1)} ${value})`;
@@ -2246,12 +2255,16 @@ function emitSemanticVectorMemoryWrite(
 ): readonly string[] {
   const valueType = operation.target.valueType;
   if (!isSemanticFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector write requires vector target", operation.span);
-  const value = emitSemanticExpression(operation.value, ir, names, options, textureSpecializations);
+  const value = emitSemanticVectorOperand(operation.value, valueType as CudaLiteScalarType, ir, names, options, textureSpecializations);
   const base = emitFlatStorageVectorBaseIndex(operation.target, ir, names, options);
   const target = nameFor(operation.target.base, names);
   const fields = ["x", "y", "z", "w"];
+  const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
+  if (operation.operator !== "=" && binaryOperator === undefined) {
+    throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
+  }
   return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
-    `${target}[(${base} + ${lane}u)] = (${value}).${fields[lane]}`
+    `${target}[(${base} + ${lane}u)] = ${operation.operator === "=" ? `(${value}).${fields[lane]}` : `(${target}[(${base} + ${lane}u)] ${binaryOperator} (${value}).${fields[lane]})`}`
   );
 }
 
@@ -3037,8 +3050,7 @@ function emitSemanticExpression(
           const right = emitSemanticExpressionAs(expression.value, ir, names, "u32", options, textureSpecializations);
           return `(${target} = ${emitSemanticUcharValue(`(${target} ${binaryOperator} ${right})`)})`;
         }
-        if (expression.operator === "+=") return `(${target} += ${value})`;
-        if (expression.operator === "-=") return `(${target} -= ${value})`;
+        if (semanticAssignmentBinaryOperator(expression.operator)) return `(${target} ${expression.operator} ${value})`;
         return `(${target} = ${value})`;
       }
     case "update":

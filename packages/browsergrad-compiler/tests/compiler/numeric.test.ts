@@ -13,6 +13,7 @@ import {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   emitSemanticKernelIrWgsl,
+  semanticKernelIrWgslPreflightFailure,
   prepareCompiledKernelWebGpu,
   canEmitSemanticKernelIrWgsl,
   canRunCompiledKernelSemanticReference,
@@ -2253,6 +2254,32 @@ describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
       expect(compiled.wgsl).toContain("value += vec2<f32>(");
       expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([10, 18]);
       expect(Array.from(semanticResult.buffers.out as ArrayLike<number>)).toEqual([10, 18]);
+    });
+
+  it("lowers vector multiply and divide assignments", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void scale(float4 *value) {
+    *value /= 2.0f;
+    *value *= 3.0f;
+  }
+  __global__ void vectorCompound(float4 *out) {
+    float4 value = make_float4(8.0f, 16.0f, 24.0f, 32.0f);
+    value /= 4.0f;
+    value *= 2.0f;
+    out[0] = value;
+    scale(&out[0]);
+  }`, { workgroupSize: [1, 1, 1] });
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const result = runCompiledKernelReference(compiled, { buffers: { out: new Float32Array(4) } }, launch);
+      const semanticResult = runCompiledKernelSemanticReference(compiled, { buffers: { out: new Float32Array(4) } }, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(semanticKernelIrWgslPreflightFailure(compiled.kernelIr)).toBeUndefined();
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("value /= vec4<f32>(f32(4.0)");
+      expect(compiled.wgsl).toContain("value *= vec4<f32>(f32(2.0)");
+      expect(Array.from(result.buffers.out as Float32Array)).toEqual([6, 12, 18, 24]);
+      expect(Array.from(semanticResult.buffers.out as Float32Array)).toEqual([6, 12, 18, 24]);
     });
 
   it("lowers CUDA half and half2 saturating arithmetic intrinsics", () => {
