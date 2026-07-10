@@ -505,6 +505,9 @@ function unsupportedSemanticWgslOperation(
 ): SemanticKernelIrOperation | undefined {
   for (const operation of operations) {
     switch (operation.kind) {
+      case "dim3-declare":
+      case "cooperative-group-declare":
+        break;
       case "declare":
         if (operation.target.addressSpace === "shared") {
           if (operation.target.pointer || !semanticWgslScalarTypeSupported(operation.target.valueType)) return operation;
@@ -1482,6 +1485,9 @@ function emitSemanticOperation(
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   switch (operation.kind) {
+    case "dim3-declare":
+    case "cooperative-group-declare":
+      return [];
     case "declare": {
       if (operation.target.addressSpace === "shared") return [];
       if (operation.target.dimensions.length > 0) {

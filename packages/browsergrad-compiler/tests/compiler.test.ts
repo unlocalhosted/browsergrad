@@ -6828,8 +6828,8 @@ __global__ void gridPhases(float *scratch, float *out) {
     expect(plan.supported).toBe(true);
     expect(detachedPlan.supported).toBe(true);
     if (plan.supported) {
-      expect(plan.modules).toHaveLength(2);
-      expect(plan.modules.map((module) => module.name)).toEqual([
+      expect(plan.phases).toHaveLength(2);
+      expect(plan.phases.map((phase) => phase.name)).toEqual([
         "gridPhases_grid_phase_0",
         "gridPhases_grid_phase_1",
       ]);
@@ -6908,7 +6908,7 @@ __global__ void sharedReuse(float *out) {
     const plan = createCudaGridSyncPhasePlan(compiled);
 
     expect(plan.supported).toBe(true);
-    if (plan.supported) expect(plan.modules).toHaveLength(2);
+    if (plan.supported) expect(plan.phases).toHaveLength(2);
   });
 
   it("rejects grid sync phases when shared memory is read before rewrite", () => {

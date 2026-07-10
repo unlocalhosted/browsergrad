@@ -31,7 +31,7 @@ import {
   memoryPoolStorageMetadata,
   surfaceBufferInputs,
 } from "./webgpu_inputs.js";
-import { emitKernelIrWgsl } from "./wgsl.js";
+import { emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -254,14 +254,12 @@ function createGridSyncWebGpuPlan(
   launch: KernelLaunch,
   gridSyncPhasePlan: ReturnType<typeof createCudaGridSyncPhasePlan>,
 ): CudaWebGpuExecutionPlan | undefined {
-  if (!gridSyncPhasePlan.supported || gridSyncPhasePlan.modules.length <= 1) return undefined;
+  if (!gridSyncPhasePlan.supported || gridSyncPhasePlan.phases.length <= 1) return undefined;
   const wgslInput = createWgslRunInput(compiled, input);
   const dispatchCount = dispatchCountForLaunch(launch);
-  const steps = gridSyncPhasePlan.modules.map((module): WgslKernelSequenceStep => ({
-    program: emitKernelIrWgsl(module, {
-      features: featureOptionsFor(module.requiredFeatures),
+  const steps = gridSyncPhasePlan.phases.map((phase): WgslKernelSequenceStep => ({
+    program: emitSemanticKernelIrWgsl(phase, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
-      ...(compiled.subgroupMode === undefined ? {} : { subgroupMode: compiled.subgroupMode }),
       ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
     }).program,
     launch: { dispatchCount },

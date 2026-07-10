@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T01:44:33Z
+Last updated: 2026-07-10T06:20:14Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: expression support contract shared across semantic reference/WGSL |
+| Active work item | Semantic IR grid-sync phase planning; AST phase path removed |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture migration: replaced AST-shaped `KernelIrModule` grid-sync phase reconstruction with `SemanticKernelIrModule` phases, moved phase safety/replay checks to `semantic_grid_sync.ts`, and made WebGPU orchestration emit those semantic phases directly; canonicalized member-call `grid.sync()` into semantic `barrier`, added semantic WGSL support for cooperative-group metadata and f32-compatible `double`, and changed the public plan field from `modules` to `phases`; full `verify:compiler` passed with `749/0`, exact real WebGPU `runtime:grid-sync-phases` passed `1/0/0` as `grid-sync-phases`, full browser compiler suite passed `101/0`, and fast auto-corpus WebGPU passed `32/0/0` with skips `0`
 - Architecture split: added `semantic_expression_contracts.ts` for backend-neutral assignment operators, vector binary operators, and default surface-read value typing; rewired semantic reference plus semantic WGSL adapters to consume it, added a structural guard against reintroducing local variants, and retained backend-specific memory rules in their owning adapters; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, direct fast auto-corpus WebGPU passed `32/0/0` with skips `0`, and adapters are now `4402`/`5192` LOC
 - Architecture split: added `semantic_value_types.ts` for shared scalar/value-type support and rewired semantic reference plus semantic WGSL readiness aliases to consume it instead of duplicating the supported scalar list; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, direct fast auto-corpus WebGPU passed `32/0/0` with skips `0` after sandbox blocked the `verify:changed:fast` wrapper localhost bind, and architecture map shows `semantic_reference.ts` at `4410`, `semantic_wgsl.ts` at `5200`, with semantic-IR bucket at `15703`
 - Architecture split: expanded `semantic_math_intrinsics.ts` with shared math call argument support over call recognition, arity, and scalar args, then rewired semantic reference and semantic WGSL math readiness checks to consume it instead of duplicating arity/scalar checks; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, direct fast auto-corpus WebGPU passed `32/0/0` with skips `0` after sandbox blocked the `verify:changed:fast` wrapper localhost bind, and architecture map shows `semantic_reference.ts` at `4406`, `semantic_wgsl.ts` at `5196`, with semantic-IR bucket at `15679`
@@ -1028,6 +1029,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | Grid-sync phase architecture | Grid-sync orchestration reconstructed AST-shaped backend IR from analysis, so runtime planning and phase WGSL bypassed the public semantic IR contract | phase plan now partitions, validates, replays, and emits `SemanticKernelIrModule` operations; member `grid.sync()` becomes a semantic barrier, cooperative-group declarations are semantic-WGSL metadata, and explicit f32-compatible `double` parameters remain browser-runnable | full `verify:compiler` `749/0`; exact real WebGPU `runtime:grid-sync-phases` `1/0/0`; browser suite `101/0`; fast corpus `32/0/0` |
 | Fixed | Semantic adapter drift | CPU-reference and WGSL adapters independently defined accepted assignment operators, vector arithmetic, and default surface-read type, allowing future widening to diverge before runtime proof catches it | extracted one backend-neutral expression contract Module, rewired both adapters, and added a structural test guard; intentionally left different memory-reference invariants in their owning adapters | typecheck + lint passed; compiler/WGSL `749/0`; real WebGPU fast corpus `32/0/0`, skips `0` |
 | Fixed | Inline PTX `div.rn.f32` | Kernels using PTX f32 division inline asm stayed an `unsupported-inline-asm` gap despite mapping directly to browser-native f32 division | classified f32 division opcode with register/literal f32 sources, added f32 input and output validation, CPU reference `Math.fround` execution, native WGSL division lowering, compatibility note, unit coverage, exact browser WebGPU fixture, and changed-scope smoke coverage | focused compiler `749/0`; exact native WebGPU `inline-asm:f32-division` `1/0/0`, skips `0`, plan `single-dispatch`; changed-fast typecheck, compiler `733/0`, WGSL `16/0`, smoke `610/0/0`, selected storage/pointer `125/0/0`, slow-hot `78/0/0`, fast auto-corpus `32/0/0`; lint passed |
 | Fixed | Inline PTX `add/sub/mul.rn.f32` | Kernels using PTX f32 arithmetic inline asm stayed an `unsupported-inline-asm` gap despite mapping directly to browser-native f32 arithmetic | classified f32 arithmetic opcodes with register/literal f32 sources, added f32 input and output validation, CPU reference `Math.fround` execution, native WGSL arithmetic lowering, compatibility note, unit coverage, exact browser WebGPU fixture, and changed-scope smoke coverage | focused compiler `748/0`; exact native WebGPU `inline-asm:f32-arithmetic` `1/0/0`, skips `0`, plan `single-dispatch`; changed-fast typecheck, compiler `732/0`, WGSL `16/0`, smoke `609/0/0`, selected storage/pointer `125/0/0`, slow-hot `78/0/0`, fast auto-corpus `32/0/0`; lint passed |
@@ -1740,6 +1742,7 @@ Verifier current: src `677/0/0`, dist `677/0/0`.
 ## Remaining Probe Map
 
 - Architecture: shared contracts cover identical adapter rules only. Next audit candidate is typed memory-reference eligibility; do not merge it until address-space/vector-lane differences can be expressed without weakening either adapter.
+- Runtime planning: grid-sync now consumes semantic IR end to end. Dynamic launch and peer-copy planners still contain AST-shape helpers; migrate each only after their host-plan constraints have equivalent semantic operation checks.
 
 Probe these with fail-first real WebGPU fixtures:
 

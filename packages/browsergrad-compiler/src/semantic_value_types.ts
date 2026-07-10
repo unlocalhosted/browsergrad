@@ -3,6 +3,7 @@ import { isSemanticFloatVectorType } from "./semantic_vector_intrinsics.js";
 
 export function semanticScalarValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float" ||
+    valueType === "double" ||
     valueType === "half" ||
     valueType === "bf16" ||
     valueType === "int" ||

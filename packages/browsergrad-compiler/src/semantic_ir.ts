@@ -665,17 +665,18 @@ function lowerStatement(
       const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const expression = lowerExpression(statement.expression, scope);
-      if (expression.kind === "call" && expression.callee.kind === "symbol" && BARRIER_CALLS.has(expression.callee.name)) {
+      const callName = expression.kind === "call" ? semanticCallName(expression.callee) : undefined;
+      if (expression.kind === "call" && callName !== undefined && BARRIER_CALLS.has(callName)) {
         const groupName = barrierGroupName(expression);
         return {
           kind: "barrier",
-          callee: expression.callee.name,
+          callee: callName,
           ...(groupName === undefined ? {} : { groupName }),
           span: statement.span,
         };
       }
-      if (expression.kind === "call" && expression.callee.kind === "symbol" && FENCE_CALLS.has(expression.callee.name)) {
-        return { kind: "fence", callee: expression.callee.name, span: statement.span };
+      if (expression.kind === "call" && callName !== undefined && FENCE_CALLS.has(callName)) {
+        return { kind: "fence", callee: callName, span: statement.span };
       }
       if (expression.kind === "assignment") {
         if (statement.expression.kind === "assignment") {
@@ -1050,6 +1051,15 @@ function barrierGroupName(expression: Extract<SemanticExpression, { readonly kin
   if (expression.callee.kind === "symbol" && expression.callee.name.endsWith("::sync")) {
     const group = expression.args[0];
     return group?.kind === "symbol" ? group.name : undefined;
+  }
+  return undefined;
+}
+
+function semanticCallName(callee: SemanticExpression): string | undefined {
+  if (callee.kind === "symbol") return callee.name;
+  if (callee.kind === "member") {
+    const objectName = semanticCallName(callee.object);
+    return objectName ? `${objectName}.${callee.property}` : undefined;
   }
   return undefined;
 }
