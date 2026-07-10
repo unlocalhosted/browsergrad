@@ -779,7 +779,7 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([2, 4]);
     });
 
-  it("lowers vector reinterpret memory-view helpers through the pointer ABI", () => {
+  it("lowers vector reinterpret memory-view helpers through semantic WGSL", () => {
       const compiled = compileCudaLiteKernelForWebGpu(`
   __device__ float4 ld_vec(const float* address) {
     return *reinterpret_cast<const float4*>(address);
@@ -803,10 +803,13 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("return bg_ptr_read_f32x4(address_buffer, address_base);");
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(address_buffer, address_base, val);");
-      expect(compiled.wgsl).toContain("case 1u: { return vec4<f32>(inp[(index + 0u)], inp[(index + 1u)], inp[(index + 2u)], inp[(index + 3u)]); }");
-      expect(compiled.wgsl).toContain("case 0u: { out[(index + 0u)] = value.x; out[(index + 1u)] = value.y; out[(index + 2u)] = value.z; out[(index + 3u)] = value.w; return; }");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("fn ld_vec(");
+      expect(compiled.wgsl).toContain("fn st_vec(");
+      expect(compiled.wgsl).toContain("fn bg_ptr_read_f32x4(");
+      expect(compiled.wgsl).toContain("fn bg_ptr_write_f32x4(");
       expect(compiled.wgsl).not.toContain("address[");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 12, 3, 4]);
     });
@@ -1319,6 +1322,26 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       expect(compiled.wgsl).toContain("data__bg_ptr_offset");
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([10, 11, 20, 21]);
       expect([...result.buffers.out as Uint32Array]).toEqual([10, 11, 20, 21]);
+    });
+
+  it("lowers offset local pointer dereferences through semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void offsetPointerDeref(uint *data, uint *out) {
+    uint *cursor = data + threadIdx.x * 3;
+    out[threadIdx.x] = *cursor;
+    out[threadIdx.x + 2] = *(cursor + 1);
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = { buffers: { data: new Uint32Array([10, 11, 12, 20, 21, 22]), out: new Uint32Array(4) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("data[(local_id.x * 3u)]");
+      expect(compiled.wgsl).toContain("data[((local_id.x * 3u) + 1u)]");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([10, 20, 11, 21]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([10, 20, 11, 21]);
     });
 
   it("rejects writes through const device helper pointer params", () => {

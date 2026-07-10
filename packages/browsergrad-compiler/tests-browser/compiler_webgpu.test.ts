@@ -506,6 +506,25 @@ __global__ void storageRebase(uint *data, uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([10, 11, 20, 21]);
   });
 
+  it("runs offset local pointer dereferences through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void offsetPointerDeref(uint *data, uint *out) {
+  uint *cursor = data + threadIdx.x * 3;
+  out[threadIdx.x] = *cursor;
+  out[threadIdx.x + 2] = *(cursor + 1);
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { data: new Uint32Array([10, 11, 12, 20, 21, 22]), out: new Uint32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([10, 20, 11, 21]);
+  });
+
   it("runs common CUDA float math builtins through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(FLOAT_MATH, { workgroupSize: [2, 1, 1] });

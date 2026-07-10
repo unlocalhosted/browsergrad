@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T12:36:48Z
+Last updated: 2026-07-10T12:43:47Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `199/354`, up from `161/354`; `155` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `202/354`, up from `161/354`; `152` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
-| Active work item | Device-helper barrier scheduling, then highest-impact remaining semantic WGSL fallback class |
+| Active work item | Highest-impact remaining semantic WGSL fallback class after local-pointer aliases; device-helper barrier scheduling remains an explicit safety-gated slice |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic offset local-pointer dereferences: `*ptr` and `*(ptr + n)` now resolve through the existing local-pointer root/base-index contract into typed semantic memory references. Semantic WGSL inventories the actual dereference types used by storage-pointer device helpers, emitting the necessary vector read/write helpers instead of relying on scalar declaration type alone. Focused memory tests passed `180/0`; native Chromium WebGPU tests passed `117/0`; the vector helper is output-verified on native WebGPU; CUDA-samples `VoteAnyKernel3`, `fluidsGL::advectParticles_k`, and `fluidsGLES::advectParticles_k` moved semantic-direct. Corpus is compile/codegen proof only: `202/354`, AST fallback `152`, plan compilation `357/357`, hard failures `0`.
 - Semantic storage-pointer rebase: assignment forms `p = p + delta`, `p = p - delta`, and `p = &p[index]` now lower into existing semantic offset updates instead of buffer stores. The restriction to a storage parameter rebasing itself preserves pointer semantics and rejects cross-root aliasing. Focused memory tests passed `179/0`; native browser tests passed `116/0`; CUDA-samples `d_boxfilter_rgba_y` is semantic-direct and `sobolGPU_kernel` advances from a store blocker to its independent barrier-shape blocker; corpus reached `199/354`, AST fallback `155`, store blockers `14`.
 - Semantic chained memory stores: statement-level assignment chains such as `x[i] = y[i] = value` now become ordered semantic `Store(y,value)` then `Store(x,value)` operations when targets are call-free memory refs and the RHS is a literal or symbol. This avoids duplicated effectful evaluation and leaves local/expression chains on their existing path. Focused numeric tests passed `104/0`; native browser tests passed `115/0`; the CUDA-samples `cudaCompressibleMemory/init` source compiles semantic-direct; corpus reached `198/354`, AST fallback `156`, store blockers `16`.
 - Semantic scalar-shared vector views: `reinterpret_cast<float4 *>(&sharedScalar[index])` now uses explicit scalar-lane loads and stores when the shared backing scalar matches the vector lane type. Reference and WGSL keep the same base offset, avoiding a second vector stride. Focused memory tests passed `178/0`; native browser tests passed `114/0`; the CUDA-samples `MatrixMulNaiveLargeChunk` source compiles semantic-direct; corpus reached `197/354`, AST fallback `157`, plan compilation `357/357`, hard failures `0`.
@@ -1040,6 +1041,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | Semantic device-pointer vector helpers | A valid semantic `float4` dereference through a device `float*` parameter emitted calls to `bg_ptr_*_f32x4` without generating those helpers, causing native WGSL pipeline creation to fail | inventory the typed semantic memory references used by each storage-pointer device helper, including nested control flow, and emit only the required scalar/vector helper specializations | focused memory `180/0`; Chromium WebGPU `117/0`; output-verified vector helper; CUDA-samples semantic-direct `202/354`, fallback `152` |
 | Fixed | Semantic 2D surface boundary modes | `surf2Dwrite(..., cudaBoundaryModeTrap)` placed its optional boundary-mode argument in semantic IR's 3D z coordinate, blocking valid native 2D surface emission | derive z only for `surf2DLayeredwrite` and `surf3Dwrite`; omit 2D optional boundary mode from execution coordinates | focused semantic surface unit and native browser surface fixture `1/0`; CUDA-samples semantic-direct `194/354`, fallback `160` |
 | Fixed | Semantic cp.async copies | `CP_ASYNC_*` macros remained opaque semantic `call` operations, so real async-copy matrix kernels still depended on AST WGSL emission despite having synchronous browser-native semantics | lower static byte-aligned copies into typed semantic `copy` operations, lower commit/wait macros into explicit `copy-fence` operations, and execute/emit through shared `MemoryRef` contracts | focused semantic unit passed; exact native WebGPU CP async fixture `1/0`; full compiler `762/0`; browser `111/0`; CUDA-samples semantic-direct `193/354`, fallback `161` |
 | Fixed | Shared-array pointer decay | local pointers initialized from `__shared__` array decay were emitted as backend-visible pointer declarations instead of resolving to shared-memory aliases | allow fixed one-dimensional shared arrays to seed local pointer aliases while keeping direct shared-array function arguments as pointer-bearing symbols | focused semantic shared-alias coverage passed; no corpus semantic-direct regression |
@@ -1760,6 +1762,7 @@ Verifier current: src `677/0/0`, dist `677/0/0`.
 
 ## Remaining Probe Map
 
+- Local-pointer aliasing now covers typed dereference offsets, but remaining pointer fallback work includes conditional/rebound roots, multi-dimensional views, and pointer-array routing. Every new alias form needs semantic-reference parity, a semantic WGSL structural assertion, and a real WebGPU fixture before it is called browser-native.
 - Semantic reference: direct uniform-loop barriers, including `cg::sync(block)`, now have resumable IR scheduling. Extend this only to device-helper barriers after function-call continuations and lexical local restoration have matching scheduler semantics; do not bypass the current explicit rejection. Do not classify generic member `sync` as a block barrier: grid-sync remains a host-phased operation.
 - Architecture: shared contracts cover identical adapter rules only. Next audit candidate is typed memory-reference eligibility; do not merge it until address-space/vector-lane differences can be expressed without weakening either adapter. Surface-object pointer arrays require an explicit indexed-surface handle contract rather than scalar surface lowering.
 - Runtime planning: grid-sync consumes semantic IR end to end for simple/block-grid reductions, but semantic `cg::reduce` helper lowering is still required before the cuda-samples grid-sync fixture can rejoin the full native browser gate. Dynamic launch now resolves child signatures from semantic IR, but parent launch traversal and host expression evaluation remain AST-shaped; migrate those next before replacing `CudaHostDynamicLaunch.statement` with `SemanticDeviceLaunch`. Peer-copy planning still contains AST-shape helpers and needs equivalent semantic operation checks.

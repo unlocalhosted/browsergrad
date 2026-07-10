@@ -912,12 +912,7 @@ function emitSemanticStoragePointerHelpers(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
 ): readonly (readonly string[])[] {
-  const types = new Set<CudaLiteScalarType>();
-  for (const fn of ir.functions) {
-    for (const param of fn.params) {
-      if (param.pointer && param.addressSpace === "storage" && param.valueType !== undefined) types.add(param.valueType);
-    }
-  }
+  const types = semanticStoragePointerValueTypes(ir);
   return [...types].flatMap((type) => [
     emitSemanticStoragePointerReadHelper(type, ir, names),
     emitSemanticStoragePointerWriteHelper(type, ir, names),
@@ -926,6 +921,82 @@ function emitSemanticStoragePointerHelpers(
       return helper.length === 0 ? [] : [helper];
     }),
   ]);
+}
+
+function semanticStoragePointerValueTypes(ir: SemanticKernelIrModule): ReadonlySet<CudaLiteScalarType> {
+  const types = new Set<CudaLiteScalarType>();
+  for (const fn of ir.functions) {
+    const pointerNames = new Set(fn.params
+      .filter((param) => param.pointer && param.addressSpace === "storage")
+      .map((param) => param.name));
+    if (pointerNames.size === 0) continue;
+    const add = (ref: SemanticMemoryRef): void => {
+      if (pointerNames.has(ref.base) && ref.valueType !== undefined) types.add(ref.valueType);
+    };
+    for (const param of fn.params) {
+      if (param.pointer && param.addressSpace === "storage" && param.valueType !== undefined) types.add(param.valueType);
+    }
+    walkSemanticOperations(fn.body, (expression) => {
+      const ref = memoryRefFromIndexExpression(expression);
+      if (ref) add(ref);
+    });
+    collectSemanticStoragePointerOperationRefs(fn.body, add);
+  }
+  return types;
+}
+
+function collectSemanticStoragePointerOperationRefs(
+  operations: readonly SemanticKernelIrOperation[],
+  add: (ref: SemanticMemoryRef) => void,
+): void {
+  for (const operation of operations) {
+    switch (operation.kind) {
+      case "load":
+        add(operation.source);
+        break;
+      case "store":
+        add(operation.target);
+        operation.reads.forEach(add);
+        break;
+      case "copy":
+        add(operation.source);
+        add(operation.target);
+        break;
+      case "atomic":
+        if (operation.target) add(operation.target);
+        break;
+      case "call":
+        operation.reads.forEach(add);
+        break;
+      case "branch":
+        collectSemanticStoragePointerOperationRefs(operation.consequent, add);
+        collectSemanticStoragePointerOperationRefs(operation.alternate, add);
+        break;
+      case "loop":
+        if (operation.init && isSemanticKernelIrOperation(operation.init)) {
+          collectSemanticStoragePointerOperationRefs([operation.init], add);
+        }
+        collectSemanticStoragePointerOperationRefs(operation.body, add);
+        break;
+      case "block":
+        collectSemanticStoragePointerOperationRefs(operation.body, add);
+        break;
+      case "declare":
+      case "dim3-declare":
+      case "surface-write":
+      case "surface-read-store":
+      case "cooperative-group-declare":
+      case "barrier":
+      case "fence":
+      case "inline-asm":
+      case "expression":
+      case "device-launch":
+      case "return":
+      case "continue":
+      case "break":
+        break;
+    }
+  }
 }
 
 const SEMANTIC_POINTER_ATOMIC_CALLS = [
