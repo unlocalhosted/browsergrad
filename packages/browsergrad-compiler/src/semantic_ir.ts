@@ -1449,7 +1449,13 @@ function lowerExpression(
       const aliased = expression.operator === "*" ? localPointerAliasDerefExpression(expression.argument, scope, expression.span) : undefined;
       if (aliased) return aliased;
       const argument = lowerExpression(expression.argument, scope);
-      return { kind: "unary", operator: expression.operator, argument, ...optionalValueType(expression.operator === "&" ? "voidptr" : expressionValueType(argument)), span: expression.span };
+      return {
+        kind: "unary",
+        operator: expression.operator,
+        argument,
+        ...optionalValueType(expression.operator === "&" ? "voidptr" : expression.operator === "!" ? "bool" : expressionValueType(argument)),
+        span: expression.span,
+      };
     }
     case "binary": {
       const pointerDifference = localPointerAliasDifferenceExpression(expression, scope);

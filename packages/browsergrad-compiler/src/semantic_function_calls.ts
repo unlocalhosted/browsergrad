@@ -69,6 +69,7 @@ export interface SemanticFunctionBodyShapeOptions {
 export interface SemanticPointerFunctionBodyOptions {
   readonly allowCooperativeOps?: boolean;
   readonly allowSharedMemory?: boolean;
+  readonly allowDeviceGlobals?: boolean;
 }
 
 export function semanticFunctionBodyShapeSupported(
@@ -81,7 +82,7 @@ export function semanticFunctionBodyShapeSupported(
       if (options.allowSharedMemory && operation.target.addressSpace === "shared") return !operation.target.pointer && operation.init === undefined;
       return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
     }
-    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage" || operation.target.addressSpace === "shared";
+    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage" || operation.target.addressSpace === "shared" || operation.target.addressSpace === "device-global";
     if (operation.kind === "atomic") return options.allowAtomic === true;
     if (operation.kind === "surface-write" || operation.kind === "call") return true;
     if (options.allowBarrierFence && (operation.kind === "barrier" || operation.kind === "fence")) return true;
@@ -137,13 +138,18 @@ function semanticPointerFunctionOperationSupported(
     return operation.target.addressSpace === "local" &&
       !operation.target.pointer &&
       operation.target.dimensions.length === 0 &&
-      (operation.init === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget));
+      (operation.init === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
   }
-  if (operation.kind === "atomic") return operation.target !== undefined && pointerParams.has(operation.target.base);
-  if (operation.kind === "store") return (operation.target.addressSpace === "local" || pointerParams.has(operation.target.base)) &&
-    (!options.allowCooperativeOps || semanticPointerFunctionExpressionAccessesSupported(operation.value, pointerParams, memoryRefFromIndex, atomicCallTarget));
+  if (operation.kind === "atomic") return operation.target !== undefined && (pointerParams.has(operation.target.base) || options.allowDeviceGlobals === true && operation.target.addressSpace === "device-global");
+  if (operation.kind === "store") return (operation.target.addressSpace === "local" || pointerParams.has(operation.target.base) || options.allowDeviceGlobals === true && operation.target.addressSpace === "device-global") &&
+    (!options.allowCooperativeOps || semanticPointerFunctionExpressionAccessesSupported(operation.value, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
+  if (operation.kind === "call") {
+    return operation.args.every((arg) =>
+      semanticPointerFunctionExpressionAccessesSupported(arg, pointerParams, memoryRefFromIndex, atomicCallTarget, options),
+    );
+  }
   if (options.allowCooperativeOps && operation.kind === "branch") {
-    return semanticPointerFunctionExpressionAccessesSupported(operation.condition, pointerParams, memoryRefFromIndex, atomicCallTarget) &&
+    return semanticPointerFunctionExpressionAccessesSupported(operation.condition, pointerParams, memoryRefFromIndex, atomicCallTarget, options) &&
       operation.consequent.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
       operation.alternate.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
   }
@@ -152,22 +158,23 @@ function semanticPointerFunctionOperationSupported(
   }
   if (options.allowCooperativeOps && operation.kind === "loop") {
     return (operation.init === undefined || semanticPointerFunctionLoopInitSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
-      (operation.condition === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.condition, pointerParams, memoryRefFromIndex, atomicCallTarget)) &&
-      (operation.update === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.update, pointerParams, memoryRefFromIndex, atomicCallTarget)) &&
+      (operation.condition === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.condition, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
+      (operation.update === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.update, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
       operation.body.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
   }
   if (operation.kind === "return" && operation.value) {
-    return semanticPointerFunctionExpressionAccessesSupported(operation.value, pointerParams, memoryRefFromIndex, atomicCallTarget);
+    return semanticPointerFunctionExpressionAccessesSupported(operation.value, pointerParams, memoryRefFromIndex, atomicCallTarget, options);
   }
+  if (operation.kind === "return" || operation.kind === "break" || operation.kind === "continue") return true;
   if (operation.kind === "expression" && operation.expression.kind === "update") {
     const ref = memoryRefFromIndex(operation.expression.argument);
-    return ref !== undefined && pointerParams.has(ref.base);
+    return ref !== undefined && (pointerParams.has(ref.base) || options.allowDeviceGlobals === true && ref.addressSpace === "device-global");
   }
   if (operation.kind === "expression" && operation.expression.kind === "literal") return true;
   if (options.allowCooperativeOps && operation.kind === "expression") {
-    return semanticPointerFunctionExpressionAccessesSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget);
+    return semanticPointerFunctionExpressionAccessesSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget, options);
   }
-  if (operation.kind === "expression") return semanticPointerFunctionExpressionAccessesSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget);
+  if (operation.kind === "expression") return semanticPointerFunctionExpressionAccessesSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget, options);
   return false;
 }
 
@@ -180,7 +187,7 @@ function semanticPointerFunctionLoopInitSupported(
 ): boolean {
   return isSemanticKernelIrOperation(init)
     ? semanticPointerFunctionOperationSupported(init, pointerParams, memoryRefFromIndex, atomicCallTarget, options)
-    : semanticPointerFunctionExpressionAccessesSupported(init, pointerParams, memoryRefFromIndex, atomicCallTarget);
+    : semanticPointerFunctionExpressionAccessesSupported(init, pointerParams, memoryRefFromIndex, atomicCallTarget, options);
 }
 
 function semanticPointerFunctionExpressionAccessesSupported(
@@ -188,15 +195,16 @@ function semanticPointerFunctionExpressionAccessesSupported(
   pointerParams: ReadonlySet<string>,
   memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+  options: SemanticPointerFunctionBodyOptions,
 ): boolean {
   if (semanticPointerFunctionExpressionHasPointerIdentityCheck(expression, pointerParams)) return false;
   let supported = true;
   walkSemanticExpression(expression, (item) => {
     const ref = memoryRefFromIndex(item);
-    if (ref && !pointerParams.has(ref.base)) supported = false;
+    if (ref && !pointerParams.has(ref.base) && !(options.allowDeviceGlobals === true && ref.addressSpace === "device-global")) supported = false;
     if (item.kind !== "call") return;
     const target = atomicCallTarget(item);
-    if (target && !pointerParams.has(target.base)) supported = false;
+    if (target && !pointerParams.has(target.base) && !(options.allowDeviceGlobals === true && target.addressSpace === "device-global")) supported = false;
   });
   return supported;
 }

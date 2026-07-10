@@ -310,6 +310,29 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler: Memory and pointer model", () => {
+  it("executes pointer helpers with scalar device-global side effects", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint counter = 0, stopped = 0;
+__device__ void record(uint *out) {
+  if (!stopped) {
+    printf("record %u", counter);
+    counter++;
+    stopped = 1;
+    out[0] = counter;
+  }
+}
+__global__ void helper_global(uint *out) { record(out); }
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1]);
+  });
+
   it("bitcasts same-width shared pointer helper views through semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void write_bits(uint *value) { value[0] = 0xffffffffu; }
@@ -5241,7 +5264,7 @@ __global__ void sharedHelperScoped(float *out) {
     check_value(data, 7);
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("!(flag[0u] != 0u)");
+      expect(compiled.wgsl).toContain("!((flag[0u] != 0u))");
       expect(compiled.wgsl).not.toContain("!(1u != 4294967295u)");
     });
 

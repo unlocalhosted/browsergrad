@@ -851,7 +851,7 @@ function semanticWgslAssignmentMemoryRef(
   expression: SemanticExpression,
   _ir?: SemanticKernelIrModule,
 ): SemanticMemoryRef | undefined {
-  return expression.kind === "index" ? memoryRefFromIndexExpression(expression) : undefined;
+  return memoryRefFromIndexExpression(expression);
 }
 
 function semanticWgslLoopInitSupported(
@@ -1507,6 +1507,7 @@ function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["fu
   return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget, {
     allowCooperativeOps: true,
     allowSharedMemory: true,
+    allowDeviceGlobals: true,
   });
 }
 
@@ -5231,6 +5232,16 @@ function semanticCurandStatePointer(
 }
 
 function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticMemoryRef | undefined {
+  if (expression.kind === "symbol" && expression.addressSpace === "device-global") {
+    return {
+      base: expression.name,
+      addressSpace: expression.addressSpace,
+      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+      indices: [],
+      fields: [],
+      span: expression.span,
+    };
+  }
   if (expression.kind !== "index") return undefined;
   const flattened = flattenMemoryRef(expression);
   if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared" && flattened.base.addressSpace !== "constant" && flattened.base.addressSpace !== "device-global" && flattened.base.addressSpace !== "local")) return undefined;

@@ -805,6 +805,7 @@ function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKerne
   return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget, {
     allowCooperativeOps: true,
     allowSharedMemory: true,
+    allowDeviceGlobals: true,
   });
 }
 
@@ -1178,7 +1179,7 @@ function semanticReferenceAssignmentMemoryRef(
   expression: SemanticExpression,
   _compiled?: CompiledCudaLiteKernel,
 ): SemanticMemoryRef | undefined {
-  return expression.kind === "index" ? memoryRefFromIndexExpression(expression) : undefined;
+  return memoryRefFromIndexExpression(expression);
 }
 
 function isStoragePointerNullComparison(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): boolean {
@@ -4152,6 +4153,16 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
 }
 
 function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticMemoryRef | undefined {
+  if (expression.kind === "symbol" && expression.addressSpace === "device-global") {
+    return {
+      base: expression.name,
+      addressSpace: expression.addressSpace,
+      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+      indices: [],
+      fields: [],
+      span: expression.span,
+    };
+  }
   if (expression.kind !== "index") return undefined;
   const indices: SemanticExpression[] = [expression.index];
   let target = expression.target;

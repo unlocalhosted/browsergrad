@@ -3459,6 +3459,28 @@ __global__ void sharedReinterpret(int *out) {
     expect([...actual.buffers.out as Int32Array]).toEqual([-1]);
   });
 
+  it("runs pointer helpers with scalar device-global side effects through semantic WGSL", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ uint counter = 0, stopped = 0;
+__device__ void record(uint *out) {
+  if (!stopped) {
+    printf("record %u", counter);
+    counter++;
+    stopped = 1;
+    out[0] = counter;
+  }
+}
+__global__ void helperGlobal(uint *out) { record(out); }
+`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Uint32Array]).toEqual([1]);
+  });
+
   it("runs half2 comparison intrinsics through f32 compatibility mode on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
