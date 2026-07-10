@@ -642,6 +642,39 @@ __global__ void sharedVector(const float4* x, float4* y) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs shared half2 device helpers through WebGPU compatibility lowering", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void pair_reduce(half2 *values) {
+  if (threadIdx.x == 0) values[0] = values[0] + values[1];
+}
+__global__ void half2_shared_reduce(const half2 *input, half2 *out) {
+  __shared__ half2 tile[2];
+  tile[threadIdx.x] = input[threadIdx.x];
+  __syncthreads();
+  pair_reduce(tile);
+  __syncthreads();
+  if (threadIdx.x == 0) out[0] = tile[0];
+}`, { f16Mode: "f32", workgroupSize: [2, 1, 1] });
+    const referenceInput = {
+      buffers: {
+        input: createWgslFloat16Array([1, 2, 3, 4]),
+        out: createWgslFloat16Array(2),
+      },
+    };
+    const webGpuInput = {
+      buffers: {
+        input: new Float32Array([1, 2, 3, 4]),
+        out: new Float32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, referenceInput, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, webGpuInput, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual(Array.from(expected.buffers.out as Iterable<number>));
+  });
+
   it("runs vector memory-view helper functions through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernelForWebGpu(VECTOR_MEMORY_VIEW_HELPERS, {

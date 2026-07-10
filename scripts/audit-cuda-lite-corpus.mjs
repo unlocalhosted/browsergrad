@@ -36,6 +36,8 @@ const compilerUrl = pathToFileURL(path.join(repoRoot, "packages/browsergrad-comp
 const {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
+  canEmitSemanticKernelIrWgsl,
+  emitSemanticKernelIrWgsl,
   createCudaRuntimePlan,
   createCudaWebGpuExecutionPlan,
   describeCudaDiagnostic,
@@ -162,6 +164,7 @@ for (const file of files) {
           kernelName,
           ok: true,
           directLoweringOk: true,
+          ...directAttempt.semanticIrDirectWgsl,
           compileCodegenOk: true,
           ...((includeSources || kernelManifestSources) ? { source: directAttempt.source } : {}),
         });
@@ -177,6 +180,7 @@ for (const file of files) {
             kernelName,
             ok: true,
             directLoweringOk: true,
+            ...reverseAttempt.semanticIrDirectWgsl,
             compileCodegenOk: true,
             ...((includeSources || kernelManifestSources) ? { source: reverseAttempt.source } : {}),
           });
@@ -289,7 +293,11 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
         },
       };
     }
-    return { ok: true, source };
+    return {
+      ok: true,
+      source,
+      semanticIrDirectWgsl: semanticIrDirectWgslFor(compiled),
+    };
   } catch (error) {
     return { ok: false, source, error };
   }
@@ -375,10 +383,27 @@ function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kerne
         },
       };
     }
-    return { ok: true, source };
+    return {
+      ok: true,
+      source,
+      semanticIrDirectWgsl: semanticIrDirectWgslFor(compiled),
+    };
   } catch (error) {
     return { ok: false, source, error };
   }
+}
+
+function semanticIrDirectWgslFor(compiled) {
+  if (canEmitSemanticKernelIrWgsl(compiled.kernelIr)) return { semanticIrDirectWgslOk: true };
+  try {
+    emitSemanticKernelIrWgsl(compiled.kernelIr);
+  } catch (error) {
+    return {
+      semanticIrDirectWgslOk: false,
+      semanticIrDirectWgslBlocker: String(error?.message ?? error).split("\n")[0],
+    };
+  }
+  return { semanticIrDirectWgslOk: false, semanticIrDirectWgslBlocker: "semantic WGSL emission rejected" };
 }
 
 function hostOrchestratedDiagnosticFor(compiled) {
@@ -398,6 +423,12 @@ function shouldRetryWithReverseContext(error) {
 
 const failures = results.filter((result) => !result.ok);
 const directLoweringOk = results.length - failures.length;
+const semanticIrDirectWgslOk = results.filter((result) => result.directLoweringOk && result.semanticIrDirectWgslOk).length;
+const legacyAstDirectWgslFallback = directLoweringOk - semanticIrDirectWgslOk;
+const legacyAstDirectWgslBlockers = countBy(
+  results.filter((result) => result.directLoweringOk && !result.semanticIrDirectWgslOk),
+  (result) => result.semanticIrDirectWgslBlocker ?? "unknown",
+);
 const hostPlanCompiledOk = failures.filter((failure) => failure.webGpuPlanLiftOk).length;
 const compileCodegenOk = directLoweringOk + hostPlanCompiledOk;
 const compileCodegenGaps = results.length - compileCodegenOk;
@@ -418,6 +449,9 @@ const summary = {
   executionTierCounts: {
     planCompiledOk: compileCodegenOk,
     planCompileGaps: compileCodegenGaps,
+    semanticIrDirectWgslOk,
+    legacyAstDirectWgslFallback,
+    legacyAstDirectWgslBlockers,
     compileCodegenOnlyOk: compileCodegenOk,
     fixtureBackedExecutedOk: 0,
     browserWebGpuExecutedOk: 0,
@@ -426,6 +460,8 @@ const summary = {
   executionTierNotes: {
     planCompiledOk: "Parsed, analyzed, lowered, and emitted direct WGSL or a host-orchestrated WebGPU plan under compileFeatureProfile assumptions.",
     planCompileGaps: "Extracted kernels that did not compile/codegen into direct WGSL or a host-orchestrated WebGPU plan.",
+    semanticIrDirectWgslOk: "Direct-dispatch kernels emitted from semantic IR without the AST WGSL fallback.",
+    legacyAstDirectWgslFallback: "Direct-dispatch kernels that still require the AST WGSL fallback.",
     compileCodegenOnlyOk: "Parsed, analyzed, lowered, and emitted WGSL or host WebGPU plan from pinned corpus source under compileFeatureProfile assumptions.",
     fixtureBackedExecutedOk: "Requires explicit input/output fixtures; this corpus audit does not synthesize them.",
     browserWebGpuExecutedOk: "Covered by separate browser E2E gates, not by this corpus audit.",
@@ -442,6 +478,9 @@ const summary = {
   planCompiledOk: compileCodegenOk,
   planCompileGaps: compileCodegenGaps,
   webGpuDirectCompiledOk: directLoweringOk,
+  semanticIrDirectWgslOk,
+  legacyAstDirectWgslFallback,
+  legacyAstDirectWgslBlockers,
   webGpuHostPlanCompiledOk: hostPlanCompiledOk,
   singleDispatchPlanCompiledOk: directLoweringOk,
   hostOrchestratedPlanCompiledOk: hostPlanCompiledOk,
@@ -533,6 +572,8 @@ function kernelManifestRows(items, includeSources = false) {
       directLoweringOk: item.ok === true,
       planCompiledOk,
       compileCodegenOk: planCompiledOk,
+      ...(item.semanticIrDirectWgslOk === undefined ? {} : { semanticIrDirectWgslOk: item.semanticIrDirectWgslOk }),
+      ...(item.semanticIrDirectWgslBlocker === undefined ? {} : { semanticIrDirectWgslBlocker: item.semanticIrDirectWgslBlocker }),
       ...(item.webGpuPlanLiftKind === undefined ? {} : { webGpuPlanLiftKind: item.webGpuPlanLiftKind }),
       ...(item.webGpuPlanLiftBlockerCode === undefined ? {} : { webGpuPlanLiftBlockerCode: item.webGpuPlanLiftBlockerCode }),
       ...(includeSources && item.source !== undefined ? { source: item.source } : {}),

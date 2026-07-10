@@ -933,6 +933,37 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.out as Int32Array]).toEqual([0, 2]);
     });
 
+  it("lowers shared half2 arrays through device helper pointers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void pair_reduce(half2 *values) {
+    if (threadIdx.x == 0) values[0] = values[0] + values[1];
+    __syncthreads();
+  }
+  __global__ void half2_shared_reduce(const half2 *input, half2 *out) {
+    __shared__ half2 tile[2];
+    tile[threadIdx.x] = input[threadIdx.x];
+    __syncthreads();
+    pair_reduce(tile);
+    if (threadIdx.x == 0) out[0] = tile[0];
+  }`, { f16Mode: "f32", workgroupSize: [2, 1, 1] });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("var<workgroup> tile: array<vec2<f32>, 2>;");
+      expect(compiled.wgsl).toContain("ptr<workgroup, array<vec2<f32>, 2>>");
+    });
+
+  it("rejects divergent calls to helpers that contain barriers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void sync_tile(float *tile) { __syncthreads(); }
+  __global__ void divergent_helper_barrier(float *out) {
+    __shared__ float tile[1];
+    if (threadIdx.x == 0) sync_tile(tile);
+    out[threadIdx.x] = 1.0f;
+  }`, { workgroupSize: [2, 1, 1] });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
+    });
+
   it("classifies grid-wide cooperative sync as host-orchestrated WebGPU lowering", () => {
       const analysis = analyzeCudaLite(parseCudaLite(`
   namespace cg = cooperative_groups;

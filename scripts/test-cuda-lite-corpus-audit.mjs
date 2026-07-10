@@ -269,6 +269,16 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
   assertEqual(report.summary.outputVerifiedOk, 0, "output verified count");
   assertEqual(report.summary.deprecatedCompilePlanAliases.webGpuRunnableOk, "planCompiledOk", "deprecated runnable alias");
   assertEqual(report.summary.webGpuDirectCompiledOk, 12, "reverse include kernel direct WGSL compiled");
+  assertEqual(
+    report.summary.semanticIrDirectWgslOk + report.summary.legacyAstDirectWgslFallback,
+    report.summary.webGpuDirectCompiledOk,
+    "semantic and AST direct WGSL coverage partition",
+  );
+  assertEqual(
+    Object.values(report.summary.legacyAstDirectWgslBlockers).reduce((total, count) => total + count, 0),
+    report.summary.legacyAstDirectWgslFallback,
+    "AST direct WGSL blocker coverage partition",
+  );
   assertEqual(report.summary.webGpuHostPlanCompiledOk, 2, "reverse include kernel host-plan compiled");
   assertEqual(report.summary.compileCodegenOk, 14, "reverse include kernel compile/codegen count");
   assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");

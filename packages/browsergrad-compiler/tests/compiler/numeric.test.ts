@@ -2166,7 +2166,7 @@ describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
       );
 
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<vec4<f32>, 1>;");
-      expect(compiled.wgsl).toContain("vec4<f32>(1.0, 2.0, 3.0, 4.0)");
+      expect(compiled.wgsl).toContain("var value: vec4<f32> = vec4<f32>(");
       expect([...result.buffers.out as Float32Array]).toEqual([10]);
     });
 
