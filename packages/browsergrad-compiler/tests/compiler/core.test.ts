@@ -1690,6 +1690,11 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       expect(compiled.wgsl).toContain("loop {");
       expect(compiled.wgsl).toContain("continuing {");
       expect([...result.buffers.out as Int32Array]).toEqual([9]);
+      expect([...runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      ).buffers.out as Int32Array]).toEqual([9]);
     });
 
   it("lowers prefix and postfix updates to WGSL assignment statements", () => {
@@ -1707,8 +1712,9 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("i = (i + 1);");
-      expect(compiled.wgsl).toContain("j = (j - 1);");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("i += 1;");
+      expect(compiled.wgsl).toContain("j -= 1;");
       expect(compiled.wgsl).not.toMatch(/\\+\\+|--/u);
       expect([...result.buffers.out as Int32Array]).toEqual([9]);
     });
@@ -5493,7 +5499,28 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([7, 7]);
       expect(compiled.wgsl).toContain("mySum = (mySum + sdata[(tid + 1)]);");
       expect(compiled.wgsl).toContain("sdata[tid] = f32(mySum);");
-    });
+  });
+
+  it("emits semantic WGSL for lexical blocks with local declarations", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void scopedLocal(float *out) {
+  int tid = threadIdx.x;
+  {
+    float value = (float)tid + 2.0f;
+    out[tid] = value;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var value: f32");
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
+  });
 
   it("keeps nested updates out of expression contexts", () => {
       expect(() => compileCudaLiteKernel(`

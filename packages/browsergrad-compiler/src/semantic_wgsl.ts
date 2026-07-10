@@ -588,7 +588,6 @@ function unsupportedSemanticWgslOperation(
         }
         break;
       case "block":
-        if (operationsContainDeclare(operation.body)) return operation;
         {
           const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue);
           if (unsupported) return unsupported;
@@ -652,15 +651,6 @@ function semanticWgslFunctionParamSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): boolean {
   return semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
-}
-
-function operationsContainDeclare(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.some((operation) =>
-    operation.kind === "declare" ||
-    operation.kind === "branch" && (operationsContainDeclare(operation.consequent) || operationsContainDeclare(operation.alternate)) ||
-    operation.kind === "loop" && operationsContainDeclare(operation.body) ||
-    operation.kind === "block" && operationsContainDeclare(operation.body)
-  );
 }
 
 function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
@@ -2677,6 +2667,24 @@ function emitSemanticLoop(
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   if (operation.loopKind === "for") {
+    if (operation.update?.kind === "sequence") {
+      const init = operation.init === undefined
+        ? []
+        : isSemanticKernelIrOperation(operation.init)
+          ? emitSemanticOperations([operation.init], ir, names, indentLevel, allowReturnValue, options, textureSpecializations)
+          : emitSemanticExpressionStatement(operation.init, ir, names, indentLevel, options, textureSpecializations);
+      const condition = operation.condition ? emitTruthiness(operation.condition, ir, names, options) : undefined;
+      return [
+        ...init,
+        `${prefix}loop {`,
+        ...(condition === undefined ? [] : [`${"  ".repeat(indentLevel + 1)}if (!(${condition})) { break; }`]),
+        ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
+        `${"  ".repeat(indentLevel + 1)}continuing {`,
+        ...emitSemanticSequenceStatement(operation.update, ir, names, indentLevel + 2, options, textureSpecializations),
+        `${"  ".repeat(indentLevel + 1)}}`,
+        `${prefix}}`,
+      ];
+    }
     const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names, options, textureSpecializations) : "";
     const condition = operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "true";
     const update = operation.update ? emitSemanticLoopUpdate(operation.update, ir, names, options, textureSpecializations) : "";
@@ -2711,6 +2719,7 @@ function emitSemanticLoopUpdate(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (isSemanticNoopExpression(update)) return "";
+  if (update.kind === "sequence") throw semanticWgslError("semantic WGSL sequence loop updates require loop lowering", update.span);
   return update.kind === "assignment"
     ? emitSemanticAssignmentStatement(update, ir, names, options, textureSpecializations)
     : emitSemanticExpression(update, ir, names, options, textureSpecializations);

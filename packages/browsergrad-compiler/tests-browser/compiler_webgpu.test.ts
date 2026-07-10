@@ -984,6 +984,25 @@ __global__ void uniformBarrierLoop(float *x) {
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
 
+  it("runs scoped local declarations through semantic WGSL on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void scopedLocal(float *out) {
+  int tid = threadIdx.x;
+  {
+    float value = (float)tid + 2.0f;
+    out[tid] = value;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const input = { buffers: { out: new Float32Array(2) } };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs grid.sync phases when shared memory is rewritten after sync", async () => {
     if (!deviceCheck.available) return;
     const source = `

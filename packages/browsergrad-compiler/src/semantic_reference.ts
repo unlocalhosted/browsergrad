@@ -322,7 +322,6 @@ function unsupportedSemanticReferenceOperation(
         if (!semanticReferenceExpressionSupported(operation.condition, "scalar", compiled)) return operation;
         break;
       case "block":
-        if (operationsContainDeclare(operation.body)) return operation;
         break;
       case "loop":
         if (operation.init && !semanticReferenceLoopInitSupported(operation.init, compiled)) return operation;
@@ -378,15 +377,6 @@ function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
   return false;
-}
-
-function operationsContainDeclare(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.some((operation) =>
-    operation.kind === "declare" ||
-    operation.kind === "branch" && (operationsContainDeclare(operation.consequent) || operationsContainDeclare(operation.alternate)) ||
-    operation.kind === "loop" && operationsContainDeclare(operation.body) ||
-    operation.kind === "block" && operationsContainDeclare(operation.body)
-  );
 }
 
 function semanticReferenceOperationsContainUnsupportedCallableSignatures(
@@ -1174,16 +1164,16 @@ function execSemanticOperations(
         break;
       case "branch":
         if (truthy(evalNumber(operation.condition, context))) {
-          const control = execSemanticOperations(operation.consequent, context);
+          const control = execSemanticScopedOperations(operation.consequent, context);
           if (control !== "fallthrough") return control;
         } else {
-          const control = execSemanticOperations(operation.alternate, context);
+          const control = execSemanticScopedOperations(operation.alternate, context);
           if (control !== "fallthrough") return control;
         }
         break;
       case "block":
         {
-          const control = execSemanticOperations(operation.body, context);
+          const control = execSemanticScopedOperations(operation.body, context);
           if (control !== "fallthrough") return control;
         }
         break;
@@ -1221,6 +1211,25 @@ function execSemanticOperations(
     }
   }
   return "fallthrough";
+}
+
+function execSemanticScopedOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  context: SemanticReferenceContext,
+): SemanticControl {
+  const savedLocals = new Map<string, SemanticValue | undefined>();
+  for (const operation of operations) {
+    if (operation.kind !== "declare" || savedLocals.has(operation.target.name)) continue;
+    savedLocals.set(operation.target.name, context.locals.get(operation.target.name));
+  }
+  try {
+    return execSemanticOperations(operations, context);
+  } finally {
+    for (const [name, value] of savedLocals) {
+      if (value === undefined) context.locals.delete(name);
+      else context.locals.set(name, value);
+    }
+  }
 }
 
 function execSemanticSurfaceReadStore(
@@ -1661,7 +1670,7 @@ function execSemanticLoop(
     if (operation.init) execSemanticLoopInit(operation.init, context);
     for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
       if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-      const control = execSemanticOperations(operation.body, context);
+      const control = execSemanticScopedOperations(operation.body, context);
       if (control === "return") return control;
       if (control === "break") return "fallthrough";
       if (operation.update) evalNumber(operation.update, context);
@@ -1671,7 +1680,7 @@ function execSemanticLoop(
   if (operation.loopKind === "while") {
     for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
       if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-      const control = execSemanticOperations(operation.body, context);
+      const control = execSemanticScopedOperations(operation.body, context);
       if (control === "return") return control;
       if (control === "break") return "fallthrough";
     }
@@ -1679,7 +1688,7 @@ function execSemanticLoop(
   }
   for (let guard = 0; ; guard++) {
     if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-    const control = execSemanticOperations(operation.body, context);
+    const control = execSemanticScopedOperations(operation.body, context);
     if (control === "return") return control;
     if (control === "break") return "fallthrough";
     if (!operation.condition || !truthy(evalNumber(operation.condition, context))) return "fallthrough";
