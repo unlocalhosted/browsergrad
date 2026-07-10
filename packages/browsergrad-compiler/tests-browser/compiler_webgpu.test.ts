@@ -2131,6 +2131,27 @@ __global__ void texture_atlas_helpers(float4* vecOut, float* scalarOut, cudaText
     expect([...actual.buffers.scalarOut as Float32Array]).toEqual([...expected.buffers.scalarOut as Float32Array]);
   });
 
+  it("runs semantic layered and 3D texture atlas reads through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void semantic_layered_volume_texture(float* out, cudaTextureObject_t tex) {
+  out[0] = tex2DLayered<float>(tex, 0.0f, 1.0f, 1.0f);
+  out[1] = tex3D<float>(tex, 2.0f, 1.0f, 1.0f);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(2) },
+      textures: {
+        tex: { width: 4, height: 4, data: new Float32Array(Array.from({ length: 16 }, (_, index) => index + 1)) },
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([9, 11]);
+  });
+
   it("runs compiled typed uchar4 texture reads through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

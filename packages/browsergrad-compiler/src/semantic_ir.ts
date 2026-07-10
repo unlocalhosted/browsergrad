@@ -28,6 +28,7 @@ import {
   isCudaSemanticSurfaceWriteCallName,
   isCudaTexture2DReadCallName,
 } from "./cuda_texture_surface_calls.js";
+import type { SemanticTextureReadCall } from "./semantic_texture_surface.js";
 import {
   cudaVibMinMaxInfo,
   isCudaFrexpCallName as isFrexpCallName,
@@ -180,7 +181,7 @@ export type SemanticExpression =
     }
   | {
       readonly kind: "texture-read";
-      readonly callee: "tex2D" | "tex2DLod" | "texCubemap";
+      readonly callee: SemanticTextureReadCall;
       readonly texture: SemanticExpression;
       readonly x: SemanticExpression;
       readonly y: SemanticExpression;
@@ -1176,16 +1177,19 @@ function lowerExpression(
       }
       if (
         expression.callee.kind === "identifier" &&
-        (isCudaTexture2DReadCallName(expression.callee.name) || expression.callee.name === "texCubemap") &&
-        (expression.callee.name === "texCubemap" ? args.length >= 4 : args.length >= 3)
+        (isCudaTexture2DReadCallName(expression.callee.name) ||
+          expression.callee.name === "tex2DLayered" ||
+          expression.callee.name === "tex3D" ||
+          expression.callee.name === "texCubemap") &&
+        (isCudaTexture2DReadCallName(expression.callee.name) ? args.length >= 3 : args.length >= 4)
       ) {
         return {
           kind: "texture-read",
-          callee: expression.callee.name as "tex2D" | "tex2DLod" | "texCubemap",
+          callee: expression.callee.name as SemanticTextureReadCall,
           texture: args[0]!,
           x: args[1]!,
           y: args[2]!,
-          ...(expression.callee.name === "texCubemap" ? { z: args[3]! } : {}),
+          ...(isCudaTexture2DReadCallName(expression.callee.name) ? {} : { z: args[3]! }),
           valueType: expression.templateValueType ?? "float",
           span: expression.span,
         };

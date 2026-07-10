@@ -1933,16 +1933,31 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...result.buffers.vecOut as Float32Array]).toEqual([1, 2, 3, 4]);
     });
 
-  it("does not misclassify unsupported texture dimensions as semantic 2D reads", () => {
+  it("lowers layered and 3D texture atlas reads through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void sample(float *out, cudaTextureObject_t tex) {
-    out[0] = tex3D<float>(tex, 0.0f, 0.0f, 0.0f);
+    out[0] = tex2DLayered<float>(tex, 0.0f, 1.0f, 1.0f);
+    out[1] = tex3D<float>(tex, 2.0f, 1.0f, 1.0f);
   }`, { workgroupSize: [1, 1, 1] });
+      const input = {
+        buffers: { out: new Float32Array(2) },
+        textures: {
+          tex: { width: 4, height: 4, data: new Float32Array(Array.from({ length: 16 }, (_, index) => index + 1)) },
+        },
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const result = runCompiledKernelReference(compiled, input, launch);
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
-      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(false);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
-      expect(compiled.wgsl).not.toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.operations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "store", value: expect.objectContaining({ kind: "texture-read", callee: "tex2DLayered" }) }),
+        expect.objectContaining({ kind: "store", value: expect.objectContaining({ kind: "texture-read", callee: "tex3D" }) }),
+      ]));
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect([...result.buffers.out as Float32Array]).toEqual([9, 11]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([9, 11]);
     });
 
   it("lowers CUDA surf2Dread into guarded surface buffer loads", () => {

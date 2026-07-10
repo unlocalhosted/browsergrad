@@ -130,7 +130,10 @@ import {
   semanticVectorAssignmentOperatorSupported,
   semanticVectorBinaryOperatorSupported as semanticWgslVectorBinaryOperatorSupported,
 } from "./semantic_expression_contracts.js";
-import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
+import {
+  semanticTextureReadCoordinateShapeSupported,
+  semanticTextureSurfaceValueTypeSupported,
+} from "./semantic_texture_surface.js";
 import {
   semanticLocalArrayFillCallSupported,
   semanticLocalArrayInitSupported as semanticLocalArrayInitContractSupported,
@@ -1436,7 +1439,8 @@ function semanticWgslTextureReadSupported(
     texture.addressSpace === "texture" &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
     semanticWgslExpressionSupported(expression.y, "scalar", ir) &&
-    (expression.callee !== "texCubemap" || expression.z !== undefined && semanticWgslExpressionSupported(expression.z, "scalar", ir));
+    semanticTextureReadCoordinateShapeSupported(expression.callee, expression.z !== undefined) &&
+    (expression.z === undefined || semanticWgslExpressionSupported(expression.z, "scalar", ir));
 }
 
 function semanticWgslSurfaceReadSupported(
@@ -3245,13 +3249,16 @@ function emitSemanticTextureRead(
   }
   const x = emitSemanticExpressionAs(expression.x, ir, names, "f32", options);
   const y = emitSemanticExpressionAs(expression.y, ir, names, "f32", options);
+  const atlasY = expression.z === undefined || expression.callee === "texCubemap"
+    ? y
+    : `(${y} + ${emitSemanticExpressionAs(expression.z, ir, names, "f32", options)})`;
   const texture = nameFor(expression.texture.name, names);
   const descriptor = expression.callee === "texCubemap" ? undefined : options.textureDescriptors?.[expression.texture.name];
   const read = expression.callee === "texCubemap"
     ? emitSemanticCubemapTextureRead(texture, x, y, emitSemanticExpressionAs(expression.z!, ir, names, "f32", options))
     : descriptor
-    ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`
-    : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
+    ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${atlasY})`
+    : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${atlasY}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
   if (isSemanticFloatVectorType(expression.valueType)) return emitSemanticTextureVectorRead(read, expression.valueType);
   if (expression.valueType === "half") return `f16(${read}.r)`;
   if (expression.valueType === "bf16") return wgslRoundBfloat16(`${read}.r`);

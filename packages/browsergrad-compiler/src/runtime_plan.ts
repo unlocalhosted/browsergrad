@@ -172,6 +172,7 @@ function visitSemanticExpression(
       visitSemanticExpression(expression.texture, visit);
       visitSemanticExpression(expression.x, visit);
       visitSemanticExpression(expression.y, visit);
+      if (expression.z) visitSemanticExpression(expression.z, visit);
       return;
     case "surface-read":
       visitSemanticExpression(expression.surface, visit);

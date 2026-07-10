@@ -131,7 +131,10 @@ import {
   semanticVectorAssignmentOperatorSupported,
   semanticVectorBinaryOperatorSupported as semanticReferenceVectorBinaryOperatorSupported,
 } from "./semantic_expression_contracts.js";
-import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
+import {
+  semanticTextureReadCoordinateShapeSupported,
+  semanticTextureSurfaceValueTypeSupported,
+} from "./semantic_texture_surface.js";
 import {
   semanticLocalArrayFillCallSupported,
   semanticLocalArrayInitSupported as semanticLocalArrayInitContractSupported,
@@ -652,7 +655,8 @@ function semanticReferenceTextureReadSupported(
     expression.texture.addressSpace === "texture" &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled) &&
-    (expression.callee !== "texCubemap" || expression.z !== undefined && semanticReferenceExpressionSupported(expression.z, "scalar", compiled));
+    semanticTextureReadCoordinateShapeSupported(expression.callee, expression.z !== undefined) &&
+    (expression.z === undefined || semanticReferenceExpressionSupported(expression.z, "scalar", compiled));
 }
 
 function semanticReferenceTextureDescriptorsSupported(_compiled: CompiledCudaLiteKernel): boolean {
@@ -2160,16 +2164,19 @@ function evalSemanticTextureRead(
   if (!texture) throw semanticReferenceError(`missing texture input '${expression.texture.name}'`, expression.texture.span);
   const channels = texture.channels ?? 1;
   const descriptor = context.textureDescriptors[expression.texture.name] ?? {};
+  const xValue = evalNumber(expression.x, context);
+  const yValue = evalNumber(expression.y, context);
   if (expression.callee === "texCubemap") {
     const z = evalNumber(expression.z!, context);
-    const cube = semanticCubemapTextureCoord(evalNumber(expression.x, context), evalNumber(expression.y, context), z, texture.width, texture.height);
+    const cube = semanticCubemapTextureCoord(xValue, yValue, z, texture.width, texture.height);
     return evalSemanticTextureValue(expression.valueType, (lane) => texture.data[(cube.y * texture.width + cube.x) * channels + lane] ?? 0);
   }
+  const atlasY = expression.z === undefined ? yValue : yValue + evalNumber(expression.z, context);
   if (descriptor.filterMode === "linear") {
-    return evalSemanticTextureValue(expression.valueType, (lane) => evalSemanticLinearTextureRead(texture, descriptor, expression, context, channels, lane));
+    return evalSemanticTextureValue(expression.valueType, (lane) => evalSemanticLinearTextureRead(texture, descriptor, xValue, atlasY, channels, lane));
   }
-  const x = semanticTextureCoord(evalNumber(expression.x, context), texture.width, descriptor, "x");
-  const y = semanticTextureCoord(evalNumber(expression.y, context), texture.height, descriptor, "y");
+  const x = semanticTextureCoord(xValue, texture.width, descriptor, "x");
+  const y = semanticTextureCoord(atlasY, texture.height, descriptor, "y");
   return evalSemanticTextureValue(expression.valueType, (lane) => texture.data[(y * texture.width + x) * channels + lane] ?? 0);
 }
 
@@ -2189,13 +2196,13 @@ function semanticCubemapTextureCoord(x: number, y: number, z: number, width: num
 function evalSemanticLinearTextureRead(
   texture: WgslTexture2DInput,
   descriptor: CudaLiteTextureDescriptor,
-  expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
-  context: SemanticReferenceContext,
+  xValue: number,
+  yValue: number,
   channels: number,
   lane = 0,
 ): number {
-  const x = semanticLinearTextureAxis(evalNumber(expression.x, context), texture.width, descriptor, "x");
-  const y = semanticLinearTextureAxis(evalNumber(expression.y, context), texture.height, descriptor, "y");
+  const x = semanticLinearTextureAxis(xValue, texture.width, descriptor, "x");
+  const y = semanticLinearTextureAxis(yValue, texture.height, descriptor, "y");
   const v00 = texture.data[(y.i0 * texture.width + x.i0) * channels + lane] ?? 0;
   const v10 = texture.data[(y.i0 * texture.width + x.i1) * channels + lane] ?? 0;
   const v01 = texture.data[(y.i1 * texture.width + x.i0) * channels + lane] ?? 0;
@@ -4669,7 +4676,7 @@ function semanticExpressionContainsSubgroupCall(expression: SemanticExpression):
   }
   if (expression.kind === "member") return semanticExpressionContainsSubgroupCall(expression.object);
   if (expression.kind === "index") return semanticExpressionContainsSubgroupCall(expression.target) || semanticExpressionContainsSubgroupCall(expression.index);
-  if (expression.kind === "texture-read") return semanticExpressionContainsSubgroupCall(expression.texture) || semanticExpressionContainsSubgroupCall(expression.x) || semanticExpressionContainsSubgroupCall(expression.y);
+  if (expression.kind === "texture-read") return semanticExpressionContainsSubgroupCall(expression.texture) || semanticExpressionContainsSubgroupCall(expression.x) || semanticExpressionContainsSubgroupCall(expression.y) || (expression.z !== undefined && semanticExpressionContainsSubgroupCall(expression.z));
   if (expression.kind === "surface-read") return semanticExpressionContainsSubgroupCall(expression.surface) || semanticExpressionContainsSubgroupCall(expression.xBytes) || semanticExpressionContainsSubgroupCall(expression.y) || (expression.z !== undefined && semanticExpressionContainsSubgroupCall(expression.z));
   if (expression.kind === "cast") return semanticExpressionContainsSubgroupCall(expression.expression);
   if (expression.kind === "unary") return semanticExpressionContainsSubgroupCall(expression.argument);

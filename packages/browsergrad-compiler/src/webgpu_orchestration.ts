@@ -479,7 +479,8 @@ function expressionNeedsParentDispatch(expression: SemanticExpression): boolean 
     case "texture-read":
       return expressionNeedsParentDispatch(expression.texture) ||
         expressionNeedsParentDispatch(expression.x) ||
-        expressionNeedsParentDispatch(expression.y);
+        expressionNeedsParentDispatch(expression.y) ||
+        Boolean(expression.z && expressionNeedsParentDispatch(expression.z));
     case "surface-read":
       return expressionNeedsParentDispatch(expression.surface) ||
         expressionNeedsParentDispatch(expression.xBytes) ||
