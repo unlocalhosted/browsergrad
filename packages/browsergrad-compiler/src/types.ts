@@ -440,6 +440,7 @@ export interface CudaLiteBarrierUniformityFact {
 
 export interface CudaLiteBarrierUniformityFacts {
   readonly kernel: CudaLiteBarrierUniformityFact;
+  readonly functions: Readonly<Record<string, CudaLiteBarrierUniformityFact>>;
 }
 
 export interface CudaLiteAnalysis {

@@ -58,6 +58,7 @@ import {
 } from "./cuda_bfloat16_intrinsics.js";
 import {
   isCudaBarrierCallName,
+  isCudaCooperativeBarrierCallName,
   isCudaSyncthreadsPredicateCallName as isSyncthreadsPredicateBuiltin,
 } from "./cuda_sync_calls.js";
 import {
@@ -484,6 +485,7 @@ export function analyzeCudaLite(
   for (const texture of ast.textures) {
     declareTexture(texture, rootScope, declaredNames, diagnostics);
   }
+  const functionBarrierUniformity: Record<string, CudaLiteBarrierUniformityFact> = {};
   for (const fn of ast.functions) {
     if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
     const reachableFunction = reachableFunctionSpans.has(fn.span.start);
@@ -783,7 +785,12 @@ export function analyzeCudaLite(
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
     if (reachableFunction) {
-      validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
+      functionBarrierUniformity[fn.name] = validateDivergentReturnsBeforeBarriers(
+        fn.body,
+        new Map(fn.params.map((param) => [param.name, param])),
+        diagnostics,
+        options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE,
+      );
     }
     activeRequiredFeatures = previousRequiredFeatures;
     activeAtomicParams = previousAtomicParams;
@@ -830,7 +837,7 @@ export function analyzeCudaLite(
     atomicParams: [...atomicParams].sort(),
     atomicShared: [...atomicShared].sort(),
     atomicDeviceGlobals: [...atomicDeviceGlobals].sort(),
-    barrierUniformity: { kernel: kernelBarrierUniformity },
+    barrierUniformity: { kernel: kernelBarrierUniformity, functions: functionBarrierUniformity },
   };
 }
 
@@ -4834,8 +4841,7 @@ function isBarrierCall(expression: CudaLiteExpression): expression is Extract<Cu
 function isUniformityBarrierCall(expression: CudaLiteExpression): expression is Extract<CudaLiteExpression, { kind: "call" }> {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  return isCudaBarrierCallName(name) ||
-    name === "cg::sync";
+  return isCudaBarrierCallName(name) || isCudaCooperativeBarrierCallName(name);
 }
 
 function isInlineAsmBarrier(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { kind: "asm" }> {

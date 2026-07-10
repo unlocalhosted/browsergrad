@@ -51,6 +51,7 @@ import {
 } from "./cuda_cp_async.js";
 import {
   CUDA_BARRIER_CALL_NAMES,
+  CUDA_COOPERATIVE_BARRIER_CALL_NAMES,
   CUDA_FENCE_CALL_NAMES,
 } from "./cuda_sync_calls.js";
 import {
@@ -498,7 +499,7 @@ export function isSemanticKernelIrOperation(
 const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
-const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, "grid.sync", "cg::sync"]);
+const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, ...CUDA_COOPERATIVE_BARRIER_CALL_NAMES, "grid.sync"]);
 const FENCE_CALLS: ReadonlySet<string> = new Set(CUDA_FENCE_CALL_NAMES);
 const ATOMIC_CALL_PREFIX = "atomic";
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
@@ -561,6 +562,9 @@ export function lowerSemanticModelToKernelIr(
     semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
     sharedMemoryDimensions,
   );
+  const functionSharedMemory = functions.flatMap((fn) =>
+    collectDeclaredMemory(fn.body).filter((symbol) => symbol.addressSpace === "shared")
+  );
   return {
     kind: "semantic-kernel-ir",
     name: analysis.kernel.name,
@@ -573,6 +577,7 @@ export function lowerSemanticModelToKernelIr(
         reachable.symbolNames.has(symbol.name)
       ).map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
       ...localMemory.map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
+      ...functionSharedMemory.map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
     ],
     functions,
     operations,

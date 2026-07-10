@@ -26,6 +26,7 @@ import { cudaVibMinMaxInfo } from "./cuda_math_calls.js";
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
 import {
   isCudaBarrierCallName,
+  isCudaCooperativeBarrierCallName,
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
 import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
@@ -135,6 +136,12 @@ import {
   semanticTextureReadCoordinateShapeSupported,
   semanticTextureSurfaceValueTypeSupported,
 } from "./semantic_texture_surface.js";
+import {
+  semanticBarrierOperationsMatchUniformityProof,
+  semanticBarrierFunctionNames,
+  semanticBarrierShapeSupported,
+  semanticOperationsContainBarrier,
+} from "./semantic_barrier_contracts.js";
 import {
   semanticLocalArrayFillCallSupported,
   semanticLocalArrayInitSupported as semanticLocalArrayInitContractSupported,
@@ -259,7 +266,10 @@ export function runCompiledKernelSemanticReference(
             }
           }
         }
-        if (sharedMemory.size > 0) runSemanticBarrierScheduler(compiled.kernelIr.operations, blockContexts);
+        const barrierFunctions = semanticBarrierFunctionNames(compiled.kernelIr);
+        if (semanticOperationsContainBarrier(compiled.kernelIr.operations, barrierFunctions)) {
+          runSemanticBarrierScheduler(compiled.kernelIr.operations, blockContexts, barrierFunctions);
+        }
         else if (semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) runSemanticSubgroupPhases(compiled.kernelIr.operations, blockContexts);
         else for (const context of blockContexts) execSemanticOperations(compiled.kernelIr.operations, context);
       }
@@ -352,7 +362,7 @@ function unsupportedSemanticReferenceOperation(
         if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "any", compiled))) return operation;
         break;
       case "barrier":
-        if (!isCudaBarrierCallName(operation.callee) && operation.callee !== "cg::sync") return operation;
+        if (!isCudaBarrierCallName(operation.callee) && !isCudaCooperativeBarrierCallName(operation.callee)) return operation;
         break;
       case "fence":
         if (!isCudaFenceCallName(operation.callee)) return operation;
@@ -446,41 +456,23 @@ function semanticReferenceFunctionParamSupported(
 }
 
 function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel): boolean {
-  if (!compiled.kernelIr.memory.some((symbol) => symbol.kind === "shared")) return true;
-  if (compiled.kernelIr.functions.some((fn) => semanticOperationsContainBarrier(fn.body))) return false;
+  const ir = compiled.kernelIr;
+  const shared = ir.memory.filter((symbol) => symbol.kind === "shared");
+  const barrierFunctions = semanticBarrierFunctionNames(ir);
+  const containsBarrier = semanticOperationsContainBarrier(ir.operations, barrierFunctions);
+  if (shared.length === 0 && !containsBarrier) return true;
+  if (!shared.every((symbol) => symbol.dimensions.length === 0 || symbol.dimensions.every((dimension) => dimension > 0))) return false;
+  if (!containsBarrier) return true;
+  if (barrierFunctions.size > 0) {
+    return semanticBarrierShapeSupported(ir.operations, barrierFunctions) &&
+      ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
+        semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
+        semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name])
+      );
+  }
+  if (shared.length === 0) return true;
   const proof = compiled.kernelIr.barrierUniformity.kernel;
-  if (!proof.verified) return false;
-  return semanticDirectBarriersMatchProof(compiled.kernelIr.operations, new Set(proof.barrierStatementStarts));
-}
-
-function semanticOperationsContainBarrier(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.some((operation) => {
-    if (operation.kind === "barrier") return true;
-    if (operation.kind === "branch") {
-      return semanticOperationsContainBarrier(operation.consequent) ||
-        semanticOperationsContainBarrier(operation.alternate);
-    }
-    if (operation.kind === "block" || operation.kind === "loop") return semanticOperationsContainBarrier(operation.body);
-    return false;
-  });
-}
-
-function semanticDirectBarriersMatchProof(
-  operations: readonly SemanticKernelIrOperation[],
-  barrierStatementStarts: ReadonlySet<number>,
-): boolean {
-  return operations.every((operation) => {
-    if (operation.kind === "barrier") return barrierStatementStarts.has(operation.span.start);
-    if (operation.kind === "inline-asm") return classifyInlineAsm(operation.statement.template)?.kind !== "bar-sync";
-    if (operation.kind === "branch") {
-      return semanticDirectBarriersMatchProof(operation.consequent, barrierStatementStarts) &&
-        semanticDirectBarriersMatchProof(operation.alternate, barrierStatementStarts);
-    }
-    if (operation.kind === "block" || operation.kind === "loop") {
-      return semanticDirectBarriersMatchProof(operation.body, barrierStatementStarts);
-    }
-    return true;
-  });
+  return semanticBarrierOperationsMatchUniformityProof(compiled.kernelIr.operations, proof);
 }
 
 function semanticReferenceLoopInitSupported(
@@ -785,7 +777,7 @@ function semanticReferenceFunctionBodyShapeSupported(
   operations: readonly SemanticKernelIrOperation[],
   allowAtomic = false,
 ): boolean {
-  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowAtomic });
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true });
 }
 
 function semanticReferenceFunctionHasSharedPointer(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
@@ -795,6 +787,7 @@ function semanticReferenceFunctionHasSharedPointer(fn: CompiledCudaLiteKernel["k
 function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
   return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget, {
     allowCooperativeOps: true,
+    allowSharedMemory: true,
   });
 }
 
@@ -1325,6 +1318,7 @@ function execSemanticScopedOperations(
 function* execSemanticBarrierOperations(
   operations: readonly SemanticKernelIrOperation[],
   context: SemanticReferenceContext,
+  barrierFunctions: ReadonlySet<string>,
 ): SemanticBarrierGenerator {
   for (const operation of operations) {
     switch (operation.kind) {
@@ -1340,26 +1334,33 @@ function* execSemanticBarrierOperations(
       case "surface-write":
       case "surface-read-store":
       case "atomic":
-      case "call":
       case "expression":
       case "fence":
         execSemanticOperations([operation], context);
+        break;
+      case "call":
+        if (barrierFunctions.has(operation.callee)) {
+          yield* execSemanticBarrierFunctionCall(operation, context, barrierFunctions);
+        } else {
+          execSemanticOperations([operation], context);
+        }
         break;
       case "branch": {
         const control = yield* execSemanticBarrierScopedOperations(
           truthy(evalNumber(operation.condition, context)) ? operation.consequent : operation.alternate,
           context,
+          barrierFunctions,
         );
         if (control !== "fallthrough") return control;
         break;
       }
       case "block": {
-        const control = yield* execSemanticBarrierScopedOperations(operation.body, context);
+        const control = yield* execSemanticBarrierScopedOperations(operation.body, context, barrierFunctions);
         if (control !== "fallthrough") return control;
         break;
       }
       case "loop": {
-        const control = yield* execSemanticBarrierLoop(operation, context);
+        const control = yield* execSemanticBarrierLoop(operation, context, barrierFunctions);
         if (control !== "fallthrough") return control;
         break;
       }
@@ -1390,6 +1391,7 @@ function* execSemanticBarrierOperations(
 function* execSemanticBarrierScopedOperations(
   operations: readonly SemanticKernelIrOperation[],
   context: SemanticReferenceContext,
+  barrierFunctions: ReadonlySet<string>,
 ): SemanticBarrierGenerator {
   const savedLocals = new Map<string, SemanticValue | undefined>();
   for (const operation of operations) {
@@ -1397,7 +1399,7 @@ function* execSemanticBarrierScopedOperations(
     savedLocals.set(operation.target.name, context.locals.get(operation.target.name));
   }
   try {
-    return yield* execSemanticBarrierOperations(operations, context);
+    return yield* execSemanticBarrierOperations(operations, context, barrierFunctions);
   } finally {
     for (const [name, value] of savedLocals) {
       if (value === undefined) context.locals.delete(name);
@@ -1406,15 +1408,33 @@ function* execSemanticBarrierScopedOperations(
   }
 }
 
+function* execSemanticBarrierFunctionCall(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+  barrierFunctions: ReadonlySet<string>,
+): SemanticBarrierGenerator {
+  const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  if (!fn || fn.returnType !== "void") {
+    throw semanticReferenceError(`semantic reference barrier call '${operation.callee}' must target a void device function`, operation.span);
+  }
+  const child = createSemanticFunctionContext(fn, operation.args, context, operation.span);
+  const control = yield* execSemanticBarrierOperations(fn.body, child, barrierFunctions);
+  if (control === "break" || control === "continue") {
+    throw semanticReferenceError(`semantic reference function '${fn.name}' leaked ${control} across call boundary`, fn.span);
+  }
+  return "fallthrough";
+}
+
 function* execSemanticBarrierLoop(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "loop" }>,
   context: SemanticReferenceContext,
+  barrierFunctions: ReadonlySet<string>,
 ): SemanticBarrierGenerator {
   if (operation.loopKind === "for" && operation.init) execSemanticLoopInit(operation.init, context);
   for (let guard = 0; ; guard++) {
     if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
     if (operation.loopKind !== "do-while" && operation.condition !== undefined && !truthy(evalNumber(operation.condition, context))) return "fallthrough";
-    const control = yield* execSemanticBarrierScopedOperations(operation.body, context);
+    const control = yield* execSemanticBarrierScopedOperations(operation.body, context, barrierFunctions);
     if (control === "return") return control;
     if (control === "break") return "fallthrough";
     if (operation.loopKind === "for" && operation.update) evalNumber(operation.update, context);
@@ -3873,7 +3893,7 @@ function assignMemoryRef(
   return value;
 }
 
-function runSemanticFunction(
+function createSemanticFunctionContext(
   fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number],
   args: readonly SemanticExpression[],
   context: SemanticReferenceContext,
@@ -3948,6 +3968,16 @@ function runSemanticFunction(
     blockContexts: context.blockContexts,
     trace: context.trace,
   };
+  return child;
+}
+
+function runSemanticFunction(
+  fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number],
+  args: readonly SemanticExpression[],
+  context: SemanticReferenceContext,
+  span: SourceSpan,
+): SemanticReferenceContext {
+  const child = createSemanticFunctionContext(fn, args, context, span);
   const control = execSemanticOperations(fn.body, child);
   if (fn.returnType !== "void" && control !== "return") {
     throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
@@ -4592,8 +4622,9 @@ function semanticStorageScalarType(valueType: CudaLiteScalarType | undefined): C
 function runSemanticBarrierScheduler(
   operations: readonly SemanticKernelIrOperation[],
   contexts: readonly SemanticReferenceContext[],
+  barrierFunctions: ReadonlySet<string>,
 ): void {
-  const generators = contexts.map((context) => execSemanticBarrierOperations(operations, context));
+  const generators = contexts.map((context) => execSemanticBarrierOperations(operations, context, barrierFunctions));
   const active = generators.map(() => true);
   while (active.some(Boolean)) {
     let activeBefore = 0;

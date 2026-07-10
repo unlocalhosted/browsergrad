@@ -82,6 +82,7 @@ import {
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
 import {
   isCudaBarrierCallName,
+  isCudaCooperativeBarrierCallName,
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
 import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
@@ -134,6 +135,12 @@ import {
   semanticTextureReadCoordinateShapeSupported,
   semanticTextureSurfaceValueTypeSupported,
 } from "./semantic_texture_surface.js";
+import {
+  semanticBarrierOperationsMatchUniformityProof,
+  semanticBarrierFunctionNames,
+  semanticBarrierShapeSupported,
+  semanticOperationsContainBarrier,
+} from "./semantic_barrier_contracts.js";
 import {
   semanticLocalArrayFillCallSupported,
   semanticLocalArrayInitSupported as semanticLocalArrayInitContractSupported,
@@ -718,24 +725,14 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
     return operationsHaveOnlyTopLevelBarriers(ir.operations);
   }
   return semanticBarrierShapeSupported(ir.operations, barrierFunctions) &&
-    ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) => semanticBarrierShapeSupported(fn.body, barrierFunctions));
+    ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
+      semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
+      semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name])
+    );
 }
 
 function semanticDirectBarriersHaveAnalyzerProof(ir: SemanticKernelIrModule): boolean {
-  const proof = ir.barrierUniformity.kernel;
-  if (!proof.verified) return false;
-  const provenStarts = new Set(proof.barrierStatementStarts);
-  let hasBarrier = false;
-  const visit = (operations: readonly SemanticKernelIrOperation[]): boolean => operations.every((operation) => {
-    if (operation.kind === "barrier") {
-      hasBarrier = true;
-      return provenStarts.has(operation.span.start);
-    }
-    if (operation.kind === "branch") return visit(operation.consequent) && visit(operation.alternate);
-    if (operation.kind === "loop" || operation.kind === "block") return visit(operation.body);
-    return true;
-  });
-  return visit(ir.operations) && hasBarrier;
+  return semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel);
 }
 
 function semanticWgslBarrierSupported(
@@ -743,7 +740,7 @@ function semanticWgslBarrierSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (operation.callee === "grid.sync") return false;
-  if (operation.callee === "cg::sync") {
+  if (isCudaCooperativeBarrierCallName(operation.callee)) {
     const kind = operation.groupName === undefined ? undefined : semanticCooperativeGroupKind(ir, operation.groupName);
     return kind !== undefined && kind !== "grid";
   }
@@ -755,7 +752,13 @@ function semanticCooperativeGroupKind(ir: SemanticKernelIrModule, name: string):
     const kind = semanticCooperativeGroupKindInOperations([operation], name);
     if (kind !== undefined) return kind;
   }
-  return ir.functions.flatMap((fn) => fn.params).find((param) => param.name === name)?.cooperativeGroupKind;
+  for (const fn of ir.functions) {
+    const kind = semanticCooperativeGroupKindInOperations(fn.body, name);
+    if (kind !== undefined) return kind;
+    const paramKind = fn.params.find((param) => param.name === name)?.cooperativeGroupKind;
+    if (paramKind !== undefined) return paramKind;
+  }
+  return undefined;
 }
 
 function semanticCooperativeGroupKindInOperations(
@@ -777,72 +780,11 @@ function semanticCooperativeGroupKindInOperations(
   return undefined;
 }
 
-function semanticBarrierFunctionNames(ir: SemanticKernelIrModule): ReadonlySet<string> {
-  const names = new Set<string>();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const fn of ir.functions) {
-      if (names.has(fn.name) || !semanticOperationsContainBarrier(fn.body, names)) continue;
-      names.add(fn.name);
-      changed = true;
-    }
-  }
-  return names;
-}
-
-function semanticOperationsContainBarrier(
-  operations: readonly SemanticKernelIrOperation[],
-  barrierFunctions: ReadonlySet<string>,
-): boolean {
-  return operations.some((operation) =>
-    semanticOperationIsBarrier(operation, barrierFunctions) ||
-    operation.kind === "branch" && (semanticOperationsContainBarrier(operation.consequent, barrierFunctions) || semanticOperationsContainBarrier(operation.alternate, barrierFunctions)) ||
-    operation.kind === "loop" && semanticOperationsContainBarrier(operation.body, barrierFunctions) ||
-    operation.kind === "block" && semanticOperationsContainBarrier(operation.body, barrierFunctions)
-  );
-}
-
-function semanticOperationIsBarrier(
-  operation: SemanticKernelIrOperation,
-  barrierFunctions: ReadonlySet<string>,
-): boolean {
-  return operation.kind === "barrier" || operation.kind === "call" && barrierFunctions.has(operation.callee);
-}
-
 function operationsHaveOnlyTopLevelBarriers(operations: readonly SemanticKernelIrOperation[]): boolean {
   return operations.every((operation) =>
     operation.kind !== "branch" &&
     operation.kind !== "loop" &&
     operation.kind !== "block"
-  );
-}
-
-function semanticBarrierShapeSupported(
-  operations: readonly SemanticKernelIrOperation[],
-  barrierFunctions: ReadonlySet<string>,
-): boolean {
-  for (const [index, operation] of operations.entries()) {
-    const hasLaterBarrier = operations.slice(index + 1).some((item) => semanticOperationIsBarrier(item, barrierFunctions));
-    if (semanticOperationIsBarrier(operation, barrierFunctions)) continue;
-    if (operation.kind === "return") {
-      if (hasLaterBarrier) return false;
-      continue;
-    }
-    if (operation.kind !== "branch" && operation.kind !== "loop" && operation.kind !== "block") continue;
-    const nested = operation.kind === "branch" ? [...operation.consequent, ...operation.alternate] : operation.body;
-    if (semanticOperationsContainBarrier(nested, barrierFunctions)) return false;
-    if (hasLaterBarrier && semanticOperationsContainReturn(nested)) return false;
-  }
-  return true;
-}
-
-function semanticOperationsContainReturn(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.some((operation) =>
-    operation.kind === "return" ||
-    operation.kind === "branch" && (semanticOperationsContainReturn(operation.consequent) || semanticOperationsContainReturn(operation.alternate)) ||
-    operation.kind === "loop" && semanticOperationsContainReturn(operation.body) ||
-    operation.kind === "block" && semanticOperationsContainReturn(operation.body)
   );
 }
 
@@ -1549,7 +1491,7 @@ function semanticWgslFunctionBodyShapeSupported(
   operations: readonly SemanticKernelIrOperation[],
   allowAtomic = false,
 ): boolean {
-  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic });
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true });
 }
 
 function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {
@@ -1559,6 +1501,7 @@ function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functi
 function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["functions"][number]): boolean {
   return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget, {
     allowCooperativeOps: true,
+    allowSharedMemory: true,
   });
 }
 

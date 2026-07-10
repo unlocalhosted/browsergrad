@@ -1922,10 +1922,23 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   __global__ void sharedBarrierCaller(float *out) {
     sharedBarrierHelper(out);
   }`, { workgroupSize: [4, 1, 1] });
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array([1, 2, 3, 4]) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<f32, 4>;");
       expect(compiled.wgsl).toContain("sharedBarrierHelper(0u, 0u, local_id, workgroup_id, num_workgroups);");
       expect(compiled.wgsl).not.toContain("bg_inline_sharedBarrierHelper");
+      expect(compiled.kernelIr.barrierUniformity.functions.sharedBarrierHelper).toMatchObject({
+        verified: true,
+        barrierStatementStarts: [expect.any(Number)],
+      });
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
   it("lowers early returns before later barriers into active-lane guards", () => {

@@ -1075,6 +1075,79 @@ __global__ void cgShared(float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs uniform barrier-bearing device helpers through semantic WebGPU lowering", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void sharedBarrierHelper(float *out) {
+  __shared__ float tile[4];
+  tile[threadIdx.x] = out[threadIdx.x];
+  __syncthreads();
+  out[threadIdx.x] = tile[threadIdx.x] + 1.0f;
+}
+__global__ void sharedBarrierCaller(float *out) {
+  sharedBarrierHelper(out);
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Float32Array([1, 2, 3, 4]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...semantic.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
+  it("runs CUDA-samples-shaped barrier helper matmul through semantic WebGPU lowering", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void matrixMulCUDA(float *C, float *A, float *B, int wA, int wB) {
+  cooperative_groups::thread_block cta = cooperative_groups::this_thread_block();
+  int bx = blockIdx.x;
+  int by = blockIdx.y;
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+  int aBegin = wA * 16 * by;
+  int aEnd = aBegin + wA - 1;
+  int aStep = 16;
+  int bBegin = 16 * bx;
+  int bStep = 16 * wB;
+  float Csub = 0.0f;
+  for (int a = aBegin, b = bBegin; a <= aEnd; a += aStep, b += bStep) {
+    __shared__ float As[16][16];
+    __shared__ float Bs[16][16];
+    As[ty][tx] = A[a + wA * ty + tx];
+    Bs[ty][tx] = B[b + wB * ty + tx];
+    cooperative_groups::sync(cta);
+    for (int k = 0; k < 16; ++k) Csub += As[ty][k] * Bs[k][tx];
+    cooperative_groups::sync(cta);
+  }
+  int c = wB * 16 * by + 16 * bx;
+  C[c + wB * ty + tx] = Csub;
+}
+__global__ void matrixMulCUDA_block16(float *C, float *A, float *B, int wA, int wB) {
+  matrixMulCUDA(C, A, B, wA, wB);
+}`, { workgroupSize: [16, 16, 1] });
+    const side = 16;
+    const a = new Float32Array(side * side);
+    for (let index = 0; index < side; index++) a[index * side + index] = 1;
+    const b = new Float32Array(Array.from({ length: side * side }, (_, index) => index + 1));
+    const input = {
+      buffers: { C: new Float32Array(side * side), A: a, B: b },
+      scalars: { wA: side, wB: side },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [16, 16, 1] as const };
+    const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...semantic.buffers.C as Float32Array]).toEqual([...b]);
+    expect([...actual.buffers.C as Float32Array]).toEqual([...b]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `

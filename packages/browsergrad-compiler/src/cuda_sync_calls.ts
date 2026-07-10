@@ -1,8 +1,10 @@
 export const CUDA_BARRIER_CALL_NAMES = ["__syncthreads", "__syncwarp"] as const;
+export const CUDA_COOPERATIVE_BARRIER_CALL_NAMES = ["cg::sync", "cooperative_groups::sync"] as const;
 export const CUDA_FENCE_CALL_NAMES = ["__threadfence", "__threadfence_block", "__threadfence_system"] as const;
 export const CUDA_SYNCTHREADS_PREDICATE_CALL_NAMES = ["__syncthreads_count", "__syncthreads_and", "__syncthreads_or"] as const;
 
 export type CudaBarrierCallName = typeof CUDA_BARRIER_CALL_NAMES[number];
+export type CudaCooperativeBarrierCallName = typeof CUDA_COOPERATIVE_BARRIER_CALL_NAMES[number];
 export type CudaFenceCallName = typeof CUDA_FENCE_CALL_NAMES[number];
 export type CudaSyncthreadsPredicateCallName = typeof CUDA_SYNCTHREADS_PREDICATE_CALL_NAMES[number];
 export type CudaSyncthreadsPredicateReduction = "count" | "and" | "or";
@@ -10,6 +12,10 @@ export type CudaSyncthreadsCollectiveOp = "sum" | "all" | "any";
 
 export function isCudaBarrierCallName(name: string | undefined): name is CudaBarrierCallName {
   return name === "__syncthreads" || name === "__syncwarp";
+}
+
+export function isCudaCooperativeBarrierCallName(name: string | undefined): name is CudaCooperativeBarrierCallName {
+  return name === "cg::sync" || name === "cooperative_groups::sync";
 }
 
 export function isCudaFenceCallName(name: string | undefined): name is CudaFenceCallName {
