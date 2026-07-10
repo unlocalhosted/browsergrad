@@ -59,12 +59,13 @@ export function semanticBarrierShapeSupported(
 export function semanticBarrierOperationsMatchUniformityProof(
   operations: readonly SemanticKernelIrOperation[],
   proof: CudaLiteBarrierUniformityFact | undefined,
+  barrierFunctions: ReadonlySet<string> = new Set(),
 ): boolean {
   if (!proof?.verified) return false;
   const provenStarts = new Set(proof.barrierStatementStarts);
   let hasBarrier = false;
   const visit = (items: readonly SemanticKernelIrOperation[]): boolean => items.every((operation) => {
-    if (operation.kind === "barrier" || operation.kind === "inline-asm" && classifyInlineAsm(operation.statement.template)?.kind === "bar-sync") {
+    if (semanticOperationIsBarrier(operation, barrierFunctions)) {
       hasBarrier = true;
       return provenStarts.has(operation.span.start);
     }

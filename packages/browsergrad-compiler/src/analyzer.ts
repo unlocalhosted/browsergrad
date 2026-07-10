@@ -486,6 +486,7 @@ export function analyzeCudaLite(
     declareTexture(texture, rootScope, declaredNames, diagnostics);
   }
   const functionBarrierUniformity: Record<string, CudaLiteBarrierUniformityFact> = {};
+  const barrierFunctionNames = cudaBarrierFunctionNames(ast.functions);
   for (const fn of ast.functions) {
     if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
     const reachableFunction = reachableFunctionSpans.has(fn.span.start);
@@ -790,6 +791,7 @@ export function analyzeCudaLite(
         new Map(fn.params.map((param) => [param.name, param])),
         diagnostics,
         options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE,
+        barrierFunctionNames,
       );
     }
     activeRequiredFeatures = previousRequiredFeatures;
@@ -805,6 +807,7 @@ export function analyzeCudaLite(
     params,
     diagnostics,
     options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE,
+    barrierFunctionNames,
   );
   markExactAtomicPointerUsage(ast, kernel, options, atomicParams, atomicShared, atomicDeviceGlobals);
 
@@ -4875,14 +4878,25 @@ function isBarrierCall(expression: CudaLiteExpression): expression is Extract<Cu
 function isUniformityBarrierCall(
   expression: CudaLiteExpression,
   params: ReadonlyMap<string, CudaLiteParam>,
-): expression is Extract<CudaLiteExpression, { kind: "call" }> {
-  if (expression.kind !== "call") return false;
-  const name = expressionName(expression.callee);
-  if (isCudaBarrierCallName(name) || isCudaCooperativeBarrierCallName(name)) return true;
-  return expression.callee.kind === "member" &&
-    expression.callee.property === "sync" &&
-    expression.callee.object.kind === "identifier" &&
-    params.get(expression.callee.object.name)?.cooperativeGroupKind !== undefined;
+  barrierFunctionNames: ReadonlySet<string>,
+): boolean {
+  let found = false;
+  const visit = (item: CudaLiteExpression): void => {
+    if (found) return;
+    if (item.kind === "call") {
+      const name = expressionName(item.callee);
+      found = isCudaBarrierCallName(name) ||
+        isCudaCooperativeBarrierCallName(name) ||
+        name !== undefined && barrierFunctionNames.has(name) ||
+        item.callee.kind === "member" &&
+          item.callee.property === "sync" &&
+          item.callee.object.kind === "identifier" &&
+          params.get(item.callee.object.name)?.cooperativeGroupKind !== undefined;
+    }
+    if (!found) forEachExpressionChild(item, visit);
+  };
+  visit(expression);
+  return found;
 }
 
 function isInlineAsmBarrier(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { kind: "asm" }> {
@@ -4894,6 +4908,7 @@ function validateDivergentReturnsBeforeBarriers(
   params: ReadonlyMap<string, CudaLiteParam>,
   diagnostics: CudaLiteDiagnostic[],
   workgroupSize: readonly [number, number, number],
+  barrierFunctionNames: ReadonlySet<string>,
 ): CudaLiteBarrierUniformityFact {
   const uniformity = collectBarrierUniformity(statements, params, workgroupSize);
   const barrierStatementStarts: number[] = [];
@@ -4928,7 +4943,7 @@ function validateDivergentReturnsBeforeBarriers(
       case "block":
         return { containsBarrier: visitBlock(statement.body, divergentDepth, barrierLater, continueBarrierLater) };
       case "expr":
-        if (isUniformityBarrierCall(statement.expression, params)) {
+        if (isUniformityBarrierCall(statement.expression, params, barrierFunctionNames)) {
           barrierStatementStarts.push(statement.span.start);
           if (divergentDepth > 0) verified = false;
           return { containsBarrier: true };
@@ -4997,6 +5012,47 @@ function validateDivergentReturnsBeforeBarriers(
 
   visitBlock(statements, 0);
   return { verified, barrierStatementStarts: barrierStatementStarts.sort((left, right) => left - right) };
+}
+
+function cudaBarrierFunctionNames(functions: readonly CudaLiteDeviceFunction[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const fn of functions) {
+      if (names.has(fn.name)) continue;
+      let containsBarrier = false;
+      const cooperativeParams = new Set(fn.params.filter((param) => param.cooperativeGroupKind !== undefined).map((param) => param.name));
+      walkCudaLiteExpressions(fn.body, (expression) => {
+        if (containsBarrier || expression.kind !== "call") return;
+        const name = expressionName(expression.callee);
+        const cooperativeMemberBarrier = expression.callee.kind === "member" &&
+          expression.callee.property === "sync" &&
+          expression.callee.object.kind === "identifier" &&
+          cooperativeParams.has(expression.callee.object.name);
+        if (isCudaBarrierCallName(name) || isCudaCooperativeBarrierCallName(name) || cooperativeMemberBarrier || name !== undefined && names.has(name)) containsBarrier = true;
+      });
+      if (!containsBarrier && cudaStatementsContainInlineAsmBarrier(fn.body)) containsBarrier = true;
+      if (!containsBarrier) continue;
+      names.add(fn.name);
+      changed = true;
+    }
+  }
+  return names;
+}
+
+function cudaStatementsContainInlineAsmBarrier(statements: readonly CudaLiteStatement[]): boolean {
+  return statements.some((statement) => {
+    if (statement.kind === "asm") return isInlineAsmBarrier(statement);
+    if (statement.kind === "if") {
+      return cudaStatementsContainInlineAsmBarrier(statement.consequent) ||
+        (statement.alternate !== undefined && cudaStatementsContainInlineAsmBarrier(statement.alternate));
+    }
+    if (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while" || statement.kind === "block") {
+      return cudaStatementsContainInlineAsmBarrier(statement.body);
+    }
+    return false;
+  });
 }
 
 interface BarrierUniformityContext {

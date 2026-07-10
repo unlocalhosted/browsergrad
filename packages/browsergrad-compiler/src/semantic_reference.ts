@@ -470,15 +470,16 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
   if (!shared.every((symbol) => symbol.dimensions.length === 0 || symbol.dimensions.every((dimension) => dimension > 0))) return false;
   if (!containsBarrier) return true;
   if (barrierFunctions.size > 0) {
-    return semanticBarrierShapeSupported(ir.operations, barrierFunctions) &&
+    return (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+        semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
       ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
         semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
-        semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name])
+        semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name], barrierFunctions)
       );
   }
   if (shared.length === 0) return true;
   const proof = compiled.kernelIr.barrierUniformity.kernel;
-  return semanticBarrierOperationsMatchUniformityProof(compiled.kernelIr.operations, proof);
+  return semanticBarrierOperationsMatchUniformityProof(compiled.kernelIr.operations, proof, semanticBarrierFunctionNames(compiled.kernelIr));
 }
 
 function semanticReferenceLoopInitSupported(

@@ -3481,6 +3481,29 @@ __global__ void helperGlobal(uint *out) { record(out); }
     expect([...actual.buffers.out as Uint32Array]).toEqual([1]);
   });
 
+  it("runs scalar helper results with dynamic frexp side effects into shared memory", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ int ceil_pow2(int n) {
+  if (0 == (n & (n - 1))) return n;
+  int exp;
+  frexp(float(n), &exp);
+  return 1 << exp;
+}
+__global__ void sharedHelperResult(int *out, int n) {
+  __shared__ uint value;
+  if (threadIdx.x == 0) value = ceil_pow2(n);
+  __syncthreads();
+  out[threadIdx.x] = int(value);
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { out: new Int32Array(2) }, scalars: { n: 5 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Int32Array]).toEqual([8, 8]);
+  });
+
   it("runs half2 comparison intrinsics through f32 compatibility mode on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

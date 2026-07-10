@@ -311,6 +311,29 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
+  it("lowers ignored dynamic frexp results with local exponent side effects", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int ceil_pow2(int n) {
+  if (0 == (n & (n - 1))) return n;
+  int exp;
+  frexp(float(n), &exp);
+  return 1 << exp;
+}
+__global__ void shared_helper_result(int *out, int n) {
+  __shared__ uint value;
+  if (threadIdx.x == 0) value = ceil_pow2(n);
+  __syncthreads();
+  out[threadIdx.x] = int(value);
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(2) }, scalars: { n: 5 } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...result.buffers.out as Int32Array]).toEqual([8, 8]);
+  });
   it("uses C-style truncating integer division and remainder in the reference interpreter", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void divmod(int* out, int n) {
@@ -1454,16 +1477,22 @@ describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
         { buffers: { out: new Float32Array(3), expOut: new Int32Array(3) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(3), expOut: new Int32Array(3) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
-      expect(compiled.wgsl).toContain("fn bg_frexp(");
-      expect(compiled.wgsl).toContain("bg_frexp(9.0, &exponent)");
-      expect(compiled.wgsl).toContain("bg_frexp(10.0, &bg_frexp_exp_");
-      expect(compiled.wgsl).toContain("expOut[1] = i32(bg_frexp_exp_");
-      expect(compiled.wgsl).toContain("out[2] = f32(bg_frexp(12.0, &bg_frexp_exp_");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var bg__bg_frexp_value_");
+      expect(compiled.wgsl).toContain("expOut[1u] = select(");
+      expect(compiled.wgsl).not.toContain("fn bg_frexp(");
       expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(0.5625, 6);
       expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(0.625, 6);
       expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(0.75, 6);
       expect([...result.buffers.expOut as Int32Array]).toEqual([4, 4, 4]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+      expect([...semanticResult.buffers.expOut as Int32Array]).toEqual([4, 4, 4]);
     });
 
   it("lowers C modf integer-part out params", () => {

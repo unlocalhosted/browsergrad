@@ -729,15 +729,16 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
   if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
     return operationsHaveOnlyTopLevelBarriers(ir.operations);
   }
-  return semanticBarrierShapeSupported(ir.operations, barrierFunctions) &&
+  return (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+      semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
     ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
       semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
-      semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name])
+      semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name], barrierFunctions)
     );
 }
 
 function semanticDirectBarriersHaveAnalyzerProof(ir: SemanticKernelIrModule): boolean {
-  return semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel);
+  return semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, semanticBarrierFunctionNames(ir));
 }
 
 function semanticWgslBarrierSupported(
@@ -5043,6 +5044,12 @@ function emitSemanticBinary(
   if (isSemanticFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
     const valueType = expression.valueType as CudaLiteScalarType;
     return `(${emitSemanticVectorOperand(expression.left, valueType, ir, names, options, textureSpecializations)} ${expression.operator} ${emitSemanticVectorOperand(expression.right, valueType, ir, names, options, textureSpecializations)})`;
+  }
+  if (expression.operator === "<<" || expression.operator === ">>") {
+    const leftType = semanticExpressionWgslScalar(expression.left) === "u32" ? "u32" : "i32";
+    const left = emitSemanticExpressionAs(expression.left, ir, names, leftType, options, textureSpecializations);
+    const right = emitSemanticExpressionAs(expression.right, ir, names, "u32", options, textureSpecializations);
+    return `(${left} ${expression.operator} ${right})`;
   }
   const operandType = semanticBinaryOperandType(expression);
   const left = emitSemanticExpressionAs(expression.left, ir, names, operandType, options, textureSpecializations);

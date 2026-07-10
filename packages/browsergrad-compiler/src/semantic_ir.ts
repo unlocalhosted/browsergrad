@@ -1784,16 +1784,14 @@ function semanticFrexpCallResult(
   span: SourceSpan,
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
   const value = expression.args[0];
-  const exponentTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
+  const exponentTarget = source.args[1] === undefined ? undefined : mathOutTargetExpressionFromSource(source.args[1], scope);
   if (value === undefined || !exponentTarget || !semanticExpressionSideEffectFree(value)) return undefined;
-  const exponentRef = memoryRefFromExpression(exponentTarget);
-  if (!exponentRef) return undefined;
   const temp = tempScalarSymbol("__bg.frexp.value", span, "float");
   const tempValue = semanticSymbolExpression(temp, value.span);
   return {
     sideEffects: [
       { kind: "declare", target: temp, init: value, span },
-      storeOperation(exponentRef, unaryIntCallExpression("__bg_frexp_exponent", tempValue, expression.span), span),
+      mathOutStoreOrAssignOperation(exponentTarget, unaryIntCallExpression("__bg_frexp_exponent", tempValue, expression.span), span),
     ],
     value: unaryFloatCallExpression("__bg_frexp_mantissa", tempValue, expression.span),
   };
@@ -1916,19 +1914,14 @@ function semanticFrexpStore(
 ): SemanticKernelIrOperation | undefined {
   if (expression.callee.kind !== "symbol" || !isFrexpCallName(expression.callee.name)) return undefined;
   const value = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
-  const target = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
-  if (value === undefined || !target) return undefined;
-  const targetRef = memoryRefFromExpression(target);
-  if (!targetRef) return undefined;
+  const target = source.args[1] === undefined ? undefined : mathOutTargetExpressionFromSource(source.args[1], scope);
+  if (value === undefined) {
+    const dynamic = semanticFrexpCallResult(source, expression, scope, span);
+    return dynamic === undefined ? undefined : { kind: "block", body: dynamic.sideEffects, span };
+  }
+  if (!target) return undefined;
   const exponent = frexpExponentForFiniteNumber(value);
-  return {
-    kind: "store",
-    target: targetRef,
-    value: intNumberExpression(exponent, expression.span),
-    operator: "=",
-    reads: [],
-    span,
-  };
+  return mathOutStoreOrAssignOperation(target, intNumberExpression(exponent, expression.span), span);
 }
 
 function semanticSincosStores(
