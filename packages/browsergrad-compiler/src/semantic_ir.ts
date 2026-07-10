@@ -1204,6 +1204,7 @@ function lowerExpression(
         };
       }
       const callee = lowerExpression(expression.callee, scope);
+      const cooperativeGroupValueType = semanticCooperativeGroupCallValueType(expression);
       return {
         kind: "call",
         callee,
@@ -1223,7 +1224,7 @@ function lowerExpression(
             ? "uint"
           : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)
             ? "int"
-            : expression.templateValueType ?? semanticIntrinsicReturnType(expression.callee.kind === "identifier" ? expression.callee.name : undefined, args) ?? expressionValueType(callee) ?? expressionValueType(args[0])),
+            : cooperativeGroupValueType ?? expression.templateValueType ?? semanticIntrinsicReturnType(expression.callee.kind === "identifier" ? expression.callee.name : undefined, args) ?? expressionValueType(callee) ?? expressionValueType(args[0])),
         span: expression.span,
       };
     }
@@ -1284,6 +1285,16 @@ function lowerExpression(
       return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
     }
   }
+}
+
+function semanticCooperativeGroupCallValueType(
+  expression: CudaLiteCallExpression,
+): CudaLiteScalarType | undefined {
+  if (
+    expression.callee.kind !== "member" ||
+    (expression.callee.property !== "thread_rank" && expression.callee.property !== "size")
+  ) return undefined;
+  return "int";
 }
 
 function lowerForInitStatement(

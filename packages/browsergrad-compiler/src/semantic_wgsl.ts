@@ -308,7 +308,7 @@ export function emitSemanticKernelIrWgsl(
       rawNames.add(pointerBaseOffsetUniformName(param.name));
     }
   }
-  const names = createWgslNameMap([...rawNames]);
+  const names = createWgslNameMap([...rawNames], [], ir.functions.map((fn) => fn.name));
   const initializedScalarConstants = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length === 0);
   const initializedConstantArrays = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length > 0);
   const uniformParams = [
@@ -2342,8 +2342,9 @@ function emitSemanticFunction(
   rawName = fn.name,
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
+  const mutableParams = semanticFunctionMutableValueParams(fn);
   const params = [
-    ...fn.params.flatMap((param) => emitSemanticFunctionParams(param, names, semanticFunctionSharedPointerAtomicParams(fn).has(param.name))),
+    ...fn.params.flatMap((param) => emitSemanticFunctionParams(param, names, semanticFunctionSharedPointerAtomicParams(fn).has(param.name), mutableParams.has(param.name))),
     "local_id: vec3<u32>",
     "workgroup_id: vec3<u32>",
     "num_workgroups: vec3<u32>",
@@ -2351,10 +2352,42 @@ function emitSemanticFunction(
   const returnType = fn.returnType === "void" ? "" : ` -> ${wgslValueType(fn.returnType)}`;
   return [
     `fn ${nameFor(rawName, names)}(${params})${returnType} {`,
+    ...fn.params.filter((param) => mutableParams.has(param.name)).map((param) =>
+      `  var ${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)} = ${semanticFunctionParamIncomingName(param, names)};`),
     ...emitSemanticOperations(fn.body, ir, names, 1, true, options, textureSpecializations),
     ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslValueType(fn.returnType))};`]),
     "}",
   ];
+}
+
+function semanticFunctionMutableValueParams(
+  fn: SemanticKernelIrModule["functions"][number],
+): ReadonlySet<string> {
+  const mutable = new Set<string>();
+  const paramNames = new Set(fn.params
+    .filter((param) => !param.pointer && !param.constant && param.cooperativeGroupKind === undefined && param.addressSpace === "local")
+    .map((param) => param.name));
+  walkSemanticOperations(fn.body, (expression) => {
+    const target = expression.kind === "assignment"
+      ? expression.target
+      : expression.kind === "update"
+      ? expression.argument
+      : undefined;
+    const name = target?.kind === "symbol"
+      ? target.name
+      : target?.kind === "member" && target.object.kind === "symbol"
+      ? target.object.name
+      : undefined;
+    if (name && paramNames.has(name)) mutable.add(name);
+  });
+  return mutable;
+}
+
+function semanticFunctionParamIncomingName(
+  param: SemanticKernelIrModule["functions"][number]["params"][number],
+  names: ReadonlyMap<string, string>,
+): string {
+  return `bg_arg_${nameFor(param.name, names)}`;
 }
 
 function emitSemanticFunctionParamType(
@@ -2374,6 +2407,7 @@ function emitSemanticFunctionParams(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
   names: ReadonlyMap<string, string>,
   atomicSharedPointer = false,
+  mutableValueParam = false,
 ): readonly string[] {
   if (param.cooperativeGroupKind !== undefined) return [];
   if (param.pointer && param.addressSpace === "storage") {
@@ -2388,7 +2422,7 @@ function emitSemanticFunctionParams(
       `${nameFor(semanticPointerBaseParamName(param.name), names)}: u32`,
     ];
   }
-  return [`${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param, atomicSharedPointer)}`];
+  return [`${mutableValueParam ? semanticFunctionParamIncomingName(param, names) : nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param, atomicSharedPointer)}`];
 }
 
 function emitSemanticAssignmentStatement(
@@ -4136,6 +4170,10 @@ function emitSemanticMathCall(
   if (wgslCallee === "clock") {
     return "u32(workgroup_id.x * 104729u + workgroup_id.y * 1009u + workgroup_id.z * 97u + local_id.x + local_id.y * 31u + local_id.z * 7u)";
   }
+  if (wgslCallee === "min" || wgslCallee === "max") {
+    const scalar = semanticMathCallOperandType(expression.args);
+    return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, scalar, options, textureSpecializations)).join(", ")})`;
+  }
   if (wgslCallee === "div_ceil") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
@@ -4934,6 +4972,14 @@ function semanticBinaryOperandType(expression: Extract<SemanticExpression, { rea
   const result = wgslValueScalar(expression.valueType);
   if (left === "f32" || right === "f32" || result === "f32") return "f32";
   if (left === "u32" || right === "u32" || result === "u32") return "u32";
+  return "i32";
+}
+
+function semanticMathCallOperandType(args: readonly SemanticExpression[]): WgslValueType {
+  const types = args.map(semanticExpressionWgslScalar);
+  if (types.includes("f32")) return "f32";
+  if (types.includes("f16")) return "f16";
+  if (types.includes("u32")) return "u32";
   return "i32";
 }
 

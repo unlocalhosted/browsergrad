@@ -814,6 +814,31 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([1, 12, 3, 4]);
     });
 
+  it("emits integer min/max device helpers with integer operands and safe WGSL names", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ int clamp(int x, int lo, int hi) {
+    x = max(lo, min(hi, x));
+    return x;
+  }
+
+  __global__ void clampKernel(int *out) {
+    out[0] = clamp(-5, -2, 4);
+    out[1] = clamp(8, -2, 4);
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = { buffers: { out: new Int32Array(2) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("fn bg_clamp(bg_arg_x: i32, lo: i32, hi: i32");
+      expect(compiled.wgsl).toContain("var x: i32 = bg_arg_x;");
+      expect(compiled.wgsl).toContain("x = max(lo, min(hi, x));");
+      expect([...semanticResult.buffers.out as Int32Array]).toEqual([-2, 4]);
+      expect([...result.buffers.out as Int32Array]).toEqual([-2, 4]);
+    });
+
   it("lowers CUDA vector swizzle writes through storage vector views", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void vector_storage_swizzle_writes(float* out, uint* ui) {

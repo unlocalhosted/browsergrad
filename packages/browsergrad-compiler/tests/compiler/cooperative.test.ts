@@ -439,7 +439,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.wgsl).toContain("enable subgroups;");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_float_32(val, 16u, 32u, local_id)");
-      expect(compiled.wgsl).toContain("fn warpReduceSum(val: f32, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> f32");
+      expect(compiled.wgsl).toContain("fn warpReduceSum(bg_arg_val: f32, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> f32");
+      expect(compiled.wgsl).toContain("var val: f32 = bg_arg_val;");
       expect(compiled.wgsl).toContain("val = warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
     });
 
@@ -1133,7 +1134,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       if (phases.supported) {
         expect(phases.phases).toHaveLength(2);
         expect(canEmitSemanticKernelIrWgsl(phases.phases[0]!)).toBe(true);
-        expect(emitSemanticKernelIrWgsl(phases.phases[0]!).wgsl).toContain("fn reduceBlock");
+        const phaseWgsl = emitSemanticKernelIrWgsl(phases.phases[0]!).wgsl;
+        expect(phaseWgsl).toContain("fn reduceBlock");
+        expect(phaseWgsl).not.toContain("i32(local_id.x) == 0.0");
       }
       expect(plan).toMatchObject({ supported: true, kind: "grid-sync-phases" });
     });

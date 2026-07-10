@@ -4932,7 +4932,7 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn mix");
+      expect(compiled.wgsl).toContain("fn bg_mix");
       expect([...result.buffers.out as Uint32Array]).toEqual([518]);
     });
 

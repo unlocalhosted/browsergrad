@@ -51,13 +51,37 @@ const WGSL_RESERVED_IDENTIFIERS = new Set([
   "num_workgroups",
 ]);
 
-export function createWgslNameMap(names: readonly string[], extraReserved: Iterable<string> = []): ReadonlyMap<string, string> {
+// User declarations share WGSL's function namespace with these predeclared operations.
+const WGSL_PREDECLARED_FUNCTION_IDENTIFIERS = new Set([
+  "abs", "acos", "acosh", "all", "any", "arrayLength", "asin", "asinh", "atan", "atan2",
+  "ceil", "clamp", "cos", "cosh", "countLeadingZeros", "countOneBits", "countTrailingZeros",
+  "cross", "degrees", "determinant", "distance", "dot", "dpdx", "dpdxCoarse", "dpdxFine",
+  "dpdy", "dpdyCoarse", "dpdyFine", "exp", "exp2", "extractBits", "faceForward",
+  "firstLeadingBit", "firstTrailingBit", "floor", "fma", "fract", "frexp", "fwidth",
+  "fwidthCoarse", "fwidthFine", "insertBits", "inverseSqrt", "ldexp", "length", "log", "log2",
+  "max", "min", "mix", "modf", "normalize", "pack2x16float", "pack2x16snorm", "pack2x16unorm",
+  "pack4x8snorm", "pack4x8unorm", "pow", "quantizeToF16", "radians", "reflect", "refract",
+  "reverseBits", "round", "sign", "sin", "sinh", "smoothstep", "sqrt", "step", "tan", "tanh",
+  "textureDimensions", "textureGather", "textureGatherCompare", "textureLoad", "textureNumLayers",
+  "textureNumLevels", "textureNumSamples", "textureSample", "textureSampleBaseClampToEdge",
+  "textureSampleBias", "textureSampleCompare", "textureSampleCompareLevel", "textureSampleGrad",
+  "textureSampleLevel", "transpose", "trunc", "unpack2x16float", "unpack2x16snorm", "unpack2x16unorm",
+  "unpack4x8snorm", "unpack4x8unorm",
+]);
+
+export function createWgslNameMap(
+  names: readonly string[],
+  extraReserved: Iterable<string> = [],
+  functionNames: Iterable<string> = [],
+): ReadonlyMap<string, string> {
   const used = new Set([...WGSL_RESERVED_IDENTIFIERS, ...extraReserved]);
+  const functions = new Set(functionNames);
   const out = new Map<string, string>();
   for (const name of names) {
     if (out.has(name)) continue;
     const candidate = safeWgslIdentifier(name);
-    if (!used.has(candidate)) {
+    const shadowsPredeclaredFunction = functions.has(name) && WGSL_PREDECLARED_FUNCTION_IDENTIFIERS.has(candidate);
+    if (!used.has(candidate) && !shadowsPredeclaredFunction) {
       used.add(candidate);
       out.set(name, candidate);
       continue;
