@@ -24,8 +24,14 @@ export function semanticWgslCooperativeGroupCallSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol" || expression.args.length !== 0) return false;
-  if (expression.callee.property !== "thread_rank" && expression.callee.property !== "size") return false;
-  return semanticCooperativeGroupInfo(ir, expression.callee.object.name) !== undefined;
+  if (
+    expression.callee.property !== "thread_rank" &&
+    expression.callee.property !== "size" &&
+    expression.callee.property !== "meta_group_rank" &&
+    expression.callee.property !== "meta_group_size"
+  ) return false;
+  const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
+  return group !== undefined && !group.partitioned && group.kind !== "binary" && group.kind !== "coalesced";
 }
 
 export function semanticWgslCooperativeReduceCallSupported(
@@ -65,6 +71,18 @@ export function emitSemanticCooperativeGroupCall(
       ? String(group.tileSize ?? 32)
       : String(semanticCooperativeWorkgroupSize(ir));
     return expression.valueType === "uint" ? `u32(${size})` : size;
+  }
+  if (expression.callee.property === "meta_group_rank") {
+    const rank = group.kind === "tile"
+      ? `i32(${semanticCooperativeLocalLinearRank(ir)} / ${group.tileSize ?? 32}u)`
+      : "0";
+    return expression.valueType === "uint" ? `u32(${rank})` : rank;
+  }
+  if (expression.callee.property === "meta_group_size") {
+    const size = group.kind === "tile"
+      ? Math.ceil(semanticCooperativeWorkgroupSize(ir) / (group.tileSize ?? 32))
+      : 1;
+    return expression.valueType === "uint" ? `${size}u` : String(size);
   }
   return undefined;
 }

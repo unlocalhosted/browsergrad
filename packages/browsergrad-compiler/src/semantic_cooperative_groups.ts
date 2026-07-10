@@ -3,6 +3,7 @@ import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semant
 export interface SemanticCooperativeGroupInfo {
   readonly kind: "thread" | "block" | "grid" | "tile" | "coalesced" | "binary";
   readonly tileSize?: number;
+  readonly partitioned?: boolean;
 }
 
 export function semanticCooperativeGroupInfo(
@@ -18,6 +19,7 @@ export function semanticCooperativeGroupInfo(
     return {
       kind: declaration.declaration.groupKind,
       ...(declaration.declaration.tileSize === undefined ? {} : { tileSize: declaration.declaration.tileSize }),
+      ...(declaration.declaration.partitionParent === undefined ? {} : { partitioned: true }),
     };
   }
   const param = ir.functions.flatMap((fn) => fn.params)

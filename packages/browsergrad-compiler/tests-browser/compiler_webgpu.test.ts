@@ -3459,6 +3459,34 @@ __global__ void sharedReinterpret(int *out) {
     expect([...actual.buffers.out as Int32Array]).toEqual([-1]);
   });
 
+  it("runs cooperative meta topology and uniform member barriers through semantic WGSL", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void cooperativeMetaBarrier(int *out) {
+  __shared__ int values[8];
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<4> tile = cg::tiled_partition<4>(block);
+  uint rank = block.thread_rank();
+  out[rank] = tile.meta_group_size() * 10 + tile.meta_group_rank() + tile.thread_rank() * 100;
+  values[rank] = 1;
+  uint limit = block.size() >> 1;
+  while (limit >= 1) {
+    block.sync();
+    if (rank < limit) values[rank] += values[rank + limit];
+    limit >>= 1;
+  }
+  block.sync();
+  if (rank == 0) out[8] = values[0];
+}`, { workgroupSize: [8, 1, 1] });
+    const input = { buffers: { out: new Int32Array(9) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [8, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Int32Array]).toEqual([20, 120, 220, 320, 21, 121, 221, 321, 8]);
+  });
+
   it("runs packed shared uchar aliases through semantic WGSL", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

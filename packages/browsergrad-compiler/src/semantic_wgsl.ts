@@ -1299,13 +1299,13 @@ function semanticWgslScalarCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
+  if (semanticWgslCooperativeGroupCallSupported(expression, ir)) return true;
   if (expression.callee.kind !== "symbol") return false;
   const callee = expression.callee.name;
   if (SEMANTIC_CURAND_VECTOR_CALLS.has(callee) || SEMANTIC_HALF2_VECTOR_CALLS.has(callee) || SEMANTIC_BF162_VECTOR_CALLS.has(callee) || cudaVectorConstructorType(callee)) return false;
   const fn = ir.functions.find((item) => item.name === callee);
   if (fn && isSemanticFloatVectorType(fn.returnType)) return false;
-  return semanticWgslCooperativeGroupCallSupported(expression, ir) ||
-    semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
+  return semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
     semanticWgslFunctionCallSupported(expression, ir) ||
     semanticWgslAtomicCallSupported(expression, ir) ||
     semanticWgslCurandCallSupported(expression, ir) ||

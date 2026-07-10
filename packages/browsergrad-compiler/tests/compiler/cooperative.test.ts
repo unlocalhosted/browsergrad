@@ -1525,9 +1525,47 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { buffers: { out: new Int32Array(8) } },
         { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Int32Array(8) } },
+        { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      );
 
-      expect(compiled.wgsl).toContain("/ 4)");
+      expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("/ 4u");
       expect([...result.buffers.out as Int32Array]).toEqual([20, 120, 220, 320, 21, 121, 221, 321]);
+      expect([...semanticResult.buffers.out as Int32Array]).toEqual([20, 120, 220, 320, 21, 121, 221, 321]);
+    });
+
+  it("proves uniform member barriers inside shared reduction loops", () => {
+      const compiled = compileCudaLiteKernel(`
+  namespace cg = cooperative_groups;
+  __global__ void memberBarrierLoop(int *out) {
+    __shared__ int values[8];
+    cg::thread_block block = cg::this_thread_block();
+    uint rank = block.thread_rank();
+    values[rank] = 1;
+    uint limit = block.size() >> 1;
+    while (limit >= 1) {
+      block.sync();
+      if (rank < limit) values[rank] += values[rank + limit];
+      limit >>= 1;
+    }
+    block.sync();
+    if (rank == 0) out[0] = values[0];
+  }`, { workgroupSize: [8, 1, 1] });
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      );
+
+      expect(compiled.kernelIr.barrierUniformity.kernel).toMatchObject({ verified: true });
+      expect(compiled.kernelIr.barrierUniformity.kernel.barrierStatementStarts).toHaveLength(2);
+      expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect([...semanticResult.buffers.out as Int32Array]).toEqual([8]);
     });
 
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {

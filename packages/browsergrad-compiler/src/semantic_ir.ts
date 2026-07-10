@@ -1507,7 +1507,10 @@ function semanticCooperativeGroupCallValueType(
 ): CudaLiteScalarType | undefined {
   if (
     expression.callee.kind !== "member" ||
-    (expression.callee.property !== "thread_rank" && expression.callee.property !== "size")
+    expression.callee.property !== "thread_rank" &&
+    expression.callee.property !== "size" &&
+    expression.callee.property !== "meta_group_rank" &&
+    expression.callee.property !== "meta_group_size"
   ) return undefined;
   return "int";
 }

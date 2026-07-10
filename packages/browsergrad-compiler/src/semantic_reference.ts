@@ -711,11 +711,15 @@ function semanticReferenceCooperativeGroupCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return expression.callee.kind === "member" &&
+  if (!(expression.callee.kind === "member" &&
     expression.callee.object.kind === "symbol" &&
     expression.args.length === 0 &&
-    (expression.callee.property === "thread_rank" || expression.callee.property === "size") &&
-    semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name) !== undefined;
+    (expression.callee.property === "thread_rank" ||
+      expression.callee.property === "size" ||
+      expression.callee.property === "meta_group_rank" ||
+      expression.callee.property === "meta_group_size"))) return false;
+  const group = semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name);
+  return group !== undefined && !group.partitioned && group.kind !== "binary" && group.kind !== "coalesced";
 }
 
 function semanticReferenceFunctionArgSupported(
@@ -3588,26 +3592,33 @@ function evalSemanticCooperativeGroupCall(
   if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") {
     throw semanticReferenceError("semantic reference cooperative-group call requires symbol receiver", expression.span);
   }
-  if (expression.callee.property !== "thread_rank" && expression.callee.property !== "size") {
-    throw semanticReferenceError("semantic reference cooperative-group call requires rank or size", expression.span);
+  if (
+    expression.callee.property !== "thread_rank" &&
+    expression.callee.property !== "size" &&
+    expression.callee.property !== "meta_group_rank" &&
+    expression.callee.property !== "meta_group_size"
+  ) {
+    throw semanticReferenceError("semantic reference cooperative-group call requires rank, size, or meta-group topology", expression.span);
   }
   return semanticReferenceCooperativeGroupValue(expression.callee.object.name, expression.callee.property, context);
 }
 
 function semanticReferenceCooperativeGroupValue(
   name: string,
-  property: "thread_rank" | "size",
+  property: "thread_rank" | "size" | "meta_group_rank" | "meta_group_size",
   context: SemanticReferenceContext,
 ): number {
+  const group = semanticCooperativeGroupInfo(context.compiled.kernelIr, name);
+  if (!group) throw semanticReferenceError(`unknown cooperative group '${name}'`, context.compiled.kernelIr.span);
+  const workgroupSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
+  const localRank = context.threadIdx.x + context.blockDim.x * (context.threadIdx.y + context.blockDim.y * context.threadIdx.z);
+  if (property === "meta_group_rank") return group.kind === "tile" ? Math.floor(localRank / (group.tileSize ?? 32)) : 0;
+  if (property === "meta_group_size") return group.kind === "tile" ? Math.ceil(workgroupSize / (group.tileSize ?? 32)) : 1;
   const localName = property === "thread_rank"
     ? semanticCooperativeGroupRankParamName(name)
     : semanticCooperativeGroupSizeParamName(name);
   const local = context.locals.get(localName);
   if (typeof local === "number") return local;
-  const group = semanticCooperativeGroupInfo(context.compiled.kernelIr, name);
-  if (!group) throw semanticReferenceError(`unknown cooperative group '${name}'`, context.compiled.kernelIr.span);
-  const workgroupSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
-  const localRank = context.threadIdx.x + context.blockDim.x * (context.threadIdx.y + context.blockDim.y * context.threadIdx.z);
   if (property === "thread_rank") {
     if (group.kind === "grid") {
       const blockRank = context.blockIdx.x + context.gridDim.x * (context.blockIdx.y + context.gridDim.y * context.blockIdx.z);
