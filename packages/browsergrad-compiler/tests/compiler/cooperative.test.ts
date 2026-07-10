@@ -1941,6 +1941,35 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
+  it("specializes shared-pointer helper calls inside declaration initializers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ uint readSharedOffset(uint *data, uint offset) {
+    return data[offset];
+  }
+  __global__ void sharedInitializerCall(uint *out) {
+    __shared__ uint values[2];
+    uint tid = threadIdx.x;
+    values[tid] = tid + 3u;
+    __syncthreads();
+    uint result = readSharedOffset(values + 1, 0u);
+    out[tid] = result;
+  }`, { workgroupSize: [2, 1, 1] });
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.functions.find((fn) => fn.name === "readSharedOffset")?.params[0]).toMatchObject({
+        addressSpace: "shared",
+        name: "data__bg_shared_ptr",
+      });
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([4, 4]);
+    });
+
   it("lowers early returns before later barriers into active-lane guards", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void earlyReturnBarrier(float *x, int N) {

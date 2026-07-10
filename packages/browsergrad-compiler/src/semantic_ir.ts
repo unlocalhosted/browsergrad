@@ -549,18 +549,16 @@ export function lowerSemanticModelToKernelIr(
   const operations = lowerStatements(analysis.kernel.body, scope);
   const localMemory = collectDeclaredMemory(operations);
   const reachable = collectReachableAnalysisNames(analysis);
-  const sharedMemoryDimensions = new Map(
-    [...semantic.symbols, ...localMemory]
-      .filter((symbol) => symbol.addressSpace === "shared")
-      .map((symbol) => {
-        const materialized = semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory);
-        return [materialized.name, materialized.dimensions] as const;
-      }),
-  );
+  const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
+    .filter((symbol) => symbol.addressSpace === "shared")
+    .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
+  const sharedMemoryDimensions = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.dimensions] as const));
+  const sharedMemoryValueTypes = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.valueType] as const));
   const functions = specializeSharedPointerFunctions(
     operations,
     semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
     sharedMemoryDimensions,
+    sharedMemoryValueTypes,
   );
   const functionSharedMemory = functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body).filter((symbol) => symbol.addressSpace === "shared")
@@ -591,6 +589,7 @@ function specializeSharedPointerFunctions(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
   sharedMemoryDimensions: ReadonlyMap<string, readonly number[]>,
+  sharedMemoryValueTypes: ReadonlyMap<string, CudaLiteScalarType | undefined>,
 ): readonly CudaLiteSemanticFunction[] {
   const calls = collectSemanticFunctionCalls(operations);
   return functions.map((fn) => {
@@ -603,7 +602,8 @@ function specializeSharedPointerFunctions(
         .map((call) => call.args[index])
         .flatMap((arg) => arg === undefined ? [] : [sharedPointerRoot(arg)]);
       const dimensions = args.map((root) => root === undefined ? undefined : sharedMemoryDimensions.get(root));
-      if (args.length > 0 && args.every((root) => root !== undefined) && dimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
+      const matchingValueTypes = args.every((root) => root !== undefined && sharedMemoryValueTypes.get(root) === param.valueType);
+      if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && dimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
         sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
         sharedPointerDimensions.set(param.name, dimensions[0]!);
       }
@@ -622,18 +622,40 @@ function specializeSharedPointerFunctions(
   });
 }
 
-function collectSemanticFunctionCalls(operations: readonly SemanticKernelIrOperation[]): readonly Extract<SemanticKernelIrOperation, { readonly kind: "call" }>[] {
-  const out: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>[] = [];
-  for (const operation of operations) {
-    if (operation.kind === "call") out.push(operation);
-    if (operation.kind === "branch") out.push(...collectSemanticFunctionCalls(operation.consequent), ...collectSemanticFunctionCalls(operation.alternate));
-    if (operation.kind === "loop" || operation.kind === "block") out.push(...collectSemanticFunctionCalls(operation.body));
-  }
+interface SemanticFunctionCallSite {
+  readonly callee: string;
+  readonly args: readonly SemanticExpression[];
+}
+
+function collectSemanticFunctionCalls(operations: readonly SemanticKernelIrOperation[]): readonly SemanticFunctionCallSite[] {
+  const out: SemanticFunctionCallSite[] = [];
+  collectSemanticOperationFunctionCalls(operations, out);
+  walkSemanticOperations(operations, (expression) => {
+    if (expression.kind === "call" && expression.callee.kind === "symbol") {
+      out.push({ callee: expression.callee.name, args: expression.args });
+    }
+  });
   return out;
+}
+
+function collectSemanticOperationFunctionCalls(
+  operations: readonly SemanticKernelIrOperation[],
+  out: SemanticFunctionCallSite[],
+): void {
+  for (const operation of operations) {
+    if (operation.kind === "call") out.push({ callee: operation.callee, args: operation.args });
+    if (operation.kind === "branch") {
+      collectSemanticOperationFunctionCalls(operation.consequent, out);
+      collectSemanticOperationFunctionCalls(operation.alternate, out);
+    }
+    if (operation.kind === "loop" || operation.kind === "block") collectSemanticOperationFunctionCalls(operation.body, out);
+  }
 }
 
 function sharedPointerRoot(expression: SemanticExpression): string | undefined {
   if (expression.kind === "symbol" && expression.addressSpace === "shared") return expression.name;
+  const directRef = memoryRefFromExpression(expression);
+  if (directRef?.addressSpace === "shared") return directRef.base;
   if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
   if (expression.argument.kind === "symbol" && expression.argument.addressSpace === "shared") return expression.argument.name;
   const ref = memoryRefFromExpression(expression.argument);

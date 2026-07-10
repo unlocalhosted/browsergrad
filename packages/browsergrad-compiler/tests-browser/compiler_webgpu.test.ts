@@ -1148,6 +1148,30 @@ __global__ void matrixMulCUDA_block16(float *C, float *A, float *B, int wA, int 
     expect([...actual.buffers.C as Float32Array]).toEqual([...b]);
   });
 
+  it("runs shared-pointer initializer helper calls through semantic WebGPU lowering", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ uint readSharedOffset(uint *data, uint offset) {
+  return data[offset];
+}
+__global__ void sharedInitializerCall(uint *out) {
+  __shared__ uint values[2];
+  uint tid = threadIdx.x;
+  values[tid] = tid + 3u;
+  __syncthreads();
+  uint result = readSharedOffset(values + 1, 0u);
+  out[tid] = result;
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...semantic.buffers.out as Uint32Array]).toEqual([4, 4]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([4, 4]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `

@@ -1569,10 +1569,10 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32 {\n  return tile[index];");
-      expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32) {\n  tile[index] = value;");
-      expect(compiled.wgsl).not.toContain("switch buffer");
-      expect(compiled.wgsl).toContain("writeTile(1u, 0u, tid");
+      expect(compiled.wgsl).toContain("fn readTile(tile__bg_shared_ptr: ptr<workgroup, array<f32, 4>>, tile__bg_shared_ptr_base: u32");
+      expect(compiled.wgsl).toContain("return (*tile__bg_shared_ptr)[(tile__bg_shared_ptr_base + u32(offset))]");
+      expect(compiled.wgsl).toContain("fn writeTile(tile__bg_shared_ptr: ptr<workgroup, array<f32, 4>>, tile__bg_shared_ptr_base: u32");
+      expect(compiled.wgsl).toContain("writeTile(&tile, 0u, tid");
       expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
     });
 
@@ -4168,7 +4168,8 @@ __global__ void sharedHelperScoped(float *out) {
       );
 
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<vec4<f32>, 2>;");
-      expect(compiled.wgsl).toContain("bg_ptr_read_f32x4");
+      expect(compiled.wgsl).toContain("fn load_float4(tile__bg_shared_ptr: ptr<workgroup, array<vec4<f32>, 2>>, tile__bg_shared_ptr_base: u32");
+      expect(compiled.wgsl).toContain("load_float4(&tile, 0u, (1 - tid)");
       expect([...result.buffers.y as Float32Array]).toEqual([10, 20, 30, 41, 1, 2, 3, 5]);
     });
 
@@ -5170,7 +5171,8 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("copy_one(0u, 0u, 1u, (0u + u32(1))");
+      expect(compiled.wgsl).toContain("src__bg_shared_ptr: ptr<workgroup, array<f32, 4>>");
+      expect(compiled.wgsl).toContain("copy_one(0u, 0u, &tile, 1u");
       expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
     });
 
