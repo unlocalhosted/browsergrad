@@ -75,10 +75,10 @@ export const scopeRules = [
     reason: "parser/analyzer/reference/core compiler changed",
     matches: [
       /^packages\/browsergrad-compiler\/src\/(?:analyzer|parser|reference|types|index|webgpu_orchestration)\.ts$/u,
-      /^packages\/browsergrad-compiler\/tests\/compiler\.test\.ts$/u,
+      /^packages\/browsergrad-compiler\/tests\/compiler\/.+\.test\.ts$/u,
     ],
     commands: [
-      command("pnpm", "--filter", COMPILER, "exec", "vitest", "run", "tests/compiler.test.ts"),
+      command("pnpm", "--filter", COMPILER, "exec", "vitest", "run", "tests/compiler"),
     ],
   },
   {

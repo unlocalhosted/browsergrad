@@ -870,6 +870,30 @@ __global__ void parent(float *x, int n) {
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
   });
 
+  it("runs uniform cg::sync barriers through semantic WebGPU lowering", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void cgShared(float *out) {
+  cg::thread_block block = cg::this_thread_block();
+  __shared__ float tile[2][2];
+  int tid = threadIdx.x;
+  for (int pass = 0; pass < 2; pass++) {
+    tile[tid][pass] = (float)(tid + pass);
+    cg::sync(block);
+    out[tid * 2 + pass] = tile[1 - tid][pass];
+    cg::sync(block);
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `

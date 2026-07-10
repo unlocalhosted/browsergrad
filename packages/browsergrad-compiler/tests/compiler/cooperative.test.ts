@@ -395,6 +395,31 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 
+  it("schedules uniform cg::sync barriers through semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  namespace cg = cooperative_groups;
+  __global__ void cgShared(float *out) {
+    cg::thread_block block = cg::this_thread_block();
+    __shared__ float tile[2][2];
+    int tid = threadIdx.x;
+    for (int pass = 0; pass < 2; pass++) {
+      tile[tid][pass] = (float)(tid + pass);
+      cg::sync(block);
+      out[tid * 2 + pass] = tile[1 - tid][pass];
+      cg::sync(block);
+    }
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = { buffers: { out: new Float32Array(4) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(compiled.kernelIr.barrierUniformity.kernel.verified).toBe(true);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 0, 1]);
+      expect(compiled.wgsl).toContain("workgroupBarrier();");
+    });
+
   it("lowers CUDA warp shuffle helpers to workgroup-backed warp intrinsics", () => {
       const compiled = compileCudaLiteKernel(`
   __inline__ __device__ float warpReduceSum(float val) {

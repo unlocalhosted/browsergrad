@@ -281,6 +281,9 @@ function unsupportedSemanticReferenceOperation(
 ): SemanticKernelIrOperation | undefined {
   for (const operation of operations) {
     switch (operation.kind) {
+      case "dim3-declare":
+      case "cooperative-group-declare":
+        break;
       case "declare":
         if (operation.target.addressSpace === "shared") {
           if (operation.target.pointer || !semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
@@ -1147,6 +1150,9 @@ function execSemanticOperations(
 ): SemanticControl {
   for (const operation of operations) {
     switch (operation.kind) {
+      case "dim3-declare":
+      case "cooperative-group-declare":
+        break;
       case "declare":
         if (operation.target.addressSpace === "shared") break;
         context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
@@ -1251,6 +1257,9 @@ function* execSemanticBarrierOperations(
 ): SemanticBarrierGenerator {
   for (const operation of operations) {
     switch (operation.kind) {
+      case "dim3-declare":
+      case "cooperative-group-declare":
+        break;
       case "declare":
         if (operation.target.addressSpace !== "shared") context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         break;

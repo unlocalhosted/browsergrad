@@ -2388,7 +2388,7 @@ function localPointerAliasRoot(
   if (target?.kind === "param" && target.pointer && target.addressSpace === "storage") {
     return {
       root: target,
-      indices: [lowerExpression(expression.index, scope)],
+      indices: [pointerAliasElementOffset(target.valueType, target.valueType, lowerExpression(expression.index, scope), expression.index.span)],
     };
   }
   if (target?.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices?.length === 1) {
@@ -2396,7 +2396,11 @@ function localPointerAliasRoot(
     if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;
     return {
       root,
-      indices: [addIndexExpressions(target.pointerBaseIndices[0]!, lowerExpression(expression.index, scope), expression.span)],
+      indices: [addIndexExpressions(
+        target.pointerBaseIndices[0]!,
+        pointerAliasElementOffset(target.valueType, root.valueType, lowerExpression(expression.index, scope), expression.index.span),
+        expression.span,
+      )],
     };
   }
   return undefined;
@@ -2449,6 +2453,21 @@ function pointerAliasTargetValueType(
 ): CudaLiteScalarType | undefined {
   if (expression.kind === "cast" && expression.pointer) return expression.valueType;
   if (expression.kind === "identifier") return scope.get(expression.name)?.valueType;
+  if (expression.kind === "index") return pointerAliasTargetValueType(expression.target, scope);
+  if (expression.kind === "unary" && (expression.operator === "&" || expression.operator === "*")) {
+    return pointerAliasTargetValueType(expression.argument, scope);
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return pointerAliasTargetValueType(expression.left, scope) ?? pointerAliasTargetValueType(expression.right, scope);
+  }
+  if (expression.kind === "call" && localPointerIdentityCallName(expression.callee)) {
+    return expression.args[0] === undefined ? undefined : pointerAliasTargetValueType(expression.args[0], scope);
+  }
+  if (expression.kind === "conditional") {
+    const consequent = pointerAliasTargetValueType(expression.consequent, scope);
+    const alternate = pointerAliasTargetValueType(expression.alternate, scope);
+    return consequent === alternate ? consequent : undefined;
+  }
   return undefined;
 }
 

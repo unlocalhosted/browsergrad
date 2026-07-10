@@ -25,6 +25,7 @@ const WGSL_RESERVED_IDENTIFIERS = new Set([
   "let",
   "loop",
   "override",
+  "pass",
   "precision",
   "private",
   "read",

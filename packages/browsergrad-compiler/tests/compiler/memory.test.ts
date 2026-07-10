@@ -3344,6 +3344,34 @@ __global__ void sharedHelperScoped(float *out) {
       expect([...result.buffers.y as Float32Array]).toEqual([3, 7]);
     });
 
+  it("preserves vector reinterpret aliases through CUDA cache-hint loads", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void vector_cache_hint(float* out, const float* inp) {
+    int idx = threadIdx.x;
+    const float4* view = reinterpret_cast<const float4*>(inp);
+    float4 value = __ldcs(&view[idx]);
+    out[idx * 4] = value.x;
+    out[idx * 4 + 1] = value.y;
+    out[idx * 4 + 2] = value.z;
+    out[idx * 4 + 3] = value.w;
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = {
+        buffers: {
+          out: new Float32Array(8),
+          inp: new Float32Array([11, 22, 33, 44, 20, 40, 60, 80]),
+        },
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const result = runCompiledKernelReference(compiled, input, launch);
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("var value: vec4<f32> = vec4<f32>(inp[");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([11, 22, 33, 44, 20, 40, 60, 80]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+    });
+
   it("lowers CUDA float4 values as scalar storage memory views", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ inline float4 add_float4(const float4& a, const float4& b) {
