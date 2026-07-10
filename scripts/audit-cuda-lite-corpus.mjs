@@ -37,7 +37,7 @@ const {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   canEmitSemanticKernelIrWgsl,
-  emitSemanticKernelIrWgsl,
+  semanticKernelIrWgslPreflightBlocker,
   createCudaRuntimePlan,
   createCudaWebGpuExecutionPlan,
   describeCudaDiagnostic,
@@ -395,15 +395,10 @@ function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kerne
 
 function semanticIrDirectWgslFor(compiled) {
   if (canEmitSemanticKernelIrWgsl(compiled.kernelIr)) return { semanticIrDirectWgslOk: true };
-  try {
-    emitSemanticKernelIrWgsl(compiled.kernelIr);
-  } catch (error) {
-    return {
-      semanticIrDirectWgslOk: false,
-      semanticIrDirectWgslBlocker: String(error?.message ?? error).split("\n")[0],
-    };
-  }
-  return { semanticIrDirectWgslOk: false, semanticIrDirectWgslBlocker: "semantic WGSL emission rejected" };
+  return {
+    semanticIrDirectWgslOk: false,
+    semanticIrDirectWgslBlocker: semanticKernelIrWgslPreflightBlocker(compiled.kernelIr) ?? "semantic WGSL preflight rejected",
+  };
 }
 
 function hostOrchestratedDiagnosticFor(compiled) {

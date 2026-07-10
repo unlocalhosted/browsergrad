@@ -129,6 +129,7 @@ export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput
 export {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
+  semanticKernelIrWgslPreflightBlocker,
   type EmitSemanticKernelIrWgslOptions,
   type SemanticKernelIrWgslOutput,
 } from "./semantic_wgsl.js";

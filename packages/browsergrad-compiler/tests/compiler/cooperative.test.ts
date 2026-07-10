@@ -13,6 +13,7 @@ import {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   emitSemanticKernelIrWgsl,
+  semanticKernelIrWgslPreflightBlocker,
   prepareCompiledKernelWebGpu,
   canEmitSemanticKernelIrWgsl,
   canRunCompiledKernelSemanticReference,
@@ -962,6 +963,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [2, 1, 1] });
 
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
+      expect(semanticKernelIrWgslPreflightBlocker(compiled.kernelIr)).toBe("semantic WGSL does not support shared-memory barrier shape");
     });
 
   it("classifies grid-wide cooperative sync as host-orchestrated WebGPU lowering", () => {

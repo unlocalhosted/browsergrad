@@ -253,11 +253,21 @@ export function canEmitSemanticKernelIrWgsl(
   ir: SemanticKernelIrModule,
   _options: EmitSemanticKernelIrWgslOptions = {},
 ): boolean {
-  return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
-    semanticWgslRequiredFeaturesSupported(ir.requiredFeatures) &&
-    ir.params.every(semanticWgslParamSupported) &&
-    semanticWgslSharedBarrierShapeSupported(ir) &&
-    ir.memory.every(semanticWgslMemorySymbolSupported);
+  return semanticKernelIrWgslPreflightBlocker(ir) === undefined;
+}
+
+export function semanticKernelIrWgslPreflightBlocker(
+  ir: SemanticKernelIrModule,
+): string | undefined {
+  const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
+  if (unsupported) return `semantic WGSL does not support ${unsupported.kind}`;
+  if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) return "semantic WGSL does not support required WebGPU features yet";
+  const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
+  if (unsupportedParam) return `semantic WGSL does not support parameter '${unsupportedParam.name}'`;
+  if (!semanticWgslSharedBarrierShapeSupported(ir)) return "semantic WGSL does not support shared-memory barrier shape";
+  const unsupportedMemory = ir.memory.find((symbol) => !semanticWgslMemorySymbolSupported(symbol));
+  if (unsupportedMemory) return `semantic WGSL does not support memory '${unsupportedMemory.name}'`;
+  return undefined;
 }
 
 export function emitSemanticKernelIrWgsl(
