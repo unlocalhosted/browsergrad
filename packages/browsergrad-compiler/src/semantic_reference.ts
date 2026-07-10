@@ -637,7 +637,14 @@ function semanticReferenceFunctionArgSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number] | undefined,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return semanticFunctionArgContractSupported(arg, param, semanticPointerArgMemoryRef, (item, mode) => semanticReferenceExpressionSupported(item, mode, compiled));
+  const supported = semanticFunctionArgContractSupported(
+    arg,
+    param,
+    semanticPointerArgMemoryRef,
+    (item, mode) => semanticReferenceExpressionSupported(item, mode, compiled),
+  );
+  if (!supported || param?.addressSpace !== "shared" || !param.pointer) return supported;
+  return semanticPointerArgMemoryRef(arg)?.indices.length === 0;
 }
 
 function semanticReferenceVectorConstructorSupported(
@@ -3622,6 +3629,7 @@ function runSemanticFunction(
   const textureDescriptors = { ...context.textureDescriptors };
   const surfaces = { ...context.surfaces };
   const buffers = new Map(context.buffers);
+  const sharedMemory = new Map(context.sharedMemory);
   const storageOffsets = new Map(context.storageOffsets);
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
@@ -3651,6 +3659,16 @@ function runSemanticFunction(
       storageOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, context));
       continue;
     }
+    if (param.pointer && param.addressSpace === "shared") {
+      const ref = semanticPointerArgMemoryRef(arg);
+      if (!ref || ref.addressSpace !== "shared" || ref.indices.length !== 0) {
+        throw semanticReferenceError(`semantic reference function '${fn.name}' shared pointer argument must be a shared array root`, arg.span);
+      }
+      const buffer = context.sharedMemory.get(ref.base);
+      if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, arg.span);
+      sharedMemory.set(param.name, buffer);
+      continue;
+    }
     locals.set(param.name, isSemanticFloatVectorType(param.valueType) ? evalSemanticExpression(arg, context) : evalNumber(arg, context));
   }
   const child: SemanticReferenceContext = {
@@ -3661,7 +3679,7 @@ function runSemanticFunction(
     textures,
     textureDescriptors,
     surfaces,
-    sharedMemory: context.sharedMemory,
+    sharedMemory,
     storageOffsets,
     scalars: context.scalars,
     locals,
@@ -3739,7 +3757,7 @@ function semanticPointerArgMemoryRef(expression: SemanticExpression): SemanticMe
     return memoryRefFromIndexExpression(expression.argument);
   }
   if (expression.kind === "index") return memoryRefFromIndexExpression(expression);
-  if (expression.kind === "symbol" && expression.addressSpace === "storage") {
+  if (expression.kind === "symbol" && (expression.addressSpace === "storage" || expression.addressSpace === "shared")) {
     return {
       base: expression.name,
       addressSpace: expression.addressSpace,
@@ -4001,6 +4019,11 @@ function semanticReferenceVectorStorageStride(ref: SemanticMemoryRef, context: S
 function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
   if (ref.addressSpace === "local" || ref.addressSpace === "shared") {
     const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
+    if (ref.addressSpace === "shared" && !symbol) {
+      if (!context.sharedMemory.has(ref.base)) throw semanticReferenceError(`unknown shared array '${ref.base}'`, ref.span);
+      if (ref.indices.length !== 1) throw semanticReferenceError(`shared pointer '${ref.base}' index rank mismatch`, ref.span);
+      return Math.trunc(evalNumber(ref.indices[0]!, context));
+    }
     if (!symbol) throw semanticReferenceError(`unknown ${ref.addressSpace} array '${ref.base}'`, ref.span);
     const dimensions = ref.addressSpace === "shared" ? semanticReferenceSharedDimensions(context.compiled, symbol) : symbol.dimensions;
     if (ref.addressSpace === "local" && ref.indices.length === 1 && dimensions.length > 1) {

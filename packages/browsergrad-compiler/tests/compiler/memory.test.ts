@@ -736,11 +736,18 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
         { buffers: { out: new Float32Array(1) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn copyArrayParam(out_buffer: u32, out_base: u32");
       expect(compiled.wgsl).toContain("src__bg_shared_ptr: ptr<workgroup, array<f32, 2>>");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([6.25]);
       expect([...result.buffers.out as Float32Array]).toEqual([6.25]);
     });
 

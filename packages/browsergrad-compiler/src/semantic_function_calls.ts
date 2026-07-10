@@ -83,7 +83,9 @@ export function semanticPointerFunctionBodySupported(
   memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
 ): boolean {
-  const pointerParams = new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "storage").map((param) => param.name));
+  const pointerParams = new Set(fn.params
+    .filter((param) => param.pointer && (param.addressSpace === "storage" || param.addressSpace === "shared"))
+    .map((param) => param.name));
   return pointerParams.size > 0 &&
     fn.body.every((operation) => semanticPointerFunctionOperationSupported(operation, pointerParams, memoryRefFromIndex, atomicCallTarget));
 }
