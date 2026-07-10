@@ -1621,14 +1621,13 @@ function semanticWgslExpressionSupported(
         semanticWgslExpressionSupported(expression.alternate, expected, ir);
     case "assignment":
       {
-        const vectorMemberTarget = expression.target.kind === "member" &&
-          isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
+        const vectorTarget = isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
         return semanticWgslAssignmentOperatorSupported(expression.operator) &&
-        (!vectorMemberTarget || semanticVectorAssignmentOperatorSupported(expression.operator)) &&
+        (!vectorTarget || semanticVectorAssignmentOperatorSupported(expression.operator)) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
           expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir) ||
           semanticWgslAssignmentMemoryRefSupported(expression.target, ir)) &&
-        semanticWgslExpressionSupported(expression.value, vectorMemberTarget ? "any" : "scalar", ir);
+        semanticWgslExpressionSupported(expression.value, vectorTarget ? "any" : "scalar", ir);
       }
     case "update":
       return (expression.argument.kind === "symbol" && expression.argument.addressSpace === "local" ||
@@ -2276,9 +2275,12 @@ function emitSemanticAssignmentStatement(
       return `${target} = ${value}`;
     }
   }
-  if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
+  if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local assignment targets only", expression.target.span);
   const target = nameFor(expression.target.name, names);
-  const value = emitSemanticLocalScalarExpressionAs(expression.value, expression.target.valueType, ir, names, options, textureSpecializations);
+  const targetType = expression.target.valueType;
+  const value = targetType !== undefined && isSemanticFloatVectorType(targetType)
+    ? emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations)
+    : emitSemanticLocalScalarExpressionAs(expression.value, targetType, ir, names, options, textureSpecializations);
   if (semanticAssignmentBinaryOperator(expression.operator)) return `${target} ${expression.operator} ${value}`;
   return `${target} = ${value}`;
 }
@@ -2824,10 +2826,13 @@ function emitSemanticExpression(
         expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir) ||
         semanticWgslAssignmentMemoryRefSupported(expression.target, ir)
       ) return `(${emitSemanticAssignmentStatement(expression, ir, names, options, textureSpecializations)})`;
-      if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
+      if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local assignment targets only", expression.target.span);
       {
         const target = nameFor(expression.target.name, names);
-        const value = emitSemanticLocalScalarExpressionAs(expression.value, expression.target.valueType, ir, names, options, textureSpecializations);
+        const targetType = expression.target.valueType;
+        const value = targetType !== undefined && isSemanticFloatVectorType(targetType)
+          ? emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations)
+          : emitSemanticLocalScalarExpressionAs(expression.value, expression.target.valueType, ir, names, options, textureSpecializations);
         if (expression.operator === "+=") return `(${target} += ${value})`;
         if (expression.operator === "-=") return `(${target} -= ${value})`;
         return `(${target} = ${value})`;

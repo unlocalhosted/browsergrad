@@ -917,14 +917,13 @@ function semanticReferenceExpressionSupported(
         semanticReferenceExpressionSupported(expression.alternate, expected, compiled);
     case "assignment":
       {
-        const vectorMemberTarget = expression.target.kind === "member" &&
-          isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
+        const vectorTarget = isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
         return semanticReferenceAssignmentOperatorSupported(expression.operator) &&
-        (!vectorMemberTarget || semanticVectorAssignmentOperatorSupported(expression.operator)) &&
+        (!vectorTarget || semanticVectorAssignmentOperatorSupported(expression.operator)) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
           expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, compiled) ||
           semanticReferenceAssignmentMemoryRefSupported(expression.target, compiled)) &&
-        semanticReferenceExpressionSupported(expression.value, vectorMemberTarget ? "any" : "scalar", compiled);
+        semanticReferenceExpressionSupported(expression.value, vectorTarget ? "any" : "scalar", compiled);
       }
     case "sequence":
       return expression.expressions.every((item) => semanticReferenceExpressionSupported(item, "scalar", compiled));
@@ -1859,12 +1858,15 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
         ? evalSemanticExpression(expression.consequent, context)
         : evalSemanticExpression(expression.alternate, context);
     case "assignment":
-      if (!semanticReferenceAssignmentOperatorSupported(expression.operator) ||
+      {
+        const vectorTarget = isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
+        if (!semanticReferenceAssignmentOperatorSupported(expression.operator) ||
+        (vectorTarget && !semanticVectorAssignmentOperatorSupported(expression.operator)) ||
         (expression.target.kind !== "symbol" &&
           (expression.target.kind !== "member" || !semanticReferenceVectorMemberSupported(expression.target, context.compiled)) &&
           !semanticReferenceAssignmentMemoryRefSupported(expression.target, context.compiled))) {
-        throw semanticReferenceError("semantic reference supports only scalar local assignment expressions", expression.span);
-      }
+          throw semanticReferenceError("semantic reference supports only modeled local assignment expressions", expression.span);
+        }
       if (expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, context.compiled)) return assignLocalVectorMember(expression, context);
       {
         const ref = semanticReferenceAssignmentMemoryRef(expression.target, context.compiled);
@@ -1872,10 +1874,18 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       }
       if (expression.target.kind !== "symbol") throw semanticReferenceError("semantic reference assignment requires local symbol target", expression.target.span);
       {
+        if (vectorTarget) {
+          const right = evalSemanticExpression(expression.value, context);
+          const left = evalSemanticExpression(expression.target, context);
+          const value = expression.operator === "=" ? right : evalVectorBinary(expression.operator.slice(0, -1), left, right, expression.span);
+          context.locals.set(expression.target.name, value);
+          return value;
+        }
         const right = evalNumber(expression.value, context);
         const value = applySemanticScalarAssignment(expression.operator, evalNumber(expression.target, context), right, expression.span);
         context.locals.set(expression.target.name, value);
         return value;
+      }
       }
     case "sequence": {
       let value = 0;

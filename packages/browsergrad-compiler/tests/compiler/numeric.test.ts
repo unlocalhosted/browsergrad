@@ -2233,6 +2233,28 @@ describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
       expect([...semanticResult.buffers.scalar as Float32Array]).toEqual([38]);
     });
 
+  it("lowers local half2 vector assignments", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void half2Assignment(half2 *out) {
+    half2 left = __floats2half2_rn(2.0f, 3.0f);
+    half2 right = __floats2half2_rn(4.0f, 5.0f);
+    half2 value = __floats2half2_rn(1.0f, 1.0f);
+    value = left * right + value;
+    value += __floats2half2_rn(1.0f, 2.0f);
+    out[0] = value;
+  }`, { f16Mode: "f32", workgroupSize: [1, 1, 1] });
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const result = runCompiledKernelReference(compiled, { buffers: { out: createWgslFloat16Array(2) } }, launch);
+      const semanticResult = runCompiledKernelSemanticReference(compiled, { buffers: { out: createWgslFloat16Array(2) } }, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("value = ((left * right) + value);");
+      expect(compiled.wgsl).toContain("value += vec2<f32>(");
+      expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([10, 18]);
+      expect(Array.from(semanticResult.buffers.out as ArrayLike<number>)).toEqual([10, 18]);
+    });
+
   it("lowers CUDA half and half2 saturating arithmetic intrinsics", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void halfSat(const half *x, const half2 *v, half *out, half2 *vecOut) {

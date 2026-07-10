@@ -1783,7 +1783,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("bg_tex2d_float4_texRef");
+      expect(compiled.wgsl).toContain("textureLoad(texRef");
       expect(compiled.wgsl).toContain("vec4<f32>(f32(0.5)");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 1.5, 2, 2.5]);
     });
