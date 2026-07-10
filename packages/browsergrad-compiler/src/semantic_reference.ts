@@ -65,6 +65,7 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
+import { sizeofCudaType } from "./type_layout.js";
 import type {
   SemanticExpression,
   SemanticKernelIrOperation,
@@ -311,7 +312,7 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") {
-          if (operation.target.pointer || !semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
+          if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
@@ -458,6 +459,7 @@ function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["
 function semanticReferenceFunctionParamSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number],
 ): boolean {
+  if (param.pointer && param.addressSpace === "shared" && param.valueType === "uchar" && param.pointerCarrierValueType === "uchar") return true;
   return semanticFunctionParamContractSupported(param, semanticReferenceValueTypeSupported);
 }
 
@@ -521,11 +523,24 @@ function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledC
 
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
+  if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticReferenceSharedScalarVectorView(ref, compiled)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol === undefined || symbol.valueType === ref.valueType;
+}
+
+function semanticReferencePackedSharedByteRoot(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  if (ref.addressSpace !== "shared") return false;
+  return compiled.kernelIr.memory.some((symbol) => symbol.kind === "shared" && symbol.name === ref.base && symbol.valueType === "uchar") ||
+    compiled.kernelIr.functions.some((fn) => fn.params.some((param) =>
+      param.name === ref.base && param.pointer && param.addressSpace === "shared" && param.pointerCarrierValueType === "uchar"
+    ));
+}
+
+function semanticPackedSharedByteViewSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "uchar" || valueType === "uint" || valueType === "int" || valueType === "float";
 }
 
 function semanticReferenceSharedScalarVectorView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -4198,6 +4213,9 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   if (ref.addressSpace === "shared") {
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    if (semanticReferencePackedSharedByteRoot(ref, context.compiled)) {
+      return readPackedSemanticSharedByteView(ref, buffer, context);
+    }
     const index = flatIndex(ref, context);
     const ok = index >= 0 && index < buffer.length;
     const value = ok ? Number(buffer[index]) : 0;
@@ -4240,6 +4258,10 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   if (ref.addressSpace === "shared") {
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    if (semanticReferencePackedSharedByteRoot(ref, context.compiled)) {
+      writePackedSemanticSharedByteView(ref, value, buffer, context);
+      return;
+    }
     const index = flatIndex(ref, context);
     const ok = index >= 0 && index < buffer.length;
     if (ok) buffer[index] = value;
@@ -4252,6 +4274,56 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   const ok = index >= 0 && index < buffer.length;
   if (ok) buffer[index] = value;
   context.trace.writes.push({ name: ref.base, index, value, ok });
+}
+
+function packedSemanticSharedByteIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  const elementBytes = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
+  const pointer = context.compiled.kernelIr.functions
+    .flatMap((fn) => fn.params)
+    .find((param) => param.name === ref.base && param.pointer && param.addressSpace === "shared");
+  if (!pointer) return flatIndex(ref, context) * elementBytes;
+  if (ref.indices.length > 1) throw semanticReferenceError(`shared pointer '${ref.base}' index rank mismatch`, ref.span);
+  const offset = context.sharedOffsets.get(ref.base) ?? 0;
+  const index = ref.indices[0] === undefined ? 0 : Math.trunc(evalNumber(ref.indices[0], context));
+  return offset + index * elementBytes;
+}
+
+function readPackedSemanticSharedByteView(
+  ref: SemanticMemoryRef,
+  buffer: WgslTypedArray,
+  context: SemanticReferenceContext,
+): number {
+  const byteIndex = packedSemanticSharedByteIndex(ref, context);
+  const byteCount = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
+  let bits = 0;
+  for (let lane = 0; lane < byteCount; lane++) {
+    const index = byteIndex + lane;
+    const ok = index >= 0 && index < buffer.length;
+    const value = ok ? Number(buffer[index]) & 0xff : 0;
+    context.trace.sharedReads.push({ name: ref.base, index, value, ok });
+    bits = (bits | value << lane * 8) >>> 0;
+  }
+  if (ref.valueType === "float") return uintBitsToFloat32(bits);
+  if (ref.valueType === "int") return bits | 0;
+  return ref.valueType === "uchar" ? bits & 0xff : bits >>> 0;
+}
+
+function writePackedSemanticSharedByteView(
+  ref: SemanticMemoryRef,
+  value: number,
+  buffer: WgslTypedArray,
+  context: SemanticReferenceContext,
+): void {
+  const byteIndex = packedSemanticSharedByteIndex(ref, context);
+  const byteCount = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
+  const bits = ref.valueType === "float" ? float32ToUintBits(value) : value >>> 0;
+  for (let lane = 0; lane < byteCount; lane++) {
+    const index = byteIndex + lane;
+    const byte = bits >>> lane * 8 & 0xff;
+    const ok = index >= 0 && index < buffer.length;
+    if (ok) buffer[index] = byte;
+    context.trace.sharedWrites.push({ name: ref.base, index, value: byte, ok });
+  }
 }
 
 function readAtomicMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {

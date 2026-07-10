@@ -20,6 +20,7 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
+import { sizeofCudaType } from "./type_layout.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
@@ -270,6 +271,8 @@ export interface SemanticKernelIrWgslPreflightFailure {
 export interface EmitSemanticKernelIrWgslOptions extends SemanticTextureDescriptorOptions {}
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
+const PACKED_SHARED_U8_STORE = "bg_semantic_packed_shared_u8_store";
+const PACKED_SHARED_U8_ADD = "bg_semantic_packed_shared_u8_add";
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 
@@ -500,6 +503,9 @@ export function emitSemanticKernelIrWgsl(
   for (const shared of sharedMemorySymbols(ir)) {
     lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared, atomicShared.has(shared.name))};`);
   }
+  if (sharedMemorySymbols(ir).some((shared) => shared.valueType === "uchar")) {
+    lines.push("", ...emitSemanticPackedSharedByteHelpers());
+  }
   if (uniformParams.length > 0) {
     lines.push("struct Params {");
     for (const param of uniformParams) {
@@ -574,7 +580,7 @@ function unsupportedSemanticWgslOperation(
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") {
-          if (operation.target.pointer || operation.target.valueType === "uchar" || !semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
+          if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
@@ -690,6 +696,7 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
 function semanticWgslFunctionParamSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): boolean {
+  if (param.pointer && param.addressSpace === "shared" && param.valueType === "uchar" && param.pointerCarrierValueType === "uchar") return true;
   return param.valueType !== "uchar" && semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
 }
 
@@ -1104,6 +1111,7 @@ function emitSemanticStoragePointerAtomicValue(
 
 function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (!semanticWgslMemoryRefSupported(ref, ir)) return false;
+  if (semanticWgslPackedSharedByteRoot(ref, ir)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
   if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
@@ -1111,6 +1119,18 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol !== undefined && symbol.valueType === ref.valueType;
+}
+
+function semanticWgslPackedSharedByteRoot(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  if (ref.addressSpace !== "shared") return false;
+  return sharedMemorySymbols(ir).some((symbol) => symbol.name === ref.base && symbol.valueType === "uchar") ||
+    ir.functions.some((fn) => fn.params.some((param) =>
+      param.name === ref.base && param.pointer && param.addressSpace === "shared" && param.pointerCarrierValueType === "uchar"
+    ));
+}
+
+function semanticPackedSharedByteViewSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "uchar" || valueType === "uint" || valueType === "int" || valueType === "float";
 }
 
 function semanticWgslCopySupported(
@@ -2131,6 +2151,14 @@ function emitSemanticStore(
   if (semanticWgslVectorFieldMemoryRefSupported(operation.target)) {
     return emitSemanticVectorFieldMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
   }
+  if (semanticWgslPackedSharedByteRoot(operation.target, ir)) {
+    const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
+    if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
+    const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
+    if (binaryOperator === undefined) throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
+    const current = emitSemanticMemoryRead(operation.target, ir, names, options);
+    return emitSemanticMemoryWrite(operation.target, `(${current} ${binaryOperator} ${value})`, ir, names, options);
+  }
   if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) {
     return emitSemanticPointerMemoryStore(operation, ir, names, options, textureSpecializations);
   }
@@ -2409,6 +2437,12 @@ function emitSemanticFunctionParamType(
   atomicSharedPointer = false,
 ): string {
   if (param.pointer && param.addressSpace === "shared") {
+    if (param.pointerCarrierValueType === "uchar") {
+      const words = Math.ceil((param.dimensions[0] ?? 1) / 4);
+      return param.dimensions.length === 0
+        ? "ptr<workgroup, atomic<u32>>"
+        : `ptr<workgroup, array<atomic<u32>, ${words}>>`;
+    }
     const carrierType = param.pointerCarrierValueType ?? param.valueType;
     const element = atomicSharedPointer ? `atomic<${wgslAtomicScalar(carrierType)}>` : wgslValueType(carrierType);
     return param.dimensions.length === 0 ? `ptr<workgroup, ${element}>` : `ptr<workgroup, array<${element}, ${param.dimensions[0] ?? 1}>>`;
@@ -3019,6 +3053,7 @@ function emitSemanticExpression(
       }
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) {
+        if (semanticWgslPackedSharedByteRoot(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
           return emitSemanticMemoryRead(ref, ir, names, options);
         }
@@ -3918,6 +3953,13 @@ function emitSemanticUpdate(
 ): string {
   const ref = memoryRefFromIndexExpression(expression.argument);
   if (ref) {
+    if (semanticWgslPackedSharedByteRoot(ref, ir) && ref.valueType === "uchar") {
+      const byteIndex = emitSemanticPackedSharedByteIndex(ref, ir, names, options);
+      const word = `${nameFor(ref.base, names)}[(${byteIndex} >> 2u)]`;
+      const shift = `((${byteIndex} & 3u) * 8u)`;
+      const delta = expression.operator === "++" ? "1" : "-1";
+      return `${PACKED_SHARED_U8_ADD}(&${word}, ${shift}, ${delta})`;
+    }
     const target = emitSemanticMemoryRead(ref, ir, names, options);
     const next = `(${target} ${expression.operator === "++" ? "+" : "-"} ${emitNumberLiteral(1, expression.valueType, wgslValueScalar(expression.valueType))})`;
     return emitSemanticMemoryWrite(ref, next, ir, names, options);
@@ -3935,6 +3977,9 @@ function emitSemanticMemoryRead(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  if (semanticWgslPackedSharedByteRoot(ref, ir)) {
+    return emitSemanticPackedSharedByteRead(ref, ir, names, options);
+  }
   if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
     const valueType = ref.valueType ?? "float";
     const index = isCudaVectorType(valueType) ? emitFlatStorageVectorBaseIndex(ref, ir, names, options) : emitFlatStorageIndex(ref, ir, names, options);
@@ -3957,6 +4002,9 @@ function emitSemanticMemoryWrite(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  if (semanticWgslPackedSharedByteRoot(ref, ir)) {
+    return emitSemanticPackedSharedByteWrite(ref, value, ir, names, options);
+  }
   if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
     const valueType = ref.valueType ?? "float";
     const index = isCudaVectorType(valueType) ? emitFlatStorageVectorBaseIndex(ref, ir, names, options) : emitFlatStorageIndex(ref, ir, names, options);
@@ -3972,6 +4020,58 @@ function emitSemanticMemoryWrite(
   }
   const target = emitSemanticMemoryRef(ref, ir, names, options);
   return `${target} = ${value}`;
+}
+
+function emitSemanticPackedSharedByteIndex(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): string {
+  const elementBytes = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
+  const pointer = semanticWgslFunctionSharedPointerParam(ir, ref.base);
+  if (pointer) {
+    if (ref.indices.length > 1) throw semanticWgslError(`shared pointer '${ref.base}' index rank mismatch`, ref.span);
+    const base = nameFor(semanticPointerBaseParamName(ref.base), names);
+    const index = ref.indices[0] === undefined ? "0u" : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options);
+    const offset = elementBytes === 1 ? index : `(${index} * ${elementBytes}u)`;
+    return `(${base} + ${offset})`;
+  }
+  const shared = sharedMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
+  if (!shared) throw semanticWgslError(`unknown packed shared memory '${ref.base}'`, ref.span);
+  const index = emitFlatSharedIndex(shared, ref.indices, ir, names);
+  return elementBytes === 1 ? index : `(${index} * ${elementBytes}u)`;
+}
+
+function emitSemanticPackedSharedByteRead(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): string {
+  const byteIndex = emitSemanticPackedSharedByteIndex(ref, ir, names, options);
+  const word = `${nameFor(ref.base, names)}[(${byteIndex} >> 2u)]`;
+  const loaded = `atomicLoad(&${word})`;
+  if (ref.valueType === "uint") return loaded;
+  if (ref.valueType === "int") return `bitcast<i32>(${loaded})`;
+  if (ref.valueType === "float") return `bitcast<f32>(${loaded})`;
+  const shift = `((${byteIndex} & 3u) * 8u)`;
+  return `((${loaded} >> ${shift}) & 255u)`;
+}
+
+function emitSemanticPackedSharedByteWrite(
+  ref: SemanticMemoryRef,
+  value: string,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): string {
+  const byteIndex = emitSemanticPackedSharedByteIndex(ref, ir, names, options);
+  const word = `${nameFor(ref.base, names)}[(${byteIndex} >> 2u)]`;
+  if (ref.valueType === "uint") return `atomicStore(&${word}, ${value})`;
+  if (ref.valueType === "int" || ref.valueType === "float") return `atomicStore(&${word}, bitcast<u32>(${value}))`;
+  const shift = `((${byteIndex} & 3u) * 8u)`;
+  return `${PACKED_SHARED_U8_STORE}(&${word}, ${shift}, u32(${value}))`;
 }
 
 function emitSemanticSharedPointerMemoryRef(
@@ -4013,6 +4113,9 @@ function emitSemanticExpressionAs(
 ): string {
   if (expression.kind === "literal" && typeof expression.value === "number") {
     return emitNumberLiteral(expression.value, expression.valueType, targetType);
+  }
+  if (expression.kind === "unary" && expression.operator === "~" && (targetType === "u32" || targetType === "i32")) {
+    return `~(${emitSemanticExpressionAs(expression.argument, ir, names, targetType, options, textureSpecializations)})`;
   }
   const emitted = emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   const atomicValueType = semanticAtomicCallValueType(expression);
@@ -5025,7 +5128,10 @@ function emitSemanticUnary(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (expression.operator === "!") return `!(${emitTruthiness(expression.argument, ir, names, options)})`;
-  if (expression.operator === "~") return `~(${emitSemanticExpression(expression.argument, ir, names, options, textureSpecializations)})`;
+  if (expression.operator === "~") {
+    const operandType = semanticExpressionWgslScalar(expression) === "u32" ? "u32" : "i32";
+    return `~(${emitSemanticExpressionAs(expression.argument, ir, names, operandType, options, textureSpecializations)})`;
+  }
   if (expression.operator === "+") return emitSemanticExpression(expression.argument, ir, names, options, textureSpecializations);
   if (expression.operator === "-") return `-(${emitSemanticExpression(expression.argument, ir, names, options, textureSpecializations)})`;
   throw semanticWgslError(`semantic WGSL does not support unary '${expression.operator}'`, expression.span);
@@ -5363,9 +5469,40 @@ function emitLocalArrayFill(
 }
 
 function emitSharedType(symbol: SemanticKernelIrModule["memory"][number], atomic: boolean): string {
+  if (symbol.valueType === "uchar") {
+    const bytes = symbol.dimensions.length === 0 ? 1 : totalElements(symbol.dimensions);
+    return symbol.dimensions.length === 0 ? "atomic<u32>" : `array<atomic<u32>, ${Math.ceil(bytes / 4)}>`;
+  }
   const element = atomic ? `atomic<${wgslAtomicScalar(symbol.valueType)}>` : wgslValueType(symbol.valueType);
   if (symbol.dimensions.length === 0) return element;
   return emitSemanticFlatArrayType(symbol.dimensions, element);
+}
+
+function emitSemanticPackedSharedByteHelpers(): readonly string[] {
+  return [
+    `fn ${PACKED_SHARED_U8_STORE}(word: ptr<workgroup, atomic<u32>>, shift: u32, value: u32) {`,
+    "  let mask = 255u << shift;",
+    "  var old_bits = atomicLoad(word);",
+    "  loop {",
+    "    let new_bits = (old_bits & ~mask) | ((value & 255u) << shift);",
+    "    let result = atomicCompareExchangeWeak(word, old_bits, new_bits);",
+    "    if (result.exchanged) { return; }",
+    "    old_bits = result.old_value;",
+    "  }",
+    "}",
+    `fn ${PACKED_SHARED_U8_ADD}(word: ptr<workgroup, atomic<u32>>, shift: u32, delta: i32) -> u32 {`,
+    "  let mask = 255u << shift;",
+    "  var old_bits = atomicLoad(word);",
+    "  loop {",
+    "    let old_value = (old_bits >> shift) & 255u;",
+    "    let new_value = u32(i32(old_value) + delta) & 255u;",
+    "    let new_bits = (old_bits & ~mask) | (new_value << shift);",
+    "    let result = atomicCompareExchangeWeak(word, old_bits, new_bits);",
+    "    if (result.exchanged) { return old_value; }",
+    "    old_bits = result.old_value;",
+    "  }",
+    "}",
+  ];
 }
 
 function emitFlatStorageIndex(

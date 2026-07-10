@@ -3459,6 +3459,28 @@ __global__ void sharedReinterpret(int *out) {
     expect([...actual.buffers.out as Int32Array]).toEqual([-1]);
   });
 
+  it("runs packed shared uchar aliases through semantic WGSL", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void bump(uchar *bytes, uint index) { bytes[index]++; }
+__global__ void packedSharedUchar(uint *out) {
+  __shared__ uchar bytes[4];
+  if (threadIdx.x == 0) {
+    ((uint *)bytes)[0] = 0x04030201u;
+    bump(bytes, 1u);
+    out[0] = ((uint *)bytes)[0];
+    out[1] = bytes[0] + bytes[1] + bytes[2] + bytes[3];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("array<atomic<u32>, 1>");
+    expect([...actual.buffers.out as Uint32Array]).toEqual([0x04030301, 11]);
+  });
+
   it("runs pointer helpers with scalar device-global side effects through semantic WGSL", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
