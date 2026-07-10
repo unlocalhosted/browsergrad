@@ -873,7 +873,7 @@ function lowerStatement(
             surface: expression.args[1]!,
             xBytes: expression.args[2]!,
             y: expression.args[3]!,
-            ...(expression.args[4] === undefined ? {} : { z: expression.args[4]! }),
+            ...(semanticSurfaceWriteUsesZ(expression.callee.name) && expression.args[4] !== undefined ? { z: expression.args[4]! } : {}),
             span: statement.span,
           };
         }
@@ -997,6 +997,10 @@ function lowerStatement(
     case "break":
       return { kind: "break", span: statement.span };
   }
+}
+
+function semanticSurfaceWriteUsesZ(callee: string): boolean {
+  return callee === "surf2DLayeredwrite" || callee === "surf3Dwrite";
 }
 
 function lowerExpression(

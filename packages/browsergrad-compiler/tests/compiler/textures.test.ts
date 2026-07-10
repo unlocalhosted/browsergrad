@@ -331,10 +331,25 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         },
         { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {},
+          textures: { texRef: { width: 2, height: 2, data: new Float32Array([1, 2, 3, 4]) } },
+          surfaces: { outputSurf: { width: 2, height: 2, data: new Float32Array(4) } },
+          scalars: { width: 2, height: 2 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
+      );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<storage, read_write> outputSurf: array<f32>;");
-      expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf");
+      expect(compiled.wgsl).toContain("outputSurf[bg_index] = (value * 2.0);");
+      expect(compiled.wgsl).not.toContain("bg_surf2dwrite_outputSurf");
       expect([...result.buffers.outputSurf as Float32Array]).toEqual([2, 4, 6, 8]);
+      expect([...semanticResult.buffers.outputSurf as Float32Array]).toEqual([2, 4, 6, 8]);
     });
 
   it("lowers cudaSurfaceObject_t surf3Dwrite to z-linearized storage", () => {
