@@ -1,6 +1,8 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T13:55:00Z
+- 2026-07-10: CI corpus regression check: native WebGPU re-ran `reduceSinglePassMultiBlockCG_grid_sync` and `cudaProcess` after the reported WGSL type failures; both passed (`2/2`, zero skips). Semantic texture lowering now admits only `tex2D`, `tex2DLod`, and `texCubemap`; unsupported dimensional texture calls stay on the established AST backend instead of entering an invalid semantic IR shape. Focused regression and typecheck passed; next gate: `verify:real-world-cuda -- --require-webgpu`.
+
+Last updated: 2026-07-10T14:08:11Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 

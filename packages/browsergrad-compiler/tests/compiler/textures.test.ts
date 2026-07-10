@@ -1933,6 +1933,18 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...result.buffers.vecOut as Float32Array]).toEqual([1, 2, 3, 4]);
     });
 
+  it("does not misclassify unsupported texture dimensions as semantic 2D reads", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void sample(float *out, cudaTextureObject_t tex) {
+    out[0] = tex3D<float>(tex, 0.0f, 0.0f, 0.0f);
+  }`, { workgroupSize: [1, 1, 1] });
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(false);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
+      expect(compiled.wgsl).not.toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
+    });
+
   it("lowers CUDA surf2Dread into guarded surface buffer loads", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {

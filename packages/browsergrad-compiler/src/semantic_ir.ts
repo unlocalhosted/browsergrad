@@ -26,7 +26,7 @@ import {
 import { cudaBfloat16IntrinsicReturnType } from "./cuda_bfloat16_intrinsics.js";
 import {
   isCudaSemanticSurfaceWriteCallName,
-  isCudaTextureReadCallName,
+  isCudaTexture2DReadCallName,
 } from "./cuda_texture_surface_calls.js";
 import {
   cudaVibMinMaxInfo,
@@ -1176,7 +1176,7 @@ function lowerExpression(
       }
       if (
         expression.callee.kind === "identifier" &&
-        isCudaTextureReadCallName(expression.callee.name) &&
+        (isCudaTexture2DReadCallName(expression.callee.name) || expression.callee.name === "texCubemap") &&
         (expression.callee.name === "texCubemap" ? args.length >= 4 : args.length >= 3)
       ) {
         return {
