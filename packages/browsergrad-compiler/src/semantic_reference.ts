@@ -120,6 +120,11 @@ import {
   referenceCurandPoissonDraw as curandPoissonDraw,
 } from "./reference_curand.js";
 import { semanticMathCallArgumentsSupported } from "./semantic_math_intrinsics.js";
+import {
+  semanticAssignmentOperatorSupported as semanticReferenceAssignmentOperatorSupported,
+  semanticSurfaceReadValueType,
+  semanticVectorBinaryOperatorSupported as semanticReferenceVectorBinaryOperatorSupported,
+} from "./semantic_expression_contracts.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
   semanticLocalArrayFillCallSupported,
@@ -1055,10 +1060,6 @@ function semanticReferenceExpressionChildren(expression: SemanticExpression): re
   }
 }
 
-function semanticReferenceAssignmentOperatorSupported(operator: string): boolean {
-  return operator === "=" || operator === "+=" || operator === "-=";
-}
-
 function semanticReferenceAssignmentMemoryRefSupported(
   expression: SemanticExpression,
   compiled?: CompiledCudaLiteKernel,
@@ -1074,10 +1075,6 @@ function semanticReferenceAssignmentMemoryRef(
   _compiled?: CompiledCudaLiteKernel,
 ): SemanticMemoryRef | undefined {
   return expression.kind === "index" ? memoryRefFromIndexExpression(expression) : undefined;
-}
-
-function semanticReferenceVectorBinaryOperatorSupported(operator: string): boolean {
-  return operator === "+" || operator === "-" || operator === "*" || operator === "/";
 }
 
 function isStoragePointerNullComparison(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): boolean {
@@ -1239,10 +1236,6 @@ function semanticReferenceSurfaceReadTarget(expression: SemanticExpression): { r
     };
   }
   return undefined;
-}
-
-function semanticSurfaceReadValueType(valueType: CudaLiteScalarType | undefined): Exclude<CudaLiteScalarType, "void"> {
-  return valueType === undefined || valueType === "void" ? "float" : valueType;
 }
 
 function execSemanticSurfaceWrite(

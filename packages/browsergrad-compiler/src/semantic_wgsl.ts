@@ -121,6 +121,11 @@ import {
   SEMANTIC_MATH_CALLS,
   semanticMathCallArgumentsSupported,
 } from "./semantic_math_intrinsics.js";
+import {
+  semanticAssignmentOperatorSupported as semanticWgslAssignmentOperatorSupported,
+  semanticSurfaceReadValueType,
+  semanticVectorBinaryOperatorSupported as semanticWgslVectorBinaryOperatorSupported,
+} from "./semantic_expression_contracts.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
   semanticLocalArrayFillCallSupported,
@@ -704,10 +709,6 @@ function semanticWgslValueTypeSupported(valueType: CudaLiteScalarType | undefine
   return semanticValueTypeSupported(valueType);
 }
 
-function semanticWgslAssignmentOperatorSupported(operator: string): boolean {
-  return operator === "=" || operator === "+=" || operator === "-=";
-}
-
 function semanticWgslAssignmentMemoryRefSupported(
   expression: SemanticExpression,
   ir?: SemanticKernelIrModule,
@@ -723,10 +724,6 @@ function semanticWgslAssignmentMemoryRef(
   _ir?: SemanticKernelIrModule,
 ): SemanticMemoryRef | undefined {
   return expression.kind === "index" ? memoryRefFromIndexExpression(expression) : undefined;
-}
-
-function semanticWgslVectorBinaryOperatorSupported(operator: string): boolean {
-  return operator === "+" || operator === "-" || operator === "*" || operator === "/";
 }
 
 function semanticWgslLoopInitSupported(
@@ -1714,10 +1711,6 @@ function semanticWgslSurfaceReadTarget(expression: SemanticExpression): { readon
     };
   }
   return undefined;
-}
-
-function semanticSurfaceReadValueType(valueType: CudaLiteScalarType | undefined): Exclude<CudaLiteScalarType, "void"> {
-  return valueType === undefined || valueType === "void" ? "float" : valueType;
 }
 
 function emitSemanticSurfaceWrite(

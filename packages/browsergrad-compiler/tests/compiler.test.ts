@@ -325,7 +325,7 @@ describe("CUDA-lite compiler", () => {
     expect(forbidden).toEqual([]);
   });
 
-  it("keeps semantic IR traversal centralized", () => {
+  it("keeps semantic IR traversal and shared expression contracts centralized", () => {
     const srcDir = path.join(packageRoot, "src");
     const duplicates = fs.readdirSync(srcDir)
       .filter((file) => file.endsWith(".ts") && file !== "semantic_ir.ts")
@@ -342,6 +342,20 @@ describe("CUDA-lite compiler", () => {
       });
 
     expect(duplicates).toEqual([]);
+
+    const expressionContractDuplicates = ["semantic_reference.ts", "semantic_wgsl.ts"]
+      .flatMap((file) => {
+        const source = compilerSourceText(file);
+        return [
+          "AssignmentOperatorSupported",
+          "VectorBinaryOperatorSupported",
+          "SurfaceReadValueType",
+        ]
+          .filter((suffix) => new RegExp(`function\\s+semantic(?:Reference|Wgsl)${suffix}\\b`, "u").test(source))
+          .map((suffix) => `${file}:semantic${suffix}`);
+      });
+
+    expect(expressionContractDuplicates).toEqual([]);
   });
 
   it("parses and compiles SAXPY to WGSL", () => {
