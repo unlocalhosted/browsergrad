@@ -643,6 +643,38 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
     });
 
+  it("lowers looped local arithmetic in storage-pointer device helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void sumWindow(float *out, const float *input, int count) {
+    float total = 0.0f;
+    for (int i = 0; i < count; ++i) {
+      total += input[i];
+    }
+    out[0] = total;
+  }
+
+  __global__ void sumWindows(float *out, const float *input) {
+    int tid = threadIdx.x;
+    sumWindow(out + tid, input + tid * 2, 2);
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = {
+        buffers: {
+          out: new Float32Array(2),
+          input: new Float32Array([1, 2, 3, 4]),
+        },
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("fn sumWindow(");
+      expect(compiled.wgsl).toContain("for (var i: i32 = 0;");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 7]);
+      expect([...result.buffers.out as Float32Array]).toEqual([3, 7]);
+    });
+
   it("lowers direct kernel pointer dereference writes through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void directDeref(float* result, int* count) {
@@ -1259,7 +1291,7 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
     bump_roundtrip_vec(vecView, idx, make_float4(scale, scale * 2.0f, scale * 3.0f, scale * 4.0f));
   }`, { workgroupSize: [2, 1, 1] });
 
-      expect(compiled.wgsl).toContain("bump_roundtrip_vec(0u, (0u + u32((((0 + 1) * 4) + 0))), idx");
+      expect(compiled.wgsl).toContain("bump_roundtrip_vec(0u, (1u * 4u), idx");
       expect(compiled.wgsl).toContain("bg_ptr_read_f32x4(out_buffer, (out_base + (u32(idx) * 4u)))");
       expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(out_buffer, (out_base + (u32(idx) * 4u)), vec4<f32>");
     });

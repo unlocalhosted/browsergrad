@@ -161,6 +161,7 @@ function semanticPointerFunctionExpressionAccessesSupported(
   memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
 ): boolean {
+  if (semanticPointerFunctionExpressionHasPointerIdentityCheck(expression, pointerParams)) return false;
   let supported = true;
   walkSemanticExpression(expression, (item) => {
     const ref = memoryRefFromIndex(item);
@@ -170,6 +171,27 @@ function semanticPointerFunctionExpressionAccessesSupported(
     if (target && !pointerParams.has(target.base)) supported = false;
   });
   return supported;
+}
+
+function semanticPointerFunctionExpressionHasPointerIdentityCheck(
+  expression: SemanticExpression,
+  pointerParams: ReadonlySet<string>,
+): boolean {
+  let found = false;
+  walkSemanticExpression(expression, (item) => {
+    if (item.kind !== "binary" || (item.operator !== "==" && item.operator !== "!=")) return;
+    if (semanticPointerFunctionIdentityOperand(item.left, pointerParams) || semanticPointerFunctionIdentityOperand(item.right, pointerParams)) {
+      found = true;
+    }
+  });
+  return found;
+}
+
+function semanticPointerFunctionIdentityOperand(
+  expression: SemanticExpression,
+  pointerParams: ReadonlySet<string>,
+): boolean {
+  return expression.kind === "symbol" && pointerParams.has(expression.name);
 }
 
 function semanticPointerFunctionExpressionSupported(

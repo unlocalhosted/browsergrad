@@ -1522,7 +1522,7 @@ function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functi
 
 function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["functions"][number]): boolean {
   return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget, {
-    allowCooperativeOps: fn.params.some((param) => param.pointer && param.addressSpace === "shared"),
+    allowCooperativeOps: true,
   });
 }
 

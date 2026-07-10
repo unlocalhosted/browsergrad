@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T13:08:05Z
+Last updated: 2026-07-10T13:14:35Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `221/354`, up from `161/354`; `133` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `226/354`, up from `161/354`; `128` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
-| Active work item | Highest-impact remaining semantic WGSL fallback class after scalar shared-memory widening; device-helper barrier scheduling remains an explicit safety-gated slice |
+| Active work item | Highest-impact remaining semantic WGSL fallback class after storage-pointer device-helper widening; device-helper barrier scheduling remains an explicit safety-gated slice |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Storage-pointer device helper widening: semantic reference and semantic WGSL now accept device helper bodies with local declarations, local arithmetic, branches, and loops when all pointer accesses remain rooted in modeled pointer parameters. Pointer identity/null checks remain excluded until semantic IR carries pointer validity through helper ABI, preserving AST fallback correctness for nullable pointer helpers. Focused memory tests passed `182/0`; full compiler gate passed `768/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `221/354 -> 226/354`, AST fallback `133 -> 128`, and unsupported-call blockers `32 -> 27`.
 - Scalar shared-memory semantic widening: scalar `__shared__` symbols already had correct direct WGSL emission but semantic preflight incorrectly required a shared-pointer helper before allowing them near barriers. Direct scalar shared memory now follows the same type/rank contract as shared arrays. Focused compiler plus native-browser test coverage passed `268/0` (the browser suite’s local adapter check was unavailable, so this does not substitute for a native fixture); full compiler gate passed `767/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `218/354 -> 221/354`, AST fallback `136 -> 133`, barrier-shape blockers `7 -> 4`.
 - Analyzer-proven direct barrier widening: semantic WGSL now accepts direct barriers whose source spans are verified by analyzer uniformity facts, even when unrelated loops surround a top-level barrier. This removes an AST-backend-only layout restriction without weakening divergent-barrier rejection. Focused cooperative tests passed `99/0`; exact native Chromium fixture `shared_tile_transpose_kernel_mdspan` passed `1/0/0` as semantic `single-dispatch` with pinned output; full compiler gate passed `767/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `202/354 -> 218/354`, AST fallback `152 -> 136`, and shared-memory barrier-shape blockers `23 -> 7`.
 - Native WGSL type and device-function ABI hardening: cooperative `thread_rank()`/`size()` calls now carry semantic `int` type, preventing phase emission of `i32 == 0.0`; generic `min`/`max` emits operands from semantic result type; user declarations cannot shadow WGSL predeclared function names; mutated CUDA device value parameters lower to immutable WGSL inputs plus mutable local copies. Focused compiler tests passed `279/0`; exact native browser WebGPU corpus fixtures `reduceSinglePassMultiBlockCG_grid_sync` and `cudaProcess` passed `2/0/0` with output comparison; full `verify:real-world-cuda -- --require-webgpu` passed.
@@ -1044,6 +1045,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | Storage-pointer device helper control flow | Semantic backends rejected valid helper-local declarations, arithmetic, branches, and loops unless the pointer parameter was shared, keeping ordinary CUDA storage-pointer helpers on AST WGSL | use the richer pointer-access contract for all modeled storage/shared helper params; reject pointer identity/null checks until helper pointer validity is modeled | focused memory `182/0`; full compiler `768/0`; full real-world native verifier passed; CUDA-samples semantic-direct `226/354`, fallback `128`, unsupported-call blockers `27` |
 | Fixed | Direct scalar shared memory | Semantic WGSL already emitted valid scalar workgroup variables but preflight rejected them near barriers unless a shared-pointer helper existed | allow scalar shared symbols through the same rank/type contract as shared arrays; preserve the one-dimensional shared-pointer ABI restriction | focused compiler/browser test `268/0` (local browser adapter unavailable); full compiler `767/0`; full real-world native verifier passed; CUDA-samples semantic-direct `221/354`, fallback `133`, barrier-shape blockers `4` |
 | Fixed | Analyzer-proven direct barriers | Semantic WGSL rejected direct uniform barriers when an unrelated loop appeared before or after the barrier, forcing safe CUDA shared-memory kernels through AST WGSL | trust analyzer-verified direct barrier source spans without requiring the barrier itself to be nested; keep helper-mediated barriers and unverified/divergent shapes safety-gated | focused cooperative `99/0`; exact Chromium fixture `shared_tile_transpose_kernel_mdspan` `1/0/0`; CUDA-samples semantic-direct `218/354`, fallback `136`, barrier-shape blockers `7` |
 | Fixed | Native WGSL semantic type and device-function ABI | CI corpus fixtures generated `i32 == 0.0`, forced integer `min/max` through f32, allowed a user `clamp` helper to shadow WGSL builtin `clamp`, then attempted assignment to immutable WGSL device-function parameters | type cooperative rank/size calls in semantic IR; emit typed min/max operands; reserve WGSL predeclared function names; lower mutated value parameters as immutable incoming arguments plus mutable local copies | focused compiler `279/0`; exact Chromium corpus fixtures `2/0/0`; full `verify:real-world-cuda -- --require-webgpu` passed |
