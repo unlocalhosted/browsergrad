@@ -3260,18 +3260,23 @@ describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
     float4 record = x[0];
     out[0] = record.S + record.X + record.MuByT + record.VBySqrtT;
   }`, { workgroupSize: [1, 1, 1] });
-      const result = runCompiledKernelReference(
-        compiled,
-        {
-          buffers: {
-            x: new Float32Array(4),
-            y: new Float32Array(4),
-            out: new Float32Array(1),
-          },
+      const input = {
+        buffers: {
+          x: new Float32Array(4),
+          y: new Float32Array(4),
+          out: new Float32Array(1),
         },
-        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-      );
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect([...semanticResult.buffers.x as Float32Array]).toEqual([2, 3, 5, 7]);
+      expect([...semanticResult.buffers.y as Float32Array]).toEqual([2, 3, 5, 7]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([17]);
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 5, 7]);
       expect([...result.buffers.y as Float32Array]).toEqual([2, 3, 5, 7]);
       expect([...result.buffers.out as Float32Array]).toEqual([17]);

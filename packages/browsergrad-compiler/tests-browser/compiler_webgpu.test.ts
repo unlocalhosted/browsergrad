@@ -461,6 +461,33 @@ __global__ void sharedScalarVectorView(float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([4, 14]);
   });
 
+  it("runs chained vector stores through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void chainedVectorStore(float4 *x, float4 *y, float *out) {
+  float4 value = make_float4(2.0f, 3.0f, 5.0f, 7.0f);
+  x[0] = y[0] = value;
+  out[threadIdx.x] = x[0].w + y[0].z;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array(4),
+        y: new Float32Array(4),
+        out: new Float32Array(1),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.x as Float32Array]).toEqual([2, 3, 5, 7]);
+    expect([...actual.buffers.y as Float32Array]).toEqual([2, 3, 5, 7]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([12]);
+  });
+
   it("runs common CUDA float math builtins through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(FLOAT_MATH, { workgroupSize: [2, 1, 1] });

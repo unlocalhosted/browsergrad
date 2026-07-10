@@ -748,10 +748,37 @@ function lowerStatementOperations(
   statement: CudaLiteStatement,
   scope: Map<string, CudaLiteSemanticSymbol>,
 ): readonly SemanticKernelIrOperation[] {
+  const chainedStores = semanticMemoryAssignmentChainOperations(statement, scope);
+  if (chainedStores) return chainedStores;
   const mathOutVarDecl = semanticMathOutVarDeclOperations(statement, scope);
   const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
   const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
+}
+
+function semanticMemoryAssignmentChainOperations(
+  statement: CudaLiteStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "expr" || statement.expression.kind !== "assignment") return undefined;
+  let expression = lowerExpression(statement.expression, scope);
+  const targets: SemanticMemoryRef[] = [];
+  while (expression.kind === "assignment" && expression.operator === "=") {
+    const target = memoryRefFromExpression(expression.target);
+    if (!target || !semanticExpressionSideEffectFree(expression.target) || semanticExpressionContainsCall(expression.target)) return undefined;
+    targets.push(target);
+    expression = expression.value;
+  }
+  if (targets.length < 2 || (expression.kind !== "literal" && expression.kind !== "symbol")) return undefined;
+  return targets.reverse().map((target) => storeOperation(target, expression, statement.span));
+}
+
+function semanticExpressionContainsCall(expression: SemanticExpression): boolean {
+  let found = false;
+  walkSemanticExpression(expression, (item) => {
+    if (item.kind === "call") found = true;
+  });
+  return found;
 }
 
 function lowerInlineAsmBuiltinRegisterAssignment(

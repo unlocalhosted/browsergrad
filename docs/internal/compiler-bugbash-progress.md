@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T12:29:33Z
+Last updated: 2026-07-10T12:32:52Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,7 +9,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `197/354`, up from `161/354`; `157` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `198/354`, up from `161/354`; `156` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
 | Active work item | Device-helper barrier scheduling, then highest-impact remaining semantic WGSL fallback class |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic chained memory stores: statement-level assignment chains such as `x[i] = y[i] = value` now become ordered semantic `Store(y,value)` then `Store(x,value)` operations when targets are call-free memory refs and the RHS is a literal or symbol. This avoids duplicated effectful evaluation and leaves local/expression chains on their existing path. Focused numeric tests passed `104/0`; native browser tests passed `115/0`; the CUDA-samples `cudaCompressibleMemory/init` source compiles semantic-direct; corpus reached `198/354`, AST fallback `156`, store blockers `16`.
 - Semantic scalar-shared vector views: `reinterpret_cast<float4 *>(&sharedScalar[index])` now uses explicit scalar-lane loads and stores when the shared backing scalar matches the vector lane type. Reference and WGSL keep the same base offset, avoiding a second vector stride. Focused memory tests passed `178/0`; native browser tests passed `114/0`; the CUDA-samples `MatrixMulNaiveLargeChunk` source compiles semantic-direct; corpus reached `197/354`, AST fallback `157`, plan compilation `357/357`, hard failures `0`.
 - Semantic inline-PTX warp registers: output-only `mov.u32 ..., %laneid`, `%warpid`, and `%lanemask_lt` now lower to typed semantic expressions over the full 3D CTA-linear thread rank, not only `threadIdx.x`. Semantic reference and WGSL consume those operations; native WebGPU fixtures verify 2D lane sequencing, the warp boundary, and all 32 mask values. Focused compiler tests passed `266/0`; browser tests passed `113/0`; CUDA-samples semantic-direct lowering remains `196/354`, AST fallback `158`, plan compilation `357/357`, hard failures `0`.
 - Semantic 2D surface boundary-mode shape: `surf2Dwrite(value, surface, xBytes, y, cudaBoundaryModeTrap)` now keeps the final argument out of the 3D `z` slot, matching the AST backend's intrinsic arity contract. Semantic reference and WGSL emit direct 2D surface storage writes. Focused semantic unit and native browser surface fixture passed `1/0`; CUDA-samples semantic-direct lowering reached `194/354`, AST fallback `160`, plan compilation `357/357`, hard failures `0`. Surface-object pointer-array routing remains a separate unsupported shape.
