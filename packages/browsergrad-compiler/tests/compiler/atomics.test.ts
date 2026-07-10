@@ -585,8 +585,11 @@ describe("CUDA-lite compiler: Atomics", () => {
 
       expect([...result.buffers.counter as Uint32Array]).toEqual([3]);
       expect([...result.buffers.out as Float32Array]).toEqual([5, 3]);
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer, (out_base + u32(0)), f32(");
-      expect(compiled.wgsl).not.toContain("bg_ptr_read_f32(out_buffer, (out_base + u32(0))) =");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicSub_u32(counter_buffer");
+      expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer, u32((i32(out_base) + 0)), f32(");
     });
 
   it("supports atomic operations on __device__ globals", () => {

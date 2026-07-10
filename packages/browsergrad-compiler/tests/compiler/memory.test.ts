@@ -688,6 +688,9 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toMatch(/bg_ptr_read_f32\(inp_buffer(?:_arg)?/u);
       expect(compiled.wgsl).not.toContain("x[");
       expect([...result.buffers.out as Float32Array]).toEqual([60]);

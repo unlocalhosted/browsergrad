@@ -103,6 +103,7 @@ function semanticPointerFunctionOperationSupported(
     const ref = memoryRefFromIndex(operation.expression.argument);
     return ref !== undefined && pointerParams.has(ref.base);
   }
+  if (operation.kind === "expression" && operation.expression.kind === "literal") return true;
   if (operation.kind === "expression") return semanticPointerFunctionExpressionSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget);
   return false;
 }
