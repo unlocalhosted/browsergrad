@@ -3418,6 +3418,29 @@ __global__ void clampVector(float4 *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs same-arity pointer overloads through semantic WGSL on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ int pick(int *value) { return value[0] + 1; }
+__device__ uint pick(uint *value) { return value[0] + 2u; }
+__global__ void pointerOverload(int *signedInput, uint *unsignedInput, int *out) {
+  out[0] = pick(signedInput);
+  out[1] = int(pick(unsignedInput));
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        signedInput: new Int32Array([4]),
+        unsignedInput: new Uint32Array([5]),
+        out: new Int32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Int32Array]).toEqual([5, 7]);
+  });
+
   it("runs half2 comparison intrinsics through f32 compatibility mode on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

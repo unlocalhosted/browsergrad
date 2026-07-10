@@ -1288,12 +1288,34 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["pick", "pick"]);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl: direct semantic IR emission");
+      expect(compiled.kernelIr.functions.map((fn) => fn.name)).toEqual(["pick__bg_overload_0", "pick__bg_overload_1"]);
       expect(compiled.wgsl).toContain("fn pick__bg_overload_0(");
       expect(compiled.wgsl).toContain("fn pick__bg_overload_1(");
-      expect(compiled.wgsl).toContain("out[0] = i32(pick__bg_overload_0(4");
-      expect(compiled.wgsl).toContain("out[1] = i32(pick__bg_overload_1(4, 5");
+      expect(compiled.wgsl).toContain("out[0u] = pick__bg_overload_0(4");
+      expect(compiled.wgsl).toContain("out[1u] = pick__bg_overload_1(4, 5");
       expect([...result.buffers.out as Int32Array]).toEqual([5, 9]);
+    });
+
+  it("resolves same-arity pointer overloads by semantic pointee type", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ int pick(int *value) { return value[0] + 1; }
+  __device__ uint pick(uint *value) { return value[0] + 2u; }
+  __global__ void overloadPointerKernel(int *signedInput, uint *unsignedInput, int *out) {
+    if (threadIdx.x < 1) {
+      out[0] = pick(signedInput);
+      out[1] = int(pick(unsignedInput));
+    }
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { signedInput: new Int32Array([4]), unsignedInput: new Uint32Array([5]), out: new Int32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl: direct semantic IR emission");
+      expect(compiled.kernelIr.functions.map((fn) => fn.name)).toEqual(["pick__bg_overload_0", "pick__bg_overload_1"]);
+      expect([...result.buffers.out as Int32Array]).toEqual([5, 7]);
     });
 
   it("lowers CUDA match_any through semantic IR", () => {

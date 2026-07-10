@@ -2966,7 +2966,7 @@ function validateDeviceFunctionCall(
   walkExpression: ExpressionWalker,
   scope: Scope,
 ): ExpressionInfo {
-  const overload = resolveDeviceFunctionOverload(symbol, expression.args.length);
+  const overload = resolveDeviceFunctionOverload(symbol, expression.args, scope);
   const fnParams = overload?.params ?? symbol.params ?? [];
   if (expression.args.length !== fnParams.length) {
     diagnostics.push(error(
@@ -3020,11 +3020,45 @@ function validateDeviceFunctionCall(
 
 function resolveDeviceFunctionOverload(
   symbol: SymbolInfo,
-  argCount: number,
+  args: readonly CudaLiteExpression[],
+  scope: Scope,
 ): CudaLiteDeviceFunction | undefined {
   const overloads = symbol.overloads ?? [];
   if (overloads.length === 0) return undefined;
-  return overloads.find((fn) => fn.params.length === argCount) ?? overloads[0];
+  const matchingArity = overloads.filter((fn) => fn.params.length === args.length);
+  const ranked = matchingArity
+    .map((fn) => ({ fn, score: deviceFunctionOverloadScore(fn, args, scope) }))
+    .filter((candidate) => candidate.score !== undefined)
+    .sort((left, right) => right.score! - left.score!);
+  return ranked[0]?.fn ?? matchingArity[0] ?? overloads[0];
+}
+
+function deviceFunctionOverloadScore(
+  fn: CudaLiteDeviceFunction,
+  args: readonly CudaLiteExpression[],
+  scope: Scope,
+): number | undefined {
+  let score = 0;
+  for (const [index, param] of fn.params.entries()) {
+    const arg = args[index]!;
+    if (param.pointer) {
+      const root = rootIdentifier(arg);
+      const rootSymbol = root ? lookupSymbol(root, scope, arg.span) : undefined;
+      const actualValueType = arg.kind === "cast" && arg.pointer ? arg.valueType : rootSymbol?.valueType;
+      if (actualValueType !== undefined && !pointerTypesCompatible(param.valueType, actualValueType, hasExplicitPointerCast(arg))) return undefined;
+      score += 4;
+      if (actualValueType === param.valueType) score += 4;
+      continue;
+    }
+    if (arg.kind === "cast" && arg.pointer) return undefined;
+    const argType = arg.kind === "cast"
+      ? arg.valueType
+      : arg.kind === "identifier"
+        ? lookupSymbol(arg.name, scope, arg.span)?.valueType
+        : undefined;
+    if (argType === param.valueType) score += 2;
+  }
+  return score;
 }
 
 function deviceFunctionArityMessage(symbol: SymbolInfo): string {

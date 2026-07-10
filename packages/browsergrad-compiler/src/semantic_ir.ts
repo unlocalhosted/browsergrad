@@ -68,6 +68,7 @@ import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCud
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
 import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
 import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
+import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -556,14 +557,18 @@ export function lowerSemanticModelToKernelIr(
     .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
   const sharedMemoryDimensions = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.dimensions] as const));
   const sharedMemoryValueTypes = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.valueType] as const));
-  const specializedFunctions = specializeSharedPointerFunctions(
+  const resolved = resolveSemanticFunctionOverloads(
     loweredOperations,
     semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
+  );
+  const specializedFunctions = specializeSharedPointerFunctions(
+    resolved.operations,
+    resolved.functions,
     sharedMemoryDimensions,
     sharedMemoryValueTypes,
   );
   const barrierFunctions = semanticIrBarrierFunctionNames(specializedFunctions);
-  const operations = promoteSemanticBarrierResultCalls(loweredOperations, barrierFunctions);
+  const operations = promoteSemanticBarrierResultCalls(resolved.operations, barrierFunctions);
   const functions = specializedFunctions.map((fn) => ({
     ...fn,
     body: promoteSemanticBarrierResultCalls(fn.body, barrierFunctions),
