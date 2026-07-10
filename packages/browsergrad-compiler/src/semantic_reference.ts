@@ -149,6 +149,7 @@ import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, c
 
 type SemanticValue = number | ReferenceVector3 | number[];
 type SemanticControl = "fallthrough" | "return" | "break" | "continue";
+type SemanticBarrierGenerator = Generator<"barrier", SemanticControl, void>;
 type SemanticCurandState =
   | { readonly kind: "local"; readonly name: string; readonly span: SourceSpan }
   | { readonly kind: "memory"; readonly ref: SemanticMemoryRef };
@@ -249,7 +250,8 @@ export function runCompiledKernelSemanticReference(
             }
           }
         }
-        if (sharedMemory.size > 0 || semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) runSemanticBlockPhases(compiled.kernelIr.operations, blockContexts);
+        if (sharedMemory.size > 0) runSemanticBarrierScheduler(compiled.kernelIr.operations, blockContexts);
+        else if (semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) runSemanticSubgroupPhases(compiled.kernelIr.operations, blockContexts);
         else for (const context of blockContexts) execSemanticOperations(compiled.kernelIr.operations, context);
       }
     }
@@ -427,28 +429,38 @@ function semanticReferenceFunctionParamSupported(
 
 function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel): boolean {
   if (!compiled.kernelIr.memory.some((symbol) => symbol.kind === "shared")) return true;
-  return operationsHaveOnlyTopLevelSharedBarriers(compiled.kernelIr.operations);
+  if (compiled.kernelIr.functions.some((fn) => semanticOperationsContainBarrier(fn.body))) return false;
+  const proof = compiled.kernelIr.barrierUniformity.kernel;
+  if (!proof.verified) return false;
+  return semanticDirectBarriersMatchProof(compiled.kernelIr.operations, new Set(proof.barrierStatementStarts));
 }
 
-function operationsHaveOnlyTopLevelSharedBarriers(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.every((operation) => {
+function semanticOperationsContainBarrier(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === "barrier") return true;
     if (operation.kind === "branch") {
-      return operationsHaveNoBarrierOrControlTransfer(operation.consequent) &&
-        operationsHaveNoBarrierOrControlTransfer(operation.alternate);
+      return semanticOperationsContainBarrier(operation.consequent) ||
+        semanticOperationsContainBarrier(operation.alternate);
     }
-    if (operation.kind === "block") return operationsHaveNoBarrierOrControlTransfer(operation.body);
-    return operation.kind !== "loop";
+    if (operation.kind === "block" || operation.kind === "loop") return semanticOperationsContainBarrier(operation.body);
+    return false;
   });
 }
 
-function operationsHaveNoBarrierOrControlTransfer(operations: readonly SemanticKernelIrOperation[]): boolean {
+function semanticDirectBarriersMatchProof(
+  operations: readonly SemanticKernelIrOperation[],
+  barrierStatementStarts: ReadonlySet<number>,
+): boolean {
   return operations.every((operation) => {
-    if (operation.kind === "barrier" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue") return false;
+    if (operation.kind === "barrier") return barrierStatementStarts.has(operation.span.start);
+    if (operation.kind === "inline-asm") return classifyInlineAsm(operation.statement.template)?.kind !== "bar-sync";
     if (operation.kind === "branch") {
-      return operationsHaveNoBarrierOrControlTransfer(operation.consequent) &&
-        operationsHaveNoBarrierOrControlTransfer(operation.alternate);
+      return semanticDirectBarriersMatchProof(operation.consequent, barrierStatementStarts) &&
+        semanticDirectBarriersMatchProof(operation.alternate, barrierStatementStarts);
     }
-    if (operation.kind === "block" || operation.kind === "loop") return operationsHaveNoBarrierOrControlTransfer(operation.body);
+    if (operation.kind === "block" || operation.kind === "loop") {
+      return semanticDirectBarriersMatchProof(operation.body, barrierStatementStarts);
+    }
     return true;
   });
 }
@@ -1230,6 +1242,101 @@ function execSemanticScopedOperations(
       if (value === undefined) context.locals.delete(name);
       else context.locals.set(name, value);
     }
+  }
+}
+
+function* execSemanticBarrierOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  context: SemanticReferenceContext,
+): SemanticBarrierGenerator {
+  for (const operation of operations) {
+    switch (operation.kind) {
+      case "declare":
+        if (operation.target.addressSpace !== "shared") context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
+        break;
+      case "store":
+      case "surface-write":
+      case "surface-read-store":
+      case "atomic":
+      case "call":
+      case "expression":
+      case "fence":
+        execSemanticOperations([operation], context);
+        break;
+      case "branch": {
+        const control = yield* execSemanticBarrierScopedOperations(
+          truthy(evalNumber(operation.condition, context)) ? operation.consequent : operation.alternate,
+          context,
+        );
+        if (control !== "fallthrough") return control;
+        break;
+      }
+      case "block": {
+        const control = yield* execSemanticBarrierScopedOperations(operation.body, context);
+        if (control !== "fallthrough") return control;
+        break;
+      }
+      case "loop": {
+        const control = yield* execSemanticBarrierLoop(operation, context);
+        if (control !== "fallthrough") return control;
+        break;
+      }
+      case "return":
+        if (operation.value) context.returnValue = evalSemanticExpression(operation.value, context);
+        return "return";
+      case "barrier":
+        yield "barrier";
+        break;
+      case "inline-asm":
+        if (classifyInlineAsm(operation.statement.template)?.kind !== "bar-sync") {
+          execSemanticOperations([operation], context);
+          break;
+        }
+        yield "barrier";
+        break;
+      case "break":
+        return "break";
+      case "continue":
+        return "continue";
+      default:
+        throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
+    }
+  }
+  return "fallthrough";
+}
+
+function* execSemanticBarrierScopedOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  context: SemanticReferenceContext,
+): SemanticBarrierGenerator {
+  const savedLocals = new Map<string, SemanticValue | undefined>();
+  for (const operation of operations) {
+    if (operation.kind !== "declare" || savedLocals.has(operation.target.name)) continue;
+    savedLocals.set(operation.target.name, context.locals.get(operation.target.name));
+  }
+  try {
+    return yield* execSemanticBarrierOperations(operations, context);
+  } finally {
+    for (const [name, value] of savedLocals) {
+      if (value === undefined) context.locals.delete(name);
+      else context.locals.set(name, value);
+    }
+  }
+}
+
+function* execSemanticBarrierLoop(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "loop" }>,
+  context: SemanticReferenceContext,
+): SemanticBarrierGenerator {
+  if (operation.loopKind === "for" && operation.init) execSemanticLoopInit(operation.init, context);
+  for (let guard = 0; ; guard++) {
+    if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
+    if (operation.loopKind !== "do-while" && operation.condition !== undefined && !truthy(evalNumber(operation.condition, context))) return "fallthrough";
+    const control = yield* execSemanticBarrierScopedOperations(operation.body, context);
+    if (control === "return") return control;
+    if (control === "break") return "fallthrough";
+    if (operation.loopKind === "for" && operation.update) evalNumber(operation.update, context);
+    if (operation.loopKind === "do-while" && (!operation.condition || !truthy(evalNumber(operation.condition, context)))) return "fallthrough";
   }
 }
 
@@ -4297,7 +4404,35 @@ function semanticStorageScalarType(valueType: CudaLiteScalarType | undefined): C
   return isCudaVectorType(valueType) ? cudaVectorScalarType(valueType) : valueType;
 }
 
-function runSemanticBlockPhases(
+function runSemanticBarrierScheduler(
+  operations: readonly SemanticKernelIrOperation[],
+  contexts: readonly SemanticReferenceContext[],
+): void {
+  const generators = contexts.map((context) => execSemanticBarrierOperations(operations, context));
+  const active = generators.map(() => true);
+  while (active.some(Boolean)) {
+    let activeBefore = 0;
+    let barriers = 0;
+    for (const [index, generator] of generators.entries()) {
+      if (!active[index]) continue;
+      activeBefore++;
+      const next = generator.next();
+      if (next.done) {
+        active[index] = false;
+        if (next.value === "break" || next.value === "continue") {
+          throw semanticReferenceError(`semantic reference unexpected ${next.value} across shared-memory phase`, contexts[index]!.compiled.kernelIr.span);
+        }
+      } else {
+        barriers++;
+      }
+    }
+    if (barriers > 0 && barriers !== activeBefore) {
+      throw semanticReferenceError("semantic reference barrier mismatch: not every active thread reached the same barrier", contexts[0]?.compiled.kernelIr.span ?? operations[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 });
+    }
+  }
+}
+
+function runSemanticSubgroupPhases(
   operations: readonly SemanticKernelIrOperation[],
   contexts: readonly SemanticReferenceContext[],
 ): void {
@@ -4306,7 +4441,7 @@ function runSemanticBlockPhases(
       for (const context of contexts) {
         const control = execSemanticOperations([operation], context);
         if (control === "break" || control === "continue") {
-          throw semanticReferenceError(`semantic reference unexpected ${control} across shared-memory phase`, context.compiled.kernelIr.span);
+          throw semanticReferenceError(`semantic reference unexpected ${control} across subgroup phase`, context.compiled.kernelIr.span);
         }
       }
     }

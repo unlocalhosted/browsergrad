@@ -385,9 +385,12 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         input,
         launch,
       );
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect([...result.buffers.C as Float32Array]).toEqual([19, 22, 43, 50]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect([...semanticResult.buffers.C as Float32Array]).toEqual([19, 22, 43, 50]);
       expect(compiled.wgsl).toContain("var<workgroup> As: array<f32, 4>;");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
