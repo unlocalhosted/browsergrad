@@ -1303,6 +1303,24 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([4, 14]);
     });
 
+  it("lowers storage parameter rebases through semantic IR offsets", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void storageRebase(uint *data, uint *out) {
+    data = data + blockIdx.x * 2;
+    out[blockIdx.x * blockDim.x + threadIdx.x] = data[threadIdx.x];
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = { buffers: { data: new Uint32Array([10, 11, 20, 21]), out: new Uint32Array(4) } };
+      const launch = { gridDim: [2, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("data__bg_ptr_offset");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([10, 11, 20, 21]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([10, 11, 20, 21]);
+    });
+
   it("rejects writes through const device helper pointer params", () => {
       expect(() => compileCudaLiteKernel(`
   __device__ void bad(const float* x) {
@@ -5172,8 +5190,8 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
       expect([...assignmentRebaseResult.buffers.out as Uint32Array]).toEqual([20, 30]);
-      expect(assignmentRebase.wgsl).toContain("bg_x_base = (bg_x_base + u32(bg_uniforms.offset));");
-      expect(assignmentRebase.wgsl).toContain("bg_x_base = (bg_x_base + u32(1));");
+      expect(assignmentRebase.wgsl).toContain("x__bg_ptr_offset = (x__bg_ptr_offset + bg_uniforms.offset);");
+      expect(assignmentRebase.wgsl).toContain("x__bg_ptr_offset = (x__bg_ptr_offset + 1);");
 
       const nullGuard = compileCudaLiteKernel(`
   __global__ void pointer_null_guard(const uint* x, uint* out) {

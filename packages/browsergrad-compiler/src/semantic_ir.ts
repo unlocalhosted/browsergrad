@@ -905,6 +905,8 @@ function lowerStatement(
     case "expr": {
       const cpAsync = semanticCpAsyncOperation(statement.expression, scope, statement.span);
       if (cpAsync) return cpAsync;
+      const pointerRebase = semanticStoragePointerRebaseOperation(statement.expression, scope, statement.span);
+      if (pointerRebase) return pointerRebase;
       const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const expression = lowerExpression(statement.expression, scope);
@@ -1070,6 +1072,44 @@ function lowerStatement(
     case "break":
       return { kind: "break", span: statement.span };
   }
+}
+
+function semanticStoragePointerRebaseOperation(
+  source: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (source.kind !== "assignment" || source.operator !== "=") return undefined;
+  const targetExpression = lowerExpression(source.left, scope);
+  const target = memoryRefFromExpression(targetExpression);
+  if (!target || target.addressSpace !== "storage" || target.indices.length !== 0 || target.fields.length !== 0) return undefined;
+  const value = lowerExpression(source.right, scope);
+  const rebase = semanticStoragePointerRebaseValue(target, value);
+  if (!rebase) return undefined;
+  return {
+    kind: "store",
+    target,
+    value: rebase.value,
+    operator: rebase.operator,
+    reads: collectMemoryRefs(rebase.value),
+    span,
+  };
+}
+
+function semanticStoragePointerRebaseValue(
+  target: SemanticMemoryRef,
+  value: SemanticExpression,
+): { readonly operator: "+=" | "-="; readonly value: SemanticExpression } | undefined {
+  if (value.kind === "binary" && (value.operator === "+" || value.operator === "-")) {
+    const base = memoryRefFromExpression(value.left);
+    if (base?.base === target.base && base.addressSpace === "storage" && base.indices.length === 0 && base.fields.length === 0) {
+      return { operator: value.operator === "+" ? "+=" : "-=", value: value.right };
+    }
+  }
+  if (value.kind !== "unary" || value.operator !== "&" || value.argument.kind !== "index") return undefined;
+  const base = memoryRefFromExpression(value.argument.target);
+  if (base?.base !== target.base || base.addressSpace !== "storage" || base.indices.length !== 0 || base.fields.length !== 0) return undefined;
+  return { operator: "+=", value: value.argument.index };
 }
 
 function semanticSurfaceWriteUsesZ(callee: string): boolean {
