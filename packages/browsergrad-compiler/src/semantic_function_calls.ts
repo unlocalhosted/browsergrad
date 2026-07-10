@@ -15,6 +15,7 @@ export function semanticFunctionParamContractSupported(
   param: CudaLiteSemanticSymbol,
   valueTypeSupported: (valueType: CudaLiteScalarType | undefined) => boolean,
 ): boolean {
+  if (param.cooperativeGroupKind !== undefined) return !param.pointer && param.addressSpace === "local";
   if (param.pointer) return (param.addressSpace === "storage" || param.addressSpace === "shared") && valueTypeSupported(param.valueType);
   return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";
 }
@@ -23,7 +24,7 @@ export function semanticFunctionLocalParamValueTypesSupported(
   fn: CudaLiteSemanticFunction,
   valueTypeSupported: (valueType: CudaLiteScalarType | undefined) => boolean,
 ): boolean {
-  return fn.params.every((param) => param.addressSpace !== "local" || valueTypeSupported(param.valueType));
+  return fn.params.every((param) => param.addressSpace !== "local" || param.cooperativeGroupKind !== undefined || valueTypeSupported(param.valueType));
 }
 
 export function semanticFunctionArgAddressContractSupported(
@@ -32,6 +33,7 @@ export function semanticFunctionArgAddressContractSupported(
   pointerRef: (arg: SemanticExpression) => SemanticMemoryRef | undefined,
 ): boolean | undefined {
   if (!param) return false;
+  if (param.cooperativeGroupKind !== undefined) return arg.kind === "symbol";
   if (param.pointer) {
     const ref = pointerRef(arg);
     return (param.addressSpace === "storage" || param.addressSpace === "shared") && ref?.addressSpace === param.addressSpace;

@@ -3910,6 +3910,7 @@ function createSemanticFunctionContext(
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
     if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, span);
+    if (param.cooperativeGroupKind !== undefined) continue;
     if (param.addressSpace === "texture") {
       if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticReferenceError(`semantic reference function '${fn.name}' texture argument must be a texture symbol`, arg.span);
       const texture = context.textures[arg.name];

@@ -96,6 +96,7 @@ export interface CudaLiteSemanticSymbol {
   readonly valueType?: CudaLiteScalarType;
   readonly pointer?: boolean;
   readonly pointerRoot?: string;
+  readonly pointerAliasOf?: string;
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly pointerValid?: SemanticExpression;
@@ -591,14 +592,39 @@ function specializeSharedPointerFunctions(
   sharedMemoryDimensions: ReadonlyMap<string, readonly number[]>,
   sharedMemoryValueTypes: ReadonlyMap<string, CudaLiteScalarType | undefined>,
 ): readonly CudaLiteSemanticFunction[] {
-  const calls = collectSemanticFunctionCalls(operations);
+  let current = functions;
+  for (let pass = 0; pass <= functions.length; pass++) {
+    const dimensions = new Map(sharedMemoryDimensions);
+    const valueTypes = new Map(sharedMemoryValueTypes);
+    for (const param of current.flatMap((fn) => fn.params).filter((param) => param.pointer && param.addressSpace === "shared")) {
+      dimensions.set(param.name, param.dimensions);
+      valueTypes.set(param.name, param.valueType);
+    }
+    const calls = [
+      ...collectSemanticFunctionCalls(operations),
+      ...current.flatMap((fn) => collectSemanticFunctionCalls(fn.body)),
+    ];
+    const next = specializeSharedPointerFunctionsOnce(current, calls, dimensions, valueTypes);
+    if (next.every((fn, index) => fn === current[index])) return next;
+    current = next;
+  }
+  return current;
+}
+
+function specializeSharedPointerFunctionsOnce(
+  functions: readonly CudaLiteSemanticFunction[],
+  calls: readonly SemanticFunctionCallSite[],
+  sharedMemoryDimensions: ReadonlyMap<string, readonly number[]>,
+  sharedMemoryValueTypes: ReadonlyMap<string, CudaLiteScalarType | undefined>,
+): readonly CudaLiteSemanticFunction[] {
   return functions.map((fn) => {
+    const fnCalls = calls.filter((call) => call.callee === fn.name);
     const sharedPointerNames = new Map<string, string>();
     const sharedPointerDimensions = new Map<string, readonly number[]>();
+    const sharedPointerRoots = new Map<string, readonly (string | undefined)[]>();
     for (const [index, param] of fn.params.entries()) {
       if (!param.pointer || param.addressSpace !== "storage") continue;
-      const args = calls
-        .filter((call) => call.callee === fn.name)
+      const args = fnCalls
         .map((call) => call.args[index])
         .flatMap((arg) => arg === undefined ? [] : [sharedPointerRoot(arg)]);
       const dimensions = args.map((root) => root === undefined ? undefined : sharedMemoryDimensions.get(root));
@@ -606,9 +632,19 @@ function specializeSharedPointerFunctions(
       if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && dimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
         sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
         sharedPointerDimensions.set(param.name, dimensions[0]!);
+        sharedPointerRoots.set(param.name, args);
       }
     }
     if (sharedPointerNames.size === 0) return fn;
+    const sharedPointerAliases = new Map<string, string>();
+    const specializedParams = fn.params.filter((param) => sharedPointerNames.has(param.name));
+    for (const [index, param] of specializedParams.entries()) {
+      const roots = sharedPointerRoots.get(param.name)!;
+      const canonical = specializedParams.slice(0, index).find((candidate) =>
+        sameSemanticPointerRoots(roots, sharedPointerRoots.get(candidate.name)!),
+      );
+      if (canonical) sharedPointerAliases.set(param.name, sharedPointerNames.get(canonical.name)!);
+    }
     return {
       ...fn,
       params: fn.params.map((param) => sharedPointerNames.has(param.name) ? {
@@ -616,10 +652,18 @@ function specializeSharedPointerFunctions(
         name: sharedPointerNames.get(param.name)!,
         addressSpace: "shared" as const,
         dimensions: sharedPointerDimensions.get(param.name)!,
+        ...(sharedPointerAliases.has(param.name) ? { pointerAliasOf: sharedPointerAliases.get(param.name)! } : {}),
       } : param),
       body: rewriteSemanticPointerAddressSpace(fn.body, sharedPointerNames),
     };
   });
+}
+
+function sameSemanticPointerRoots(
+  left: readonly (string | undefined)[],
+  right: readonly (string | undefined)[],
+): boolean {
+  return left.length === right.length && left.every((root, index) => root === right[index]);
 }
 
 interface SemanticFunctionCallSite {

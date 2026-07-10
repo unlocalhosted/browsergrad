@@ -2405,6 +2405,9 @@ function emitSemanticFunctionParams(
     ];
   }
   if (param.pointer && param.addressSpace === "shared") {
+    if (param.pointerAliasOf !== undefined) {
+      return [`${nameFor(semanticPointerBaseParamName(param.name), names)}: u32`];
+    }
     return [
       `${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param, atomicSharedPointer)}`,
       `${nameFor(semanticPointerBaseParamName(param.name), names)}: u32`,
@@ -3775,7 +3778,12 @@ function emitSemanticFunctionArgs(
   if (param?.pointer && param.addressSpace === "shared") {
     const ref = semanticPointerArgMemoryRef(arg);
     if (!ref || ref.addressSpace !== "shared") throw semanticWgslError("semantic WGSL shared pointer helper argument must be modeled shared memory", arg.span);
-    return [`&${nameFor(ref.base, names)}`, emitSemanticSharedPointerArgBaseIndex(ref, ir, names)];
+    const base = emitSemanticSharedPointerArgBaseIndex(ref, ir, names);
+    const sourceParam = semanticWgslFunctionSharedPointerParam(ir, ref.base);
+    const pointer = sourceParam === undefined
+      ? `&${nameFor(ref.base, names)}`
+      : nameFor(sourceParam.pointerAliasOf ?? sourceParam.name, names);
+    return param.pointerAliasOf === undefined ? [pointer, base] : [base];
   }
   if (param?.pointer && param.addressSpace === "storage") {
     const ref = semanticPointerArgMemoryRef(arg);
@@ -3792,6 +3800,16 @@ function emitSemanticSharedPointerArgBaseIndex(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
 ): string {
+  const pointer = semanticWgslFunctionSharedPointerParam(ir, ref.base);
+  if (pointer) {
+    const base = nameFor(semanticPointerBaseParamName(ref.base), names);
+    if (ref.indices.length === 0) return base;
+    if (pointer.dimensions.length === 0 || ref.indices.length !== 1) {
+      throw semanticWgslError(`shared pointer '${ref.base}' index rank mismatch`, ref.span);
+    }
+    const index = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32");
+    return `(${base} + ${index})`;
+  }
   if (ref.indices.length === 0) return "0u";
   const shared = sharedMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
   if (!shared) throw semanticWgslError(`unknown shared pointer base '${ref.base}'`, ref.span);
@@ -3925,14 +3943,15 @@ function emitSemanticSharedPointerMemoryRef(
 ): string {
   const param = semanticWgslFunctionSharedPointerParam(ir, ref.base);
   if (!param) throw semanticWgslError(`unknown shared pointer '${ref.base}'`, ref.span);
+  const pointerName = param.pointerAliasOf ?? ref.base;
   if (param.dimensions.length === 0) {
     if (ref.indices.length > 1 || ref.indices[0] && !semanticExpressionIsZero(ref.indices[0])) {
       throw semanticWgslError(`shared scalar pointer '${ref.base}' cannot be indexed`, ref.span);
     }
-    return `*${nameFor(ref.base, names)}`;
+    return `*${nameFor(pointerName, names)}`;
   }
   const index = ref.indices[0] === undefined ? "0u" : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options);
-  return `(*${nameFor(ref.base, names)})[(${nameFor(semanticPointerBaseParamName(ref.base), names)} + ${index})]`;
+  return `(*${nameFor(pointerName, names)})[(${nameFor(semanticPointerBaseParamName(ref.base), names)} + ${index})]`;
 }
 
 function semanticExpressionIsZero(expression: SemanticExpression): boolean {
@@ -5700,7 +5719,10 @@ function semanticFunctionSharedPointerAtomicParams(
   const pointerParams = new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "shared").map((param) => param.name));
   const names = new Set<string>();
   for (const name of semanticAtomicSharedNames(fn.body)) {
-    if (pointerParams.has(name)) names.add(name);
+    if (!pointerParams.has(name)) continue;
+    names.add(name);
+    const alias = fn.params.find((param) => param.name === name)?.pointerAliasOf;
+    if (alias !== undefined) names.add(alias);
   }
   return names;
 }

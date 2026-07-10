@@ -1172,6 +1172,41 @@ __global__ void sharedInitializerCall(uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([4, 4]);
   });
 
+  it("runs multi-shared-pointer barrier helpers with cooperative-group params", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void mergeShared(
+  uint *dstKey, uint *dstVal,
+  uint *srcAKey, uint *srcAVal,
+  uint *srcBKey, uint *srcBVal,
+  cg::thread_block cta
+) {
+  uint tid = threadIdx.x;
+  uint key = tid < 2u ? srcAKey[tid] : srcBKey[tid - 2u];
+  uint value = tid < 2u ? srcAVal[tid] : srcBVal[tid - 2u];
+  cg::sync(cta);
+  dstKey[tid] = key;
+  dstVal[tid] = value;
+}
+__global__ void sharedMergeHelper(uint *out) {
+  cg::thread_block cta = cg::this_thread_block();
+  __shared__ uint keys[4];
+  __shared__ uint values[4];
+  uint tid = threadIdx.x;
+  keys[tid] = tid + 10u;
+  values[tid] = tid + 20u;
+  cg::sync(cta);
+  mergeShared(keys, values, keys, values, keys + 2u, values + 2u, cta);
+  out[tid] = keys[tid] + values[tid];
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Uint32Array]).toEqual([30, 32, 34, 36]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `
