@@ -134,6 +134,10 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import {
+  semanticScalarValueTypeSupported,
+  semanticValueTypeSupported,
+} from "./semantic_value_types.js";
+import {
   semanticConstantMemorySymbols as constantMemorySymbols,
   semanticDeviceGlobalMemorySymbols as deviceGlobalMemorySymbols,
   semanticLocalMemorySymbols as localMemorySymbols,
@@ -693,11 +697,11 @@ function semanticIrUsesHalf(value: unknown): boolean {
 }
 
 function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" || valueType === "half" || valueType === "bf16" || valueType === "int" || valueType === "uint" || valueType === "bool";
+  return semanticScalarValueTypeSupported(valueType);
 }
 
 function semanticWgslValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return semanticWgslScalarTypeSupported(valueType) || isSemanticFloatVectorType(valueType);
+  return semanticValueTypeSupported(valueType);
 }
 
 function semanticWgslAssignmentOperatorSupported(operator: string): boolean {

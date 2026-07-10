@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T01:36:13Z
+Last updated: 2026-07-10T01:39:14Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current real-world gate is green at src `822/0/0`, dist `822/0/0`; cuda-samples compile/codegen audit is now `357/357` with `0` hard fails; real-world compile/codegen audit has `0` hard fails across `1038` plan-compiled kernels; real corpus WebGPU fixture outputs are pinned `127/127` |
 | Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Architecture split: math call argument contract shared across semantic reference/WGSL |
+| Active work item | Architecture split: value type support contract shared across semantic reference/WGSL |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- Architecture split: added `semantic_value_types.ts` for shared scalar/value-type support and rewired semantic reference plus semantic WGSL readiness aliases to consume it instead of duplicating the supported scalar list; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, direct fast auto-corpus WebGPU passed `32/0/0` with skips `0` after sandbox blocked the `verify:changed:fast` wrapper localhost bind, and architecture map shows `semantic_reference.ts` at `4410`, `semantic_wgsl.ts` at `5200`, with semantic-IR bucket at `15703`
 - Architecture split: expanded `semantic_math_intrinsics.ts` with shared math call argument support over call recognition, arity, and scalar args, then rewired semantic reference and semantic WGSL math readiness checks to consume it instead of duplicating arity/scalar checks; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, direct fast auto-corpus WebGPU passed `32/0/0` with skips `0` after sandbox blocked the `verify:changed:fast` wrapper localhost bind, and architecture map shows `semantic_reference.ts` at `4406`, `semantic_wgsl.ts` at `5196`, with semantic-IR bucket at `15679`
 - Architecture split: expanded `semantic_builtin_calls.ts` with shared `assert`, `printf`, and no-op call contracts, then rewired semantic reference and semantic WGSL call readiness checks to consume those contracts instead of duplicating scalar-argument and string-format validation; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, direct fast auto-corpus WebGPU passed `32/0/0` with skips `0` after sandbox blocked the `verify:changed:fast` wrapper localhost bind, and architecture map shows `semantic_reference.ts` down to `4404`, `semantic_wgsl.ts` down to `5194`, with semantic-IR bucket at `15662`
 - Architecture split: added `semantic_local_arrays.ts` for shared local-array initializer and fill-call contracts, then rewired semantic reference and semantic WGSL local-array readiness checks to consume those contracts while keeping execution/emission paths target-specific; typecheck passed, lint passed, compiler unit + WGSL module tests passed `749/0`, changed-fast passed typecheck + fast auto-corpus WebGPU `32/0/0` with skips `0`, and architecture map shows `semantic_reference.ts` down to `4409`, `semantic_wgsl.ts` down to `5199`, with semantic-IR bucket at `15655`

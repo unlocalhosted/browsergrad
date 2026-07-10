@@ -132,6 +132,10 @@ import {
   semanticFunctionParamContractSupported,
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
+import {
+  semanticScalarValueTypeSupported,
+  semanticValueTypeSupported,
+} from "./semantic_value_types.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
@@ -456,11 +460,11 @@ function semanticReferenceLoopInitSupported(
 }
 
 function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "float" || valueType === "half" || valueType === "bf16" || valueType === "int" || valueType === "uint" || valueType === "bool";
+  return semanticScalarValueTypeSupported(valueType);
 }
 
 function semanticReferenceValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return semanticReferenceScalarTypeSupported(valueType) || isSemanticFloatVectorType(valueType);
+  return semanticValueTypeSupported(valueType);
 }
 
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
