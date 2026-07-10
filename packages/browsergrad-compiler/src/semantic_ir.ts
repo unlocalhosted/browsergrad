@@ -754,13 +754,19 @@ function lowerStatementOperations(
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
 }
 
-function lowerInlineAsmSpecialRegisterAssignment(
+function lowerInlineAsmBuiltinRegisterAssignment(
   statement: CudaLiteAsmStatement,
   scope: Map<string, CudaLiteSemanticSymbol>,
 ): SemanticKernelIrOperation | undefined {
   const op = classifyInlineAsm(statement.template);
   const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
-  if (op?.kind !== "special-register-u32" || statement.inputs.length !== 0 || outputs.length !== 1) return undefined;
+  if (statement.inputs.length !== 0 || outputs.length !== 1) return undefined;
+  const value = op?.kind === "special-register-u32"
+    ? semanticSpecialRegisterExpression(op.register, statement.span)
+    : op?.kind === "laneid"
+      ? semanticLaneIdExpression(statement.span)
+      : undefined;
+  if (!value) return undefined;
   const target = lowerExpression(outputs[0]!, scope);
   return {
     kind: "expression",
@@ -768,11 +774,22 @@ function lowerInlineAsmSpecialRegisterAssignment(
       kind: "assignment",
       operator: "=",
       target,
-      value: semanticSpecialRegisterExpression(op.register, statement.span),
+      value,
       valueType: expressionValueType(target) ?? "uint",
       span: statement.span,
     },
     span: statement.span,
+  };
+}
+
+function semanticLaneIdExpression(span: SourceSpan): SemanticExpression {
+  return {
+    kind: "binary",
+    operator: "&",
+    left: semanticSpecialRegisterExpression("tid.x", span),
+    right: { kind: "literal", literalKind: "number", value: 31, valueType: "uint", span },
+    valueType: "uint",
+    span,
   };
 }
 
@@ -825,7 +842,7 @@ function lowerStatement(
     case "kernel-launch":
       return { kind: "device-launch", launch: lowerDeviceLaunch(statement, scope), span: statement.span };
     case "asm": {
-      const registerAssignment = lowerInlineAsmSpecialRegisterAssignment(statement, scope);
+      const registerAssignment = lowerInlineAsmBuiltinRegisterAssignment(statement, scope);
       if (registerAssignment) return registerAssignment;
       return { kind: "inline-asm", statement, span: statement.span };
     }

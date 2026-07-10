@@ -11,10 +11,12 @@ import {
 import {
   type CompiledCudaLiteKernel,
   canEmitSemanticKernelIrWgsl,
+  canRunCompiledKernelSemanticReference,
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
+  runCompiledKernelSemanticReference,
   runCompiledKernelWebGpu,
 } from "../src/index";
 import { lowerAnalyzedCudaLiteToKernelIr } from "../src/analyzer";
@@ -386,6 +388,26 @@ __global__ void dimensionSpecialRegs(uint *out) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs inline PTX lane-id through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void laneId(uint *out) {
+  uint idx = threadIdx.x;
+  uint lane;
+  asm volatile("mov.u32 %0, %laneid;" : "=r"(lane));
+  out[idx] = lane;
+}`, { workgroupSize: [32, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(32) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [32, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual(Array.from({ length: 32 }, (_, index) => index));
   });
 
   it("runs common CUDA float math builtins through WebGPU", async () => {

@@ -2847,13 +2847,16 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
     asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
     out[idx] = laneid;
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
-        compiled,
-        { buffers: { out: new Int32Array(4) } },
-        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
-      );
+      const input = { buffers: { out: new Int32Array(4) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
 
-      expect(compiled.wgsl).toContain("% 32");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("& 31u");
+      expect([...semanticResult.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
       expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
     });
 
@@ -2872,7 +2875,7 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
-      expect(compiled.wgsl).toContain("% 32");
+      expect(compiled.wgsl).toContain("& 31u");
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
     });
 
