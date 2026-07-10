@@ -2132,6 +2132,17 @@ function emitSemanticStore(
   if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) {
     return emitSemanticPointerMemoryStore(operation, ir, names, options, textureSpecializations);
   }
+  if (
+    semanticWgslFunctionSharedPointerParam(ir, operation.target.base) &&
+    !semanticWgslFunctionSharedPointerAtomicParam(ir, operation.target.base)
+  ) {
+    const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
+    if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
+    const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
+    if (binaryOperator === undefined) throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
+    const current = emitSemanticMemoryRead(operation.target, ir, names, options);
+    return emitSemanticMemoryWrite(operation.target, `(${current} ${binaryOperator} ${value})`, ir, names, options);
+  }
   const target = emitSemanticLocalVectorLaneRef(operation.target, ir, names, options, textureSpecializations) ??
     emitSemanticMemoryRef(operation.target, ir, names, options);
   if (
@@ -2396,7 +2407,8 @@ function emitSemanticFunctionParamType(
   atomicSharedPointer = false,
 ): string {
   if (param.pointer && param.addressSpace === "shared") {
-    const element = atomicSharedPointer ? `atomic<${wgslAtomicScalar(param.valueType)}>` : wgslValueType(param.valueType);
+    const carrierType = param.pointerCarrierValueType ?? param.valueType;
+    const element = atomicSharedPointer ? `atomic<${wgslAtomicScalar(carrierType)}>` : wgslValueType(carrierType);
     return param.dimensions.length === 0 ? `ptr<workgroup, ${element}>` : `ptr<workgroup, array<${element}, ${param.dimensions[0] ?? 1}>>`;
   }
   if (param.addressSpace === "texture") return "texture_2d<f32>";
@@ -3927,7 +3939,11 @@ function emitSemanticMemoryRead(
     return `${semanticPointerReadHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index})`;
   }
   if (semanticWgslFunctionSharedPointerParam(ir, ref.base)) {
-    return emitSemanticSharedPointerMemoryRef(ref, ir, names, options);
+    const target = emitSemanticSharedPointerMemoryRef(ref, ir, names, options);
+    const param = semanticWgslFunctionSharedPointerParam(ir, ref.base)!;
+    return semanticSharedPointerNeedsBitcast(param)
+      ? `bitcast<${wgslValueType(param.valueType)}>(${target})`
+      : target;
   }
   return emitSemanticMemoryRef(ref, ir, names, options);
 }
@@ -3946,7 +3962,11 @@ function emitSemanticMemoryWrite(
   }
   if (semanticWgslFunctionSharedPointerParam(ir, ref.base)) {
     const target = emitSemanticSharedPointerMemoryRef(ref, ir, names, options);
-    return `${target} = ${value}`;
+    const param = semanticWgslFunctionSharedPointerParam(ir, ref.base)!;
+    const stored = semanticSharedPointerNeedsBitcast(param)
+      ? `bitcast<${wgslValueType(param.pointerCarrierValueType)}>(${value})`
+      : value;
+    return `${target} = ${stored}`;
   }
   const target = emitSemanticMemoryRef(ref, ir, names, options);
   return `${target} = ${value}`;
@@ -3969,6 +3989,12 @@ function emitSemanticSharedPointerMemoryRef(
   }
   const index = ref.indices[0] === undefined ? "0u" : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options);
   return `(*${nameFor(pointerName, names)})[(${nameFor(semanticPointerBaseParamName(ref.base), names)} + ${index})]`;
+}
+
+function semanticSharedPointerNeedsBitcast(
+  param: SemanticKernelIrModule["functions"][number]["params"][number],
+): boolean {
+  return param.pointerCarrierValueType !== undefined && param.pointerCarrierValueType !== param.valueType;
 }
 
 function semanticExpressionIsZero(expression: SemanticExpression): boolean {

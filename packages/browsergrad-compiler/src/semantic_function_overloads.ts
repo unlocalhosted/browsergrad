@@ -4,7 +4,6 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import { isSemanticKernelIrOperation } from "./semantic_ir.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 
 export interface ResolvedSemanticFunctions {
@@ -112,7 +111,7 @@ function resolveOperation(
     case "loop":
       return {
         ...operation,
-        ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? resolveOperation(operation.init, resolve) : resolveExpression(operation.init, resolve) }),
+        ...(operation.init === undefined ? {} : { init: semanticLoopInitIsOperation(operation.init) ? resolveOperation(operation.init, resolve) : resolveExpression(operation.init, resolve) }),
         ...(operation.condition === undefined ? {} : { condition: resolveExpression(operation.condition, resolve) }),
         ...(operation.update === undefined ? {} : { update: resolveExpression(operation.update, resolve) }),
         body: operation.body.map((item) => resolveOperation(item, resolve)),
@@ -125,6 +124,39 @@ function resolveOperation(
       return { ...operation, launch: { ...operation.launch, grid: operation.launch.grid.map((arg) => resolveExpression(arg, resolve)), block: operation.launch.block.map((arg) => resolveExpression(arg, resolve)), args: operation.launch.args.map((arg) => resolveExpression(arg, resolve)) } };
     default:
       return operation;
+  }
+}
+
+function semanticLoopInitIsOperation(
+  value: SemanticKernelIrOperation | SemanticExpression,
+): value is SemanticKernelIrOperation {
+  switch (value.kind) {
+    case "declare":
+    case "dim3-declare":
+    case "cooperative-group-declare":
+    case "load":
+    case "store":
+    case "copy":
+    case "copy-fence":
+    case "surface-write":
+    case "surface-read-store":
+    case "atomic":
+    case "expression":
+    case "branch":
+    case "loop":
+    case "barrier":
+    case "fence":
+    case "device-launch":
+    case "inline-asm":
+    case "return":
+    case "continue":
+    case "break":
+    case "block":
+      return true;
+    case "call":
+      return typeof value.callee === "string";
+    default:
+      return false;
   }
 }
 

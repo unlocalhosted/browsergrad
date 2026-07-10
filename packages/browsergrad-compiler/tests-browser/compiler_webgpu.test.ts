@@ -3441,6 +3441,24 @@ __global__ void pointerOverload(int *signedInput, uint *unsignedInput, int *out)
     expect([...actual.buffers.out as Int32Array]).toEqual([5, 7]);
   });
 
+  it("runs same-width shared pointer reinterpret helpers through semantic WGSL", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void write_bits(uint *value) { value[0] = 0xffffffffu; }
+__global__ void sharedReinterpret(int *out) {
+  __shared__ int scratch[1];
+  scratch[0] = 0;
+  write_bits((uint *)scratch);
+  out[0] = scratch[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Int32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Int32Array]).toEqual([-1]);
+  });
+
   it("runs half2 comparison intrinsics through f32 compatibility mode on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

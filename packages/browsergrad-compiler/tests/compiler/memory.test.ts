@@ -310,6 +310,25 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler: Memory and pointer model", () => {
+  it("bitcasts same-width shared pointer helper views through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void write_bits(uint *value) { value[0] = 0xffffffffu; }
+__global__ void shared_reinterpret(int *out) {
+  __shared__ int scratch[1];
+  scratch[0] = 0;
+  write_bits((uint *)scratch);
+  out[0] = scratch[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("bitcast<i32>(4294967295u)");
+    expect([...result.buffers.out as Int32Array]).toEqual([-1]);
+  });
   it("runs storage pointer offset updates through semantic reference and WGSL", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void pointerOffset(float* out, const float* input, int stride) {

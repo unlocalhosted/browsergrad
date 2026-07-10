@@ -102,6 +102,7 @@ export interface CudaLiteSemanticSymbol {
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly pointerValid?: SemanticExpression;
+  readonly pointerCarrierValueType?: CudaLiteScalarType;
   readonly cooperativeGroupKind?: CudaLiteParam["cooperativeGroupKind"];
   readonly tileSize?: number;
   readonly constant?: boolean;
@@ -640,7 +641,10 @@ function specializeSharedPointerFunctionsOnce(
         .map((call) => call.args[index])
         .flatMap((arg) => arg === undefined ? [] : [sharedPointerRoot(arg)]);
       const dimensions = args.map((root) => root === undefined ? undefined : sharedMemoryDimensions.get(root));
-      const matchingValueTypes = args.every((root) => root !== undefined && sharedMemoryValueTypes.get(root) === param.valueType);
+      const carrierTypes = args.map((root) => root === undefined ? undefined : sharedMemoryValueTypes.get(root));
+      const matchingValueTypes = param.valueType !== undefined && carrierTypes.every((valueType) =>
+        valueType !== undefined && (valueType === param.valueType || sizeofCudaType(valueType) === sizeofCudaType(param.valueType!)),
+      );
       if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && dimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
         sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
         sharedPointerDimensions.set(param.name, dimensions[0]!);
@@ -664,11 +668,20 @@ function specializeSharedPointerFunctionsOnce(
         name: sharedPointerNames.get(param.name)!,
         addressSpace: "shared" as const,
         dimensions: sharedPointerDimensions.get(param.name)!,
+        ...optionalPointerCarrierValueType(
+          sharedMemoryValueTypes.get(sharedPointerRoots.get(param.name)![0]!) ?? param.valueType,
+        ),
         ...(sharedPointerAliases.has(param.name) ? { pointerAliasOf: sharedPointerAliases.get(param.name)! } : {}),
       } : param),
       body: rewriteSemanticPointerAddressSpace(fn.body, sharedPointerNames),
     };
   });
+}
+
+function optionalPointerCarrierValueType(
+  valueType: CudaLiteScalarType | undefined,
+): { readonly pointerCarrierValueType?: CudaLiteScalarType } {
+  return valueType === undefined ? {} : { pointerCarrierValueType: valueType };
 }
 
 function sameSemanticPointerRoots(
