@@ -420,6 +420,30 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 
+  it("keeps analyzer-proven top-level barriers semantic-direct around unrelated loops", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void stagedTranspose(float *out) {
+    __shared__ float tile[4];
+    int tid = threadIdx.x;
+    for (int i = 0; i < 2; ++i) {
+      tile[tid] = (float)(tid + i);
+    }
+    __syncthreads();
+    for (int i = 0; i < 2; ++i) {
+      out[tid * 2 + i] = tile[3 - tid] + (float)i;
+    }
+  }`, { workgroupSize: [4, 1, 1] });
+      const input = { buffers: { out: new Float32Array(8) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(compiled.kernelIr.barrierUniformity.kernel.verified).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("workgroupBarrier();");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 5, 3, 4, 2, 3, 1, 2]);
+    });
+
   it("lowers CUDA warp shuffle helpers to workgroup-backed warp intrinsics", () => {
       const compiled = compileCudaLiteKernel(`
   __inline__ __device__ float warpReduceSum(float val) {
@@ -2276,9 +2300,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     if (warpId == 0) { out[tid] = 2.0f; }
   }`, { workgroupSize: [32, 1, 1] });
 
-      expect(compiled.wgsl).toContain("var warpId: i32 = 0;");
+      expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
-      expect(compiled.wgsl).not.toContain("i32(local_id.x) / 32");
     });
 
   it("keeps loop barriers uniform after divergent breaks", () => {

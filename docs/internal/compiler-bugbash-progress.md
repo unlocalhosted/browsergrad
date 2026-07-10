@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T12:53:38Z
+Last updated: 2026-07-10T13:03:39Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `202/354`, up from `161/354`; `152` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `218/354`, up from `161/354`; `136` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
-| Active work item | Highest-impact remaining semantic WGSL fallback class after CI type/ABI hardening; device-helper barrier scheduling remains an explicit safety-gated slice |
+| Active work item | Highest-impact remaining semantic WGSL fallback class after analyzer-proven direct-barrier widening; device-helper barrier scheduling remains an explicit safety-gated slice |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Analyzer-proven direct barrier widening: semantic WGSL now accepts direct barriers whose source spans are verified by analyzer uniformity facts, even when unrelated loops surround a top-level barrier. This removes an AST-backend-only layout restriction without weakening divergent-barrier rejection. Focused cooperative tests passed `99/0`; exact native Chromium fixture `shared_tile_transpose_kernel_mdspan` passed `1/0/0` as semantic `single-dispatch` with pinned output; full compiler gate passed `767/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `202/354 -> 218/354`, AST fallback `152 -> 136`, and shared-memory barrier-shape blockers `23 -> 7`.
 - Native WGSL type and device-function ABI hardening: cooperative `thread_rank()`/`size()` calls now carry semantic `int` type, preventing phase emission of `i32 == 0.0`; generic `min`/`max` emits operands from semantic result type; user declarations cannot shadow WGSL predeclared function names; mutated CUDA device value parameters lower to immutable WGSL inputs plus mutable local copies. Focused compiler tests passed `279/0`; exact native browser WebGPU corpus fixtures `reduceSinglePassMultiBlockCG_grid_sync` and `cudaProcess` passed `2/0/0` with output comparison; full `verify:real-world-cuda -- --require-webgpu` passed.
 - Semantic offset local-pointer dereferences: `*ptr` and `*(ptr + n)` now resolve through the existing local-pointer root/base-index contract into typed semantic memory references. Semantic WGSL inventories the actual dereference types used by storage-pointer device helpers, emitting the necessary vector read/write helpers instead of relying on scalar declaration type alone. Focused memory tests passed `180/0`; native Chromium WebGPU tests passed `117/0`; the vector helper is output-verified on native WebGPU; CUDA-samples `VoteAnyKernel3`, `fluidsGL::advectParticles_k`, and `fluidsGLES::advectParticles_k` moved semantic-direct. Corpus is compile/codegen proof only: `202/354`, AST fallback `152`, plan compilation `357/357`, hard failures `0`.
 - Semantic storage-pointer rebase: assignment forms `p = p + delta`, `p = p - delta`, and `p = &p[index]` now lower into existing semantic offset updates instead of buffer stores. The restriction to a storage parameter rebasing itself preserves pointer semantics and rejects cross-root aliasing. Focused memory tests passed `179/0`; native browser tests passed `116/0`; CUDA-samples `d_boxfilter_rgba_y` is semantic-direct and `sobolGPU_kernel` advances from a store blocker to its independent barrier-shape blocker; corpus reached `199/354`, AST fallback `155`, store blockers `14`.
@@ -1042,6 +1043,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | Analyzer-proven direct barriers | Semantic WGSL rejected direct uniform barriers when an unrelated loop appeared before or after the barrier, forcing safe CUDA shared-memory kernels through AST WGSL | trust analyzer-verified direct barrier source spans without requiring the barrier itself to be nested; keep helper-mediated barriers and unverified/divergent shapes safety-gated | focused cooperative `99/0`; exact Chromium fixture `shared_tile_transpose_kernel_mdspan` `1/0/0`; CUDA-samples semantic-direct `218/354`, fallback `136`, barrier-shape blockers `7` |
 | Fixed | Native WGSL semantic type and device-function ABI | CI corpus fixtures generated `i32 == 0.0`, forced integer `min/max` through f32, allowed a user `clamp` helper to shadow WGSL builtin `clamp`, then attempted assignment to immutable WGSL device-function parameters | type cooperative rank/size calls in semantic IR; emit typed min/max operands; reserve WGSL predeclared function names; lower mutated value parameters as immutable incoming arguments plus mutable local copies | focused compiler `279/0`; exact Chromium corpus fixtures `2/0/0`; full `verify:real-world-cuda -- --require-webgpu` passed |
 | Fixed | Semantic device-pointer vector helpers | A valid semantic `float4` dereference through a device `float*` parameter emitted calls to `bg_ptr_*_f32x4` without generating those helpers, causing native WGSL pipeline creation to fail | inventory the typed semantic memory references used by each storage-pointer device helper, including nested control flow, and emit only the required scalar/vector helper specializations | focused memory `180/0`; Chromium WebGPU `117/0`; output-verified vector helper; CUDA-samples semantic-direct `202/354`, fallback `152` |
 | Fixed | Semantic 2D surface boundary modes | `surf2Dwrite(..., cudaBoundaryModeTrap)` placed its optional boundary-mode argument in semantic IR's 3D z coordinate, blocking valid native 2D surface emission | derive z only for `surf2DLayeredwrite` and `surf3Dwrite`; omit 2D optional boundary mode from execution coordinates | focused semantic surface unit and native browser surface fixture `1/0`; CUDA-samples semantic-direct `194/354`, fallback `160` |

@@ -1034,7 +1034,7 @@ describe("CUDA-lite compiler: Atomics", () => {
 
       expect(compiled.wgsl).toContain("var<workgroup> acc: array<atomic<u32>, 1>;");
       expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32_workgroup");
-      expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&acc[0]))");
+      expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&acc[0u]))");
       expect([...result.buffers.out as Float32Array]).toEqual([3]);
     });
 

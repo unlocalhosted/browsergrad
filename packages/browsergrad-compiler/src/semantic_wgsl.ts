@@ -706,18 +706,16 @@ function semanticDirectBarriersHaveAnalyzerProof(ir: SemanticKernelIrModule): bo
   if (!proof.verified) return false;
   const provenStarts = new Set(proof.barrierStatementStarts);
   let hasBarrier = false;
-  let hasNestedBarrier = false;
-  const visit = (operations: readonly SemanticKernelIrOperation[], nesting = 0): boolean => operations.every((operation) => {
+  const visit = (operations: readonly SemanticKernelIrOperation[]): boolean => operations.every((operation) => {
     if (operation.kind === "barrier") {
       hasBarrier = true;
-      if (nesting > 0) hasNestedBarrier = true;
       return provenStarts.has(operation.span.start);
     }
-    if (operation.kind === "branch") return visit(operation.consequent, nesting + 1) && visit(operation.alternate, nesting + 1);
-    if (operation.kind === "loop" || operation.kind === "block") return visit(operation.body, nesting + 1);
+    if (operation.kind === "branch") return visit(operation.consequent) && visit(operation.alternate);
+    if (operation.kind === "loop" || operation.kind === "block") return visit(operation.body);
     return true;
   });
-  return visit(ir.operations) && hasBarrier && hasNestedBarrier;
+  return visit(ir.operations) && hasBarrier;
 }
 
 function semanticWgslBarrierSupported(

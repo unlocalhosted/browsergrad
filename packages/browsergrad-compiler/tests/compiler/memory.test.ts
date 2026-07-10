@@ -4402,7 +4402,7 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("var<workgroup> scratch: array<array<f32, 2>, 2>;");
+      expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 4>;");
       expect([...result.buffers.x as Float32Array]).toEqual([7, 3]);
     });
 
