@@ -435,6 +435,7 @@ export interface CudaLiteTextureDescriptor {
 
 export interface CudaLiteAnalysis {
   readonly kernel: CudaLiteKernel;
+  readonly kernels: readonly CudaLiteKernel[];
   readonly constants: readonly CudaLiteGlobalConstant[];
   readonly deviceGlobals: readonly CudaLiteDeviceGlobal[];
   readonly textures: readonly CudaLiteTexture2D[];

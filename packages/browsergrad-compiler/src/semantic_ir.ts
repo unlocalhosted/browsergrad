@@ -90,6 +90,8 @@ export interface CudaLiteSemanticSymbol {
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly pointerValid?: SemanticExpression;
+  readonly cooperativeGroupKind?: CudaLiteParam["cooperativeGroupKind"];
+  readonly tileSize?: number;
   readonly constant?: boolean;
   readonly initialized?: boolean;
   readonly init?: SemanticExpression;
@@ -106,6 +108,13 @@ export interface CudaLiteSemanticFunction {
   readonly span: SourceSpan;
 }
 
+export interface CudaLiteSemanticLaunchableEntry {
+  readonly kind: "kernel" | "device-function";
+  readonly name: string;
+  readonly params: readonly CudaLiteSemanticSymbol[];
+  readonly span: SourceSpan;
+}
+
 export interface CudaLiteSemanticModel {
   readonly kind: "cuda-lite-semantic-model";
   readonly kernelName: string;
@@ -113,6 +122,7 @@ export interface CudaLiteSemanticModel {
   readonly params: readonly CudaLiteSemanticSymbol[];
   readonly symbols: readonly CudaLiteSemanticSymbol[];
   readonly functions: readonly CudaLiteSemanticFunction[];
+  readonly launchableEntries: readonly CudaLiteSemanticLaunchableEntry[];
   readonly requiredFeatures: readonly string[];
 }
 
@@ -480,6 +490,20 @@ export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLit
   const functionSymbols = analysis.functions.map(symbolForFunctionDeclaration);
   const globalScope = new Map([...params, ...constants, ...deviceGlobals, ...textures, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
   const functions = analysis.functions.map((fn) => symbolForFunction(fn, globalScope));
+  const launchableEntries: CudaLiteSemanticLaunchableEntry[] = [
+    ...analysis.kernels.map((kernel) => ({
+      kind: "kernel" as const,
+      name: kernel.name,
+      params: kernel.params.map(symbolForParam),
+      span: kernel.span,
+    })),
+    ...analysis.functions.map((fn) => ({
+      kind: "device-function" as const,
+      name: fn.name,
+      params: fn.params.map(symbolForParam),
+      span: fn.span,
+    })),
+  ];
   return {
     kind: "cuda-lite-semantic-model",
     kernelName: analysis.kernel.name,
@@ -487,6 +511,7 @@ export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLit
     params,
     symbols: [...params, ...constants, ...deviceGlobals, ...textures],
     functions,
+    launchableEntries,
     requiredFeatures: analysis.requiredFeatures,
   };
 }
@@ -494,13 +519,29 @@ export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLit
 export function lowerSemanticModelToKernelIr(
   analysis: CudaLiteAnalysis,
   semantic: CudaLiteSemanticModel,
-  options: { readonly workgroupSize?: readonly [number, number, number] } = {},
+  options: {
+    readonly workgroupSize?: readonly [number, number, number];
+    readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
+  } = {},
 ): SemanticKernelIrModule {
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
   const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
   const operations = lowerStatements(analysis.kernel.body, scope);
   const localMemory = collectDeclaredMemory(operations);
   const reachable = collectReachableAnalysisNames(analysis);
+  const sharedMemoryDimensions = new Map(
+    [...semantic.symbols, ...localMemory]
+      .filter((symbol) => symbol.addressSpace === "shared")
+      .map((symbol) => {
+        const materialized = semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory);
+        return [materialized.name, materialized.dimensions] as const;
+      }),
+  );
+  const functions = specializeSharedPointerFunctions(
+    operations,
+    semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
+    sharedMemoryDimensions,
+  );
   return {
     kind: "semantic-kernel-ir",
     name: analysis.kernel.name,
@@ -511,14 +552,123 @@ export function lowerSemanticModelToKernelIr(
         symbol.kind !== "param" &&
         symbol.kind !== "function" &&
         reachable.symbolNames.has(symbol.name)
-      ),
-      ...localMemory,
+      ).map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
+      ...localMemory.map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
     ],
-    functions: semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
+    functions,
     operations,
     requiredFeatures: semantic.requiredFeatures,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
+}
+
+function specializeSharedPointerFunctions(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+  sharedMemoryDimensions: ReadonlyMap<string, readonly number[]>,
+): readonly CudaLiteSemanticFunction[] {
+  const calls = collectSemanticFunctionCalls(operations);
+  return functions.map((fn) => {
+    const sharedPointerNames = new Map<string, string>();
+    const sharedPointerDimensions = new Map<string, readonly number[]>();
+    for (const [index, param] of fn.params.entries()) {
+      if (!param.pointer || param.addressSpace !== "storage") continue;
+      const args = calls
+        .filter((call) => call.callee === fn.name)
+        .map((call) => call.args[index])
+        .flatMap((arg) => arg === undefined ? [] : [sharedPointerRoot(arg)]);
+      const dimensions = args.map((root) => root === undefined ? undefined : sharedMemoryDimensions.get(root));
+      if (args.length > 0 && args.every((root) => root !== undefined) && dimensions.every((item) => item !== undefined && item.length === 1 && item[0] !== undefined) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
+        sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
+        sharedPointerDimensions.set(param.name, dimensions[0]!);
+      }
+    }
+    if (sharedPointerNames.size === 0) return fn;
+    return {
+      ...fn,
+      params: fn.params.map((param) => sharedPointerNames.has(param.name) ? {
+        ...param,
+        name: sharedPointerNames.get(param.name)!,
+        addressSpace: "shared" as const,
+        dimensions: sharedPointerDimensions.get(param.name)!,
+      } : param),
+      body: rewriteSemanticPointerAddressSpace(fn.body, sharedPointerNames),
+    };
+  });
+}
+
+function collectSemanticFunctionCalls(operations: readonly SemanticKernelIrOperation[]): readonly Extract<SemanticKernelIrOperation, { readonly kind: "call" }>[] {
+  const out: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>[] = [];
+  for (const operation of operations) {
+    if (operation.kind === "call") out.push(operation);
+    if (operation.kind === "branch") out.push(...collectSemanticFunctionCalls(operation.consequent), ...collectSemanticFunctionCalls(operation.alternate));
+    if (operation.kind === "loop" || operation.kind === "block") out.push(...collectSemanticFunctionCalls(operation.body));
+  }
+  return out;
+}
+
+function sharedPointerRoot(expression: SemanticExpression): string | undefined {
+  return expression.kind === "symbol" && expression.addressSpace === "shared" ? expression.name : undefined;
+}
+
+function sameSemanticDimensions(dimensions: readonly (readonly number[])[]): boolean {
+  return dimensions.every((item) => item.length === dimensions[0]!.length && item.every((value, index) => value === dimensions[0]![index]));
+}
+
+function rewriteSemanticPointerAddressSpace(
+  operations: readonly SemanticKernelIrOperation[],
+  names: ReadonlyMap<string, string>,
+): readonly SemanticKernelIrOperation[] {
+  return operations.map((operation) => {
+    if (operation.kind === "store") return { ...operation, target: rewriteSemanticMemoryRef(operation.target, names), value: rewriteSemanticExpressionAddressSpace(operation.value, names), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names)) };
+    if (operation.kind === "load") return { ...operation, source: rewriteSemanticMemoryRef(operation.source, names) };
+    if (operation.kind === "atomic") return { ...operation, ...(operation.target === undefined ? {} : { target: rewriteSemanticMemoryRef(operation.target, names) }), args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names)) };
+    if (operation.kind === "call") return { ...operation, args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names)), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names)) };
+    if (operation.kind === "declare") return operation.init === undefined ? operation : { ...operation, init: rewriteSemanticExpressionAddressSpace(operation.init, names) };
+    if (operation.kind === "expression") return { ...operation, expression: rewriteSemanticExpressionAddressSpace(operation.expression, names) };
+    if (operation.kind === "branch") return { ...operation, condition: rewriteSemanticExpressionAddressSpace(operation.condition, names), consequent: rewriteSemanticPointerAddressSpace(operation.consequent, names), alternate: rewriteSemanticPointerAddressSpace(operation.alternate, names) };
+    if (operation.kind === "loop") return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSemanticPointerAddressSpace([operation.init], names)[0]! : rewriteSemanticExpressionAddressSpace(operation.init, names) }), ...(operation.condition === undefined ? {} : { condition: rewriteSemanticExpressionAddressSpace(operation.condition, names) }), ...(operation.update === undefined ? {} : { update: rewriteSemanticExpressionAddressSpace(operation.update, names) }), body: rewriteSemanticPointerAddressSpace(operation.body, names) };
+    if (operation.kind === "block") return { ...operation, body: rewriteSemanticPointerAddressSpace(operation.body, names) };
+    if (operation.kind === "return" && operation.value) return { ...operation, value: rewriteSemanticExpressionAddressSpace(operation.value, names) };
+    return operation;
+  });
+}
+
+function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<string, string>): SemanticMemoryRef {
+  return {
+    ...ref,
+    ...(names.has(ref.base) && ref.addressSpace === "storage" ? { base: names.get(ref.base)!, addressSpace: "shared" as const } : {}),
+    indices: ref.indices.map((index) => rewriteSemanticExpressionAddressSpace(index, names)),
+  };
+}
+
+function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, string>): SemanticExpression {
+  switch (expression.kind) {
+    case "symbol": return names.has(expression.name) && expression.addressSpace === "storage" ? { ...expression, name: names.get(expression.name)!, addressSpace: "shared" } : expression;
+    case "member": return { ...expression, object: rewriteSemanticExpressionAddressSpace(expression.object, names) };
+    case "index": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names), index: rewriteSemanticExpressionAddressSpace(expression.index, names), ...(expression.addressSpace === "storage" && expression.target.kind === "symbol" && names.has(expression.target.name) ? { addressSpace: "shared" } : {}) };
+    case "call": return { ...expression, callee: rewriteSemanticExpressionAddressSpace(expression.callee, names), args: expression.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names)) };
+    case "texture-read": return { ...expression, texture: rewriteSemanticExpressionAddressSpace(expression.texture, names), x: rewriteSemanticExpressionAddressSpace(expression.x, names), y: rewriteSemanticExpressionAddressSpace(expression.y, names) };
+    case "surface-read": return { ...expression, surface: rewriteSemanticExpressionAddressSpace(expression.surface, names), xBytes: rewriteSemanticExpressionAddressSpace(expression.xBytes, names), y: rewriteSemanticExpressionAddressSpace(expression.y, names), ...(expression.z === undefined ? {} : { z: rewriteSemanticExpressionAddressSpace(expression.z, names) }) };
+    case "cast": return { ...expression, expression: rewriteSemanticExpressionAddressSpace(expression.expression, names) };
+    case "unary": return { ...expression, argument: rewriteSemanticExpressionAddressSpace(expression.argument, names) };
+    case "binary": return { ...expression, left: rewriteSemanticExpressionAddressSpace(expression.left, names), right: rewriteSemanticExpressionAddressSpace(expression.right, names) };
+    case "conditional": return { ...expression, condition: rewriteSemanticExpressionAddressSpace(expression.condition, names), consequent: rewriteSemanticExpressionAddressSpace(expression.consequent, names), alternate: rewriteSemanticExpressionAddressSpace(expression.alternate, names) };
+    case "assignment": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names), value: rewriteSemanticExpressionAddressSpace(expression.value, names) };
+    case "update": return { ...expression, argument: rewriteSemanticExpressionAddressSpace(expression.argument, names) };
+    case "initializer": return { ...expression, elements: expression.elements.map((item) => rewriteSemanticExpressionAddressSpace(item, names)) };
+    case "sequence": return { ...expression, expressions: expression.expressions.map((item) => rewriteSemanticExpressionAddressSpace(item, names)) };
+    case "literal": return expression;
+  }
+}
+
+function semanticMemorySymbolWithDynamicSharedExtent(
+  symbol: CudaLiteSemanticSymbol,
+  dynamicSharedMemory: Readonly<Record<string, number>> | undefined,
+): CudaLiteSemanticSymbol {
+  const extent = dynamicSharedMemory?.[symbol.name];
+  if (symbol.addressSpace !== "shared" || extent === undefined) return symbol;
+  return { ...symbol, dimensions: [extent, ...symbol.dimensions] };
 }
 
 function collectReachableAnalysisNames(analysis: CudaLiteAnalysis): {
@@ -1829,6 +1979,8 @@ function symbolForParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
     valueType: param.valueType,
     pointer: param.pointer,
     constant: param.constant,
+    ...(param.cooperativeGroupKind === undefined ? {} : { cooperativeGroupKind: param.cooperativeGroupKind }),
+    ...(param.tileSize === undefined ? {} : { tileSize: param.tileSize }),
     dimensions: [],
     addressSpace: paramAddressSpace(param),
     span: param.span,

@@ -10,7 +10,6 @@ import {
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
 import { matrixTileStorageDimensions } from "./matrix_tiles.js";
-import { emitVectorLaneSetExpression } from "./wgsl_value_conversion.js";
 import type {
   CudaLiteDeviceGlobal,
   CudaLiteGlobalConstant,
@@ -131,6 +130,21 @@ export function vectorStorageBase(index: string, lanes: number): string {
 
 export function vectorFieldName(index: number): string {
   return index === 0 ? "x" : index === 1 ? "y" : index === 2 ? "z" : "w";
+}
+
+export function emitVectorLaneSetExpression(
+  base: string,
+  type: CudaLiteScalarType,
+  index: string | number,
+  value: string,
+): string {
+  const scalar = wgslScalar(cudaVectorScalarType(type) ?? "float");
+  const indexExpression = typeof index === "number" ? `${index}u` : index;
+  const values = Array.from({ length: cudaVectorLaneCount(type) }, (_unused, lane) => {
+    const current = `(${base}).${vectorFieldName(lane)}`;
+    return `select(${current}, ${scalar}(${value}), ${indexExpression} == ${lane}u)`;
+  });
+  return `${wgslScalar(type)}(${values.join(", ")})`;
 }
 
 export function emitVectorStorageRead(name: string, type: CudaLiteScalarType, index: string): string {

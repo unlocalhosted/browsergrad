@@ -53,6 +53,7 @@ export {
   createCudaLiteSemanticModel,
   lowerSemanticModelToKernelIr,
   type CudaLiteSemanticFunction,
+  type CudaLiteSemanticLaunchableEntry,
   type CudaLiteSemanticModel,
   type CudaLiteSemanticSymbol,
   type SemanticAddressSpace,

@@ -20,6 +20,17 @@ export function semanticWgslFunctionStoragePointerParam(
   return undefined;
 }
 
+export function semanticWgslFunctionSharedPointerParam(
+  ir: SemanticKernelIrModule,
+  base: string,
+): SemanticKernelIrModule["functions"][number]["params"][number] | undefined {
+  for (const fn of ir.functions) {
+    const param = fn.params.find((item) => item.name === base && item.pointer && item.addressSpace === "shared");
+    if (param) return param;
+  }
+  return undefined;
+}
+
 export function semanticStoragePointerBufferId(base: string, ir: SemanticKernelIrModule): number | undefined {
   const index = ir.params.findIndex((param) => param.name === base && param.addressSpace === "storage");
   return index < 0 ? undefined : index;

@@ -14,13 +14,15 @@ import {
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { createCudaRuntimePlan } from "./runtime_plan.js";
 import type {
+  CudaLiteSemanticLaunchableEntry,
+  CudaLiteSemanticSymbol,
+} from "./semantic_ir.js";
+import type {
   CompiledCudaLiteKernel,
   CompiledKernelInput,
-  CudaLiteDeviceFunction,
   CudaLiteExpression,
-  CudaLiteKernel,
   CudaLiteKernelLaunchStatement,
-  CudaLiteParam,
+  CudaLiteScalarType,
   CudaLiteStatement,
   KernelLaunch,
 } from "./types.js";
@@ -58,7 +60,7 @@ export interface CudaHostDynamicLaunchPlanOptions {
 
 export interface CudaHostDynamicLaunch {
   readonly statement: CudaLiteKernelLaunchStatement;
-  readonly kernel: CudaLiteKernel;
+  readonly kernel: CudaLiteSemanticLaunchableEntry;
   readonly gridDim: readonly [number, number, number];
   readonly blockDim: readonly [number, number, number];
   readonly input: CompiledKernelInput;
@@ -140,20 +142,11 @@ export function createCudaHostDynamicLaunchPlan(
   return { supported: true, launches: planned, poolOffsetUpdates: launchCollection.poolOffsetUpdates };
 }
 
-function findLaunchableKernel(compiled: CompiledCudaLiteKernel, name: string): CudaLiteKernel | undefined {
-  return compiled.ast.kernels.find((kernel) => kernel.name === name) ??
-    launchableDeviceFunctionAsKernel(compiled.ast.functions.find((fn) => fn.name === name));
-}
-
-function launchableDeviceFunctionAsKernel(fn: CudaLiteDeviceFunction | undefined): CudaLiteKernel | undefined {
-  if (!fn) return undefined;
-  return {
-    kind: "kernel",
-    name: fn.name,
-    params: fn.params,
-    body: fn.body,
-    span: fn.span,
-  };
+function findLaunchableKernel(
+  compiled: CompiledCudaLiteKernel,
+  name: string,
+): CudaLiteSemanticLaunchableEntry | undefined {
+  return compiled.semantic.launchableEntries.find((entry) => entry.name === name);
 }
 
 function unsupported(code: CudaHostDynamicLaunchBlockerCode, message: string): CudaHostDynamicLaunchPlan {
@@ -272,7 +265,7 @@ function poolOffsetUpdates(
   return out;
 }
 
-function coerceHostScalar(valueType: CudaLiteParam["valueType"], value: number): number {
+function coerceHostScalar(valueType: CudaLiteScalarType | undefined, value: number): number {
   if (valueType === "int" || valueType === "uint" || valueType === "bool") return Math.trunc(value);
   return value;
 }
@@ -443,7 +436,7 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
 }
 
 function createChildKernelInput(
-  params: readonly CudaLiteParam[],
+  params: readonly CudaLiteSemanticSymbol[],
   statement: CudaLiteKernelLaunchStatement,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
@@ -517,13 +510,13 @@ function createChildKernelInput(
   };
 }
 
-function typedPoolView(data: Uint32Array, valueType: CudaLiteParam["valueType"]): WgslTypedArray {
+function typedPoolView(data: Uint32Array, valueType: CudaLiteScalarType | undefined): WgslTypedArray {
   if (valueType === "int") return new Int32Array(data.buffer, data.byteOffset, data.byteLength / 4);
   if (valueType === "uint" || valueType === "voidptr" || valueType === "bool") return data;
   return new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4);
 }
 
-function elementByteSize(valueType: CudaLiteParam["valueType"]): number {
+function elementByteSize(valueType: CudaLiteScalarType | undefined): number {
   return valueType === "half" ? 2 : 4;
 }
 

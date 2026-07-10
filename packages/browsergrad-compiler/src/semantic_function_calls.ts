@@ -14,7 +14,7 @@ export function semanticFunctionParamContractSupported(
   param: CudaLiteSemanticSymbol,
   valueTypeSupported: (valueType: CudaLiteScalarType | undefined) => boolean,
 ): boolean {
-  if (param.pointer) return param.addressSpace === "storage" && valueTypeSupported(param.valueType);
+  if (param.pointer) return (param.addressSpace === "storage" || param.addressSpace === "shared") && valueTypeSupported(param.valueType);
   return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";
 }
 
@@ -33,7 +33,7 @@ export function semanticFunctionArgAddressContractSupported(
   if (!param) return false;
   if (param.pointer) {
     const ref = pointerRef(arg);
-    return param.addressSpace === "storage" && ref?.addressSpace === "storage";
+    return (param.addressSpace === "storage" || param.addressSpace === "shared") && ref?.addressSpace === param.addressSpace;
   }
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
   if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
@@ -66,8 +66,9 @@ export function semanticFunctionBodyShapeSupported(
   options: SemanticFunctionBodyShapeOptions = {},
 ): boolean {
   return operations.every((operation) => {
+    if (operation.kind === "cooperative-group-declare" || operation.kind === "dim3-declare") return true;
     if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
-    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage";
+    if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage" || operation.target.addressSpace === "shared";
     if (operation.kind === "surface-write" || operation.kind === "call") return true;
     if (options.allowBarrierFence && (operation.kind === "barrier" || operation.kind === "fence")) return true;
     if (operation.kind === "branch") return semanticFunctionBodyShapeSupported(operation.consequent, options) && semanticFunctionBodyShapeSupported(operation.alternate, options);

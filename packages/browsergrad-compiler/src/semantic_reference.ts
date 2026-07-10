@@ -121,8 +121,10 @@ import {
 } from "./reference_curand.js";
 import { semanticMathCallArgumentsSupported } from "./semantic_math_intrinsics.js";
 import {
+  semanticAssignmentBinaryOperator,
   semanticAssignmentOperatorSupported as semanticReferenceAssignmentOperatorSupported,
   semanticSurfaceReadValueType,
+  semanticVectorAssignmentOperatorSupported,
   semanticVectorBinaryOperatorSupported as semanticReferenceVectorBinaryOperatorSupported,
 } from "./semantic_expression_contracts.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
@@ -142,6 +144,7 @@ import {
   semanticValueTypeSupported,
 } from "./semantic_value_types.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
+import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 
 type SemanticValue = number | ReferenceVector3 | number[];
@@ -195,6 +198,7 @@ export function runCompiledKernelSemanticReference(
   }
   validateCudaKernelLaunch(launch, compiled.kernelIr.workgroupSize);
   validateSemanticReferenceInput(compiled, input);
+  assertCudaTrapLaunchPreconditions(compiled, input.scalars ?? {});
 
   const buffers = cloneReferenceBuffers(input.buffers);
   const constants = semanticReferenceConstants(compiled, input);
@@ -288,6 +292,8 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "store":
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
+        if (isSemanticFloatVectorType(operation.target.valueType) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return operation;
+        if (semanticReferenceVectorFieldMemoryRefSupported(operation.target) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return operation;
         if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) return operation;
         if (
           operation.target.addressSpace === "storage" &&
@@ -325,7 +331,7 @@ function unsupportedSemanticReferenceOperation(
         if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "any", compiled))) return operation;
         break;
       case "barrier":
-        if (!isCudaBarrierCallName(operation.callee)) return operation;
+        if (!isCudaBarrierCallName(operation.callee) && operation.callee !== "cg::sync") return operation;
         break;
       case "fence":
         if (!isCudaFenceCallName(operation.callee)) return operation;
@@ -906,6 +912,7 @@ function semanticReferenceExpressionSupported(
         const vectorMemberTarget = expression.target.kind === "member" &&
           isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
         return semanticReferenceAssignmentOperatorSupported(expression.operator) &&
+        (!vectorMemberTarget || semanticVectorAssignmentOperatorSupported(expression.operator)) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
           expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, compiled) ||
           semanticReferenceAssignmentMemoryRefSupported(expression.target, compiled)) &&
@@ -1298,11 +1305,7 @@ function storeValueExpression(
     return evalSemanticExpression(operation.value, context);
   }
   const right = evalNumber(operation.value, context);
-  if (operation.operator === "=") return right;
-  const left = readMemory(operation.target, context);
-  if (operation.operator === "+=") return left + right;
-  if (operation.operator === "-=") return left - right;
-  throw semanticReferenceError(`semantic reference does not support assignment '${operation.operator}'`, operation.span);
+  return applySemanticScalarAssignment(operation.operator, readMemory(operation.target, context), right, operation.span);
 }
 
 function evalVectorFieldAssignment(operator: string, left: SemanticValue, right: SemanticValue, span: SourceSpan): SemanticValue {
@@ -1843,8 +1846,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (expression.target.kind !== "symbol") throw semanticReferenceError("semantic reference assignment requires local symbol target", expression.target.span);
       {
         const right = evalNumber(expression.value, context);
-        const left = expression.operator === "=" ? 0 : evalNumber(expression.target, context);
-        const value = expression.operator === "+=" ? left + right : expression.operator === "-=" ? left - right : right;
+        const value = applySemanticScalarAssignment(expression.operator, evalNumber(expression.target, context), right, expression.span);
         context.locals.set(expression.target.name, value);
         return value;
       }
@@ -3607,8 +3609,7 @@ function assignMemoryRef(
   context: SemanticReferenceContext,
 ): number {
   const right = evalNumber(expression.value, context);
-  const left = expression.operator === "=" ? 0 : readMemory(ref, context);
-  const value = expression.operator === "+=" ? left + right : expression.operator === "-=" ? left - right : right;
+  const value = applySemanticScalarAssignment(expression.operator, readMemory(ref, context), right, expression.span);
   writeMemory(ref, value, context);
   return value;
 }
@@ -4127,6 +4128,20 @@ function evalBinary(operator: string, left: number, right: number): number {
   }
 }
 
+function applySemanticScalarAssignment(
+  operator: string,
+  left: number,
+  right: number,
+  span: SourceSpan,
+): number {
+  if (operator === "=") return right;
+  const binaryOperator = semanticAssignmentBinaryOperator(operator);
+  if (binaryOperator === undefined) {
+    throw semanticReferenceError(`semantic reference does not support assignment '${operator}'`, span);
+  }
+  return evalBinary(binaryOperator, left, right);
+}
+
 function evalVectorBinary(operator: string, left: SemanticValue, right: SemanticValue, span: SourceSpan): number[] {
   if (!semanticReferenceVectorBinaryOperatorSupported(operator)) {
     throw semanticReferenceError(`semantic reference does not support vector binary '${operator}'`, span);
@@ -4285,12 +4300,10 @@ function semanticReferenceSharedMemory(compiled: CompiledCudaLiteKernel): Map<st
 }
 
 function semanticReferenceSharedDimensions(
-  compiled: CompiledCudaLiteKernel,
+  _compiled: CompiledCudaLiteKernel,
   symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number],
 ): readonly number[] {
-  const dynamicLeading = compiled.dynamicSharedMemory?.[symbol.name];
-  if (dynamicLeading === undefined) return symbol.dimensions;
-  return [dynamicLeading, ...symbol.dimensions];
+  return symbol.dimensions;
 }
 
 function semanticReferenceConstants(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): Map<string, number | WgslTypedArray> {

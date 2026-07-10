@@ -1,4 +1,4 @@
-import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
+import { isCudaVectorType } from "./vector_types.js";
 import { cudaScalarWgslType, wgslScalar } from "./wgsl_storage.js";
 import type { CudaLiteExpression, CudaLiteScalarType } from "./types.js";
 
@@ -80,17 +80,6 @@ export function emitExpressionAsWgslScalarText(value: string, type: CudaLiteScal
   if (scalar === "u32") return `u32(${value})`;
   if (scalar === "bool") return `bool(${value})`;
   return `${wgslScalar(type)}(${value})`;
-}
-
-export function emitVectorLaneSetExpression(base: string, type: CudaLiteScalarType, index: string | number, value: string): string {
-  const scalar = wgslScalar(cudaVectorScalarType(type) ?? "float");
-  const indexExpression = typeof index === "number" ? `${index}u` : index;
-  const values = Array.from({ length: cudaVectorLaneCount(type) }, (_unused, lane) => {
-    const field = lane === 0 ? "x" : lane === 1 ? "y" : lane === 2 ? "z" : "w";
-    const current = `(${base}).${field}`;
-    return `select(${current}, ${scalar}(${value}), ${indexExpression} == ${lane}u)`;
-  });
-  return `${wgslScalar(type)}(${values.join(", ")})`;
 }
 
 export function updateDeltaForValueType(type: CudaLiteScalarType | undefined): string {

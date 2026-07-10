@@ -814,6 +814,7 @@ export function analyzeCudaLite(
 
   return {
     kernel,
+    kernels: ast.kernels,
     constants: ast.constants,
     deviceGlobals: ast.deviceGlobals,
     textures: ast.textures,

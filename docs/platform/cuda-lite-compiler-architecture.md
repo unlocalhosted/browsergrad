@@ -42,7 +42,13 @@ resident buffers, and readback mechanics.
   parsing/model facts should move here before the same capability grows more
   analyzer/reference/WGSL code.
 - `scripts/compiler-architecture-map.mjs`: line-count/import/function map for
-  finding shallow or oversized modules before each extraction batch.
+  finding shallow or oversized modules before each extraction batch. Its
+  `--check` mode validates runtime dependency cycles and size budgets; run it
+  through `pnpm --filter @unlocalhosted/browsergrad-compiler architecture:check`.
+- `tests/compiler/*.test.ts`: vertical capability suites for core contracts,
+  memory, control, atomics, textures, numeric lowering, runtime orchestration,
+  and cooperative execution. Keep new compatibility tests with the owning
+  capability instead of rebuilding a monolithic compiler test module.
 
 If a feature needs support in multiple files, add it in this order:
 
