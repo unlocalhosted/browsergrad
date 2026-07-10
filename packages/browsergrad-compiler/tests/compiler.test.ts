@@ -356,6 +356,21 @@ describe("CUDA-lite compiler", () => {
       });
 
     expect(expressionContractDuplicates).toEqual([]);
+
+    const gridSyncPlannerLeaks = ["runtime_plan.ts", "semantic_grid_sync.ts"]
+      .flatMap((file) => {
+        const source = compilerSourceText(file);
+        return [
+          "CudaLiteStatement",
+          "CudaLiteExpression",
+          "KernelIrModule",
+          "lowerAnalyzedCudaLiteToKernelIr",
+        ]
+          .filter((name) => new RegExp(`\\b${name}\\b`, "u").test(source))
+          .map((name) => `${file}:${name}`);
+      });
+
+    expect(gridSyncPlannerLeaks).toEqual([]);
   });
 
   it("parses and compiles SAXPY to WGSL", () => {
