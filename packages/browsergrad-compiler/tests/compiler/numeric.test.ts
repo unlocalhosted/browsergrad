@@ -3273,10 +3273,19 @@ describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
         { buffers: { out: new Float32Array(4) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("min(");
       expect(compiled.wgsl).toContain("max(");
       expect([...result.buffers.out as Float32Array]).toEqual([0, 2, 8, 255]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([0, 2, 8, 255]);
     });
 
   it("lowers vector assignment chains and POD-field aliases", () => {

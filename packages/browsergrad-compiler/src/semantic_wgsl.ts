@@ -121,6 +121,7 @@ import {
 import {
   SEMANTIC_MATH_CALLS,
   semanticMathCallArgumentsSupported,
+  semanticVectorMinMaxCallValueType,
 } from "./semantic_math_intrinsics.js";
 import {
   semanticAssignmentBinaryOperator,
@@ -1372,11 +1373,19 @@ function semanticWgslLocalArrayInitSupported(
   return semanticLocalArrayInitContractSupported(expression, targetValueType, (item, expected) => semanticWgslExpressionSupported(item, expected, ir));
 }
 
-function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
+function semanticWgslMathCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  expected: "scalar" | "any" = "scalar",
+  ir?: SemanticKernelIrModule,
+): boolean {
+  const name = expression.callee.kind === "symbol" ? expression.callee.name : undefined;
+  if (semanticVectorMinMaxCallValueType(name, expression.args) !== undefined) {
+    return expected === "any" && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "any", ir));
+  }
   return semanticMathCallArgumentsSupported(
-    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    name,
     expression.args,
-    (arg) => semanticWgslExpressionSupported(arg, "scalar"),
+    (arg) => semanticWgslExpressionSupported(arg, "scalar", ir),
   );
 }
 
@@ -1761,7 +1770,7 @@ function semanticWgslExpressionSupported(
           (expected === "any" || !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression, ir?.functions))) ||
         semanticWgslSubgroupCallSupported(expression, ir) ||
         semanticWgslAddressPredicateCallSupported(expression) ||
-        semanticWgslMathCallSupported(expression) ||
+        semanticWgslMathCallSupported(expression, expected, ir) ||
         semanticWgslHalf2CallSupported(expression, ir) ||
         semanticWgslBf162CallSupported(expression, ir) ||
         semanticWgslVectorConstructorSupported(expression, expected, ir) ||
@@ -3080,7 +3089,7 @@ function emitSemanticExpression(
       if (semanticWgslHalf2CallSupported(expression, ir)) return emitSemanticHalf2Call(expression, ir, names, options, textureSpecializations);
       if (semanticWgslBf162CallSupported(expression, ir)) return emitSemanticBf162Call(expression, ir, names, options, textureSpecializations);
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations);
-      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslMathCallSupported(expression, "any", ir)) return emitSemanticMathCall(expression, ir, names, options, textureSpecializations);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
     case "texture-read":
       return emitSemanticTextureRead(expression, ir, names, options);
@@ -4231,6 +4240,10 @@ function emitSemanticMathCall(
     return "u32(workgroup_id.x * 104729u + workgroup_id.y * 1009u + workgroup_id.z * 97u + local_id.x + local_id.y * 31u + local_id.z * 7u)";
   }
   if (wgslCallee === "min" || wgslCallee === "max") {
+    const vectorType = semanticVectorMinMaxCallValueType(expression.callee.name, expression.args);
+    if (vectorType !== undefined) {
+      return `${wgslCallee}(${expression.args.map((arg) => emitSemanticVectorOperand(arg, vectorType, ir, names, options, textureSpecializations)).join(", ")})`;
+    }
     const scalar = semanticMathCallOperandType(expression.args);
     return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, scalar, options, textureSpecializations)).join(", ")})`;
   }

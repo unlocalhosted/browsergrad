@@ -120,7 +120,10 @@ import {
   referenceCurandNormalPair as curandNormalPair,
   referenceCurandPoissonDraw as curandPoissonDraw,
 } from "./reference_curand.js";
-import { semanticMathCallArgumentsSupported } from "./semantic_math_intrinsics.js";
+import {
+  semanticMathCallArgumentsSupported,
+  semanticVectorMinMaxCallValueType,
+} from "./semantic_math_intrinsics.js";
 import {
   semanticAssignmentBinaryOperator,
   semanticAssignmentOperatorSupported as semanticReferenceAssignmentOperatorSupported,
@@ -585,7 +588,7 @@ function semanticReferenceAtomicSupported(
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression, "any", compiled) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -598,11 +601,19 @@ function semanticReferenceLocalArrayInitSupported(
   return semanticLocalArrayInitContractSupported(expression, targetValueType, (item, expected) => semanticReferenceExpressionSupported(item, expected, compiled));
 }
 
-function semanticReferenceMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
+function semanticReferenceMathCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  expected: "scalar" | "any" = "scalar",
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  const name = expression.callee.kind === "symbol" ? expression.callee.name : undefined;
+  if (semanticVectorMinMaxCallValueType(name, expression.args) !== undefined) {
+    return expected === "any" && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "any", compiled));
+  }
   return semanticMathCallArgumentsSupported(
-    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    name,
     expression.args,
-    (arg) => semanticReferenceExpressionSupported(arg, "scalar"),
+    (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled),
   );
 }
 
@@ -993,7 +1004,7 @@ function semanticReferenceExpressionSupported(
           (expected === "any" || !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression))) ||
         semanticReferenceSubgroupCallSupported(expression) ||
         semanticReferenceAddressPredicateCallSupported(expression) ||
-        semanticReferenceMathCallSupported(expression) ||
+        semanticReferenceMathCallSupported(expression, expected, compiled) ||
         semanticReferenceHalf2CallSupported(expression, compiled) ||
         semanticReferenceBf162CallSupported(expression, compiled) ||
         semanticReferenceVectorConstructorSupported(expression, expected, compiled) ||
@@ -1070,7 +1081,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
       semanticReferenceFunctionCallSupported(expression, compiled) ||
       semanticReferenceSubgroupCallSupported(expression) ||
       semanticReferenceAddressPredicateCallSupported(expression) ||
-      semanticReferenceMathCallSupported(expression) ||
+      semanticReferenceMathCallSupported(expression, "any", compiled) ||
       semanticReferenceHalf2CallSupported(expression, compiled) ||
       semanticReferenceBf162CallSupported(expression, compiled) ||
       semanticReferenceVectorConstructorSupported(expression, "any", compiled) ||
@@ -2080,7 +2091,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (semanticReferenceHalf2CallSupported(expression, context.compiled)) return evalSemanticHalf2Call(expression, context);
       if (semanticReferenceBf162CallSupported(expression, context.compiled)) return evalSemanticBf162Call(expression, context);
       if (semanticReferenceFunctionCallSupported(expression, context.compiled)) return evalSemanticFunctionCall(expression, context);
-      if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
+      if (semanticReferenceMathCallSupported(expression, "any", context.compiled)) return evalSemanticMathCall(expression, context);
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "texture-read":
       return evalSemanticTextureRead(expression, context);
@@ -2278,8 +2289,14 @@ function evalSemanticAtomicCall(
 function evalSemanticMathCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference math call requires symbol callee", expression.span);
+  const vectorType = semanticVectorMinMaxCallValueType(expression.callee.name, expression.args);
+  if (vectorType !== undefined) {
+    const [left, right] = expression.args.map((arg) => evalSemanticExpression(arg, context));
+    if (left === undefined || right === undefined) throw semanticReferenceError(`${expression.callee.name} expects two operands`, expression.span);
+    return evalSemanticVectorMinMax(expression.callee.name, left, right, expression.span);
+  }
   const args = expression.args.map((arg) => evalNumber(arg, context));
   const vib = cudaVibMinMaxInfo(expression.callee.name);
   if (vib) {
@@ -4464,6 +4481,19 @@ function evalVectorBinary(operator: string, left: SemanticValue, right: Semantic
     const leftValue = leftValues.length === 1 ? leftValues[0]! : leftValues[lane] ?? 0;
     const rightValue = rightValues.length === 1 ? rightValues[0]! : rightValues[lane] ?? 0;
     return evalBinary(operator, leftValue, rightValue);
+  });
+}
+
+function evalSemanticVectorMinMax(name: string, left: SemanticValue, right: SemanticValue, span: SourceSpan): number[] {
+  const leftValues = Array.isArray(left) ? left : typeof left === "number" ? [left] : [];
+  const rightValues = Array.isArray(right) ? right : typeof right === "number" ? [right] : [];
+  const laneCount = Math.max(leftValues.length, rightValues.length);
+  if (laneCount === 0) throw semanticReferenceError(`${name} expects numeric operands`, span);
+  const chooseMax = name === "fmax" || name === "fmaxf" || name === "max";
+  return Array.from({ length: laneCount }, (_, lane) => {
+    const leftValue = leftValues.length === 1 ? leftValues[0]! : leftValues[lane] ?? 0;
+    const rightValue = rightValues.length === 1 ? rightValues[0]! : rightValues[lane] ?? 0;
+    return chooseMax ? Math.max(leftValue, rightValue) : Math.min(leftValue, rightValue);
   });
 }
 

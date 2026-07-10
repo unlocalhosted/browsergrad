@@ -1,4 +1,6 @@
 import type { SemanticExpression } from "./semantic_ir.js";
+import { isSemanticFloatVectorType, semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
+import type { CudaLiteScalarType } from "./types.js";
 
 export const SEMANTIC_FP8_CALLS: ReadonlySet<string> = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
 
@@ -559,6 +561,23 @@ export const SEMANTIC_MATH_CALLS: ReadonlyMap<string, string> = new Map([
 
 export function isSemanticMathCallName(name: string): boolean {
   return SEMANTIC_MATH_CALLS.has(name);
+}
+
+const SEMANTIC_VECTOR_MIN_MAX_CALLS: ReadonlySet<string> = new Set([
+  "fmin", "fminf", "min", "fmax", "fmaxf", "max",
+]);
+
+/** Returns the vector overload selected by a CUDA min/max call, if any. */
+export function semanticVectorMinMaxCallValueType(
+  name: string | undefined,
+  args: readonly SemanticExpression[],
+): CudaLiteScalarType | undefined {
+  if (name === undefined || !SEMANTIC_VECTOR_MIN_MAX_CALLS.has(name) || args.length !== 2) return undefined;
+  const left = semanticExpressionValueType(args[0]!);
+  const right = semanticExpressionValueType(args[1]!);
+  if (isSemanticFloatVectorType(left) && (right === undefined || !isSemanticFloatVectorType(right) || right === left)) return left;
+  if (isSemanticFloatVectorType(right) && (left === undefined || !isSemanticFloatVectorType(left) || left === right)) return right;
+  return undefined;
 }
 
 export function semanticMathCallArgumentsSupported(
