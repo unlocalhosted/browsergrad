@@ -2109,6 +2109,7 @@ __global__ void texture_atlas_helpers(float4* vecOut, float* scalarOut, cudaText
   vecOut[0] = tex1D<float4>(tex, 0.0f);
 }`;
     const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     const input = {
       buffers: {
         vecOut: new Float32Array(4),

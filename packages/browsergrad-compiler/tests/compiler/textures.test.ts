@@ -1892,10 +1892,24 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: { vecOut: new Float32Array(4), scalarOut: new Float32Array(1) },
+          textures: {
+            texRef: { width: 2, height: 1, channels: 4, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+          },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
-      expect(compiled.wgsl).toContain("bg_tex2d_float4_texRef");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect([...result.buffers.vecOut as Float32Array]).toEqual([1, 2, 3, 4]);
       expect([...result.buffers.scalarOut as Float32Array]).toEqual([5]);
+      expect([...semanticResult.buffers.vecOut as Float32Array]).toEqual([1, 2, 3, 4]);
+      expect([...semanticResult.buffers.scalarOut as Float32Array]).toEqual([5]);
     });
 
   it("lowers CUDA 1D, layered, 3D, and cubemap texture calls through texture atlas helpers", () => {
@@ -1926,9 +1940,14 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_cube_face");
       expect(compiled.wgsl).toContain("bg_cube_u");
-      expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
+      expect(compiled.kernelIr.operations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "store", value: expect.objectContaining({ kind: "texture-read", callee: "tex1D" }) }),
+      ]));
       expect([...result.buffers.scalarOut as Float32Array]).toEqual([5, 33, 41, 21]);
       expect([...result.buffers.vecOut as Float32Array]).toEqual([1, 2, 3, 4]);
     });

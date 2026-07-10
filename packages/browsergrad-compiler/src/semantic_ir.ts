@@ -26,9 +26,12 @@ import {
 import { cudaBfloat16IntrinsicReturnType } from "./cuda_bfloat16_intrinsics.js";
 import {
   isCudaSemanticSurfaceWriteCallName,
-  isCudaTexture2DReadCallName,
 } from "./cuda_texture_surface_calls.js";
-import type { SemanticTextureReadCall } from "./semantic_texture_surface.js";
+import {
+  isSemanticTextureReadCall,
+  semanticTextureReadCoordinateCount,
+  type SemanticTextureReadCall,
+} from "./semantic_texture_surface.js";
 import {
   cudaVibMinMaxInfo,
   isCudaFrexpCallName as isFrexpCallName,
@@ -1175,21 +1178,21 @@ function lowerExpression(
         const load = cacheHintLoadExpression(expression, scope);
         if (load) return load;
       }
+      const semanticTextureCall = expression.callee.kind === "identifier" && isSemanticTextureReadCall(expression.callee.name)
+        ? expression.callee.name
+        : undefined;
       if (
-        expression.callee.kind === "identifier" &&
-        (isCudaTexture2DReadCallName(expression.callee.name) ||
-          expression.callee.name === "tex2DLayered" ||
-          expression.callee.name === "tex3D" ||
-          expression.callee.name === "texCubemap") &&
-        (isCudaTexture2DReadCallName(expression.callee.name) ? args.length >= 3 : args.length >= 4)
+        semanticTextureCall !== undefined &&
+        args.length >= semanticTextureReadCoordinateCount(semanticTextureCall) + 1
       ) {
+        const coordinateCount = semanticTextureReadCoordinateCount(semanticTextureCall);
         return {
           kind: "texture-read",
-          callee: expression.callee.name as SemanticTextureReadCall,
+          callee: semanticTextureCall,
           texture: args[0]!,
           x: args[1]!,
-          y: args[2]!,
-          ...(isCudaTexture2DReadCallName(expression.callee.name) ? {} : { z: args[3]! }),
+          y: coordinateCount === 1 ? numberExpression(0, expression.span) : args[2]!,
+          ...(coordinateCount === 3 ? { z: args[3]! } : {}),
           valueType: expression.templateValueType ?? "float",
           span: expression.span,
         };

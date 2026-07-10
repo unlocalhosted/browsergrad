@@ -1,8 +1,8 @@
 # Compiler Bugbash Progress
 
-- 2026-07-10: Semantic layered/3D texture reads: `tex2DLayered` and `tex3D` now lower as typed semantic texture reads with explicit `z`; semantic reference and WGSL share the established 2D-atlas projection `atlasY = y + z`, including descriptor handling. Focused unit passed `51/51`, exact native WebGPU passed `1/1`, full compiler passed `773/773`, and source/dist real-world WebGPU passed `855/855` each with zero skips. CUDA-samples semantic-direct moved `234/354 -> 236/354`; AST fallback moved `120 -> 118`.
+- 2026-07-10: Semantic 1D texture reads: `tex1D` and `tex1Dfetch` now use the shared semantic texture dimensional contract and lower with explicit atlas `y = 0`; all modeled CUDA texture-read intrinsics now enter typed semantic IR. Focused texture unit passed `51/51`, mixed-dimension native WebGPU passed `1/1`, full compiler passed `773/773`, and source/dist real-world WebGPU passed `855/855` each with zero skips. CUDA-samples remains `236/354` semantic-direct because affected corpus kernels have independent later blockers. Next exact blocker: `matrixMulCUDA_block16` normalized line 80 helper call, whose helper contains shared 2D arrays and cooperative barriers.
 
-Last updated: 2026-07-10T14:45:59Z
+Last updated: 2026-07-10T15:06:07Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -13,7 +13,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | CUDA-samples semantic-direct lowering is now `236/354`, up from `161/354`; `118` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
-| Active work item | Migrate `tex1D`/`tex1Dfetch`, then select the next real semantic WGSL blocker by source span; device-helper barrier scheduling remains an explicit safety-gated slice |
+| Active work item | `matrixMulCUDA_block16` normalized line 80: migrate the called helper's shared 2D arrays and cooperative barriers without weakening barrier safety |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic 1D texture reads: `tex1D` and `tex1Dfetch` now participate in the shared semantic texture-call dimensional contract. IR lowering synthesizes atlas `y = 0`, while reference and WGSL reuse the same descriptor-aware typed texture path. Focused texture unit passed `51/51`; exact mixed-dimension native WebGPU fixture passed `1/1` and now proves semantic WGSL for scalar/vector 1D, layered, 3D, and cubemap reads together; changed-fast passed compiler unit `757/757` and fast corpus WebGPU `32/32`; full compiler passed `773/773`; source/dist real-world WebGPU passed `855/855` each with corpus fixtures `127/127` and zero skips. CUDA-samples remains `236/354` semantic-direct and `118` AST fallback because newly admitted 1D calls expose independent later blockers.
 - Semantic layered/3D texture reads: `tex2DLayered` and `tex3D` now lower into typed semantic `texture-read` nodes carrying explicit `z`. Semantic reference and WGSL use the established browser-native 2D atlas projection `atlasY = y + z`, preserve descriptor behavior, and walk `z` through runtime planning/orchestration. Focused texture unit passed `51/51`; exact native WebGPU fixture passed `1/1` with output `[9,11]`; changed-fast passed compiler unit `757/757`, selected WebGPU `62/62`, and fast corpus `32/32`; full compiler passed `773/773`; source/dist real-world WebGPU passed `855/855` each with corpus fixtures `127/127` and zero skips. CUDA-samples semantic-direct moved `234/354 -> 236/354`, AST fallback `120 -> 118`.
 - Semantic pointer-return helpers: device functions with modeled storage pointers may now return a scalar local value after validated pointer-rooted reads. The shared contract still rejects pointer identity/null comparisons and unmodeled pointer roots. Semantic reference and WGSL use the same contract; native WebGPU test passed `1/0`, full compiler passed `773/0`, and full real-world native source/dist verifier passed `855/0/0` each. CUDA-samples semantic-direct moved `232/354 -> 234/354`, AST fallback `122 -> 120`; `generateSampleRanksKernel` is now semantic-direct.
 - Semantic cubemap texture reads: `texCubemap` now lowers into typed semantic `texture-read` with an explicit direction `z`; semantic WGSL and semantic reference use the same six-face 2D atlas projection already used by the established backend, while cubemap reads deliberately bypass 2D descriptor transforms. Focused compiler and native WebGPU tests passed `1/0` each; full compiler gate passed `771/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `231/354 -> 234/354`, AST fallback `123 -> 120`.
