@@ -651,7 +651,8 @@ function semanticReferenceTextureReadSupported(
     expression.texture.kind === "symbol" &&
     expression.texture.addressSpace === "texture" &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
-    semanticReferenceExpressionSupported(expression.y, "scalar", compiled);
+    semanticReferenceExpressionSupported(expression.y, "scalar", compiled) &&
+    (expression.callee !== "texCubemap" || expression.z !== undefined && semanticReferenceExpressionSupported(expression.z, "scalar", compiled));
 }
 
 function semanticReferenceTextureDescriptorsSupported(_compiled: CompiledCudaLiteKernel): boolean {
@@ -1093,7 +1094,8 @@ function semanticReferenceExpressionContainsUnsupportedCall(
     return !semanticReferenceTextureReadSupported(expression, compiled) ||
       semanticReferenceExpressionContainsUnsupportedCall(expression.texture, compiled) ||
       semanticReferenceExpressionContainsUnsupportedCall(expression.x, compiled) ||
-      semanticReferenceExpressionContainsUnsupportedCall(expression.y, compiled);
+      semanticReferenceExpressionContainsUnsupportedCall(expression.y, compiled) ||
+      expression.z !== undefined && semanticReferenceExpressionContainsUnsupportedCall(expression.z, compiled);
   }
   if (expression.kind === "surface-read") {
     return !semanticReferenceSurfaceReadSupported(expression, compiled) ||
@@ -1132,7 +1134,7 @@ function semanticReferenceExpressionChildren(expression: SemanticExpression): re
     case "call":
       return expression.args;
     case "texture-read":
-      return [expression.texture, expression.x, expression.y];
+      return [expression.texture, expression.x, expression.y, ...(expression.z ? [expression.z] : [])];
     case "surface-read":
       return [expression.surface, expression.xBytes, expression.y, ...(expression.z ? [expression.z] : [])];
   }
@@ -2152,18 +2154,36 @@ function evalSemanticTextureRead(
   context: SemanticReferenceContext,
 ): SemanticValue {
   if (!semanticReferenceTextureReadSupported(expression, context.compiled) || expression.texture.kind !== "symbol") {
-    throw semanticReferenceError("semantic reference supports only direct scalar/vector tex2D reads", expression.span);
+    throw semanticReferenceError("semantic reference supports only direct scalar/vector texture reads", expression.span);
   }
   const texture = context.textures[expression.texture.name];
   if (!texture) throw semanticReferenceError(`missing texture input '${expression.texture.name}'`, expression.texture.span);
   const channels = texture.channels ?? 1;
   const descriptor = context.textureDescriptors[expression.texture.name] ?? {};
+  if (expression.callee === "texCubemap") {
+    const z = evalNumber(expression.z!, context);
+    const cube = semanticCubemapTextureCoord(evalNumber(expression.x, context), evalNumber(expression.y, context), z, texture.width, texture.height);
+    return evalSemanticTextureValue(expression.valueType, (lane) => texture.data[(cube.y * texture.width + cube.x) * channels + lane] ?? 0);
+  }
   if (descriptor.filterMode === "linear") {
     return evalSemanticTextureValue(expression.valueType, (lane) => evalSemanticLinearTextureRead(texture, descriptor, expression, context, channels, lane));
   }
   const x = semanticTextureCoord(evalNumber(expression.x, context), texture.width, descriptor, "x");
   const y = semanticTextureCoord(evalNumber(expression.y, context), texture.height, descriptor, "y");
   return evalSemanticTextureValue(expression.valueType, (lane) => texture.data[(y * texture.width + x) * channels + lane] ?? 0);
+}
+
+function semanticCubemapTextureCoord(x: number, y: number, z: number, width: number, height: number): { readonly x: number; readonly y: number } {
+  const ax = Math.abs(x);
+  const ay = Math.abs(y);
+  const az = Math.abs(z);
+  const face = ax >= ay && ax >= az ? (x >= 0 ? 0 : 1) : ay >= az ? (y >= 0 ? 2 : 3) : (z >= 0 ? 4 : 5);
+  const u = ax >= ay && ax >= az ? z / Math.max(ax, 1e-6) : x / Math.max(ay >= az ? ay : az, 1e-6);
+  const v = ax >= ay && ax >= az ? y / Math.max(ax, 1e-6) : ay >= az ? z / Math.max(ay, 1e-6) : y / Math.max(az, 1e-6);
+  return {
+    x: semanticTextureCoord((u + 1) * 0.5 * (width - 1), width, {}, "x"),
+    y: semanticTextureCoord((v + 1) * 0.5 * (width - 1) + face * width, height, {}, "y"),
+  };
 }
 
 function evalSemanticLinearTextureRead(

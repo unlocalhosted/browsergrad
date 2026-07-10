@@ -35,7 +35,7 @@ export function semanticExpressionChildren(expression: SemanticExpression): read
     case "call":
       return [expression.callee, ...expression.args];
     case "texture-read":
-      return [expression.texture, expression.x, expression.y];
+      return [expression.texture, expression.x, expression.y, ...(expression.z ? [expression.z] : [])];
     case "surface-read":
       return [expression.surface, expression.xBytes, expression.y, ...(expression.z ? [expression.z] : [])];
     case "cast":

@@ -26,7 +26,7 @@ import {
 import { cudaBfloat16IntrinsicReturnType } from "./cuda_bfloat16_intrinsics.js";
 import {
   isCudaSemanticSurfaceWriteCallName,
-  isCudaTexture2DReadCallName,
+  isCudaTextureReadCallName,
 } from "./cuda_texture_surface_calls.js";
 import {
   cudaVibMinMaxInfo,
@@ -180,10 +180,11 @@ export type SemanticExpression =
     }
   | {
       readonly kind: "texture-read";
-      readonly callee: "tex2D" | "tex2DLod";
+      readonly callee: "tex2D" | "tex2DLod" | "texCubemap";
       readonly texture: SemanticExpression;
       readonly x: SemanticExpression;
       readonly y: SemanticExpression;
+      readonly z?: SemanticExpression;
       readonly valueType: Exclude<CudaLiteScalarType, "void">;
       readonly span: SourceSpan;
     }
@@ -420,6 +421,7 @@ export function walkSemanticExpression(
       walkSemanticExpression(expression.texture, visitExpression);
       walkSemanticExpression(expression.x, visitExpression);
       walkSemanticExpression(expression.y, visitExpression);
+      if (expression.z) walkSemanticExpression(expression.z, visitExpression);
       return;
     case "surface-read":
       walkSemanticExpression(expression.surface, visitExpression);
@@ -666,7 +668,7 @@ function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, n
     case "member": return { ...expression, object: rewriteSemanticExpressionAddressSpace(expression.object, names) };
     case "index": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names), index: rewriteSemanticExpressionAddressSpace(expression.index, names), ...(expression.addressSpace === "storage" && expression.target.kind === "symbol" && names.has(expression.target.name) ? { addressSpace: "shared" } : {}) };
     case "call": return { ...expression, callee: rewriteSemanticExpressionAddressSpace(expression.callee, names), args: expression.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names)) };
-    case "texture-read": return { ...expression, texture: rewriteSemanticExpressionAddressSpace(expression.texture, names), x: rewriteSemanticExpressionAddressSpace(expression.x, names), y: rewriteSemanticExpressionAddressSpace(expression.y, names) };
+    case "texture-read": return { ...expression, texture: rewriteSemanticExpressionAddressSpace(expression.texture, names), x: rewriteSemanticExpressionAddressSpace(expression.x, names), y: rewriteSemanticExpressionAddressSpace(expression.y, names), ...(expression.z === undefined ? {} : { z: rewriteSemanticExpressionAddressSpace(expression.z, names) }) };
     case "surface-read": return { ...expression, surface: rewriteSemanticExpressionAddressSpace(expression.surface, names), xBytes: rewriteSemanticExpressionAddressSpace(expression.xBytes, names), y: rewriteSemanticExpressionAddressSpace(expression.y, names), ...(expression.z === undefined ? {} : { z: rewriteSemanticExpressionAddressSpace(expression.z, names) }) };
     case "cast": return { ...expression, expression: rewriteSemanticExpressionAddressSpace(expression.expression, names) };
     case "unary": return { ...expression, argument: rewriteSemanticExpressionAddressSpace(expression.argument, names) };
@@ -1174,15 +1176,16 @@ function lowerExpression(
       }
       if (
         expression.callee.kind === "identifier" &&
-        isCudaTexture2DReadCallName(expression.callee.name) &&
-        args.length >= 3
+        isCudaTextureReadCallName(expression.callee.name) &&
+        (expression.callee.name === "texCubemap" ? args.length >= 4 : args.length >= 3)
       ) {
         return {
           kind: "texture-read",
-          callee: expression.callee.name as "tex2D" | "tex2DLod",
+          callee: expression.callee.name as "tex2D" | "tex2DLod" | "texCubemap",
           texture: args[0]!,
           x: args[1]!,
           y: args[2]!,
+          ...(expression.callee.name === "texCubemap" ? { z: args[3]! } : {}),
           valueType: expression.templateValueType ?? "float",
           span: expression.span,
         };
@@ -1935,7 +1938,8 @@ function semanticExpressionSideEffectFree(expression: SemanticExpression): boole
     case "texture-read":
       return semanticExpressionSideEffectFree(expression.texture) &&
         semanticExpressionSideEffectFree(expression.x) &&
-        semanticExpressionSideEffectFree(expression.y);
+        semanticExpressionSideEffectFree(expression.y) &&
+        (expression.z === undefined || semanticExpressionSideEffectFree(expression.z));
     case "surface-read":
       return semanticExpressionSideEffectFree(expression.surface) &&
         semanticExpressionSideEffectFree(expression.xBytes) &&
@@ -2082,6 +2086,7 @@ function collectMemoryRefsInto(expression: SemanticExpression, refs: SemanticMem
       collectMemoryRefsInto(expression.texture, refs);
       collectMemoryRefsInto(expression.x, refs);
       collectMemoryRefsInto(expression.y, refs);
+      if (expression.z) collectMemoryRefsInto(expression.z, refs);
       return;
     case "surface-read":
       collectMemoryRefsInto(expression.surface, refs);

@@ -2151,6 +2151,23 @@ __global__ void local_uchar(uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([3, 255]);
   });
 
+  it("runs cubemap texture reads through semantic WGSL on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void sample(float *out, cudaTextureObject_t tex) {
+  out[0] = texCubemap<float>(tex, 1.0f, 0.0f, 0.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      textures: { tex: { width: 2, height: 12, channels: 1 as const, data: new Float32Array([7, 0, ...new Array(22).fill(0)]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([7]);
+  });
+
   it("runs compiled integer CAS atomics through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

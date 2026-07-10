@@ -1752,11 +1752,31 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         textureDescriptors: {
           tex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
         },
-      });
+  });
 
       expect(compiled.wgsl).toContain("bg_cube_face");
       expect(compiled.wgsl).not.toContain("fn readCube__bg_tex_0");
       expect(compiled.wgsl).not.toContain("bg_tex2d_f32_texSrc");
+    });
+
+  it("lowers cubemap texture reads through semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void sample(float *out, cudaTextureObject_t tex) {
+    out[0] = texCubemap<float>(tex, 1.0f, 0.0f, 0.0f);
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = {
+        buffers: { out: new Float32Array(1) },
+        textures: { tex: { width: 2, height: 12, channels: 1 as const, data: new Float32Array([7, 0, ...new Array(22).fill(0)]) } },
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const result = runCompiledKernelReference(compiled, input, launch);
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bg_cube_face");
+      expect([...result.buffers.out as Float32Array]).toEqual([7]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([7]);
     });
 
   it("lowers CUDA driver texture object aliases as texture params", () => {

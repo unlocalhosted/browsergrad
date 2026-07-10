@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T13:48:24Z
+Last updated: 2026-07-10T13:55:00Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic cubemap texture reads: `texCubemap` now lowers into typed semantic `texture-read` with an explicit direction `z`; semantic WGSL and semantic reference use the same six-face 2D atlas projection already used by the established backend, while cubemap reads deliberately bypass 2D descriptor transforms. Focused compiler and native WebGPU tests passed `1/0` each; full compiler gate passed `771/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `231/354 -> 234/354`, AST fallback `123 -> 120`.
 - Semantic vector `fminf`/`fmaxf` overloads: typed semantic IR now resolves `float2`/`float3`/`float4` min/max calls, including scalar broadcast, through one shared overload contract. Semantic reference evaluates the same lane-wise operation and WGSL emits typed native `min`/`max`. Focused compiler and native WebGPU tests passed `1/0` each; full compiler gate passed `770/0`; full real-world native WebGPU verifier passed; CUDA-samples `d_mipmap` moved semantic-direct and the corpus reached `231/354`, AST fallback `123`.
 - Semantic vector compound writes: typed semantic IR now accepts `+=`, `-=`, `*=`, and `/=` for `float2`/`float3`/`float4` local, shared, and storage targets. Scalar RHS values are explicitly broadcast to the target vector type before native WGSL emission; semantic reference uses the same lane-wise rule. Focused compiler and native WebGPU tests passed `1/0` each; full compiler gate passed `770/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `229/354 -> 230/354`, AST fallback `124`.
 - Semantic local-`uchar` lowering: local CUDA byte values now remain explicit semantic values instead of forcing AST WGSL fallback. Semantic reference and WGSL both narrow declarations, casts, and compound assignments to eight bits; local byte arrays, storage byte ABI, shared packed-byte aliases, and byte-pointer helper ABI remain deliberately excluded pending typed packed `MemoryRef` lowering. Focused compiler test passed `1/0`; guarded native-browser WebGPU test passed `1/0`; full compiler gate passed `769/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `226/354 -> 229/354`, AST fallback `128 -> 125`.

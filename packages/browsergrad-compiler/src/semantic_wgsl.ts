@@ -220,6 +220,7 @@ import {
   type SemanticTextureDescriptorOptions,
   type SemanticTextureDescriptorSpecializations,
 } from "./semantic_wgsl_texture_descriptors.js";
+import { emitCubeTextureAtlasHelpers } from "./wgsl_texture_surface.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
@@ -427,6 +428,7 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticTextureDescriptorHelpers(options, textureSpecializations, names)) {
     lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
+  if (semanticUsesCubemapTextureRead(ir)) lines.push("", ...emitCubeTextureAtlasHelpers());
   lines.push("", ...emitSemanticNumericHelpers());
   if (semanticUsesBfloatHelper(ir)) {
     lines.push("", ...emitBfloatConversionHelpers());
@@ -1433,7 +1435,8 @@ function semanticWgslTextureReadSupported(
     texture.kind === "symbol" &&
     texture.addressSpace === "texture" &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
-    semanticWgslExpressionSupported(expression.y, "scalar", ir);
+    semanticWgslExpressionSupported(expression.y, "scalar", ir) &&
+    (expression.callee !== "texCubemap" || expression.z !== undefined && semanticWgslExpressionSupported(expression.z, "scalar", ir));
 }
 
 function semanticWgslSurfaceReadSupported(
@@ -3238,13 +3241,15 @@ function emitSemanticTextureRead(
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (!semanticWgslTextureReadSupported(expression, ir) || expression.texture.kind !== "symbol") {
-    throw semanticWgslError("semantic WGSL supports only direct tex2D<float> reads", expression.span);
+    throw semanticWgslError("semantic WGSL supports only direct texture reads", expression.span);
   }
   const x = emitSemanticExpressionAs(expression.x, ir, names, "f32", options);
   const y = emitSemanticExpressionAs(expression.y, ir, names, "f32", options);
   const texture = nameFor(expression.texture.name, names);
-  const descriptor = options.textureDescriptors?.[expression.texture.name];
-  const read = descriptor
+  const descriptor = expression.callee === "texCubemap" ? undefined : options.textureDescriptors?.[expression.texture.name];
+  const read = expression.callee === "texCubemap"
+    ? emitSemanticCubemapTextureRead(texture, x, y, emitSemanticExpressionAs(expression.z!, ir, names, "f32", options))
+    : descriptor
     ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${y})`
     : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
   if (isSemanticFloatVectorType(expression.valueType)) return emitSemanticTextureVectorRead(read, expression.valueType);
@@ -3253,6 +3258,25 @@ function emitSemanticTextureRead(
   if (expression.valueType === "uint" || expression.valueType === "uchar") return `u32(${read}.r)`;
   if (expression.valueType === "int") return `i32(${read}.r)`;
   return `${read}.r`;
+}
+
+function emitSemanticCubemapTextureRead(texture: string, x: string, y: string, z: string): string {
+  const width = `f32(textureDimensions(${texture}).x)`;
+  const cubeX = `((bg_cube_u(${x}, ${y}, ${z}) + 1.0) * 0.5 * (${width} - 1.0))`;
+  const cubeY = `((bg_cube_v(${x}, ${y}, ${z}) + 1.0) * 0.5 * (${width} - 1.0) + bg_cube_face(${x}, ${y}, ${z}) * ${width})`;
+  return `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${cubeX})), i32(floor(${cubeY}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
+}
+
+function semanticUsesCubemapTextureRead(ir: SemanticKernelIrModule): boolean {
+  let found = false;
+  const visit = (operations: readonly SemanticKernelIrOperation[]): void => {
+    walkSemanticOperations(operations, (expression) => {
+      if (expression.kind === "texture-read" && expression.callee === "texCubemap") found = true;
+    });
+  };
+  visit(ir.operations);
+  for (const fn of ir.functions) visit(fn.body);
+  return found;
 }
 
 function emitSemanticTextureVectorRead(read: string, valueType: CudaLiteScalarType): string {
