@@ -161,6 +161,7 @@ interface SemanticReferenceContext {
   readonly textureDescriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>;
   readonly surfaces: Readonly<Record<string, WgslTexture2DInput>>;
   readonly sharedMemory: Map<string, WgslTypedArray>;
+  readonly sharedOffsets: Map<string, number>;
   readonly storageOffsets: Map<string, number>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, SemanticValue>;
@@ -234,6 +235,7 @@ export function runCompiledKernelSemanticReference(
                 textureDescriptors: compiled.textureDescriptors ?? {},
                 surfaces,
                 sharedMemory,
+                sharedOffsets: new Map(),
                 storageOffsets: new Map(),
                 scalars,
                 locals: new Map(),
@@ -626,7 +628,7 @@ function semanticReferenceFunctionCallSupported(
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceValueTypeSupported)) return false;
-  if (!semanticReferenceFunctionBodyShapeSupported(fn.body)) return false;
+  if (!semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasSharedPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
     unsupportedSemanticReferenceOperation(fn.body, compiled, true) === undefined;
@@ -643,8 +645,7 @@ function semanticReferenceFunctionArgSupported(
     semanticPointerArgMemoryRef,
     (item, mode) => semanticReferenceExpressionSupported(item, mode, compiled),
   );
-  if (!supported || param?.addressSpace !== "shared" || !param.pointer) return supported;
-  return semanticPointerArgMemoryRef(arg)?.indices.length === 0;
+  return supported;
 }
 
 function semanticReferenceVectorConstructorSupported(
@@ -721,8 +722,15 @@ function semanticReferenceBf162CallSupported(
   );
 }
 
-function semanticReferenceFunctionBodyShapeSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true });
+function semanticReferenceFunctionBodyShapeSupported(
+  operations: readonly SemanticKernelIrOperation[],
+  allowAtomic = false,
+): boolean {
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowAtomic });
+}
+
+function semanticReferenceFunctionHasSharedPointer(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
+  return fn.params.some((param) => param.pointer && param.addressSpace === "shared");
 }
 
 function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
@@ -809,7 +817,7 @@ function semanticReferenceVoidFunctionCallSupported(
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceValueTypeSupported)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
-    semanticReferenceFunctionBodyShapeSupported(fn.body) &&
+    semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasSharedPointer(fn)) &&
     unsupportedSemanticReferenceOperation(fn.body, compiled, true) === undefined;
 }
 
@@ -864,7 +872,10 @@ function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, comp
     return compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "device-global");
   }
   if (ref.addressSpace === "shared") {
-    return compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "shared");
+    return compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "shared") ||
+      compiled.kernelIr.functions.some((fn) =>
+        fn.params.some((param) => param.name === ref.base && param.pointer && param.addressSpace === "shared")
+      );
   }
   return false;
 }
@@ -883,6 +894,7 @@ function semanticReferenceExpressionSupported(
         expression.addressSpace === "local" ||
         expression.addressSpace === "constant" ||
         expression.addressSpace === "device-global" ||
+        expression.addressSpace === "shared" ||
         isBuiltinVectorSymbol(expression.name);
     case "member":
       if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
@@ -3630,6 +3642,7 @@ function runSemanticFunction(
   const surfaces = { ...context.surfaces };
   const buffers = new Map(context.buffers);
   const sharedMemory = new Map(context.sharedMemory);
+  const sharedOffsets = new Map(context.sharedOffsets);
   const storageOffsets = new Map(context.storageOffsets);
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
@@ -3661,12 +3674,13 @@ function runSemanticFunction(
     }
     if (param.pointer && param.addressSpace === "shared") {
       const ref = semanticPointerArgMemoryRef(arg);
-      if (!ref || ref.addressSpace !== "shared" || ref.indices.length !== 0) {
-        throw semanticReferenceError(`semantic reference function '${fn.name}' shared pointer argument must be a shared array root`, arg.span);
+      if (!ref || ref.addressSpace !== "shared") {
+        throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled shared memory`, arg.span);
       }
       const buffer = context.sharedMemory.get(ref.base);
       if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, arg.span);
       sharedMemory.set(param.name, buffer);
+      sharedOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, context));
       continue;
     }
     locals.set(param.name, isSemanticFloatVectorType(param.valueType) ? evalSemanticExpression(arg, context) : evalNumber(arg, context));
@@ -3680,6 +3694,7 @@ function runSemanticFunction(
     textureDescriptors,
     surfaces,
     sharedMemory,
+    sharedOffsets,
     storageOffsets,
     scalars: context.scalars,
     locals,
@@ -3739,7 +3754,7 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
     };
   }
   if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
-  if (firstArg.kind === "symbol" && firstArg.addressSpace === "storage") {
+  if (firstArg.kind === "symbol" && (firstArg.addressSpace === "storage" || firstArg.addressSpace === "shared")) {
     return {
       base: firstArg.name,
       addressSpace: firstArg.addressSpace,
@@ -3755,6 +3770,21 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
 function semanticPointerArgMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "index") {
     return memoryRefFromIndexExpression(expression.argument);
+  }
+  if (
+    expression.kind === "unary" &&
+    expression.operator === "&" &&
+    expression.argument.kind === "symbol" &&
+    (expression.argument.addressSpace === "storage" || expression.argument.addressSpace === "shared")
+  ) {
+    return {
+      base: expression.argument.name,
+      addressSpace: expression.argument.addressSpace,
+      ...(expression.argument.valueType === undefined ? {} : { valueType: expression.argument.valueType }),
+      indices: [],
+      fields: [],
+      span: expression.argument.span,
+    };
   }
   if (expression.kind === "index") return memoryRefFromIndexExpression(expression);
   if (expression.kind === "symbol" && (expression.addressSpace === "storage" || expression.addressSpace === "shared")) {
@@ -4021,10 +4051,20 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
     const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
     if (ref.addressSpace === "shared" && !symbol) {
       if (!context.sharedMemory.has(ref.base)) throw semanticReferenceError(`unknown shared array '${ref.base}'`, ref.span);
+      const pointerParam = context.compiled.kernelIr.functions
+        .flatMap((fn) => fn.params)
+        .find((param) => param.name === ref.base && param.pointer && param.addressSpace === "shared");
+      if (pointerParam?.dimensions.length === 0) {
+        if (ref.indices.length > 1 || ref.indices[0] && Math.trunc(evalNumber(ref.indices[0]!, context)) !== 0) {
+          throw semanticReferenceError(`shared scalar pointer '${ref.base}' cannot be indexed`, ref.span);
+        }
+        return context.sharedOffsets.get(ref.base) ?? 0;
+      }
       if (ref.indices.length !== 1) throw semanticReferenceError(`shared pointer '${ref.base}' index rank mismatch`, ref.span);
-      return Math.trunc(evalNumber(ref.indices[0]!, context));
+      return (context.sharedOffsets.get(ref.base) ?? 0) + Math.trunc(evalNumber(ref.indices[0]!, context));
     }
     if (!symbol) throw semanticReferenceError(`unknown ${ref.addressSpace} array '${ref.base}'`, ref.span);
+    if (ref.addressSpace === "shared" && ref.indices.length === 0) return 0;
     const dimensions = ref.addressSpace === "shared" ? semanticReferenceSharedDimensions(context.compiled, symbol) : symbol.dimensions;
     if (ref.addressSpace === "local" && ref.indices.length === 1 && dimensions.length > 1) {
       return Math.trunc(evalNumber(ref.indices[0]!, context));

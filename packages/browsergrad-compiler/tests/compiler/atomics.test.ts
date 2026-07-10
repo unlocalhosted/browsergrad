@@ -1455,8 +1455,11 @@ describe("CUDA-lite compiler: Atomics", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
-      expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&counts[index], value); }");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("ptr<workgroup, array<atomic<u32>, 2>>");
+      expect(compiled.wgsl).toContain("atomicAdd(&(*target__bg_shared_ptr)[(target__bg_shared_ptr_base + 0u)], value)");
       expect([...result.buffers.out as Uint32Array]).toEqual([5]);
     });
 
@@ -1678,15 +1681,18 @@ describe("CUDA-lite compiler: Atomics", () => {
       helper_shared_rmw(&xi[0], &xf[0], out);
     }
   }`, { workgroupSize: [1, 1, 1] });
-      const result = runCompiledKernelReference(
-        compiled,
-        { buffers: { out: new Float32Array(11) } },
-        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-      );
+      const input = { buffers: { out: new Float32Array(11) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
 
-      expect(compiled.wgsl).toContain("fn bg_ptr_atomicSub_i32");
-      expect(compiled.wgsl).toContain("case 1u: { return atomicSub(&xi[index], value); }");
-      expect(compiled.wgsl).toContain("case 2u: { return bg_atomicSub_f32_workgroup(&xf[index], value); }");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("ptr<workgroup, array<atomic<i32>, 1>>");
+      expect(compiled.wgsl).toContain("atomicSub(&(*xi__bg_shared_ptr)[(xi__bg_shared_ptr_base + 0u)], 2)");
+      expect(compiled.wgsl).toContain("bg_atomicSub_f32_workgroup(&(*xf__bg_shared_ptr)[(xf__bg_shared_ptr_base + 0u)], 1.5)");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5]);
       expect([...result.buffers.out as Float32Array]).toEqual([10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5]);
     });
 
@@ -1703,14 +1709,17 @@ describe("CUDA-lite compiler: Atomics", () => {
       out[0] = flag;
     }
   }`, { workgroupSize: [1, 1, 1] });
-      const result = runCompiledKernelReference(
-        compiled,
-        { buffers: { out: new Uint32Array(1) } },
-        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-      );
+      const input = { buffers: { out: new Uint32Array(1) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
 
-      expect(compiled.wgsl).toContain("fn bg_ptr_atomicExchange_u32");
-      expect(compiled.wgsl).toContain("case 1u: { return atomicExchange(&flag, value); }");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("ptr<workgroup, atomic<u32>>");
+      expect(compiled.wgsl).toContain("atomicExchange(&*target__bg_shared_ptr, value)");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([7]);
       expect([...result.buffers.out as Uint32Array]).toEqual([7]);
     });
 
@@ -1733,8 +1742,11 @@ describe("CUDA-lite compiler: Atomics", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("bg_ptr_atomicExchange_u32(flag_buffer");
-      expect(compiled.wgsl).not.toContain("&flag[flag_base]");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("ptr<workgroup, atomic<u32>>");
+      expect(compiled.wgsl).toContain("atomicExchange(&*flag__bg_shared_ptr, value)");
       expect([...result.buffers.out as Uint32Array]).toEqual([7]);
     });
 

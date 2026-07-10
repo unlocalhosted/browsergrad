@@ -578,7 +578,7 @@ function specializeSharedPointerFunctions(
         .map((call) => call.args[index])
         .flatMap((arg) => arg === undefined ? [] : [sharedPointerRoot(arg)]);
       const dimensions = args.map((root) => root === undefined ? undefined : sharedMemoryDimensions.get(root));
-      if (args.length > 0 && args.every((root) => root !== undefined) && dimensions.every((item) => item !== undefined && item.length === 1 && item[0] !== undefined) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
+      if (args.length > 0 && args.every((root) => root !== undefined) && dimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
         sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
         sharedPointerDimensions.set(param.name, dimensions[0]!);
       }
@@ -608,7 +608,11 @@ function collectSemanticFunctionCalls(operations: readonly SemanticKernelIrOpera
 }
 
 function sharedPointerRoot(expression: SemanticExpression): string | undefined {
-  return expression.kind === "symbol" && expression.addressSpace === "shared" ? expression.name : undefined;
+  if (expression.kind === "symbol" && expression.addressSpace === "shared") return expression.name;
+  if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
+  if (expression.argument.kind === "symbol" && expression.argument.addressSpace === "shared") return expression.argument.name;
+  const ref = memoryRefFromExpression(expression.argument);
+  return ref?.addressSpace === "shared" ? ref.base : undefined;
 }
 
 function sameSemanticDimensions(dimensions: readonly (readonly number[])[]): boolean {

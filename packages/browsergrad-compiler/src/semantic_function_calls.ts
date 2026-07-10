@@ -59,6 +59,7 @@ export function semanticFunctionArgSupported(
 export interface SemanticFunctionBodyShapeOptions {
   readonly allowBlock?: boolean;
   readonly allowBarrierFence?: boolean;
+  readonly allowAtomic?: boolean;
 }
 
 export function semanticFunctionBodyShapeSupported(
@@ -69,6 +70,7 @@ export function semanticFunctionBodyShapeSupported(
     if (operation.kind === "cooperative-group-declare" || operation.kind === "dim3-declare") return true;
     if (operation.kind === "declare") return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
     if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage" || operation.target.addressSpace === "shared";
+    if (operation.kind === "atomic") return options.allowAtomic === true;
     if (operation.kind === "surface-write" || operation.kind === "call") return true;
     if (options.allowBarrierFence && (operation.kind === "barrier" || operation.kind === "fence")) return true;
     if (operation.kind === "branch") return semanticFunctionBodyShapeSupported(operation.consequent, options) && semanticFunctionBodyShapeSupported(operation.alternate, options);

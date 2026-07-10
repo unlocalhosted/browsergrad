@@ -2303,6 +2303,29 @@ __global__ void helper_shared_atomic_rmw(float* out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs compiled shared scalar helper atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ void mark_u32(uint* target, uint value) {
+  atomicExch(target, value);
+}
+__global__ void helper_shared_scalar_exchange(uint* out) {
+  __shared__ uint flag;
+  if (threadIdx.x == 0) {
+    flag = 0u;
+    mark_u32(&flag, 7u);
+    out[0] = flag;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
   it("runs compiled system-scope integer atomic aliases through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
