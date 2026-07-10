@@ -1207,6 +1207,43 @@ __global__ void sharedMergeHelper(uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([30, 32, 34, 36]);
   });
 
+  it("runs generic cooperative-group barrier helpers returning values", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ int sumReduction(thread_group group, int *workspace, int value) {
+  int lane = group.thread_rank();
+  for (int stride = group.size() / 2; stride > 0; stride /= 2) {
+    workspace[lane] = value;
+    group.sync();
+    if (lane < stride) value += workspace[lane + stride];
+    group.sync();
+  }
+  return lane == 0 ? value : -1;
+}
+__global__ void genericGroupReduction(int *out) {
+  thread_block block = this_thread_block();
+  extern __shared__ int workspace[];
+  int result;
+  int rank = block.thread_rank();
+  result = sumReduction(block, workspace, rank);
+  if (rank == 0) out[0] = result;
+  block.sync();
+  thread_block_tile<2> tile = tiled_partition<2>(block);
+  int offset = rank - tile.thread_rank();
+  result = sumReduction(tile, workspace + offset, tile.thread_rank());
+  if (tile.thread_rank() == 0) out[1 + rank / 2] = result;
+}`, {
+      workgroupSize: [4, 1, 1],
+      dynamicSharedMemory: { workspace: 4 },
+    });
+    const input = { buffers: { out: new Int32Array(3) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Int32Array]).toEqual([6, 1, 1]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `

@@ -4838,10 +4838,17 @@ function isBarrierCall(expression: CudaLiteExpression): expression is Extract<Cu
   return isCudaBarrierCallName(name);
 }
 
-function isUniformityBarrierCall(expression: CudaLiteExpression): expression is Extract<CudaLiteExpression, { kind: "call" }> {
+function isUniformityBarrierCall(
+  expression: CudaLiteExpression,
+  params: ReadonlyMap<string, CudaLiteParam>,
+): expression is Extract<CudaLiteExpression, { kind: "call" }> {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  return isCudaBarrierCallName(name) || isCudaCooperativeBarrierCallName(name);
+  if (isCudaBarrierCallName(name) || isCudaCooperativeBarrierCallName(name)) return true;
+  return expression.callee.kind === "member" &&
+    expression.callee.property === "sync" &&
+    expression.callee.object.kind === "identifier" &&
+    params.get(expression.callee.object.name)?.cooperativeGroupKind !== undefined;
 }
 
 function isInlineAsmBarrier(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { kind: "asm" }> {
@@ -4887,7 +4894,7 @@ function validateDivergentReturnsBeforeBarriers(
       case "block":
         return { containsBarrier: visitBlock(statement.body, divergentDepth, barrierLater, continueBarrierLater) };
       case "expr":
-        if (isUniformityBarrierCall(statement.expression)) {
+        if (isUniformityBarrierCall(statement.expression, params)) {
           barrierStatementStarts.push(statement.span.start);
           if (divergentDepth > 0) verified = false;
           return { containsBarrier: true };

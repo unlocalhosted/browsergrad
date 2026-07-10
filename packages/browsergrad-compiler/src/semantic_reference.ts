@@ -153,6 +153,7 @@ import {
   semanticFunctionParamContractSupported,
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
+import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
 import {
   semanticLocalScalarValueTypeSupported,
   semanticLocalValueTypeSupported,
@@ -162,6 +163,11 @@ import {
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
+import {
+  semanticCooperativeGroupInfo,
+  semanticCooperativeGroupRankParamName,
+  semanticCooperativeGroupSizeParamName,
+} from "./semantic_cooperative_groups.js";
 
 type SemanticValue = number | ReferenceVector3 | number[];
 type SemanticControl = "fallthrough" | "return" | "break" | "continue";
@@ -685,6 +691,17 @@ function semanticReferenceFunctionCallSupported(
     unsupportedSemanticReferenceOperation(fn.body, compiled, true) === undefined;
 }
 
+function semanticReferenceCooperativeGroupCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return expression.callee.kind === "member" &&
+    expression.callee.object.kind === "symbol" &&
+    expression.args.length === 0 &&
+    (expression.callee.property === "thread_rank" || expression.callee.property === "size") &&
+    semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name) !== undefined;
+}
+
 function semanticReferenceFunctionArgSupported(
   arg: SemanticExpression,
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number] | undefined,
@@ -825,6 +842,13 @@ function semanticReferenceCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
+  if (operation.result !== undefined) {
+    const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+    return fn !== undefined &&
+      fn.returnType !== "void" &&
+      fn.returnType === operation.result.valueType &&
+      semanticReferenceFunctionCallSupported(semanticCallOperationExpression(operation, fn.returnType), compiled);
+  }
   if (operation.callee === "assert") return semanticAssertCallSupported(operation.args, (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
   if (operation.callee === "printf") return semanticPrintfCallSupported(operation.args, (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) {
@@ -864,6 +888,7 @@ function semanticReferenceVoidFunctionCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
+  if (operation.result !== undefined) return false;
   const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
   if (!fn || fn.returnType !== "void") return false;
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
@@ -996,7 +1021,8 @@ function semanticReferenceExpressionSupported(
             : semanticReferenceAssignmentMemoryRefSupported(expression.argument, compiled))) &&
         (expression.operator === "++" || expression.operator === "--");
     case "call":
-      return compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
+      return compiled !== undefined && semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
+        compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceAtomicCallSupported(expression, compiled) ||
         semanticReferenceCurandCallSupported(expression, compiled) &&
           (expected === "any" || !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression))) ||
@@ -1075,6 +1101,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
 ): boolean {
   if (expression.kind === "call") {
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
+      semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
       semanticReferenceCurandCallSupported(expression, compiled) ||
       semanticReferenceFunctionCallSupported(expression, compiled) ||
       semanticReferenceSubgroupCallSupported(expression) ||
@@ -1414,14 +1441,14 @@ function* execSemanticBarrierFunctionCall(
   barrierFunctions: ReadonlySet<string>,
 ): SemanticBarrierGenerator {
   const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
-  if (!fn || fn.returnType !== "void") {
-    throw semanticReferenceError(`semantic reference barrier call '${operation.callee}' must target a void device function`, operation.span);
-  }
+  if (!fn) throw semanticReferenceError(`semantic reference unknown barrier function '${operation.callee}'`, operation.span);
+  if ((operation.result === undefined) !== (fn.returnType === "void")) throw semanticReferenceError(`semantic reference barrier call '${operation.callee}' result contract mismatch`, operation.span);
   const child = createSemanticFunctionContext(fn, operation.args, context, operation.span);
   const control = yield* execSemanticBarrierOperations(fn.body, child, barrierFunctions);
   if (control === "break" || control === "continue") {
     throw semanticReferenceError(`semantic reference function '${fn.name}' leaked ${control} across call boundary`, fn.span);
   }
+  assignSemanticCallResult(operation, fn, child, context);
   return "fallthrough";
 }
 
@@ -1608,6 +1635,13 @@ function execSemanticCall(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
 ): void {
+  if (operation.result !== undefined) {
+    const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+    if (!fn || fn.returnType === "void") throw semanticReferenceError(`semantic reference call '${operation.callee}' cannot produce a result`, operation.span);
+    const child = runSemanticFunction(fn, operation.args, context, operation.span);
+    assignSemanticCallResult(operation, fn, child, context);
+    return;
+  }
   if (operation.callee === "assert") {
     if (operation.args[0]) evalNumber(operation.args[0], context);
     return;
@@ -1642,6 +1676,36 @@ function execSemanticCall(
     return;
   }
   throw semanticReferenceError(`semantic reference does not support call '${operation.callee}'`, operation.span);
+}
+
+function assignSemanticCallResult(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number],
+  child: SemanticReferenceContext,
+  context: SemanticReferenceContext,
+): void {
+  if (operation.result === undefined) return;
+  if (child.returnValue === undefined) throw semanticReferenceError(`semantic reference function '${fn.name}' did not return value`, fn.span);
+  if (!Array.isArray(child.returnValue) && typeof child.returnValue !== "number") {
+    throw semanticReferenceError(`semantic reference function '${fn.name}' returned a non-scalar value`, fn.span);
+  }
+  const value = Array.isArray(child.returnValue)
+    ? child.returnValue
+    : coerceSemanticScalarValue(child.returnValue, operation.result.valueType);
+  context.locals.set(operation.result.name, value);
+}
+
+function semanticCallOperationExpression(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  valueType: CudaLiteScalarType,
+): Extract<SemanticExpression, { readonly kind: "call" }> {
+  return {
+    kind: "call",
+    callee: { kind: "symbol", name: operation.callee, addressSpace: "function", valueType, span: operation.span },
+    args: operation.args,
+    valueType,
+    span: operation.span,
+  };
 }
 
 function execSemanticVoidFunctionCall(
@@ -2107,6 +2171,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       return value;
     }
     case "call":
+      if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return evalSemanticCooperativeGroupCall(expression, context);
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
       if (semanticReferenceCurandCallSupported(expression, context.compiled)) return evalSemanticCurandCall(expression, context);
       if (semanticReferenceSubgroupCallSupported(expression)) return evalSemanticSubgroupCall(expression, context);
@@ -3499,6 +3564,46 @@ function evalSemanticFunctionCall(
   return child.returnValue;
 }
 
+function evalSemanticCooperativeGroupCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") {
+    throw semanticReferenceError("semantic reference cooperative-group call requires symbol receiver", expression.span);
+  }
+  if (expression.callee.property !== "thread_rank" && expression.callee.property !== "size") {
+    throw semanticReferenceError("semantic reference cooperative-group call requires rank or size", expression.span);
+  }
+  return semanticReferenceCooperativeGroupValue(expression.callee.object.name, expression.callee.property, context);
+}
+
+function semanticReferenceCooperativeGroupValue(
+  name: string,
+  property: "thread_rank" | "size",
+  context: SemanticReferenceContext,
+): number {
+  const localName = property === "thread_rank"
+    ? semanticCooperativeGroupRankParamName(name)
+    : semanticCooperativeGroupSizeParamName(name);
+  const local = context.locals.get(localName);
+  if (typeof local === "number") return local;
+  const group = semanticCooperativeGroupInfo(context.compiled.kernelIr, name);
+  if (!group) throw semanticReferenceError(`unknown cooperative group '${name}'`, context.compiled.kernelIr.span);
+  const workgroupSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
+  const localRank = context.threadIdx.x + context.blockDim.x * (context.threadIdx.y + context.blockDim.y * context.threadIdx.z);
+  if (property === "thread_rank") {
+    if (group.kind === "grid") {
+      const blockRank = context.blockIdx.x + context.gridDim.x * (context.blockIdx.y + context.gridDim.y * context.blockIdx.z);
+      return localRank + workgroupSize * blockRank;
+    }
+    if (group.kind === "tile") return localRank % (group.tileSize ?? 32);
+    return localRank;
+  }
+  if (group.kind === "grid") return workgroupSize * context.gridDim.x * context.gridDim.y * context.gridDim.z;
+  if (group.kind === "tile") return group.tileSize ?? 32;
+  return workgroupSize;
+}
+
 function evalSemanticVectorConstructor(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
@@ -3910,7 +4015,12 @@ function createSemanticFunctionContext(
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
     if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, span);
-    if (param.cooperativeGroupKind !== undefined) continue;
+    if (param.cooperativeGroupKind !== undefined) {
+      if (arg.kind !== "symbol") throw semanticReferenceError(`semantic reference function '${fn.name}' cooperative-group argument must be a symbol`, arg.span);
+      locals.set(semanticCooperativeGroupRankParamName(param.name), semanticReferenceCooperativeGroupValue(arg.name, "thread_rank", context));
+      locals.set(semanticCooperativeGroupSizeParamName(param.name), semanticReferenceCooperativeGroupValue(arg.name, "size", context));
+      continue;
+    }
     if (param.addressSpace === "texture") {
       if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticReferenceError(`semantic reference function '${fn.name}' texture argument must be a texture symbol`, arg.span);
       const texture = context.textures[arg.name];
@@ -4036,39 +4146,6 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
       indices: [],
       fields: [],
       span: firstArg.span,
-    };
-  }
-  return undefined;
-}
-
-function semanticPointerArgMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {
-  if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "index") {
-    return memoryRefFromIndexExpression(expression.argument);
-  }
-  if (
-    expression.kind === "unary" &&
-    expression.operator === "&" &&
-    expression.argument.kind === "symbol" &&
-    (expression.argument.addressSpace === "storage" || expression.argument.addressSpace === "shared")
-  ) {
-    return {
-      base: expression.argument.name,
-      addressSpace: expression.argument.addressSpace,
-      ...(expression.argument.valueType === undefined ? {} : { valueType: expression.argument.valueType }),
-      indices: [],
-      fields: [],
-      span: expression.argument.span,
-    };
-  }
-  if (expression.kind === "index") return memoryRefFromIndexExpression(expression);
-  if (expression.kind === "symbol" && (expression.addressSpace === "storage" || expression.addressSpace === "shared")) {
-    return {
-      base: expression.name,
-      addressSpace: expression.addressSpace,
-      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
-      indices: [],
-      fields: [],
-      span: expression.span,
     };
   }
   return undefined;
@@ -4566,7 +4643,9 @@ function castNumber(value: number, valueType: CudaLiteScalarType): number {
 }
 
 function coerceSemanticScalarValue(value: number, valueType: CudaLiteScalarType | undefined): number {
-  return valueType === "uchar" ? castNumber(value, valueType) : value;
+  return valueType === "int" || valueType === "uint" || valueType === "uchar" || valueType === "bool"
+    ? castNumber(value, valueType)
+    : value;
 }
 
 function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {

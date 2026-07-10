@@ -6,6 +6,11 @@ import type {
 import { semanticExpressionChildren, semanticOperationExpressions } from "./semantic_ir_walk.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 import { wgslValueScalar } from "./semantic_wgsl_types.js";
+import {
+  semanticCooperativeGroupInfo,
+  semanticCooperativeGroupRankParamName,
+  semanticCooperativeGroupSizeParamName,
+} from "./semantic_cooperative_groups.js";
 
 export interface SemanticCooperativeReduceHelper {
   readonly name: string;
@@ -38,9 +43,13 @@ export function emitSemanticCooperativeGroupCall(
   ir: SemanticKernelIrModule,
 ): string | undefined {
   if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return undefined;
-  const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
+  const groupName = expression.callee.object.name;
+  const group = semanticCooperativeGroupInfo(ir, groupName);
   if (!group) return undefined;
+  const groupParam = ir.functions.flatMap((fn) => fn.params)
+    .find((param) => param.name === groupName && param.cooperativeGroupKind !== undefined);
   if (expression.callee.property === "thread_rank") {
+    if (groupParam) return semanticCooperativeGroupRankParamName(groupParam.name);
     const rank = group.kind === "grid"
       ? semanticCooperativeGlobalLinearRank(ir)
       : group.kind === "tile"
@@ -49,6 +58,7 @@ export function emitSemanticCooperativeGroupCall(
     return expression.valueType === "uint" ? `u32(${rank})` : rank;
   }
   if (expression.callee.property === "size") {
+    if (groupParam) return semanticCooperativeGroupSizeParamName(groupParam.name);
     const size = group.kind === "grid"
       ? semanticCooperativeGridThreadCount(ir)
       : group.kind === "tile"
@@ -145,25 +155,6 @@ function semanticOperationExpressionsDeep(operation: SemanticKernelIrOperation):
 
 function semanticExpressionDeep(expression: SemanticExpression): readonly SemanticExpression[] {
   return [expression, ...semanticExpressionChildren(expression).flatMap(semanticExpressionDeep)];
-}
-
-function semanticCooperativeGroupInfo(
-  ir: SemanticKernelIrModule,
-  name: string,
-): { readonly kind: "thread" | "block" | "grid" | "tile" | "coalesced" | "binary"; readonly tileSize?: number } | undefined {
-  const declaration = [...ir.operations, ...ir.functions.flatMap((fn) => fn.body)].flatMap(semanticOperationsDeep).find((operation): operation is Extract<SemanticKernelIrOperation, { readonly kind: "cooperative-group-declare" }> =>
-    operation.kind === "cooperative-group-declare" && operation.declaration.name === name,
-  );
-  if (declaration) return { kind: declaration.declaration.groupKind, ...(declaration.declaration.tileSize === undefined ? {} : { tileSize: declaration.declaration.tileSize }) };
-  const param = ir.functions.flatMap((fn) => fn.params).find((item) => item.name === name && item.cooperativeGroupKind !== undefined);
-  return param?.cooperativeGroupKind === undefined ? undefined : { kind: param.cooperativeGroupKind, ...(param.tileSize === undefined ? {} : { tileSize: param.tileSize }) };
-}
-
-function semanticOperationsDeep(operation: SemanticKernelIrOperation): readonly SemanticKernelIrOperation[] {
-  if (operation.kind === "branch") return [operation, ...operation.consequent.flatMap(semanticOperationsDeep), ...operation.alternate.flatMap(semanticOperationsDeep)];
-  if (operation.kind === "loop") return [operation, ...operation.body.flatMap(semanticOperationsDeep)];
-  if (operation.kind === "block") return [operation, ...operation.body.flatMap(semanticOperationsDeep)];
-  return [operation];
 }
 
 function isCooperativeReduceName(name: string): boolean {

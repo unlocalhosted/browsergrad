@@ -67,6 +67,7 @@ import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
 import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
+import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -273,7 +274,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "surface-read-store"; readonly target: SemanticExpression; readonly surface: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly valueType?: CudaLiteScalarType; readonly span: SourceSpan }
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
-  | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
+  | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly result?: Extract<SemanticExpression, { readonly kind: "symbol" }>; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
@@ -547,20 +548,26 @@ export function lowerSemanticModelToKernelIr(
 ): SemanticKernelIrModule {
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
   const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
-  const operations = lowerStatements(analysis.kernel.body, scope);
-  const localMemory = collectDeclaredMemory(operations);
+  const loweredOperations = lowerStatements(analysis.kernel.body, scope);
+  const localMemory = collectDeclaredMemory(loweredOperations);
   const reachable = collectReachableAnalysisNames(analysis);
   const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
     .filter((symbol) => symbol.addressSpace === "shared")
     .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
   const sharedMemoryDimensions = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.dimensions] as const));
   const sharedMemoryValueTypes = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.valueType] as const));
-  const functions = specializeSharedPointerFunctions(
-    operations,
+  const specializedFunctions = specializeSharedPointerFunctions(
+    loweredOperations,
     semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
     sharedMemoryDimensions,
     sharedMemoryValueTypes,
   );
+  const barrierFunctions = semanticIrBarrierFunctionNames(specializedFunctions);
+  const operations = promoteSemanticBarrierResultCalls(loweredOperations, barrierFunctions);
+  const functions = specializedFunctions.map((fn) => ({
+    ...fn,
+    body: promoteSemanticBarrierResultCalls(fn.body, barrierFunctions),
+  }));
   const functionSharedMemory = functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body).filter((symbol) => symbol.addressSpace === "shared")
   );
@@ -697,12 +704,7 @@ function collectSemanticOperationFunctionCalls(
 }
 
 function sharedPointerRoot(expression: SemanticExpression): string | undefined {
-  if (expression.kind === "symbol" && expression.addressSpace === "shared") return expression.name;
-  const directRef = memoryRefFromExpression(expression);
-  if (directRef?.addressSpace === "shared") return directRef.base;
-  if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
-  if (expression.argument.kind === "symbol" && expression.argument.addressSpace === "shared") return expression.argument.name;
-  const ref = memoryRefFromExpression(expression.argument);
+  const ref = semanticIrPointerArgumentMemoryRef(expression);
   return ref?.addressSpace === "shared" ? ref.base : undefined;
 }
 
@@ -971,6 +973,7 @@ function lowerStatement(
     case "dim3":
       return { kind: "dim3-declare", name: statement.name, args: statement.args.map((arg) => lowerExpression(arg, scope)), span: statement.span };
     case "cooperative-group":
+      scope.set(statement.name, semanticSymbolForCooperativeGroup(statement));
       return { kind: "cooperative-group-declare", declaration: statement, span: statement.span };
     case "kernel-launch":
       return { kind: "device-launch", launch: lowerDeviceLaunch(statement, scope), span: statement.span };
@@ -988,6 +991,15 @@ function lowerStatement(
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const expression = lowerExpression(statement.expression, scope);
       const callName = expression.kind === "call" ? semanticCallName(expression.callee) : undefined;
+      const memberBarrier = expression.kind === "call" ? semanticCooperativeMemberBarrier(expression, scope) : undefined;
+      if (memberBarrier) {
+        return {
+          kind: "barrier",
+          callee: memberBarrier.callee,
+          groupName: memberBarrier.groupName,
+          span: statement.span,
+        };
+      }
       if (expression.kind === "call" && callName !== undefined && BARRIER_CALLS.has(callName)) {
         const groupName = barrierGroupName(expression);
         return {
@@ -1149,6 +1161,104 @@ function lowerStatement(
     case "break":
       return { kind: "break", span: statement.span };
   }
+}
+
+function semanticResultCallOperation(
+  expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
+  span: SourceSpan,
+): Extract<SemanticKernelIrOperation, { readonly kind: "call" }> | undefined {
+  if (
+    expression.operator !== "=" ||
+    expression.target.kind !== "symbol" ||
+    expression.target.addressSpace !== "local" ||
+    expression.value.kind !== "call" ||
+    expression.value.callee.kind !== "symbol" ||
+    expression.value.callee.addressSpace !== "function"
+  ) return undefined;
+  return {
+    kind: "call",
+    callee: expression.value.callee.name,
+    args: expression.value.args,
+    reads: collectMemoryRefs(expression.value),
+    result: expression.target,
+    span,
+  };
+}
+
+function semanticIrBarrierFunctionNames(functions: readonly CudaLiteSemanticFunction[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const fn of functions) {
+      if (names.has(fn.name) || !semanticIrOperationsContainBarrier(fn.body, names)) continue;
+      names.add(fn.name);
+      changed = true;
+    }
+  }
+  return names;
+}
+
+function semanticIrOperationsContainBarrier(
+  operations: readonly SemanticKernelIrOperation[],
+  barrierFunctions: ReadonlySet<string>,
+): boolean {
+  return operations.some((operation) =>
+    operation.kind === "barrier" ||
+    operation.kind === "call" && barrierFunctions.has(operation.callee) ||
+    operation.kind === "branch" && (semanticIrOperationsContainBarrier(operation.consequent, barrierFunctions) || semanticIrOperationsContainBarrier(operation.alternate, barrierFunctions)) ||
+    (operation.kind === "loop" || operation.kind === "block") && semanticIrOperationsContainBarrier(operation.body, barrierFunctions)
+  );
+}
+
+function promoteSemanticBarrierResultCalls(
+  operations: readonly SemanticKernelIrOperation[],
+  barrierFunctions: ReadonlySet<string>,
+): readonly SemanticKernelIrOperation[] {
+  return operations.map((operation) => {
+    if (operation.kind === "expression" && operation.expression.kind === "assignment") {
+      const promoted = semanticResultCallOperation(operation.expression, operation.span);
+      if (promoted && barrierFunctions.has(promoted.callee)) return promoted;
+    }
+    if (operation.kind === "branch") {
+      return {
+        ...operation,
+        consequent: promoteSemanticBarrierResultCalls(operation.consequent, barrierFunctions),
+        alternate: promoteSemanticBarrierResultCalls(operation.alternate, barrierFunctions),
+      };
+    }
+    if (operation.kind === "loop" || operation.kind === "block") {
+      return { ...operation, body: promoteSemanticBarrierResultCalls(operation.body, barrierFunctions) };
+    }
+    return operation;
+  });
+}
+
+function semanticSymbolForCooperativeGroup(statement: CudaLiteCooperativeGroupDecl): CudaLiteSemanticSymbol {
+  return {
+    name: statement.name,
+    kind: "local",
+    valueType: "uint",
+    pointer: false,
+    cooperativeGroupKind: statement.groupKind,
+    ...(statement.tileSize === undefined ? {} : { tileSize: statement.tileSize }),
+    dimensions: [],
+    addressSpace: "local",
+    span: statement.span,
+  };
+}
+
+function semanticCooperativeMemberBarrier(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): { readonly callee: "cg::sync" | "grid.sync"; readonly groupName: string } | undefined {
+  if (expression.callee.kind !== "member" || expression.callee.property !== "sync" || expression.callee.object.kind !== "symbol") return undefined;
+  const group = scope.get(expression.callee.object.name);
+  if (group?.cooperativeGroupKind === undefined) return undefined;
+  return {
+    callee: group.cooperativeGroupKind === "grid" ? "grid.sync" : "cg::sync",
+    groupName: group.name,
+  };
 }
 
 function semanticStoragePointerRebaseOperation(

@@ -986,8 +986,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn block_rank(local_id: vec3<u32>");
-      expect(compiled.wgsl).toContain("fn tile_rank(local_id: vec3<u32>");
+      expect(compiled.wgsl).toContain("fn block_rank(block__bg_group_rank: i32, block__bg_group_size: i32");
+      expect(compiled.wgsl).toContain("fn tile_rank(tile__bg_group_rank: i32, tile__bg_group_size: i32");
       expect([...result.buffers.out as Int32Array]).toEqual([0, 2]);
     });
 
@@ -1472,7 +1472,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("reduce_n(value, local_id");
+      expect(compiled.wgsl).toContain("reduce_n(value, tile__bg_group_rank, tile__bg_group_size");
       expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_i32_4(value, local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });
@@ -2004,6 +2004,44 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...runCompiledKernelSemanticReference(compiled, input, launch).buffers.out as Uint32Array]).toEqual([30, 32, 34, 36]);
       expect(compiled.wgsl).toContain("fn mergeShared(dstKey__bg_shared_ptr: ptr<workgroup, array<u32, 4>>");
       expect(compiled.wgsl).toContain("mergeShared(&keys, 0u, &values, 0u, 0u, 0u, 2u, 2u");
+    });
+
+  it("returns values from generic cooperative-group barrier helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ int sumReduction(thread_group group, int *workspace, int value) {
+    int lane = group.thread_rank();
+    for (int stride = group.size() / 2; stride > 0; stride /= 2) {
+      workspace[lane] = value;
+      group.sync();
+      if (lane < stride) value += workspace[lane + stride];
+      group.sync();
+    }
+    return lane == 0 ? value : -1;
+  }
+  __global__ void genericGroupReduction(int *out) {
+    thread_block block = this_thread_block();
+    extern __shared__ int workspace[];
+    int result;
+    int rank = block.thread_rank();
+    result = sumReduction(block, workspace, rank);
+    if (rank == 0) out[0] = result;
+    block.sync();
+    thread_block_tile<2> tile = tiled_partition<2>(block);
+    int offset = rank - tile.thread_rank();
+    result = sumReduction(tile, workspace + offset, tile.thread_rank());
+    if (tile.thread_rank() == 0) out[1 + rank / 2] = result;
+  }`, {
+        workgroupSize: [4, 1, 1],
+        dynamicSharedMemory: { workspace: 4 },
+      });
+      const input = { buffers: { out: new Int32Array(3) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.operations.filter((operation) => operation.kind === "call").map((operation) => operation.result?.name)).toEqual(["result", "result"]);
+      expect([...runCompiledKernelSemanticReference(compiled, input, launch).buffers.out as Int32Array]).toEqual([6, 1, 1]);
+      expect(compiled.wgsl).toContain("group__bg_group_rank: i32, group__bg_group_size: i32");
     });
 
   it("lowers early returns before later barriers into active-lane guards", () => {

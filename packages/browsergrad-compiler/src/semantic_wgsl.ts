@@ -152,6 +152,7 @@ import {
   semanticFunctionParamContractSupported,
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
+import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
 import {
   semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
@@ -199,6 +200,10 @@ import {
   semanticWgslCooperativeGroupCallSupported,
   semanticWgslCooperativeReduceCallSupported,
 } from "./semantic_wgsl_cooperative.js";
+import {
+  semanticCooperativeGroupRankParamName,
+  semanticCooperativeGroupSizeParamName,
+} from "./semantic_cooperative_groups.js";
 import { emitSemanticNumericHelpers } from "./semantic_wgsl_numeric_helpers.js";
 import {
   emitRoundEvenWgsl,
@@ -1548,6 +1553,13 @@ function semanticWgslCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
+  if (operation.result !== undefined) {
+    const fn = ir.functions.find((item) => item.name === operation.callee);
+    return fn !== undefined &&
+      fn.returnType !== "void" &&
+      fn.returnType === operation.result.valueType &&
+      semanticWgslFunctionCallSupported(semanticCallOperationExpression(operation, fn.returnType), ir);
+  }
   if (operation.callee === "assert") return semanticAssertCallSupported(operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
   if (operation.callee === "printf") return semanticPrintfCallSupported(operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) {
@@ -1583,6 +1595,7 @@ function semanticWgslVoidFunctionCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
+  if (operation.result !== undefined) return false;
   const fn = ir.functions.find((item) => item.name === operation.callee);
   if (!fn || fn.returnType !== "void") return false;
   if (fn.params.some((param) => !semanticWgslFunctionParamSupported(param))) return false;
@@ -2397,7 +2410,12 @@ function emitSemanticFunctionParams(
   atomicSharedPointer = false,
   mutableValueParam = false,
 ): readonly string[] {
-  if (param.cooperativeGroupKind !== undefined) return [];
+  if (param.cooperativeGroupKind !== undefined) {
+    return [
+      `${semanticCooperativeGroupRankParamName(param.name)}: i32`,
+      `${semanticCooperativeGroupSizeParamName(param.name)}: i32`,
+    ];
+  }
   if (param.pointer && param.addressSpace === "storage") {
     return [
       `${nameFor(semanticPointerBufferParamName(param.name), names)}: u32`,
@@ -2687,6 +2705,12 @@ function emitSemanticCall(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
+  if (operation.result !== undefined) {
+    const fn = ir.functions.find((item) => item.name === operation.callee);
+    if (!fn || fn.returnType === "void") throw semanticWgslError(`semantic WGSL call '${operation.callee}' cannot produce a result`, operation.span);
+    const call = emitSemanticFunctionCall(semanticCallOperationExpression(operation, fn.returnType), ir, names, options, textureSpecializations);
+    return [`${"  ".repeat(indentLevel)}${nameFor(operation.result.name, names)} = ${call};`];
+  }
   if (operation.callee === "assert") return [];
   if (operation.callee === "printf") return [];
   if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return [];
@@ -2703,6 +2727,19 @@ function emitSemanticCall(
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
+}
+
+function semanticCallOperationExpression(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  valueType: CudaLiteScalarType,
+): Extract<SemanticExpression, { readonly kind: "call" }> {
+  return {
+    kind: "call",
+    callee: { kind: "symbol", name: operation.callee, addressSpace: "function", valueType, span: operation.span },
+    args: operation.args,
+    valueType,
+    span: operation.span,
+  };
 }
 
 function emitSemanticVoidFunctionCall(
@@ -3774,7 +3811,20 @@ function emitSemanticFunctionArgs(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
-  if (param?.cooperativeGroupKind !== undefined) return [];
+  if (param?.cooperativeGroupKind !== undefined) {
+    if (arg.kind !== "symbol") throw semanticWgslError("semantic WGSL cooperative-group argument must be a symbol", arg.span);
+    const groupCall = (property: "thread_rank" | "size"): Extract<SemanticExpression, { readonly kind: "call" }> => ({
+      kind: "call",
+      callee: { kind: "member", object: arg, property, valueType: "int", span: arg.span },
+      args: [],
+      valueType: "int",
+      span: arg.span,
+    });
+    const rank = emitSemanticCooperativeGroupCall(groupCall("thread_rank"), ir);
+    const size = emitSemanticCooperativeGroupCall(groupCall("size"), ir);
+    if (rank === undefined || size === undefined) throw semanticWgslError(`unknown cooperative group '${arg.name}'`, arg.span);
+    return [rank, size];
+  }
   if (param?.pointer && param.addressSpace === "shared") {
     const ref = semanticPointerArgMemoryRef(arg);
     if (!ref || ref.addressSpace !== "shared") throw semanticWgslError("semantic WGSL shared pointer helper argument must be modeled shared memory", arg.span);
@@ -3814,39 +3864,6 @@ function emitSemanticSharedPointerArgBaseIndex(
   const shared = sharedMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
   if (!shared) throw semanticWgslError(`unknown shared pointer base '${ref.base}'`, ref.span);
   return emitFlatSharedIndex(shared, ref.indices, ir, names);
-}
-
-function semanticPointerArgMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {
-  if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "index") {
-    return memoryRefFromIndexExpression(expression.argument);
-  }
-  if (
-    expression.kind === "unary" &&
-    expression.operator === "&" &&
-    expression.argument.kind === "symbol" &&
-    (expression.argument.addressSpace === "storage" || expression.argument.addressSpace === "shared")
-  ) {
-    return {
-      base: expression.argument.name,
-      addressSpace: expression.argument.addressSpace,
-      ...(expression.argument.valueType === undefined ? {} : { valueType: expression.argument.valueType }),
-      indices: [],
-      fields: [],
-      span: expression.argument.span,
-    };
-  }
-  if (expression.kind === "index") return memoryRefFromIndexExpression(expression);
-  if (expression.kind === "symbol" && (expression.addressSpace === "storage" || expression.addressSpace === "shared")) {
-    return {
-      base: expression.name,
-      addressSpace: expression.addressSpace,
-      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
-      indices: [],
-      fields: [],
-      span: expression.span,
-    };
-  }
-  return undefined;
 }
 
 function emitSemanticPointerArgBaseIndex(

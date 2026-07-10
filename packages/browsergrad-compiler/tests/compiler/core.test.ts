@@ -1408,11 +1408,9 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       });
 
       expect(compiled.wgsl).toContain("fn sumReduction");
-      expect(compiled.wgsl).toContain("g_tile_size_arg");
-      expect(compiled.wgsl).toContain("let g_tile_size: u32 = g_tile_size_arg");
-      expect(compiled.wgsl).toContain("let bg_inline_sumReduction_");
-      expect(compiled.wgsl).toContain("_g_tile_size: u32 = 4u");
-      expect(compiled.wgsl).toContain("_g_tile_size: u32 = 2u");
+      expect(compiled.wgsl).toContain("g__bg_group_rank: i32, g__bg_group_size: i32");
+      expect(compiled.wgsl).toContain("sumReduction(i32(local_id.x), 4");
+      expect(compiled.wgsl).toContain("sumReduction(i32(local_id.x % 2u), 2");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 
