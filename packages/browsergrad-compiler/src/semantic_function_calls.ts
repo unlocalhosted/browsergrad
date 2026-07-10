@@ -5,6 +5,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
+import { isSemanticKernelIrOperation, walkSemanticExpression } from "./semantic_ir.js";
 import type { CudaLiteScalarType } from "./types.js";
 import { isSemanticFloatVectorType } from "./semantic_vector_intrinsics.js";
 
@@ -62,6 +63,10 @@ export interface SemanticFunctionBodyShapeOptions {
   readonly allowAtomic?: boolean;
 }
 
+export interface SemanticPointerFunctionBodyOptions {
+  readonly allowCooperativeOps?: boolean;
+}
+
 export function semanticFunctionBodyShapeSupported(
   operations: readonly SemanticKernelIrOperation[],
   options: SemanticFunctionBodyShapeOptions = {},
@@ -84,12 +89,13 @@ export function semanticPointerFunctionBodySupported(
   fn: CudaLiteSemanticFunction,
   memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+  options: SemanticPointerFunctionBodyOptions = {},
 ): boolean {
   const pointerParams = new Set(fn.params
     .filter((param) => param.pointer && (param.addressSpace === "storage" || param.addressSpace === "shared"))
     .map((param) => param.name));
   return pointerParams.size > 0 &&
-    fn.body.every((operation) => semanticPointerFunctionOperationSupported(operation, pointerParams, memoryRefFromIndex, atomicCallTarget));
+    fn.body.every((operation) => semanticPointerFunctionOperationSupported(operation, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
 }
 
 function semanticPointerFunctionOperationSupported(
@@ -97,17 +103,70 @@ function semanticPointerFunctionOperationSupported(
   pointerParams: ReadonlySet<string>,
   memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+  options: SemanticPointerFunctionBodyOptions,
 ): boolean {
+  if (options.allowCooperativeOps && operation.kind === "cooperative-group-declare") return true;
+  if (options.allowCooperativeOps && (operation.kind === "barrier" || operation.kind === "fence")) return true;
+  if (options.allowCooperativeOps && operation.kind === "declare") {
+    return operation.target.addressSpace === "local" &&
+      !operation.target.pointer &&
+      operation.target.dimensions.length === 0 &&
+      (operation.init === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget));
+  }
   if (operation.kind === "atomic") return operation.target !== undefined && pointerParams.has(operation.target.base);
-  if (operation.kind === "store") return pointerParams.has(operation.target.base);
+  if (operation.kind === "store") return pointerParams.has(operation.target.base) &&
+    (!options.allowCooperativeOps || semanticPointerFunctionExpressionAccessesSupported(operation.value, pointerParams, memoryRefFromIndex, atomicCallTarget));
+  if (options.allowCooperativeOps && operation.kind === "branch") {
+    return semanticPointerFunctionExpressionAccessesSupported(operation.condition, pointerParams, memoryRefFromIndex, atomicCallTarget) &&
+      operation.consequent.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
+      operation.alternate.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
+  }
+  if (options.allowCooperativeOps && operation.kind === "loop") {
+    return (operation.init === undefined || semanticPointerFunctionLoopInitSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
+      (operation.condition === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.condition, pointerParams, memoryRefFromIndex, atomicCallTarget)) &&
+      (operation.update === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.update, pointerParams, memoryRefFromIndex, atomicCallTarget)) &&
+      operation.body.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
+  }
   if (operation.kind === "return" && operation.value) return semanticPointerFunctionExpressionSupported(operation.value, pointerParams, memoryRefFromIndex, atomicCallTarget);
   if (operation.kind === "expression" && operation.expression.kind === "update") {
     const ref = memoryRefFromIndex(operation.expression.argument);
     return ref !== undefined && pointerParams.has(ref.base);
   }
   if (operation.kind === "expression" && operation.expression.kind === "literal") return true;
+  if (options.allowCooperativeOps && operation.kind === "expression") {
+    return semanticPointerFunctionExpressionAccessesSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget);
+  }
   if (operation.kind === "expression") return semanticPointerFunctionExpressionSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget);
   return false;
+}
+
+function semanticPointerFunctionLoopInitSupported(
+  init: SemanticKernelIrOperation | SemanticExpression,
+  pointerParams: ReadonlySet<string>,
+  memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
+  atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+  options: SemanticPointerFunctionBodyOptions,
+): boolean {
+  return isSemanticKernelIrOperation(init)
+    ? semanticPointerFunctionOperationSupported(init, pointerParams, memoryRefFromIndex, atomicCallTarget, options)
+    : semanticPointerFunctionExpressionAccessesSupported(init, pointerParams, memoryRefFromIndex, atomicCallTarget);
+}
+
+function semanticPointerFunctionExpressionAccessesSupported(
+  expression: SemanticExpression,
+  pointerParams: ReadonlySet<string>,
+  memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
+  atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
+): boolean {
+  let supported = true;
+  walkSemanticExpression(expression, (item) => {
+    const ref = memoryRefFromIndex(item);
+    if (ref && !pointerParams.has(ref.base)) supported = false;
+    if (item.kind !== "call") return;
+    const target = atomicCallTarget(item);
+    if (target && !pointerParams.has(target.base)) supported = false;
+  });
+  return supported;
 }
 
 function semanticPointerFunctionExpressionSupported(

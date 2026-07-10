@@ -1028,6 +1028,52 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(wgsl).toContain("num_workgroups.x");
     });
 
+  it("plans grid sync phases through shared cooperative reduction helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  namespace cg = cooperative_groups;
+  __device__ void reduceBlock(double *sdata, const cg::thread_block &cta) {
+    const unsigned int tid = cta.thread_rank();
+    cg::thread_block_tile<32> tile32 = cg::tiled_partition<32>(cta);
+    sdata[tid] = cg::reduce(tile32, sdata[tid], cg::plus<double>());
+    cg::sync(cta);
+    double beta = 0.0;
+    if (cta.thread_rank() == 0) {
+      for (int i = 0; i < blockDim.x; i += tile32.size()) beta += sdata[i];
+      sdata[0] = beta;
+    }
+    cg::sync(cta);
+  }
+  __global__ void helperGridSync(const float *input, float *out, unsigned int n) {
+    cg::thread_block block = cg::this_thread_block();
+    cg::grid_group grid = cg::this_grid();
+    extern double __shared__ sdata[];
+    sdata[block.thread_rank()] = input[grid.thread_rank()];
+    reduceBlock(sdata, block);
+    if (block.thread_rank() == 0) out[blockIdx.x] = sdata[0];
+    cg::sync(grid);
+    if (grid.thread_rank() == 0) out[0] += n - n;
+  }`, {
+        f64Mode: "f32",
+        dynamicSharedMemory: { sdata: 32 },
+        workgroupSize: [32, 1, 1],
+      });
+      const phases = createCudaGridSyncPhasePlan(compiled);
+      const plan = createCudaWebGpuExecutionPlan(
+        compiled,
+        { buffers: { input: new Float32Array(32), out: new Float32Array(1) }, scalars: { n: 32 } },
+        { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
+      expect(phases).toMatchObject({ supported: true });
+      if (phases.supported) {
+        expect(phases.phases).toHaveLength(2);
+        expect(canEmitSemanticKernelIrWgsl(phases.phases[0]!)).toBe(true);
+        expect(emitSemanticKernelIrWgsl(phases.phases[0]!).wgsl).toContain("fn reduceBlock");
+      }
+      expect(plan).toMatchObject({ supported: true, kind: "grid-sync-phases" });
+    });
+
   it("runs grid-wide cooperative sync in CPU reference when explicitly enabled", async () => {
       const compiled = compileCudaLiteKernel(`
   namespace cg = cooperative_groups;
