@@ -724,7 +724,9 @@ function semanticReferenceFunctionHasSharedPointer(fn: CompiledCudaLiteKernel["k
 }
 
 function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
-  return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget);
+  return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget, {
+    allowCooperativeOps: fn.params.some((param) => param.pointer && param.addressSpace === "shared"),
+  });
 }
 
 function semanticReferenceAtomicCallSupported(

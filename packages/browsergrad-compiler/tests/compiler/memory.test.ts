@@ -2901,13 +2901,40 @@ __global__ void sharedPointerAlias(float *out) {
         pointer: true,
         addressSpace: "shared",
         dimensions: [4],
-      });
+  });
 
       const semanticWgsl = emitSemanticKernelIrWgsl(compiled.kernelIr).wgsl;
       expect(semanticWgsl).toContain("fn writeShared(values__bg_shared_ptr: ptr<workgroup, array<f32, 4>>");
       expect(semanticWgsl).toContain("writeShared(&sdata");
       expect(semanticWgsl).not.toContain("(*sdata)[");
     });
+
+  it("lowers lexical blocks inside shared-pointer device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void writeScoped(float *values, int index, float value) {
+  {
+    values[index] = value;
+  }
+}
+__global__ void sharedHelperScoped(float *out) {
+  __shared__ float values[2];
+  int tid = threadIdx.x;
+  writeScoped(&values[0], tid, float(tid + 3));
+  __syncthreads();
+  out[tid] = values[tid];
+}`, { workgroupSize: [2, 1, 1] });
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const input = { buffers: { out: new Float32Array(2) } };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn writeScoped(values__bg_shared_ptr: ptr<workgroup, array<f32, 2>>");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 4]);
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 4]);
+  });
 
   it("supports u32-backed bool pointer parameters", () => {
       const compiled = compileCudaLiteKernel(`

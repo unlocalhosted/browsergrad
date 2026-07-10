@@ -121,6 +121,9 @@ function semanticPointerFunctionOperationSupported(
       operation.consequent.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
       operation.alternate.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
   }
+  if (options.allowCooperativeOps && operation.kind === "block") {
+    return operation.body.every((item) => semanticPointerFunctionOperationSupported(item, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
+  }
   if (options.allowCooperativeOps && operation.kind === "loop") {
     return (operation.init === undefined || semanticPointerFunctionLoopInitSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget, options)) &&
       (operation.condition === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.condition, pointerParams, memoryRefFromIndex, atomicCallTarget)) &&
