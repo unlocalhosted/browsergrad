@@ -2,6 +2,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAnalysis,
   type CudaLiteAnalyzeOptions,
+  type CudaLiteBarrierUniformityFact,
   type CudaLiteAssignmentExpression,
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteCooperativeGroupKind,
@@ -792,7 +793,12 @@ export function analyzeCudaLite(
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
-  validateDivergentReturnsBeforeBarriers(kernel.body, params, diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
+  const kernelBarrierUniformity = validateDivergentReturnsBeforeBarriers(
+    kernel.body,
+    params,
+    diagnostics,
+    options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE,
+  );
   markExactAtomicPointerUsage(ast, kernel, options, atomicParams, atomicShared, atomicDeviceGlobals);
 
   if (options.f16Mode === "f32") {
@@ -824,6 +830,7 @@ export function analyzeCudaLite(
     atomicParams: [...atomicParams].sort(),
     atomicShared: [...atomicShared].sort(),
     atomicDeviceGlobals: [...atomicDeviceGlobals].sort(),
+    barrierUniformity: { kernel: kernelBarrierUniformity },
   };
 }
 
@@ -4833,8 +4840,10 @@ function validateDivergentReturnsBeforeBarriers(
   params: ReadonlyMap<string, CudaLiteParam>,
   diagnostics: CudaLiteDiagnostic[],
   workgroupSize: readonly [number, number, number],
-): void {
+): CudaLiteBarrierUniformityFact {
   const uniformity = collectBarrierUniformity(statements, params, workgroupSize);
+  const barrierStatementStarts: number[] = [];
+  let verified = true;
   const visitBlock = (
     body: readonly CudaLiteStatement[],
     divergentDepth: number,
@@ -4865,11 +4874,23 @@ function validateDivergentReturnsBeforeBarriers(
       case "block":
         return { containsBarrier: visitBlock(statement.body, divergentDepth, barrierLater, continueBarrierLater) };
       case "expr":
-        return { containsBarrier: isBarrierCall(statement.expression) };
-      case "asm":
-        return { containsBarrier: isInlineAsmBarrier(statement) };
+        if (isBarrierCall(statement.expression)) {
+          barrierStatementStarts.push(statement.span.start);
+          if (divergentDepth > 0) verified = false;
+          return { containsBarrier: true };
+        }
+        return { containsBarrier: false };
+      case "asm": {
+        const containsBarrier = isInlineAsmBarrier(statement);
+        if (containsBarrier) {
+          barrierStatementStarts.push(statement.span.start);
+          if (divergentDepth > 0) verified = false;
+        }
+        return { containsBarrier };
+      }
       case "return":
         if (divergentDepth > 0 && barrierLater) {
+          verified = false;
           diagnostics.push(warning(
             "divergent-return-before-barrier",
             "thread-dependent return before a later barrier would make WGSL barrier control flow non-uniform",
@@ -4879,6 +4900,7 @@ function validateDivergentReturnsBeforeBarriers(
         return { containsBarrier: false };
       case "break":
         if (divergentDepth > 0 && barrierLater) {
+          verified = false;
           diagnostics.push(warning(
             "divergent-break-before-barrier",
             "thread-dependent break before a later barrier would make WGSL barrier control flow non-uniform",
@@ -4888,6 +4910,7 @@ function validateDivergentReturnsBeforeBarriers(
         return { containsBarrier: false };
       case "continue":
         if (divergentDepth > 0 && continueBarrierLater) {
+          verified = false;
           diagnostics.push(error(
             "divergent-continue-before-barrier",
             "thread-dependent continue before a later barrier would make WGSL barrier control flow non-uniform",
@@ -4919,6 +4942,7 @@ function validateDivergentReturnsBeforeBarriers(
   };
 
   visitBlock(statements, 0);
+  return { verified, barrierStatementStarts: barrierStatementStarts.sort((left, right) => left - right) };
 }
 
 interface BarrierUniformityContext {
@@ -4947,7 +4971,17 @@ function collectBarrierUniformity(
       } else if (statement.kind === "expr" && statement.expression.kind === "assignment" && statement.expression.left.kind === "identifier") {
         locals.set(statement.expression.left.name, expressionMayBeNonUniformBeforeBarrier(statement.expression.right, context));
       }
-      if (statement.kind === "block" || statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") visitStatements(statement.body);
+      if (statement.kind === "for") {
+        if (statement.init?.kind === "var") {
+          locals.set(statement.init.name, statement.init.init ? expressionMayBeNonUniformBeforeBarrier(statement.init.init, context) : true);
+        } else if (statement.init?.kind === "assignment" && statement.init.left.kind === "identifier") {
+          locals.set(statement.init.left.name, expressionMayBeNonUniformBeforeBarrier(statement.init.right, context));
+        }
+        if (statement.update?.kind === "assignment" && statement.update.left.kind === "identifier") {
+          locals.set(statement.update.left.name, expressionMayBeNonUniformBeforeBarrier(statement.update.right, context));
+        }
+        visitStatements(statement.body);
+      } else if (statement.kind === "block" || statement.kind === "while" || statement.kind === "do-while") visitStatements(statement.body);
       if (statement.kind === "if") {
         visitStatements(statement.consequent);
         if (statement.alternate) visitStatements(statement.alternate);

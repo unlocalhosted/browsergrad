@@ -692,11 +692,31 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
     symbol.dimensions.length === 0 && hasScalarSharedPointer
   )) return false;
   if (!containsBarrier) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
+  if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
   if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
     return operationsHaveOnlyTopLevelBarriers(ir.operations);
   }
   return semanticBarrierShapeSupported(ir.operations, barrierFunctions) &&
     ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) => semanticBarrierShapeSupported(fn.body, barrierFunctions));
+}
+
+function semanticDirectBarriersHaveAnalyzerProof(ir: SemanticKernelIrModule): boolean {
+  const proof = ir.barrierUniformity.kernel;
+  if (!proof.verified) return false;
+  const provenStarts = new Set(proof.barrierStatementStarts);
+  let hasBarrier = false;
+  let hasNestedBarrier = false;
+  const visit = (operations: readonly SemanticKernelIrOperation[], nesting = 0): boolean => operations.every((operation) => {
+    if (operation.kind === "barrier") {
+      hasBarrier = true;
+      if (nesting > 0) hasNestedBarrier = true;
+      return provenStarts.has(operation.span.start);
+    }
+    if (operation.kind === "branch") return visit(operation.consequent, nesting + 1) && visit(operation.alternate, nesting + 1);
+    if (operation.kind === "loop" || operation.kind === "block") return visit(operation.body, nesting + 1);
+    return true;
+  });
+  return visit(ir.operations) && hasBarrier && hasNestedBarrier;
 }
 
 function semanticWgslBarrierSupported(

@@ -961,6 +961,29 @@ __global__ void gridSync(float *scratch, float *out, float scale) {
     }
   });
 
+  it("runs analyzer-proven uniform barrier loops through semantic WGSL on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void uniformBarrierLoop(float *x) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  for (int row = 0; row < 2; ++row) {
+    int index = row * blockDim.x + tid;
+    scratch[tid] = x[index];
+    __syncthreads();
+    x[index] = scratch[tid] + 1.0f;
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const input = { buffers: { x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
+  });
+
   it("runs grid.sync phases when shared memory is rewritten after sync", async () => {
     if (!deviceCheck.available) return;
     const source = `

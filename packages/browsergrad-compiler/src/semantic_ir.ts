@@ -289,6 +289,7 @@ export interface SemanticKernelIrModule {
   readonly functions: readonly CudaLiteSemanticFunction[];
   readonly operations: readonly SemanticKernelIrOperation[];
   readonly requiredFeatures: readonly string[];
+  readonly barrierUniformity: CudaLiteAnalysis["barrierUniformity"];
   readonly workgroupSize: KernelLaunch["blockDim"];
 }
 
@@ -558,6 +559,7 @@ export function lowerSemanticModelToKernelIr(
     functions,
     operations,
     requiredFeatures: semantic.requiredFeatures,
+    barrierUniformity: analysis.barrierUniformity,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
 }

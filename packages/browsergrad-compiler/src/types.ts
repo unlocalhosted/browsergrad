@@ -433,6 +433,15 @@ export interface CudaLiteTextureDescriptor {
   readonly filterMode?: CudaLiteTextureFilterMode;
 }
 
+export interface CudaLiteBarrierUniformityFact {
+  readonly verified: boolean;
+  readonly barrierStatementStarts: readonly number[];
+}
+
+export interface CudaLiteBarrierUniformityFacts {
+  readonly kernel: CudaLiteBarrierUniformityFact;
+}
+
 export interface CudaLiteAnalysis {
   readonly kernel: CudaLiteKernel;
   readonly kernels: readonly CudaLiteKernel[];
@@ -445,6 +454,7 @@ export interface CudaLiteAnalysis {
   readonly atomicParams: readonly string[];
   readonly atomicShared: readonly string[];
   readonly atomicDeviceGlobals: readonly string[];
+  readonly barrierUniformity: CudaLiteBarrierUniformityFacts;
 }
 
 export interface KernelIrModule {

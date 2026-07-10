@@ -2120,10 +2120,12 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     }
   }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
 
-      expect(compiled.wgsl).toContain("for (var bg_barrier_loop_iter_");
-      expect(compiled.wgsl).toContain("bg_barrier_loop_iter_");
+      expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("for (var row");
       expect(compiled.wgsl).toContain("bg_uniforms.N");
-      expect(compiled.wgsl).not.toContain("< 256u;");
+      expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 
   it("keeps nested predicated barriers uniform after active-lane early returns", () => {
@@ -2175,10 +2177,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("if (bg_barrier_loop_active_");
-      expect(compiled.wgsl).toContain("&& (((k + 1) < 2)))");
-      expect(compiled.wgsl).toContain("workgroupBarrier();\n    }\n    workgroupBarrier();");
-      expect(compiled.wgsl).not.toContain("if (((k + 1) < 2)) {\n      workgroupBarrier();");
+      expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
@@ -2202,9 +2204,11 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("if ((bg_uniforms.flag != 0))");
-      expect(compiled.wgsl).toContain("if (!((bg_uniforms.flag != 0)))");
-      expect(compiled.wgsl).not.toContain("} else {\n    workgroupBarrier();");
+      expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("} else {");
+      expect(compiled.wgsl.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
