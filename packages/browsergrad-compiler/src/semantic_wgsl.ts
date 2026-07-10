@@ -1904,8 +1904,8 @@ function emitSemanticStore(
   }
   const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
   if (operation.operator === "=") return `${target} = ${value}`;
-  if (operation.operator === "+=") return `${target} = (${target} + ${value})`;
-  if (operation.operator === "-=") return `${target} = (${target} - ${value})`;
+  const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
+  if (binaryOperator !== undefined) return `${target} = (${target} ${binaryOperator} ${value})`;
   throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
 }
 
