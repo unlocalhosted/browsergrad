@@ -2,7 +2,7 @@
 
 - 2026-07-10: CI corpus regression check: native WebGPU re-ran `reduceSinglePassMultiBlockCG_grid_sync` and `cudaProcess` after the reported WGSL type failures; both passed (`2/2`, zero skips). Semantic texture lowering now admits only `tex2D`, `tex2DLod`, and `texCubemap`; unsupported dimensional texture calls stay on the established AST backend instead of entering an invalid semantic IR shape. Focused regression and typecheck passed; next gate: `verify:real-world-cuda -- --require-webgpu`.
 
-Last updated: 2026-07-10T14:08:11Z
+Last updated: 2026-07-10T14:24:54Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `229/354`, up from `161/354`; `125` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `234/354`, up from `161/354`; `120` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
 | Active work item | Highest-impact remaining semantic WGSL fallback class after storage-pointer device-helper widening; device-helper barrier scheduling remains an explicit safety-gated slice |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic pointer-return helpers: device functions with modeled storage pointers may now return a scalar local value after validated pointer-rooted reads. The shared contract still rejects pointer identity/null comparisons and unmodeled pointer roots. Semantic reference and WGSL use the same contract; native WebGPU test passed `1/0`, full compiler passed `773/0`, and full real-world native source/dist verifier passed `855/0/0` each. CUDA-samples semantic-direct moved `232/354 -> 234/354`, AST fallback `122 -> 120`; `generateSampleRanksKernel` is now semantic-direct.
 - Semantic cubemap texture reads: `texCubemap` now lowers into typed semantic `texture-read` with an explicit direction `z`; semantic WGSL and semantic reference use the same six-face 2D atlas projection already used by the established backend, while cubemap reads deliberately bypass 2D descriptor transforms. Focused compiler and native WebGPU tests passed `1/0` each; full compiler gate passed `771/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `231/354 -> 234/354`, AST fallback `123 -> 120`.
 - Semantic vector `fminf`/`fmaxf` overloads: typed semantic IR now resolves `float2`/`float3`/`float4` min/max calls, including scalar broadcast, through one shared overload contract. Semantic reference evaluates the same lane-wise operation and WGSL emits typed native `min`/`max`. Focused compiler and native WebGPU tests passed `1/0` each; full compiler gate passed `770/0`; full real-world native WebGPU verifier passed; CUDA-samples `d_mipmap` moved semantic-direct and the corpus reached `231/354`, AST fallback `123`.
 - Semantic vector compound writes: typed semantic IR now accepts `+=`, `-=`, `*=`, and `/=` for `float2`/`float3`/`float4` local, shared, and storage targets. Scalar RHS values are explicitly broadcast to the target vector type before native WGSL emission; semantic reference uses the same lane-wise rule. Focused compiler and native WebGPU tests passed `1/0` each; full compiler gate passed `770/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `229/354 -> 230/354`, AST fallback `124`.
@@ -1051,6 +1052,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | Storage-pointer helper return values | Pointer-bearing device helpers could return a direct dereference but rejected a local scalar accumulated from modeled pointer reads, needlessly retaining valid search/reduction helpers on AST WGSL | use the existing pointer-access contract for scalar helper return values and expression statements; it allows locals and modeled pointer reads while retaining pointer-root and pointer-identity rejection | focused semantic + native WebGPU `1/0`; full compiler `773/0`; real-world source/dist `855/0/0`; CUDA-samples semantic-direct `234/354`, fallback `120` |
 | Fixed | Storage-pointer device helper control flow | Semantic backends rejected valid helper-local declarations, arithmetic, branches, and loops unless the pointer parameter was shared, keeping ordinary CUDA storage-pointer helpers on AST WGSL | use the richer pointer-access contract for all modeled storage/shared helper params; reject pointer identity/null checks until helper pointer validity is modeled | focused memory `182/0`; full compiler `768/0`; full real-world native verifier passed; CUDA-samples semantic-direct `226/354`, fallback `128`, unsupported-call blockers `27` |
 | Fixed | Direct scalar shared memory | Semantic WGSL already emitted valid scalar workgroup variables but preflight rejected them near barriers unless a shared-pointer helper existed | allow scalar shared symbols through the same rank/type contract as shared arrays; preserve the one-dimensional shared-pointer ABI restriction | focused compiler/browser test `268/0` (local browser adapter unavailable); full compiler `767/0`; full real-world native verifier passed; CUDA-samples semantic-direct `221/354`, fallback `133`, barrier-shape blockers `4` |
 | Fixed | Analyzer-proven direct barriers | Semantic WGSL rejected direct uniform barriers when an unrelated loop appeared before or after the barrier, forcing safe CUDA shared-memory kernels through AST WGSL | trust analyzer-verified direct barrier source spans without requiring the barrier itself to be nested; keep helper-mediated barriers and unverified/divergent shapes safety-gated | focused cooperative `99/0`; exact Chromium fixture `shared_tile_transpose_kernel_mdspan` `1/0/0`; CUDA-samples semantic-direct `218/354`, fallback `136`, barrier-shape blockers `7` |

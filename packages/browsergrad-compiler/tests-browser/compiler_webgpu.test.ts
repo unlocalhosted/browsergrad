@@ -1255,6 +1255,34 @@ __global__ void sharedHelperScoped(float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs storage-pointer helper local return values through semantic WGSL on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ float sumWindow(const float *input, int count) {
+  float total = 0.0f;
+  for (int i = 0; i < count; ++i) {
+    total += input[i];
+  }
+  return total;
+}
+__global__ void sumWindows(float *out, const float *input) {
+  int tid = threadIdx.x;
+  out[tid] = sumWindow(input + tid * 2, 2);
+}`, { workgroupSize: [2, 1, 1] });
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const input = {
+      buffers: {
+        out: new Float32Array(2),
+        input: new Float32Array([1, 2, 3, 4]),
+      },
+    };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs explicit shared-memory pointer aliases through semantic WGSL on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

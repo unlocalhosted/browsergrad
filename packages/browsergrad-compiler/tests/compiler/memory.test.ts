@@ -675,6 +675,38 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([3, 7]);
     });
 
+  it("lowers local return values from storage-pointer device helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ float sumWindow(const float *input, int count) {
+    float total = 0.0f;
+    for (int i = 0; i < count; ++i) {
+      total += input[i];
+    }
+    return total;
+  }
+
+  __global__ void sumWindows(float *out, const float *input) {
+    int tid = threadIdx.x;
+    out[tid] = sumWindow(input + tid * 2, 2);
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = {
+        buffers: {
+          out: new Float32Array(2),
+          input: new Float32Array([1, 2, 3, 4]),
+        },
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("return total;");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 7]);
+      expect([...result.buffers.out as Float32Array]).toEqual([3, 7]);
+    });
+
   it("lowers direct kernel pointer dereference writes through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void directDeref(float* result, int* count) {
