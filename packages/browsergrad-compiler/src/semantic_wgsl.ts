@@ -1418,7 +1418,7 @@ function semanticWgslFunctionBodyShapeSupported(
   operations: readonly SemanticKernelIrOperation[],
   allowAtomic = false,
 ): boolean {
-  return semanticFunctionBodyShapeContractSupported(operations, { allowBarrierFence: true, allowAtomic });
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic });
 }
 
 function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {

@@ -5522,6 +5522,30 @@ __global__ void scopedLocal(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
   });
 
+  it("emits semantic WGSL for device helpers with lexical blocks", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float scopedAdd(float value) {
+  {
+    float result = value + 2.0f;
+    return result;
+  }
+}
+__global__ void helperScopedLocal(float *out) {
+  out[threadIdx.x] = scopedAdd((float)threadIdx.x);
+}`, { workgroupSize: [2, 1, 1] });
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const input = { buffers: { out: new Float32Array(2) } };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn scopedAdd");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([2, 3]);
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
+  });
+
   it("keeps nested updates out of expression contexts", () => {
       expect(() => compileCudaLiteKernel(`
   __global__ void bad_update(float* out) {
