@@ -394,13 +394,13 @@ __global__ void dimensionSpecialRegs(uint *out) {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void laneId(uint *out) {
-  uint idx = threadIdx.x;
+  uint idx = (threadIdx.y * blockDim.x) + threadIdx.x;
   uint lane;
   asm volatile("mov.u32 %0, %laneid;" : "=r"(lane));
   out[idx] = lane;
-}`, { workgroupSize: [32, 1, 1] });
+}`, { workgroupSize: [16, 2, 1] });
     const input = { buffers: { out: new Uint32Array(32) } };
-    const launch = { gridDim: [1, 1, 1] as const, blockDim: [32, 1, 1] as const };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [16, 2, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
@@ -408,6 +408,34 @@ __global__ void laneId(uint *out) {
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual(Array.from({ length: 32 }, (_, index) => index));
+  });
+
+  it("runs inline PTX warp-id and lane-mask through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void warpAndLaneMask(uint *out) {
+  uint idx = (threadIdx.y * blockDim.x) + threadIdx.x;
+  uint warp;
+  uint laneMask;
+  asm volatile("mov.u32 %0, %warpid;" : "=r"(warp));
+  asm volatile("mov.u32 %0, %lanemask_lt;" : "=r"(laneMask));
+  out[idx] = warp;
+  out[idx + 64] = laneMask;
+}`, { workgroupSize: [16, 4, 1] });
+    const input = { buffers: { out: new Uint32Array(128) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [16, 4, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array].slice(0, 64)).toEqual([
+      ...new Array(32).fill(0),
+      ...new Array(32).fill(1),
+    ]);
+    const laneMasks = Array.from({ length: 32 }, (_, index) => (2 ** index) - 1);
+    expect([...actual.buffers.out as Uint32Array].slice(64)).toEqual(laneMasks.concat(laneMasks));
   });
 
   it("runs common CUDA float math builtins through WebGPU", async () => {

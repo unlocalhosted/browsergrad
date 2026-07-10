@@ -765,6 +765,10 @@ function lowerInlineAsmBuiltinRegisterAssignment(
     ? semanticSpecialRegisterExpression(op.register, statement.span)
     : op?.kind === "laneid"
       ? semanticLaneIdExpression(statement.span)
+      : op?.kind === "warpid"
+        ? semanticWarpIdExpression(statement.span)
+        : op?.kind === "lanemask-lt"
+          ? semanticLaneMaskLtExpression(statement.span)
       : undefined;
   if (!value) return undefined;
   const target = lowerExpression(outputs[0]!, scope);
@@ -783,14 +787,39 @@ function lowerInlineAsmBuiltinRegisterAssignment(
 }
 
 function semanticLaneIdExpression(span: SourceSpan): SemanticExpression {
-  return {
-    kind: "binary",
-    operator: "&",
-    left: semanticSpecialRegisterExpression("tid.x", span),
-    right: { kind: "literal", literalKind: "number", value: 31, valueType: "uint", span },
-    valueType: "uint",
-    span,
-  };
+  return semanticUintBinaryExpression("&", semanticThreadLinearIndexExpression(span), semanticUintLiteralExpression(31, span), span);
+}
+
+function semanticWarpIdExpression(span: SourceSpan): SemanticExpression {
+  return semanticUintBinaryExpression("/", semanticThreadLinearIndexExpression(span), semanticUintLiteralExpression(32, span), span);
+}
+
+function semanticLaneMaskLtExpression(span: SourceSpan): SemanticExpression {
+  const one = semanticUintLiteralExpression(1, span);
+  return semanticUintBinaryExpression("-", semanticUintBinaryExpression("<<", one, semanticLaneIdExpression(span), span), one, span);
+}
+
+function semanticUintLiteralExpression(value: number, span: SourceSpan): SemanticExpression {
+  return { kind: "literal", literalKind: "number", value, valueType: "uint", span };
+}
+
+function semanticThreadLinearIndexExpression(span: SourceSpan): SemanticExpression {
+  const threadX = semanticSpecialRegisterExpression("tid.x", span);
+  const threadY = semanticSpecialRegisterExpression("tid.y", span);
+  const threadZ = semanticSpecialRegisterExpression("tid.z", span);
+  const blockX = semanticSpecialRegisterExpression("ntid.x", span);
+  const blockY = semanticSpecialRegisterExpression("ntid.y", span);
+  const row = semanticUintBinaryExpression("+", threadY, semanticUintBinaryExpression("*", blockY, threadZ, span), span);
+  return semanticUintBinaryExpression("+", threadX, semanticUintBinaryExpression("*", blockX, row, span), span);
+}
+
+function semanticUintBinaryExpression(
+  operator: "+" | "-" | "*" | "/" | "<<" | "&",
+  left: SemanticExpression,
+  right: SemanticExpression,
+  span: SourceSpan,
+): SemanticExpression {
+  return { kind: "binary", operator, left, right, valueType: "uint", span };
 }
 
 function semanticSpecialRegisterExpression(register: PtxSpecialU32Register, span: SourceSpan): SemanticExpression {

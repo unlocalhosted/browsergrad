@@ -1604,14 +1604,20 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     asm volatile("mov.u32 %0, %%warpid;" : "=r"(warp));
     out[idx] = warp;
   }`, { workgroupSize: [64, 1, 1] });
-      const result = runCompiledKernelReference(
-        compiled,
-        { buffers: { out: new Uint32Array(64) } },
-        { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
-      );
+      const input = { buffers: { out: new Uint32Array(64) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [64, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
-      expect(compiled.wgsl).toContain("/ 32");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("/ 32u");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+        ...new Array(32).fill(0),
+        ...new Array(32).fill(1),
+      ]);
       expect([...result.buffers.out as Uint32Array]).toEqual([
         ...new Array(32).fill(0),
         ...new Array(32).fill(1),

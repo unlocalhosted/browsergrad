@@ -2887,13 +2887,16 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
     asm("mov.u32 %0, %%lanemask_lt;" : "=r"(mask));
     out[idx] = mask;
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
-        compiled,
-        { buffers: { out: new Uint32Array(4) } },
-        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
-      );
+      const input = { buffers: { out: new Uint32Array(4) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("1u <<");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1, 3, 7]);
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 3, 7]);
     });
 

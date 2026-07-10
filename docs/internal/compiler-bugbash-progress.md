@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T12:20:29Z
+Last updated: 2026-07-10T12:24:02Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -48,7 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
-- Semantic inline-PTX lane ID: output-only `mov.u32 ..., %laneid` now lowers to a typed semantic `threadIdx.x & 31u` expression instead of retaining an inline-asm node. Semantic reference and WGSL consume that operation; the native WebGPU fixture verifies all 32 lane values. Core compiler tests passed `168/0`; browser tests passed `112/0`; CUDA-samples semantic-direct lowering reached `196/354`, AST fallback `158`, plan compilation `357/357`, hard failures `0`.
+- Semantic inline-PTX warp registers: output-only `mov.u32 ..., %laneid`, `%warpid`, and `%lanemask_lt` now lower to typed semantic expressions over the full 3D CTA-linear thread rank, not only `threadIdx.x`. Semantic reference and WGSL consume those operations; native WebGPU fixtures verify 2D lane sequencing, the warp boundary, and all 32 mask values. Focused compiler tests passed `266/0`; browser tests passed `113/0`; CUDA-samples semantic-direct lowering remains `196/354`, AST fallback `158`, plan compilation `357/357`, hard failures `0`.
 - Semantic 2D surface boundary-mode shape: `surf2Dwrite(value, surface, xBytes, y, cudaBoundaryModeTrap)` now keeps the final argument out of the 3D `z` slot, matching the AST backend's intrinsic arity contract. Semantic reference and WGSL emit direct 2D surface storage writes. Focused semantic unit and native browser surface fixture passed `1/0`; CUDA-samples semantic-direct lowering reached `194/354`, AST fallback `160`, plan compilation `357/357`, hard failures `0`. Surface-object pointer-array routing remains a separate unsupported shape.
 - Semantic cp.async copy IR: CUDA `CP_ASYNC_CA`/`CP_ASYNC_CG`/`CP_ASYNC_BULK` with static byte-aligned copies now lower to typed semantic `copy` operations; commit/wait macros lower to explicit semantic `copy-fence` operations. Reference and WGSL consume the same typed `MemoryRef` source/target contract, with fences documented native no-ops because emission is synchronous. Shared-array decay now produces local pointer-alias metadata while preserving direct shared-array helper arguments. Exact native WebGPU CP async fixture passed `1/0`; compiler unit tests passed `762/0`; browser tests passed `111/0`; CUDA-samples semantic-direct lowering reached `193/354`, AST fallback `161`, plan compilation `357/357`, hard failures `0`.
 - Semantic shared-memory loop scheduler: semantic reference now runs each lane as a resumable semantic-IR continuation until the next direct barrier, verifies all active lanes converge, and resumes uniform `for`/`while`/`do-while` loops correctly. Fixed-rank shared arrays emit one flat row-major `var<workgroup>` array, reusing semantic IR's existing flattened index contract; multidimensional shared arrays passed through pointer helpers remain deliberately rejected until that pointer ABI is flattened. CUDA-samples semantic-direct lowering is now `188/354`, with `357/357` plan compilation and `0` hard failures. Full `verify:compiler` passed, compiler unit tests passed `761/0`, and real WebGPU tests passed `110/0`.
