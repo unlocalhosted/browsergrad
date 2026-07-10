@@ -29,7 +29,7 @@ export function wgslScalar(valueType: CudaLiteScalarType | undefined): WgslValue
   if (valueType === "half" || valueType === "half2") return "f16";
   const scalarType = isCudaVectorType(valueType) ? cudaVectorScalarType(valueType) : valueType;
   if (scalarType === "int") return "i32";
-  if (scalarType === "uint") return "u32";
+  if (scalarType === "uint" || scalarType === "uchar") return "u32";
   if (scalarType === "half") return "f16";
   if (valueType === "bool") return "bool";
   return "f32";
@@ -69,7 +69,7 @@ export function wgslAtomicScalar(valueType: CudaLiteScalarType | undefined): Ext
 export function wgslUniformScalar(valueType: CudaLiteScalarType | undefined): WgslValueType {
   if (valueType === "half") return "f16";
   if (valueType === "int") return "i32";
-  if (valueType === "uint" || valueType === "bool") return "u32";
+  if (valueType === "uint" || valueType === "uchar" || valueType === "bool") return "u32";
   return "f32";
 }
 

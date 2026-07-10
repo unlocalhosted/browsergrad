@@ -130,8 +130,10 @@ export {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
   semanticKernelIrWgslPreflightBlocker,
+  semanticKernelIrWgslPreflightFailure,
   type EmitSemanticKernelIrWgslOptions,
   type SemanticKernelIrWgslOutput,
+  type SemanticKernelIrWgslPreflightFailure,
 } from "./semantic_wgsl.js";
 export {
   createCudaLiteCompileCacheKey,

@@ -5296,6 +5296,33 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       expect(compiled.wgsl).toContain("var delta: i32 = i32((right - left));");
     });
 
+  it("lowers local uchar values through semantic IR without widening byte semantics", () => {
+      const compiled = compileCudaLiteKernelForWebGpu(`
+  texture<float, cudaTextureType2D, cudaReadModeElementType> tex;
+  __global__ void local_uchar(uint *out) {
+    uchar value = (uchar)257;
+    value += 2;
+    uchar sample = tex2D<unsigned char>(tex, 0.5f, 0.5f);
+    out[0] = value;
+    out[1] = sample;
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = {
+        buffers: { out: new Uint32Array(2) },
+        textures: { tex: { width: 1, height: 1, data: new Float32Array([255]) } },
+      };
+      const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+      const result = runCompiledKernelReference(compiled, input, launch);
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var value: u32 = (u32(i32(257)) & 0xffu);");
+      expect(compiled.wgsl).toContain("value = (u32(i32((value + 2u))) & 0xffu);");
+      expect([...result.buffers.out as Uint32Array]).toEqual([3, 255]);
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([3, 255]);
+    });
+
   it("casts device-function scalar compound assignments from promoted operands in WGSL", () => {
       const compiled = compileCudaLiteKernelForWebGpu(`
   __device__ int scale_box(unsigned char ul, unsigned char um, float fscale) {

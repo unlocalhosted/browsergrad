@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T13:14:35Z
+Last updated: 2026-07-10T13:28:43Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,7 +9,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `226/354`, up from `161/354`; `128` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `229/354`, up from `161/354`; `125` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
 | Active work item | Highest-impact remaining semantic WGSL fallback class after storage-pointer device-helper widening; device-helper barrier scheduling remains an explicit safety-gated slice |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic local-`uchar` lowering: local CUDA byte values now remain explicit semantic values instead of forcing AST WGSL fallback. Semantic reference and WGSL both narrow declarations, casts, and compound assignments to eight bits; local byte arrays, storage byte ABI, shared packed-byte aliases, and byte-pointer helper ABI remain deliberately excluded pending typed packed `MemoryRef` lowering. Focused compiler test passed `1/0`; guarded native-browser WebGPU test passed `1/0`; full compiler gate passed `769/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `226/354 -> 229/354`, AST fallback `128 -> 125`.
 - Storage-pointer device helper widening: semantic reference and semantic WGSL now accept device helper bodies with local declarations, local arithmetic, branches, and loops when all pointer accesses remain rooted in modeled pointer parameters. Pointer identity/null checks remain excluded until semantic IR carries pointer validity through helper ABI, preserving AST fallback correctness for nullable pointer helpers. Focused memory tests passed `182/0`; full compiler gate passed `768/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `221/354 -> 226/354`, AST fallback `133 -> 128`, and unsupported-call blockers `32 -> 27`.
 - Scalar shared-memory semantic widening: scalar `__shared__` symbols already had correct direct WGSL emission but semantic preflight incorrectly required a shared-pointer helper before allowing them near barriers. Direct scalar shared memory now follows the same type/rank contract as shared arrays. Focused compiler plus native-browser test coverage passed `268/0` (the browser suite’s local adapter check was unavailable, so this does not substitute for a native fixture); full compiler gate passed `767/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `218/354 -> 221/354`, AST fallback `136 -> 133`, barrier-shape blockers `7 -> 4`.
 - Analyzer-proven direct barrier widening: semantic WGSL now accepts direct barriers whose source spans are verified by analyzer uniformity facts, even when unrelated loops surround a top-level barrier. This removes an AST-backend-only layout restriction without weakening divergent-barrier rejection. Focused cooperative tests passed `99/0`; exact native Chromium fixture `shared_tile_transpose_kernel_mdspan` passed `1/0/0` as semantic `single-dispatch` with pinned output; full compiler gate passed `767/0`; full real-world native WebGPU verifier passed; CUDA-samples semantic-direct moved `202/354 -> 218/354`, AST fallback `152 -> 136`, and shared-memory barrier-shape blockers `23 -> 7`.

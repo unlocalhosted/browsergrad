@@ -141,6 +141,8 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import {
+  semanticLocalScalarValueTypeSupported,
+  semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
   semanticValueTypeSupported,
 } from "./semantic_value_types.js";
@@ -291,7 +293,7 @@ function unsupportedSemanticReferenceOperation(
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
-        if (!semanticReferenceValueTypeSupported(operation.target.valueType)) return operation;
+        if (!semanticReferenceLocalValueTypeSupported(operation.target.valueType)) return operation;
         if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init, operation.target.valueType, compiled)) return operation;
         if (operation.target.dimensions.length === 0) {
           const vectorTarget = isSemanticFloatVectorType(operation.target.valueType);
@@ -492,12 +494,16 @@ function semanticReferenceValueTypeSupported(valueType: CudaLiteScalarType | und
   return semanticValueTypeSupported(valueType);
 }
 
+function semanticReferenceLocalValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return semanticLocalValueTypeSupported(valueType);
+}
+
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local" && ref.addressSpace !== "shared") {
     return false;
   }
   if (ref.fields.length > 0) return semanticReferenceVectorFieldMemoryRefSupported(ref);
-  if (ref.addressSpace === "local" && ref.indices.length === 0) return semanticReferenceScalarTypeSupported(ref.valueType);
+  if (ref.addressSpace === "local" && ref.indices.length === 0) return semanticLocalScalarValueTypeSupported(ref.valueType);
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
@@ -1531,7 +1537,10 @@ function semanticDeclareValue(
     }
     return values as number[];
   }
-  if (operation.init) return evalSemanticExpression(operation.init, context);
+  if (operation.init) {
+    const value = evalSemanticExpression(operation.init, context);
+    return typeof value === "number" ? coerceSemanticScalarValue(value, operation.target.valueType) : value;
+  }
   if (isSemanticFloatVectorType(operation.target.valueType)) {
     return Array.from({ length: cudaVectorLaneCount(operation.target.valueType) }, () => 0);
   }
@@ -2049,8 +2058,9 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
         }
         const right = evalNumber(expression.value, context);
         const value = applySemanticScalarAssignment(expression.operator, evalNumber(expression.target, context), right, expression.span);
-        context.locals.set(expression.target.name, value);
-        return value;
+        const assigned = coerceSemanticScalarValue(value, expression.target.valueType);
+        context.locals.set(expression.target.name, assigned);
+        return assigned;
       }
       }
     case "sequence": {
@@ -4458,10 +4468,15 @@ function evalVectorBinary(operator: string, left: SemanticValue, right: Semantic
 function castNumber(value: number, valueType: CudaLiteScalarType): number {
   if (valueType === "int") return Math.trunc(value);
   if (valueType === "uint") return Math.trunc(value) >>> 0;
+  if (valueType === "uchar") return Math.trunc(value) & 0xff;
   if (valueType === "bool") return truthy(value) ? 1 : 0;
   if (valueType === "half") return roundSemanticHalf(value);
   if (valueType === "bf16") return roundSemanticBfloat16(value);
   return value;
+}
+
+function coerceSemanticScalarValue(value: number, valueType: CudaLiteScalarType | undefined): number {
+  return valueType === "uchar" ? castNumber(value, valueType) : value;
 }
 
 function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {

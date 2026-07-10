@@ -11,6 +11,14 @@ export function semanticScalarValueTypeSupported(valueType: CudaLiteScalarType |
     valueType === "bool";
 }
 
+export function semanticLocalScalarValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "uchar" || semanticScalarValueTypeSupported(valueType);
+}
+
 export function semanticValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return semanticScalarValueTypeSupported(valueType) || isSemanticFloatVectorType(valueType);
+}
+
+export function semanticLocalValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return semanticLocalScalarValueTypeSupported(valueType) || isSemanticFloatVectorType(valueType);
 }

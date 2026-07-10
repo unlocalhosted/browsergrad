@@ -142,6 +142,7 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import {
+  semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
   semanticValueTypeSupported,
 } from "./semantic_value_types.js";
@@ -244,6 +245,11 @@ export interface SemanticKernelIrWgslOutput {
   readonly program: ReturnType<typeof defineWgslKernelProgram>;
 }
 
+export interface SemanticKernelIrWgslPreflightFailure {
+  readonly message: string;
+  readonly span: SourceSpan;
+}
+
 export interface EmitSemanticKernelIrWgslOptions extends SemanticTextureDescriptorOptions {}
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
@@ -254,20 +260,30 @@ export function canEmitSemanticKernelIrWgsl(
   ir: SemanticKernelIrModule,
   _options: EmitSemanticKernelIrWgslOptions = {},
 ): boolean {
-  return semanticKernelIrWgslPreflightBlocker(ir) === undefined;
+  return semanticKernelIrWgslPreflightFailure(ir) === undefined;
 }
 
 export function semanticKernelIrWgslPreflightBlocker(
   ir: SemanticKernelIrModule,
 ): string | undefined {
+  return semanticKernelIrWgslPreflightFailure(ir)?.message;
+}
+
+export function semanticKernelIrWgslPreflightFailure(
+  ir: SemanticKernelIrModule,
+): SemanticKernelIrWgslPreflightFailure | undefined {
   const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
-  if (unsupported) return `semantic WGSL does not support ${unsupported.kind}`;
-  if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) return "semantic WGSL does not support required WebGPU features yet";
+  if (unsupported) return { message: `semantic WGSL does not support ${unsupported.kind}`, span: unsupported.span };
+  if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) {
+    return { message: "semantic WGSL does not support required WebGPU features yet", span: ir.span };
+  }
   const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
-  if (unsupportedParam) return `semantic WGSL does not support parameter '${unsupportedParam.name}'`;
-  if (!semanticWgslSharedBarrierShapeSupported(ir)) return "semantic WGSL does not support shared-memory barrier shape";
+  if (unsupportedParam) return { message: `semantic WGSL does not support parameter '${unsupportedParam.name}'`, span: unsupportedParam.span };
+  if (!semanticWgslSharedBarrierShapeSupported(ir)) {
+    return { message: "semantic WGSL does not support shared-memory barrier shape", span: ir.span };
+  }
   const unsupportedMemory = ir.memory.find((symbol) => !semanticWgslMemorySymbolSupported(symbol));
-  if (unsupportedMemory) return `semantic WGSL does not support memory '${unsupportedMemory.name}'`;
+  if (unsupportedMemory) return { message: `semantic WGSL does not support memory '${unsupportedMemory.name}'`, span: unsupportedMemory.span };
   return undefined;
 }
 
@@ -275,11 +291,8 @@ export function emitSemanticKernelIrWgsl(
   ir: SemanticKernelIrModule,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): SemanticKernelIrWgslOutput {
-  const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
-  if (unsupported) throw semanticWgslError(`semantic WGSL does not support ${unsupported.kind}`, unsupported.span);
-  if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) throw semanticWgslError("semantic WGSL does not support required WebGPU features yet", ir.span);
-  const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
-  if (unsupportedParam) throw semanticWgslError(`semantic WGSL does not support parameter '${unsupportedParam.name}'`, unsupportedParam.span);
+  const failure = semanticKernelIrWgslPreflightFailure(ir);
+  if (failure) throw semanticWgslError(failure.message, failure.span);
 
   const textureSpecializations = collectSemanticTextureDescriptorSpecializations(ir, options);
   const storageOffsetBases = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets);
@@ -543,11 +556,12 @@ function unsupportedSemanticWgslOperation(
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") {
-          if (operation.target.pointer || !semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
+          if (operation.target.pointer || operation.target.valueType === "uchar" || !semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
-        if (!semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
+        if (operation.target.valueType === "uchar" && operation.target.dimensions.length > 0) return operation;
+        if (!semanticWgslLocalValueTypeSupported(operation.target.valueType)) return operation;
         if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init, operation.target.valueType, ir)) return operation;
         if (operation.target.dimensions.length === 0) {
           const vectorTarget = isSemanticFloatVectorType(operation.target.valueType);
@@ -647,6 +661,7 @@ function unsupportedSemanticWgslOperation(
 }
 
 function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][number]): boolean {
+  if (param.valueType === "uchar") return false;
   if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslValueTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
@@ -657,7 +672,7 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
 function semanticWgslFunctionParamSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): boolean {
-  return semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
+  return param.valueType !== "uchar" && semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
 }
 
 function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
@@ -673,7 +688,7 @@ function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memor
           : initializedConstantArraySupported(symbol)
       );
   }
-  if (symbol.kind === "device-global") return semanticWgslScalarTypeSupported(symbol.valueType);
+  if (symbol.kind === "device-global") return symbol.valueType !== "uchar" && semanticWgslScalarTypeSupported(symbol.valueType);
   if (symbol.kind === "texture") return symbol.valueType === "texture2d";
   return false;
 }
@@ -863,6 +878,10 @@ function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefin
 
 function semanticWgslValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return semanticValueTypeSupported(valueType);
+}
+
+function semanticWgslLocalValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
+  return semanticLocalValueTypeSupported(valueType);
 }
 
 function semanticWgslAssignmentMemoryRefSupported(
@@ -2456,6 +2475,11 @@ function emitSemanticAssignmentStatement(
   const value = targetType !== undefined && isSemanticFloatVectorType(targetType)
     ? emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations)
     : emitSemanticLocalScalarExpressionAs(expression.value, targetType, ir, names, options, textureSpecializations);
+  if (targetType === "uchar" && expression.operator !== "=") {
+    const binaryOperator = expression.operator.slice(0, -1);
+    const right = emitSemanticExpressionAs(expression.value, ir, names, "u32", options, textureSpecializations);
+    return `${target} = ${emitSemanticUcharValue(`(${target} ${binaryOperator} ${right})`)}`;
+  }
   if (semanticAssignmentBinaryOperator(expression.operator)) return `${target} ${expression.operator} ${value}`;
   return `${target} = ${value}`;
 }
@@ -3008,6 +3032,11 @@ function emitSemanticExpression(
         const value = targetType !== undefined && isSemanticFloatVectorType(targetType)
           ? emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations)
           : emitSemanticLocalScalarExpressionAs(expression.value, expression.target.valueType, ir, names, options, textureSpecializations);
+        if (targetType === "uchar" && expression.operator !== "=") {
+          const binaryOperator = expression.operator.slice(0, -1);
+          const right = emitSemanticExpressionAs(expression.value, ir, names, "u32", options, textureSpecializations);
+          return `(${target} = ${emitSemanticUcharValue(`(${target} ${binaryOperator} ${right})`)})`;
+        }
         if (expression.operator === "+=") return `(${target} += ${value})`;
         if (expression.operator === "-=") return `(${target} -= ${value})`;
         return `(${target} = ${value})`;
@@ -3707,6 +3736,9 @@ function emitSemanticCast(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  if (expression.valueType === "uchar") {
+    return emitSemanticUcharExpression(expression.expression, ir, names, options, textureSpecializations);
+  }
   const value = emitSemanticExpression(expression.expression, ir, names, options, textureSpecializations);
   const sourceType = "valueType" in expression.expression ? expression.expression.valueType : undefined;
   if (expression.valueType === "int" && sourceType === "uint") return `bitcast<i32>(${value})`;
@@ -3949,6 +3981,7 @@ function emitSemanticInitExpression(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (valueType === "bool") return emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations);
+  if (valueType === "uchar") return emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations);
   if (isSemanticFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
@@ -3962,7 +3995,25 @@ function emitSemanticLocalScalarExpressionAs(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (valueType === "bool") return emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations);
+  if (valueType === "uchar") return emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
+}
+
+function emitSemanticUcharExpression(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): string {
+  if (expression.kind === "cast" && expression.valueType === "uchar") {
+    return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  }
+  return emitSemanticUcharValue(emitSemanticExpressionAs(expression, ir, names, "i32", options, textureSpecializations));
+}
+
+function emitSemanticUcharValue(value: string): string {
+  return `(u32(i32(${value})) & 0xffu)`;
 }
 
 function emitSemanticBoolExpression(

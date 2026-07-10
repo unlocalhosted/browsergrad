@@ -2126,6 +2126,31 @@ __global__ void texture_uchar4(uint4* out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
   });
 
+  it("runs local uchar truncation through semantic WGSL on WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+texture<float, cudaTextureType2D, cudaReadModeElementType> tex;
+__global__ void local_uchar(uint *out) {
+  uchar value = (uchar)257;
+  value += 2;
+  uchar sample = tex2D<unsigned char>(tex, 0.5f, 0.5f);
+  out[0] = value;
+  out[1] = sample;
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(2) },
+      textures: { tex: { width: 1, height: 1, data: new Float32Array([255]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([3, 255]);
+  });
+
   it("runs compiled integer CAS atomics through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
