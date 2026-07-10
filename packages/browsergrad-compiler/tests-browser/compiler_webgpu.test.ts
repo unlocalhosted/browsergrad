@@ -461,6 +461,28 @@ __global__ void sharedScalarVectorView(float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([4, 14]);
   });
 
+  it("runs scalar shared-memory atomics through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedScalarAtomic(int *out) {
+  __shared__ int localCount;
+  if (threadIdx.x == 0) { localCount = 7; }
+  __syncthreads();
+  atomicAdd(&localCount, 1);
+  __syncthreads();
+  if (threadIdx.x == 1) { out[0] = localCount; }
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { out: new Int32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([9]);
+  });
+
   it("runs chained vector stores through semantic IR on native WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

@@ -4973,8 +4973,10 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<workgroup> localCount: atomic<i32>;");
-      expect(compiled.wgsl).toContain("atomicStore(&localCount, i32(7))");
+      expect(compiled.wgsl).toContain("atomicStore(&localCount, 7)");
       expect(compiled.wgsl).toContain("atomicAdd(&localCount, 1)");
       expect(compiled.wgsl).toContain("atomicLoad(&localCount)");
       expect([...semanticResult.buffers.out as Int32Array]).toEqual([9]);

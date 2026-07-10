@@ -5298,7 +5298,7 @@ __global__ void sharedHelperScoped(float *out) {
       out[0] = active;
     }
   }`, { workgroupSize: [1, 1, 1] });
-      expect(sharedScalarDistance.wgsl).toContain("bg_active = u32((end - start));");
+      expect(sharedScalarDistance.wgsl).toContain("bg_active = (end - start);");
       expect(sharedScalarDistance.wgsl).not.toContain("select(0, (i32(end) - i32(start))");
 
       const mismatchedPointerDistance = analyzeCudaLite(parseCudaLite(`
