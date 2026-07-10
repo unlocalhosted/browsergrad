@@ -23,6 +23,23 @@ export const SEMANTIC_ADDRESS_PREDICATE_CALLS: ReadonlySet<string> = new Set(CUD
 
 export const SEMANTIC_SUBGROUP_CALLS: ReadonlySet<string> = new Set(CUDA_SUBGROUP_CALL_NAMES);
 
+type SemanticBuiltinExpressionSupported = (expression: SemanticExpression) => boolean;
+
+export function semanticAssertCallSupported(args: readonly SemanticExpression[], expressionSupported: SemanticBuiltinExpressionSupported): boolean {
+  return args.length === 1 && args[0] !== undefined && expressionSupported(args[0]);
+}
+
+export function semanticNoopCallSupported(callee: string, args: readonly SemanticExpression[], expressionSupported: SemanticBuiltinExpressionSupported): boolean {
+  return SEMANTIC_NOOP_CALLS.has(callee) && args.every(expressionSupported);
+}
+
+export function semanticPrintfCallSupported(args: readonly SemanticExpression[], expressionSupported: SemanticBuiltinExpressionSupported): boolean {
+  const [format, ...rest] = args;
+  return format?.kind === "literal" &&
+    format.literalKind === "string" &&
+    rest.every(expressionSupported);
+}
+
 type SemanticSubgroupScalarArgRule = "all" | readonly number[];
 
 interface SemanticSubgroupCallShape {

@@ -101,6 +101,9 @@ import {
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
   semanticAddressPredicateAddressSpace,
+  semanticAssertCallSupported,
+  semanticNoopCallSupported,
+  semanticPrintfCallSupported,
   semanticSubgroupScalarArguments,
 } from "./semantic_builtin_calls.js";
 import {
@@ -736,9 +739,11 @@ function semanticReferenceCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  if (operation.callee === "assert") return operation.args.length === 1 && semanticReferenceExpressionSupported(operation.args[0]!, "scalar", compiled);
-  if (operation.callee === "printf") return semanticReferencePrintfSupported(operation, compiled);
-  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  if (operation.callee === "assert") return semanticAssertCallSupported(operation.args, (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  if (operation.callee === "printf") return semanticPrintfCallSupported(operation.args, (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) {
+    return semanticNoopCallSupported(operation.callee, operation.args, (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  }
   if (operation.callee === "curand_init") {
     return semanticReferenceCurandCallSupported({
       kind: "call",
@@ -767,16 +772,6 @@ function semanticReferenceCallSupported(
     ),
     (item, expected) => semanticReferenceExpressionSupported(item, expected, compiled),
   );
-}
-
-function semanticReferencePrintfSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
-  compiled: CompiledCudaLiteKernel,
-): boolean {
-  const [format, ...args] = operation.args;
-  return format?.kind === "literal" &&
-    format.literalKind === "string" &&
-    args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
 }
 
 function semanticReferenceVoidFunctionCallSupported(

@@ -63,6 +63,9 @@ import {
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
   semanticAddressPredicateAddressSpace,
+  semanticAssertCallSupported,
+  semanticNoopCallSupported,
+  semanticPrintfCallSupported,
   semanticSubgroupScalarArguments,
 } from "./semantic_builtin_calls.js";
 import {
@@ -1264,9 +1267,11 @@ function semanticWgslCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
-  if (operation.callee === "assert") return operation.args.length === 1 && semanticWgslExpressionSupported(operation.args[0]!, "scalar", ir);
-  if (operation.callee === "printf") return semanticWgslPrintfSupported(operation, ir);
-  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return operation.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  if (operation.callee === "assert") return semanticAssertCallSupported(operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  if (operation.callee === "printf") return semanticPrintfCallSupported(operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) {
+    return semanticNoopCallSupported(operation.callee, operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  }
   if (operation.callee === "curand_init") {
     return semanticWgslCurandCallSupported({
       kind: "call",
@@ -1291,16 +1296,6 @@ function semanticWgslCallSupported(
     (name) => localArraySymbol(ir, name),
     (item, expected) => semanticWgslExpressionSupported(item, expected, ir),
   );
-}
-
-function semanticWgslPrintfSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  const [format, ...args] = operation.args;
-  return format?.kind === "literal" &&
-    format.literalKind === "string" &&
-    args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
 }
 
 function semanticWgslVoidFunctionCallSupported(
