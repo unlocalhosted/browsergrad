@@ -84,6 +84,7 @@ import {
   isCudaBarrierCallName,
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
+import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
 import {
   cudaArithmeticReduceOpForCall,
   cudaVoteOpForCall,
@@ -563,6 +564,12 @@ function unsupportedSemanticWgslOperation(
           !semanticWgslStorageBaseSupported(operation.target.base, ir)
         ) return operation;
         if (!semanticWgslStoreValueSupported(operation, ir)) return operation;
+        break;
+      case "copy":
+        if (!semanticWgslCopySupported(operation, ir)) return operation;
+        break;
+      case "copy-fence":
+        if (!isCudaCpAsyncFenceCall(operation.callee)) return operation;
         break;
       case "surface-write":
         if (!semanticWgslSurfaceWriteSupported(operation, ir)) return operation;
@@ -1062,6 +1069,21 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol !== undefined && symbol.valueType === ref.valueType;
+}
+
+function semanticWgslCopySupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  return operation.elements >= 1 &&
+    operation.elements <= 16 &&
+    operation.source.valueType !== undefined &&
+    operation.source.valueType === operation.target.valueType &&
+    operation.source.fields.length === 0 &&
+    operation.target.fields.length === 0 &&
+    operation.target.addressSpace !== "constant" &&
+    semanticWgslTypedMemoryRefSupported(operation.source, ir) &&
+    semanticWgslTypedMemoryRefSupported(operation.target, ir);
 }
 
 function semanticWgslVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
@@ -1720,6 +1742,10 @@ function emitSemanticOperation(
     }
     case "store":
       return emitSemanticStoreOperation(operation, ir, names, indentLevel, options, textureSpecializations);
+    case "copy":
+      return emitSemanticCopyOperation(operation, ir, names, indentLevel, options);
+    case "copy-fence":
+      return [`${prefix}// cp.async fence omitted: ${operation.callee}`];
     case "surface-write":
       return emitSemanticSurfaceWrite(operation, ir, names, indentLevel, options, textureSpecializations);
     case "surface-read-store":
@@ -1822,6 +1848,48 @@ function emitSemanticStoreOperation(
     ...sequence.prefix,
     `${prefix}${emitSemanticStore({ ...operation, value: sequence.value }, ir, names, options, textureSpecializations)};`,
   ];
+}
+
+function emitSemanticCopyOperation(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  return Array.from({ length: operation.elements }, (_, offset) => {
+    const source = semanticCopyMemoryRefAt(operation.source, offset);
+    const target = semanticCopyMemoryRefAt(operation.target, offset);
+    return `${prefix}${emitSemanticMemoryWrite(target, emitSemanticMemoryRead(source, ir, names, options), ir, names, options)};`;
+  });
+}
+
+function semanticCopyMemoryRefAt(ref: SemanticMemoryRef, offset: number): SemanticMemoryRef {
+  if (offset === 0 && ref.indices.length > 0) return ref;
+  const offsetExpression: SemanticExpression = {
+    kind: "literal",
+    literalKind: "number",
+    value: offset,
+    valueType: "int",
+    span: ref.span,
+  };
+  if (ref.indices.length === 0) return { ...ref, indices: [offsetExpression] };
+  const index = ref.indices.at(-1)!;
+  return {
+    ...ref,
+    indices: [
+      ...ref.indices.slice(0, -1),
+      {
+        kind: "binary",
+        operator: "+",
+        left: index,
+        right: offsetExpression,
+        valueType: semanticExpressionValueType(index) ?? "int",
+        span: ref.span,
+      },
+    ],
+  };
 }
 
 function emitSemanticSequenceStatement(

@@ -42,6 +42,10 @@ import {
   isCudaPointerIdentityCallName,
 } from "./cuda_pointer_calls.js";
 import {
+  isCudaCpAsyncCopyCall,
+  isCudaCpAsyncFenceCall,
+} from "./cuda_cp_async.js";
+import {
   CUDA_BARRIER_CALL_NAMES,
   CUDA_FENCE_CALL_NAMES,
 } from "./cuda_sync_calls.js";
@@ -257,6 +261,8 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "cooperative-group-declare"; readonly declaration: CudaLiteCooperativeGroupDecl; readonly span: SourceSpan }
   | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
+  | { readonly kind: "copy"; readonly source: SemanticMemoryRef; readonly target: SemanticMemoryRef; readonly elements: number; readonly span: SourceSpan }
+  | { readonly kind: "copy-fence"; readonly callee: string; readonly span: SourceSpan }
   | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "surface-read-store"; readonly target: SemanticExpression; readonly surface: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly valueType?: CudaLiteScalarType; readonly span: SourceSpan }
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
@@ -318,6 +324,10 @@ export function walkSemanticOperation(
       walkSemanticMemoryRef(operation.target, visitExpression);
       walkSemanticExpression(operation.value, visitExpression);
       for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
+      return;
+    case "copy":
+      walkSemanticMemoryRef(operation.source, visitExpression);
+      walkSemanticMemoryRef(operation.target, visitExpression);
       return;
     case "surface-write":
       walkSemanticExpression(operation.surface, visitExpression);
@@ -455,6 +465,8 @@ export function isSemanticKernelIrOperation(
     case "cooperative-group-declare":
     case "load":
     case "store":
+    case "copy":
+    case "copy-fence":
     case "surface-write":
     case "surface-read-store":
     case "atomic":
@@ -818,6 +830,8 @@ function lowerStatement(
       return { kind: "inline-asm", statement, span: statement.span };
     }
     case "expr": {
+      const cpAsync = semanticCpAsyncOperation(statement.expression, scope, statement.span);
+      if (cpAsync) return cpAsync;
       const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const expression = lowerExpression(statement.expression, scope);
@@ -1247,6 +1261,47 @@ function cacheHintStoreTarget(
   if (pointer === undefined) return undefined;
   const target = pointerAliasValueExpression(pointer, scope, pointer.span);
   return target === undefined ? undefined : memoryRefFromExpression(target);
+}
+
+function semanticCpAsyncOperation(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (expression.kind !== "call" || expression.callee.kind !== "identifier") return undefined;
+  const callee = expression.callee.name;
+  if (isCudaCpAsyncFenceCall(callee)) return { kind: "copy-fence", callee, span };
+  if (!isCudaCpAsyncCopyCall(callee)) return undefined;
+  const [targetSource, sourceSource, byteCountSource] = expression.args;
+  if (!targetSource || !sourceSource) return undefined;
+  const target = semanticPointerArgumentMemoryRef(targetSource, scope);
+  const source = semanticPointerArgumentMemoryRef(sourceSource, scope);
+  const byteCount = byteCountSource === undefined ? undefined : staticNumberValue(lowerExpression(byteCountSource, scope));
+  if (
+    !target ||
+    !source ||
+    target.valueType === undefined ||
+    target.valueType !== source.valueType ||
+    target.fields.length > 0 ||
+    source.fields.length > 0 ||
+    byteCount === undefined ||
+    !Number.isInteger(byteCount) ||
+    byteCount <= 0
+  ) return undefined;
+  const elementBytes = sizeofCudaType(source.valueType) ?? 0;
+  if (elementBytes <= 0 || byteCount % elementBytes !== 0) return undefined;
+  const elements = byteCount / elementBytes;
+  if (elements < 1 || elements > 16) return undefined;
+  return { kind: "copy", source, target, elements, span };
+}
+
+function semanticPointerArgumentMemoryRef(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticMemoryRef | undefined {
+  const lowered = pointerAliasValueExpression(expression, scope, expression.span) ?? lowerExpression(expression, scope);
+  const value = lowered.kind === "unary" && lowered.operator === "&" ? lowered.argument : lowered;
+  return memoryRefFromExpression(value);
 }
 
 function semanticMathOutVarDeclOperations(
@@ -1801,6 +1856,10 @@ function pointerAliasValueExpression(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   span: SourceSpan,
 ): SemanticExpression | undefined {
+  if (expression.kind === "identifier") {
+    const symbol = scope.get(expression.name);
+    if (symbol?.kind === "shared" && !symbol.pointer && symbol.dimensions.length > 0) return undefined;
+  }
   if (isDirectSharedPointerAddress(expression, scope)) return undefined;
   const alias = localPointerAliasForInitializer(expression, scope);
   if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
@@ -2207,7 +2266,7 @@ function localPointerAliasForInitializer(
         pointerBaseIndices: [zeroExpression(expression.span)],
       };
     }
-    if (!root || root.kind !== "local" || root.dimensions.length !== 1 || root.pointer) return undefined;
+    if (!root || (root.kind !== "local" && root.kind !== "shared") || root.dimensions.length !== 1 || root.pointer) return undefined;
     return {
       pointerRoot: root.name,
       pointerAddressSpace: root.addressSpace,

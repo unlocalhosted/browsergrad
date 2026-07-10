@@ -4018,15 +4018,36 @@ __global__ void sharedHelperScoped(float *out) {
       expect([...result.buffers.y as Float32Array]).toEqual([10, 20, 30, 41, 1, 2, 3, 5]);
     });
 
+  it("lowers shared-array decay into a semantic pointer alias", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void shared_array_decay(float* out) {
+    __shared__ float tile[4];
+    int tid = threadIdx.x;
+    float* base = tile + 1;
+    base[tid] = out[tid];
+    __syncthreads();
+    out[tid] = base[1 - tid];
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = { buffers: { out: new Float32Array([3, 7, 0, 0]) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const result = runCompiledKernelReference(compiled, input, launch);
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("var<workgroup> tile: array<f32, 4>;");
+      expect(compiled.wgsl).not.toContain("var base");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([7, 3, 0, 0]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+    });
+
   it("lowers cp.async pointer-form copies to synchronous shared-memory copies", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void async_copy(const float *input, float *output) {
     __shared__ float tile[4];
-    if (threadIdx.x < 1) {
-      CP_ASYNC_CG(&tile[0], &input[0], 16);
-      CP_ASYNC_COMMIT_GROUP();
-      CP_ASYNC_WAIT_GROUP(0);
-    }
+    CP_ASYNC_CG(&tile[0], &input[0], 16);
+    CP_ASYNC_COMMIT_GROUP();
+    CP_ASYNC_WAIT_GROUP(0);
     __syncthreads();
     output[threadIdx.x] = tile[threadIdx.x] + 1.0f;
   }`, { workgroupSize: [4, 1, 1] });
@@ -4035,11 +4056,22 @@ __global__ void sharedHelperScoped(float *out) {
         { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
 
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(JSON.stringify(compiled.kernelIr.operations)).toContain('"kind":"copy"');
+      expect(JSON.stringify(compiled.kernelIr.operations)).toContain('"kind":"copy-fence"');
+      expect(compiled.wgsl).toContain("tile[0u] = input[0u];");
+      expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
       expect(compiled.wgsl).toContain("cp.async fence omitted: CP_ASYNC_WAIT_GROUP");
       expect(compiled.wgsl).toContain("workgroupBarrier()");
       expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
+      expect([...semanticResult.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
   it("lowers cuRAND calls against storage-backed state arrays", () => {

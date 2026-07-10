@@ -7,6 +7,7 @@ export function semanticOperationExpressions(operation: SemanticKernelIrOperatio
   const expressions: SemanticExpression[] = [];
   if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
   if (operation.kind === "store") expressions.push(...operation.target.indices, operation.value);
+  if (operation.kind === "copy") expressions.push(...operation.source.indices, ...operation.target.indices);
   if (operation.kind === "surface-write") expressions.push(operation.surface, operation.value, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
   if (operation.kind === "surface-read-store") expressions.push(operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
   if (operation.kind === "atomic") expressions.push(...operation.args, ...(operation.target?.indices ?? []));
@@ -64,6 +65,8 @@ export function isSemanticKernelIrOperation(
     case "cooperative-group-declare":
     case "load":
     case "store":
+    case "copy":
+    case "copy-fence":
     case "surface-write":
     case "surface-read-store":
     case "atomic":

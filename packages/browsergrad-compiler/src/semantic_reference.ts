@@ -28,6 +28,7 @@ import {
   isCudaBarrierCallName,
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
+import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
 import {
   cudaArithmeticReduceOpForCall,
   cudaBitwiseReduceOpForCall,
@@ -308,6 +309,12 @@ function unsupportedSemanticReferenceOperation(
         ) return operation;
         if (!semanticReferenceValueExpressionSupported(operation.value, compiled)) return operation;
         break;
+      case "copy":
+        if (!semanticReferenceCopySupported(operation, compiled)) return operation;
+        break;
+      case "copy-fence":
+        if (!isCudaCpAsyncFenceCall(operation.callee)) return operation;
+        break;
       case "surface-write":
         if (!semanticReferenceSurfaceWriteSupported(operation, compiled)) return operation;
         break;
@@ -507,6 +514,21 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol === undefined || symbol.valueType === ref.valueType;
+}
+
+function semanticReferenceCopySupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return operation.elements >= 1 &&
+    operation.elements <= 16 &&
+    operation.source.valueType !== undefined &&
+    operation.source.valueType === operation.target.valueType &&
+    operation.source.fields.length === 0 &&
+    operation.target.fields.length === 0 &&
+    operation.target.addressSpace !== "constant" &&
+    semanticReferenceTypedMemoryRefSupported(operation.source, compiled) &&
+    semanticReferenceTypedMemoryRefSupported(operation.target, compiled);
 }
 
 function semanticReferenceVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
@@ -1166,6 +1188,11 @@ function execSemanticOperations(
         }
         writeMemoryValue(operation.target, storeValueExpression(operation, context), context);
         break;
+      case "copy":
+        execSemanticCopy(operation, context);
+        break;
+      case "copy-fence":
+        break;
       case "surface-write":
         execSemanticSurfaceWrite(operation, context);
         break;
@@ -1232,6 +1259,17 @@ function execSemanticOperations(
   return "fallthrough";
 }
 
+function execSemanticCopy(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
+  context: SemanticReferenceContext,
+): void {
+  for (let offset = 0; offset < operation.elements; offset++) {
+    const source = semanticCopyMemoryRefAt(operation.source, offset);
+    const target = semanticCopyMemoryRefAt(operation.target, offset);
+    writeMemoryValue(target, readMemoryValue(source, context), context);
+  }
+}
+
 function execSemanticScopedOperations(
   operations: readonly SemanticKernelIrOperation[],
   context: SemanticReferenceContext,
@@ -1264,6 +1302,8 @@ function* execSemanticBarrierOperations(
         if (operation.target.addressSpace !== "shared") context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         break;
       case "store":
+      case "copy":
+      case "copy-fence":
       case "surface-write":
       case "surface-read-store":
       case "atomic":
@@ -4112,6 +4152,33 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     if (ok) buffer[index] = laneValue;
     context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
   }
+}
+
+function semanticCopyMemoryRefAt(ref: SemanticMemoryRef, offset: number): SemanticMemoryRef {
+  if (offset === 0 && ref.indices.length > 0) return ref;
+  const offsetExpression: SemanticExpression = {
+    kind: "literal",
+    literalKind: "number",
+    value: offset,
+    valueType: "int",
+    span: ref.span,
+  };
+  if (ref.indices.length === 0) return { ...ref, indices: [offsetExpression] };
+  const index = ref.indices.at(-1)!;
+  return {
+    ...ref,
+    indices: [
+      ...ref.indices.slice(0, -1),
+      {
+        kind: "binary",
+        operator: "+",
+        left: index,
+        right: offsetExpression,
+        valueType: semanticExpressionValueType(index) ?? "int",
+        span: ref.span,
+      },
+    ],
+  };
 }
 
 function vectorFieldMemoryLanes(ref: SemanticMemoryRef): readonly number[] | undefined {

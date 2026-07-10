@@ -420,6 +420,10 @@ function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boo
       return true;
     case "store":
       return true;
+    case "copy":
+      return true;
+    case "copy-fence":
+      return false;
     case "surface-write":
       return true;
     case "surface-read-store":

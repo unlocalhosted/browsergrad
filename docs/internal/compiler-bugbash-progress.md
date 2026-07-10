@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T12:00:12Z
+Last updated: 2026-07-10T12:11:29Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,7 +9,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `188/354`, up from `161/354`; `166` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `193/354`, up from `161/354`; `161` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
 | Active work item | Device-helper barrier scheduling, then highest-impact remaining semantic WGSL fallback class |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic cp.async copy IR: CUDA `CP_ASYNC_CA`/`CP_ASYNC_CG`/`CP_ASYNC_BULK` with static byte-aligned copies now lower to typed semantic `copy` operations; commit/wait macros lower to explicit semantic `copy-fence` operations. Reference and WGSL consume the same typed `MemoryRef` source/target contract, with fences documented native no-ops because emission is synchronous. Shared-array decay now produces local pointer-alias metadata while preserving direct shared-array helper arguments. Exact native WebGPU CP async fixture passed `1/0`; compiler unit tests passed `762/0`; browser tests passed `111/0`; CUDA-samples semantic-direct lowering reached `193/354`, AST fallback `161`, plan compilation `357/357`, hard failures `0`.
 - Semantic shared-memory loop scheduler: semantic reference now runs each lane as a resumable semantic-IR continuation until the next direct barrier, verifies all active lanes converge, and resumes uniform `for`/`while`/`do-while` loops correctly. Fixed-rank shared arrays emit one flat row-major `var<workgroup>` array, reusing semantic IR's existing flattened index contract; multidimensional shared arrays passed through pointer helpers remain deliberately rejected until that pointer ABI is flattened. CUDA-samples semantic-direct lowering is now `188/354`, with `357/357` plan compilation and `0` hard failures. Full `verify:compiler` passed, compiler unit tests passed `761/0`, and real WebGPU tests passed `110/0`.
 - Cooperative barriers and typed cache-hint loads: `cg::sync(block)` is included in divergent-return barrier safety analysis and modeled as a uniform semantic barrier; cooperative-group declarations are semantic-reference metadata. Cache-hint pointer lowering now preserves vector reinterpret-view type and lane scaling through address-of/index aliases, so `__ldcs(&float4View[idx])` emits a native `vec4<f32>` load rather than a scalar mismatch. WGSL identifiers reserve `pass`, and the changed-test router now executes the compiler test directory rather than a stale removed filename. Focused unit coverage passed `3/0`; exact native WebGPU cache-hint fixture passed `1/0/0`; full compiler verification passed `761/0`; browser suite passed `110/0`.
 - Semantic dynamic-launch child signature slice: semantic models now publish typed, source-spanned `launchableEntries` for kernel and device-function child targets; host-dynamic planning resolves child names and binds child input from this semantic inventory, not `compiled.ast.kernels` or `compiled.ast.functions`; focused dynamic-launch suite passed `26/0`, typecheck passed, and lint passed. Parent launch traversal and host expression evaluation remain AST-shaped work, explicitly tracked below.
@@ -1034,6 +1035,8 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | Semantic cp.async copies | `CP_ASYNC_*` macros remained opaque semantic `call` operations, so real async-copy matrix kernels still depended on AST WGSL emission despite having synchronous browser-native semantics | lower static byte-aligned copies into typed semantic `copy` operations, lower commit/wait macros into explicit `copy-fence` operations, and execute/emit through shared `MemoryRef` contracts | focused semantic unit passed; exact native WebGPU CP async fixture `1/0`; full compiler `762/0`; browser `111/0`; CUDA-samples semantic-direct `193/354`, fallback `161` |
+| Fixed | Shared-array pointer decay | local pointers initialized from `__shared__` array decay were emitted as backend-visible pointer declarations instead of resolving to shared-memory aliases | allow fixed one-dimensional shared arrays to seed local pointer aliases while keeping direct shared-array function arguments as pointer-bearing symbols | focused semantic shared-alias coverage passed; no corpus semantic-direct regression |
 | Fixed | Vector cache-hint pointer views | `__ldcs(&view[idx])` over `const float4* view = reinterpret_cast<const float4*>(inp)` discarded the view type and vector-stride while flattening the alias, producing invalid WGSL `var value: vec4<f32> = inp[...]` | recover pointee type through casts, aliases, indexing, address-of, arithmetic, identity calls, and matching conditionals; use that type while computing pointer-alias element offsets | focused cache-hint units `3/0`; exact native WebGPU `helpers:vector-cache-hint-dynamic-read` `1/0/0`; full compiler `761/0`; browser `110/0` |
 | Fixed | Cooperative barrier semantic contract | direct `cg::sync(block)` needed the same divergent-return safety proof and semantic-reference barrier metadata as `__syncthreads`, while generic member `sync` must not be conflated with grid phases | recognize namespace-qualified `cg::sync` only in uniformity analysis and treat cooperative-group declarations as semantic-reference metadata | cooperative unit coverage plus browser WebGPU fixture passed; full compiler `761/0`; browser `110/0` |
 | Fixed | Changed-test routing | `verify:changed:fast` targeted a removed single compiler test file, weakening the intended compiler-unit gate | route compiler changes to `tests/compiler` and match the directory's test files | test-scope gate passed; changed-fast selected the full compiler unit scope |

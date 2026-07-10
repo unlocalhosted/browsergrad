@@ -522,6 +522,28 @@ __global__ void cacheHint(const float* x, float* y) {
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
 
+  it("runs semantic CP_ASYNC_CG copies through real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void asyncCopy(const float* input, float* output) {
+  __shared__ float tile[4];
+  CP_ASYNC_CG(&tile[0], &input[0], 16);
+  CP_ASYNC_COMMIT_GROUP();
+  CP_ASYNC_WAIT_GROUP(0);
+  __syncthreads();
+  output[threadIdx.x] = tile[threadIdx.x] + 1.0f;
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.output as Float32Array]).toEqual([...expected.buffers.output as Float32Array]);
+    expect([...actual.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
   it("runs u32-backed bool pointer storage through real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
