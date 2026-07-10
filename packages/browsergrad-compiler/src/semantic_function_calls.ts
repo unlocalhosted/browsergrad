@@ -95,21 +95,24 @@ function semanticPointerFunctionOperationSupported(
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
 ): boolean {
   if (operation.kind === "atomic") return operation.target !== undefined && pointerParams.has(operation.target.base);
-  if (operation.kind === "store") return pointerParams.has(operation.target.base) && operation.target.fields.length > 0;
-  if (operation.kind === "return" && operation.value) return semanticPointerFunctionExpressionSupported(operation.value, pointerParams, atomicCallTarget);
+  if (operation.kind === "store") return pointerParams.has(operation.target.base);
+  if (operation.kind === "return" && operation.value) return semanticPointerFunctionExpressionSupported(operation.value, pointerParams, memoryRefFromIndex, atomicCallTarget);
   if (operation.kind === "expression" && operation.expression.kind === "update") {
     const ref = memoryRefFromIndex(operation.expression.argument);
     return ref !== undefined && pointerParams.has(ref.base);
   }
-  if (operation.kind === "expression") return semanticPointerFunctionExpressionSupported(operation.expression, pointerParams, atomicCallTarget);
+  if (operation.kind === "expression") return semanticPointerFunctionExpressionSupported(operation.expression, pointerParams, memoryRefFromIndex, atomicCallTarget);
   return false;
 }
 
 function semanticPointerFunctionExpressionSupported(
   expression: SemanticExpression,
   pointerParams: ReadonlySet<string>,
+  memoryRefFromIndex: (expression: SemanticExpression) => SemanticMemoryRef | undefined,
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
 ): boolean {
+  const ref = memoryRefFromIndex(expression);
+  if (ref) return pointerParams.has(ref.base);
   if (expression.kind !== "call") return false;
   const target = atomicCallTarget(expression);
   return target !== undefined && pointerParams.has(target.base);

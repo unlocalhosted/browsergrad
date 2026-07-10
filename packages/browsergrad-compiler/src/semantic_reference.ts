@@ -882,13 +882,10 @@ function semanticReferenceExpressionSupported(
       return isBuiltinVectorMember(expression) || semanticReferenceVectorMemberSupported(expression, compiled);
     case "index":
       if (semanticReferenceVectorIndexSupported(expression, compiled)) return true;
-      if (expected === "any" && isSemanticFloatVectorType(expression.valueType)) {
-        const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
-        return compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled);
-      }
       {
         const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
-        return expected === "scalar" && (compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled));
+        const supported = compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled);
+        return supported && (expected === "any" || !isSemanticFloatVectorType(expression.valueType));
       }
     case "cast":
       return !expression.pointer && semanticReferenceExpressionSupported(expression.expression, "scalar", compiled);

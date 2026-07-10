@@ -632,9 +632,13 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       );
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32");
       expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
-      expect(compiled.wgsl).toContain("loadAt(0u, (0u + u32(1)), idx");
+      expect(compiled.wgsl).toContain("fn loadAt(ptr_buffer: u32, ptr_base: u32, offset: i32");
+      expect(compiled.wgsl).toContain("return bg_ptr_read_f32(ptr_buffer, u32((i32(ptr_base) + offset)))");
       expect(compiled.wgsl).toContain("addAt(1u, 0u, idx");
       expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
     });
@@ -733,7 +737,10 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn copyArrayParam(out_buffer_arg: u32, out_base_arg: u32, src_buffer_arg: u32, src_base_arg: u32");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("fn copyArrayParam(out_buffer: u32, out_base: u32");
+      expect(compiled.wgsl).toContain("src__bg_shared_ptr: ptr<workgroup, array<f32, 2>>");
       expect([...result.buffers.out as Float32Array]).toEqual([6.25]);
     });
 
@@ -1920,7 +1927,10 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("read_one(0u, (0u + u32(1))");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("read_one(0u, 1u");
       expect([...result.buffers.out as Float32Array]).toEqual([9]);
     });
 
@@ -3435,7 +3445,9 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
     reduce_pair(x);
   }`, { features: { "shader-f16": true }, f16Mode: "f32", workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("bg_ptr_write_f16x2(v_buffer, (v_base + (u32(0) * 2u)), (bg_ptr_read_f16x2(v_buffer, (v_base + (u32(0) * 2u))) + bg_ptr_read_f16x2(v_buffer, (v_base + (u32(1) * 2u)))))");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("bg_ptr_write_f16x2(v_buffer, (v_base + (0u * 2u)), (bg_ptr_read_f16x2(v_buffer, (v_base + (0u * 2u))) + bg_ptr_read_f16x2(v_buffer, (v_base + (1u * 2u)))))");
       expect(compiled.wgsl).not.toMatch(/vec2<f32>\(f32\(\(bg_ptr_read_f16x2/u);
     });
 

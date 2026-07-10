@@ -985,6 +985,7 @@ function semanticWgslAtomicSupported(
   if (!atomicOp) return false;
   if (!operation.target || (operation.target.addressSpace !== "storage" && operation.target.addressSpace !== "device-global" && operation.target.addressSpace !== "shared")) return false;
   if (!semanticWgslAtomicMemoryRefSupported(operation.target, ir)) return false;
+  if (!semanticWgslPointerAtomicSupported(operation.callee, operation.target, ir)) return false;
   if (operation.target.addressSpace === "storage" && operation.target.indices.length !== 1 && !semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) return false;
   if (operation.target.fields.length > 0) return false;
   if (!semanticWgslAtomicValueTypeSupported(operation.callee, operation.target.valueType)) return false;
@@ -1275,6 +1276,7 @@ function semanticWgslAtomicCallSupported(
   const target = semanticAtomicCallTarget(expression);
   if (!target || (target.addressSpace !== "storage" && target.addressSpace !== "device-global" && target.addressSpace !== "shared")) return false;
   if (!semanticWgslAtomicMemoryRefSupported(target, ir)) return false;
+  if (!semanticWgslPointerAtomicSupported(expression.callee.name, target, ir)) return false;
   if (target.addressSpace === "storage" && target.indices.length !== 1 && !semanticWgslFunctionStoragePointerParam(ir, target.base)) return false;
   if (target.fields.length > 0) return false;
   if (!semanticWgslAtomicValueTypeSupported(expression.callee.name, target.valueType)) return false;
@@ -1282,6 +1284,15 @@ function semanticWgslAtomicCallSupported(
   const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
   return expression.args.length >= scalarArgIndices.length + 1 &&
     scalarArgIndices.every((index) => semanticWgslExpressionSupported(expression.args[index]!, "scalar", ir));
+}
+
+function semanticWgslPointerAtomicSupported(
+  callee: string,
+  target: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+): boolean {
+  return semanticWgslFunctionStoragePointerParam(ir, target.base) === undefined ||
+    callee === "atomicCAS" || callee === "atomicCAS_system";
 }
 
 function semanticWgslAtomicMemoryRefSupported(
@@ -1421,13 +1432,10 @@ function semanticWgslExpressionSupported(
         semanticWgslVectorMemberSupported(expression, ir);
     case "index":
       if (semanticWgslVectorIndexSupported(expression, ir)) return true;
-      if (expected === "any" && isSemanticFloatVectorType(expression.valueType)) {
-        const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
-        return ir === undefined ? semanticWgslMemoryRefSupported(ref) : semanticWgslTypedMemoryRefSupported(ref, ir);
-      }
       {
         const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
-        return expected === "scalar" && (ir === undefined ? semanticWgslMemoryRefSupported(ref) : semanticWgslTypedMemoryRefSupported(ref, ir));
+        const supported = ir === undefined ? semanticWgslMemoryRefSupported(ref) : semanticWgslTypedMemoryRefSupported(ref, ir);
+        return supported && (expected === "any" || !isSemanticFloatVectorType(expression.valueType));
       }
     case "cast":
       return !expression.pointer && semanticWgslExpressionSupported(expression.expression, "scalar", ir);
