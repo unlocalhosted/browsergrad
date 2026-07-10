@@ -119,7 +119,7 @@ import {
   referenceCurandNormalPair as curandNormalPair,
   referenceCurandPoissonDraw as curandPoissonDraw,
 } from "./reference_curand.js";
-import { isSemanticMathCallName, semanticMathCallArity } from "./semantic_math_intrinsics.js";
+import { semanticMathCallArgumentsSupported } from "./semantic_math_intrinsics.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
   semanticLocalArrayFillCallSupported,
@@ -539,9 +539,11 @@ function semanticReferenceLocalArrayInitSupported(
 }
 
 function semanticReferenceMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
-  if (expression.callee.kind !== "symbol" || !isSemanticMathCallName(expression.callee.name)) return false;
-  const arity = semanticMathCallArity(expression.callee.name);
-  return expression.args.length === arity && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+  return semanticMathCallArgumentsSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    (arg) => semanticReferenceExpressionSupported(arg, "scalar"),
+  );
 }
 
 function semanticReferenceCurandCallSupported(

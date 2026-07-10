@@ -119,7 +119,7 @@ import {
 } from "./semantic_wgsl_types.js";
 import {
   SEMANTIC_MATH_CALLS,
-  semanticMathCallArity,
+  semanticMathCallArgumentsSupported,
 } from "./semantic_math_intrinsics.js";
 import { semanticTextureSurfaceValueTypeSupported } from "./semantic_texture_surface.js";
 import {
@@ -1073,9 +1073,11 @@ function semanticWgslLocalArrayInitSupported(
 }
 
 function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
-  if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
-  const arity = semanticMathCallArity(expression.callee.name);
-  return expression.args.length === arity && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
+  return semanticMathCallArgumentsSupported(
+    expression.callee.kind === "symbol" ? expression.callee.name : undefined,
+    expression.args,
+    (arg) => semanticWgslExpressionSupported(arg, "scalar"),
+  );
 }
 
 function semanticWgslCurandCallSupported(

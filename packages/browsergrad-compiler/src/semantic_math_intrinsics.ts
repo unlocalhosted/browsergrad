@@ -1,3 +1,5 @@
+import type { SemanticExpression } from "./semantic_ir.js";
+
 export const SEMANTIC_FP8_CALLS: ReadonlySet<string> = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
 
 export const SEMANTIC_HALF_CONVERSION_CALLS: ReadonlySet<string> = new Set([
@@ -557,6 +559,17 @@ export const SEMANTIC_MATH_CALLS: ReadonlyMap<string, string> = new Map([
 
 export function isSemanticMathCallName(name: string): boolean {
   return SEMANTIC_MATH_CALLS.has(name);
+}
+
+export function semanticMathCallArgumentsSupported(
+  name: string | undefined,
+  args: readonly SemanticExpression[],
+  expressionSupported: (expression: SemanticExpression) => boolean,
+): boolean {
+  return name !== undefined &&
+    isSemanticMathCallName(name) &&
+    args.length === semanticMathCallArity(name) &&
+    args.every(expressionSupported);
 }
 
 export function semanticMathCallArity(name: string): number {
