@@ -1066,6 +1066,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
   if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
+  if (semanticWgslSharedScalarVectorView(ref, ir)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol !== undefined && symbol.valueType === ref.valueType;
@@ -4960,6 +4961,15 @@ function semanticWgslSharedVectorMemoryRef(ref: SemanticMemoryRef, ir: SemanticK
   const pointer = semanticWgslFunctionSharedPointerParam(ir, ref.base);
   if (pointer) return pointer.valueType === ref.valueType;
   return sharedMemorySymbols(ir).some((symbol) => symbol.name === ref.base && symbol.valueType === ref.valueType);
+}
+
+function semanticWgslSharedScalarVectorView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  const valueType = ref.valueType;
+  if (ref.addressSpace !== "shared" || !valueType || !isSemanticFloatVectorType(valueType) || ref.indices.length === 0) return false;
+  const scalar = cudaVectorScalarType(valueType);
+  return scalar !== undefined && sharedMemorySymbols(ir).some((symbol) =>
+    symbol.name === ref.base && symbol.valueType === scalar,
+  );
 }
 
 function semanticCurandStateAddressSpace(expression: SemanticExpression | undefined): "function" | "storage" | "workgroup" | undefined {

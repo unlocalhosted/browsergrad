@@ -511,9 +511,19 @@ function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledC
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
+  if (semanticReferenceSharedScalarVectorView(ref, compiled)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol === undefined || symbol.valueType === ref.valueType;
+}
+
+function semanticReferenceSharedScalarVectorView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  const valueType = ref.valueType;
+  if (ref.addressSpace !== "shared" || !valueType || !isSemanticFloatVectorType(valueType) || ref.indices.length === 0) return false;
+  const scalar = cudaVectorScalarType(valueType);
+  return scalar !== undefined && compiled.kernelIr.memory.some((symbol) =>
+    symbol.name === ref.base && symbol.kind === "shared" && symbol.valueType === scalar,
+  );
 }
 
 function semanticReferenceCopySupported(
@@ -4086,7 +4096,6 @@ function atomicMemoryUsesFloatBits(ref: SemanticMemoryRef, context: SemanticRefe
 function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number[] {
   if (!isSemanticFloatVectorType(ref.valueType)) throw semanticReferenceError("semantic reference vector read requires vector memory type", ref.span);
   const laneCount = cudaVectorLaneCount(ref.valueType);
-  const base = flatIndex(ref, context) * semanticReferenceVectorStorageStride(ref, context);
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
@@ -4094,6 +4103,19 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
     if (!Array.isArray(value)) throw semanticReferenceError(`local vector array '${ref.base}' contains scalar value`, ref.span);
     return Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));
   }
+  if (ref.addressSpace === "shared") {
+    const buffer = context.sharedMemory.get(ref.base);
+    if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    const base = flatIndex(ref, context);
+    return Array.from({ length: laneCount }, (_, lane) => {
+      const index = base + lane;
+      const ok = index >= 0 && index < buffer.length;
+      const value = ok ? Number(buffer[index]) : 0;
+      context.trace.sharedReads.push({ name: ref.base, index, value, ok });
+      return value;
+    });
+  }
+  const base = flatIndex(ref, context) * semanticReferenceVectorStorageStride(ref, context);
   const buffer = ref.addressSpace === "constant"
     ? context.constants.get(ref.base)
     : ref.addressSpace === "device-global"
@@ -4139,6 +4161,19 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     const index = flatIndex(ref, context);
     if (index >= 0 && index < buffer.length) {
       (buffer as SemanticValue[])[index] = Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));
+    }
+    return;
+  }
+  if (ref.addressSpace === "shared") {
+    const buffer = context.sharedMemory.get(ref.base);
+    if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    const base = flatIndex(ref, context);
+    for (let lane = 0; lane < laneCount; lane++) {
+      const index = base + lane;
+      const laneValue = value[lane] ?? 0;
+      const ok = index >= 0 && index < buffer.length;
+      if (ok) buffer[index] = laneValue;
+      context.trace.sharedWrites.push({ name: ref.base, index, value: laneValue, ok });
     }
     return;
   }

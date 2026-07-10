@@ -438,6 +438,29 @@ __global__ void warpAndLaneMask(uint *out) {
     expect([...actual.buffers.out as Uint32Array].slice(64)).toEqual(laneMasks.concat(laneMasks));
   });
 
+  it("runs scalar shared-memory vector views through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedScalarVectorView(float *out) {
+  __shared__ float tile[8];
+  int lane = threadIdx.x;
+  float4 *view = reinterpret_cast<float4 *>(&tile[lane * 4]);
+  view[0] = make_float4(float(lane * 10 + 1), float(lane * 10 + 2), float(lane * 10 + 3), float(lane * 10 + 4));
+  __syncthreads();
+  float4 value = view[0];
+  out[lane] = value.w;
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { out: new Float32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([4, 14]);
+  });
+
   it("runs common CUDA float math builtins through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(FLOAT_MATH, { workgroupSize: [2, 1, 1] });

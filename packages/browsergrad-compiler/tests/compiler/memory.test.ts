@@ -1279,6 +1279,30 @@ describe("CUDA-lite compiler: Memory and pointer model", () => {
       expect(compiled.wgsl).not.toContain("return vec4<f32>(bg_shared[(index + 0u)]");
     });
 
+  it("lowers scalar shared-memory vector views through semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void sharedScalarVectorView(float *out) {
+    __shared__ float tile[8];
+    int lane = threadIdx.x;
+    float4 *view = reinterpret_cast<float4 *>(&tile[lane * 4]);
+    view[0] = make_float4(float(lane * 10 + 1), float(lane * 10 + 2), float(lane * 10 + 3), float(lane * 10 + 4));
+    __syncthreads();
+    float4 value = view[0];
+    out[lane] = value.w;
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = { buffers: { out: new Float32Array(2) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+      const result = runCompiledKernelReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("tile[");
+      expect(compiled.wgsl).toContain("vec4<f32>(tile[");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 14]);
+      expect([...result.buffers.out as Float32Array]).toEqual([4, 14]);
+    });
+
   it("rejects writes through const device helper pointer params", () => {
       expect(() => compileCudaLiteKernel(`
   __device__ void bad(const float* x) {
