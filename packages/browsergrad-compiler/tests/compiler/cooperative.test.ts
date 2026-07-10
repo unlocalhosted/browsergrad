@@ -371,21 +371,24 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
   it("runs a shared-memory tiled matmul reference and emits barriers", () => {
       const compiled = compileCudaLiteKernel(TILED_MATMUL, { workgroupSize: [2, 2, 1] });
+      const input = {
+        buffers: {
+          A: new Float32Array([1, 2, 3, 4]),
+          B: new Float32Array([5, 6, 7, 8]),
+          C: new Float32Array(4),
+        },
+        scalars: { N: 2 },
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 2, 1] as const };
       const result = runCompiledKernelReference(
         compiled,
-        {
-          buffers: {
-            A: new Float32Array([1, 2, 3, 4]),
-            B: new Float32Array([5, 6, 7, 8]),
-            C: new Float32Array(4),
-          },
-          scalars: { N: 2 },
-        },
-        { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
+        input,
+        launch,
       );
 
       expect([...result.buffers.C as Float32Array]).toEqual([19, 22, 43, 50]);
-      expect(compiled.wgsl).toContain("var<workgroup> As: array<array<f32, 2>, 2>;");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("var<workgroup> As: array<f32, 4>;");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 

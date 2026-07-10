@@ -10,6 +10,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import {
   type CompiledCudaLiteKernel,
+  canEmitSemanticKernelIrWgsl,
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   prepareCompiledKernelWebGpu,
@@ -865,6 +866,7 @@ __global__ void parent(float *x, int n) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
   });
 

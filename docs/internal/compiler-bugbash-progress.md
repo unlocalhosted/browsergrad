@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-10T06:30:09Z
+Last updated: 2026-07-10T11:47:29Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; compile/codegen audit remains `0` hard fails across `1038` plan-compiled kernels and real corpus outputs are pinned `127/127`; latest full native browser sweep exposed semantic grid backend gaps at `815/7`, six CUDA-120 grid-sync fixtures are recovered, and one cuda-samples `cg::reduce` helper remains on the active blocker path |
-| Current focus | Native CUDA library/runtime capability widening, pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Semantic dynamic-launch child signature inventory; child AST lookup removed |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `170/354`, up from `161/354`; `184` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
+| Active work item | Resumable semantic-reference barrier scheduler for uniform loops; semantic WGSL now directly lowers fixed multidimensional shared arrays |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -48,6 +48,7 @@ Done means all of these are true:
 
 ## Latest Proven Green Gates
 
+- Semantic multidimensional shared-memory lowering: fixed-rank shared arrays now emit one flat row-major `var<workgroup>` array, reusing semantic IR's existing flattened index contract; multidimensional shared arrays passed through pointer helpers remain deliberately rejected until that pointer ABI is flattened. CUDA-samples semantic-direct lowering moved `161 -> 170`, with `357/357` plan compilation and `0` hard failures. Full `verify:compiler` passed, compiler unit tests passed `759/0`, and real WebGPU tests passed `109/0`. Semantic-reference execution of barriers inside loops remains an explicit scheduler gap and is not claimed as parity.
 - Semantic dynamic-launch child signature slice: semantic models now publish typed, source-spanned `launchableEntries` for kernel and device-function child targets; host-dynamic planning resolves child names and binds child input from this semantic inventory, not `compiled.ast.kernels` or `compiled.ast.functions`; focused dynamic-launch suite passed `26/0`, typecheck passed, and lint passed. Parent launch traversal and host expression evaluation remain AST-shaped work, explicitly tracked below.
 - Semantic grid-sync backend repair: dynamic shared-memory extents now live in `kernelIr.memory`, semantic WGSL validates memory indices and loop initializers with semantic module context, scalar compound assignments include shifts and bitwise forms, and block/grid cooperative `thread_rank()`/`size()` queries emit natively. Focused real WebGPU CUDA-120 grid-sync fixtures passed `6/0/0`; semantic `cg::reduce` helper lowering remains unfinished for one cuda-samples fixture.
 
@@ -1746,6 +1747,7 @@ Verifier current: src `677/0/0`, dist `677/0/0`.
 
 ## Remaining Probe Map
 
+- Semantic reference: replace top-level barrier segmentation with a resumable IR scheduler before treating uniform loops containing barriers as CPU semantic-reference capable. Until then, these kernels are browser-native semantic WGSL only, with legacy reference retained as the compatibility baseline.
 - Architecture: shared contracts cover identical adapter rules only. Next audit candidate is typed memory-reference eligibility; do not merge it until address-space/vector-lane differences can be expressed without weakening either adapter.
 - Runtime planning: grid-sync consumes semantic IR end to end for simple/block-grid reductions, but semantic `cg::reduce` helper lowering is still required before the cuda-samples grid-sync fixture can rejoin the full native browser gate. Dynamic launch now resolves child signatures from semantic IR, but parent launch traversal and host expression evaluation remain AST-shaped; migrate those next before replacing `CudaHostDynamicLaunch.statement` with `SemanticDeviceLaunch`. Peer-copy planning still contains AST-shape helpers and needs equivalent semantic operation checks.
 

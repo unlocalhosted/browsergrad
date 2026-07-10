@@ -677,10 +677,14 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
   const containsBarrier = semanticOperationsContainBarrier(ir.operations, barrierFunctions);
   if (shared.length === 0 && !containsBarrier) return true;
   const hasScalarSharedPointer = ir.functions.some((fn) => semanticWgslFunctionHasSharedPointer(fn) && fn.params.some((param) => param.dimensions.length === 0));
+  const hasSharedPointer = ir.functions.some(semanticWgslFunctionHasSharedPointer);
   if (!shared.every((symbol) =>
-    symbol.dimensions.length === 1 && (symbol.dimensions[0] ?? 0) > 0 ||
+    symbol.dimensions.length > 0 && symbol.dimensions.every((dimension) => dimension > 0) ||
     symbol.dimensions.length === 0 && hasScalarSharedPointer
   )) return false;
+  // Direct shared references use row-major flattened indices. Pointer-helper ABI
+  // remains one-dimensional until its parameter type and base arithmetic are flattened.
+  if (hasSharedPointer && shared.some((symbol) => symbol.dimensions.length > 1)) return false;
   if (!containsBarrier) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
   if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
   if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {

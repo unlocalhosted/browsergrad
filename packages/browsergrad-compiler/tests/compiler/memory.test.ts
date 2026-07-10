@@ -4446,7 +4446,7 @@ __global__ void sharedHelperScoped(float *out) {
     if (tid < 1) { tile[0][0] = x[0]; x[0] = tile[0][0]; }
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("array<array<f32, 17>, 16>");
+      expect(compiled.wgsl).toContain("array<f32, 272>");
     });
 
   it("lowers CUDA constant arrays as readonly storage inputs", () => {
