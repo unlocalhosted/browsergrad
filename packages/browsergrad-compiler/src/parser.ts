@@ -422,6 +422,9 @@ class Parser {
       const cooperativeGroup = this.parseCooperativeGroupParamType();
       const type = cooperativeGroup === undefined ? this.parseType() : "uint";
       constant = this.consumeCvQualifiers() || constant;
+      if (params.length === 0 && cooperativeGroup === undefined && type === "voidptr" && this.match(")")) {
+        return params;
+      }
       let pointer = cooperativeGroup === undefined && this.consumeIf("*") !== undefined;
       const reference = !pointer && this.consumeIf("&") !== undefined;
       this.consumeTypeQualifiers();

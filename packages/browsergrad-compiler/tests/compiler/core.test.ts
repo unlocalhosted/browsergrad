@@ -310,6 +310,18 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler: Core compiler contracts", () => {
+  it("treats a sole void parameter as an empty kernel parameter list", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void noArgs(void) {
+  printf("hello");
+}`);
+
+    expect(compiled.ast.kernels[0]?.params).toEqual([]);
+    expect(compiled.kernelIr.params).toEqual([]);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("__bg_unused_param_0");
+  });
   it("keeps legacy IR and misleading GPU readiness out of public compiler contracts", () => {
       const srcDir = path.join(packageRoot, "src");
       const sources = fs.readdirSync(srcDir)
