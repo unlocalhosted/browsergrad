@@ -1680,6 +1680,7 @@ function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["fu
     allowDeviceGlobals: true,
     allowLocalArrays: true,
     allowConstantMemory: true,
+    allowStoragePointerIdentity: true,
   });
 }
 
@@ -1870,6 +1871,7 @@ function semanticWgslExpressionSupported(
       return expression.operator !== "*" && expression.operator !== "&" && semanticWgslExpressionSupported(expression.argument, "scalar", ir);
     case "binary":
       if (isSemanticStoragePointerNullComparison(expression)) return true;
+      if (isSemanticStoragePointerIdentityComparison(expression, ir)) return true;
       if (expected === "any" && isSemanticFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
         return semanticWgslExpressionSupported(expression.left, "any", ir) &&
           semanticWgslExpressionSupported(expression.right, "any", ir);
@@ -2442,7 +2444,15 @@ function emitSemanticReturnValue(
     const lines = emitSemanticExpressionStatement(expression, ir, names, indentLevel, options, textureSpecializations);
     return [...lines, `${prefix}return ${emitSemanticAssignmentResult(expression, ir, names, options)};`];
   }
-  return [`${prefix}return ${emitSemanticExpression(expression, ir, names, options, textureSpecializations)};`];
+  const returnType = options.activeFunction === undefined
+    ? undefined
+    : ir.functions.find((fn) => fn.name === options.activeFunction)?.returnType;
+  const value = returnType === undefined
+    ? emitSemanticExpression(expression, ir, names, options, textureSpecializations)
+    : semanticExpressionValueType(expression) === "bool" && returnType !== "bool"
+      ? `select(${emitNumberLiteral(0, returnType)}, ${emitNumberLiteral(1, returnType)}, ${emitTruthiness(expression, ir, names, options)})`
+      : emitSemanticLocalScalarExpressionAs(expression, returnType, ir, names, options, textureSpecializations);
+  return [`${prefix}return ${value};`];
 }
 
 function emitSemanticAssignmentResult(
@@ -5706,6 +5716,12 @@ function emitSemanticBinary(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   if (isSemanticStoragePointerNullComparison(expression)) return expression.operator === "!=" ? "true" : "false";
+  if (isSemanticStoragePointerIdentityComparison(expression, ir)) {
+    const left = emitSemanticStoragePointerIdentity(expression.left, ir, names, options);
+    const right = emitSemanticStoragePointerIdentity(expression.right, ir, names, options);
+    const equal = `((${left.buffer}) == (${right.buffer}) && (${left.base}) == (${right.base}))`;
+    return expression.operator === "==" ? equal : `!${equal}`;
+  }
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return `(${emitTruthiness(expression.left, ir, names, options)} ${expression.operator} ${emitTruthiness(expression.right, ir, names, options)})`;
   }
@@ -5735,6 +5751,54 @@ function isSemanticStoragePointerNullComparison(
     value.kind === "symbol" && (value.name === "NULL" || value.name === "nullptr");
   return storageParam(expression.left) && nullValue(expression.right) ||
     storageParam(expression.right) && nullValue(expression.left);
+}
+
+function isSemanticStoragePointerIdentityComparison(
+  expression: Extract<SemanticExpression, { readonly kind: "binary" }>,
+  ir?: SemanticKernelIrModule,
+): boolean {
+  if (ir === undefined || expression.operator !== "==" && expression.operator !== "!=") return false;
+  return semanticStoragePointerSymbol(expression.left, ir) && semanticStoragePointerSymbol(expression.right, ir);
+}
+
+function semanticStoragePointerSymbol(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
+  if (expression.kind !== "symbol" || expression.addressSpace !== "storage") return false;
+  return ir.params.some((param) => param.name === expression.name && param.pointer && param.addressSpace === "storage") ||
+    ir.functions.some((fn) => fn.params.some((param) =>
+      param.name === expression.name && param.pointer && param.addressSpace === "storage"));
+}
+
+function emitSemanticStoragePointerIdentity(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): { readonly buffer: string; readonly base: string } {
+  if (expression.kind !== "symbol") throw semanticWgslError("semantic storage pointer identity requires symbols", expression.span);
+  const ownerParam = options.activeFunction === undefined
+    ? undefined
+    : ir.functions.find((fn) => fn.name === options.activeFunction)?.params.find((param) =>
+      param.name === expression.name && param.pointer && param.addressSpace === "storage");
+  if (ownerParam) {
+    return {
+      buffer: nameFor(semanticPointerBufferParamName(expression.name), names),
+      base: nameFor(semanticPointerBaseParamName(expression.name), names),
+    };
+  }
+  const bufferId = semanticStoragePointerBufferId(expression.name, ir);
+  const root = ir.params.find((param) => param.name === expression.name && param.pointer && param.addressSpace === "storage");
+  if (bufferId === undefined || root?.valueType === undefined) throw semanticWgslError(`unknown storage pointer '${expression.name}'`, expression.span);
+  return {
+    buffer: `${bufferId}u`,
+    base: emitSemanticRootStoragePointerArgBaseIndex({
+      base: expression.name,
+      addressSpace: "storage",
+      valueType: root.valueType,
+      indices: [],
+      fields: [],
+      span: expression.span,
+    }, root, ir, names, options),
+  };
 }
 
 function emitSemanticVectorOperand(

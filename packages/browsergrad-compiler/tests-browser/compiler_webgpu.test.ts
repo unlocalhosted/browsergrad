@@ -4945,6 +4945,25 @@ __global__ void partitionSums(const int *input, int *sums, int *counts) {
     expect([...actual.buffers.counts as Int32Array]).toEqual([2, 2]);
   });
 
+  it("compares storage pointer roots and offsets inside helpers on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ int same_pointer(uint* left, uint* right) { return left == right; }
+__global__ void helper_pointer_identity(uint* x, uint* y, int* out) {
+  out[0] = same_pointer(x, x);
+  out[1] = same_pointer(x, x + 1);
+  out[2] = same_pointer(x, y);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { x: new Uint32Array(2), y: new Uint32Array(2), out: new Int32Array(3) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([1, 0, 0]);
+  });
+
   it("runs nested helpers over helper-local dynamic shared memory on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

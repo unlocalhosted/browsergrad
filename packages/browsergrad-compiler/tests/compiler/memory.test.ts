@@ -5692,7 +5692,27 @@ __global__ void localOut(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
       expect([...pointerIdentityResult.buffers.out as Uint32Array]).toEqual([1, 2]);
-      expect(pointerIdentity.wgsl).toContain("((0u == 1u) && (0u == 0u))");
+      expect(canEmitSemanticKernelIrWgsl(pointerIdentity.kernelIr)).toBe(true);
+      expect(pointerIdentity.wgsl).toContain("!((0u) == (1u) && (0u) == (0u))");
+      expect(pointerIdentity.wgsl).toContain("((0u) == (0u) && (0u) == (0u))");
+
+      const helperPointerIdentity = compileCudaLiteKernel(`
+  __device__ int same_pointer(uint* left, uint* right) { return left == right; }
+  __global__ void helper_pointer_identity(uint* x, uint* y, int* out) {
+    out[0] = same_pointer(x, x);
+    out[1] = same_pointer(x, x + 1);
+    out[2] = same_pointer(x, y);
+  }`, { workgroupSize: [1, 1, 1] });
+      const helperPointerIdentityResult = runCompiledKernelSemanticReference(
+        helperPointerIdentity,
+        { buffers: { x: new Uint32Array(2), y: new Uint32Array(2), out: new Int32Array(3) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(canRunCompiledKernelSemanticReference(helperPointerIdentity)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(helperPointerIdentity.kernelIr)).toBe(true);
+      expect([...helperPointerIdentityResult.buffers.out as Int32Array]).toEqual([1, 0, 0]);
+      expect(helperPointerIdentity.wgsl).toContain("left_buffer");
+      expect(helperPointerIdentity.wgsl).toContain("left_base");
 
       const pointerDistance = compileCudaLiteKernel(`
   __global__ void pointer_distance(uint* data, int* out, int left) {

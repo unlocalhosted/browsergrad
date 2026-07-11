@@ -895,6 +895,7 @@ function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKerne
     allowDeviceGlobals: true,
     allowLocalArrays: true,
     allowConstantMemory: true,
+    allowStoragePointerIdentity: true,
   });
 }
 
@@ -1082,6 +1083,7 @@ function semanticReferenceExpressionSupported(
       return expression.operator !== "*" && expression.operator !== "&" && semanticReferenceExpressionSupported(expression.argument, "scalar", compiled);
     case "binary":
       if (isStoragePointerNullComparison(expression)) return true;
+      if (compiled !== undefined && isStoragePointerIdentityComparison(expression, compiled)) return true;
       if (expected === "any" && isSemanticFloatVectorType(expression.valueType) && semanticReferenceVectorBinaryOperatorSupported(expression.operator)) {
         return semanticReferenceExpressionSupported(expression.left, "any", compiled) &&
           semanticReferenceExpressionSupported(expression.right, "any", compiled);
@@ -1282,6 +1284,26 @@ function isStoragePointerNullComparison(expression: Extract<SemanticExpression, 
   if (expression.operator !== "==" && expression.operator !== "!=") return false;
   return isStorageSymbol(expression.left) && isNullLiteral(expression.right) ||
     isStorageSymbol(expression.right) && isNullLiteral(expression.left);
+}
+
+function isStoragePointerIdentityComparison(
+  expression: Extract<SemanticExpression, { readonly kind: "binary" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.operator !== "==" && expression.operator !== "!=") return false;
+  return semanticReferenceStoragePointerSymbol(expression.left, compiled) &&
+    semanticReferenceStoragePointerSymbol(expression.right, compiled);
+}
+
+function semanticReferenceStoragePointerSymbol(
+  expression: SemanticExpression,
+  compiled: CompiledCudaLiteKernel,
+): expression is Extract<SemanticExpression, { readonly kind: "symbol" }> {
+  if (expression.kind !== "symbol" || expression.addressSpace !== "storage") return false;
+  return compiled.kernelIr.params.some((param) =>
+    param.name === expression.name && param.pointer && param.addressSpace === "storage") ||
+    compiled.kernelIr.functions.some((fn) => fn.params.some((param) =>
+      param.name === expression.name && param.pointer && param.addressSpace === "storage"));
 }
 
 function semanticReferenceConditionSupported(expression: SemanticExpression, compiled?: CompiledCudaLiteKernel): boolean {
@@ -2279,6 +2301,12 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (semanticReferenceBf162LocalBitsCastSupported(expression, context.compiled)) return evalSemanticBf162LocalBitsCast(expression, context);
       return evalUnary(expression.operator, evalNumber(expression.argument, context));
     case "binary": {
+      if (isStoragePointerIdentityComparison(expression, context.compiled)) {
+        const left = semanticReferenceStoragePointerIdentity(expression.left, context);
+        const right = semanticReferenceStoragePointerIdentity(expression.right, context);
+        const equal = left.buffer === right.buffer && left.base === right.base;
+        return expression.operator === "==" ? Number(equal) : Number(!equal);
+      }
       const left = evalSemanticExpression(expression.left, context);
       const right = evalSemanticExpression(expression.right, context);
       if (Array.isArray(left) || Array.isArray(right)) {
@@ -2355,6 +2383,16 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "update":
       return evalUpdate(expression, context);
   }
+}
+
+function semanticReferenceStoragePointerIdentity(
+  expression: SemanticExpression,
+  context: SemanticReferenceContext,
+): { readonly buffer: WgslTypedArray; readonly base: number } {
+  if (expression.kind !== "symbol") throw semanticReferenceError("semantic storage pointer identity requires symbols", expression.span);
+  const buffer = context.buffers.get(expression.name);
+  if (!buffer) throw semanticReferenceError(`missing storage pointer '${expression.name}'`, expression.span);
+  return { buffer, base: context.storageOffsets.get(expression.name) ?? 0 };
 }
 
 function evalSemanticVectorMathCall(

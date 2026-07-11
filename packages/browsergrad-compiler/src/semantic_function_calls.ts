@@ -81,6 +81,8 @@ export interface SemanticPointerFunctionBodyOptions {
   readonly allowDeviceGlobals?: boolean;
   readonly allowLocalArrays?: boolean;
   readonly allowConstantMemory?: boolean;
+  readonly allowStoragePointerIdentity?: boolean;
+  readonly storagePointerParams?: ReadonlySet<string>;
 }
 
 export function semanticFunctionBodyShapeSupported(
@@ -114,11 +116,20 @@ export function semanticPointerFunctionBodySupported(
   const pointerParams = new Set(fn.params
     .filter((param) => param.pointer && (param.addressSpace === "storage" || param.addressSpace === "shared" || param.addressSpace === "local"))
     .map((param) => param.name));
+  const storagePointerParams = new Set(fn.params
+    .filter((param) => param.pointer && param.addressSpace === "storage")
+    .map((param) => param.name));
   const allowedMemoryRoots = new Set(pointerParams);
   if (options.allowSharedMemory) collectSemanticFunctionSharedRoots(fn.body, allowedMemoryRoots);
   if (options.allowLocalArrays) collectSemanticFunctionLocalArrayRoots(fn.body, allowedMemoryRoots);
   return pointerParams.size > 0 &&
-    fn.body.every((operation) => semanticPointerFunctionOperationSupported(operation, allowedMemoryRoots, memoryRefFromIndex, atomicCallTarget, options));
+    fn.body.every((operation) => semanticPointerFunctionOperationSupported(
+      operation,
+      allowedMemoryRoots,
+      memoryRefFromIndex,
+      atomicCallTarget,
+      { ...options, storagePointerParams },
+    ));
 }
 
 function collectSemanticFunctionLocalArrayRoots(
@@ -226,7 +237,11 @@ function semanticPointerFunctionExpressionAccessesSupported(
   atomicCallTarget: (expression: Extract<SemanticExpression, { readonly kind: "call" }>) => SemanticMemoryRef | undefined,
   options: SemanticPointerFunctionBodyOptions,
 ): boolean {
-  if (semanticPointerFunctionExpressionHasPointerIdentityCheck(expression, pointerParams)) return false;
+  if (semanticPointerFunctionExpressionHasUnsupportedPointerIdentityCheck(
+    expression,
+    pointerParams,
+    options.allowStoragePointerIdentity === true ? options.storagePointerParams ?? new Set() : new Set(),
+  )) return false;
   let supported = true;
   walkSemanticExpression(expression, (item) => {
     const ref = memoryRefFromIndex(item);
@@ -241,16 +256,19 @@ function semanticPointerFunctionExpressionAccessesSupported(
   return supported;
 }
 
-function semanticPointerFunctionExpressionHasPointerIdentityCheck(
+function semanticPointerFunctionExpressionHasUnsupportedPointerIdentityCheck(
   expression: SemanticExpression,
   pointerParams: ReadonlySet<string>,
+  allowedStoragePointerParams: ReadonlySet<string>,
 ): boolean {
   let found = false;
   walkSemanticExpression(expression, (item) => {
     if (item.kind !== "binary" || (item.operator !== "==" && item.operator !== "!=")) return;
-    if (semanticPointerFunctionIdentityOperand(item.left, pointerParams) || semanticPointerFunctionIdentityOperand(item.right, pointerParams)) {
-      found = true;
-    }
+    const usesPointer = semanticPointerFunctionIdentityOperand(item.left, pointerParams) ||
+      semanticPointerFunctionIdentityOperand(item.right, pointerParams);
+    const supportedStorageIdentity = semanticPointerFunctionIdentityOperand(item.left, allowedStoragePointerParams) &&
+      semanticPointerFunctionIdentityOperand(item.right, allowedStoragePointerParams);
+    if (usesPointer && !supportedStorageIdentity) found = true;
   });
   return found;
 }
