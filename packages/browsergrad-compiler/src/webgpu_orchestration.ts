@@ -16,6 +16,7 @@ import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.
 import { poolOffsetName } from "./pool_bindings.js";
 import { deviceLaunchTreeIsExternallySilent } from "./runtime_elision.js";
 import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
+import { createSemanticRetirementReductionPlan } from "./semantic_retirement_reduction.js";
 import { createCudaTrapLaunchPreconditionDiagnostics } from "./trap_preconditions.js";
 import type {
   SemanticExpression,
@@ -33,7 +34,7 @@ import {
 } from "./webgpu_inputs.js";
 import { semanticUniformLayout } from "./semantic_uniform_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
-import { emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
+import { canEmitSemanticKernelIrWgsl, emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -47,6 +48,7 @@ export type CudaWebGpuExecutionPlanKind =
   | "single-dispatch"
   | "runtime-elided-single-dispatch"
   | "grid-sync-phases"
+  | "host-retirement-reduction"
   | "host-dynamic-launch"
   | "host-copy";
 
@@ -148,6 +150,9 @@ export function createCudaWebGpuExecutionPlan(
   }
   const runtimePlan = createCudaRuntimePlan(compiled);
   const blockers: CudaWebGpuExecutionBlocker[] = [];
+
+  const retirementReductionPlan = createRetirementReductionWebGpuPlan(compiled, input, launch);
+  if (retirementReductionPlan) return retirementReductionPlan;
 
   const gridSyncPhasePlan = createCudaGridSyncPhasePlan(compiled);
   const gridSyncPlan = createGridSyncWebGpuPlan(compiled, input, launch, gridSyncPhasePlan);
@@ -270,6 +275,34 @@ function createGridSyncWebGpuPlan(
   return {
     supported: true,
     kind: "grid-sync-phases",
+    steps,
+    input: wgslInput,
+  };
+}
+
+function createRetirementReductionWebGpuPlan(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  launch: KernelLaunch,
+): CudaWebGpuExecutionPlan | undefined {
+  const phasePlan = createSemanticRetirementReductionPlan(compiled.kernelIr, launch);
+  if (!phasePlan.supported) return undefined;
+  const phases = phasePlan.phases.filter((phase): phase is NonNullable<typeof phase> => phase !== undefined);
+  if (phases.some((phase) => !canEmitSemanticKernelIrWgsl(phase))) return undefined;
+  const wgslInput = createWgslRunInput(compiled, input);
+  const steps = phases.map((phase, index): WgslKernelSequenceStep => ({
+    program: emitSemanticKernelIrWgsl(phase, {
+      ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
+      ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
+    }).program,
+    launch: {
+      dispatchCount: index === 0 ? dispatchCountForLaunch(launch) : launch.blockDim,
+    },
+    ...(wgslInput.uniforms === undefined ? {} : { uniforms: wgslInput.uniforms }),
+  }));
+  return {
+    supported: true,
+    kind: "host-retirement-reduction",
     steps,
     input: wgslInput,
   };

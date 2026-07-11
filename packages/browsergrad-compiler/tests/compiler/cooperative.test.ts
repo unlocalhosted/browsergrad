@@ -1360,6 +1360,70 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.out as Int32Array]).toEqual([40, 41, 42, 43]);
     });
 
+  it("plans retirement-count reductions as explicit host dispatch phases", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void fold(float *values, uint tid, const cg::thread_block &cta) {
+    if (tid < 2u) values[tid] += values[tid + 2u];
+    cg::sync(cta);
+    if (tid == 0u) values[0] += values[1];
+    cg::sync(cta);
+  }
+  __device__ void reduceBlocks(const float *input, float *out, uint n, const cg::thread_block &cta) {
+    extern __shared__ float sdata[];
+    uint tid = threadIdx.x;
+    uint index = blockIdx.x * blockDim.x + tid;
+    sdata[tid] = index < n ? input[index] : 0.0f;
+    cg::sync(cta);
+    fold(sdata, tid, cta);
+    if (tid == 0u) out[blockIdx.x] = sdata[0];
+  }
+  __device__ uint retirementCount = 0u;
+  __global__ void retirementReduce(const float *input, float *out, uint n) {
+    const cg::thread_block cta = cg::this_thread_block();
+    reduceBlocks(input, out, n, cta);
+    if (gridDim.x > 1u) {
+      uint tid = threadIdx.x;
+      __shared__ bool amLast;
+      extern __shared__ float smem[];
+      __threadfence();
+      if (tid == 0u) {
+        uint ticket = atomicInc(&retirementCount, gridDim.x);
+        amLast = ticket == gridDim.x - 1u;
+      }
+      cg::sync(cta);
+      if (amLast) {
+        uint i = tid;
+        float sum = 0.0f;
+        while (i < gridDim.x) { sum += out[i]; i += blockDim.x; }
+        smem[tid] = sum;
+        cg::sync(cta);
+        fold(smem, tid, cta);
+        if (tid == 0u) { out[0] = smem[0]; retirementCount = 0u; }
+      }
+    }
+  }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { sdata: 4, smem: 4 } });
+      const input = {
+        buffers: { input: new Float32Array(12), out: new Float32Array(3) },
+        deviceGlobals: { retirementCount: new Uint32Array(1) },
+        scalars: { n: 12 },
+      };
+      const plan = createCudaWebGpuExecutionPlan(
+        compiled,
+        input,
+        { gridDim: [3, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(plan).toMatchObject({ supported: true, kind: "host-retirement-reduction" });
+      if (!plan.supported) return;
+      expect(plan.steps.map((step) => step.launch.dispatchCount)).toEqual([[12, 1, 1], [4, 1, 1]]);
+      expect(plan.steps.map((step) => step.program.name)).toEqual([
+        "retirementReduce_retirement_phase_0",
+        "retirementReduce_retirement_phase_1",
+      ]);
+      expect(plan.steps[1]!.program.wgsl).toContain("i < 3u");
+      expect(plan.steps[1]!.program.wgsl).not.toContain("atomicInc");
+    });
+
   it("rejects grid sync phase splitting when private locals cross phases", () => {
       const compiled = compileCudaLiteKernel(`
   namespace cg = cooperative_groups;
