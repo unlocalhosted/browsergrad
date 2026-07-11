@@ -1357,8 +1357,8 @@ function semanticWgslCopySupported(
     operation.bytes % 4 === 0 &&
     sourceBytes !== undefined &&
     targetBytes !== undefined &&
-    (sourceBytes === 2 || sourceBytes === 4) &&
-    (targetBytes === 2 || targetBytes === 4) &&
+    (sourceBytes === 2 || sourceBytes === 4 || sourceBytes === 1 && semanticWgslPackedSharedByteRoot(operation.source, ir)) &&
+    (targetBytes === 2 || targetBytes === 4 || targetBytes === 1 && semanticWgslPackedSharedByteRoot(operation.target, ir)) &&
     operation.bytes % sourceBytes === 0 &&
     operation.bytes % targetBytes === 0 &&
     operation.source.fields.length === 0 &&
@@ -2762,6 +2762,12 @@ function emitSemanticCopyOperation(
 }
 
 function emitSemanticCopyWordRead(ref: SemanticMemoryRef, valueType: CudaLiteScalarType, valueBytes: number, wordOffset: number, ir: SemanticKernelIrModule, names: ReadonlyMap<string, string>, options: EmitSemanticKernelIrWgslOptions): string {
+  if (valueBytes === 1) {
+    return Array.from({ length: 4 }, (_, lane) => {
+      const value = emitSemanticMemoryRead(semanticCopyMemoryRefAt(ref, wordOffset * 4 + lane), ir, names, options);
+      return `(u32(${value}) << ${lane * 8}u)`;
+    }).join(" | ");
+  }
   if (valueBytes === 2) {
     const low = emitSemanticMemoryRead(semanticCopyMemoryRefAt(ref, wordOffset * 2), ir, names, options);
     const high = emitSemanticMemoryRead(semanticCopyMemoryRefAt(ref, wordOffset * 2 + 1), ir, names, options);
@@ -2772,6 +2778,10 @@ function emitSemanticCopyWordRead(ref: SemanticMemoryRef, valueType: CudaLiteSca
 }
 
 function emitSemanticCopyWordWrite(ref: SemanticMemoryRef, valueType: CudaLiteScalarType, valueBytes: number, wordOffset: number, word: string, ir: SemanticKernelIrModule, names: ReadonlyMap<string, string>, options: EmitSemanticKernelIrWgslOptions): readonly string[] {
+  if (valueBytes === 1) {
+    return Array.from({ length: 4 }, (_, lane) =>
+      emitSemanticMemoryWrite(semanticCopyMemoryRefAt(ref, wordOffset * 4 + lane), `((${word}) >> ${lane * 8}u) & 0xffu`, ir, names, options));
+  }
   if (valueBytes === 2) {
     const pair = `bitcast<vec2<f16>>(${word})`;
     return [

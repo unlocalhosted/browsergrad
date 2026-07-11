@@ -1999,7 +1999,7 @@ function lowerStatement(
           const mathOutAssignment = semanticMathOutAssignmentBlock(statement.expression, expression, scope, statement.span);
           if (mathOutAssignment) return mathOutAssignment;
         }
-        const target = memoryRefFromExpression(expression.target);
+        const target = semanticMatrixLaneMemoryRef(expression.target, scope) ?? memoryRefFromExpression(expression.target);
         if (target) {
           const value = semanticSequencedAssignmentValue(expression.value);
           const reinterpretedCopy = semanticReinterpretedScalarCopy(target, value, expression.operator, scope, statement.span);
@@ -2533,6 +2533,8 @@ function lowerExpression(
     }
     case "member": {
       const object = lowerExpression(expression.object, scope);
+      const matrixTile = expression.property === "num_elements" ? semanticMatrixTileRef(object, scope) : undefined;
+      if (matrixTile) return intNumberExpression(matrixTileElementCount(matrixTile.spec), expression.span);
       return {
         kind: "member",
         object,
@@ -3003,6 +3005,42 @@ function semanticMatrixTileRef(
     indices,
     span: expression.span,
   };
+}
+
+function semanticMatrixLaneMemoryRef(
+  expression: SemanticExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticMemoryRef | undefined {
+  const ref = memoryRefFromExpression(expression);
+  if (!ref || ref.addressSpace !== "local" || ref.fields.length !== 1 || ref.fields[0] !== "x") return undefined;
+  const symbol = scope.get(ref.base);
+  const dimensions = symbol?.matrixTileArrayDimensions;
+  const tile = symbol?.matrixTile;
+  if (!tile || !dimensions || ref.indices.length !== dimensions.length + 1) return undefined;
+  const arrayIndices = ref.indices.slice(0, -1);
+  const lane = ref.indices.at(-1)!;
+  let flat = arrayIndices[0] ?? intNumberExpression(0, expression.span);
+  for (let axis = 1; axis < arrayIndices.length; axis++) {
+    flat = semanticIndexAdd(
+      semanticIndexMultiply(flat, dimensions[axis]!, expression.span),
+      arrayIndices[axis]!,
+      expression.span,
+    );
+  }
+  flat = semanticIndexAdd(
+    semanticIndexMultiply(flat, matrixTileElementCount(tile), expression.span),
+    lane,
+    expression.span,
+  );
+  return { ...ref, valueType: tile.valueType, containerValueType: tile.valueType, indices: [flat], fields: [] };
+}
+
+function semanticIndexMultiply(left: SemanticExpression, right: number, span: SourceSpan): SemanticExpression {
+  return { kind: "binary", operator: "*", left, right: intNumberExpression(right, span), valueType: "int", span };
+}
+
+function semanticIndexAdd(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return { kind: "binary", operator: "+", left, right, valueType: "int", span };
 }
 
 function semanticMatrixLayout(expression: CudaLiteExpression | undefined): MatrixTileLayout | undefined {

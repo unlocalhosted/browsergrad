@@ -1591,13 +1591,15 @@ function execSemanticCopy(
 }
 
 function writeSemanticCopyScalarBits(data: DataView, offset: number, valueType: CudaLiteScalarType, value: number): void {
-  if (valueType === "half") data.setUint16(offset, float32ToFloat16Bits(value), true);
+  if (valueType === "uchar" || valueType === "bool") data.setUint8(offset, Math.trunc(value) & 0xff);
+  else if (valueType === "half") data.setUint16(offset, float32ToFloat16Bits(value), true);
   else if (valueType === "float") data.setUint32(offset, float32ToUintBits(value), true);
   else if (valueType === "int") data.setInt32(offset, Math.trunc(value), true);
   else data.setUint32(offset, Math.trunc(value) >>> 0, true);
 }
 
 function readSemanticCopyScalarBits(data: DataView, offset: number, valueType: CudaLiteScalarType): number {
+  if (valueType === "uchar" || valueType === "bool") return data.getUint8(offset);
   if (valueType === "half") return float16BitsToFloat32(data.getUint16(offset, true));
   if (valueType === "float") return uintBitsToFloat32(data.getUint32(offset, true));
   if (valueType === "int") return data.getInt32(offset, true);

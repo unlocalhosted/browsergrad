@@ -5515,4 +5515,23 @@ __global__ void lazyDoWhile(uint* state, uint* out, int enabled) {
     expect([...actual.buffers.state as Uint32Array]).toEqual([16]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([3]);
   });
+
+  it("copies 16-byte vector views through packed uchar shared memory on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void packedSharedCopy(const int* input, int* out) {
+  __shared__ uchar bytes[16];
+  *((int4*)&bytes[0]) = *((int4*)&input[0]);
+  __syncthreads();
+  *((int4*)&out[0]) = *((int4*)&bytes[0]);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { input: new Int32Array([0x04030201, 0x08070605, 0x0c0b0a09, 0x100f0e0d]), out: new Int32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
+  });
 });
