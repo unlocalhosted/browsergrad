@@ -2054,7 +2054,8 @@ function evalSemanticSubgroupCall(
     if (voteOp !== undefined) return truthy(scalar) ? 1 : 0;
     return scalar;
   }
-  const mask = isCudaWarpSumCallName(name) && expression.args.length === 2
+  const mask = expression.args.length === 2 &&
+    (isCudaWarpSumCallName(name) || voteOp !== undefined || cudaArithmeticReduceOpForCall(name) !== undefined)
     ? evalNumber(expression.args[0]!, context) >>> 0
     : undefined;
   const peers = semanticWarpContexts(context).filter((peer) =>

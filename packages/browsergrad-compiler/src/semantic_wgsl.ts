@@ -2005,7 +2005,10 @@ function semanticExpressionContainsWorkgroupCollective(expression: SemanticExpre
   if (expression.kind === "call" && expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" &&
     (semanticShuffleOpForCall(expression.callee.name) !== undefined ||
       isCudaWarpSumCallName(expression.callee.name) ||
-      cudaVoteOpForCall(expression.callee.name) === "ballot")) return true;
+      cudaVoteOpForCall(expression.callee.name) === "ballot" ||
+      cudaVoteOpForCall(expression.callee.name) === "any" ||
+      cudaVoteOpForCall(expression.callee.name) === "all" ||
+      expression.callee.name === "__reduce_add_sync")) return true;
   return semanticExpressionChildren(expression).some(semanticExpressionContainsWorkgroupCollective);
 }
 
@@ -4500,12 +4503,16 @@ function emitSemanticSubgroupCall(
   const voteOp = cudaVoteOpForCall(name);
   if (voteOp === "any" || voteOp === "all" || voteOp === "ballot") {
     const predicate = emitTruthiness(value, ir, names, options);
-    if (voteOp === "any") return `select(0u, 1u, subgroupAny(${predicate}))`;
-    if (voteOp === "all") return `select(0u, 1u, subgroupAll(${predicate}))`;
     const activeMask = legacyVoteCall(name)
       ? "0xffffffffu"
       : emitSemanticExpressionAs(expression.args[0]!, ir, names, "u32", options, textureSpecializations);
-    return `${semanticBallotHelper().name}(${predicate}, ${activeMask}, local_id)`;
+    const ballot = `${semanticBallotHelper().name}(${predicate}, ${activeMask}, local_id)`;
+    if (voteOp === "any") return `select(0u, 1u, ${ballot} != 0u)`;
+    if (voteOp === "all") {
+      const failed = `${semanticBallotHelper().name}(!(${predicate}), ${activeMask}, local_id)`;
+      return `select(0u, 1u, ${failed} == 0u)`;
+    }
+    return ballot;
   }
   if (voteOp === "match-any") {
     const valueType = semanticExpressionValueType(value);

@@ -138,7 +138,9 @@ export function semanticBallotHelpers(ir: SemanticKernelIrModule): readonly Sema
   let used = false;
   const visitExpression = (expression: SemanticExpression): void => {
     if (expression.kind === "call" && expression.callee.kind === "symbol" &&
-      (expression.callee.name === "__ballot" || expression.callee.name === "__ballot_sync")) used = true;
+      (expression.callee.name === "__ballot" || expression.callee.name === "__ballot_sync" ||
+        expression.callee.name === "__any" || expression.callee.name === "__any_sync" ||
+        expression.callee.name === "__all" || expression.callee.name === "__all_sync")) used = true;
     for (const child of semanticExpressionChildren(expression)) visitExpression(child);
   };
   const visitOperations = (operations: readonly SemanticKernelIrOperation[]): void => {

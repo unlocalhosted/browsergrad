@@ -567,10 +567,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("subgroupAny");
-      expect(compiled.wgsl).toContain("subgroupAll");
+      expect(compiled.wgsl).not.toContain("subgroupAny");
+      expect(compiled.wgsl).not.toContain("subgroupAll");
       expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
-      expect(compiled.wgsl).toContain("subgroupAdd(input[0u])");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_u32_32_masked(input[0u], mask, local_id)");
       expect(compiled.wgsl).toContain("countOneBits");
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
@@ -604,10 +604,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("subgroupAny");
-      expect(compiled.wgsl).toContain("subgroupAll");
+      expect(compiled.wgsl).not.toContain("subgroupAny");
+      expect(compiled.wgsl).not.toContain("subgroupAll");
       expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
-      expect(compiled.wgsl).toContain("subgroupAdd");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_u32_32_masked");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         1, 0, 10, 2,
         1, 0, 10, 2,
@@ -648,8 +648,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("subgroupAny");
-      expect(compiled.wgsl).toContain("subgroupAll");
+      expect(compiled.wgsl).not.toContain("subgroupAny");
+      expect(compiled.wgsl).not.toContain("subgroupAll");
       expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
       expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
       expect([...result.buffers.out as Uint32Array]).toEqual([

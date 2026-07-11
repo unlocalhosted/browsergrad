@@ -6,7 +6,7 @@ import type {
 import { semanticExpressionChildren, semanticOperationExpressions } from "./semantic_ir_walk.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 import { wgslValueScalar } from "./semantic_wgsl_types.js";
-import { isCudaWarpSumCallName } from "./cuda_subgroup_calls.js";
+import { cudaArithmeticReduceOpForCall, isCudaWarpSumCallName } from "./cuda_subgroup_calls.js";
 import {
   semanticCooperativeGroupInfo,
   semanticCooperativeGroupRankParamName,
@@ -106,7 +106,9 @@ export function semanticCooperativeReduceHelperFor(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
 ): SemanticCooperativeReduceHelper | undefined {
   if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function") return undefined;
-  if (isCudaWarpSumCallName(expression.callee.name)) {
+  const logicalWarpSum = isCudaWarpSumCallName(expression.callee.name) ||
+    expression.callee.name === "__reduce_add_sync";
+  if (logicalWarpSum) {
     const valueArg = semanticCooperativeReduceValue(expression);
     const valueType = valueArg ? semanticExpressionValueType(valueArg) : undefined;
     if (valueType !== "float" && valueType !== "double" && valueType !== "half" && valueType !== "int" && valueType !== "uint") return undefined;
@@ -141,7 +143,10 @@ export function semanticCooperativeReduceHelperFor(
 export function semanticCooperativeReduceValue(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
 ): SemanticExpression | undefined {
-  if (expression.callee.kind === "symbol" && isCudaWarpSumCallName(expression.callee.name)) return expression.args.at(-1);
+  if (expression.callee.kind === "symbol" &&
+    (isCudaWarpSumCallName(expression.callee.name) || cudaArithmeticReduceOpForCall(expression.callee.name) === "add")) {
+    return expression.args.at(-1);
+  }
   return expression.args[1];
 }
 

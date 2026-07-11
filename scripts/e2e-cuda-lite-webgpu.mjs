@@ -2495,6 +2495,15 @@ __global__ void semanticVote(uint *input, uint *out) {
   out[tid * 4 + 2] = __ballot_sync(mask, input[tid]);
   out[tid * 4 + 3] = __reduce_add_sync(mask, input[tid]);
 }`,
+  semanticMaskedVote: `
+__global__ void semanticMaskedVote(uint *out) {
+  int tid = threadIdx.x;
+  uint mask = 5u;
+  out[tid * 4] = __any_sync(mask, tid == 1);
+  out[tid * 4 + 1] = __all_sync(mask, tid != 1);
+  out[tid * 4 + 2] = __ballot_sync(mask, (tid & 1) == 0);
+  out[tid * 4 + 3] = __reduce_add_sync(mask, uint(tid + 1));
+}`,
   legacyVote: `
 __global__ void legacyVote(uint *input, uint *out) {
   int tid = threadIdx.x;
@@ -14491,6 +14500,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2] },
+          },
+          {
+            name: "subgroup:semantic-masked-vote-reduce",
+            source: SOURCES.semanticMaskedVote,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 1, 5, 4, 0, 1, 5, 4, 0, 1, 5, 4, 0, 1, 5, 4] },
           },
           {
             name: "subgroup:legacy-vote",
