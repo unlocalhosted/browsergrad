@@ -859,7 +859,7 @@ function semanticReferenceFunctionCallSupported(
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer && param.addressSpace !== "constant") && !semanticReferencePointerFunctionBodySupported(fn)) return false;
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceLocalValueTypeSupported)) return false;
-  if (!semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasSharedPointer(fn))) return false;
+  if (!semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasAtomicPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
     unsupportedSemanticReferenceOperation(fn.body, compiled, true) === undefined;
@@ -993,8 +993,8 @@ function semanticReferenceFunctionBodyShapeSupported(
   return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true, allowLocalArrays: true });
 }
 
-function semanticReferenceFunctionHasSharedPointer(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
-  return fn.params.some((param) => param.pointer && param.addressSpace === "shared");
+function semanticReferenceFunctionHasAtomicPointer(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
+  return fn.params.some((param) => param.pointer && (param.addressSpace === "shared" || param.addressSpace === "storage"));
 }
 
 function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
@@ -1096,7 +1096,7 @@ function semanticReferenceVoidFunctionCallSupported(
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceLocalValueTypeSupported)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
-    semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasSharedPointer(fn)) &&
+    semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasAtomicPointer(fn)) &&
     unsupportedSemanticReferenceOperation(fn.body, compiled, true) === undefined;
 }
 

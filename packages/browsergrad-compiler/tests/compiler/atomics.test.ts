@@ -424,8 +424,9 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [2, 1, 1] });
 
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<atomic<u32>>;");
-      expect(compiled.wgsl).toContain("add_scalar_offset(0u, (0u + u32(((0 + 1) * 4))), idx");
-      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(out_buffer, (out_base + u32(idx)), value);");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("add_scalar_offset(0u, u32((1 * 4)), idx");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(out_buffer, u32((i32(out_base) + idx)), value);");
       expect(compiled.wgsl).toContain("case 0u: { return bg_atomicAdd_f32(&out[index], value); }");
     });
 
@@ -442,7 +443,8 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [2, 1, 1] });
 
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<atomic<u32>>;");
-      expect(compiled.wgsl).toContain("add_uint_scalar_offset(0u, (0u + u32(((0 + 1) * 4))), idx");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("add_uint_scalar_offset(0u, u32((1 * 4)), idx");
       expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&out[index], value); }");
     });
 
@@ -461,7 +463,8 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
-      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(slot_buffer, ((slot_base + u32((0 * 4))) + u32(3)), value)");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(slot_buffer, u32((i32(slot_base) + ((0 * 4) + 3))), value)");
       expect(compiled.wgsl).not.toContain("atomicAdd((slot_base + 3u), value)");
     });
 
@@ -1436,8 +1439,9 @@ describe("CUDA-lite compiler: Atomics", () => {
 
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_i32");
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_f32");
-      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_i32(target_buffer, target_base, value)");
-      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(target_buffer, target_base, value)");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_i32(target_buffer, u32((i32(target_base) + 0)), value)");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(target_buffer, u32((i32(target_base) + 0)), value)");
       expect([...result.buffers.xi as Int32Array]).toEqual([0, 7]);
       expect([...result.buffers.xf as Float32Array]).toEqual([3.75]);
     });

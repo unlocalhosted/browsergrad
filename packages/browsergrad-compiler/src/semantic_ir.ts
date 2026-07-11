@@ -1441,10 +1441,45 @@ function lowerStatementOperations(
 ): readonly SemanticKernelIrOperation[] {
   const chainedStores = semanticMemoryAssignmentChainOperations(statement, scope);
   if (chainedStores) return chainedStores;
+  const conditionalAssignment = semanticConditionalLocalAssignmentOperations(statement, scope);
+  if (conditionalAssignment) return conditionalAssignment;
   const mathOutVarDecl = semanticMathOutVarDeclOperations(statement, scope);
   const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
   const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
+}
+
+function semanticConditionalLocalAssignmentOperations(
+  statement: CudaLiteStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (
+    statement.kind !== "expr" ||
+    statement.expression.kind !== "assignment" ||
+    statement.expression.right.kind !== "conditional"
+  ) return undefined;
+  const target = lowerExpression(statement.expression.left, scope);
+  if (target.kind !== "symbol" || target.addressSpace !== "local") return undefined;
+  const conditional = statement.expression.right;
+  const assignment = (value: CudaLiteExpression): SemanticKernelIrOperation => ({
+    kind: "expression",
+    expression: {
+      kind: "assignment",
+      operator: statement.expression.kind === "assignment" ? statement.expression.operator : "=",
+      target,
+      value: lowerExpression(value, scope),
+      ...optionalValueType(expressionValueType(target)),
+      span: statement.span,
+    },
+    span: statement.span,
+  });
+  return [{
+    kind: "branch",
+    condition: lowerExpression(conditional.condition, scope),
+    consequent: [assignment(conditional.consequent)],
+    alternate: [assignment(conditional.alternate)],
+    span: statement.span,
+  }];
 }
 
 function semanticMemoryAssignmentChainOperations(
@@ -1970,9 +2005,11 @@ function lowerStatement(
       return { kind: "expression", expression, span: statement.span };
     }
     case "if": {
-      const condition = lowerExpression(statement.condition, scope);
+      const loweredCondition = lowerExpression(statement.condition, scope);
+      const materializedCondition = materializeConditionalCalls(loweredCondition);
+      const condition = materializedCondition.expression;
       const constantCondition = staticNumberValue(condition);
-      if (constantCondition !== undefined) {
+      if (constantCondition !== undefined && materializedCondition.operations.length === 0) {
         const selectedScope = new Map(scope);
         const body = lowerStatementsWithScope(constantCondition !== 0 ? statement.consequent : statement.alternate ?? [], selectedScope);
         mergeBlockLocalPointerAliases(scope, selectedScope);
@@ -1983,13 +2020,16 @@ function lowerStatement(
       const consequent = lowerStatementsWithScope(statement.consequent, consequentScope);
       const alternate = lowerStatementsWithScope(statement.alternate ?? [], alternateScope);
       mergeBranchLocalPointerAliases(scope, consequentScope, alternateScope, condition, statement.span);
-      return {
+      const branch: SemanticKernelIrOperation = {
         kind: "branch",
         condition,
         consequent,
         alternate,
         span: statement.span,
       };
+      return materializedCondition.operations.length === 0
+        ? branch
+        : { kind: "block", body: [...materializedCondition.operations, branch], span: statement.span };
     }
     case "for":
       {
@@ -2036,6 +2076,44 @@ function lowerStatement(
     case "break":
       return { kind: "break", span: statement.span };
   }
+}
+
+function materializeConditionalCalls(
+  expression: SemanticExpression,
+): { readonly operations: readonly SemanticKernelIrOperation[]; readonly expression: SemanticExpression } {
+  if (expression.kind === "conditional" &&
+    (semanticExpressionContainsCall(expression.consequent) || semanticExpressionContainsCall(expression.alternate))) {
+    const valueType = expressionValueType(expression);
+    if (!valueType || valueType === "void" || isCudaVectorType(valueType)) return { operations: [], expression };
+    const temp = tempScalarSymbol("__bg.condition.value", expression.span, valueType);
+    const target = semanticSymbolExpression(temp, expression.span);
+    const assign = (value: SemanticExpression): SemanticKernelIrOperation => ({
+      kind: "expression",
+      expression: { kind: "assignment", operator: "=", target, value, valueType, span: expression.span },
+      span: expression.span,
+    });
+    return {
+      operations: [
+        { kind: "declare", target: temp, span: expression.span },
+        { kind: "branch", condition: expression.condition, consequent: [assign(expression.consequent)], alternate: [assign(expression.alternate)], span: expression.span },
+      ],
+      expression: target,
+    };
+  }
+  if (expression.kind === "binary" && expression.operator !== "&&" && expression.operator !== "||") {
+    const left = materializeConditionalCalls(expression.left);
+    const right = materializeConditionalCalls(expression.right);
+    return { operations: [...left.operations, ...right.operations], expression: { ...expression, left: left.expression, right: right.expression } };
+  }
+  if (expression.kind === "cast") {
+    const nested = materializeConditionalCalls(expression.expression);
+    return { operations: nested.operations, expression: { ...expression, expression: nested.expression } };
+  }
+  if (expression.kind === "unary") {
+    const nested = materializeConditionalCalls(expression.argument);
+    return { operations: nested.operations, expression: { ...expression, argument: nested.expression } };
+  }
+  return { operations: [], expression };
 }
 
 function semanticReinterpretedScalarCopy(

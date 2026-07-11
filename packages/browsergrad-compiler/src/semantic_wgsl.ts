@@ -1682,7 +1682,7 @@ function semanticWgslFunctionCallSupported(
   if (fn.params.some((param) => !semanticWgslFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer && param.addressSpace !== "constant") && !semanticWgslPointerFunctionBodySupported(fn)) return false;
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslLocalValueTypeSupported)) return false;
-  if (!semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasSharedPointer(fn))) return false;
+  if (!semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasAtomicPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
     unsupportedSemanticWgslOperation(fn.body, ir, true) === undefined;
@@ -1769,6 +1769,10 @@ function semanticWgslFunctionBodyShapeSupported(
   allowAtomic = false,
 ): boolean {
   return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true, allowLocalArrays: true });
+}
+
+function semanticWgslFunctionHasAtomicPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {
+  return fn.params.some((param) => param.pointer && (param.addressSpace === "shared" || param.addressSpace === "storage"));
 }
 
 function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {
@@ -1879,7 +1883,7 @@ function semanticWgslVoidFunctionCallSupported(
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslLocalValueTypeSupported)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
-    semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasSharedPointer(fn)) &&
+    semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasAtomicPointer(fn)) &&
     unsupportedSemanticWgslOperation(fn.body, ir, true) === undefined;
 }
 
@@ -1981,7 +1985,9 @@ function semanticWgslExpressionSupported(
       return semanticWgslExpressionSupported(expression.left, "scalar", ir) &&
         semanticWgslExpressionSupported(expression.right, "scalar", ir);
     case "conditional":
-      return semanticWgslExpressionSupported(expression.condition, "scalar", ir) &&
+      return !semanticWgslExpressionContainsSideEffectingCall(expression.consequent, ir) &&
+        !semanticWgslExpressionContainsSideEffectingCall(expression.alternate, ir) &&
+        semanticWgslExpressionSupported(expression.condition, "scalar", ir) &&
         semanticWgslExpressionSupported(expression.consequent, expected, ir) &&
         semanticWgslExpressionSupported(expression.alternate, expected, ir);
     case "assignment":
@@ -2034,6 +2040,50 @@ function semanticWgslExpressionSupported(
     case "initializer":
       return false;
   }
+}
+
+function semanticWgslExpressionContainsSideEffectingCall(
+  expression: SemanticExpression,
+  ir?: SemanticKernelIrModule,
+  visited: ReadonlySet<string> = new Set(),
+): boolean {
+  if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    const callee = expression.callee.name;
+    if (isSemanticAtomicCallName(callee)) return true;
+    const fn = ir?.functions.find((item) => item.name === callee);
+    if (fn && ir && !visited.has(fn.name)) {
+      const nextVisited = new Set(visited).add(fn.name);
+      if (semanticWgslOperationsHaveObservableSideEffects(fn.body, ir, nextVisited)) return true;
+    }
+  }
+  return semanticExpressionChildren(expression).some((child) =>
+    semanticWgslExpressionContainsSideEffectingCall(child, ir, visited)
+  );
+}
+
+function semanticWgslOperationsHaveObservableSideEffects(
+  operations: readonly SemanticKernelIrOperation[],
+  ir: SemanticKernelIrModule,
+  visited: ReadonlySet<string>,
+): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === "store" || operation.kind === "atomic" || operation.kind === "copy" ||
+      operation.kind === "surface-write" || operation.kind === "surface-read-store" ||
+      operation.kind === "matrix-store" || operation.kind === "device-launch") return true;
+    if (operation.kind === "call") {
+      const fn = ir.functions.find((item) => item.name === operation.callee);
+      return fn !== undefined && !visited.has(fn.name) &&
+        semanticWgslOperationsHaveObservableSideEffects(fn.body, ir, new Set(visited).add(fn.name));
+    }
+    if (operation.kind === "branch") {
+      return semanticWgslOperationsHaveObservableSideEffects(operation.consequent, ir, visited) ||
+        semanticWgslOperationsHaveObservableSideEffects(operation.alternate, ir, visited);
+    }
+    if (operation.kind === "block" || operation.kind === "loop") {
+      return semanticWgslOperationsHaveObservableSideEffects(operation.body, ir, visited);
+    }
+    return false;
+  });
 }
 
 function emitSemanticOperations(
@@ -3422,6 +3472,17 @@ function emitSemanticAtomic(
   const loopAtomicKind = wgslIntegerLoopAtomicKindForCudaAtomic(operation.callee);
   if (!operation.target || (!wgslCallee && !loopAtomicKind && !semanticWgslAtomicValueTypeSupported(operation.callee, operation.target.valueType))) {
     throw semanticWgslError(`semantic WGSL does not support atomic '${operation.callee}'`, operation.span);
+  }
+  if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) {
+    const pointerCall = emitSemanticPointerAtomicCall({
+      kind: "call",
+      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      args: operation.args,
+      ...(operation.target.valueType === undefined ? {} : { valueType: operation.target.valueType }),
+      span: operation.span,
+    }, operation.target, ir, names, options, textureSpecializations);
+    if (!pointerCall) throw semanticWgslError(`semantic WGSL pointer atomic '${operation.callee}' is unsupported`, operation.span);
+    return `_ = ${pointerCall}`;
   }
   const target = emitSemanticMemoryRef(operation.target, ir, names, options);
   const operands = operation.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);

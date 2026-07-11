@@ -604,12 +604,30 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
     uint total = 0u;
     total += enabled != 0 ? conditional_helper_with_pointer_side_effect(storage, 7u) : 0u;
     out[0] = total;
-  }`, { workgroupSize: [4, 1, 1] });
+  }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("if ((bg_uniforms.enabled != 0))");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
       expect(compiled.wgsl).toContain("total += conditional_helper_with_pointer_side_effect");
       expect(compiled.wgsl).toContain("total += 0u;");
       expect(compiled.wgsl).not.toContain("select(0u, conditional_helper_with_pointer_side_effect");
+
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const disabled = runCompiledKernelReference(compiled, {
+        buffers: { storage: new Uint32Array([2]), out: new Uint32Array(1) },
+        scalars: { enabled: 0 },
+      }, launch);
+      expect([...disabled.buffers.storage as Uint32Array]).toEqual([2]);
+      expect([...disabled.buffers.out as Uint32Array]).toEqual([0]);
+
+      const enabled = runCompiledKernelReference(compiled, {
+        buffers: { storage: new Uint32Array([2]), out: new Uint32Array(1) },
+        scalars: { enabled: 1 },
+      }, launch);
+      expect([...enabled.buffers.storage as Uint32Array]).toEqual([9]);
+      expect([...enabled.buffers.out as Uint32Array]).toEqual([9]);
     });
 
   it("preserves conditional helper-call laziness inside active-lane predication", () => {
@@ -783,7 +801,10 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
     }
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(compiled.wgsl).toContain("if ((bg_uniforms.enabled != 0))");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
       expect(compiled.wgsl).toContain("nested_condition_conditional_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0u, nested_condition_conditional_helper_with_pointer_side_effect");
     });
