@@ -1889,6 +1889,8 @@ function lowerExpression(
     case "index": {
       const localScalar = directLocalScalarPointerIndexExpression(expression, scope);
       if (localScalar) return localScalar;
+      const localVectorLane = directLocalVectorPointerIndexExpression(expression, scope);
+      if (localVectorLane) return localVectorLane;
       const aliased = localPointerAliasIndexExpression(expression, scope);
       if (aliased) return aliased;
       const target = lowerExpression(expression.target, scope);
@@ -2060,6 +2062,31 @@ function lowerExpression(
       return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
     }
   }
+}
+
+function directLocalVectorPointerIndexExpression(
+  expression: Extract<CudaLiteExpression, { readonly kind: "index" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  if (
+    expression.target.kind !== "cast" || !expression.target.pointer ||
+    expression.target.expression.kind !== "unary" || expression.target.expression.operator !== "&" ||
+    expression.target.expression.argument.kind !== "identifier" ||
+    isCudaVectorType(expression.target.valueType)
+  ) return undefined;
+  const symbol = scope.get(expression.target.expression.argument.name);
+  if (!symbol || symbol.kind !== "local" || symbol.pointer || symbol.dimensions.length !== 0 || !isCudaVectorType(symbol.valueType)) return undefined;
+  const rootScalar = cudaVectorScalarType(symbol.valueType);
+  if (sizeofCudaType(rootScalar ?? "") !== sizeofCudaType(expression.target.valueType)) return undefined;
+  return {
+    kind: "index",
+    target: semanticSymbolExpression(symbol, expression.target.expression.argument.span),
+    index: lowerExpression(expression.index, scope),
+    valueType: expression.target.valueType,
+    addressSpace: "local",
+    pointerBaseIsScalarLane: true,
+    span: expression.span,
+  };
 }
 
 function directLocalScalarPointerIndexExpression(
@@ -3058,6 +3085,7 @@ function memoryRefFromExpression(expression: SemanticExpression): SemanticMemory
     addressSpace: parts.base.addressSpace,
     ...(valueType === undefined ? {} : { valueType }),
     ...(expression.kind === "member" ? optionalContainerValueType(expressionValueType(expression.object)) : {}),
+    ...(expression.kind === "index" ? optionalContainerValueType(expressionValueType(expression.target)) : {}),
     ...(expression.kind === "index" && expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(expression.kind === "index" && expression.pointerBaseUnitBytes !== undefined ? { pointerBaseUnitBytes: expression.pointerBaseUnitBytes } : {}),
     ...(expression.kind === "index" ? optionalPackedByteLanes(expression.packedByteLanes) : {}),

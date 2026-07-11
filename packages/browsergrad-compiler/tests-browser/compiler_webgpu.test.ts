@@ -5266,4 +5266,29 @@ __global__ void local_scalar_bit_view(float* out) {
     expect([...expected.buffers.out as Float32Array]).toEqual([5.5]);
     expect([...actual.buffers.out as Float32Array]).toEqual([5.5]);
   });
+
+  it("runs dynamic scalar bit views over local uint vectors on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void local_vector_scalar_bits(float* out) {
+  uint4 source = make_uint4(__float_as_uint(1.0f), __float_as_uint(2.0f), __float_as_uint(3.0f), __float_as_uint(4.0f));
+  uint4 target;
+  for (uint i = 0; i < 4; ++i) {
+    float value = reinterpret_cast<float*>(&source)[i];
+    reinterpret_cast<float*>(&target)[i] = value + 1.0f;
+  }
+  out[0] = reinterpret_cast<float*>(&target)[0];
+  out[1] = reinterpret_cast<float*>(&target)[1];
+  out[2] = reinterpret_cast<float*>(&target)[2];
+  out[3] = reinterpret_cast<float*>(&target)[3];
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
 });

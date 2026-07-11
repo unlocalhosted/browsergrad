@@ -1242,6 +1242,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (!semanticWgslMemoryRefSupported(ref, ir)) return false;
   if (semanticWgslLocalPackedHalfView(ref, ir)) return true;
   if (semanticWgslLocalScalarBitViewRootType(ref, ir) !== undefined) return true;
+  if (semanticWgslLocalVectorBitViewRootType(ref, ir) !== undefined) return true;
   if (semanticWgslLocalPackedByteRawView(ref, ir)) return true;
   if (semanticWgslPackedSharedByteRoot(ref, ir)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
@@ -1265,6 +1266,14 @@ function semanticWgslLocalScalarBitViewRootType(
   const root = localArraySymbol(ir, ref.base);
   if (root?.valueType !== "float" && root?.valueType !== "uint" && root?.valueType !== "int") return undefined;
   return root.valueType === ref.valueType ? undefined : root.valueType;
+}
+
+function semanticWgslLocalVectorBitViewRootType(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): CudaLiteScalarType | undefined {
+  if (ref.addressSpace !== "local" || ref.fields.length > 0 || ref.indices.length !== 1 || ref.valueType === undefined) return undefined;
+  const rootType = ref.containerValueType ?? semanticDeclaredLocalVectorType(ir, ref.base);
+  const rootScalar = rootType === undefined ? undefined : cudaVectorScalarType(rootType);
+  if (!rootScalar || rootScalar === ref.valueType || sizeofCudaType(rootScalar) !== sizeofCudaType(ref.valueType)) return undefined;
+  return rootScalar;
 }
 
 function semanticWgslLocalPackedHalfView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
@@ -1500,7 +1509,7 @@ function semanticWgslVectorIndexSupported(
   ir?: SemanticKernelIrModule,
 ): boolean {
   const ref = memoryRefFromIndexExpression(expression);
-  if (ref && ir && semanticWgslLocalScalarVectorView(ref, ir)) return false;
+  if (ref && ir && (semanticWgslLocalScalarVectorView(ref, ir) || semanticWgslLocalVectorBitViewRootType(ref, ir) !== undefined)) return false;
   if (ref && !(ref.addressSpace === "local" && isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.target, ir?.functions)))) return false;
   return isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.target, ir?.functions)) &&
     semanticWgslExpressionSupported(expression.target, "any", ir) &&
@@ -2707,7 +2716,8 @@ function emitSemanticStore(
     semanticWgslPackedSharedByteRoot(operation.target, ir) ||
     semanticWgslDirectByteRawView(operation.target, ir) ||
     semanticWgslLocalPackedHalfView(operation.target, ir) ||
-    semanticWgslLocalScalarBitViewRootType(operation.target, ir) !== undefined
+    semanticWgslLocalScalarBitViewRootType(operation.target, ir) !== undefined ||
+    semanticWgslLocalVectorBitViewRootType(operation.target, ir) !== undefined
   ) {
     const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
     if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
@@ -3658,6 +3668,7 @@ function emitSemanticExpression(
         if (semanticWgslPackedSharedByteRoot(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslLocalPackedHalfView(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslLocalScalarBitViewRootType(ref, ir) !== undefined) return emitSemanticMemoryRead(ref, ir, names, options);
+        if (semanticWgslLocalVectorBitViewRootType(ref, ir) !== undefined) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
           return emitSemanticMemoryRead(ref, ir, names, options);
         }
@@ -4680,8 +4691,12 @@ function emitSemanticMemoryRead(
     return effectiveSemanticF16Mode(ir, options) === "native" ? `f16(${lane})` : lane;
   }
   const bitRootType = semanticWgslLocalScalarBitViewRootType(ref, ir);
-  if (bitRootType !== undefined) {
-    const access = emitSemanticMemoryRef({ ...ref, valueType: bitRootType }, ir, names, options);
+  const vectorBitRootType = semanticWgslLocalVectorBitViewRootType(ref, ir);
+  if (bitRootType !== undefined || vectorBitRootType !== undefined) {
+    const rootType = bitRootType ?? vectorBitRootType!;
+    const access = vectorBitRootType === undefined
+      ? emitSemanticMemoryRef({ ...ref, valueType: rootType }, ir, names, options)
+      : emitSemanticLocalVectorBitViewAccess(ref, ir, names, options);
     return `bitcast<${wgslValueType(ref.valueType)}>(${access})`;
   }
   if (semanticWgslDirectByteRawView(ref, ir)) {
@@ -4746,9 +4761,13 @@ function emitSemanticMemoryWrite(
     return `${word} = select((${word} & 0xffff0000u) | ${bits}, (${word} & 0x0000ffffu) | (${bits} << 16u), (${halfIndex} & 1u) != 0u)`;
   }
   const bitRootType = semanticWgslLocalScalarBitViewRootType(ref, ir);
-  if (bitRootType !== undefined) {
-    const target = emitSemanticMemoryRef({ ...ref, valueType: bitRootType }, ir, names, options);
-    return `${target} = bitcast<${wgslValueType(bitRootType)}>(${value})`;
+  const vectorBitRootType = semanticWgslLocalVectorBitViewRootType(ref, ir);
+  if (bitRootType !== undefined || vectorBitRootType !== undefined) {
+    const rootType = bitRootType ?? vectorBitRootType!;
+    const target = vectorBitRootType === undefined
+      ? emitSemanticMemoryRef({ ...ref, valueType: rootType }, ir, names, options)
+      : emitSemanticLocalVectorBitViewAccess(ref, ir, names, options);
+    return `${target} = bitcast<${wgslValueType(rootType)}>(${value})`;
   }
   if (semanticWgslDirectByteRawView(ref, ir)) {
     const base = emitFlatStorageIndex({ ...ref, valueType: "uchar" }, ir, names, options);
@@ -4778,6 +4797,17 @@ function emitSemanticMemoryWrite(
   }
   const target = emitSemanticMemoryRef(ref, ir, names, options);
   return `${target} = ${value}`;
+}
+
+function emitSemanticLocalVectorBitViewAccess(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): string {
+  const index = ref.indices[0];
+  if (!index) throw semanticWgslError(`local vector bit view '${ref.base}' requires one lane index`, ref.span);
+  return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(index, ir, names, "u32", options)}]`;
 }
 
 function emitSemanticLocalPackedHalfWord(
@@ -6237,6 +6267,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     base: flattened.base.name,
     addressSpace: flattened.base.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    ...(expression.target.kind === "symbol" && expression.target.valueType !== undefined ? { containerValueType: expression.target.valueType } : {}),
     ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
     ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),

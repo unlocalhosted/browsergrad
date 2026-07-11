@@ -4240,6 +4240,33 @@ __global__ void sharedHelperScoped(float *out) {
       expect(Array.from(result.buffers.out as Iterable<number>)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     });
 
+  it("bitcasts dynamic scalar lanes over local uint vectors", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void localVectorScalarBits(float *out) {
+    uint4 source = make_uint4(__float_as_uint(1.0f), __float_as_uint(2.0f), __float_as_uint(3.0f), __float_as_uint(4.0f));
+    uint4 target;
+    for (uint i = 0; i < 4; ++i) {
+      float value = reinterpret_cast<float *>(&source)[i];
+      reinterpret_cast<float *>(&target)[i] = value + 1.0f;
+    }
+    out[0] = reinterpret_cast<float *>(&target)[0];
+    out[1] = reinterpret_cast<float *>(&target)[1];
+    out[2] = reinterpret_cast<float *>(&target)[2];
+    out[3] = reinterpret_cast<float *>(&target)[3];
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bitcast<f32>(source[i])");
+      expect(compiled.wgsl).toContain("target[i] = bitcast<u32>");
+      expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
+    });
+
   it("folds same-type pointer indexing over local scalar addresses", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void scalar_address_identity(const float4* input, float4* output) {

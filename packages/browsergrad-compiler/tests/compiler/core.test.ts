@@ -4848,7 +4848,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var set: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var bg_set: i32 = i32(0);");
       expect(compiled.wgsl).toContain("var reset: i32 = i32(0);");
       expect(compiled.wgsl).toContain("var last: i32 = i32(0);");
       expect(compiled.wgsl).toContain("var peek: i32 = i32(0);");
@@ -5824,8 +5824,9 @@ __global__ void helperScopedLocal(float *out) {
     extern __shared__ float shared[];
     float var = array[0];
     float exp = var + precision;
+    float target = exp;
     if (threadIdx.x == 0) {
-      shared[0] = exp;
+      shared[0] = target;
       out[0] = shared[0];
     }
   }`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { shared: 1 } });
@@ -5840,6 +5841,7 @@ __global__ void helperScopedLocal(float *out) {
       expect(compiled.wgsl).toContain("bg_shared");
       expect(compiled.wgsl).toContain("bg_var");
       expect(compiled.wgsl).toContain("bg_precision");
+      expect(compiled.wgsl).toContain("bg_target");
       expect(compiled.wgsl).not.toContain("var var:");
       expect(compiled.wgsl).not.toContain(" precision:");
     });

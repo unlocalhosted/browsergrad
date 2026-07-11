@@ -559,6 +559,7 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
   if (semanticReferenceLocalPackedHalfView(ref, compiled)) return true;
   if (semanticReferenceLocalScalarBitViewRootType(ref, compiled) !== undefined) return true;
+  if (semanticReferenceLocalVectorBitViewRootType(ref, compiled) !== undefined) return true;
   if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
   if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
@@ -613,6 +614,34 @@ function semanticReferenceLocalScalarVectorView(ref: SemanticMemoryRef, compiled
   return scalar !== undefined && compiled.kernelIr.memory.some((symbol) =>
     symbol.name === ref.base && symbol.kind === "local" && symbol.valueType === scalar,
   );
+}
+
+function semanticReferenceLocalVectorBitViewRootType(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): CudaLiteScalarType | undefined {
+  if (ref.addressSpace !== "local" || ref.fields.length > 0 || ref.indices.length !== 1 || ref.valueType === undefined) return undefined;
+  const rootType = ref.containerValueType ?? semanticReferenceDeclaredLocalVectorType(compiled.kernelIr.operations, ref.base) ??
+    compiled.kernelIr.functions.map((fn) => semanticReferenceDeclaredLocalVectorType(fn.body, ref.base)).find((value) => value !== undefined);
+  const rootScalar = rootType === undefined ? undefined : cudaVectorScalarType(rootType);
+  if (!rootScalar || rootScalar === ref.valueType || sizeofCudaType(rootScalar) !== sizeofCudaType(ref.valueType)) return undefined;
+  return rootScalar;
+}
+
+function semanticReferenceDeclaredLocalVectorType(
+  operations: readonly SemanticKernelIrOperation[],
+  name: string,
+): CudaLiteScalarType | undefined {
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.target.addressSpace === "local" && operation.target.name === name && operation.target.dimensions.length === 0 && isCudaVectorType(operation.target.valueType)) return operation.target.valueType;
+    const nested = operation.kind === "branch"
+      ? [...operation.consequent, ...operation.alternate]
+      : operation.kind === "loop" || operation.kind === "block"
+      ? operation.body
+      : undefined;
+    if (nested) {
+      const valueType = semanticReferenceDeclaredLocalVectorType(nested, name);
+      if (valueType !== undefined) return valueType;
+    }
+  }
+  return undefined;
 }
 
 function semanticReferenceCopySupported(
@@ -856,6 +885,7 @@ function semanticReferenceVectorIndexSupported(
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
   const ref = memoryRefFromIndexExpression(expression);
+  if (ref && compiled && semanticReferenceLocalVectorBitViewRootType(ref, compiled) !== undefined) return false;
   if (ref && !(ref.addressSpace === "local" && isSemanticFloatVectorType(semanticExpressionValueType(expression.target)))) return false;
   return isSemanticFloatVectorType(semanticExpressionValueType(expression.target)) &&
     semanticReferenceExpressionSupported(expression.target, "any", compiled) &&
@@ -4669,6 +4699,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     base: target.name,
     addressSpace: target.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    ...(expression.target.kind === "symbol" && expression.target.valueType !== undefined ? { containerValueType: expression.target.valueType } : {}),
     ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
     ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
@@ -4697,11 +4728,13 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
       const word = Number(buffer[Math.trunc(halfIndex / 2)] ?? 0) >>> 0;
       return float16BitsToFloat32(halfIndex % 2 === 0 ? word & 0xffff : word >>> 16);
     }
-    const index = flatIndex(ref, context);
     const bitRootType = semanticReferenceLocalScalarBitViewRootType(ref, context.compiled);
-    if (bitRootType !== undefined) {
+    const vectorBitRootType = semanticReferenceLocalVectorBitViewRootType(ref, context.compiled);
+    const index = vectorBitRootType === undefined ? flatIndex(ref, context) : Math.trunc(evalNumber(ref.indices[0]!, context));
+    if (bitRootType !== undefined || vectorBitRootType !== undefined) {
+      const rootType = bitRootType ?? vectorBitRootType!;
       const raw = Number(buffer[index] ?? 0);
-      const bits = bitRootType === "float" ? float32ToUintBits(raw) : raw >>> 0;
+      const bits = rootType === "float" ? float32ToUintBits(raw) : raw >>> 0;
       return ref.valueType === "float" ? uintBitsToFloat32(bits) : ref.valueType === "int" ? bits | 0 : bits;
     }
     return Number(buffer[index] ?? 0);
@@ -4778,13 +4811,15 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
         : ((previous & 0x0000ffff) | (bits << 16)) >>> 0;
       return;
     }
-    const index = flatIndex(ref, context);
+    const vectorBitRootType = semanticReferenceLocalVectorBitViewRootType(ref, context.compiled);
+    const index = vectorBitRootType === undefined ? flatIndex(ref, context) : Math.trunc(evalNumber(ref.indices[0]!, context));
     if (index >= 0 && index < buffer.length) {
       const bitRootType = semanticReferenceLocalScalarBitViewRootType(ref, context.compiled);
-      if (bitRootType === undefined) buffer[index] = value;
+      if (bitRootType === undefined && vectorBitRootType === undefined) buffer[index] = value;
       else {
+        const rootType = bitRootType ?? vectorBitRootType!;
         const bits = ref.valueType === "float" ? float32ToUintBits(value) : value >>> 0;
-        buffer[index] = bitRootType === "float" ? uintBitsToFloat32(bits) : bitRootType === "int" ? bits | 0 : bits;
+        buffer[index] = rootType === "float" ? uintBitsToFloat32(bits) : rootType === "int" ? bits | 0 : bits;
       }
     }
     return;
