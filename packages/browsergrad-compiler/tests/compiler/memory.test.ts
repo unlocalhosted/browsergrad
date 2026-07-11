@@ -3500,9 +3500,10 @@ __global__ void sharedHelperScoped(float *out) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("out[0u] = sin(0.25);");
-      expect(compiled.wgsl).toContain("out[1u] = cos(0.25);");
-      expect(compiled.wgsl).toContain("out[2u] = sin((3.141592653589793 * 0.5));");
+      expect(compiled.wgsl).toContain("var bg__bg_sincos_angle");
+      expect(compiled.wgsl).toContain("out[0u] = sin(bg__bg_sincos_angle");
+      expect(compiled.wgsl).toContain("out[1u] = cos(bg__bg_sincos_angle");
+      expect(compiled.wgsl).toContain("(3.141592653589793 * 0.5)");
       const out = [...semanticResult.buffers.out as Float32Array];
       expect(out[0]).toBeCloseTo(Math.sin(0.25), 6);
       expect(out[1]).toBeCloseTo(Math.cos(0.25), 6);

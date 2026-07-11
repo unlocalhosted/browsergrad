@@ -1563,10 +1563,13 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sincos-output");
-      expect(compiled.wgsl).toContain("let bg_sincos_sin_");
-      expect(compiled.wgsl).toContain("sin(0.25)");
-      expect(compiled.wgsl).toContain("cos(0.25)");
-      expect(compiled.wgsl).toContain("sin((3.141592653589793 * 0.5))");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("bg__bg_sincos_angle");
+      expect(compiled.wgsl).toContain("sin(bg__bg_sincos_angle");
+      expect(compiled.wgsl).toContain("cos(bg__bg_sincos_angle");
+      expect(compiled.wgsl).toContain("(3.141592653589793 * 0.5)");
       const out = [...result.buffers.out as Float32Array];
       expect(out[0]).toBeCloseTo(Math.sin(0.25), 6);
       expect(out[1]).toBeCloseTo(Math.cos(0.25), 6);

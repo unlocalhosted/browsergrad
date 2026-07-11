@@ -3140,34 +3140,20 @@ function semanticSincosStores(
 ): SemanticKernelIrOperation | undefined {
   if (expression.callee.kind !== "symbol" || !isSincosCallName(expression.callee.name)) return undefined;
   const value = expression.args[0];
-  const sinTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
-  const cosTarget = source.args[2] === undefined ? undefined : pointerAliasValueExpression(source.args[2], scope, source.args[2].span);
+  const sinTarget = source.args[1] === undefined ? undefined : mathOutTargetExpressionFromSource(source.args[1], scope);
+  const cosTarget = source.args[2] === undefined ? undefined : mathOutTargetExpressionFromSource(source.args[2], scope);
   if (!value || !sinTarget || !cosTarget) return undefined;
-  const sinRef = memoryRefFromExpression(sinTarget);
-  const cosRef = memoryRefFromExpression(cosTarget);
-  if (!sinRef || !cosRef) return undefined;
   const angle = isSincosPiCallName(expression.callee.name)
     ? multiplyFloatExpressions(numberExpression(Math.PI, value.span), value, value.span)
     : value;
+  const temp = tempScalarSymbol("__bg.sincos.angle", span, "float");
+  const tempValue = semanticSymbolExpression(temp, angle.span);
   return {
     kind: "block",
     body: [
-      {
-        kind: "store",
-        target: sinRef,
-        value: mathCallExpression("sin", angle, value.span),
-        operator: "=",
-        reads: collectMemoryRefs(angle),
-        span,
-      },
-      {
-        kind: "store",
-        target: cosRef,
-        value: mathCallExpression("cos", angle, value.span),
-        operator: "=",
-        reads: collectMemoryRefs(angle),
-        span,
-      },
+      { kind: "declare", target: temp, init: angle, span },
+      mathOutStoreOrAssignOperation(sinTarget, mathCallExpression("sin", tempValue, value.span), span),
+      mathOutStoreOrAssignOperation(cosTarget, mathCallExpression("cos", tempValue, value.span), span),
     ],
     span,
   };
