@@ -117,7 +117,6 @@ import {
   wgslAtomicScalar,
   wgslBindingType,
   wgslScalar,
-  wgslUniformScalar,
   wgslValueScalar,
   wgslValueType,
   wgslVectorScalar,
@@ -247,6 +246,7 @@ import {
   type SemanticTextureDescriptorSpecializations,
 } from "./semantic_wgsl_texture_descriptors.js";
 import { emitCubeTextureAtlasHelpers } from "./wgsl_texture_surface.js";
+import { semanticUniformLayout } from "./semantic_uniform_layout.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
@@ -357,8 +357,10 @@ export function emitSemanticKernelIrWgsl(
   const initializedScalarConstants = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length === 0);
   const initializedConstantArrays = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length > 0);
   const uniformParams = [
-    ...ir.params.filter((param) => param.addressSpace === "uniform"),
-    ...constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length === 0 && !isSemanticFloatVectorType(symbol.valueType)),
+    ...ir.params.filter((param) => param.addressSpace === "uniform").map((param) => ({ ...param, valueType: param.valueType ?? "float" as const })),
+    ...constantMemorySymbols(ir)
+      .filter((symbol) => !symbol.initialized && symbol.dimensions.length === 0 && !isSemanticFloatVectorType(symbol.valueType))
+      .map((symbol) => ({ ...symbol, valueType: symbol.valueType ?? "float" as const })),
     ...surfaces.flatMap((surface) => [
       { name: surfaceWidthField(surface.name), valueType: "uint" as const, span: surface.span },
       { name: surfaceHeightField(surface.name), valueType: "uint" as const, span: surface.span },
@@ -369,6 +371,7 @@ export function emitSemanticKernelIrWgsl(
         : []
     ),
   ];
+  const uniformLayout = semanticUniformLayout(uniformParams);
   const constantBuffers = constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && (symbol.dimensions.length > 0 || isSemanticFloatVectorType(symbol.valueType)));
   const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
   const textures = textureSymbols(ir);
@@ -425,7 +428,7 @@ export function emitSemanticKernelIrWgsl(
     bindings.push({
       kind: "uniform",
       name: UNIFORM_PARAMS_NAME,
-      byteLength: Math.max(16, uniformParams.length * 4),
+      byteLength: uniformLayout.byteLength,
       binding: bindings.length,
     });
   }
@@ -523,10 +526,10 @@ export function emitSemanticKernelIrWgsl(
   }
   if (uniformParams.length > 0) {
     lines.push("struct Params {");
-    for (const param of uniformParams) {
-      const scalar = wgslUniformScalar(param.valueType);
-      const align = scalar === "f16" ? "@align(4) " : "";
-      lines.push(`  ${align}${nameFor(param.name, names)}: ${scalar},`);
+    for (const param of uniformLayout.fields) {
+      const valueType = wgslValueType(param.valueType);
+      const size = valueType === "f16" ? "@size(4) " : "";
+      lines.push(`  @align(${param.align}) ${size}${nameFor(param.name, names)}: ${valueType},`);
     }
     lines.push("};");
     lines.push(`@group(0) @binding(${bindings.length - 1}) var<uniform> ${UNIFORM_PARAMS_NAME}: Params;`);
@@ -712,7 +715,7 @@ function semanticWgslParamSupported(
       : semanticWgslValueTypeSupported(param.valueType));
   }
   if (param.valueType === "uchar") return false;
-  if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
+  if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType) || isCudaVectorType(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
   return false;

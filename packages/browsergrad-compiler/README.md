@@ -86,6 +86,12 @@ console.log(status.canRunOnWebGpu, status.mode, status.kind);
 const gpu = await runCompiledKernelWebGpu(device, compiled, input, launch);
 ```
 
+Pass by-value CUDA vector parameters through `input.vectors`, using a matching
+typed array such as `vectors: { origin: new Float32Array([1, 2, 3]) }` for a
+`float3 origin` parameter. Scalar by-value parameters remain in `input.scalars`.
+The compiler uses one WGSL-aligned uniform layout for shader declarations,
+host packing, semantic reference validation, and WebGPU execution.
+
 Compiler results expose the production compiler contracts:
 
 - `ast`: syntax tree from the parser.

@@ -322,6 +322,35 @@ __global__ void noArgs(void) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).not.toContain("__bg_unused_param_0");
   });
+
+  it("packs by-value vector kernel params with WGSL uniform alignment", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vectorParams(float *out, float prefix, float2 value, int suffix) {
+  out[0] = prefix + value.x;
+  out[1] = value.y + suffix;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(2) },
+      scalars: { prefix: 2, suffix: 3 },
+      vectors: { value: new Float32Array([1.25, -2.5]) },
+    };
+    const packed = packCudaWebGpuUniformParams(compiled, input);
+    const view = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      input,
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("@align(8) value: vec2<f32>");
+    expect(packed.byteLength).toBe(24);
+    expect(view.getFloat32(0, true)).toBe(2);
+    expect(view.getFloat32(8, true)).toBe(1.25);
+    expect(view.getFloat32(12, true)).toBe(-2.5);
+    expect(view.getInt32(16, true)).toBe(3);
+    expect([...result.buffers.out as Float32Array]).toEqual([3.25, 0.5]);
+  });
   it("keeps legacy IR and misleading GPU readiness out of public compiler contracts", () => {
       const srcDir = path.join(packageRoot, "src");
       const sources = fs.readdirSync(srcDir)

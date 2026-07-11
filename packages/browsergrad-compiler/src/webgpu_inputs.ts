@@ -33,6 +33,12 @@ export type CudaWebGpuUniformParamDescriptor =
       readonly span: SourceSpan;
     }
   | {
+      readonly kind: "vector";
+      readonly name: string;
+      readonly valueType: NonNullable<CudaLiteSemanticSymbolValueType>;
+      readonly span: SourceSpan;
+    }
+  | {
       readonly kind: "constant";
       readonly name: string;
       readonly valueType: CudaLiteGlobalConstant["valueType"];
@@ -162,11 +168,12 @@ export function cudaWebGpuUniformParamDescriptors(
   compiled: CompiledCudaLiteKernel,
 ): readonly CudaWebGpuUniformParamDescriptor[] {
   return [
-    ...compiled.kernelIr.params.flatMap((param): readonly CudaWebGpuUniformParamDescriptor[] =>
-      param.addressSpace === "uniform" && param.valueType !== undefined
-        ? [{ kind: "scalar", name: param.name, valueType: param.valueType, span: param.span }]
-        : []
-    ),
+    ...compiled.kernelIr.params.flatMap((param): readonly CudaWebGpuUniformParamDescriptor[] => {
+      if (param.addressSpace !== "uniform" || param.valueType === undefined) return [];
+      return isCudaVectorType(param.valueType)
+        ? [{ kind: "vector", name: param.name, valueType: param.valueType, span: param.span }]
+        : [{ kind: "scalar", name: param.name, valueType: param.valueType, span: param.span }];
+    }),
     ...externalConstantDeclarations(compiled).flatMap((constant): readonly CudaWebGpuUniformParamDescriptor[] =>
       constant.dimensions.length === 0 && constant.init === undefined && !isCudaVectorType(constant.valueType)
         ? [{ kind: "constant", name: constant.name, valueType: constant.valueType, span: constant.span }]

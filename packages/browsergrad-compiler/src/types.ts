@@ -511,6 +511,7 @@ export interface CompiledKernelInput {
   readonly surfaces?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly memoryPools?: Readonly<Record<string, CudaLiteMemoryPoolInput>>;
   readonly scalars?: Readonly<Record<string, number>>;
+  readonly vectors?: Readonly<Record<string, WgslTypedArray>>;
   readonly readback?: readonly string[];
 }
 

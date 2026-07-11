@@ -191,6 +191,7 @@ interface SemanticReferenceContext {
   readonly sharedOffsets: Map<string, number>;
   readonly storageOffsets: Map<string, number>;
   readonly scalars: Readonly<Record<string, number>>;
+  readonly vectors: Readonly<Record<string, WgslTypedArray>>;
   readonly locals: Map<string, SemanticValue>;
   readonly blockIdx: ReferenceVector3;
   readonly threadIdx: ReferenceVector3;
@@ -237,6 +238,7 @@ export function runCompiledKernelSemanticReference(
   const blockDim = referenceVectorFromTuple(launch.blockDim);
   const gridDim = referenceVectorFromTuple(launch.gridDim);
   const scalars = input.scalars ?? {};
+  const vectors = input.vectors ?? {};
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
@@ -266,6 +268,7 @@ export function runCompiledKernelSemanticReference(
                 sharedOffsets: new Map(),
                 storageOffsets: new Map(),
                 scalars,
+                vectors,
                 locals: new Map(),
                 blockIdx: referenceVectorFromTuple([bx, by, bz]),
                 threadIdx: referenceVectorFromTuple([tx, ty, tz]),
@@ -421,7 +424,7 @@ function semanticReferenceParamSupported(
       ? semanticDirectByteStorageParamSupported(compiled.kernelIr, param.name)
       : semanticReferenceValueTypeSupported(param.valueType));
   }
-  if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType);
+  if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType) || isCudaVectorType(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
   return false;
@@ -4155,6 +4158,7 @@ function createSemanticFunctionContext(
     sharedOffsets,
     storageOffsets,
     scalars: context.scalars,
+    vectors: context.vectors,
     locals,
     blockIdx: context.blockIdx,
     threadIdx: context.threadIdx,
@@ -4660,6 +4664,8 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   if (context.locals.has(name)) return context.locals.get(name)!;
   const scalar = context.scalars[name];
   if (scalar !== undefined) return scalar;
+  const vector = context.vectors[name];
+  if (vector !== undefined) return Array.from(vector, Number);
   const constant = context.constants.get(name);
   if (typeof constant === "number") return constant;
   const constantSymbol = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "constant");
@@ -4821,7 +4827,15 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
         throw semanticReferenceError(`buffer '${param.name}' expects Float32Array`, param.span);
       }
     } else if (param.addressSpace === "uniform") {
-      if (input.scalars?.[param.name] === undefined) throw semanticReferenceError(`missing scalar input '${param.name}'`, param.span);
+      if (isCudaVectorType(param.valueType)) {
+        const vector = input.vectors?.[param.name];
+        if (vector === undefined) throw semanticReferenceError(`missing vector input '${param.name}'`, param.span);
+        if (vector.length < cudaVectorLaneCount(param.valueType)) {
+          throw semanticReferenceError(`vector '${param.name}' has insufficient lanes`, param.span);
+        }
+      } else if (input.scalars?.[param.name] === undefined) {
+        throw semanticReferenceError(`missing scalar input '${param.name}'`, param.span);
+      }
     } else if (param.addressSpace === "texture") {
       if (!input.textures?.[param.name]) throw semanticReferenceError(`missing texture input '${param.name}'`, param.span);
     } else if (param.addressSpace === "surface") {

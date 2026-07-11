@@ -42,6 +42,12 @@ export function validateReferenceInputs(
       const buffer = input.buffers[param.name];
       if (!buffer) throw referenceInputFailure(`missing buffer input '${param.name}'`);
       validateBufferInput(param.name, semanticSymbolValueType(param), buffer);
+    } else if (isCudaVectorType(param.valueType)) {
+      const vector = input.vectors?.[param.name];
+      if (vector === undefined) throw referenceInputFailure(`missing vector input '${param.name}'`);
+      validateTypedConstant(param.name, param.valueType, vector);
+      const expected = cudaVectorLaneCount(param.valueType);
+      if (vector.length < expected) throw referenceInputFailure(`vector '${param.name}' expects at least ${expected} elements`);
     } else if (input.scalars?.[param.name] === undefined) {
       throw referenceInputFailure(`missing scalar input '${param.name}'`);
     }

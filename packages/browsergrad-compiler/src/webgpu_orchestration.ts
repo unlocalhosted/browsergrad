@@ -31,6 +31,8 @@ import {
   memoryPoolStorageMetadata,
   surfaceBufferInputs,
 } from "./webgpu_inputs.js";
+import { semanticUniformLayout } from "./semantic_uniform_layout.js";
+import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import { emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
 import {
   CudaLiteCompilerError,
@@ -1050,25 +1052,50 @@ export function packCudaWebGpuUniformParams(
 ): Uint8Array {
   const scalarParams = cudaWebGpuUniformParamDescriptors(compiled);
   if (scalarParams.length === 0) return new Uint8Array(0);
-  const bytes = new Uint8Array(Math.max(16, scalarParams.length * 4));
+  const layout = semanticUniformLayout(scalarParams);
+  const bytes = new Uint8Array(layout.byteLength);
   const view = new DataView(bytes.buffer);
-  for (let i = 0; i < scalarParams.length; i++) {
-    const param = scalarParams[i]!;
+  for (const field of layout.fields) {
+    const param = scalarParams.find((item) => item.name === field.name)!;
     const value = param.kind === "surface-dimension"
       ? (param.name.endsWith("_width") ? input.surfaces?.[param.surface]?.width : input.surfaces?.[param.surface]?.height)
       : param.kind === "pointer-base"
       ? compiled.pointerBaseOffsets?.[param.pointerBase]
+      : param.kind === "vector"
+      ? input.vectors?.[param.name]
       : param.kind === "scalar"
       ? input.scalars?.[param.name]
       : input.constants?.[param.name];
     if (value === undefined) {
-      const kind = param.kind === "surface-dimension" ? "surface input" : param.kind === "scalar" ? "scalar input" : "constant input";
+      const kind = param.kind === "surface-dimension" ? "surface input" : param.kind === "scalar" ? "scalar input" : param.kind === "vector" ? "vector input" : "constant input";
       throw new CudaLiteCompilerError(`missing ${kind} '${param.name}'`, [{
         code: "missing-scalar",
         severity: "error",
         message: `missing ${kind} '${param.name}'`,
         span: param.span,
       }]);
+    }
+    if (param.kind === "vector") {
+      if (typeof value === "number" || !isCudaVectorType(param.valueType)) {
+        throw new CudaLiteCompilerError(`vector '${param.name}' must be a typed array`, [{
+          code: "invalid-constant-input",
+          severity: "error",
+          message: `vector '${param.name}' must be a typed array`,
+          span: param.span,
+        }]);
+      }
+      const lanes = cudaVectorLaneCount(param.valueType);
+      if (value.length < lanes) {
+        throw new CudaLiteCompilerError(`vector '${param.name}' expects ${lanes} lanes`, [{
+          code: "invalid-constant-input",
+          severity: "error",
+          message: `vector '${param.name}' expects ${lanes} lanes`,
+          span: param.span,
+        }]);
+      }
+      const scalarType = cudaVectorScalarType(param.valueType);
+      for (let lane = 0; lane < lanes; lane++) writeUniformScalar(view, field.offset + lane * (scalarType === "half" ? 2 : 4), scalarType, Number(value[lane]), compiled);
+      continue;
     }
     if (typeof value !== "number") {
       throw new CudaLiteCompilerError(`constant '${param.name}' must be a scalar number`, [{
@@ -1078,14 +1105,23 @@ export function packCudaWebGpuUniformParams(
         span: param.span,
       }]);
     }
-    const offset = i * 4;
-    if (param.valueType === "int") view.setInt32(offset, Math.trunc(value), true);
-    else if (param.valueType === "uint") view.setUint32(offset, Math.trunc(value), true);
-    else if (param.valueType === "half" && compiled.f16Mode !== "f32") view.setUint16(offset, float16Bits(value), true);
-    else if (param.valueType === "bool") view.setUint32(offset, value ? 1 : 0, true);
-    else view.setFloat32(offset, value, true);
+    writeUniformScalar(view, field.offset, param.valueType, value, compiled);
   }
   return bytes;
+}
+
+function writeUniformScalar(
+  view: DataView,
+  offset: number,
+  valueType: CompiledCudaLiteKernel["kernelIr"]["params"][number]["valueType"],
+  value: number,
+  compiled: CompiledCudaLiteKernel,
+): void {
+  if (valueType === "int") view.setInt32(offset, Math.trunc(value), true);
+  else if (valueType === "uint" || valueType === "uchar") view.setUint32(offset, Math.trunc(value), true);
+  else if (valueType === "half" && compiled.f16Mode !== "f32") view.setUint16(offset, float16Bits(value), true);
+  else if (valueType === "bool") view.setUint32(offset, value ? 1 : 0, true);
+  else view.setFloat32(offset, value, true);
 }
 
 function float16Bits(value: number): number {

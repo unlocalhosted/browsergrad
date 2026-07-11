@@ -2521,6 +2521,13 @@ __global__ void semanticMaskedMinMax(int *out) {
   out[tid * 2] = __reduce_min_sync(mask, value);
   out[tid * 2 + 1] = __reduce_max_sync(mask, value);
 }`,
+  cudaSamplesIntervalVectorParam: `
+__global__ void test_interval_newton(float2 *buffer, int *nresults, float2 i, int implementation_choice)
+{
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  buffer[thread_id] = i;
+  nresults[thread_id] = implementation_choice >= 0 ? 1 : 0;
+}`,
   legacyVote: `
 __global__ void legacyVote(uint *input, uint *out) {
   int tid = threadIdx.x;
@@ -14559,6 +14566,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [3, 5, 3, 5, 3, 5, 3, 5] },
+          },
+          {
+            name: "corpus:cuda-samples:test-interval-newton-vector-param",
+            corpusId: "cuda-samples",
+            source: SOURCES.cudaSamplesIntervalVectorParam,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                buffer: new Float32Array(2),
+                nresults: new Int32Array(1),
+              },
+              vectors: { i: new Float32Array([1.25, -2.5]) },
+              scalars: { implementation_choice: 1 },
+            }),
+            output: "buffer",
+            expectedOutput: { type: "Float32Array", data: [1.25, -2.5] },
           },
           {
             name: "subgroup:legacy-vote",

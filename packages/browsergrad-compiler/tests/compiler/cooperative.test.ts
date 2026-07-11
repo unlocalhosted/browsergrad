@@ -2676,7 +2676,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         features: { "shader-f16": true },
         workgroupSize: [1, 1, 1],
       });
-      expect(halfScalar.wgsl).toContain("@align(4) a: f16");
+      expect(halfScalar.wgsl).toContain("@align(4) @size(4) a: f16");
       const halfResult = runCompiledKernelReference(
         halfScalar,
         { buffers: { x: createWgslFloat16Array([1]) }, scalars: { a: 2 } },
