@@ -73,7 +73,9 @@ export function semanticOperationsReferenceRoot(
     if (operation.kind === "copy") return memoryRefReferencesRoot(operation.source) || memoryRefReferencesRoot(operation.target);
     if (operation.kind === "atomic" && operation.target) return memoryRefReferencesRoot(operation.target);
     if (operation.kind === "branch") return semanticOperationsReferenceRoot(operation.consequent, root) || semanticOperationsReferenceRoot(operation.alternate, root);
-    if (operation.kind === "loop" || operation.kind === "block") return semanticOperationsReferenceRoot(operation.body, root);
+    if (operation.kind === "loop") return semanticOperationsReferenceRoot(operation.body, root) ||
+      (operation.continuing !== undefined && semanticOperationsReferenceRoot(operation.continuing, root));
+    if (operation.kind === "block") return semanticOperationsReferenceRoot(operation.body, root);
     // Device launches carry host-runtime pointer topology outside expression walking.
     if (operation.kind === "device-launch") return true;
     return false;

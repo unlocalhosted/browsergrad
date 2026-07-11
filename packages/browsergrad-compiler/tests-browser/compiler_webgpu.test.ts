@@ -5493,4 +5493,26 @@ __global__ void boolStorage(bool *flags, uint *out) {
     expect([...actual.buffers.flags as Uint32Array]).toEqual([0, 1, 1]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([7, 11]);
   });
+
+  it("runs lazy do-while conditions through semantic continuing IR on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void lazyDoWhile(uint* state, uint* out, int enabled) {
+  int i = 0;
+  do {
+    i++;
+    if (i < 2) continue;
+    out[0] = (uint)i;
+  } while (i < 3 && (enabled ? atomicAdd(state, 7u) + 1u : 0u) != 0u);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { state: new Uint32Array([2]), out: new Uint32Array(1) }, scalars: { enabled: 1 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.state as Uint32Array]).toEqual([16]);
+    expect([...actual.buffers.state as Uint32Array]).toEqual([16]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([3]);
+  });
 });

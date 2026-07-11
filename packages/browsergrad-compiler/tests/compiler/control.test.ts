@@ -386,9 +386,40 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("continuing {");
+      expect(compiled.wgsl).toContain("break if !(");
       expect(compiled.wgsl).toContain("break if !((u32(i) < 4u));");
       expect([...semanticResult.buffers.out as Int32Array]).toEqual([8]);
       expect([...referenceResult.buffers.out as Int32Array]).toEqual([8]);
+    });
+
+  it("materializes lazy do-while conditions in the IR continuing region", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void lazyDoWhile(uint* state, uint* out, int enabled) {
+    int i = 0;
+    do {
+      i++;
+      if (i < 2) continue;
+      out[0] = (uint)i;
+    } while (i < 3 && (enabled ? atomicAdd(state, 7u) + 1u : 0u) != 0u);
+  }
+  `, { workgroupSize: [1, 1, 1] });
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const enabledInput = { buffers: { state: new Uint32Array([2]), out: new Uint32Array(1) }, scalars: { enabled: 1 } };
+      const disabledInput = { buffers: { state: new Uint32Array([2]), out: new Uint32Array(1) }, scalars: { enabled: 0 } };
+      const enabled = runCompiledKernelSemanticReference(compiled, enabledInput, launch);
+      const disabled = runCompiledKernelSemanticReference(compiled, disabledInput, launch);
+      const loop = compiled.kernelIr.operations.find((operation) => operation.kind === "loop");
+
+      expect(loop?.kind).toBe("loop");
+      expect(loop?.kind === "loop" ? loop.condition : undefined).toBeUndefined();
+      expect(loop?.kind === "loop" ? loop.continuing?.length : undefined).toBeGreaterThan(0);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("continuing {");
+      expect([...enabled.buffers.state as Uint32Array]).toEqual([16]);
+      expect([...enabled.buffers.out as Uint32Array]).toEqual([3]);
+      expect([...disabled.buffers.state as Uint32Array]).toEqual([2]);
+      expect([...disabled.buffers.out as Uint32Array]).toEqual([0]);
     });
 
   it("runs early kernel returns through semantic reference and WGSL", () => {

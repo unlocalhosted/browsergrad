@@ -1837,6 +1837,11 @@ function* execSemanticBarrierLoop(
     const control = yield* execSemanticBarrierScopedOperations(operation.body, context, barrierFunctions);
     if (control === "return") return control;
     if (control === "break") return "fallthrough";
+    if (operation.continuing) {
+      const continuingControl = yield* execSemanticBarrierScopedOperations(operation.continuing, context, barrierFunctions);
+      if (continuingControl === "return") return continuingControl;
+      if (continuingControl === "break") return "fallthrough";
+    }
     if (operation.loopKind === "for" && operation.update) evalNumber(operation.update, context);
     if (operation.loopKind === "do-while" && (!operation.condition || !truthy(evalNumber(operation.condition, context)))) return "fallthrough";
   }
@@ -2463,7 +2468,12 @@ function execSemanticLoop(
     const control = execSemanticScopedOperations(operation.body, context);
     if (control === "return") return control;
     if (control === "break") return "fallthrough";
-    if (!operation.condition || !truthy(evalNumber(operation.condition, context))) return "fallthrough";
+    if (operation.continuing) {
+      const continuingControl = execSemanticScopedOperations(operation.continuing, context);
+      if (continuingControl === "return") return continuingControl;
+      if (continuingControl === "break") return "fallthrough";
+    }
+    if (operation.continuing === undefined && (!operation.condition || !truthy(evalNumber(operation.condition, context)))) return "fallthrough";
   }
 }
 
@@ -5774,6 +5784,17 @@ function runSemanticCollectiveLoop(
       else continuing.push(context);
     }
     active = continuing;
+    if (operation.continuing && active.length > 0) {
+      const continuingControls = runSemanticCollectiveScopedOperations(operation.continuing, active);
+      const repeating: SemanticReferenceContext[] = [];
+      for (const context of active) {
+        const control = continuingControls.get(context) ?? "fallthrough";
+        if (control === "return") completed.set(context, control);
+        else if (control === "break") completed.set(context, "fallthrough");
+        else repeating.push(context);
+      }
+      active = repeating;
+    }
     if (operation.loopKind === "for" && operation.update) {
       for (const context of active) evalNumber(operation.update, context);
     }
@@ -5815,7 +5836,8 @@ function semanticOperationsContainSubgroupCall(operations: readonly SemanticKern
         : semanticExpressionContainsSubgroupCall(operation.init)) ||
       (operation.condition !== undefined && semanticExpressionContainsSubgroupCall(operation.condition)) ||
       (operation.update !== undefined && semanticExpressionContainsSubgroupCall(operation.update)) ||
-      semanticOperationsContainSubgroupCall(operation.body);
+      semanticOperationsContainSubgroupCall(operation.body) ||
+      (operation.continuing !== undefined && semanticOperationsContainSubgroupCall(operation.continuing));
     if (operation.kind === "return") return operation.value !== undefined && semanticExpressionContainsSubgroupCall(operation.value);
     if (operation.kind === "block") return semanticOperationsContainSubgroupCall(operation.body);
     return false;

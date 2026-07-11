@@ -756,7 +756,8 @@ function unsupportedSemanticWgslOperation(
         if (operation.condition && !semanticWgslConditionSupported(operation.condition, ir)) return operation;
         if (operation.update && !semanticWgslExpressionSupported(operation.update, "scalar", ir)) return operation;
         {
-          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue, predicated);
+          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue, predicated) ??
+            (operation.continuing === undefined ? undefined : unsupportedSemanticWgslOperation(operation.continuing, ir, allowReturnValue, predicated));
           if (unsupported) return unsupported;
         }
         break;
@@ -1128,6 +1129,7 @@ function collectSemanticStoragePointerOperationRefs(
           collectSemanticStoragePointerOperationRefs([operation.init], add);
         }
         collectSemanticStoragePointerOperationRefs(operation.body, add);
+        if (operation.continuing) collectSemanticStoragePointerOperationRefs(operation.continuing, add);
         break;
       case "block":
         collectSemanticStoragePointerOperationRefs(operation.body, add);
@@ -3867,11 +3869,24 @@ function emitSemanticLoop(
       `${prefix}}`,
     ];
   }
+  const continuingBreak = operation.continuing?.at(-1);
+  const hasTerminalBreak = continuingBreak?.kind === "branch" && continuingBreak.consequent.length === 0 &&
+    continuingBreak.alternate.length === 1 && continuingBreak.alternate[0]?.kind === "break";
+  const continuingPrefix = operation.continuing === undefined
+    ? undefined
+    : hasTerminalBreak ? operation.continuing.slice(0, -1) : operation.continuing;
   return [
     `${prefix}loop {`,
     ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
     `${"  ".repeat(indentLevel + 1)}continuing {`,
-    `${"  ".repeat(indentLevel + 2)}break if !(${operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "false"});`,
+    ...(continuingPrefix === undefined
+      ? [`${"  ".repeat(indentLevel + 2)}break if !(${operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "false"});`]
+      : [
+          ...emitSemanticOperations(continuingPrefix, ir, names, indentLevel + 2, allowReturnValue, options, textureSpecializations),
+          ...(hasTerminalBreak && continuingBreak?.kind === "branch"
+            ? [`${"  ".repeat(indentLevel + 2)}break if !(${emitTruthiness(continuingBreak.condition, ir, names, options)});`]
+            : []),
+        ]),
     `${"  ".repeat(indentLevel + 1)}}`,
     `${prefix}}`,
   ];
@@ -7103,6 +7118,7 @@ function semanticAtomicStorageNames(
         for (const name of semanticAtomicStorageNames([operation.init], functions)) names.add(name);
       }
       for (const name of semanticAtomicStorageNames(operation.body, functions)) names.add(name);
+      if (operation.continuing) for (const name of semanticAtomicStorageNames(operation.continuing, functions)) names.add(name);
     }
     if (operation.kind === "block") {
       for (const name of semanticAtomicStorageNames(operation.body, functions)) names.add(name);
@@ -7127,6 +7143,7 @@ function semanticAtomicDeviceGlobalNames(operations: readonly SemanticKernelIrOp
         for (const name of semanticAtomicDeviceGlobalNames([operation.init])) names.add(name);
       }
       for (const name of semanticAtomicDeviceGlobalNames(operation.body)) names.add(name);
+      if (operation.continuing) for (const name of semanticAtomicDeviceGlobalNames(operation.continuing)) names.add(name);
     }
     if (operation.kind === "block") {
       for (const name of semanticAtomicDeviceGlobalNames(operation.body)) names.add(name);
@@ -7154,6 +7171,7 @@ function semanticAtomicSharedNames(
         for (const name of semanticAtomicSharedNames([operation.init], functions)) names.add(name);
       }
       for (const name of semanticAtomicSharedNames(operation.body, functions)) names.add(name);
+      if (operation.continuing) for (const name of semanticAtomicSharedNames(operation.continuing, functions)) names.add(name);
     }
     if (operation.kind === "block") {
       for (const name of semanticAtomicSharedNames(operation.body, functions)) names.add(name);

@@ -89,6 +89,7 @@ function reachableFunctions(
         visitOperations(operation.alternate);
       } else if (operation.kind === "loop" || operation.kind === "block") {
         visitOperations(operation.body);
+        if (operation.kind === "loop" && operation.continuing) visitOperations(operation.continuing);
       }
     }
   };
@@ -167,7 +168,8 @@ function containsRetirementAtomicIncrement(operation: SemanticKernelIrOperation)
     return operation.init.callee.name === "atomicInc" && operation.init.args[0]?.kind === "unary";
   }
   if (operation.kind === "branch") return operation.consequent.some(containsRetirementAtomicIncrement) || operation.alternate.some(containsRetirementAtomicIncrement);
-  if (operation.kind === "loop" || operation.kind === "block") return operation.body.some(containsRetirementAtomicIncrement);
+  if (operation.kind === "loop") return operation.body.some(containsRetirementAtomicIncrement) || operation.continuing?.some(containsRetirementAtomicIncrement) === true;
+  if (operation.kind === "block") return operation.body.some(containsRetirementAtomicIncrement);
   return false;
 }
 
@@ -189,7 +191,8 @@ function semanticFunctionContainsBarrier(ir: SemanticKernelIrModule, name: strin
 function containsBarrierOperation(operation: SemanticKernelIrOperation): boolean {
   if (operation.kind === "barrier") return true;
   if (operation.kind === "branch") return [...operation.consequent, ...operation.alternate].some(containsBarrierOperation);
-  if (operation.kind === "loop" || operation.kind === "block") return operation.body.some(containsBarrierOperation);
+  if (operation.kind === "loop") return operation.body.some(containsBarrierOperation) || operation.continuing?.some(containsBarrierOperation) === true;
+  if (operation.kind === "block") return operation.body.some(containsBarrierOperation);
   return false;
 }
 
@@ -217,7 +220,7 @@ function replaceGridDimensionsInOperations(
       case "expression": return { ...operation, expression: replaceGridDimensions(operation.expression, gridDim) };
       case "branch": return { ...operation, condition: replaceGridDimensions(operation.condition, gridDim), consequent: replaceGridDimensionsInOperations(operation.consequent, gridDim), alternate: replaceGridDimensionsInOperations(operation.alternate, gridDim) };
       case "block": return { ...operation, body: replaceGridDimensionsInOperations(operation.body, gridDim) };
-      case "loop": return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? replaceGridDimensionsInOperations([operation.init], gridDim)[0]! : replaceGridDimensions(operation.init, gridDim) }), ...(operation.condition === undefined ? {} : { condition: replaceGridDimensions(operation.condition, gridDim) }), ...(operation.update === undefined ? {} : { update: replaceGridDimensions(operation.update, gridDim) }), body: replaceGridDimensionsInOperations(operation.body, gridDim) };
+      case "loop": return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? replaceGridDimensionsInOperations([operation.init], gridDim)[0]! : replaceGridDimensions(operation.init, gridDim) }), ...(operation.condition === undefined ? {} : { condition: replaceGridDimensions(operation.condition, gridDim) }), ...(operation.update === undefined ? {} : { update: replaceGridDimensions(operation.update, gridDim) }), body: replaceGridDimensionsInOperations(operation.body, gridDim), ...(operation.continuing === undefined ? {} : { continuing: replaceGridDimensionsInOperations(operation.continuing, gridDim) }) };
       case "barrier":
       case "fence":
       case "inline-asm":

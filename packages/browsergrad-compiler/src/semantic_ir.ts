@@ -349,7 +349,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly result?: Extract<SemanticExpression, { readonly kind: "symbol" }>; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
-  | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
+  | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly continuing?: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "barrier"; readonly callee: string; readonly scope: "subgroup" | "workgroup" | "grid"; readonly groupName?: string; readonly span: SourceSpan }
   | { readonly kind: "fence"; readonly callee: string; readonly span: SourceSpan }
   | { readonly kind: "device-launch"; readonly launch: SemanticDeviceLaunch; readonly span: SourceSpan }
@@ -504,6 +504,7 @@ export function walkSemanticOperation(
       if (operation.condition) walkSemanticExpression(operation.condition, visitExpression);
       if (operation.update) walkSemanticExpression(operation.update, visitExpression);
       walkSemanticOperations(operation.body, visitExpression);
+      if (operation.continuing) walkSemanticOperations(operation.continuing, visitExpression);
       return;
     case "device-launch":
       for (const expression of [...operation.launch.grid, ...operation.launch.block, ...operation.launch.args]) {
@@ -819,7 +820,8 @@ function semanticPredicatedBarrierTransformUnsafe(
     }
     if (operation.kind === "branch" && semanticIrOperationsContainBarrier([operation], barrierFunctions)) return true;
     if (operation.kind === "loop" || operation.kind === "block") {
-      return semanticPredicatedBarrierTransformUnsafe(operation.body, barrierFunctions);
+      return semanticPredicatedBarrierTransformUnsafe(operation.body, barrierFunctions) ||
+        (operation.kind === "loop" && operation.continuing !== undefined && semanticPredicatedBarrierTransformUnsafe(operation.continuing, barrierFunctions));
     }
     return false;
   });
@@ -833,7 +835,8 @@ function lowerSemanticPredicatedBarrierOperations(
   return operations.flatMap((operation): readonly SemanticKernelIrOperation[] => {
     if (semanticIrOperationsContainBarrier([operation], barrierFunctions)) {
       if (operation.kind === "loop" || operation.kind === "block") {
-        return [{ ...operation, body: lowerSemanticPredicatedBarrierOperations(operation.body, predicate, barrierFunctions) }];
+        return [{ ...operation, body: lowerSemanticPredicatedBarrierOperations(operation.body, predicate, barrierFunctions),
+          ...(operation.kind === "loop" && operation.continuing !== undefined ? { continuing: lowerSemanticPredicatedBarrierOperations(operation.continuing, predicate, barrierFunctions) } : {}) }];
       }
       if (operation.kind === "branch") {
         return lowerSemanticPredicatedBarrierOperations(operation.consequent, predicate, barrierFunctions);
@@ -907,7 +910,10 @@ function semanticVoidReturnStarts(operations: readonly SemanticKernelIrOperation
       else if (operation.kind === "branch") {
         visit(operation.consequent);
         visit(operation.alternate);
-      } else if (operation.kind === "loop" || operation.kind === "block") visit(operation.body);
+      } else if (operation.kind === "loop" || operation.kind === "block") {
+        visit(operation.body);
+        if (operation.kind === "loop" && operation.continuing) visit(operation.continuing);
+      }
     }
   };
   visit(operations);
@@ -924,7 +930,8 @@ function lowerSemanticActiveLaneOperations(
     const rewritten = rewriteSemanticVoidReturnsAsInactive(operation, active);
     if (semanticIrOperationsContainBarrier([operation], barrierFunctions)) {
       if (operation.kind === "loop" || operation.kind === "block") {
-        return [{ ...operation, body: lowerSemanticActiveLaneOperations(operation.body, active, activeExpression, barrierFunctions) }];
+        return [{ ...operation, body: lowerSemanticActiveLaneOperations(operation.body, active, activeExpression, barrierFunctions),
+          ...(operation.kind === "loop" && operation.continuing !== undefined ? { continuing: lowerSemanticActiveLaneOperations(operation.continuing, active, activeExpression, barrierFunctions) } : {}) }];
       }
       if (operation.kind === "branch") {
         return [{
@@ -1301,7 +1308,10 @@ function collectSemanticOperationFunctionCalls(
       collectSemanticOperationFunctionCalls(operation.consequent, out, ownerLocalPointerNames);
       collectSemanticOperationFunctionCalls(operation.alternate, out, ownerLocalPointerNames);
     }
-    if (operation.kind === "loop" || operation.kind === "block") collectSemanticOperationFunctionCalls(operation.body, out, ownerLocalPointerNames);
+    if (operation.kind === "loop" || operation.kind === "block") {
+      collectSemanticOperationFunctionCalls(operation.body, out, ownerLocalPointerNames);
+      if (operation.kind === "loop" && operation.continuing) collectSemanticOperationFunctionCalls(operation.continuing, out, ownerLocalPointerNames);
+    }
   }
 }
 
@@ -1331,7 +1341,7 @@ function rewriteSemanticPointerAddressSpace(
     if (operation.kind === "declare") return operation.init === undefined ? operation : { ...operation, init: rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) };
     if (operation.kind === "expression") return { ...operation, expression: rewriteSemanticExpressionAddressSpace(operation.expression, names, addressSpace) };
     if (operation.kind === "branch") return { ...operation, condition: rewriteSemanticExpressionAddressSpace(operation.condition, names, addressSpace), consequent: rewriteSemanticPointerAddressSpace(operation.consequent, names, addressSpace), alternate: rewriteSemanticPointerAddressSpace(operation.alternate, names, addressSpace) };
-    if (operation.kind === "loop") return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSemanticPointerAddressSpace([operation.init], names, addressSpace)[0]! : rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) }), ...(operation.condition === undefined ? {} : { condition: rewriteSemanticExpressionAddressSpace(operation.condition, names, addressSpace) }), ...(operation.update === undefined ? {} : { update: rewriteSemanticExpressionAddressSpace(operation.update, names, addressSpace) }), body: rewriteSemanticPointerAddressSpace(operation.body, names, addressSpace) };
+    if (operation.kind === "loop") return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSemanticPointerAddressSpace([operation.init], names, addressSpace)[0]! : rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) }), ...(operation.condition === undefined ? {} : { condition: rewriteSemanticExpressionAddressSpace(operation.condition, names, addressSpace) }), ...(operation.update === undefined ? {} : { update: rewriteSemanticExpressionAddressSpace(operation.update, names, addressSpace) }), body: rewriteSemanticPointerAddressSpace(operation.body, names, addressSpace), ...(operation.continuing === undefined ? {} : { continuing: rewriteSemanticPointerAddressSpace(operation.continuing, names, addressSpace) }) };
     if (operation.kind === "block") return { ...operation, body: rewriteSemanticPointerAddressSpace(operation.body, names, addressSpace) };
     if (operation.kind === "return" && operation.value) return { ...operation, value: rewriteSemanticExpressionAddressSpace(operation.value, names, addressSpace) };
     return operation;
@@ -2142,14 +2152,19 @@ function lowerStatement(
         span: statement.span,
       };
     }
-    case "do-while":
+    case "do-while": {
+      const loweredCondition = materializeConditionalCalls(lowerExpression(statement.condition, scope));
       return {
         kind: "loop",
         loopKind: "do-while",
-        condition: lowerExpression(statement.condition, scope),
+        ...(loweredCondition.operations.length === 0 ? { condition: loweredCondition.expression } : {}),
         body: lowerStatements(statement.body, scope),
+        ...(loweredCondition.operations.length === 0
+          ? {}
+          : { continuing: semanticMaterializedLoopCondition(loweredCondition, statement.span) }),
         span: statement.span,
       };
+    }
     case "return":
       return {
         kind: "return",
@@ -2174,6 +2189,22 @@ function semanticMaterializedLoopBody(
       kind: "branch",
       condition: condition.expression,
       consequent: body,
+      alternate: [{ kind: "break", span }],
+      span,
+    },
+  ];
+}
+
+function semanticMaterializedLoopCondition(
+  condition: { readonly operations: readonly SemanticKernelIrOperation[]; readonly expression: SemanticExpression },
+  span: SourceSpan,
+): readonly SemanticKernelIrOperation[] {
+  return [
+    ...condition.operations,
+    {
+      kind: "branch",
+      condition: condition.expression,
+      consequent: [],
       alternate: [{ kind: "break", span }],
       span,
     },
@@ -2334,7 +2365,8 @@ function semanticIrOperationsContainBarrier(
     operation.kind === "barrier" ||
     operation.kind === "call" && barrierFunctions.has(operation.callee) ||
     operation.kind === "branch" && (semanticIrOperationsContainBarrier(operation.consequent, barrierFunctions) || semanticIrOperationsContainBarrier(operation.alternate, barrierFunctions)) ||
-    (operation.kind === "loop" || operation.kind === "block") && semanticIrOperationsContainBarrier(operation.body, barrierFunctions)
+    (operation.kind === "loop" || operation.kind === "block") && semanticIrOperationsContainBarrier(operation.body, barrierFunctions) ||
+    operation.kind === "loop" && operation.continuing !== undefined && semanticIrOperationsContainBarrier(operation.continuing, barrierFunctions)
   );
 }
 
@@ -2355,7 +2387,8 @@ function promoteSemanticBarrierResultCalls(
       };
     }
     if (operation.kind === "loop" || operation.kind === "block") {
-      return { ...operation, body: promoteSemanticBarrierResultCalls(operation.body, barrierFunctions) };
+      return { ...operation, body: promoteSemanticBarrierResultCalls(operation.body, barrierFunctions),
+        ...(operation.kind === "loop" && operation.continuing !== undefined ? { continuing: promoteSemanticBarrierResultCalls(operation.continuing, barrierFunctions) } : {}) };
     }
     return operation;
   });
