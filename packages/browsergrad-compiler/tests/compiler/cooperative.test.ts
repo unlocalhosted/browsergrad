@@ -2914,6 +2914,35 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("subgroup");
     });
 
+  it("hoists cooperative declarations from predicated canonical loops", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void firstWarpScan(const cg::thread_block &cta, uint *out) {
+    const auto tile = cg::tiled_partition<32>(cta);
+    uint lane = tile.thread_rank();
+    uint warp = tile.meta_group_rank();
+    if (warp == 0) {
+      uint value = lane + 1u;
+      for (uint offset = 1u; offset <= 16u; offset *= 2u) {
+        const uint n = tile.shfl_up(value, offset);
+        if (lane >= offset) value += n;
+      }
+      out[lane] = value;
+    }
+  }
+  __global__ void predicatedDeclarationScan(uint *out) {
+    const cg::thread_block cta = cg::this_thread_block();
+    firstWarpScan(cta, out);
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [64, 1, 1],
+      });
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_32");
+      expect(compiled.wgsl).toContain("warp == 0u");
+    });
+
   it("lowers syncwarp and fences through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void syncwarp_fence_semantic(int *out) {

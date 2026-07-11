@@ -670,7 +670,11 @@ function unsupportedSemanticWgslOperation(
         if (!semanticWgslAtomicSupported(operation, ir)) return operation;
         break;
       case "call":
-        if (!semanticWgslCallSupported(operation, ir)) return operation;
+        if (!semanticWgslCallSupported(operation, ir)) {
+          const fn = ir.functions.find((item) => item.name === operation.callee);
+          const nested = fn ? unsupportedSemanticWgslOperation(fn.body, ir, true) : undefined;
+          return nested ?? operation;
+        }
         break;
       case "expression":
         if (!semanticWgslExpressionSupported(operation.expression, "scalar", ir)) return operation;
@@ -2022,6 +2026,55 @@ function emitSemanticPredicatedOperations(
       lines.push(`${prefix}}`);
       continue;
     }
+    if (operation.kind === "declare") {
+      const valueType = operation.target.valueType;
+      if (operation.target.addressSpace !== "local" || operation.target.dimensions.length > 0 ||
+        valueType === undefined || valueType === "void" || isSemanticFloatVectorType(valueType)) {
+        throw semanticWgslError("predicated cooperative shuffle requires local scalar declaration", operation.span);
+      }
+      if (operation.init && semanticExpressionContainsWorkgroupCollective(operation.init)) {
+        lines.push(...emitSemanticOperation(
+          operation,
+          ir,
+          names,
+          indentLevel,
+          allowReturnValue,
+          { ...options, activeCollectivePredicate: predicate },
+          textureSpecializations,
+        ));
+      } else {
+        const { init: _init, ...declaration } = operation;
+        lines.push(...emitSemanticOperation(
+          declaration,
+          ir,
+          names,
+          indentLevel,
+          allowReturnValue,
+          options,
+          textureSpecializations,
+        ));
+        if (operation.init) {
+          const target: SemanticExpression = {
+            kind: "symbol",
+            name: operation.target.name,
+            valueType,
+            addressSpace: "local",
+            span: operation.target.span,
+          };
+          lines.push(`${prefix}if (${predicate}) {`);
+          lines.push(`${"  ".repeat(indentLevel + 1)}${emitSemanticAssignmentStatement({
+            kind: "assignment",
+            operator: "=",
+            target,
+            value: operation.init,
+            valueType,
+            span: operation.span,
+          }, ir, names, options, textureSpecializations)};`);
+          lines.push(`${prefix}}`);
+        }
+      }
+      continue;
+    }
     if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWorkgroupCollective(operation.expression.value)) {
       if (operation.expression.target.kind !== "symbol" || operation.expression.target.addressSpace !== "local") {
         throw semanticWgslError("predicated cooperative shuffle requires local scalar assignment", operation.span);
@@ -2076,6 +2129,11 @@ function semanticPredicatedOperationsSupported(operations: readonly SemanticKern
     }
     if (operation.kind === "loop" && semanticOperationsContainWorkgroupCollective(operation.body)) {
       return operation.loopKind === "for" && operation.update?.kind !== "sequence" && semanticPredicatedOperationsSupported(operation.body);
+    }
+    if (operation.kind === "declare") {
+      return operation.target.addressSpace === "local" && operation.target.dimensions.length === 0 &&
+        operation.target.valueType !== undefined && operation.target.valueType !== "void" &&
+        !isSemanticFloatVectorType(operation.target.valueType);
     }
     if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWorkgroupCollective(operation.expression.value)) {
       const target = operation.expression.target;

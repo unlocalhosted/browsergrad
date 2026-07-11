@@ -325,7 +325,9 @@ describe("real WebGPU — CUDA-lite compiler", () => {
       console.warn(`[skip] WebGPU not available: ${deviceCheck.reason}`);
       return;
     }
-    defaultDevice = await createDevice();
+    const requiredFeatures = ["subgroups", "shader-f16"]
+      .filter((feature) => deviceCheck.features?.includes(feature)) as GPUFeatureName[];
+    defaultDevice = await createDevice({ requiredFeatures });
   });
 
   afterAll(() => {
@@ -704,7 +706,7 @@ __global__ void namedConstants(float* out, uint* kinds) {
 
   it("runs subgroup reductions with mixed scalar math through real WebGPU", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
-    const device = await createDevice({ requiredFeatures: ["subgroups" as GPUFeatureName] });
+    const device = testDevice();
     const compiled = compileCudaLiteKernel(SUBGROUP_REDUCTION_MIX, {
       features: { subgroups: true },
       workgroupSize: [1, 1, 1],
@@ -4737,7 +4739,7 @@ __global__ void bf162Compare(const float *seed, float *out, uint *mask, uint *fl
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
-    const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });
+    const device = testDevice();
     const features = await detectKernelFeatures(device);
     if (!features.shaderF16 || !features.float16Array) return;
 
@@ -4838,9 +4840,41 @@ __global__ void qsort_shape(uint *indata, uint *outdata, uint offset, uint len, 
     expect([...actual.buffers.atomicData as Uint32Array]).toEqual([4]);
   });
 
+  it("runs predicated cooperative declarations uniformly on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void firstWarpScan(const cg::thread_block &cta, uint *out) {
+  const auto tile = cg::tiled_partition<32>(cta);
+  uint lane = tile.thread_rank();
+  uint warp = tile.meta_group_rank();
+  if (warp == 0) {
+    uint value = lane + 1u;
+    for (uint offset = 1u; offset <= 16u; offset *= 2u) {
+      const uint n = tile.shfl_up(value, offset);
+      if (lane >= offset) value += n;
+    }
+    out[lane] = value;
+  }
+}
+__global__ void predicatedDeclarationScan(uint *out) {
+  const cg::thread_block cta = cg::this_thread_block();
+  firstWarpScan(cta, out);
+}`, { features: { subgroups: true }, workgroupSize: [64, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(64) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [64, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([
+      1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66, 78, 91, 105, 120, 136,
+      153, 171, 190, 210, 231, 253, 276, 300, 325, 351, 378, 406, 435, 465, 496, 528,
+      ...new Array<number>(32).fill(0),
+    ]);
+  });
+
   it("runs compiled half2 vector storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
-    const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });
+    const device = testDevice();
     const features = await detectKernelFeatures(device);
     if (!features.shaderF16 || !features.float16Array) return;
 
