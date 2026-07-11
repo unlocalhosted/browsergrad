@@ -1450,8 +1450,11 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
-      expect(compiled.wgsl).toContain("g = i32(1u)");
-      expect(compiled.wgsl).toContain("sg = i32(0u)");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("g = 1");
+      expect(compiled.wgsl).toContain("sg = 0");
       expect([...result.buffers.out as Int32Array]).toEqual([1, 1, 1, 0]);
     });
 

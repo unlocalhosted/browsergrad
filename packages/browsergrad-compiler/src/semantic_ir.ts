@@ -1512,6 +1512,9 @@ function lowerInlineAsmBuiltinRegisterAssignment(
       : statement.inputs.length === 0 ? semanticUintLiteralExpression(op.immediate, statement.span) : undefined
     : undefined;
   const integerValue = op === undefined ? undefined : semanticInlineAsmIntegerExpression(op, statement, scope, expressionValueType(target));
+  const addressPredicate = op?.kind === "isspacep" && statement.inputs.length === 1
+    ? semanticInlineAsmAddressPredicate(op.space, statement.inputs[0]!, scope, statement.span)
+    : undefined;
   const value = op?.kind === "fma-rn-f32" && fmaArgs?.length === 3 && fmaArgs.every((arg) => arg !== undefined)
     ? semanticCallExpression("fma", fmaArgs as readonly SemanticExpression[], "float", statement.span)
     : op?.kind === "float-binary-rn-f32" && floatBinaryArgs?.length === 2 && floatBinaryArgs.every((arg) => arg !== undefined)
@@ -1537,6 +1540,8 @@ function lowerInlineAsmBuiltinRegisterAssignment(
       ? semanticCallExpression("__brev", [bitInput], "uint", statement.span)
     : integerValue !== undefined
       ? integerValue
+    : addressPredicate !== undefined
+      ? addressPredicate
     : op?.kind === "convert-f32-to-int" && conversionSource !== undefined
       ? semanticCallExpression(
           `__float2${op.toSigned ? "int" : "uint"}_${op.rounding === "rm" ? "rd" : op.rounding === "rp" ? "ru" : op.rounding}`,
@@ -1579,6 +1584,23 @@ function lowerInlineAsmBuiltinRegisterAssignment(
     },
     span: statement.span,
   };
+}
+
+function semanticInlineAsmAddressPredicate(
+  expected: "global" | "shared" | "const" | "local",
+  source: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticExpression {
+  const actual = expressionAddressSpace(lowerExpression(source, scope));
+  const matches = expected === "global"
+    ? actual === "storage" || actual === "device-global"
+    : expected === "shared"
+      ? actual === "shared"
+      : expected === "const"
+        ? actual === "constant"
+        : actual === "local";
+  return intNumberExpression(matches ? 1 : 0, span);
 }
 
 function semanticInlineAsmIntegerExpression(
