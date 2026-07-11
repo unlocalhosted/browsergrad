@@ -7,6 +7,7 @@ import type {
   SemanticExpression,
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
+  SemanticMatrixTileRef,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import { semanticInlineAsmLdmatrixAssignments, walkSemanticOperations } from "./semantic_ir.js";
@@ -90,6 +91,12 @@ import {
   isCudaFenceCallName,
 } from "./cuda_sync_calls.js";
 import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
+import {
+  isMatrixTileByteValueType,
+  matrixTileElementCount,
+  type MatrixTileLayout,
+  type MatrixTileResolvedSpec,
+} from "./matrix_tiles.js";
 import {
   cudaArithmeticReduceOpForCall,
   cudaVoteOpForCall,
@@ -680,6 +687,18 @@ function unsupportedSemanticWgslOperation(
       case "copy-fence":
         if (!isCudaCpAsyncFenceCall(operation.callee)) return operation;
         break;
+      case "matrix-fill":
+        if (!semanticWgslMatrixRefSupported(operation.fragment, ir) || !semanticWgslExpressionSupported(operation.value, "scalar", ir)) return operation;
+        break;
+      case "matrix-load":
+        if (!semanticWgslMatrixRefSupported(operation.fragment, ir) || !semanticWgslTypedMemoryRefSupported(operation.source, ir) || !semanticWgslExpressionSupported(operation.stride, "scalar", ir)) return operation;
+        break;
+      case "matrix-mma":
+        if (![operation.destination, operation.a, operation.b, operation.accumulator].every((ref) => semanticWgslMatrixRefSupported(ref, ir))) return operation;
+        break;
+      case "matrix-store":
+        if (!semanticWgslTypedMemoryRefSupported(operation.target, ir) || !semanticWgslMatrixRefSupported(operation.fragment, ir) || !semanticWgslExpressionSupported(operation.stride, "scalar", ir)) return operation;
+        break;
       case "surface-write":
         if (!semanticWgslSurfaceWriteSupported(operation, ir)) return operation;
         break;
@@ -763,6 +782,12 @@ function unsupportedSemanticWgslOperation(
     }
   }
   return undefined;
+}
+
+function semanticWgslMatrixRefSupported(ref: SemanticMatrixTileRef, ir: SemanticKernelIrModule): boolean {
+  const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === "local");
+  return symbol?.matrixTile !== undefined && ref.indices.length === ref.arrayDimensions.length &&
+    ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar", ir));
 }
 
 function unsupportedSemanticWgslNestedExpressionOperation(
@@ -2035,6 +2060,14 @@ function emitSemanticOperation(
       return emitSemanticCopyOperation(operation, ir, names, indentLevel, options);
     case "copy-fence":
       return [`${prefix}// cp.async fence omitted: ${operation.callee}`];
+    case "matrix-fill":
+      return emitSemanticMatrixFill(operation, ir, names, indentLevel, options, textureSpecializations);
+    case "matrix-load":
+      return emitSemanticMatrixLoad(operation, ir, names, indentLevel, options, textureSpecializations);
+    case "matrix-mma":
+      return emitSemanticMatrixMma(operation, ir, names, indentLevel, options, textureSpecializations);
+    case "matrix-store":
+      return emitSemanticMatrixStore(operation, ir, names, indentLevel, options, textureSpecializations);
     case "surface-write":
       return emitSemanticSurfaceWrite(operation, ir, names, indentLevel, options, textureSpecializations);
     case "surface-read-store":
@@ -2111,6 +2144,154 @@ function emitSemanticOperation(
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
+}
+
+function emitSemanticMatrixFill(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-fill" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  const index = `bg_wmma_i_${operation.span.start}`;
+  const value = emitSemanticMatrixCoerce(emitSemanticExpression(operation.value, ir, names, options, textureSpecializations), operation.fragment.spec);
+  return [
+    `${prefix}for (var ${index}: u32 = 0u; ${index} < ${matrixTileElementCount(operation.fragment.spec)}u; ${index} = ${index} + 1u) {`,
+    `${prefix}  ${emitSemanticMatrixAccess(operation.fragment, index, ir, names, options)} = ${value};`,
+    `${prefix}}`,
+  ];
+}
+
+function emitSemanticMatrixLoad(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-load" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions,
+  _textureSpecializations: SemanticTextureDescriptorSpecializations,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  const row = `bg_wmma_row_${operation.span.start}`;
+  const col = `bg_wmma_col_${operation.span.start}`;
+  const [rows, cols] = semanticWgslMatrixRowsCols(operation.fragment.spec);
+  const offset = semanticWgslMatrixOffset(row, col, operation.stride, operation.layout, operation.span);
+  const read = emitSemanticMemoryRead(semanticWgslMemoryRefOffset(operation.source, offset), ir, names, options);
+  const tileIndex = `(${row} * ${cols}u + ${col})`;
+  return [
+    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${rows}u; ${row} = ${row} + 1u) {`,
+    `${prefix}  for (var ${col}: u32 = 0u; ${col} < ${cols}u; ${col} = ${col} + 1u) {`,
+    `${prefix}    ${emitSemanticMatrixAccess(operation.fragment, tileIndex, ir, names, options)} = ${emitSemanticMatrixCoerce(read, operation.fragment.spec)};`,
+    `${prefix}  }`,
+    `${prefix}}`,
+  ];
+}
+
+function emitSemanticMatrixMma(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-mma" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions,
+  _textureSpecializations: SemanticTextureDescriptorSpecializations,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  const row = `bg_wmma_row_${operation.span.start}`;
+  const col = `bg_wmma_col_${operation.span.start}`;
+  const kk = `bg_wmma_k_${operation.span.start}`;
+  const sum = `bg_wmma_sum_${operation.span.start}`;
+  const { destination: dst, a, b, accumulator: c } = operation;
+  const dstIndex = `(${row} * ${dst.spec.n}u + ${col})`;
+  const aIndex = `(${row} * ${dst.spec.k}u + ${kk})`;
+  const bIndex = `(${kk} * ${dst.spec.n}u + ${col})`;
+  const integer = dst.spec.tileValueType === "s32" && isMatrixTileByteValueType(a.spec.tileValueType) && isMatrixTileByteValueType(b.spec.tileValueType);
+  const cValue = emitSemanticMatrixAccess(c, dstIndex, ir, names, options);
+  const aValue = emitSemanticMatrixAccess(a, aIndex, ir, names, options);
+  const bValue = emitSemanticMatrixAccess(b, bIndex, ir, names, options);
+  const init = integer ? emitSemanticMatrixInteger(cValue, c.spec) : `f32(${cValue})`;
+  const product = integer
+    ? `(${emitSemanticMatrixInteger(aValue, a.spec)} * ${emitSemanticMatrixInteger(bValue, b.spec)})`
+    : `(f32(${aValue}) * f32(${bValue}))`;
+  return [
+    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${dst.spec.m}u; ${row} = ${row} + 1u) {`,
+    `${prefix}  for (var ${col}: u32 = 0u; ${col} < ${dst.spec.n}u; ${col} = ${col} + 1u) {`,
+    `${prefix}    var ${sum}: ${integer ? "i32" : "f32"} = ${init};`,
+    `${prefix}    for (var ${kk}: u32 = 0u; ${kk} < ${dst.spec.k}u; ${kk} = ${kk} + 1u) {`,
+    `${prefix}      ${sum} = ${sum} + ${product};`,
+    `${prefix}    }`,
+    `${prefix}    ${emitSemanticMatrixAccess(dst, dstIndex, ir, names, options)} = ${emitSemanticMatrixCoerce(sum, dst.spec)};`,
+    `${prefix}  }`,
+    `${prefix}}`,
+  ];
+}
+
+function emitSemanticMatrixStore(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-store" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions,
+  _textureSpecializations: SemanticTextureDescriptorSpecializations,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  const row = `bg_wmma_row_${operation.span.start}`;
+  const col = `bg_wmma_col_${operation.span.start}`;
+  const [rows, cols] = semanticWgslMatrixRowsCols(operation.fragment.spec);
+  const offset = semanticWgslMatrixOffset(row, col, operation.stride, operation.layout, operation.span);
+  const target = semanticWgslMemoryRefOffset(operation.target, offset);
+  const tileIndex = `(${row} * ${cols}u + ${col})`;
+  const value = emitSemanticMatrixAccess(operation.fragment, tileIndex, ir, names, options);
+  return [
+    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${rows}u; ${row} = ${row} + 1u) {`,
+    `${prefix}  for (var ${col}: u32 = 0u; ${col} < ${cols}u; ${col} = ${col} + 1u) {`,
+    `${prefix}    ${emitSemanticMemoryWrite(target, value, ir, names, options)};`,
+    `${prefix}  }`,
+    `${prefix}}`,
+  ];
+}
+
+function emitSemanticMatrixAccess(ref: SemanticMatrixTileRef, index: string, ir: SemanticKernelIrModule, names: ReadonlyMap<string, string>, options: EmitSemanticKernelIrWgslOptions): string {
+  const terms = ref.indices.map((item, axis) => {
+    const stride = ref.arrayDimensions.slice(axis + 1).reduce((product, value) => product * value, 1) * matrixTileElementCount(ref.spec);
+    const emitted = `u32(${emitSemanticExpression(item, ir, names, options)})`;
+    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
+  });
+  const base = terms.length === 0 ? undefined : terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  return `${nameFor(ref.base, names)}[${base ? `(${base} + ${index})` : index}]`;
+}
+
+function semanticWgslMatrixOffset(row: string, col: string, stride: SemanticExpression, layout: MatrixTileLayout, span: SourceSpan): SemanticExpression {
+  const rowExpression = semanticWgslGeneratedSymbol(row, span);
+  const colExpression = semanticWgslGeneratedSymbol(col, span);
+  const major = layout === "col_major" || layout === "mem_col_major" ? colExpression : rowExpression;
+  const minor = layout === "col_major" || layout === "mem_col_major" ? rowExpression : colExpression;
+  return { kind: "binary", operator: "+", left: { kind: "binary", operator: "*", left: major, right: stride, valueType: "uint", span }, right: minor, valueType: "uint", span };
+}
+
+function semanticWgslGeneratedSymbol(name: string, span: SourceSpan): SemanticExpression {
+  return { kind: "symbol", name, valueType: "uint", addressSpace: "local", span };
+}
+
+function semanticWgslMemoryRefOffset(ref: SemanticMemoryRef, offset: SemanticExpression): SemanticMemoryRef {
+  if (ref.indices.length === 0) return { ...ref, indices: [offset] };
+  const last = ref.indices[ref.indices.length - 1]!;
+  return { ...ref, indices: [...ref.indices.slice(0, -1), { kind: "binary", operator: "+", left: last, right: offset, valueType: "uint", span: ref.span }] };
+}
+
+function semanticWgslMatrixRowsCols(spec: MatrixTileResolvedSpec): readonly [number, number] {
+  return spec.role === "matrix_a" ? [spec.m, spec.k] : spec.role === "matrix_b" ? [spec.k, spec.n] : [spec.m, spec.n];
+}
+
+function emitSemanticMatrixCoerce(value: string, spec: MatrixTileResolvedSpec): string {
+  if (spec.tileValueType === "u8") return `(u32(${value}) & 255u)`;
+  if (spec.tileValueType === "s8") return `(i32((u32(${value}) & 255u) << 24u) >> 24)`;
+  if (spec.tileValueType === "s32") return `i32(${value})`;
+  return `f32(${value})`;
+}
+
+function emitSemanticMatrixInteger(value: string, spec: MatrixTileResolvedSpec): string {
+  return spec.tileValueType === "u8" ? `i32(u32(${value}) & 255u)` : spec.tileValueType === "s8" ? `(i32((u32(${value}) & 255u) << 24u) >> 24)` : `i32(${value})`;
 }
 
 function semanticWgslInlineMmaSupported(

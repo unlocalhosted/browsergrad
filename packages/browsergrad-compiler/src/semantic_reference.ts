@@ -71,9 +71,16 @@ import { sizeofCudaType } from "./type_layout.js";
 import type {
   SemanticExpression,
   SemanticKernelIrOperation,
+  SemanticMatrixTileRef,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import { semanticInlineAsmLdmatrixAssignments } from "./semantic_ir.js";
+import {
+  isMatrixTileByteValueType,
+  matrixTileElementCount,
+  type MatrixTileLayout,
+  type MatrixTileResolvedSpec,
+} from "./matrix_tiles.js";
 import { semanticOperationsReferenceRoot } from "./semantic_ir_walk.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
@@ -360,6 +367,18 @@ function unsupportedSemanticReferenceOperation(
       case "copy-fence":
         if (!isCudaCpAsyncFenceCall(operation.callee)) return operation;
         break;
+      case "matrix-fill":
+        if (!semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceExpressionSupported(operation.value, "scalar", compiled)) return operation;
+        break;
+      case "matrix-load":
+        if (!semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceTypedMemoryRefSupported(operation.source, compiled) || !semanticReferenceExpressionSupported(operation.stride, "scalar", compiled)) return operation;
+        break;
+      case "matrix-mma":
+        if (![operation.destination, operation.a, operation.b, operation.accumulator].every((ref) => semanticReferenceMatrixRefSupported(ref, compiled))) return operation;
+        break;
+      case "matrix-store":
+        if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) || !semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceExpressionSupported(operation.stride, "scalar", compiled)) return operation;
+        break;
       case "surface-write":
         if (!semanticReferenceSurfaceWriteSupported(operation, compiled)) return operation;
         break;
@@ -428,6 +447,12 @@ function unsupportedSemanticReferenceOperation(
     if (operation.kind === "loop") return unsupportedSemanticReferenceOperation(operation.body, compiled, allowReturnValue);
   }
   return undefined;
+}
+
+function semanticReferenceMatrixRefSupported(ref: SemanticMatrixTileRef, compiled: CompiledCudaLiteKernel): boolean {
+  const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === "local");
+  return symbol?.matrixTile !== undefined && ref.indices.length === ref.arrayDimensions.length &&
+    ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar", compiled));
 }
 
 function semanticReferenceParamSupported(
@@ -1439,6 +1464,18 @@ function execSemanticOperations(
         break;
       case "copy-fence":
         break;
+      case "matrix-fill":
+        execSemanticMatrixFill(operation, context);
+        break;
+      case "matrix-load":
+        execSemanticMatrixLoad(operation, context);
+        break;
+      case "matrix-mma":
+        execSemanticMatrixMma(operation, context);
+        break;
+      case "matrix-store":
+        execSemanticMatrixStore(operation, context);
+        break;
       case "surface-write":
         execSemanticSurfaceWrite(operation, context);
         break;
@@ -1926,6 +1963,96 @@ function semanticDeclareValue(
     return Array.from({ length: cudaVectorLaneCount(operation.target.valueType) }, () => 0);
   }
   return 0;
+}
+
+function execSemanticMatrixFill(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-fill" }>,
+  context: SemanticReferenceContext,
+): void {
+  const value = evalNumber(operation.value, context);
+  for (let index = 0; index < matrixTileElementCount(operation.fragment.spec); index++) {
+    writeSemanticMatrixElement(operation.fragment, index, value, context);
+  }
+}
+
+function execSemanticMatrixLoad(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-load" }>,
+  context: SemanticReferenceContext,
+): void {
+  const stride = Math.trunc(evalNumber(operation.stride, context));
+  const [rows, cols] = semanticMatrixRowsCols(operation.fragment.spec);
+  for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+    const offset = semanticMatrixMemoryIndex(row, col, stride, operation.layout);
+    writeSemanticMatrixElement(operation.fragment, row * cols + col, readMemoryValue(semanticMemoryRefOffset(operation.source, offset), context), context);
+  }
+}
+
+function execSemanticMatrixMma(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-mma" }>,
+  context: SemanticReferenceContext,
+): void {
+  const { destination: dst, a, b, accumulator: c } = operation;
+  const integerMma = dst.spec.tileValueType === "s32" && isMatrixTileByteValueType(a.spec.tileValueType) && isMatrixTileByteValueType(b.spec.tileValueType);
+  for (let row = 0; row < dst.spec.m; row++) for (let col = 0; col < dst.spec.n; col++) {
+    let sum = semanticMatrixElement(c, row * dst.spec.n + col, context);
+    for (let kk = 0; kk < dst.spec.k; kk++) {
+      const av = semanticMatrixElement(a, row * dst.spec.k + kk, context);
+      const bv = semanticMatrixElement(b, kk * dst.spec.n + col, context);
+      sum = integerMma ? (sum + Math.imul(av | 0, bv | 0)) | 0 : sum + av * bv;
+    }
+    writeSemanticMatrixElement(dst, row * dst.spec.n + col, sum, context);
+  }
+}
+
+function execSemanticMatrixStore(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-store" }>,
+  context: SemanticReferenceContext,
+): void {
+  const stride = Math.trunc(evalNumber(operation.stride, context));
+  const [rows, cols] = semanticMatrixRowsCols(operation.fragment.spec);
+  for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+    const offset = semanticMatrixMemoryIndex(row, col, stride, operation.layout);
+    writeMemoryValue(semanticMemoryRefOffset(operation.target, offset), semanticMatrixElement(operation.fragment, row * cols + col, context), context);
+  }
+}
+
+function semanticMatrixElement(ref: SemanticMatrixTileRef, index: number, context: SemanticReferenceContext): number {
+  const values = context.locals.get(ref.base);
+  if (!Array.isArray(values)) throw semanticReferenceError(`missing WMMA fragment '${ref.base}'`, ref.span);
+  return semanticMatrixCoerce(Number(values[semanticMatrixBase(ref, context) + index] ?? 0), ref.spec);
+}
+
+function writeSemanticMatrixElement(ref: SemanticMatrixTileRef, index: number, value: SemanticValue, context: SemanticReferenceContext): void {
+  const values = context.locals.get(ref.base);
+  if (!Array.isArray(values) || typeof value !== "number") throw semanticReferenceError(`invalid WMMA fragment '${ref.base}'`, ref.span);
+  values[semanticMatrixBase(ref, context) + index] = semanticMatrixCoerce(value, ref.spec);
+}
+
+function semanticMatrixBase(ref: SemanticMatrixTileRef, context: SemanticReferenceContext): number {
+  if (ref.indices.length === 0) return 0;
+  return flatIndexForDimensions(ref.arrayDimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context)))) * matrixTileElementCount(ref.spec);
+}
+
+function semanticMatrixCoerce(value: number, spec: MatrixTileResolvedSpec): number {
+  if (spec.tileValueType === "u8") return Math.trunc(value) & 0xff;
+  if (spec.tileValueType === "s8") { const byte = Math.trunc(value) & 0xff; return byte >= 0x80 ? byte - 0x100 : byte; }
+  if (spec.tileValueType === "s32") return Math.trunc(value) | 0;
+  return value;
+}
+
+function semanticMatrixRowsCols(spec: MatrixTileResolvedSpec): readonly [number, number] {
+  return spec.role === "matrix_a" ? [spec.m, spec.k] : spec.role === "matrix_b" ? [spec.k, spec.n] : [spec.m, spec.n];
+}
+
+function semanticMatrixMemoryIndex(row: number, col: number, stride: number, layout: MatrixTileLayout): number {
+  return layout === "col_major" || layout === "mem_col_major" ? col * stride + row : row * stride + col;
+}
+
+function semanticMemoryRefOffset(ref: SemanticMemoryRef, offset: number): SemanticMemoryRef {
+  const literal: SemanticExpression = { kind: "literal", literalKind: "number", value: offset, valueType: "uint", span: ref.span };
+  if (ref.indices.length === 0) return { ...ref, indices: [literal] };
+  const last = ref.indices[ref.indices.length - 1]!;
+  return { ...ref, indices: [...ref.indices.slice(0, -1), { kind: "binary", operator: "+", left: last, right: literal, valueType: "uint", span: ref.span }] };
 }
 
 function zeroSemanticVector(valueType: CudaLiteScalarType): number[] {

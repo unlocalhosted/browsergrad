@@ -144,6 +144,10 @@ function visitExpressions(
     case "load":
     case "copy":
     case "copy-fence":
+    case "matrix-fill":
+    case "matrix-load":
+    case "matrix-mma":
+    case "matrix-store":
     case "barrier":
     case "fence":
     case "inline-asm":
@@ -202,6 +206,10 @@ function replaceGridDimensionsInOperations(
       case "store": return { ...operation, target: replaceGridDimensionsInMemoryRef(operation.target, gridDim), value: replaceGridDimensions(operation.value, gridDim), reads: operation.reads.map((ref) => replaceGridDimensionsInMemoryRef(ref, gridDim)) };
       case "copy": return { ...operation, source: replaceGridDimensionsInMemoryRef(operation.source, gridDim), target: replaceGridDimensionsInMemoryRef(operation.target, gridDim) };
       case "copy-fence": return operation;
+      case "matrix-fill": return { ...operation, fragment: replaceGridDimensionsInMatrixRef(operation.fragment, gridDim), value: replaceGridDimensions(operation.value, gridDim) };
+      case "matrix-load": return { ...operation, fragment: replaceGridDimensionsInMatrixRef(operation.fragment, gridDim), source: replaceGridDimensionsInMemoryRef(operation.source, gridDim), stride: replaceGridDimensions(operation.stride, gridDim) };
+      case "matrix-mma": return { ...operation, destination: replaceGridDimensionsInMatrixRef(operation.destination, gridDim), a: replaceGridDimensionsInMatrixRef(operation.a, gridDim), b: replaceGridDimensionsInMatrixRef(operation.b, gridDim), accumulator: replaceGridDimensionsInMatrixRef(operation.accumulator, gridDim) };
+      case "matrix-store": return { ...operation, target: replaceGridDimensionsInMemoryRef(operation.target, gridDim), fragment: replaceGridDimensionsInMatrixRef(operation.fragment, gridDim), stride: replaceGridDimensions(operation.stride, gridDim) };
       case "surface-write": return { ...operation, surface: replaceGridDimensions(operation.surface, gridDim), value: replaceGridDimensions(operation.value, gridDim), xBytes: replaceGridDimensions(operation.xBytes, gridDim), y: replaceGridDimensions(operation.y, gridDim), ...(operation.z === undefined ? {} : { z: replaceGridDimensions(operation.z, gridDim) }) };
       case "surface-read-store": return { ...operation, target: replaceGridDimensions(operation.target, gridDim), surface: replaceGridDimensions(operation.surface, gridDim), xBytes: replaceGridDimensions(operation.xBytes, gridDim), y: replaceGridDimensions(operation.y, gridDim), ...(operation.z === undefined ? {} : { z: replaceGridDimensions(operation.z, gridDim) }) };
       case "atomic": return { ...operation, ...(operation.target === undefined ? {} : { target: replaceGridDimensionsInMemoryRef(operation.target, gridDim) }), args: operation.args.map((arg) => replaceGridDimensions(arg, gridDim)) };
@@ -222,6 +230,10 @@ function replaceGridDimensionsInOperations(
 }
 
 function replaceGridDimensionsInMemoryRef(ref: SemanticMemoryRef, gridDim: KernelLaunch["gridDim"]): SemanticMemoryRef {
+  return { ...ref, indices: ref.indices.map((index) => replaceGridDimensions(index, gridDim)) };
+}
+
+function replaceGridDimensionsInMatrixRef<T extends { readonly indices: readonly SemanticExpression[] }>(ref: T, gridDim: KernelLaunch["gridDim"]): T {
   return { ...ref, indices: ref.indices.map((index) => replaceGridDimensions(index, gridDim)) };
 }
 

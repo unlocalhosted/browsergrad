@@ -459,6 +459,11 @@ function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boo
       return true;
     case "copy-fence":
       return false;
+    case "matrix-fill":
+    case "matrix-load":
+    case "matrix-mma":
+    case "matrix-store":
+      return true;
     case "surface-write":
       return true;
     case "surface-read-store":

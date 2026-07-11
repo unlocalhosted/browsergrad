@@ -82,6 +82,14 @@ import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef 
 import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.js";
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
+import {
+  matrixTileElementCount,
+  normalizeMatrixTileLayout,
+  resolveMatrixTileSpec,
+  wmmaBuiltinName,
+  type MatrixTileLayout,
+  type MatrixTileResolvedSpec,
+} from "./matrix_tiles.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -127,6 +135,8 @@ export interface CudaLiteSemanticSymbol {
   readonly init?: SemanticExpression;
   readonly dimensions: readonly number[];
   readonly dynamicShared?: boolean;
+  readonly matrixTile?: MatrixTileResolvedSpec;
+  readonly matrixTileArrayDimensions?: readonly number[];
   readonly addressSpace: SemanticAddressSpace;
   readonly span: SourceSpan;
 }
@@ -186,6 +196,14 @@ export interface SemanticMemoryRef {
   readonly packedByteLanes?: 2 | 3 | 4;
   readonly indices: readonly SemanticExpression[];
   readonly fields: readonly string[];
+  readonly span: SourceSpan;
+}
+
+export interface SemanticMatrixTileRef {
+  readonly base: string;
+  readonly spec: MatrixTileResolvedSpec;
+  readonly arrayDimensions: readonly number[];
+  readonly indices: readonly SemanticExpression[];
   readonly span: SourceSpan;
 }
 
@@ -317,6 +335,10 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
   | { readonly kind: "copy"; readonly source: SemanticMemoryRef; readonly target: SemanticMemoryRef; readonly bytes: number; readonly span: SourceSpan }
   | { readonly kind: "copy-fence"; readonly callee: string; readonly span: SourceSpan }
+  | { readonly kind: "matrix-fill"; readonly fragment: SemanticMatrixTileRef; readonly value: SemanticExpression; readonly span: SourceSpan }
+  | { readonly kind: "matrix-load"; readonly fragment: SemanticMatrixTileRef; readonly source: SemanticMemoryRef; readonly stride: SemanticExpression; readonly layout: MatrixTileLayout; readonly span: SourceSpan }
+  | { readonly kind: "matrix-mma"; readonly destination: SemanticMatrixTileRef; readonly a: SemanticMatrixTileRef; readonly b: SemanticMatrixTileRef; readonly accumulator: SemanticMatrixTileRef; readonly span: SourceSpan }
+  | { readonly kind: "matrix-store"; readonly target: SemanticMemoryRef; readonly fragment: SemanticMatrixTileRef; readonly stride: SemanticExpression; readonly layout: MatrixTileLayout; readonly span: SourceSpan }
   | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "surface-read-store"; readonly target: SemanticExpression; readonly surface: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly valueType?: CudaLiteScalarType; readonly span: SourceSpan }
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
@@ -419,6 +441,26 @@ export function walkSemanticOperation(
       walkSemanticMemoryRef(operation.source, visitExpression);
       walkSemanticMemoryRef(operation.target, visitExpression);
       return;
+    case "matrix-fill":
+      walkSemanticMatrixTileRef(operation.fragment, visitExpression);
+      walkSemanticExpression(operation.value, visitExpression);
+      return;
+    case "matrix-load":
+      walkSemanticMatrixTileRef(operation.fragment, visitExpression);
+      walkSemanticMemoryRef(operation.source, visitExpression);
+      walkSemanticExpression(operation.stride, visitExpression);
+      return;
+    case "matrix-mma":
+      walkSemanticMatrixTileRef(operation.destination, visitExpression);
+      walkSemanticMatrixTileRef(operation.a, visitExpression);
+      walkSemanticMatrixTileRef(operation.b, visitExpression);
+      walkSemanticMatrixTileRef(operation.accumulator, visitExpression);
+      return;
+    case "matrix-store":
+      walkSemanticMemoryRef(operation.target, visitExpression);
+      walkSemanticMatrixTileRef(operation.fragment, visitExpression);
+      walkSemanticExpression(operation.stride, visitExpression);
+      return;
     case "surface-write":
       walkSemanticExpression(operation.surface, visitExpression);
       walkSemanticExpression(operation.value, visitExpression);
@@ -480,6 +522,13 @@ export function walkSemanticOperation(
     case "break":
       return;
   }
+}
+
+function walkSemanticMatrixTileRef(
+  ref: SemanticMatrixTileRef,
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  for (const index of ref.indices) walkSemanticExpression(index, visitExpression);
 }
 
 export function walkSemanticMemoryRef(
@@ -1456,6 +1505,8 @@ function lowerStatement(
     case "expr": {
       const cpAsync = semanticCpAsyncOperation(statement.expression, scope, statement.span);
       if (cpAsync) return cpAsync;
+      const matrixOperation = semanticMatrixOperation(statement.expression, scope, statement.span);
+      if (matrixOperation) return matrixOperation;
       const pointerRebase = semanticStoragePointerRebaseOperation(statement.expression, scope, statement.span);
       if (pointerRebase) return pointerRebase;
       const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
@@ -2274,6 +2325,73 @@ function semanticCpAsyncOperation(
     target.fields.length > 0
   ) return undefined;
   return { kind: "copy", source, target, bytes: byteCount, span };
+}
+
+function semanticMatrixOperation(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (expression.kind !== "call" || expression.callee.kind !== "identifier") return undefined;
+  const builtin = wmmaBuiltinName(expression.callee.name);
+  if (!builtin) return undefined;
+  const args = expression.args;
+  if (builtin === "fill_fragment" && args[0] && args[1]) {
+    const fragment = semanticMatrixTileRef(lowerExpression(args[0], scope), scope);
+    return fragment ? { kind: "matrix-fill", fragment, value: lowerExpression(args[1], scope), span } : undefined;
+  }
+  if (builtin === "load_matrix_sync" && args[0] && args[1] && args[2]) {
+    const fragment = semanticMatrixTileRef(lowerExpression(args[0], scope), scope);
+    const source = semanticPointerArgumentMemoryRef(args[1], scope);
+    const layout = semanticMatrixLayout(args[3]) ?? fragment?.spec.layout;
+    return fragment && source && layout
+      ? { kind: "matrix-load", fragment, source, stride: lowerExpression(args[2], scope), layout, span }
+      : undefined;
+  }
+  if (builtin === "mma_sync" && args[0] && args[1] && args[2] && args[3]) {
+    const destination = semanticMatrixTileRef(lowerExpression(args[0], scope), scope);
+    const a = semanticMatrixTileRef(lowerExpression(args[1], scope), scope);
+    const b = semanticMatrixTileRef(lowerExpression(args[2], scope), scope);
+    const accumulator = semanticMatrixTileRef(lowerExpression(args[3], scope), scope);
+    return destination && a && b && accumulator
+      ? { kind: "matrix-mma", destination, a, b, accumulator, span }
+      : undefined;
+  }
+  if (builtin === "store_matrix_sync" && args[0] && args[1] && args[2]) {
+    const target = semanticPointerArgumentMemoryRef(args[0], scope);
+    const fragment = semanticMatrixTileRef(lowerExpression(args[1], scope), scope);
+    const layout = semanticMatrixLayout(args[3]);
+    return target && fragment && layout
+      ? { kind: "matrix-store", target, fragment, stride: lowerExpression(args[2], scope), layout, span }
+      : undefined;
+  }
+  return undefined;
+}
+
+function semanticMatrixTileRef(
+  expression: SemanticExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticMatrixTileRef | undefined {
+  const indices: SemanticExpression[] = [];
+  let cursor = expression;
+  while (cursor.kind === "index") {
+    indices.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "symbol") return undefined;
+  const symbol = scope.get(cursor.name);
+  if (!symbol?.matrixTile || indices.length !== (symbol.matrixTileArrayDimensions?.length ?? 0)) return undefined;
+  return {
+    base: symbol.name,
+    spec: symbol.matrixTile,
+    arrayDimensions: symbol.matrixTileArrayDimensions ?? [],
+    indices,
+    span: expression.span,
+  };
+}
+
+function semanticMatrixLayout(expression: CudaLiteExpression | undefined): MatrixTileLayout | undefined {
+  return expression?.kind === "identifier" ? normalizeMatrixTileLayout(expression.name) : undefined;
 }
 
 interface SemanticSharedByteAddress {
@@ -3265,6 +3383,7 @@ function symbolForVar(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): CudaLiteSemanticSymbol {
   const pointerAlias = statement.pointer ? localPointerAliasForInitializer(statement.init, scope) : undefined;
+  const matrixTile = statement.matrixTile ? resolveMatrixTileSpec(statement.matrixTile) : undefined;
   return {
     name: statement.name,
     kind: statement.storage === "shared" ? "shared" : "local",
@@ -3275,7 +3394,8 @@ function symbolForVar(
     ...(pointerAlias === undefined ? {} : pointerAlias),
     ...(statement.init === undefined ? {} : { init: lowerExpression(statement.init, scope) }),
     constant: false,
-    dimensions: statement.dimensions,
+    dimensions: matrixTile ? [Math.max(1, totalElements(statement.dimensions)) * matrixTileElementCount(matrixTile)] : statement.dimensions,
+    ...(matrixTile === undefined ? {} : { matrixTile, matrixTileArrayDimensions: statement.dimensions }),
     addressSpace: statement.storage,
     span: statement.span,
   };
