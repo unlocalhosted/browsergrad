@@ -619,10 +619,15 @@ function semanticReferenceCopySupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  return operation.elements >= 1 &&
-    operation.elements <= 16 &&
+  const sourceBytes = operation.source.valueType === undefined ? undefined : sizeofCudaType(operation.source.valueType);
+  const targetBytes = operation.target.valueType === undefined ? undefined : sizeofCudaType(operation.target.valueType);
+  return operation.bytes >= 1 &&
+    operation.bytes <= 64 &&
+    sourceBytes !== undefined &&
+    targetBytes !== undefined &&
+    operation.bytes % sourceBytes === 0 &&
+    operation.bytes % targetBytes === 0 &&
     operation.source.valueType !== undefined &&
-    operation.source.valueType === operation.target.valueType &&
     operation.source.fields.length === 0 &&
     operation.target.fields.length === 0 &&
     operation.target.addressSpace !== "constant" &&
@@ -1482,11 +1487,33 @@ function execSemanticCopy(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
   context: SemanticReferenceContext,
 ): void {
-  for (let offset = 0; offset < operation.elements; offset++) {
-    const source = semanticCopyMemoryRefAt(operation.source, offset);
-    const target = semanticCopyMemoryRefAt(operation.target, offset);
-    writeMemoryValue(target, readMemoryValue(source, context), context);
+  const sourceType = operation.source.valueType!;
+  const targetType = operation.target.valueType!;
+  const sourceBytes = sizeofCudaType(sourceType)!;
+  const targetBytes = sizeofCudaType(targetType)!;
+  const data = new DataView(new ArrayBuffer(operation.bytes));
+  for (let offset = 0; offset < operation.bytes / sourceBytes; offset++) {
+    const value = readMemoryValue(semanticCopyMemoryRefAt(operation.source, offset), context);
+    if (typeof value !== "number") throw semanticReferenceError("semantic copy source must be scalar", operation.span);
+    writeSemanticCopyScalarBits(data, offset * sourceBytes, sourceType, value);
   }
+  for (let offset = 0; offset < operation.bytes / targetBytes; offset++) {
+    writeMemoryValue(semanticCopyMemoryRefAt(operation.target, offset), readSemanticCopyScalarBits(data, offset * targetBytes, targetType), context);
+  }
+}
+
+function writeSemanticCopyScalarBits(data: DataView, offset: number, valueType: CudaLiteScalarType, value: number): void {
+  if (valueType === "half") data.setUint16(offset, float32ToFloat16Bits(value), true);
+  else if (valueType === "float") data.setUint32(offset, float32ToUintBits(value), true);
+  else if (valueType === "int") data.setInt32(offset, Math.trunc(value), true);
+  else data.setUint32(offset, Math.trunc(value) >>> 0, true);
+}
+
+function readSemanticCopyScalarBits(data: DataView, offset: number, valueType: CudaLiteScalarType): number {
+  if (valueType === "half") return float16BitsToFloat32(data.getUint16(offset, true));
+  if (valueType === "float") return uintBitsToFloat32(data.getUint32(offset, true));
+  if (valueType === "int") return data.getInt32(offset, true);
+  return data.getUint32(offset, true);
 }
 
 function semanticReferenceInlineMmaSupported(

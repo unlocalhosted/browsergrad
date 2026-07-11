@@ -1288,10 +1288,17 @@ function semanticWgslCopySupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
-  return operation.elements >= 1 &&
-    operation.elements <= 16 &&
-    operation.source.valueType !== undefined &&
-    operation.source.valueType === operation.target.valueType &&
+  const sourceBytes = operation.source.valueType === undefined ? undefined : sizeofCudaType(operation.source.valueType);
+  const targetBytes = operation.target.valueType === undefined ? undefined : sizeofCudaType(operation.target.valueType);
+  return operation.bytes >= 1 &&
+    operation.bytes <= 64 &&
+    operation.bytes % 4 === 0 &&
+    sourceBytes !== undefined &&
+    targetBytes !== undefined &&
+    (sourceBytes === 2 || sourceBytes === 4) &&
+    (targetBytes === 2 || targetBytes === 4) &&
+    operation.bytes % sourceBytes === 0 &&
+    operation.bytes % targetBytes === 0 &&
     operation.source.fields.length === 0 &&
     operation.target.fields.length === 0 &&
     operation.target.addressSpace !== "constant" &&
@@ -2444,11 +2451,45 @@ function emitSemanticCopyOperation(
   options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
-  return Array.from({ length: operation.elements }, (_, offset) => {
-    const source = semanticCopyMemoryRefAt(operation.source, offset);
-    const target = semanticCopyMemoryRefAt(operation.target, offset);
-    return `${prefix}${emitSemanticMemoryWrite(target, emitSemanticMemoryRead(source, ir, names, options), ir, names, options)};`;
+  const sourceType = operation.source.valueType!;
+  const targetType = operation.target.valueType!;
+  const sourceBytes = sizeofCudaType(sourceType)!;
+  const targetBytes = sizeofCudaType(targetType)!;
+  if (sourceType === targetType) {
+    return Array.from({ length: operation.bytes / sourceBytes }, (_, offset) => {
+      const source = semanticCopyMemoryRefAt(operation.source, offset);
+      const target = semanticCopyMemoryRefAt(operation.target, offset);
+      return `${prefix}${emitSemanticMemoryWrite(target, emitSemanticMemoryRead(source, ir, names, options), ir, names, options)};`;
+    });
+  }
+  return Array.from({ length: operation.bytes / 4 }, (_, wordOffset) => {
+    const word = emitSemanticCopyWordRead(operation.source, sourceType, sourceBytes, wordOffset, ir, names, options);
+    return emitSemanticCopyWordWrite(operation.target, targetType, targetBytes, wordOffset, word, ir, names, options)
+      .map((line) => `${prefix}${line};`)
+      .join("\n");
   });
+}
+
+function emitSemanticCopyWordRead(ref: SemanticMemoryRef, valueType: CudaLiteScalarType, valueBytes: number, wordOffset: number, ir: SemanticKernelIrModule, names: ReadonlyMap<string, string>, options: EmitSemanticKernelIrWgslOptions): string {
+  if (valueBytes === 2) {
+    const low = emitSemanticMemoryRead(semanticCopyMemoryRefAt(ref, wordOffset * 2), ir, names, options);
+    const high = emitSemanticMemoryRead(semanticCopyMemoryRefAt(ref, wordOffset * 2 + 1), ir, names, options);
+    return `bitcast<u32>(vec2<f16>(${low}, ${high}))`;
+  }
+  const value = emitSemanticMemoryRead(semanticCopyMemoryRefAt(ref, wordOffset), ir, names, options);
+  return valueType === "uint" ? value : `bitcast<u32>(${value})`;
+}
+
+function emitSemanticCopyWordWrite(ref: SemanticMemoryRef, valueType: CudaLiteScalarType, valueBytes: number, wordOffset: number, word: string, ir: SemanticKernelIrModule, names: ReadonlyMap<string, string>, options: EmitSemanticKernelIrWgslOptions): readonly string[] {
+  if (valueBytes === 2) {
+    const pair = `bitcast<vec2<f16>>(${word})`;
+    return [
+      emitSemanticMemoryWrite(semanticCopyMemoryRefAt(ref, wordOffset * 2), `${pair}.x`, ir, names, options),
+      emitSemanticMemoryWrite(semanticCopyMemoryRefAt(ref, wordOffset * 2 + 1), `${pair}.y`, ir, names, options),
+    ];
+  }
+  const value = valueType === "uint" ? word : `bitcast<${wgslValueType(valueType)}>(${word})`;
+  return [emitSemanticMemoryWrite(semanticCopyMemoryRefAt(ref, wordOffset), value, ir, names, options)];
 }
 
 function semanticCopyMemoryRefAt(ref: SemanticMemoryRef, offset: number): SemanticMemoryRef {

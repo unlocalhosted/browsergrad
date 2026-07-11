@@ -4215,6 +4215,31 @@ __global__ void sharedHelperScoped(float *out) {
       expect([...semanticResult.buffers.sum as Float32Array]).toEqual([10]);
     });
 
+  it("bit-copies reinterpreted 128-bit local uint carriers into half storage", () => {
+      const compiled = compileCudaLiteKernel(`
+  #define LDST128BITS(value) (reinterpret_cast<float4 *>(&(value))[0])
+  __global__ void localUintToHalfPack(half *out) {
+    uint regs[4];
+    regs[0] = 0x40003c00u;
+    regs[1] = 0x44004200u;
+    regs[2] = 0x46004500u;
+    regs[3] = 0x48004700u;
+    LDST128BITS(out[0]) = LDST128BITS(regs[0]);
+  }`, { workgroupSize: [1, 1, 1], features: { "shader-f16": true } });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: createWgslFloat16Array(8) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(JSON.stringify(compiled.kernelIr.operations)).toContain('"kind":"copy"');
+      expect(JSON.stringify(compiled.kernelIr.operations)).toContain('"bytes":16');
+      expect(compiled.wgsl).toContain("bitcast<vec2<f16>>");
+      expect(Array.from(result.buffers.out as Iterable<number>)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    });
+
   it("folds same-type pointer indexing over local scalar addresses", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void scalar_address_identity(const float4* input, float4* output) {

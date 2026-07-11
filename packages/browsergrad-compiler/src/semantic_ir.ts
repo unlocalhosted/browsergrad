@@ -315,7 +315,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "cooperative-group-declare"; readonly declaration: SemanticCooperativeGroupDeclaration; readonly span: SourceSpan }
   | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
-  | { readonly kind: "copy"; readonly source: SemanticMemoryRef; readonly target: SemanticMemoryRef; readonly elements: number; readonly span: SourceSpan }
+  | { readonly kind: "copy"; readonly source: SemanticMemoryRef; readonly target: SemanticMemoryRef; readonly bytes: number; readonly span: SourceSpan }
   | { readonly kind: "copy-fence"; readonly callee: string; readonly span: SourceSpan }
   | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "surface-read-store"; readonly target: SemanticExpression; readonly surface: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly valueType?: CudaLiteScalarType; readonly span: SourceSpan }
@@ -1659,18 +1659,19 @@ function semanticReinterpretedScalarCopy(
   if (!isCudaVectorType(viewType)) return undefined;
   const targetRoot = scope.get(target.base);
   const sourceRoot = scope.get(source.base);
-  const scalarType = targetRoot?.valueType;
-  if (!scalarType || scalarType !== sourceRoot?.valueType || isCudaVectorType(scalarType)) return undefined;
+  const targetScalarType = targetRoot?.valueType;
+  const sourceScalarType = sourceRoot?.valueType;
+  if (!targetScalarType || !sourceScalarType || isCudaVectorType(targetScalarType) || isCudaVectorType(sourceScalarType)) return undefined;
   const viewBytes = sizeofCudaType(viewType);
-  const scalarBytes = sizeofCudaType(scalarType);
-  if (!viewBytes || !scalarBytes || viewBytes % scalarBytes !== 0) return undefined;
-  const elements = viewBytes / scalarBytes;
-  if (elements < 1 || elements > 16) return undefined;
+  const targetScalarBytes = sizeofCudaType(targetScalarType);
+  const sourceScalarBytes = sizeofCudaType(sourceScalarType);
+  if (!viewBytes || !targetScalarBytes || !sourceScalarBytes || viewBytes % targetScalarBytes !== 0 || viewBytes % sourceScalarBytes !== 0) return undefined;
+  if (viewBytes < 1 || viewBytes > 64) return undefined;
   return {
     kind: "copy",
-    source: { ...source, valueType: scalarType },
-    target: { ...target, valueType: scalarType },
-    elements,
+    source: { ...source, valueType: sourceScalarType },
+    target: { ...target, valueType: targetScalarType },
+    bytes: viewBytes,
     span,
   };
 }
@@ -2245,7 +2246,7 @@ function semanticCpAsyncOperation(
     target.valueType !== source.valueType ||
     target.fields.length > 0
   ) return undefined;
-  return { kind: "copy", source, target, elements, span };
+  return { kind: "copy", source, target, bytes: byteCount, span };
 }
 
 interface SemanticSharedByteAddress {
