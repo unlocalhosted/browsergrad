@@ -587,7 +587,7 @@ export function semanticMathCallArgumentsSupported(
 ): boolean {
   return name !== undefined &&
     isSemanticMathCallName(name) &&
-    args.length === semanticMathCallArity(name) &&
+    (name === "__usad4" ? args.length === 2 || args.length === 3 : args.length === semanticMathCallArity(name)) &&
     args.every(expressionSupported);
 }
 

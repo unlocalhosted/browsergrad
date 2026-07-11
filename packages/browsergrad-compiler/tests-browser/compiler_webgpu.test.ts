@@ -2455,6 +2455,29 @@ __global__ void raw_byte_word(const uchar *bytes, uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([1, 2, 254, 255]);
   });
 
+  it("runs two-operand CUDA u8x4 SAD on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void sad4_two(uint *out, uint *a, uint *b) {
+  int idx = threadIdx.x;
+  out[idx] = __usad4(a[idx], b[idx]);
+}`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Uint32Array(2),
+        a: new Uint32Array([0x01020304, 0xff001020]),
+        b: new Uint32Array([0x05010108, 0x0f000020]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([11, 256]);
+  });
+
   it("runs fixed local pointer-array slots as shared vector aliases", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

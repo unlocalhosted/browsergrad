@@ -4328,6 +4328,30 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect([...result.buffers.out as Uint32Array]).toEqual([18, 263, 16, 261]);
     });
 
+  it("lowers two-operand CUDA u8x4 SAD through semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void sad4_two(uint *out, uint *a, uint *b) {
+    int idx = threadIdx.x;
+    out[idx] = __usad4(a[idx], b[idx]);
+  }`, { workgroupSize: [2, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {
+            out: new Uint32Array(2),
+            a: new Uint32Array([0x01020304, 0xff001020]),
+            b: new Uint32Array([0x05010108, 0x0f000020]),
+          },
+        },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bg_semantic_usad4_u32");
+      expect([...result.buffers.out as Uint32Array]).toEqual([11, 256]);
+    });
+
   it("lowers adjacent-string inline PTX mma carriers with multiple outputs", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void mmaCarrier(uint *out) {
