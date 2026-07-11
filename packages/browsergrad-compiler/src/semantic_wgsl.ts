@@ -3037,7 +3037,12 @@ function emitSemanticCall(
   }
   if (operation.callee === "assert") return [];
   if (operation.callee === "printf") return [];
-  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return [];
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) {
+    const prefix = "  ".repeat(indentLevel);
+    return operation.args.map((arg, index) =>
+      `${prefix}let ${nameFor(`bg_noop_arg_${operation.span.start}_${index}`, names)} = ${emitSemanticExpression(arg, ir, names, options, textureSpecializations)};`
+    );
+  }
   if (operation.callee === "curand_init") return [`${"  ".repeat(indentLevel)}${emitSemanticCurandInit(operation, ir, names, options, textureSpecializations)};`];
   if (operation.callee === "skipahead") {
     return [`${"  ".repeat(indentLevel)}${emitSemanticCurandCall({

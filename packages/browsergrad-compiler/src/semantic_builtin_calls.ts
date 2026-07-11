@@ -18,6 +18,7 @@ export const SEMANTIC_NOOP_CALLS = new Set([
   "__nanosleep",
   "__prof_trigger",
   "__trap",
+  "cudaGraphSetConditional",
 ]);
 
 export const SEMANTIC_ADDRESS_PREDICATE_CALLS: ReadonlySet<string> = new Set(CUDA_ADDRESS_SPACE_PREDICATE_CALL_NAMES);

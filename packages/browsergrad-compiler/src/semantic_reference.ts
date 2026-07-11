@@ -1722,7 +1722,10 @@ function execSemanticCall(
     return;
   }
   if (operation.callee === "printf") return;
-  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) return;
+  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) {
+    for (const arg of operation.args) evalSemanticExpression(arg, context);
+    return;
+  }
   if (operation.callee === "curand_init") {
     execSemanticCurandInit(operation, context);
     return;

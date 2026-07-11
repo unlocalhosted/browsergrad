@@ -2667,7 +2667,9 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         code: "cuda-graph-conditional-host-orchestration",
         severity: "warning",
       }));
-      expect(compiled.wgsl).toContain("cudaGraphSetConditional omitted");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("let bg_noop_arg_");
       expect([...result.buffers.out as Int32Array]).toEqual([1]);
     });
 
