@@ -1008,6 +1008,7 @@ class Parser {
     const matrixTile = this.startsWmmaFragmentType() || this.match("wmma") || this.match("nvcuda")
       ? this.parseWmmaFragmentType()
       : undefined;
+    const packedByteLanes = matrixTile ? undefined : packedByteVectorLanes(this.peek().value);
     const valueType = matrixTile ? matrixTile.valueType ?? "float" : this.parseType();
     this.consumeCvQualifiers();
     if (this.consumeIf("__shared__")) {
@@ -1043,6 +1044,7 @@ class Parser {
         storage: storageInfo.storage,
         valueType,
         pointer,
+        ...(packedByteLanes === undefined ? {} : { packedByteLanes }),
         name: name.value,
         dimensions,
         ...(matrixTile === undefined ? {} : { matrixTile }),

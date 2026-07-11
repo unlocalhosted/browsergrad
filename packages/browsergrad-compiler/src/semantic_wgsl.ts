@@ -1170,6 +1170,7 @@ function emitSemanticStoragePointerAtomicValue(
 
 function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (!semanticWgslMemoryRefSupported(ref, ir)) return false;
+  if (semanticWgslLocalPackedByteRawView(ref, ir)) return true;
   if (semanticWgslPackedSharedByteRoot(ref, ir)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
   if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
@@ -2123,6 +2124,16 @@ function emitSemanticStoreOperation(
     ? emitSemanticSequenceParts(operation.value, ir, names, indentLevel, options, textureSpecializations)
     : undefined;
   const lowered = sequence ? { ...operation, value: sequence.value } : operation;
+  if (semanticWgslLocalPackedByteRawView(lowered.target, ir)) {
+    const word = emitSemanticExpressionAs(lowered.value, ir, names, "u32", options, textureSpecializations);
+    const wordName = nameFor(`bg_packed_byte_word_${lowered.span.start}`, names);
+    const target = nameFor(lowered.target.base, names);
+    return [
+      ...(sequence?.prefix ?? []),
+      `${prefix}let ${wordName}: u32 = ${word};`,
+      ...["x", "y", "z", "w"].map((field, byte) => `${prefix}${target}.${field} = ((${wordName} >> ${byte * 8}u) & 255u);`),
+    ];
+  }
   if (semanticDirectVectorStorageStore(lowered, ir)) {
     const vectorType = semanticStorageVectorType(lowered.target.valueType)!;
     const valueName = nameFor(`bg_vector_store_value_${lowered.span.start}`, names);
@@ -3303,6 +3314,7 @@ function emitSemanticExpression(
       }
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) {
+        if (semanticWgslDirectByteRawView(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslPackedSharedByteRoot(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
           return emitSemanticMemoryRead(ref, ir, names, options);
@@ -4260,6 +4272,13 @@ function emitSemanticMemoryRead(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  if (semanticWgslDirectByteRawView(ref, ir)) {
+    const base = emitFlatStorageIndex({ ...ref, valueType: "uchar" }, ir, names, options);
+    const storage = nameFor(ref.base, names);
+    const word = `(${storage}[${base}] | (${storage}[(${base} + 1u)] << 8u) | (${storage}[(${base} + 2u)] << 16u) | (${storage}[(${base} + 3u)] << 24u))`;
+    if (ref.valueType === "float") return `bitcast<f32>(${word})`;
+    return ref.valueType === "int" ? `bitcast<i32>(${word})` : word;
+  }
   if (semanticWgslPackedSharedByteRoot(ref, ir)) {
     return emitSemanticPackedSharedByteRead(ref, ir, names, options);
   }
@@ -4276,6 +4295,29 @@ function emitSemanticMemoryRead(
       : target;
   }
   return emitSemanticMemoryRef(ref, ir, names, options);
+}
+
+function semanticWgslDirectByteRawView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  return ref.addressSpace === "storage" && ref.packedByteLanes === 4 &&
+    ir.params.some((param) => param.name === ref.base && param.valueType === "uchar");
+}
+
+function semanticWgslLocalPackedByteRawView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  return ref.addressSpace === "local" && ref.packedByteLanes === 4 &&
+    semanticWgslDeclaredPackedByteLocal(ir.operations, ref.base);
+}
+
+function semanticWgslDeclaredPackedByteLocal(operations: readonly SemanticKernelIrOperation[], name: string): boolean {
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.target.name === name) return operation.target.packedByteLanes === 4;
+    if (operation.kind === "block" && semanticWgslDeclaredPackedByteLocal(operation.body, name)) return true;
+    if (operation.kind === "branch" && (
+      semanticWgslDeclaredPackedByteLocal(operation.consequent, name) ||
+      semanticWgslDeclaredPackedByteLocal(operation.alternate, name)
+    )) return true;
+    if (operation.kind === "loop" && semanticWgslDeclaredPackedByteLocal(operation.body, name)) return true;
+  }
+  return false;
 }
 
 function emitSemanticMemoryWrite(
@@ -5655,6 +5697,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     base: flattened.base.name,
     addressSpace: flattened.base.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
     indices: flattened.indices,
     fields: [],
     span: expression.span,

@@ -7,6 +7,7 @@ import type {
 import { walkSemanticOperations } from "./semantic_ir.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import { cudaVectorLaneCount } from "./vector_types.js";
+import { sizeofCudaType } from "./type_layout.js";
 
 export function semanticDirectByteStorageParamSupported(
   ir: SemanticKernelIrModule,
@@ -42,7 +43,10 @@ function semanticByteStorageOperationsSupported(
 
 function semanticByteStorageRefSupported(ref: SemanticMemoryRef): boolean {
   return ref.valueType === "uchar" ||
-    ref.packedByteLanes !== undefined && cudaVectorLaneCount(ref.valueType) === ref.packedByteLanes;
+    ref.packedByteLanes !== undefined && (
+      cudaVectorLaneCount(ref.valueType) === ref.packedByteLanes ||
+      sizeofCudaType(ref.valueType ?? "void") === ref.packedByteLanes
+    );
 }
 
 function semanticOperationMemoryRefs(operation: SemanticKernelIrOperation): readonly SemanticMemoryRef[] {

@@ -168,6 +168,7 @@ export interface CudaLiteVarDecl {
   readonly storage: "local" | "shared";
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly pointer: boolean;
+  readonly packedByteLanes?: 2 | 3 | 4;
   readonly name: string;
   readonly dimensions: readonly number[];
   readonly matrixTile?: CudaLiteMatrixTileMetadata;

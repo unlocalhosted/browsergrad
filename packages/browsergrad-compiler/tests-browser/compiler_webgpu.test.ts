@@ -2429,6 +2429,32 @@ __global__ void packed_byte_vector(uchar *bytes) {
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([0, 44, 255, 0]);
   });
 
+  it("runs raw byte-word loads into packed local vectors", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void raw_byte_word(const uchar *bytes, uint *out) {
+  uchar4 lanes;
+  *(uint32_t *)&lanes = *(uint32_t *)(bytes + 1);
+  out[0] = lanes.x;
+  out[1] = lanes.y;
+  out[2] = lanes.z;
+  out[3] = lanes.w;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        bytes: new Uint32Array([99, 1, 2, 254, 255, 77]),
+        out: new Uint32Array(4),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([1, 2, 254, 255]);
+  });
+
   it("runs fixed local pointer-array slots as shared vector aliases", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

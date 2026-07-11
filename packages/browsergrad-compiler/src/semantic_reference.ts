@@ -542,6 +542,7 @@ function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledC
 
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
+  if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
   if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticReferenceSharedScalarVectorView(ref, compiled)) return true;
@@ -1634,6 +1635,7 @@ function storeValueExpression(
     return evalVectorBinary(binaryOperator, readMemoryValue(operation.target, context), right, operation.span);
   }
   const right = evalNumber(operation.value, context);
+  if (operation.operator === "=") return right;
   return applySemanticScalarAssignment(operation.operator, readMemory(operation.target, context), right, operation.span);
 }
 
@@ -4345,6 +4347,16 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     context.trace.sharedReads.push({ name: ref.base, index, value, ok });
     return value;
   }
+  if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
+    const buffer = context.buffers.get(ref.base);
+    if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+    const base = flatIndex(ref, context);
+    let word = 0;
+    for (let byte = 0; byte < 4; byte++) word |= (Number(buffer[base + byte] ?? 0) & 0xff) << (byte * 8);
+    const unsigned = word >>> 0;
+    if (ref.valueType === "float") return uintBitsToFloat32(unsigned);
+    return ref.valueType === "int" ? word | 0 : unsigned;
+  }
   const buffer = ref.addressSpace === "constant"
     ? context.constants.get(ref.base)
     : ref.addressSpace === "device-global"
@@ -4504,6 +4516,12 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
 }
 
 function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context: SemanticReferenceContext): void {
+  if (semanticReferenceLocalPackedByteRawView(ref, context.compiled)) {
+    if (typeof value !== "number") throw semanticReferenceError("semantic reference packed byte-vector write received vector value", ref.span);
+    const word = ref.valueType === "float" ? float32ToUintBits(value) : value >>> 0;
+    context.locals.set(ref.base, Array.from({ length: 4 }, (_, byte) => (word >>> (byte * 8)) & 0xff));
+    return;
+  }
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) {
     const lanes = vectorFieldMemoryLanes(ref);
     if (!lanes) throw semanticReferenceError("semantic reference vector field write requires modeled lanes", ref.span);
@@ -4560,6 +4578,29 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     if (ok) buffer[index] = laneValue;
     context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
   }
+}
+
+function semanticReferenceDirectByteRawView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  return ref.addressSpace === "storage" && ref.packedByteLanes === 4 &&
+    compiled.kernelIr.params.some((param) => param.name === ref.base && param.valueType === "uchar");
+}
+
+function semanticReferenceLocalPackedByteRawView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  return ref.addressSpace === "local" && ref.packedByteLanes === 4 &&
+    semanticReferenceDeclaredPackedByteLocal(compiled.kernelIr.operations, ref.base);
+}
+
+function semanticReferenceDeclaredPackedByteLocal(operations: readonly SemanticKernelIrOperation[], name: string): boolean {
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.target.name === name) return operation.target.packedByteLanes === 4;
+    if (operation.kind === "block" && semanticReferenceDeclaredPackedByteLocal(operation.body, name)) return true;
+    if (operation.kind === "branch" && (
+      semanticReferenceDeclaredPackedByteLocal(operation.consequent, name) ||
+      semanticReferenceDeclaredPackedByteLocal(operation.alternate, name)
+    )) return true;
+    if (operation.kind === "loop" && semanticReferenceDeclaredPackedByteLocal(operation.body, name)) return true;
+  }
+  return false;
 }
 
 function semanticReferenceSharedVectorBase(

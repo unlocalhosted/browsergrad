@@ -2984,6 +2984,35 @@ __global__ void sharedPointerAlias(float *out) {
       expect(canEmitSemanticKernelIrWgsl(wideCast.kernelIr)).toBe(false);
     });
 
+  it("loads raw words from byte storage into packed local byte vectors", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void rawByteWord(const uchar* bytes, uint* out) {
+    uchar4 lanes;
+    *(uint32_t*)&lanes = *(uint32_t*)(bytes + 1);
+    out[0] = lanes.x;
+    out[1] = lanes.y;
+    out[2] = lanes.z;
+    out[3] = lanes.w;
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = {
+        buffers: {
+          bytes: new Uint32Array([99, 1, 2, 254, 255, 77]),
+          out: new Uint32Array(4),
+        },
+      };
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        input,
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("<< 24u");
+      expect(compiled.wgsl).toContain("lanes.w =");
+      expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 254, 255]);
+    });
+
   it("packs wider pointer views over storage byte params into byte-offset words", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void storageByteFloatOverlay(uchar *scratch, float *out) {
