@@ -20,6 +20,7 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
+import { promotedCudaScalarType } from "./wgsl_value_conversion.js";
 import { sizeofCudaType } from "./type_layout.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
@@ -697,7 +698,8 @@ function semanticWgslFunctionParamSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): boolean {
   if (param.pointer && param.addressSpace === "shared" && param.valueType === "uchar" && param.pointerCarrierValueType === "uchar") return true;
-  return param.valueType !== "uchar" && semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
+  if (!param.pointer && param.addressSpace === "local" && param.valueType === "uchar") return true;
+  return semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
 }
 
 function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
@@ -1431,10 +1433,10 @@ function semanticWgslFunctionCallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const callee = expression.callee.name;
   const fn = ir.functions.find((item) => item.name === callee);
-  if (!fn || !semanticWgslValueTypeSupported(fn.returnType)) return false;
+  if (!fn || !semanticWgslLocalValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => !semanticWgslFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticWgslPointerFunctionBodySupported(fn)) return false;
-  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslValueTypeSupported)) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslLocalValueTypeSupported)) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasSharedPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
@@ -1622,7 +1624,7 @@ function semanticWgslVoidFunctionCallSupported(
   if (!fn || fn.returnType !== "void") return false;
   if (fn.params.some((param) => !semanticWgslFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticWgslPointerFunctionBodySupported(fn)) return false;
-  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslValueTypeSupported)) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslLocalValueTypeSupported)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
     semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasSharedPointer(fn)) &&
@@ -2521,7 +2523,17 @@ function emitSemanticAssignmentStatement(
     const right = emitSemanticExpressionAs(expression.value, ir, names, "u32", options, textureSpecializations);
     return `${target} = ${emitSemanticUcharValue(`(${target} ${binaryOperator} ${right})`)}`;
   }
-  if (semanticAssignmentBinaryOperator(expression.operator)) return `${target} ${expression.operator} ${value}`;
+  const binaryOperator = semanticAssignmentBinaryOperator(expression.operator);
+  const promotedType = binaryOperator === undefined
+    ? undefined
+    : promotedCudaScalarType(targetType, semanticExpressionValueType(expression.value));
+  if (binaryOperator !== undefined && promotedType !== undefined && wgslValueScalar(promotedType) !== wgslValueScalar(targetType)) {
+    const operationScalar = wgslValueScalar(promotedType);
+    const left = `${operationScalar}(${target})`;
+    const right = emitSemanticExpressionAs(expression.value, ir, names, operationScalar, options, textureSpecializations);
+    return `${target} = ${wgslValueScalar(targetType)}((${left} ${binaryOperator} ${right}))`;
+  }
+  if (binaryOperator) return `${target} ${expression.operator} ${value}`;
   return `${target} = ${value}`;
 }
 
@@ -3848,6 +3860,8 @@ function emitSemanticFunctionArg(
     if (handle === undefined) throw semanticWgslError(`unknown surface '${arg.name}'`, arg.span);
     return `${handle}u`;
   }
+  if (param?.valueType === "bool") return emitTruthiness(arg, ir, names, options);
+  if (param?.valueType === "uchar") return emitSemanticUcharExpression(arg, ir, names, options, textureSpecializations);
   if (isSemanticFloatVectorType(param?.valueType)) return emitSemanticExpression(arg, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType), options, textureSpecializations);
 }

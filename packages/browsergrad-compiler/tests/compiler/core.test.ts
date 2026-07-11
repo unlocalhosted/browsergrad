@@ -5343,6 +5343,34 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([3, 255]);
     });
 
+  it("lowers by-value uchar helpers into local integer-vector lanes", () => {
+      const compiled = compileCudaLiteKernelForWebGpu(`
+  __device__ uchar choose_byte(uchar left, uchar right, bool add) {
+    return add ? (uchar)(left + right) : right;
+  }
+  __global__ void uchar_helper_vector(uint *out) {
+    uint4 value;
+    value.x = choose_byte(250, 10, true);
+    value.y = choose_byte(250, 10, false);
+    value.z = true ? choose_byte(255, 2, true) : choose_byte(1, 2, false);
+    value.w = false ? choose_byte(1, 2, true) : choose_byte(9, 8, false);
+    out[0] = value.x;
+    out[1] = value.y;
+    out[2] = value.z;
+    out[3] = value.w;
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = { buffers: { out: new Uint32Array(4) } };
+      const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("fn choose_byte(left: u32, right: u32, add: bool,");
+      expect(compiled.wgsl).toContain("choose_byte((u32(i32(250)) & 0xffu), (u32(i32(10)) & 0xffu), (1 != 0)");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([4, 10, 1, 8]);
+    });
+
   it("casts device-function scalar compound assignments from promoted operands in WGSL", () => {
       const compiled = compileCudaLiteKernelForWebGpu(`
   __device__ int scale_box(unsigned char ul, unsigned char um, float fscale) {

@@ -460,6 +460,7 @@ function semanticReferenceFunctionParamSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number],
 ): boolean {
   if (param.pointer && param.addressSpace === "shared" && param.valueType === "uchar" && param.pointerCarrierValueType === "uchar") return true;
+  if (!param.pointer && param.addressSpace === "local" && param.valueType === "uchar") return true;
   return semanticFunctionParamContractSupported(param, semanticReferenceValueTypeSupported);
 }
 
@@ -697,10 +698,10 @@ function semanticReferenceFunctionCallSupported(
   if (expression.callee.kind !== "symbol") return false;
   const callee = expression.callee.name;
   const fn = compiled.kernelIr.functions.find((item) => item.name === callee);
-  if (!fn || !semanticReferenceValueTypeSupported(fn.returnType)) return false;
+  if (!fn || !semanticReferenceLocalValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
-  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceValueTypeSupported)) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceLocalValueTypeSupported)) return false;
   if (!semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasSharedPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
     expression.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
@@ -914,7 +915,7 @@ function semanticReferenceVoidFunctionCallSupported(
   if (!fn || fn.returnType !== "void") return false;
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
-  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceValueTypeSupported)) return false;
+  if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceLocalValueTypeSupported)) return false;
   return operation.args.length === fn.params.length &&
     operation.args.every((arg, index) => semanticReferenceFunctionArgSupported(arg, fn.params[index], compiled)) &&
     semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasSharedPointer(fn)) &&
@@ -3582,7 +3583,9 @@ function evalSemanticFunctionCall(
   if (child.returnValue === undefined) {
     throw semanticReferenceError(`semantic reference function '${fn.name}' did not return value`, fn.span);
   }
-  return child.returnValue;
+  return typeof child.returnValue === "number"
+    ? coerceSemanticScalarValue(child.returnValue, fn.returnType)
+    : child.returnValue;
 }
 
 function evalSemanticCooperativeGroupCall(
@@ -4085,7 +4088,9 @@ function createSemanticFunctionContext(
       sharedOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, context));
       continue;
     }
-    locals.set(param.name, isSemanticFloatVectorType(param.valueType) ? evalSemanticExpression(arg, context) : evalNumber(arg, context));
+    locals.set(param.name, isSemanticFloatVectorType(param.valueType)
+      ? evalSemanticExpression(arg, context)
+      : coerceSemanticScalarValue(evalNumber(arg, context), param.valueType));
   }
   const child: SemanticReferenceContext = {
     compiled: context.compiled,

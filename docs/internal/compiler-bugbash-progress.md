@@ -1,10 +1,11 @@
 # Compiler Bugbash Progress
 
+- 2026-07-11: By-value `uchar` device-helper params/returns now use explicit semantic ABI narrowing in reference and WGSL, including bool arguments, nested conditional calls, and integer-vector lane destinations. Mixed scalar compound assignments now preserve CUDA usual arithmetic conversion before narrowing the result, fixing `short *= float` WGSL correctness exposed by the widened helper path. Exact semantic reference/native WebGPU output passed `[4,10,1,8]`; changed-fast passed compiler unit `767/767` and auto-corpus WebGPU `32/32`; full compiler passed `783/783`; source/dist real-world WebGPU passed `855/855` each with fixtures `127/127`, zero failures, and zero skips. CUDA-samples semantic-direct moved `267/354 -> 269/354`, AST fallback `87 -> 85`; both NVIDIA `SobelShared` corpus kernels are semantic-direct.
 - 2026-07-10: Semantic cooperative-group topology now supports tile `meta_group_size()`/`meta_group_rank()`, and analyzer uniformity proof records validated local member `group.sync()` spans inside uniform loops. Partition-derived groups remain explicitly excluded until semantic IR models predicate masks. Native topology/reduction output passed; full compiler passed `782/782`; source/dist real-world WebGPU passed `855/855` each with zero skips. CUDA-samples semantic-direct moved `265/354 -> 267/354`, AST fallback `89 -> 87`; `cg_reduce` and `multi_warp_cg_reduce` are semantic-direct. CUDA-120 semantic-direct moved `204 -> 205`; llm.c moved `65 -> 68`.
 - 2026-07-10: Packed shared `uchar` arrays now lower through semantic reference and WGSL as logical byte memory over race-safe `atomic<u32>` carriers, including typed `uint`/`int`/`float` aliases and shared-pointer helper offsets. CAS-backed byte stores/updates preserve neighboring bytes; typed unary complement avoids invalid negative-to-`u32` WGSL constants. `histogram64Kernel` passed native output comparison; full compiler passed `781/781`; source/dist real-world WebGPU passed `855/855` each with fixtures `127/127` and zero skips. CUDA-samples semantic-direct moved `264/354 -> 265/354`; AST fallback moved `90 -> 89`.
 - 2026-07-10: Ignored dynamic `frexp` returns now preserve local exponent out-param side effects as explicit semantic IR; WGSL integer shifts emit `u32` counts. Barrier uniformity analysis now follows transitive barrier-bearing helper calls through nested expressions and generic cooperative-group parameters while retaining divergent-call rejection. Exact semantic reference/native WebGPU passed; full compiler passed `780/780`; source/dist real-world WebGPU passed `855/855` each with zero skips. CUDA-samples semantic-direct moved `260/354 -> 264/354`; AST fallback moved `94 -> 90`.
 
-Last updated: 2026-07-10T23:44:33Z
+Last updated: 2026-07-11T00:06:10Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -13,9 +14,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | CUDA-samples semantic-direct lowering is now `267/354`, up from `161/354`; `87` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
+| Fixed failure movement | CUDA-samples semantic-direct lowering is now `269/354`, up from `161/354`; `85` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
-| Active work item | `SobelShared` semantic preflight now stops at normalized line 132 (`semantic WGSL does not support expression`) after dynamic shared-memory normalization; inspect and lower that exact expression without widening unrelated constructs |
+| Active work item | `SobelCopyImage` semantic preflight stops at normalized line 27/30: byte-offset storage alias from `uchar*` followed by a texture-derived byte store. Model typed storage-byte `MemoryRef` addressing before admitting it |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
