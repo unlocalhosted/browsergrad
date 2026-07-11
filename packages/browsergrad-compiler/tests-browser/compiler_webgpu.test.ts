@@ -5074,6 +5074,23 @@ __global__ void dynamic_shared_alias(uint* out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([8, 7]);
   });
 
+  it("runs multidimensional shared byte-address queries on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void shared_2d_address(uint* out) {
+  __shared__ uint tile[2][4];
+  out[0] = __cvta_generic_to_shared(&tile[1][2]);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Uint32Array]).toEqual([24]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([24]);
+  });
+
   it("runs packed half pointer views over local uint carriers on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

@@ -3800,13 +3800,14 @@ function semanticWgslSharedAddressCallRef(
   if (expression.callee.kind !== "symbol" || expression.callee.name !== "__cvta_generic_to_shared") return undefined;
   const arg = expression.args[0];
   if (!arg) return undefined;
-  const ref = memoryRefFromIndexExpression(arg) ?? (arg.kind === "symbol" && arg.addressSpace === "shared" ? {
-    base: arg.name,
-    addressSpace: arg.addressSpace,
-    ...(arg.valueType === undefined ? {} : { valueType: arg.valueType }),
+  const target = arg.kind === "unary" && arg.operator === "&" ? arg.argument : arg;
+  const ref = memoryRefFromIndexExpression(target) ?? (target.kind === "symbol" && target.addressSpace === "shared" ? {
+    base: target.name,
+    addressSpace: target.addressSpace,
+    ...(target.valueType === undefined ? {} : { valueType: target.valueType }),
     indices: [],
     fields: [],
-    span: arg.span,
+    span: target.span,
   } : undefined);
   return ref?.addressSpace === "shared" ? ref : undefined;
 }

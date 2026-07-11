@@ -2582,13 +2582,14 @@ function evalSemanticSharedAddressCall(
 }
 
 function semanticReferenceSharedAddressMemoryRef(arg: SemanticExpression): SemanticMemoryRef | undefined {
-  return memoryRefFromIndexExpression(arg) ?? (arg.kind === "symbol" && arg.addressSpace === "shared" ? {
-    base: arg.name,
-    addressSpace: arg.addressSpace,
-    ...(arg.valueType === undefined ? {} : { valueType: arg.valueType }),
+  const target = arg.kind === "unary" && arg.operator === "&" ? arg.argument : arg;
+  return memoryRefFromIndexExpression(target) ?? (target.kind === "symbol" && target.addressSpace === "shared" ? {
+    base: target.name,
+    addressSpace: target.addressSpace,
+    ...(target.valueType === undefined ? {} : { valueType: target.valueType }),
     indices: [],
     fields: [],
-    span: arg.span,
+    span: target.span,
   } : undefined);
 }
 

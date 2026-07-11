@@ -5714,8 +5714,9 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 92]);
-      expect(compiled.wgsl).toContain("out[0] = u32(u32((0u) * 4u));");
-      expect(compiled.wgsl).toContain("out[1] = u32(u32((((u32(1) * 12u) + (u32(2) * 4u) + u32(3))) * 4u));");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("out[0u] = u32((0u * 4u));");
+      expect(compiled.wgsl).toContain("out[1u] = u32((((1u * 12u) + (2u * 4u) + 3u) * 4u));");
     });
 
   it("resolves dynamic shared-memory pointer aliases into semantic memory refs", () => {
