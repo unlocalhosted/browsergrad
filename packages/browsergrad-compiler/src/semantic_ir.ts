@@ -2691,8 +2691,8 @@ function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement
     (statement.init === undefined || isNullPointerLiteral(statement.init));
 }
 
-function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "shared" | "storage" {
-  return addressSpace === "local" || addressSpace === "shared" || addressSpace === "storage";
+function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "shared" | "storage" | "constant" {
+  return addressSpace === "local" || addressSpace === "shared" || addressSpace === "storage" || addressSpace === "constant";
 }
 
 function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
@@ -2862,7 +2862,7 @@ function localArrayRefFromExpression(
   if (expression.kind !== "index") return undefined;
   if (expression.target.kind === "identifier") {
     const root = scope.get(expression.target.name);
-    if (!root || (root.kind !== "local" && (!allowShared || root.kind !== "shared")) || root.dimensions.length === 0 || root.pointer) return undefined;
+    if (!root || (root.kind !== "local" && (!allowShared || root.kind !== "shared" && root.kind !== "constant")) || root.dimensions.length === 0 || root.pointer) return undefined;
     return { root, indices: [lowerExpression(expression.index, scope)] };
   }
   const target = localArrayRefFromExpression(expression.target, scope, allowShared);

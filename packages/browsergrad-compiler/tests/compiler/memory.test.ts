@@ -4862,9 +4862,9 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("var<storage, read> table: array<array<u32, 2>, 2>;");
-      expect(compiled.wgsl).toMatch(/var row_\d+_buffer: u32 = 1u;/u);
-      expect(compiled.wgsl).toMatch(/var row_\d+_base: u32 = \(\(u32\(0\) \* 2u\) \+ u32\(0\)\);/u);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var<storage, read> table: array<u32>;");
+      expect(compiled.wgsl).toContain("out[local_id.x] = table[((0u * 2u) + local_id.x)]");
       expect([...result.buffers.out as Uint32Array]).toEqual([3, 5]);
 
       const oneDimensional = compileCudaLiteKernel(`
@@ -4881,7 +4881,7 @@ __global__ void sharedHelperScoped(float *out) {
         },
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
-      expect(oneDimensional.wgsl).toMatch(/var row_\d+_base: u32 = u32\(0\);/u);
+      expect(oneDimensional.wgsl).toContain("out[local_id.x] = coeffs[local_id.x]");
       expect([...oneDimensionalResult.buffers.out as Uint32Array]).toEqual([13, 17]);
 
       const write = analyzeCudaLite(parseCudaLite(`

@@ -2528,6 +2528,23 @@ __global__ void test_interval_newton(float2 *buffer, int *nresults, float2 i, in
   buffer[thread_id] = i;
   nresults[thread_id] = implementation_choice >= 0 ? 1 : 0;
 }`,
+  cudaSamplesQuasirandomConstantAlias: `
+#define INT_SCALE (1.0f / (float)0x80000001U)
+__constant__ unsigned int c_Table[3][31];
+__global__ void quasirandomGeneratorKernel(float *d_Output, unsigned int seed, unsigned int N)
+{
+  unsigned int *dimBase = &c_Table[threadIdx.y][0];
+  unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x;
+  unsigned int threadN = blockDim.x * gridDim.x;
+  for (unsigned int pos = tid; pos < N; pos += threadN) {
+    unsigned int result = 0;
+    unsigned int data = seed + pos;
+    for (int bit = 0; bit < 31; bit++, data >>= 1) {
+      if (data & 1) result ^= dimBase[bit];
+    }
+    d_Output[threadIdx.y * N + pos] = (float)(result + 1) * INT_SCALE;
+  }
+}`,
   legacyVote: `
 __global__ void legacyVote(uint *input, uint *out) {
   int tid = threadIdx.x;
@@ -14583,6 +14600,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "buffer",
             expectedOutput: { type: "Float32Array", data: [1.25, -2.5] },
+          },
+          {
+            name: "corpus:cuda-samples:quasirandom-constant-pointer-alias",
+            corpusId: "cuda-samples",
+            source: SOURCES.cudaSamplesQuasirandomConstantAlias,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => {
+              const table = new Uint32Array(3 * 31);
+              table[0] = 3;
+              return {
+                buffers: { d_Output: new Float32Array(2) },
+                constants: { c_Table: table },
+                scalars: { seed: 0, N: 2 },
+              };
+            },
+            output: "d_Output",
+            expectedOutput: { type: "Float32Array", data: [4.656612873077393e-10, 1.862645149230957e-9] },
+            tolerance: 1e-12,
           },
           {
             name: "subgroup:legacy-vote",

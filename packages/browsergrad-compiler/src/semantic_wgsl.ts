@@ -5801,6 +5801,9 @@ function emitFlatDeviceGlobalIndex(
     if (indices.length > 1) throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
     return indices[0] ? emitSemanticExpressionAs(indices[0], ir, names, "u32") : "0u";
   }
+  if (indices.length === 1 && symbol.dimensions.length > 1) {
+    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32");
+  }
   if (indices.length !== symbol.dimensions.length) {
     throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
   }
@@ -5823,6 +5826,9 @@ function emitFlatConstantIndex(
 ): string {
   if (symbol.dimensions.length === 0) {
     if (indices.length !== 1) throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
+    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32");
+  }
+  if (indices.length === 1 && symbol.dimensions.length > 1) {
     return emitSemanticExpressionAs(indices[0]!, ir, names, "u32");
   }
   if (indices.length !== symbol.dimensions.length) {
