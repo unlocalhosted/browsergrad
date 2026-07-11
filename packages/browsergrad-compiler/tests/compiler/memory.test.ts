@@ -661,7 +661,7 @@ __global__ void shared_reinterpret(int *out) {
 
   it("lowers device helper functions with storage pointer params", () => {
       const compiled = compileCudaLiteKernel(DEVICE_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         {
           buffers: {
@@ -2931,7 +2931,7 @@ __global__ void sharedPointerAlias(float *out) {
       out[1] = shared_words[1];
     }
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         {
           buffers: {
@@ -2984,6 +2984,32 @@ __global__ void sharedPointerAlias(float *out) {
       expect(canEmitSemanticKernelIrWgsl(wideCast.kernelIr)).toBe(false);
     });
 
+  it("preserves raw word width through assigned local pointer aliases", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void pitchedFloat(uchar* bytes, int pitch) {
+    int y = threadIdx.y;
+    float* pixel;
+    pixel = (float*)(bytes + y * pitch) + threadIdx.x;
+    pixel[0] = pixel[0] + 1.0f;
+  }`, { workgroupSize: [2, 1, 1] });
+      const input = {
+        buffers: {
+          bytes: new Uint32Array([0, 0, 128, 63, 0, 0, 0, 64]),
+        },
+        scalars: { pitch: 8 },
+      };
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        input,
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bitcast<u32>");
+      expect([...result.buffers.bytes as Uint32Array]).toEqual([0, 0, 0, 64, 0, 0, 64, 64]);
+    });
+
   it("loads raw words from byte storage into packed local byte vectors", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void rawByteWord(const uchar* bytes, uint* out) {
@@ -3024,19 +3050,19 @@ __global__ void sharedPointerAlias(float *out) {
       out[1] = value[1];
     }
   }`, { workgroupSize: [1, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         {
           buffers: {
-            scratch: new Uint32Array(2),
+            scratch: new Uint32Array(8),
             out: new Float32Array(2),
           },
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32");
-      expect(compiled.wgsl).toContain(">> 2u");
+      expect(compiled.wgsl).toContain("bg_raw_word_");
+      expect(compiled.wgsl).toContain(">> 24u");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
     });
 

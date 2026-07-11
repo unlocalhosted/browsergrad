@@ -108,6 +108,7 @@ export interface CudaLiteSemanticSymbol {
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly pointerBaseIsScalarLane?: boolean;
+  readonly pointerBaseUnitBytes?: number;
   readonly pointerValid?: SemanticExpression;
   readonly pointerArrayAliases?: readonly (SemanticPointerAlias | undefined)[];
   readonly pointerCarrierValueType?: CudaLiteScalarType;
@@ -127,6 +128,7 @@ interface SemanticPointerAlias {
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly pointerBaseIsScalarLane?: boolean;
+  readonly pointerBaseUnitBytes?: number;
   readonly pointerValid?: SemanticExpression;
 }
 
@@ -162,6 +164,7 @@ export interface SemanticMemoryRef {
   readonly valueType?: CudaLiteScalarType;
   readonly containerValueType?: CudaLiteScalarType;
   readonly pointerBaseIsScalarLane?: boolean;
+  readonly pointerBaseUnitBytes?: number;
   readonly packedByteLanes?: 2 | 3 | 4;
   readonly indices: readonly SemanticExpression[];
   readonly fields: readonly string[];
@@ -197,6 +200,7 @@ export type SemanticExpression =
       readonly valueType?: CudaLiteScalarType;
       readonly addressSpace: SemanticAddressSpace;
       readonly pointerBaseIsScalarLane?: boolean;
+      readonly pointerBaseUnitBytes?: number;
       readonly packedByteLanes?: 2 | 3 | 4;
       readonly span: SourceSpan;
     }
@@ -2428,6 +2432,7 @@ function pointerAliasOffsetForBaseUnit(
   offset: SemanticExpression,
   span: SourceSpan,
 ): SemanticExpression {
+  if (alias.pointerBaseUnitBytes !== undefined) return multiplyIndexExpression(offset, alias.pointerBaseUnitBytes, span);
   return alias.pointerBaseIsScalarLane === true && isCudaVectorType(valueType)
     ? multiplyIndexExpression(offset, cudaVectorLaneCount(valueType), span)
     : offset;
@@ -2558,6 +2563,7 @@ function memoryRefFromExpression(expression: SemanticExpression): SemanticMemory
     ...(valueType === undefined ? {} : { valueType }),
     ...(expression.kind === "member" ? optionalContainerValueType(expressionValueType(expression.object)) : {}),
     ...(expression.kind === "index" && expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(expression.kind === "index" && expression.pointerBaseUnitBytes !== undefined ? { pointerBaseUnitBytes: expression.pointerBaseUnitBytes } : {}),
     ...(expression.kind === "index" ? optionalPackedByteLanes(expression.packedByteLanes) : {}),
     indices: parts.indices,
     fields: parts.fields,
@@ -2747,11 +2753,15 @@ function symbolForVar(
 function localPointerAliasForInitializer(
   expression: CudaLiteExpression | undefined,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
-): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices" | "pointerBaseIsScalarLane" | "pointerValid"> | undefined {
+): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices" | "pointerBaseIsScalarLane" | "pointerBaseUnitBytes" | "pointerValid"> | undefined {
   if (!expression) return undefined;
   if (expression.kind === "cast" && expression.pointer) {
     const alias = localPointerAliasForInitializer(expression.expression, scope);
     const sourceType = pointerAliasTargetValueType(expression.expression, scope);
+    const targetBytes = expression.pointerElementBytes ?? sizeofCudaType(expression.valueType);
+    if (alias && sourceType === "uchar" && targetBytes !== undefined && targetBytes > 1) {
+      return { ...alias, pointerBaseUnitBytes: targetBytes };
+    }
     if (
       alias?.pointerBaseIndices?.length === 1 &&
       isCudaVectorType(sourceType) &&
@@ -2781,6 +2791,7 @@ function localPointerAliasForInitializer(
         pointerAddressSpace: nonNull.pointerAddressSpace,
         pointerBaseIndices: nonNull.pointerBaseIndices,
         ...(nonNull.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+        ...(nonNull.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: nonNull.pointerBaseUnitBytes }),
         pointerValid: consequentNull ? negateExpression(condition, expression.span) : condition,
       };
     }
@@ -2795,6 +2806,7 @@ function localPointerAliasForInitializer(
       consequent.pointerBaseIndices?.length !== 1 ||
       alternate.pointerBaseIndices?.length !== 1 ||
       consequent.pointerBaseIsScalarLane !== alternate.pointerBaseIsScalarLane
+      || consequent.pointerBaseUnitBytes !== alternate.pointerBaseUnitBytes
     ) {
       return undefined;
     }
@@ -2810,6 +2822,7 @@ function localPointerAliasForInitializer(
         span: expression.span,
       }],
       ...(consequent.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+      ...(consequent.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: consequent.pointerBaseUnitBytes }),
     };
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
@@ -2824,6 +2837,7 @@ function localPointerAliasForInitializer(
           ? addIndexExpressions(left.pointerBaseIndices[0]!, offset, expression.span)
           : subtractIndexExpressions(left.pointerBaseIndices[0]!, offset, expression.span)],
         ...(left.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+        ...(left.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: left.pointerBaseUnitBytes }),
       };
     }
     if (expression.operator === "+") {
@@ -2836,6 +2850,7 @@ function localPointerAliasForInitializer(
           pointerAddressSpace: right.pointerAddressSpace,
           pointerBaseIndices: [addIndexExpressions(right.pointerBaseIndices[0]!, offset, expression.span)],
           ...(right.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+          ...(right.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: right.pointerBaseUnitBytes }),
         };
       }
     }
@@ -2848,6 +2863,7 @@ function localPointerAliasForInitializer(
         pointerAddressSpace: root.pointerAddressSpace,
         pointerBaseIndices: root.pointerBaseIndices,
         ...(root.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+        ...(root.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: root.pointerBaseUnitBytes }),
       };
     }
     if (root?.kind === "param" && root.pointer && root.addressSpace === "storage") {
@@ -3148,7 +3164,7 @@ function localPointerAliasIndexExpression(
   const target = semanticSymbolExpression(root, expression.target.span);
   const index = addIndexExpressions(
     alias.pointerBaseIndices[0]!,
-    pointerAliasElementOffset(aliasValueType, root.valueType, lowerExpression(expression.index, scope), expression.index.span),
+    pointerAliasElementOffset(aliasValueType, root.valueType, lowerExpression(expression.index, scope), expression.index.span, alias.pointerBaseUnitBytes),
     expression.index.span,
   );
   return {
@@ -3158,6 +3174,8 @@ function localPointerAliasIndexExpression(
     ...optionalValueType(aliasValueType),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
+    ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression.target, root, scope)),
     span: expression.span,
   };
 }
@@ -3191,7 +3209,9 @@ function pointerAliasElementOffset(
   rootType: CudaLiteScalarType | undefined,
   index: SemanticExpression,
   span: SourceSpan,
+  baseUnitBytes?: number,
 ): SemanticExpression {
+  if (baseUnitBytes !== undefined) return multiplyIndexExpression(index, baseUnitBytes, span);
   return aliasType !== undefined &&
       rootType !== undefined &&
       isCudaVectorType(aliasType) &&
@@ -3227,21 +3247,32 @@ function localPointerAliasDerefExpression(
     ...optionalValueType(pointerAliasTargetValueType(expression, scope) ?? root.valueType),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
-    ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression, root)),
+    ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression, root, scope)),
     span,
   };
 }
 
-function pointerAliasPackedByteLanes(expression: CudaLiteExpression, root: CudaLiteSemanticSymbol): 2 | 3 | 4 | undefined {
+function pointerAliasPackedByteLanes(
+  expression: CudaLiteExpression,
+  root: CudaLiteSemanticSymbol,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): 2 | 3 | 4 | undefined {
   if (expression.kind === "cast" && expression.pointer && expression.packedByteLanes !== undefined) return expression.packedByteLanes;
+  const aliasType = pointerAliasTargetValueType(expression, scope);
+  if (
+    (root.valueType === "uchar" || root.packedByteLanes !== undefined) &&
+    aliasType !== undefined &&
+    !isCudaVectorType(aliasType) &&
+    sizeofCudaType(aliasType) === 4
+  ) return 4;
   if (
     expression.kind === "cast" && expression.pointer &&
     (root.valueType === "uchar" || root.packedByteLanes !== undefined) &&
     !isCudaVectorType(expression.valueType) && sizeofCudaType(expression.valueType) === 4
   ) return 4;
-  if (expression.kind === "unary" && (expression.operator === "&" || expression.operator === "*")) return pointerAliasPackedByteLanes(expression.argument, root);
+  if (expression.kind === "unary" && (expression.operator === "&" || expression.operator === "*")) return pointerAliasPackedByteLanes(expression.argument, root, scope);
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
-    return pointerAliasPackedByteLanes(expression.left, root) ?? pointerAliasPackedByteLanes(expression.right, root);
+    return pointerAliasPackedByteLanes(expression.left, root, scope) ?? pointerAliasPackedByteLanes(expression.right, root, scope);
   }
   return undefined;
 }

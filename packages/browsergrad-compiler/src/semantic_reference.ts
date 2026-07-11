@@ -4329,6 +4329,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     base: target.name,
     addressSpace: target.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
     ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
     indices,
     fields: [],
@@ -4432,6 +4433,20 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     context.trace.sharedWrites.push({ name: ref.base, index, value, ok });
     return;
   }
+  if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
+    const buffer = context.buffers.get(ref.base);
+    if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+    const base = flatIndex(ref, context);
+    const word = ref.valueType === "float" ? float32ToUintBits(value) : Math.trunc(value) >>> 0;
+    for (let byte = 0; byte < 4; byte++) {
+      const index = base + byte;
+      const byteValue = (word >>> (byte * 8)) & 0xff;
+      const ok = index >= 0 && index < buffer.length;
+      if (ok) buffer[index] = byteValue;
+      context.trace.writes.push({ name: ref.base, index, value: byteValue, ok });
+    }
+    return;
+  }
   const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
@@ -4455,11 +4470,11 @@ function packedSemanticSharedByteIndex(ref: SemanticMemoryRef, context: Semantic
   const pointer = context.compiled.kernelIr.functions
     .flatMap((fn) => fn.params)
     .find((param) => param.name === ref.base && param.pointer && param.addressSpace === "shared");
-  if (!pointer) return flatIndex(ref, context) * elementBytes;
+  if (!pointer) return flatIndex(ref, context) * (ref.pointerBaseUnitBytes === undefined ? elementBytes : 1);
   if (ref.indices.length > 1) throw semanticReferenceError(`shared pointer '${ref.base}' index rank mismatch`, ref.span);
   const offset = context.sharedOffsets.get(ref.base) ?? 0;
   const index = ref.indices[0] === undefined ? 0 : Math.trunc(evalNumber(ref.indices[0], context));
-  return offset + index * elementBytes;
+  return offset + index * (ref.pointerBaseUnitBytes === undefined ? elementBytes : 1);
 }
 
 function readPackedSemanticSharedByteView(

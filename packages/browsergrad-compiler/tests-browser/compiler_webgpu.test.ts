@@ -547,6 +547,28 @@ __global__ void offsetPointerDeref(uint *data, uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([10, 20, 11, 21]);
   });
 
+  it("runs pitched float views over byte storage on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void pitchedFloat(uchar* bytes, int pitch) {
+  int y = threadIdx.y;
+  float* pixel;
+  pixel = (float*)(bytes + y * pitch) + threadIdx.x;
+  pixel[0] = pixel[0] + 1.0f;
+}`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: { bytes: new Uint32Array([0, 0, 128, 63, 0, 0, 0, 64]) },
+      scalars: { pitch: 8 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.bytes as Uint32Array]).toEqual([...expected.buffers.bytes as Uint32Array]);
+    expect([...actual.buffers.bytes as Uint32Array]).toEqual([0, 0, 0, 64, 0, 0, 64, 64]);
+  });
+
   it("runs local scalar out-pointer helpers through semantic IR on native WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

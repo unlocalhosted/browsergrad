@@ -1156,6 +1156,7 @@ class Parser {
       const start = this.expect("(").span;
       this.consumeIf("const");
       const packedByteLanes = packedByteVectorLanes(this.peek().value);
+      const pointerElementBytes = sizeofCudaType(this.peek().value);
       const valueType = this.parseType();
       const pointer = this.consumeIf("*") !== undefined;
       this.expect(")");
@@ -1164,6 +1165,7 @@ class Parser {
         kind: "cast",
         valueType,
         ...(pointer ? { pointer: true } : {}),
+        ...(pointer && pointerElementBytes !== undefined ? { pointerElementBytes } : {}),
         ...(pointer && packedByteLanes !== undefined ? { packedByteLanes } : {}),
         expression,
         span: mergeSpans(start, expression.span),
@@ -1274,6 +1276,7 @@ class Parser {
     this.expect("<");
     this.consumeIf("const");
     const packedByteLanes = packedByteVectorLanes(this.peek().value);
+    const pointerElementBytes = sizeofCudaType(this.peek().value);
     const valueType = this.parseType();
     this.consumeIf("const");
     const pointer = this.consumeIf("*") !== undefined;
@@ -1286,6 +1289,7 @@ class Parser {
       kind: "cast",
       valueType,
       ...(pointer ? { pointer: true } : {}),
+      ...(pointer && pointerElementBytes !== undefined ? { pointerElementBytes } : {}),
       ...(pointer && packedByteLanes !== undefined ? { packedByteLanes } : {}),
       expression,
       span: mergeSpans(start, end),

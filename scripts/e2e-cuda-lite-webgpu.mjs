@@ -12892,7 +12892,7 @@ const html = String.raw`<!doctype html>
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
-                scratch: new Uint32Array(2),
+                scratch: new Uint32Array(8),
                 out: new Float32Array(2),
               },
             }),
