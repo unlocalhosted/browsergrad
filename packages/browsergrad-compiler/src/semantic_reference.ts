@@ -73,6 +73,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
+import { semanticOperationsReferenceRoot } from "./semantic_ir_walk.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
@@ -437,6 +438,7 @@ function semanticReferenceParamSupported(
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType) || isCudaVectorType(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
+  if (param.addressSpace === "pool") return !semanticOperationsReferenceRoot(compiled.kernelIr.operations, param.name);
   return false;
 }
 
@@ -5017,6 +5019,8 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       if (!input.textures?.[param.name]) throw semanticReferenceError(`missing texture input '${param.name}'`, param.span);
     } else if (param.addressSpace === "surface") {
       if (!input.surfaces?.[param.name]) throw semanticReferenceError(`missing surface input '${param.name}'`, param.span);
+    } else if (param.addressSpace === "pool" && !semanticOperationsReferenceRoot(compiled.kernelIr.operations, param.name)) {
+      continue;
     } else {
       throw semanticReferenceError(`semantic reference does not support ${param.addressSpace} parameter '${param.name}'`, param.span);
     }

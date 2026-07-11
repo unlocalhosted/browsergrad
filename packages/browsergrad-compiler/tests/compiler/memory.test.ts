@@ -5628,6 +5628,8 @@ __global__ void localOut(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
       expect([...nullGuardResult.buffers.out as Uint32Array]).toEqual([42, 0]);
+      expect(canEmitSemanticKernelIrWgsl(nullGuard.kernelIr)).toBe(true);
+      expect(nullGuard.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(nullGuard.wgsl).toContain("if (true) {");
       expect(nullGuard.wgsl).toContain("if (false) {");
 

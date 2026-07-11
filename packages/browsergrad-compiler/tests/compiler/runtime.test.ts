@@ -310,6 +310,33 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler: Runtime orchestration", () => {
+  it("omits unreachable DevicePool parameters from semantic execution", () => {
+      const unused = compileCudaLiteKernel(`
+  __global__ void unusedPool(DevicePool *pool, uint *out) {
+    if (threadIdx.x < 1) out[0] = 7u;
+  }`, { workgroupSize: [1, 1, 1] });
+      const used = compileCudaLiteKernel(`
+  __global__ void usedPool(DevicePool *pool, uint *out) {
+    if (threadIdx.x < 1) {
+      uint *value = (uint *)streamOrderedAllocate(pool, sizeof(uint));
+      value[0] = 7u;
+      out[0] = value[0];
+    }
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        unused,
+        { buffers: { out: new Uint32Array(1) }, memoryPools: { pool: { data: new Uint32Array(1), offset: new Uint32Array([0]) } } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(unused.kernelIr)).toBe(true);
+      expect(canRunCompiledKernelSemanticReference(unused)).toBe(true);
+      expect(unused.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(unused.wgsl).not.toContain("pool_pool");
+      expect([...result.buffers.out as Uint32Array]).toEqual([7]);
+      expect(canEmitSemanticKernelIrWgsl(used.kernelIr)).toBe(false);
+    });
+
   it("allocates from a DevicePool and writes through casted pool pointers", () => {
       const compiled = compileCudaLiteKernel(DEVICE_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
       const result = runCompiledKernelReference(

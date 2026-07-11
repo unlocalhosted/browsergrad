@@ -4768,6 +4768,39 @@ __global__ void graphCondition(int *input, int *out, cudaGraphConditionalHandle 
     expect([...actual.buffers.out as Int32Array]).toEqual([1]);
   });
 
+  it("runs kernels with unreachable DevicePool parameters through semantic WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void qsort_shape(uint *indata, uint *outdata, uint offset, uint len, uint *atomicData, DevicePool *stack) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) return;
+  for (uint i = 0; i < len; ++i) outdata[offset + i] = indata[offset + i];
+  for (uint i = 0; i < len; ++i) {
+    uint min_idx = i;
+    uint min_val = outdata[offset + i];
+    for (uint j = i + 1u; j < len; ++j) {
+      uint value = outdata[offset + j];
+      if (value < min_val) { min_idx = j; min_val = value; }
+    }
+    if (min_idx != i) { outdata[offset + min_idx] = outdata[offset + i]; outdata[offset + i] = min_val; }
+  }
+  if (atomicData != nullptr) atomicData[0] = len;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { indata: new Uint32Array([4, 1, 3, 2]), outdata: new Uint32Array(4), atomicData: new Uint32Array(1) },
+      memoryPools: { stack: { data: new Uint32Array(1), offset: new Uint32Array([0]) } },
+      scalars: { offset: 0, len: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).not.toContain("stack_pool");
+    expect([...actual.buffers.outdata as Uint32Array]).toEqual([...expected.buffers.outdata as Uint32Array]);
+    expect([...actual.buffers.outdata as Uint32Array]).toEqual([1, 2, 3, 4]);
+    expect([...actual.buffers.atomicData as Uint32Array]).toEqual([4]);
+  });
+
   it("runs compiled half2 vector storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });

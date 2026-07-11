@@ -13,6 +13,7 @@ import { walkSemanticOperations } from "./semantic_ir.js";
 import {
   isSemanticKernelIrOperation,
   semanticExpressionChildren,
+  semanticOperationsReferenceRoot,
 } from "./semantic_ir_walk.js";
 import type {
   CudaLiteDiagnostic,
@@ -677,6 +678,10 @@ function unsupportedSemanticWgslOperation(
         break;
       case "branch":
         if (!semanticWgslExpressionSupported(operation.condition, "scalar", ir)) return operation;
+        if (
+          (semanticOperationsContainWorkgroupCollective(operation.consequent) || semanticOperationsContainWorkgroupCollective(operation.alternate)) &&
+          (!semanticPredicatedOperationsSupported(operation.consequent) || !semanticPredicatedOperationsSupported(operation.alternate))
+        ) return operation;
         {
           const unsupported = unsupportedSemanticWgslOperation(operation.consequent, ir, allowReturnValue) ??
           unsupportedSemanticWgslOperation(operation.alternate, ir, allowReturnValue);
@@ -748,6 +753,7 @@ function semanticWgslParamSupported(
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType) || isCudaVectorType(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
+  if (param.addressSpace === "pool") return !semanticOperationsReferenceRoot(ir.operations, param.name);
   return false;
 }
 
@@ -1799,6 +1805,7 @@ function semanticWgslExpressionSupported(
       if (expected === "scalar" && semanticWgslBf162LocalBitsCastSupported(expression, ir)) return true;
       return expression.operator !== "*" && expression.operator !== "&" && semanticWgslExpressionSupported(expression.argument, "scalar", ir);
     case "binary":
+      if (isSemanticStoragePointerNullComparison(expression)) return true;
       if (expected === "any" && isSemanticFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
         return semanticWgslExpressionSupported(expression.left, "any", ir) &&
           semanticWgslExpressionSupported(expression.right, "any", ir);
@@ -2059,6 +2066,26 @@ function emitSemanticPredicatedOperations(
 
 function semanticOperationsContainWorkgroupCollective(operations: readonly SemanticKernelIrOperation[]): boolean {
   return operations.some(semanticOperationContainsWorkgroupCollective);
+}
+
+function semanticPredicatedOperationsSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.every((operation) => {
+    if (operation.kind === "branch") {
+      return semanticPredicatedOperationsSupported(operation.consequent) && semanticPredicatedOperationsSupported(operation.alternate);
+    }
+    if (operation.kind === "loop" && semanticOperationsContainWorkgroupCollective(operation.body)) {
+      return operation.loopKind === "for" && operation.update?.kind !== "sequence" && semanticPredicatedOperationsSupported(operation.body);
+    }
+    if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWorkgroupCollective(operation.expression.value)) {
+      const target = operation.expression.target;
+      return target.kind === "symbol" && target.addressSpace === "local" && target.valueType !== undefined && target.valueType !== "void" && !isSemanticFloatVectorType(target.valueType);
+    }
+    if (operation.kind === "store" && semanticExpressionContainsWorkgroupCollective(operation.value) &&
+      !operation.target.indices.some(semanticExpressionContainsWorkgroupCollective)) {
+      return operation.target.valueType !== undefined && operation.target.valueType !== "void" && !isSemanticFloatVectorType(operation.target.valueType);
+    }
+    return !semanticOperationContainsWorkgroupCollective(operation);
+  });
 }
 
 function semanticOperationContainsWorkgroupCollective(operation: SemanticKernelIrOperation): boolean {
@@ -5517,6 +5544,7 @@ function emitSemanticBinary(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  if (isSemanticStoragePointerNullComparison(expression)) return expression.operator === "!=" ? "true" : "false";
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return `(${emitTruthiness(expression.left, ir, names, options)} ${expression.operator} ${emitTruthiness(expression.right, ir, names, options)})`;
   }
@@ -5534,6 +5562,18 @@ function emitSemanticBinary(
   const left = emitSemanticExpressionAs(expression.left, ir, names, operandType, options, textureSpecializations);
   const right = emitSemanticExpressionAs(expression.right, ir, names, operandType, options, textureSpecializations);
   return `(${left} ${expression.operator} ${right})`;
+}
+
+function isSemanticStoragePointerNullComparison(
+  expression: Extract<SemanticExpression, { readonly kind: "binary" }>,
+): boolean {
+  if (expression.operator !== "==" && expression.operator !== "!=") return false;
+  const storageParam = (value: SemanticExpression): boolean => value.kind === "symbol" && value.addressSpace === "storage";
+  const nullValue = (value: SemanticExpression): boolean =>
+    value.kind === "literal" && value.literalKind === "number" && value.value === 0 ||
+    value.kind === "symbol" && (value.name === "NULL" || value.name === "nullptr");
+  return storageParam(expression.left) && nullValue(expression.right) ||
+    storageParam(expression.right) && nullValue(expression.left);
 }
 
 function emitSemanticVectorOperand(

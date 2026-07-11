@@ -56,6 +56,30 @@ export function semanticExpressionChildren(expression: SemanticExpression): read
   }
 }
 
+export function semanticOperationsReferenceRoot(
+  operations: readonly SemanticKernelIrOperation[],
+  root: string,
+): boolean {
+  const expressionReferencesRoot = (expression: SemanticExpression): boolean =>
+    expression.kind === "symbol" && expression.name === root ||
+    semanticExpressionChildren(expression).some(expressionReferencesRoot);
+  const memoryRefReferencesRoot = (ref: { readonly base: string; readonly indices: readonly SemanticExpression[] }): boolean =>
+    ref.base === root || ref.indices.some(expressionReferencesRoot);
+
+  return operations.some((operation) => {
+    if (semanticOperationExpressions(operation).some(expressionReferencesRoot)) return true;
+    if (operation.kind === "load") return memoryRefReferencesRoot(operation.source);
+    if (operation.kind === "store") return memoryRefReferencesRoot(operation.target) || operation.reads.some(memoryRefReferencesRoot);
+    if (operation.kind === "copy") return memoryRefReferencesRoot(operation.source) || memoryRefReferencesRoot(operation.target);
+    if (operation.kind === "atomic" && operation.target) return memoryRefReferencesRoot(operation.target);
+    if (operation.kind === "branch") return semanticOperationsReferenceRoot(operation.consequent, root) || semanticOperationsReferenceRoot(operation.alternate, root);
+    if (operation.kind === "loop" || operation.kind === "block") return semanticOperationsReferenceRoot(operation.body, root);
+    // Device launches carry host-runtime pointer topology outside expression walking.
+    if (operation.kind === "device-launch") return true;
+    return false;
+  });
+}
+
 export function isSemanticKernelIrOperation(
   value: SemanticKernelIrOperation | SemanticExpression,
 ): value is SemanticKernelIrOperation {
