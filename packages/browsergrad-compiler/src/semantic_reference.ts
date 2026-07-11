@@ -4236,6 +4236,13 @@ function createSemanticFunctionContext(
     }
     if (param.pointer && param.addressSpace === "local") {
       const ref = semanticPointerArgMemoryRef(arg);
+      if (ref?.indices.length === 1 && semanticReferenceZeroLiteral(ref.indices[0])) {
+        const forwarded = context.localPointerTargets.get(ref.base);
+        if (forwarded) {
+          localPointerTargets.set(param.name, forwarded);
+          continue;
+        }
+      }
       if (!ref || ref.addressSpace !== "local" || ref.indices.length !== 0) {
         throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be a local scalar`, arg.span);
       }
@@ -4270,6 +4277,10 @@ function createSemanticFunctionContext(
     trace: context.trace,
   };
   return child;
+}
+
+function semanticReferenceZeroLiteral(expression: SemanticExpression | undefined): boolean {
+  return expression?.kind === "literal" && expression.literalKind === "number" && expression.value === 0;
 }
 
 function runSemanticFunction(

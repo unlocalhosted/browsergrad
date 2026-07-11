@@ -1857,6 +1857,7 @@ __global__ void shared_reinterpret(int *out) {
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-device-pointer-param");
       expect(compiled.wgsl).toContain("fn bump(state: ptr<function, u32>");
       expect(compiled.wgsl).toContain("fn bump_twice(state: ptr<function, u32>");
+      expect(compiled.wgsl).toContain("bump(state, local_id");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         (((7 * 1664525 + 1013904223) >>> 0) * 1664525 + 1013904223) >>> 0,
         (((8 * 1664525 + 1013904223) >>> 0) * 1664525 + 1013904223) >>> 0,

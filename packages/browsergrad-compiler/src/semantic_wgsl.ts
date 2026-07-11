@@ -4338,6 +4338,12 @@ function emitSemanticFunctionArgs(
   }
   if (param?.pointer && param.addressSpace === "local") {
     const ref = semanticPointerArgMemoryRef(arg);
+    const owner = options.activeFunction === undefined
+      ? undefined
+      : ir.functions.find((candidate) => candidate.name === options.activeFunction);
+    const forwarded = ref?.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]) &&
+      owner?.params.some((candidate) => candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "local");
+    if (ref && forwarded) return [nameFor(ref.base, names)];
     if (!ref || ref.addressSpace !== "local" || ref.indices.length !== 0) {
       throw semanticWgslError("semantic WGSL local pointer helper argument must be a local scalar", arg.span);
     }
@@ -4351,6 +4357,10 @@ function emitSemanticFunctionArgs(
     return [`${bufferId}u`, emitSemanticPointerArgBaseIndex(ref, ir, names, options)];
   }
   return [emitSemanticFunctionArg(arg, param, ir, names, options, textureSpecializations)];
+}
+
+function isSemanticZeroLiteral(expression: SemanticExpression | undefined): boolean {
+  return expression?.kind === "literal" && expression.literalKind === "number" && expression.value === 0;
 }
 
 function emitSemanticSharedPointerArgBaseIndex(

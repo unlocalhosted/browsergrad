@@ -800,7 +800,10 @@ function specializeLocalPointerFunctionsOnce(
 ): readonly CudaLiteSemanticFunction[] {
   const calls = [
     ...collectSemanticFunctionCalls(operations),
-    ...functions.flatMap((fn) => collectSemanticFunctionCalls(fn.body)),
+    ...functions.flatMap((fn) => collectSemanticFunctionCalls(
+      fn.body,
+      new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "local").map((param) => param.name)),
+    )),
   ];
   return functions.map((fn) => {
     const fnCalls = calls.filter((call) => call.callee === fn.name);
@@ -808,7 +811,10 @@ function specializeLocalPointerFunctionsOnce(
     for (const [index, param] of fn.params.entries()) {
       if (!param.pointer || param.addressSpace !== "storage" || param.dimensions.length !== 0) continue;
       const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
-      if (refs.length > 0 && refs.every((ref) => ref?.addressSpace === "local" && ref.indices.length === 0)) {
+      if (refs.length > 0 && refs.every((ref, callIndex) =>
+        ref?.addressSpace === "local" &&
+        (ref.indices.length === 0 ||
+          ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]) && fnCalls[callIndex]!.ownerLocalPointerNames.has(ref.base)))) {
         localPointers.set(param.name, param.name);
       }
     }
@@ -989,14 +995,18 @@ function sameSemanticPointerRoots(
 interface SemanticFunctionCallSite {
   readonly callee: string;
   readonly args: readonly SemanticExpression[];
+  readonly ownerLocalPointerNames: ReadonlySet<string>;
 }
 
-function collectSemanticFunctionCalls(operations: readonly SemanticKernelIrOperation[]): readonly SemanticFunctionCallSite[] {
+function collectSemanticFunctionCalls(
+  operations: readonly SemanticKernelIrOperation[],
+  ownerLocalPointerNames: ReadonlySet<string> = new Set(),
+): readonly SemanticFunctionCallSite[] {
   const out: SemanticFunctionCallSite[] = [];
-  collectSemanticOperationFunctionCalls(operations, out);
+  collectSemanticOperationFunctionCalls(operations, out, ownerLocalPointerNames);
   walkSemanticOperations(operations, (expression) => {
     if (expression.kind === "call" && expression.callee.kind === "symbol") {
-      out.push({ callee: expression.callee.name, args: expression.args });
+      out.push({ callee: expression.callee.name, args: expression.args, ownerLocalPointerNames });
     }
   });
   return out;
@@ -1005,15 +1015,20 @@ function collectSemanticFunctionCalls(operations: readonly SemanticKernelIrOpera
 function collectSemanticOperationFunctionCalls(
   operations: readonly SemanticKernelIrOperation[],
   out: SemanticFunctionCallSite[],
+  ownerLocalPointerNames: ReadonlySet<string>,
 ): void {
   for (const operation of operations) {
-    if (operation.kind === "call") out.push({ callee: operation.callee, args: operation.args });
+    if (operation.kind === "call") out.push({ callee: operation.callee, args: operation.args, ownerLocalPointerNames });
     if (operation.kind === "branch") {
-      collectSemanticOperationFunctionCalls(operation.consequent, out);
-      collectSemanticOperationFunctionCalls(operation.alternate, out);
+      collectSemanticOperationFunctionCalls(operation.consequent, out, ownerLocalPointerNames);
+      collectSemanticOperationFunctionCalls(operation.alternate, out, ownerLocalPointerNames);
     }
-    if (operation.kind === "loop" || operation.kind === "block") collectSemanticOperationFunctionCalls(operation.body, out);
+    if (operation.kind === "loop" || operation.kind === "block") collectSemanticOperationFunctionCalls(operation.body, out, ownerLocalPointerNames);
   }
+}
+
+function isSemanticZeroLiteral(expression: SemanticExpression | undefined): boolean {
+  return expression?.kind === "literal" && expression.literalKind === "number" && expression.value === 0;
 }
 
 function sharedPointerRoot(expression: SemanticExpression): string | undefined {
