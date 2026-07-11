@@ -73,6 +73,11 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["__nv_bfloat16", "bf16"],
   ["nv_bfloat16", "bf16"],
 ]);
+
+function packedByteVectorLanes(typeName: string): 2 | 3 | 4 | undefined {
+  const match = /^(?:u?char|u?int8_t)([234])$/u.exec(typeName);
+  return match ? Number(match[1]) as 2 | 3 | 4 : undefined;
+}
 const TYPE_KEYWORDS = new Set([
   "float",
   "double",
@@ -1148,6 +1153,7 @@ class Parser {
     if (this.startsScalarCast()) {
       const start = this.expect("(").span;
       this.consumeIf("const");
+      const packedByteLanes = packedByteVectorLanes(this.peek().value);
       const valueType = this.parseType();
       const pointer = this.consumeIf("*") !== undefined;
       this.expect(")");
@@ -1156,6 +1162,7 @@ class Parser {
         kind: "cast",
         valueType,
         ...(pointer ? { pointer: true } : {}),
+        ...(pointer && packedByteLanes !== undefined ? { packedByteLanes } : {}),
         expression,
         span: mergeSpans(start, expression.span),
       } satisfies CudaLiteCastExpression;
@@ -1264,6 +1271,7 @@ class Parser {
     const start = this.advance().span;
     this.expect("<");
     this.consumeIf("const");
+    const packedByteLanes = packedByteVectorLanes(this.peek().value);
     const valueType = this.parseType();
     this.consumeIf("const");
     const pointer = this.consumeIf("*") !== undefined;
@@ -1276,6 +1284,7 @@ class Parser {
       kind: "cast",
       valueType,
       ...(pointer ? { pointer: true } : {}),
+      ...(pointer && packedByteLanes !== undefined ? { packedByteLanes } : {}),
       expression,
       span: mergeSpans(start, end),
     } satisfies CudaLiteCastExpression;

@@ -2958,6 +2958,32 @@ __global__ void sharedPointerAlias(float *out) {
       expect(storageCompiled.wgsl).toMatch(/var lane_ptr_\d+_buffer: u32/u);
     });
 
+  it("preserves packed byte-vector cast width over direct byte storage", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void packedByteVector(uchar* bytes) {
+    uchar* target = bytes + 1;
+    *(uchar2*)target = make_uchar2(300u, 511u);
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { bytes: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      const store = compiled.kernelIr.operations.find((operation) => operation.kind === "store");
+
+      expect(store?.kind === "store" ? store.target.packedByteLanes : undefined).toBe(2);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("& 255u");
+      expect([...result.buffers.bytes as Uint32Array]).toEqual([0, 44, 255, 0]);
+
+      const wideCast = compileCudaLiteKernel(`
+  __global__ void wideVectorOverBytes(uchar* bytes) {
+    *(uint2*)bytes = make_uint2(1u, 2u);
+  }`, { workgroupSize: [1, 1, 1] });
+      expect(canEmitSemanticKernelIrWgsl(wideCast.kernelIr)).toBe(false);
+    });
+
   it("packs wider pointer views over storage byte params into byte-offset words", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void storageByteFloatOverlay(uchar *scratch, float *out) {

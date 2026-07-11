@@ -319,6 +319,7 @@ export interface CudaLiteCastExpression {
   readonly kind: "cast";
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly pointer?: boolean;
+  readonly packedByteLanes?: 2 | 3 | 4;
   readonly expression: CudaLiteExpression;
   readonly span: SourceSpan;
 }

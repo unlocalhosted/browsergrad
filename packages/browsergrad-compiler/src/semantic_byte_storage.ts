@@ -6,6 +6,7 @@ import type {
 } from "./semantic_ir.js";
 import { walkSemanticOperations } from "./semantic_ir.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
+import { cudaVectorLaneCount } from "./vector_types.js";
 
 export function semanticDirectByteStorageParamSupported(
   ir: SemanticKernelIrModule,
@@ -27,7 +28,7 @@ function semanticByteStorageOperationsSupported(
 ): boolean {
   for (const operation of operations) {
     const refs = semanticOperationMemoryRefs(operation);
-    if (refs.some((ref) => ref.base === paramName && ref.valueType !== "uchar")) return false;
+    if (refs.some((ref) => ref.base === paramName && !semanticByteStorageRefSupported(ref))) return false;
     if (operation.kind === "call" && !semanticByteStorageCallSupported(ir, operation.callee, operation.args, paramName)) return false;
     if (operation.kind === "branch" && (
       !semanticByteStorageOperationsSupported(ir, operation.consequent, paramName) ||
@@ -37,6 +38,11 @@ function semanticByteStorageOperationsSupported(
       !semanticByteStorageOperationsSupported(ir, operation.body, paramName)) return false;
   }
   return true;
+}
+
+function semanticByteStorageRefSupported(ref: SemanticMemoryRef): boolean {
+  return ref.valueType === "uchar" ||
+    ref.packedByteLanes !== undefined && cudaVectorLaneCount(ref.valueType) === ref.packedByteLanes;
 }
 
 function semanticOperationMemoryRefs(operation: SemanticKernelIrOperation): readonly SemanticMemoryRef[] {

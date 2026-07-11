@@ -4314,6 +4314,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     base: target.name,
     addressSpace: target.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
     indices,
     fields: [],
     span: expression.span,
@@ -4554,7 +4555,7 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   for (let lane = 0; lane < laneCount; lane++) {
     const index = base + lane;
-    const laneValue = value[lane] ?? 0;
+    const laneValue = ref.packedByteLanes === undefined ? value[lane] ?? 0 : (Number(value[lane] ?? 0) & 0xff);
     const ok = index >= 0 && index < buffer.length;
     if (ok) buffer[index] = laneValue;
     context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });

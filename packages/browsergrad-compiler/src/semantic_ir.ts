@@ -161,6 +161,7 @@ export interface SemanticMemoryRef {
   readonly valueType?: CudaLiteScalarType;
   readonly containerValueType?: CudaLiteScalarType;
   readonly pointerBaseIsScalarLane?: boolean;
+  readonly packedByteLanes?: 2 | 3 | 4;
   readonly indices: readonly SemanticExpression[];
   readonly fields: readonly string[];
   readonly span: SourceSpan;
@@ -195,6 +196,7 @@ export type SemanticExpression =
       readonly valueType?: CudaLiteScalarType;
       readonly addressSpace: SemanticAddressSpace;
       readonly pointerBaseIsScalarLane?: boolean;
+      readonly packedByteLanes?: 2 | 3 | 4;
       readonly span: SourceSpan;
     }
   | {
@@ -229,6 +231,7 @@ export type SemanticExpression =
       readonly kind: "cast";
       readonly valueType: Exclude<CudaLiteScalarType, "void">;
       readonly pointer: boolean;
+      readonly packedByteLanes?: 2 | 3 | 4;
       readonly expression: SemanticExpression;
       readonly span: SourceSpan;
     }
@@ -1543,6 +1546,7 @@ function lowerExpression(
         kind: "cast",
         valueType: expression.valueType,
         pointer: expression.pointer ?? false,
+        ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
         expression: lowerExpression(expression.expression, scope),
         span: expression.span,
       };
@@ -2488,10 +2492,15 @@ function memoryRefFromExpression(expression: SemanticExpression): SemanticMemory
     ...(valueType === undefined ? {} : { valueType }),
     ...(expression.kind === "member" ? optionalContainerValueType(expressionValueType(expression.object)) : {}),
     ...(expression.kind === "index" && expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(expression.kind === "index" ? optionalPackedByteLanes(expression.packedByteLanes) : {}),
     indices: parts.indices,
     fields: parts.fields,
     span: expression.span,
   };
+}
+
+function optionalPackedByteLanes(packedByteLanes: 2 | 3 | 4 | undefined): { readonly packedByteLanes?: 2 | 3 | 4 } {
+  return packedByteLanes === undefined ? {} : { packedByteLanes };
 }
 
 function optionalContainerValueType(valueType: CudaLiteScalarType | undefined): { readonly containerValueType: CudaLiteScalarType } | Record<string, never> {
@@ -3140,8 +3149,18 @@ function localPointerAliasDerefExpression(
     ...optionalValueType(pointerAliasTargetValueType(expression, scope) ?? root.valueType),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression)),
     span,
   };
+}
+
+function pointerAliasPackedByteLanes(expression: CudaLiteExpression): 2 | 3 | 4 | undefined {
+  if (expression.kind === "cast" && expression.pointer) return expression.packedByteLanes;
+  if (expression.kind === "unary" && (expression.operator === "&" || expression.operator === "*")) return pointerAliasPackedByteLanes(expression.argument);
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return pointerAliasPackedByteLanes(expression.left) ?? pointerAliasPackedByteLanes(expression.right);
+  }
+  return undefined;
 }
 
 function localPointerAliasDifferenceExpression(

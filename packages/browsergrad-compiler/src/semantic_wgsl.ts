@@ -2513,8 +2513,12 @@ function emitSemanticVectorMemoryWrite(
     throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
   }
   return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
-    `${target}[(${base} + ${lane}u)] = ${operation.operator === "=" ? `(${value}).${fields[lane]}` : `(${target}[(${base} + ${lane}u)] ${binaryOperator} (${value}).${fields[lane]})`}`
+    `${target}[(${base} + ${lane}u)] = ${semanticPackedByteVectorLaneValue(operation.target, operation.operator === "=" ? `(${value}).${fields[lane]}` : `(${target}[(${base} + ${lane}u)] ${binaryOperator} (${value}).${fields[lane]})`)}`
   );
+}
+
+function semanticPackedByteVectorLaneValue(ref: SemanticMemoryRef, value: string): string {
+  return ref.packedByteLanes === undefined ? value : `(u32(${value}) & 255u)`;
 }
 
 function emitSemanticVectorFieldMemoryWrite(
