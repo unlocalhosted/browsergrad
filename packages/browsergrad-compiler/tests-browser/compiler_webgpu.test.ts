@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  type KernelDevice,
   createDevice,
   createWgslFloat16Array,
   createWgslStorageBuffer,
@@ -316,13 +317,28 @@ async function checkDevice(): Promise<DeviceCheck> {
 
 describe("real WebGPU — CUDA-lite compiler", () => {
   let deviceCheck: DeviceCheck;
+  let defaultDevice: KernelDevice | undefined;
 
   beforeAll(async () => {
     deviceCheck = await checkDevice();
     if (!deviceCheck.available) {
       console.warn(`[skip] WebGPU not available: ${deviceCheck.reason}`);
+      return;
     }
+    defaultDevice = await createDevice();
   });
+
+  afterAll(() => {
+    defaultDevice?.clearCache();
+    defaultDevice?.gpu.destroy();
+  });
+
+  function testDevice(): KernelDevice {
+    if (!defaultDevice) {
+      throw new Error("WebGPU test device is unavailable");
+    }
+    return defaultDevice;
+  }
 
   it("runs compiled SAXPY through WebGPU and matches the reference", async () => {
     if (!deviceCheck.available) return;
@@ -336,7 +352,7 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [8, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
@@ -347,7 +363,7 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     const input = { buffers: { out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -366,7 +382,7 @@ __global__ void helperLocalArray(const float *input, float *out) {
     const input = { buffers: { input: new Float32Array([2, 3, 4]), out: new Float32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -406,7 +422,7 @@ __global__ void dimensionSpecialRegs(uint *out) {
     const input = { buffers: { out: new Uint32Array(64) } };
     const launch = { gridDim: [2, 1, 1] as const, blockDim: [2, 2, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
   });
@@ -423,7 +439,7 @@ __global__ void laneId(uint *out) {
     const input = { buffers: { out: new Uint32Array(32) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [16, 2, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -446,7 +462,7 @@ __global__ void warpAndLaneMask(uint *out) {
     const input = { buffers: { out: new Uint32Array(128) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [16, 4, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -474,7 +490,7 @@ __global__ void sharedScalarVectorView(float *out) {
     const input = { buffers: { out: new Float32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -496,7 +512,7 @@ __global__ void sharedScalarAtomic(int *out) {
     const input = { buffers: { out: new Int32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -521,7 +537,7 @@ __global__ void chainedVectorStore(float4 *x, float4 *y, float *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -541,7 +557,7 @@ __global__ void storageRebase(uint *data, uint *out) {
     const input = { buffers: { data: new Uint32Array([10, 11, 20, 21]), out: new Uint32Array(4) } };
     const launch = { gridDim: [2, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -560,7 +576,7 @@ __global__ void offsetPointerDeref(uint *data, uint *out) {
     const input = { buffers: { data: new Uint32Array([10, 11, 12, 20, 21, 22]), out: new Uint32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -583,7 +599,7 @@ __global__ void pitchedFloat(uchar* bytes, int pitch) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([...expected.buffers.bytes as Uint32Array]);
@@ -608,7 +624,7 @@ __global__ void localOut(float *out) {
     const input = { buffers: { out: new Float32Array(3) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -627,7 +643,7 @@ __global__ void localOut(float *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     const expectedValues = [...expected.buffers.out as Float32Array];
     const actualValues = [...actual.buffers.out as Float32Array];
@@ -648,7 +664,7 @@ __global__ void namedConstants(float* out, uint* kinds) {
     const input = { buffers: { out: new Float32Array(1), kinds: new Uint32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.kinds as Uint32Array]).toEqual([...expected.buffers.kinds as Uint32Array]);
     expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo([...expected.buffers.out as Float32Array][0]!, 6);
@@ -666,7 +682,7 @@ __global__ void namedConstants(float* out, uint* kinds) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.signedOut as Int32Array]).toEqual([...expected.buffers.signedOut as Int32Array]);
@@ -681,7 +697,7 @@ __global__ void namedConstants(float* out, uint* kinds) {
     const input = { buffers: { out: new Float32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -722,7 +738,7 @@ __global__ void subgroupScalarCompat(float *x) {
     const input = { buffers: { x: new Float32Array([1, 2, 3, 4]) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
     expect(compiled.wgsl).not.toContain("enable subgroups;");
@@ -745,7 +761,7 @@ __global__ void cacheHint(const float* x, float* y) {
     const input = { buffers: { x: new Float32Array([2, 4]), y: new Float32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
@@ -765,7 +781,7 @@ __global__ void asyncCopy(const float* input, float* output) {
     const input = { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.output as Float32Array]).toEqual([...expected.buffers.output as Float32Array]);
@@ -796,7 +812,7 @@ __global__ void boolPointer(bool *flags, int *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
@@ -832,7 +848,7 @@ __global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.z as Float32Array]).toEqual([...expected.buffers.z as Float32Array]);
   });
@@ -860,7 +876,7 @@ __global__ void sharedVector(const float4* x, float4* y) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
@@ -877,7 +893,7 @@ __global__ void sharedVector(const float4* x, float4* y) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
@@ -888,7 +904,7 @@ __global__ void sharedVector(const float4* x, float4* y) {
     const input = { buffers: { out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -921,7 +937,7 @@ __global__ void half2_shared_reduce(const half2 *input, half2 *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, referenceInput, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, webGpuInput, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, webGpuInput, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual(Array.from(expected.buffers.out as Iterable<number>));
   });
@@ -940,14 +956,14 @@ __global__ void half2_shared_reduce(const half2 *input, half2 *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
   it("runs compiled SAXPY over resident WebGPU buffers without forced readback", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
     const x = createWgslStorageBuffer(device, {
       valueType: "f32",
@@ -984,7 +1000,7 @@ __global__ void half2_shared_reduce(const half2 *input, half2 *out) {
 
   it("reuses a prepared compiled WebGPU kernel over resident buffers", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
     const x = createWgslStorageBuffer(device, {
       valueType: "f32",
@@ -1034,7 +1050,7 @@ __global__ void half2_shared_reduce(const half2 *input, half2 *out) {
 
   it("rejects prepared scalar updates that change host-orchestrated topology", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const source = `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -1076,7 +1092,7 @@ __global__ void parent(float *x, int n) {
 
   it("rejects running a prepared compiled WebGPU kernel after destroy", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
     const prepared = await prepareCompiledKernelWebGpu(
       device,
@@ -1114,7 +1130,7 @@ __global__ void parent(float *x, int n) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 2, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
@@ -1138,7 +1154,7 @@ __global__ void cgShared(float *out) {
     const input = { buffers: { out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -1159,7 +1175,7 @@ __global__ void sharedBarrierCaller(float *out) {
     const input = { buffers: { out: new Float32Array([1, 2, 3, 4]) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -1208,7 +1224,7 @@ __global__ void matrixMulCUDA_block16(float *C, float *A, float *B, int wA, int 
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [16, 16, 1] as const };
     const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
@@ -1234,7 +1250,7 @@ __global__ void sharedInitializerCall(uint *out) {
     const input = { buffers: { out: new Uint32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...semantic.buffers.out as Uint32Array]).toEqual([4, 4]);
@@ -1270,7 +1286,7 @@ __global__ void sharedMergeHelper(uint *out) {
 }`, { workgroupSize: [4, 1, 1] });
     const input = { buffers: { out: new Uint32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Uint32Array]).toEqual([30, 32, 34, 36]);
@@ -1307,7 +1323,7 @@ __global__ void genericGroupReduction(int *out) {
     });
     const input = { buffers: { out: new Int32Array(3) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Int32Array]).toEqual([6, 1, 1]);
@@ -1338,14 +1354,14 @@ __global__ void gridSync(float *scratch, float *out, float scale) {
     };
     const launch = { gridDim: [2, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
   it("reuses prepared grid-sync phases over resident buffers", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const source = `
 namespace cg = cooperative_groups;
 __global__ void gridSync(float *scratch, float *out, float scale) {
@@ -1422,7 +1438,7 @@ __global__ void uniformBarrierLoop(float *x) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const input = { buffers: { x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -1442,7 +1458,7 @@ __global__ void scopedLocal(float *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const input = { buffers: { out: new Float32Array(2) } };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -1463,7 +1479,7 @@ __global__ void helperScopedLocal(float *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const input = { buffers: { out: new Float32Array(2) } };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -1487,7 +1503,7 @@ __global__ void sharedHelperScoped(float *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const input = { buffers: { out: new Float32Array(2) } };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -1515,7 +1531,7 @@ __global__ void sumWindows(float *out, const float *input) {
       },
     };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -1535,7 +1551,7 @@ __global__ void sharedPointerAlias(float *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const input = { buffers: { out: new Float32Array(2) } };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -1566,7 +1582,7 @@ __global__ void sharedReuse(float *out) {
     const input = { buffers: { out: new Float32Array(2) } };
     const launch = { gridDim: [2, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -1587,7 +1603,7 @@ __global__ void syncOnly(float *x) {
     const input = { buffers: { x: new Float32Array([0]) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
@@ -1621,7 +1637,7 @@ __global__ void stream_capture_graph(uint *graphOut, int *statusOut) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.graphOut as Uint32Array]).toEqual([...expected.buffers.graphOut as Uint32Array]);
     expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
@@ -1659,7 +1675,7 @@ __global__ void stream_capture_info_v2(uint *out, int *statusOut) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
@@ -1698,7 +1714,7 @@ __global__ void graph_lifecycle(uint *handles, int *statusOut) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.handles as Uint32Array]).toEqual([...expected.buffers.handles as Uint32Array]);
     expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
@@ -1728,7 +1744,7 @@ __global__ void occupancy_dynamic_smem(uint *smemOut, int *statusOut) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.smemOut as Uint32Array]).toEqual([...expected.buffers.smemOut as Uint32Array]);
     expect([...actual.buffers.statusOut as Int32Array]).toEqual([...expected.buffers.statusOut as Int32Array]);
@@ -1755,7 +1771,7 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
   });
@@ -1791,14 +1807,14 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
   });
 
   it("runs host-lifted cudaMemcpyPeerAsync over resident WebGPU buffers", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const source = `
 __global__ void peerCopy(float *dst, const float *src, int n) {
   if (threadIdx.x == 0) {
@@ -1856,7 +1872,7 @@ __global__ void peerCopy(float *dst, const float *src, float a) {
       workgroupSize: [1, 1, 1],
     });
     const prepared = await prepareCompiledKernelWebGpu(
-      await createDevice(),
+      testDevice(),
       compiled,
       {
         buffers: {
@@ -1905,14 +1921,14 @@ __global__ void parent(float *x, int n) {
     const input = { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
 
   it("runs host-lifted dynamic child launch over resident WebGPU buffers", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const source = `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -1960,7 +1976,7 @@ __global__ void parent(float *x, int n) {
 
   it("reuses a prepared host-lifted dynamic launch over resident buffers", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const source = `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -2054,7 +2070,7 @@ __global__ void parent(DevicePool *pool, float *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.pool as Uint32Array]).toEqual([...expected.buffers.pool as Uint32Array]);
@@ -2091,7 +2107,7 @@ __global__ void parent(DevicePool *pool, int n) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(
-      await createDevice(),
+      testDevice(),
       compiled,
       { ...input, readback: ["pool", "pool_offset"] },
       launch,
@@ -2130,7 +2146,7 @@ __global__ void parent(DevicePool *pool, int n) {
     });
     const expected = runCompiledKernelReference(compiled, input(), launch);
     const actual = await runCompiledKernelWebGpu(
-      await createDevice(),
+      testDevice(),
       compiled,
       { ...input(), readback: ["pool", "pool_offset"] },
       launch,
@@ -2162,7 +2178,7 @@ __global__ void parent(float *out) {
     const input = { buffers: { out: new Float32Array([0, 0]) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -2198,7 +2214,7 @@ __global__ void parent(float *dst, const float *src, int n) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
   });
@@ -2232,7 +2248,7 @@ __global__ void parent(float *x, int n) {
     const input = { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
@@ -2260,7 +2276,7 @@ __global__ void constant_scale(const float* x, float* y, int n) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
@@ -2283,7 +2299,7 @@ __global__ void texture_sample(float* out, int width) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -2305,7 +2321,7 @@ __global__ void texture_object_sample(float* out, int width, cudaTextureObject_t
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -2330,7 +2346,7 @@ __global__ void texture_fetch_lod(float4* vecOut, float* scalarOut) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.vecOut as Float32Array]).toEqual([...expected.buffers.vecOut as Float32Array]);
     expect([...actual.buffers.scalarOut as Float32Array]).toEqual([...expected.buffers.scalarOut as Float32Array]);
@@ -2364,7 +2380,7 @@ __global__ void texture_atlas_helpers(float4* vecOut, float* scalarOut, cudaText
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.vecOut as Float32Array]).toEqual([...expected.buffers.vecOut as Float32Array]);
     expect([...actual.buffers.scalarOut as Float32Array]).toEqual([...expected.buffers.scalarOut as Float32Array]);
@@ -2385,7 +2401,7 @@ __global__ void semantic_layered_volume_texture(float* out, cudaTextureObject_t 
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([9, 11]);
@@ -2409,7 +2425,7 @@ __global__ void texture_uchar4(uint4* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
   });
@@ -2432,7 +2448,7 @@ __global__ void local_uchar(uint *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -2454,7 +2470,7 @@ __global__ void byteTextureStore(uchar *out, uint pitch, float scale, cudaTextur
       textures: { tex: { width: 4, height: 2, data: new Float32Array([1, 2, 130, 200, 3, 4, 5, 6]) } },
     };
     const launch = { gridDim: [2, 1, 1] as const, blockDim: [4, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Uint32Array]).toEqual([2, 4, 255, 255, 6, 8, 10, 12, 44]);
@@ -2473,7 +2489,7 @@ __global__ void storage_byte_helper(uchar *bytes, uint *out) {
     const input = { buffers: { bytes: new Uint32Array([3, 7]), out: new Uint32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -2491,7 +2507,7 @@ __global__ void packed_byte_vector(uchar *bytes) {
     const input = { buffers: { bytes: new Uint32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([...expected.buffers.bytes as Uint32Array]);
@@ -2517,7 +2533,7 @@ __global__ void raw_byte_word(const uchar *bytes, uint *out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -2540,7 +2556,7 @@ __global__ void sad4_two(uint *out, uint *a, uint *b) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -2570,7 +2586,7 @@ __global__ void local_pointer_array(float *out) {
     const input = { buffers: { out: new Float32Array(3) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -2589,7 +2605,7 @@ __global__ void mutable_scalar_params(float alpha, float beta, float *out) {
     const input = { scalars: { alpha: 2, beta: 4 }, buffers: { out: new Float32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -2608,7 +2624,7 @@ __global__ void sample(float *out, cudaTextureObject_t tex) {
       textures: { tex: { width: 2, height: 12, channels: 1 as const, data: new Float32Array([7, 0, ...new Array(22).fill(0)]) } },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([7]);
@@ -2632,7 +2648,7 @@ __global__ void atomic_mark(int* visited, int* out) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.visited as Int32Array][0]).toBeGreaterThan(0);
     expect([...actual.buffers.out as Int32Array].filter((value) => value === 0)).toHaveLength(1);
@@ -2657,7 +2673,7 @@ __global__ void atomic_bits(int* x, int* old) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Int32Array]).toEqual([...expected.buffers.x as Int32Array]);
     expect([...actual.buffers.old as Int32Array]).toEqual([...expected.buffers.old as Int32Array]);
@@ -2678,7 +2694,7 @@ __global__ void atomic_sum(const float* input, float* result) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.result as Float32Array][0]).toBeCloseTo(13.75);
   });
@@ -2708,7 +2724,7 @@ __global__ void bf16_atomic_sum(const __nv_bfloat16 *input, __nv_bfloat16 *resul
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.result as Float32Array]).toEqual([2.25, 0.75]);
   });
@@ -2727,7 +2743,7 @@ __global__ void atomic_exchange(float* x, float* out) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Float32Array][0]).toBeCloseTo(7.5);
     expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo(2.5);
@@ -2756,7 +2772,7 @@ __global__ void atomic_float_system(float* x, float* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Float32Array][0]).toBeCloseTo([...expected.buffers.x as Float32Array][0] ?? 0);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -2793,7 +2809,7 @@ __global__ void helper_atomic_rmw(int* xi, float* xf, float* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.xi as Int32Array]).toEqual([...expected.buffers.xi as Int32Array]);
     expect([...actual.buffers.xf as Float32Array]).toEqual([...expected.buffers.xf as Float32Array]);
@@ -2835,7 +2851,7 @@ __global__ void device_global_atomic_rmw(float* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.g_i as Int32Array]).toEqual([...expected.buffers.g_i as Int32Array]);
@@ -2864,7 +2880,7 @@ __global__ void alias_atomic(float* scratch, const float* values, uint* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.scratch as Float32Array]).toEqual([...expected.buffers.scratch as Float32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -2885,7 +2901,7 @@ __global__ void shared_counter(uint* out) {
     const input = { buffers: { out: new Uint32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
   });
@@ -2922,7 +2938,7 @@ __global__ void helper_atomic_inc_dec(uint* counter, uint* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -2956,7 +2972,7 @@ __global__ void helper_global_atomic_inc_dec(uint* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.g_counter as Uint32Array]).toEqual([...expected.buffers.g_counter as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -2982,7 +2998,7 @@ __global__ void assigned_pointer_atomic(uint* counter, uint* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -3004,7 +3020,7 @@ __global__ void nested_loop_pointer(float* out) {
     const input = { buffers: { out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -3037,7 +3053,7 @@ __global__ void branch_assigned_pointer_atomic(uint* left, uint* right, uint* ou
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.left as Uint32Array]).toEqual([...expected.buffers.left as Uint32Array]);
     expect([...actual.buffers.right as Uint32Array]).toEqual([...expected.buffers.right as Uint32Array]);
@@ -3064,7 +3080,7 @@ __global__ void conditional_pointer_atomic(uint* left, uint* right, uint* out, i
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.left as Uint32Array]).toEqual([...expected.buffers.left as Uint32Array]);
     expect([...actual.buffers.right as Uint32Array]).toEqual([...expected.buffers.right as Uint32Array]);
@@ -3092,7 +3108,7 @@ __global__ void chained_assignment_pointer_atomic(uint* counter, uint* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -3121,7 +3137,7 @@ __global__ void pointer_array_atomic(uint* counter, uint* untouched, uint* out) 
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
     expect([...actual.buffers.untouched as Uint32Array]).toEqual([...expected.buffers.untouched as Uint32Array]);
@@ -3157,7 +3173,7 @@ __global__ void helper_shared_atomic_rmw(float* out) {
     const input = { buffers: { out: new Float32Array(11) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -3180,7 +3196,7 @@ __global__ void helper_shared_scalar_exchange(uint* out) {
     const input = { buffers: { out: new Uint32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
   });
@@ -3212,7 +3228,7 @@ __global__ void atomic_system_aliases(int* x, int* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Int32Array]).toEqual([...expected.buffers.x as Int32Array]);
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
@@ -3230,7 +3246,7 @@ __global__ void atomic_system_aliases(int* x, int* out) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.A as Float32Array]).toEqual([...expected.buffers.A as Float32Array]);
   });
@@ -3258,7 +3274,7 @@ __global__ void complex_helper(cufftComplex* a, cufftComplex* b, float scale) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -3284,7 +3300,7 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -3304,7 +3320,7 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -3328,7 +3344,7 @@ __global__ void ptx_f32_binary(float *out, float *input) {
     const input = { buffers: { out: new Float32Array(8), input: new Float32Array([4, -3]) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -3352,7 +3368,7 @@ __global__ void bfindKernel(uint *out, uint *input) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -3370,7 +3386,7 @@ __global__ void bfindKernel(uint *out, uint *input) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 2, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
   });
@@ -3388,7 +3404,7 @@ __global__ void write1d(cudaSurfaceObject_t outputSurf) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
@@ -3411,7 +3427,7 @@ __global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("fn bg_sem_surf2dread_surf");
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
@@ -3434,7 +3450,7 @@ __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
     };
     const launch = { gridDim: [1, 1, 2] as const, blockDim: [2, 2, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("let index = ((z * height) + y) * width + x;");
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
@@ -3454,7 +3470,7 @@ __global__ void driverSurfaceAlias(CUsurfObject surf) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
     expect([...actual.buffers.surf as Float32Array]).toEqual([...expected.buffers.surf as Float32Array]);
@@ -3485,7 +3501,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
     const input = { buffers: { floats: new Float32Array(2), ints: new Int32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.floats as Float32Array]).toEqual([...expected.buffers.floats as Float32Array]);
@@ -3504,7 +3520,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
       scalars: { N: 4 },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.result as Float32Array][0]).toBeCloseTo(9);
   });
@@ -3519,7 +3535,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.minValue as Float32Array][0]).toBeCloseTo(3);
     expect([...actual.buffers.subValue as Float32Array][0]).toBeCloseTo(6.25);
@@ -3536,7 +3552,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(actual.buffers.out).toBeUndefined();
     expect([...actual.buffers.dp as Uint32Array]).toEqual([...expected.buffers.dp as Uint32Array]);
@@ -3544,7 +3560,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
 
   it("maps prepared logical DevicePool readback names through WebGPU", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const compiled = compileCudaLiteKernel(DEVICE_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
     const input = {
       buffers: { out: new Float32Array(2) },
@@ -3581,7 +3597,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.poolBase as Float32Array]).toEqual([...expected.buffers.poolBase as Float32Array]);
     expect([...actual.buffers.offset as Uint32Array]).toEqual([...expected.buffers.offset as Uint32Array]);
@@ -3596,7 +3612,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.g_pool as Uint32Array]).toEqual([...expected.buffers.g_pool as Uint32Array]);
@@ -3628,7 +3644,7 @@ __global__ void wmma_toy(float* A, float* B, float* C) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
   });
@@ -3639,7 +3655,7 @@ __global__ void wmma_toy(float* A, float* B, float* C) {
     const input = { buffers: { out: new Uint32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([0x40b00000, 0x40b00000]);
@@ -3667,7 +3683,7 @@ __global__ void halfCompat(half* x, half2* y, half a) {
       scalars: { a: 2 },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.x as Float32Array]).toEqual([3.5]);
@@ -3694,7 +3710,7 @@ __global__ void halfSat(half* x, half2* y) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -3726,7 +3742,7 @@ __global__ void halfUnary(half* x) {
     });
     const input = { buffers: { x: new Float32Array([-1.5, 2, 4, 1.25, 0, 0, 0]) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -3761,7 +3777,7 @@ __global__ void half2Unary(half2* x, half2* out) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -3781,7 +3797,7 @@ __global__ void half2Assignment(half2 *out) {
 }`, { f16Mode: "f32", workgroupSize: [1, 1, 1] });
     const input = { buffers: { out: new Float32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -3805,7 +3821,7 @@ __global__ void vectorCompound(float4 *out) {
     const input = { buffers: { out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -3822,7 +3838,7 @@ __global__ void clampVector(float4 *out) {
     const input = { buffers: { out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -3845,7 +3861,7 @@ __global__ void pointerOverload(int *signedInput, uint *unsignedInput, int *out)
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Int32Array]).toEqual([5, 7]);
@@ -3868,7 +3884,7 @@ __global__ void vectorMathHelper(float4 *bias, float4 *out) {
 }`, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { bias: new Float32Array([1, 2, 3, 0]), out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...new Float32Array([2.4, 2.2, 3, 5])]);
@@ -3886,7 +3902,7 @@ __global__ void sharedReinterpret(int *out) {
 }`, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { out: new Int32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Int32Array]).toEqual([-1]);
@@ -3914,7 +3930,7 @@ __global__ void cooperativeMetaBarrier(int *out) {
 }`, { workgroupSize: [8, 1, 1] });
     const input = { buffers: { out: new Int32Array(9) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [8, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Int32Array]).toEqual([20, 120, 220, 320, 21, 121, 221, 321, 8]);
@@ -3935,7 +3951,7 @@ __global__ void packedSharedUchar(uint *out) {
 }`, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { out: new Uint32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("array<atomic<u32>, 1>");
@@ -3961,7 +3977,7 @@ __global__ void ucharHelperVector(uint *out) {
 }`, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { out: new Uint32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Uint32Array]).toEqual([4, 10, 1, 8]);
@@ -3983,7 +3999,7 @@ __global__ void helperGlobal(uint *out) { record(out); }
 `, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { out: new Uint32Array(1) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Uint32Array]).toEqual([1]);
@@ -4006,7 +4022,7 @@ __global__ void sharedHelperResult(int *out, int n) {
 }`, { workgroupSize: [2, 1, 1] });
     const input = { buffers: { out: new Int32Array(2) }, scalars: { n: 5 } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Int32Array]).toEqual([8, 8]);
@@ -4063,7 +4079,7 @@ __global__ void half2Compare(const half2* a, const half2* b, half2* vec, uint* m
       f16Mode: "f32",
       workgroupSize: [1, 1, 1],
     });
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, {
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, {
       buffers: {
         a: new Float32Array([1, 2, NaN, 4]),
         b: new Float32Array([1, 3, 4, NaN]),
@@ -4101,7 +4117,7 @@ __global__ void half2MinMaxNan(const half2* a, const half2* b, half2* out, half2
       f16Mode: "f32",
       workgroupSize: [1, 1, 1],
     });
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, {
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, {
       buffers: {
         a: new Float32Array([1, 4, NaN, 2]),
         b: new Float32Array([3, 2, 5, NaN]),
@@ -4123,7 +4139,7 @@ __global__ void half2MinMaxNan(const half2* a, const half2* b, half2* out, half2
 
   it("updates prepared half scalar uniforms in f32 compatibility mode", async () => {
     if (!deviceCheck.available) return;
-    const device = await createDevice();
+    const device = testDevice();
     const source = `
 __global__ void halfCompat(half* x, half2* y, half a) {
   if (threadIdx.x < 1) {
@@ -4187,7 +4203,7 @@ __global__ void doubleCompat(double* result, double* out, double a) {
       scalars: { a: 1.5 },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -4225,7 +4241,7 @@ __global__ void halfUnordered(const half* input, half* output, int* flags) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
     const output = Array.from(actual.buffers.output as Float32Array);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -4261,7 +4277,7 @@ __global__ void half2LaneHelpers(const half2 *input, half2 *out, half *scalar) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -4300,7 +4316,7 @@ __global__ void halfShortConvert(const half* input, int* out, uint* uout, half* 
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -4332,7 +4348,7 @@ __global__ void halfDirectedConvert(half* out) {
 }`, { workgroupSize: [1, 1, 1], f16Mode: "f32" });
     const input = { buffers: { out: new Float32Array(16) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -4406,7 +4422,7 @@ __global__ void bf16Directed(float *out, uint *bits, int *signedBits) {
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.out as Float32Array]).toEqual([256, 256, 258, 256, -256, -256, -256, -258, 258, -258, 258, -1, -258, 258, 256, 2, 256, -258, 258, 256]);
@@ -4427,7 +4443,7 @@ __global__ void bf16DoubleCompat(float *out, double d) {
       scalars: { d: 257 },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("f64-lowered-to-f32");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -4485,7 +4501,7 @@ __global__ void bf16ScalarAliases(const __nv_bfloat16 *input, const float *seed,
     if (__hisinf(infValue)) { flags[13] = 1u; }
   }
 }`, { workgroupSize: [1, 1, 1] });
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, {
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, {
       buffers: {
         input: new Float32Array([2, 0.5]),
         seed: new Float32Array([Number.NaN, Number.POSITIVE_INFINITY]),
@@ -4543,7 +4559,7 @@ __global__ void bf162Move(float *out, uint *bits) {
 }`, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { out: new Float32Array(20), bits: new Uint32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -4636,7 +4652,7 @@ __global__ void bf162Math(float *out, uint *bits) {
 }`, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { out: new Float32Array(54), bits: new Uint32Array(2) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -4710,7 +4726,7 @@ __global__ void bf162Compare(const float *seed, float *out, uint *mask, uint *fl
 }`, { workgroupSize: [1, 1, 1] });
     const input = { buffers: { seed: new Float32Array([Number.NaN]), out: new Float32Array(26), mask: new Uint32Array(6), flags: new Uint32Array(5) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -4762,7 +4778,7 @@ __global__ void early_return_barrier(float *x, int limit) {
     const input = { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { limit: 3 } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
@@ -4782,7 +4798,7 @@ __global__ void graphCondition(int *input, int *out, cudaGraphConditionalHandle 
     const input = { buffers: { input: new Int32Array([3]), out: new Int32Array(1) }, scalars: { handle: 1 } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
@@ -4813,7 +4829,7 @@ __global__ void qsort_shape(uint *indata, uint *outdata, uint offset, uint len, 
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).not.toContain("stack_pool");
