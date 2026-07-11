@@ -2391,6 +2391,27 @@ __global__ void byteTextureStore(uchar *out, uint pitch, float scale, cudaTextur
     expect([...actual.buffers.out as Uint32Array]).toEqual([2, 4, 255, 255, 6, 8, 10, 12, 44]);
   });
 
+  it("runs direct byte storage through uchar device helpers", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void bump_storage_byte(uchar *bytes, uint index) {
+  bytes[index]++;
+}
+__global__ void storage_byte_helper(uchar *bytes, uint *out) {
+  bump_storage_byte(bytes, 1u);
+  out[0] = bytes[1];
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { bytes: new Uint32Array([3, 7]), out: new Uint32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.bytes as Uint32Array]).toEqual([...expected.buffers.bytes as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([8]);
+  });
+
   it("runs cubemap texture reads through semantic WGSL on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

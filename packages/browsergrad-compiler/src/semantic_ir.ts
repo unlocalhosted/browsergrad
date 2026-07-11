@@ -1347,7 +1347,7 @@ function lowerExpression(
       const symbol = scope.get(expression.name);
       return {
         kind: "symbol",
-        name: expression.name,
+        name: symbol?.name ?? expression.name,
         ...(symbol?.valueType === undefined ? {} : { valueType: symbol.valueType }),
         addressSpace: symbol?.addressSpace ?? "unknown",
         span: expression.span,
@@ -2504,8 +2504,8 @@ function symbolForFunction(
   globalScope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): CudaLiteSemanticFunction {
   const scope = new Map(globalScope);
-  const params = fn.params.map(symbolForFunctionParam);
-  for (const param of params) scope.set(param.name, param);
+  const params = fn.params.map((param) => symbolForFunctionParam(param, fn.name, globalScope.has(param.name)));
+  for (const [index, param] of params.entries()) scope.set(fn.params[index]!.name, param);
   return {
     name: fn.name,
     returnType: fn.returnType,
@@ -2541,9 +2541,12 @@ function symbolForSemanticFunctionDeclaration(fn: CudaLiteSemanticFunction): Cud
   };
 }
 
-function symbolForFunctionParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
+function symbolForFunctionParam(param: CudaLiteParam, functionName: string, collidesWithGlobal: boolean): CudaLiteSemanticSymbol {
   const symbol = symbolForParam(param);
   if (symbol.addressSpace === "texture" || symbol.addressSpace === "surface") return symbol;
+  if (symbol.pointer && symbol.addressSpace === "storage" && symbol.valueType === "uchar" && collidesWithGlobal) {
+    return { ...symbol, name: `__bg_param_${functionName}_${param.name}_${param.span.start}` };
+  }
   if (symbol.pointer) return symbol;
   return { ...symbol, addressSpace: "local" };
 }

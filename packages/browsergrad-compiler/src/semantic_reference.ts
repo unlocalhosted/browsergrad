@@ -476,6 +476,7 @@ function semanticReferenceFunctionParamSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number],
 ): boolean {
   if (param.pointer && param.addressSpace === "shared" && param.valueType === "uchar" && param.pointerCarrierValueType === "uchar") return true;
+  if (param.pointer && param.addressSpace === "storage" && param.valueType === "uchar") return true;
   if (!param.pointer && param.addressSpace === "local" && param.valueType === "uchar") return true;
   return semanticFunctionParamContractSupported(param, semanticReferenceValueTypeSupported);
 }
@@ -748,6 +749,10 @@ function semanticReferenceFunctionArgSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number] | undefined,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
+  if (param?.pointer && param.addressSpace === "storage" && param.valueType === "uchar") {
+    const ref = semanticPointerArgMemoryRef(arg);
+    return ref?.addressSpace === "storage" && semanticDirectByteStorageParamSupported(compiled.kernelIr, ref.base);
+  }
   const supported = semanticFunctionArgContractSupported(
     arg,
     param,

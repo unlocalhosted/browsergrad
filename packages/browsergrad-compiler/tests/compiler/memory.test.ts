@@ -2969,6 +2969,29 @@ __global__ void sharedPointerAlias(float *out) {
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
     });
 
+  it("passes direct byte storage through uchar device helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void bump_storage_byte(uchar *bytes, uint index) {
+    bytes[index]++;
+  }
+  __global__ void storageByteHelper(uchar *bytes, uint *out) {
+    bump_storage_byte(bytes, 1u);
+    out[0] = bytes[1];
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { bytes: new Uint32Array([3, 7]), out: new Uint32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("fn bump_storage_byte");
+      expect([...result.buffers.bytes as Uint32Array]).toEqual([3, 8]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([8]);
+    });
+
   it("scales helper pointer params when byte storage is viewed as wider values", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ void write_storage_byte_float(float *value, float *out) {

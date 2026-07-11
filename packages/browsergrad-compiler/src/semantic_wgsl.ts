@@ -727,6 +727,7 @@ function semanticWgslFunctionParamSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): boolean {
   if (param.pointer && param.addressSpace === "shared" && param.valueType === "uchar" && param.pointerCarrierValueType === "uchar") return true;
+  if (param.pointer && param.addressSpace === "storage" && param.valueType === "uchar") return true;
   if (!param.pointer && param.addressSpace === "local" && param.valueType === "uchar") return true;
   return semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
 }
@@ -1478,6 +1479,10 @@ function semanticWgslFunctionArgSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (param?.cooperativeGroupKind !== undefined) return arg.kind === "symbol";
+  if (param?.pointer && param.addressSpace === "storage" && param.valueType === "uchar") {
+    const ref = semanticPointerArgMemoryRef(arg);
+    return ref?.addressSpace === "storage" && semanticDirectByteStorageParamSupported(ir, ref.base);
+  }
   return semanticFunctionArgContractSupported(arg, param, semanticPointerArgMemoryRef, (item, mode) => semanticWgslExpressionSupported(item, mode, ir));
 }
 
