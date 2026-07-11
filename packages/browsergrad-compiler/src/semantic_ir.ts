@@ -564,7 +564,17 @@ export function lowerSemanticModelToKernelIr(
 ): SemanticKernelIrModule {
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
   const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
-  const loweredOperations = lowerStatements(analysis.kernel.body, scope);
+  const mutableParams = mutableKernelParamShadows(analysis, semantic.params);
+  for (const shadow of mutableParams) scope.set(shadow.sourceName, shadow.symbol);
+  const loweredOperations = [
+    ...mutableParams.map((shadow): SemanticKernelIrOperation => ({
+      kind: "declare",
+      target: shadow.symbol,
+      init: semanticSymbolExpression(shadow.param, shadow.param.span),
+      span: shadow.param.span,
+    })),
+    ...lowerStatements(analysis.kernel.body, scope),
+  ];
   const localMemory = collectDeclaredMemory(loweredOperations);
   const reachable = collectReachableAnalysisNames(analysis);
   const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
@@ -611,6 +621,47 @@ export function lowerSemanticModelToKernelIr(
     barrierUniformity: analysis.barrierUniformity,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
+}
+
+function mutableKernelParamShadows(
+  analysis: CudaLiteAnalysis,
+  params: readonly CudaLiteSemanticSymbol[],
+): readonly {
+  readonly sourceName: string;
+  readonly param: CudaLiteSemanticSymbol;
+  readonly symbol: CudaLiteSemanticSymbol;
+}[] {
+  const paramByName = new Map(params.map((param) => [param.name, param]));
+  const mutable = new Set<string>();
+  walkCudaLiteExpressions(analysis.kernel.body, (expression) => {
+    const target = expression.kind === "assignment"
+      ? expression.left
+      : expression.kind === "update"
+        ? expression.argument
+        : undefined;
+    const targetName = target === undefined ? undefined : mutatedParamRootName(target);
+    if (targetName !== undefined && paramByName.has(targetName)) mutable.add(targetName);
+  });
+  return [...mutable].flatMap((sourceName) => {
+    const param = paramByName.get(sourceName);
+    if (!param || param.pointer || param.addressSpace !== "uniform" || param.valueType === undefined) return [];
+    return [{
+      sourceName,
+      param,
+      symbol: {
+        ...param,
+        name: `bg_param_local_${sourceName}_${param.span.start}`,
+        kind: "local" as const,
+        addressSpace: "local" as const,
+      },
+    }];
+  });
+}
+
+function mutatedParamRootName(expression: CudaLiteExpression): string | undefined {
+  if (expression.kind === "identifier") return expression.name;
+  if (expression.kind === "member") return mutatedParamRootName(expression.object);
+  return undefined;
 }
 
 function specializeSharedPointerFunctions(

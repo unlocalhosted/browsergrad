@@ -311,6 +311,25 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler: Numeric types and intrinsics", () => {
+  it("shadows mutable by-value kernel params as thread-local values", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mutableScalarParams(float alpha, float beta, float *out) {
+  beta /= alpha;
+  beta += (float)threadIdx.x;
+  out[threadIdx.x] = beta;
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { scalars: { alpha: 2, beta: 4 }, buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toMatch(/var bg_param_local_beta_\d+: f32 = bg_uniforms\.beta;/u);
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
+  });
   it("lowers ignored dynamic frexp results with local exponent side effects", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ int ceil_pow2(int n) {

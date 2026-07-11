@@ -657,9 +657,11 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect([...result.buffers.out as Float32Array]).toEqual([8]);
-      expect(compiled.wgsl).toContain("var beta: f32 = bg_uniforms.beta;");
-      expect(compiled.wgsl).toContain("var n: i32 = bg_uniforms.n;");
-      expect(compiled.wgsl).toContain("var enabled: bool = (bg_uniforms.enabled != 0u);");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toMatch(/var bg_param_local_beta_\d+: f32 = bg_uniforms\.beta;/u);
+      expect(compiled.wgsl).toMatch(/var bg_param_local_n_\d+: i32 = bg_uniforms\.n;/u);
+      expect(compiled.wgsl).toMatch(/var bg_param_local_enabled_\d+: bool = \(bg_uniforms\.enabled != 0u\);/u);
     });
 
   it("caches compiled kernels with deterministic option keys and LRU eviction", () => {

@@ -2443,6 +2443,25 @@ __global__ void local_pointer_array(float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([12, 15, 18]);
   });
 
+  it("runs mutable by-value kernel params through thread-local shadows", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void mutable_scalar_params(float alpha, float beta, float *out) {
+  beta /= alpha;
+  beta += (float)threadIdx.x;
+  out[threadIdx.x] = beta;
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { scalars: { alpha: 2, beta: 4 }, buffers: { out: new Float32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([2, 3]);
+  });
+
   it("runs cubemap texture reads through semantic WGSL on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
