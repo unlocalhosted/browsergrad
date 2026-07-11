@@ -3002,7 +3002,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(compiled.wgsl).toContain(" & ");
       expect(compiled.wgsl).toContain(" | ");
       expect(compiled.wgsl).toContain(" ^ ");
-      expect(compiled.wgsl).toContain("~u32");
+      expect(compiled.wgsl).toContain("~(u32");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         0,
         0x02244220,

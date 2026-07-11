@@ -1504,6 +1504,7 @@ function lowerInlineAsmBuiltinRegisterAssignment(
       ? statement.inputs.length === 1 ? lowerExpression(statement.inputs[0]!, scope) : undefined
       : statement.inputs.length === 0 ? semanticUintLiteralExpression(op.immediate, statement.span) : undefined
     : undefined;
+  const integerValue = op === undefined ? undefined : semanticInlineAsmIntegerExpression(op, statement, scope);
   const value = op?.kind === "fma-rn-f32" && fmaArgs?.length === 3 && fmaArgs.every((arg) => arg !== undefined)
     ? semanticCallExpression("fma", fmaArgs as readonly SemanticExpression[], "float", statement.span)
     : op?.kind === "float-binary-rn-f32" && floatBinaryArgs?.length === 2 && floatBinaryArgs.every((arg) => arg !== undefined)
@@ -1527,6 +1528,8 @@ function lowerInlineAsmBuiltinRegisterAssignment(
       ? castScalarExpression(semanticCallExpression("__clz", [bitInput], "int", statement.span), "uint", statement.span)
     : op?.kind === "brev-b32" && bitInput !== undefined
       ? semanticCallExpression("__brev", [bitInput], "uint", statement.span)
+    : integerValue !== undefined
+      ? integerValue
     : statement.inputs.length !== 0
       ? undefined
       : op?.kind === "special-register-u32"
@@ -1551,6 +1554,35 @@ function lowerInlineAsmBuiltinRegisterAssignment(
     },
     span: statement.span,
   };
+}
+
+function semanticInlineAsmIntegerExpression(
+  op: InlineAsmOp,
+  statement: CudaLiteAsmStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  const signed = op.kind === "convert-b32" ? op.toSigned : "signed" in op ? op.signed : false;
+  const valueType: CudaLiteScalarType = signed ? "int" : "uint";
+  const inputs = statement.inputs.map((input) => castScalarExpression(lowerExpression(input, scope), valueType, statement.span));
+  const immediate = "immediate" in op && op.immediate !== undefined
+    ? castScalarExpression(semanticUintLiteralExpression(op.immediate, statement.span), valueType, statement.span)
+    : undefined;
+  const operands = immediate === undefined ? inputs : [...inputs, immediate];
+  const binary = (operator: string, left: SemanticExpression | undefined, right: SemanticExpression | undefined): SemanticExpression | undefined =>
+    left === undefined || right === undefined ? undefined : { kind: "binary", operator, left, right, valueType, span: statement.span };
+  switch (op.kind) {
+    case "bitwise-b32":
+      if (op.op === "not") {
+        const argument = operands[0];
+        return argument === undefined ? undefined : { kind: "unary", operator: "~", argument, valueType, span: statement.span };
+      }
+      return binary(op.op === "and" ? "&" : op.op === "or" ? "|" : "^", operands[0], operands[1]);
+    case "move-b32":
+    case "convert-b32":
+      return operands[0];
+    default:
+      return undefined;
+  }
 }
 
 function semanticFloatBinaryExpression(
