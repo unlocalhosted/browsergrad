@@ -283,6 +283,7 @@ export interface SemanticKernelIrWgslPreflightFailure {
 
 export interface EmitSemanticKernelIrWgslOptions extends SemanticTextureDescriptorOptions {
   readonly activeCollectivePredicate?: string;
+  readonly activeFunction?: string;
 }
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
@@ -812,7 +813,7 @@ function semanticWgslBarrierSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "barrier" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
-  if (operation.callee === "grid.sync") return false;
+  if (operation.scope === "grid") return false;
   if (isCudaCooperativeBarrierCallName(operation.callee)) {
     const kind = operation.groupName === undefined ? undefined : semanticCooperativeGroupKind(ir, operation.groupName);
     return kind !== undefined && kind !== "grid";
@@ -2138,8 +2139,9 @@ function emitSemanticStoreOperation(
   }
   if (semanticDirectVectorStorageStore(lowered, ir)) {
     const vectorType = semanticStorageVectorType(lowered.target.valueType)!;
-    const valueName = nameFor(`bg_vector_store_value_${lowered.span.start}`, names);
-    const baseName = nameFor(`bg_vector_store_base_${lowered.span.start}`, names);
+    const storeIdentity = `${lowered.target.base}_${lowered.span.start}`;
+    const valueName = nameFor(`bg_vector_store_value_${storeIdentity}`, names);
+    const baseName = nameFor(`bg_vector_store_base_${storeIdentity}`, names);
     const value = emitSemanticVectorOperand(lowered.value, vectorType, ir, names, options, textureSpecializations);
     const base = emitFlatStorageVectorBaseIndex(lowered.target, ir, names, options);
     return [
@@ -2401,6 +2403,15 @@ function emitSemanticStore(
     semanticWgslFunctionSharedPointerParam(ir, operation.target.base) &&
     !semanticWgslFunctionSharedPointerAtomicParam(ir, operation.target.base)
   ) {
+    if (semanticStorageVectorType(operation.target.valueType) !== undefined) {
+      const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
+      if (operation.operator !== "=" && binaryOperator === undefined) {
+        throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
+      }
+      const target = emitSemanticMemoryRef(operation.target, ir, names, options);
+      const value = emitSemanticVectorOperand(operation.value, operation.target.valueType as CudaLiteScalarType, ir, names, options, textureSpecializations);
+      return `${target} = ${operation.operator === "=" ? value : `(${target} ${binaryOperator} ${value})`}`;
+    }
     const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
     if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
     const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
@@ -2465,7 +2476,7 @@ function emitSemanticAtomicStoreValue(
   options: EmitSemanticKernelIrWgslOptions,
   textureSpecializations: SemanticTextureDescriptorSpecializations,
 ): string {
-  if (semanticAtomicUsesF32Storage(valueType)) {
+  if (semanticAtomicUsesF32Storage(valueType) || valueType === "bf16") {
     return `bitcast<u32>(f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)}))`;
   }
   return emitSemanticExpressionAs(value, ir, names, wgslAtomicScalar(valueType), options, textureSpecializations);
@@ -2649,7 +2660,7 @@ function emitSemanticFunction(
     `fn ${nameFor(rawName, names)}(${params})${returnType} {`,
     ...fn.params.filter((param) => mutableParams.has(param.name)).map((param) =>
       `  var ${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)} = ${semanticFunctionParamIncomingName(param, names)};`),
-    ...emitSemanticOperations(fn.body, ir, names, 1, true, options, textureSpecializations),
+    ...emitSemanticOperations(fn.body, ir, names, 1, true, { ...options, activeFunction: fn.name }, textureSpecializations),
     ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslValueType(fn.returnType))};`]),
     "}",
   ];
@@ -3373,7 +3384,7 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
       if (semanticWgslCooperativeGroupCallSupported(expression, ir)) {
-        const emitted = emitSemanticCooperativeGroupCall(expression, ir);
+        const emitted = emitSemanticCooperativeGroupCall(expression, ir, options.activeFunction);
         if (emitted !== undefined) return emitted;
       }
       if (semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir))) {
@@ -4168,8 +4179,8 @@ function emitSemanticFunctionArgs(
       valueType: "int",
       span: arg.span,
     });
-    const rank = emitSemanticCooperativeGroupCall(groupCall("thread_rank"), ir);
-    const size = emitSemanticCooperativeGroupCall(groupCall("size"), ir);
+    const rank = emitSemanticCooperativeGroupCall(groupCall("thread_rank"), ir, options.activeFunction);
+    const size = emitSemanticCooperativeGroupCall(groupCall("size"), ir, options.activeFunction);
     if (rank === undefined || size === undefined) throw semanticWgslError(`unknown cooperative group '${arg.name}'`, arg.span);
     return [rank, size];
   }
@@ -5644,7 +5655,7 @@ function semanticWgslFunctionLocalPointerParam(
 
 function emitSemanticAtomicLoad(ref: SemanticMemoryRef, memoryRef: string): string {
   const loaded = `atomicLoad(&${memoryRef})`;
-  return ref.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+  return ref.valueType === "float" || ref.valueType === "bf16" ? `bitcast<f32>(${loaded})` : loaded;
 }
 
 function emitSemanticVectorMemoryRead(

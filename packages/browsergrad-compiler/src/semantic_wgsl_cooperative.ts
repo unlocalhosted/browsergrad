@@ -50,13 +50,16 @@ export function semanticWgslCooperativeReduceCallSupported(
 export function emitSemanticCooperativeGroupCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
+  activeFunction?: string,
 ): string | undefined {
   if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return undefined;
   const groupName = expression.callee.object.name;
   const group = semanticCooperativeGroupInfo(ir, groupName);
   if (!group) return undefined;
-  const groupParam = ir.functions.flatMap((fn) => fn.params)
-    .find((param) => param.name === groupName && param.cooperativeGroupKind !== undefined);
+  const groupParam = activeFunction === undefined
+    ? undefined
+    : ir.functions.find((fn) => fn.name === activeFunction)?.params
+      .find((param) => param.name === groupName && param.cooperativeGroupKind !== undefined);
   if (expression.callee.property === "thread_rank") {
     if (groupParam) return semanticCooperativeGroupRankParamName(groupParam.name);
     const rank = group.kind === "grid"

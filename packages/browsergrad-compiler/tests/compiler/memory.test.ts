@@ -3829,9 +3829,9 @@ __global__ void sharedHelperScoped(float *out) {
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var value: vec4<f32> = vec4<f32>(x[((u32(i) * 4u) + 0u)], x[((u32(i) * 4u) + 1u)], x[((u32(i) * 4u) + 2u)], x[((u32(i) * 4u) + 3u)]);");
-      expect(compiled.wgsl).toMatch(/let bg_vector_store_value_\d+: vec4<f32> = vec4<f32>\(f32\(\(value\.x \+ 1\.0\)\)/u);
-      expect(compiled.wgsl).toMatch(/let bg_vector_store_base_\d+: u32 = \(u32\(i\) \* 4u\);/u);
-      expect(compiled.wgsl).toMatch(/y\[\(bg_vector_store_base_\d+ \+ 3u\)\] = \(bg_vector_store_value_\d+\)\.w;/u);
+      expect(compiled.wgsl).toMatch(/let bg_vector_store_value_y_\d+: vec4<f32> = vec4<f32>\(f32\(\(value\.x \+ 1\.0\)\)/u);
+      expect(compiled.wgsl).toMatch(/let bg_vector_store_base_y_\d+: u32 = \(u32\(i\) \* 4u\);/u);
+      expect(compiled.wgsl).toMatch(/y\[\(bg_vector_store_base_y_\d+ \+ 3u\)\] = \(bg_vector_store_value_y_\d+\)\.w;/u);
       expect([...result.buffers.y as Float32Array]).toEqual([2, 4, 6, 8, 6, 8, 10, 12]);
       expect([...semanticResult.buffers.y as Float32Array]).toEqual([2, 4, 6, 8, 6, 8, 10, 12]);
     });

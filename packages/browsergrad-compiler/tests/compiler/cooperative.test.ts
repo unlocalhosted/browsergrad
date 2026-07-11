@@ -1362,9 +1362,16 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [2, 1, 1],
       });
       const plan = createCudaGridSyncPhasePlan(compiled);
+      const reference = runCompiledKernelReference(
+        compiled,
+        { buffers: { out: new Float32Array(2) } },
+        { gridDim: [2, 1, 1], blockDim: [2, 1, 1] },
+      );
 
       expect(plan.supported).toBe(true);
       if (plan.supported) expect(plan.phases).toHaveLength(2);
+      expect(compiled.kernelIr.operations).toContainEqual(expect.objectContaining({ kind: "barrier", scope: "grid" }));
+      expect([...reference.buffers.out as Float32Array]).toEqual([10, 7]);
     });
 
   it("rejects grid sync phases when shared memory is read before rewrite", () => {
@@ -1525,7 +1532,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("reduce_n(value, tile__bg_group_rank, tile__bg_group_size");
+      expect(compiled.wgsl).toContain("reduce_n(value, i32((local_id.x) % 4u), 4");
+      expect(compiled.wgsl).toContain("if ((u32(i32((local_id.x) % 4u)) == 0u))");
       expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_i32_4(value, local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });

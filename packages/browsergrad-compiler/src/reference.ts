@@ -670,6 +670,7 @@ function runGrid(
 ): void {
   const generators: BarrierGenerator[] = [];
   const active: boolean[] = [];
+  const waiting: Array<BarrierKind | undefined> = [];
   const blockKeys: string[] = [];
   const sharedByBlock = new Map<string, Map<string, SharedArrayValue>>();
   for (let bz = 0; bz < gridDim.z; bz++) {
@@ -715,6 +716,7 @@ function runGrid(
                 trace,
               }));
               active.push(true);
+              waiting.push(undefined);
               blockKeys.push(blockKey);
             }
           }
@@ -723,33 +725,41 @@ function runGrid(
     }
   }
   while (active.some(Boolean)) {
-    let activeBefore = 0;
-    let gridBarriers = 0;
-    const activeByBlock = new Map<string, number>();
-    const barriersByBlock = new Map<string, number>();
+    let advanced = false;
     for (let i = 0; i < generators.length; i++) {
-      if (!active[i]) continue;
-      activeBefore++;
-      const blockKey = blockKeys[i]!;
-      activeByBlock.set(blockKey, (activeByBlock.get(blockKey) ?? 0) + 1);
+      if (!active[i] || waiting[i] !== undefined) continue;
+      advanced = true;
       const next = generators[i]!.next();
       if (next.done) {
         active[i] = false;
-      } else if (next.value === "grid-barrier") {
-        gridBarriers++;
+      } else if (next.value === "barrier" || next.value === "grid-barrier") {
+        waiting[i] = next.value;
       } else {
-        barriersByBlock.set(blockKey, (barriersByBlock.get(blockKey) ?? 0) + 1);
+        throw compilerFailure("grid-sync reference execution does not support subgroup collectives yet");
       }
     }
-    if (gridBarriers > 0 && gridBarriers !== activeBefore) {
+
+    const activeIndices = active.flatMap((isActive, index) => isActive ? [index] : []);
+    if (activeIndices.length === 0) break;
+    if (activeIndices.every((index) => waiting[index] === "grid-barrier")) {
+      for (const index of activeIndices) waiting[index] = undefined;
+      continue;
+    }
+
+    let releasedBlock = false;
+    for (const blockKey of new Set(activeIndices.map((index) => blockKeys[index]!))) {
+      const blockIndices = activeIndices.filter((index) => blockKeys[index] === blockKey);
+      if (blockIndices.every((index) => waiting[index] === "barrier")) {
+        for (const index of blockIndices) waiting[index] = undefined;
+        releasedBlock = true;
+      }
+    }
+    if (advanced || releasedBlock) continue;
+
+    if (activeIndices.some((index) => waiting[index] === "grid-barrier")) {
       throw compilerFailure("grid barrier mismatch: not every active thread reached grid.sync()");
     }
-    if (gridBarriers > 0) continue;
-    for (const [blockKey, barriers] of barriersByBlock) {
-      if (barriers !== activeByBlock.get(blockKey)) {
-        throw compilerFailure("barrier mismatch: not every active thread reached __syncthreads()");
-      }
-    }
+    throw compilerFailure("barrier mismatch: not every active thread reached __syncthreads()");
   }
 }
 

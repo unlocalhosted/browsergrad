@@ -68,12 +68,9 @@ export function createSemanticGridSyncPhasePlan(
 
 export function isSemanticGridSyncOperation(
   operation: SemanticKernelIrOperation,
-  groups: ReadonlyMap<string, string>,
+  _groups: ReadonlyMap<string, string>,
 ): boolean {
-  return operation.kind === "barrier" &&
-    (operation.callee === "grid.sync" || operation.callee === "cg::sync") &&
-    operation.groupName !== undefined &&
-    groups.get(operation.groupName) === "grid";
+  return operation.kind === "barrier" && operation.scope === "grid";
 }
 
 function semanticCooperativeGroups(

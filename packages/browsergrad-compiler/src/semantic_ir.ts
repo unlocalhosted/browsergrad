@@ -311,7 +311,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
-  | { readonly kind: "barrier"; readonly callee: string; readonly groupName?: string; readonly span: SourceSpan }
+  | { readonly kind: "barrier"; readonly callee: string; readonly scope: "subgroup" | "workgroup" | "grid"; readonly groupName?: string; readonly span: SourceSpan }
   | { readonly kind: "fence"; readonly callee: string; readonly span: SourceSpan }
   | { readonly kind: "device-launch"; readonly launch: SemanticDeviceLaunch; readonly span: SourceSpan }
   | { readonly kind: "inline-asm"; readonly statement: CudaLiteAsmStatement; readonly span: SourceSpan }
@@ -1360,15 +1360,18 @@ function lowerStatement(
         return {
           kind: "barrier",
           callee: memberBarrier.callee,
+          scope: memberBarrier.scope,
           groupName: memberBarrier.groupName,
           span: statement.span,
         };
       }
       if (expression.kind === "call" && callName !== undefined && BARRIER_CALLS.has(callName)) {
         const groupName = barrierGroupName(expression);
+        const barrierScope = semanticBarrierScope(callName, groupName, scope);
         return {
           kind: "barrier",
           callee: callName,
+          scope: barrierScope,
           ...(groupName === undefined ? {} : { groupName }),
           span: statement.span,
         };
@@ -1629,14 +1632,32 @@ function semanticSymbolForCooperativeGroup(statement: CudaLiteCooperativeGroupDe
 function semanticCooperativeMemberBarrier(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
-): { readonly callee: "cg::sync" | "grid.sync"; readonly groupName: string } | undefined {
+): { readonly callee: "cg::sync" | "grid.sync"; readonly scope: "subgroup" | "workgroup" | "grid"; readonly groupName: string } | undefined {
   if (expression.callee.kind !== "member" || expression.callee.property !== "sync" || expression.callee.object.kind !== "symbol") return undefined;
   const group = scope.get(expression.callee.object.name);
   if (group?.cooperativeGroupKind === undefined) return undefined;
   return {
     callee: group.cooperativeGroupKind === "grid" ? "grid.sync" : "cg::sync",
+    scope: group.cooperativeGroupKind === "grid"
+      ? "grid"
+      : group.cooperativeGroupKind === "tile" || group.cooperativeGroupKind === "thread"
+        ? "subgroup"
+        : "workgroup",
     groupName: group.name,
   };
+}
+
+function semanticBarrierScope(
+  callee: string,
+  groupName: string | undefined,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): "subgroup" | "workgroup" | "grid" {
+  if (callee === "__syncwarp") return "subgroup";
+  if (callee === "__syncthreads") return "workgroup";
+  const groupKind = groupName === undefined ? undefined : scope.get(groupName)?.cooperativeGroupKind;
+  if (groupKind === "grid") return "grid";
+  if (groupKind === "tile" || groupKind === "thread") return "subgroup";
+  return "workgroup";
 }
 
 function semanticStoragePointerRebaseOperation(

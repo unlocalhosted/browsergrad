@@ -178,7 +178,8 @@ import {
 
 type SemanticValue = number | ReferenceVector3 | number[];
 type SemanticControl = "fallthrough" | "return" | "break" | "continue";
-type SemanticBarrierGenerator = Generator<"barrier", SemanticControl, void>;
+type SemanticBarrierScope = "subgroup" | "workgroup" | "grid";
+type SemanticBarrierGenerator = Generator<SemanticBarrierScope, SemanticControl, void>;
 type SemanticCurandState =
   | { readonly kind: "local"; readonly name: string; readonly span: SourceSpan }
   | { readonly kind: "memory"; readonly ref: SemanticMemoryRef };
@@ -243,6 +244,7 @@ export function runCompiledKernelSemanticReference(
   const gridDim = referenceVectorFromTuple(launch.gridDim);
   const scalars = input.scalars ?? {};
   const vectors = input.vectors ?? {};
+  const contextBlocks: SemanticReferenceContext[][] = [];
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
@@ -285,14 +287,17 @@ export function runCompiledKernelSemanticReference(
             }
           }
         }
-        const barrierFunctions = semanticBarrierFunctionNames(compiled.kernelIr);
-        if (semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) {
-          runSemanticCollectiveOperations(compiled.kernelIr.operations, blockContexts);
-        } else if (semanticOperationsContainBarrier(compiled.kernelIr.operations, barrierFunctions)) {
-          runSemanticBarrierScheduler(compiled.kernelIr.operations, blockContexts, barrierFunctions);
-        } else for (const context of blockContexts) execSemanticOperations(compiled.kernelIr.operations, context);
+        contextBlocks.push(blockContexts);
       }
     }
+  }
+  const barrierFunctions = semanticBarrierFunctionNames(compiled.kernelIr);
+  if (semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) {
+    for (const blockContexts of contextBlocks) runSemanticCollectiveOperations(compiled.kernelIr.operations, blockContexts);
+  } else if (semanticOperationsContainBarrier(compiled.kernelIr.operations, barrierFunctions)) {
+    runSemanticBarrierScheduler(compiled.kernelIr.operations, contextBlocks.flat(), barrierFunctions);
+  } else {
+    for (const context of contextBlocks.flat()) execSemanticOperations(compiled.kernelIr.operations, context);
   }
 
   const readback = input.readback ?? compiled.kernelIr.params
@@ -1464,14 +1469,14 @@ function* execSemanticBarrierOperations(
         if (operation.value) context.returnValue = evalSemanticExpression(operation.value, context);
         return "return";
       case "barrier":
-        yield "barrier";
+        yield operation.scope;
         break;
       case "inline-asm":
         if (classifyInlineAsm(operation.statement.template)?.kind !== "bar-sync") {
           execSemanticOperations([operation], context);
           break;
         }
-        yield "barrier";
+        yield "workgroup";
         break;
       case "break":
         return "break";
@@ -5040,26 +5045,49 @@ function runSemanticBarrierScheduler(
 ): void {
   const generators = contexts.map((context) => execSemanticBarrierOperations(operations, context, barrierFunctions));
   const active = generators.map(() => true);
+  const waiting: Array<SemanticBarrierScope | undefined> = generators.map(() => undefined);
   while (active.some(Boolean)) {
-    let activeBefore = 0;
-    let barriers = 0;
+    let advanced = false;
     for (const [index, generator] of generators.entries()) {
-      if (!active[index]) continue;
-      activeBefore++;
+      if (!active[index] || waiting[index] !== undefined) continue;
+      advanced = true;
       const next = generator.next();
       if (next.done) {
         active[index] = false;
         if (next.value === "break" || next.value === "continue") {
           throw semanticReferenceError(`semantic reference unexpected ${next.value} across shared-memory phase`, contexts[index]!.compiled.kernelIr.span);
         }
-      } else {
-        barriers++;
+      } else waiting[index] = next.value;
+    }
+
+    const activeIndices = active.flatMap((isActive, index) => isActive ? [index] : []);
+    if (activeIndices.length === 0) break;
+    let released = false;
+    for (const scope of ["grid", "workgroup", "subgroup"] as const) {
+      const groups = new Map<string, number[]>();
+      for (const index of activeIndices) {
+        const key = semanticBarrierGroupKey(contexts[index]!, scope);
+        const members = groups.get(key) ?? [];
+        members.push(index);
+        groups.set(key, members);
+      }
+      for (const members of groups.values()) {
+        if (!members.every((index) => waiting[index] === scope)) continue;
+        for (const index of members) waiting[index] = undefined;
+        released = true;
       }
     }
-    if (barriers > 0 && barriers !== activeBefore) {
-      throw semanticReferenceError("semantic reference barrier mismatch: not every active thread reached the same barrier", contexts[0]?.compiled.kernelIr.span ?? operations[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 });
-    }
+    if (advanced || released) continue;
+    throw semanticReferenceError("semantic reference barrier mismatch: active threads reached incompatible barrier scopes", contexts[0]?.compiled.kernelIr.span ?? operations[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 });
   }
+}
+
+function semanticBarrierGroupKey(context: SemanticReferenceContext, scope: SemanticBarrierScope): string {
+  if (scope === "grid") return "grid";
+  const block = `${context.blockIdx.x},${context.blockIdx.y},${context.blockIdx.z}`;
+  if (scope === "workgroup") return block;
+  const linearThread = context.threadIdx.x + context.blockDim.x * (context.threadIdx.y + context.blockDim.y * context.threadIdx.z);
+  return `${block}:subgroup:${Math.floor(linearThread / 32)}`;
 }
 
 function runSemanticCollectiveOperations(
