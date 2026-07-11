@@ -1886,6 +1886,8 @@ function lowerExpression(
       };
     }
     case "index": {
+      const localScalar = directLocalScalarPointerIndexExpression(expression, scope);
+      if (localScalar) return localScalar;
       const aliased = localPointerAliasIndexExpression(expression, scope);
       if (aliased) return aliased;
       const target = lowerExpression(expression.target, scope);
@@ -2057,6 +2059,24 @@ function lowerExpression(
       return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
     }
   }
+}
+
+function directLocalScalarPointerIndexExpression(
+  expression: Extract<CudaLiteExpression, { readonly kind: "index" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  if (
+    staticNumberValue(lowerExpression(expression.index, scope)) !== 0 ||
+    expression.target.kind !== "cast" || !expression.target.pointer ||
+    expression.target.expression.kind !== "unary" || expression.target.expression.operator !== "&" ||
+    expression.target.expression.argument.kind !== "identifier"
+  ) return undefined;
+  const symbol = scope.get(expression.target.expression.argument.name);
+  if (
+    !symbol || symbol.kind !== "local" || symbol.pointer || symbol.dimensions.length !== 0 ||
+    symbol.valueType !== expression.target.valueType
+  ) return undefined;
+  return semanticSymbolExpression(symbol, expression.span);
 }
 
 function semanticCooperativeShuffleCall(

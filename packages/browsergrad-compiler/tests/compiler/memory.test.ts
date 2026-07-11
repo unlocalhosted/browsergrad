@@ -4012,7 +4012,7 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("= value.x;");
+      expect(compiled.wgsl).toContain("let bg_vector_store_value_out_");
       expect(compiled.wgsl).not.toMatch(/&value\[0\]\.[xyzw]/u);
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
     });
@@ -4205,6 +4205,24 @@ __global__ void sharedHelperScoped(float *out) {
       expect([...result.buffers.sum as Float32Array]).toEqual([10]);
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([...result.buffers.out as Uint32Array]);
       expect([...semanticResult.buffers.sum as Float32Array]).toEqual([10]);
+    });
+
+  it("folds same-type pointer indexing over local scalar addresses", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void scalar_address_identity(const float4* input, float4* output) {
+    float4 value = input[0];
+    output[0] = reinterpret_cast<float4*>(&value)[0];
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("let bg_vector_store_value_output_");
+      expect([...result.buffers.output as Float32Array]).toEqual([1, 2, 3, 4]);
     });
 
   it("packs half pointer views over shared byte storage into 16-bit lanes", () => {

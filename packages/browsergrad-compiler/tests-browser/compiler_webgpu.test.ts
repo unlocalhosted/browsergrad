@@ -3896,6 +3896,22 @@ __global__ void vectorCompound(float4 *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs same-type pointer indexing over local vector scalars on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void localVectorIdentity(const float4* input, float4* output) {
+  float4 value = input[0];
+  output[0] = reinterpret_cast<float4*>(&value)[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.output as Float32Array]).toEqual([...expected.buffers.output as Float32Array]);
+  });
+
   it("runs float4 min/max overloads through semantic WGSL on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
