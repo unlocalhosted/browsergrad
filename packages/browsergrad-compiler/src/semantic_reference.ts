@@ -769,7 +769,20 @@ function semanticReferenceCooperativeGroupCallSupported(
       expression.callee.property === "meta_group_rank" ||
       expression.callee.property === "meta_group_size"))) return false;
   const group = semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name);
-  return group !== undefined && !group.partitioned && group.kind !== "binary" && group.kind !== "coalesced";
+  return group !== undefined && group.kind !== "coalesced";
+}
+
+function semanticReferenceCooperativeReduceCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.callee.kind !== "symbol" ||
+    (expression.callee.name !== "cg::reduce" && expression.callee.name !== "cooperative_groups::reduce")) return false;
+  const [groupArg, valueArg, operationArg] = expression.args;
+  if (groupArg?.kind !== "symbol" || !valueArg || operationArg?.kind !== "call" ||
+    operationArg.callee.kind !== "symbol" || !operationArg.callee.name.endsWith("::plus")) return false;
+  const group = semanticCooperativeGroupInfo(compiled.kernelIr, groupArg.name);
+  return group?.partitioned === true && semanticReferenceExpressionSupported(valueArg, "scalar", compiled);
 }
 
 function semanticReferenceFunctionArgSupported(
@@ -1099,6 +1112,7 @@ function semanticReferenceExpressionSupported(
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return compiled !== undefined && semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
+        compiled !== undefined && semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceAtomicCallSupported(expression, compiled) ||
         (semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceGeneratedRandomCallSupported(expression)) &&
@@ -1179,8 +1193,10 @@ function semanticReferenceExpressionContainsUnsupportedCall(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (expression.kind === "call") {
+    if (semanticReferenceCooperativeReduceCallSupported(expression, compiled)) return false;
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
       semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
+      semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
       semanticReferenceCurandCallSupported(expression, compiled) ||
       semanticReferenceGeneratedRandomCallSupported(expression) ||
       semanticReferenceFunctionCallSupported(expression, compiled) ||
@@ -1311,7 +1327,9 @@ function execSemanticOperations(
   for (const operation of operations) {
     switch (operation.kind) {
       case "dim3-declare":
+        break;
       case "cooperative-group-declare":
+        recordSemanticPartitionMembership(operation.declaration, context);
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") break;
@@ -2313,6 +2331,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     }
     case "call":
       if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return evalSemanticCooperativeGroupCall(expression, context);
+      if (semanticReferenceCooperativeReduceCallSupported(expression, context.compiled)) return evalSemanticCooperativeReduceCall(expression, context);
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
       if (semanticReferenceCurandCallSupported(expression, context.compiled)) return evalSemanticCurandCall(expression, context);
       if (semanticReferenceGeneratedRandomCallSupported(expression)) return evalSemanticGeneratedRandomCall(expression, context);
@@ -3750,6 +3769,18 @@ function evalSemanticCooperativeGroupCall(
   return semanticReferenceCooperativeGroupValue(expression.callee.object.name, expression.callee.property, context);
 }
 
+function evalSemanticCooperativeReduceCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  const [groupArg, valueArg] = expression.args;
+  if (groupArg?.kind !== "symbol" || !valueArg) {
+    throw semanticReferenceError("semantic cooperative reduce requires group and value", expression.span);
+  }
+  return semanticReferenceCooperativeContexts(groupArg.name, context)
+    .reduce((sum, peer) => sum + evalNumber(valueArg, peer), 0);
+}
+
 function semanticReferenceCooperativeGroupValue(
   name: string,
   property: "thread_rank" | "size" | "meta_group_rank" | "meta_group_size",
@@ -3766,6 +3797,11 @@ function semanticReferenceCooperativeGroupValue(
     : semanticCooperativeGroupSizeParamName(name);
   const local = context.locals.get(localName);
   if (typeof local === "number") return local;
+  if (group.partitioned && (property === "thread_rank" || property === "size")) {
+    const peers = semanticReferenceCooperativeContexts(name, context);
+    if (property === "size") return peers.length;
+    return peers.findIndex((peer) => semanticLocalLinearRank(peer) === localRank);
+  }
   if (property === "thread_rank") {
     if (group.kind === "grid") {
       const blockRank = context.blockIdx.x + context.gridDim.x * (context.blockIdx.y + context.gridDim.y * context.blockIdx.z);
@@ -3777,6 +3813,46 @@ function semanticReferenceCooperativeGroupValue(
   if (group.kind === "grid") return workgroupSize * context.gridDim.x * context.gridDim.y * context.gridDim.z;
   if (group.kind === "tile") return group.tileSize ?? 32;
   return workgroupSize;
+}
+
+function semanticReferenceCooperativeContexts(
+  name: string,
+  context: SemanticReferenceContext,
+): readonly SemanticReferenceContext[] {
+  const group = semanticCooperativeGroupInfo(context.compiled.kernelIr, name);
+  if (!group) return [];
+  const parent = group.partitionParent
+    ? semanticCooperativeGroupInfo(context.compiled.kernelIr, group.partitionParent)
+    : undefined;
+  const tileSize = group.tileSize ?? parent?.tileSize ?? 32;
+  const rank = semanticLocalLinearRank(context);
+  const base = Math.floor(rank / tileSize) * tileSize;
+  const peers = context.blockContexts.filter((peer) => {
+    const peerRank = semanticLocalLinearRank(peer);
+    return peerRank >= base && peerRank < base + tileSize;
+  });
+  if (!group.partitioned || !group.partitionPredicate) return peers;
+  const membershipName = semanticPartitionMembershipName(name);
+  const selected = context.locals.get(membershipName);
+  if (typeof selected !== "number") {
+    throw semanticReferenceError(`partition membership for '${name}' was not initialized`, context.compiled.kernelIr.span);
+  }
+  return peers.filter((peer) => peer.locals.get(membershipName) === selected);
+}
+
+function recordSemanticPartitionMembership(
+  declaration: Extract<SemanticKernelIrOperation, { readonly kind: "cooperative-group-declare" }>["declaration"],
+  context: SemanticReferenceContext,
+): void {
+  if (!declaration.partitionPredicate) return;
+  context.locals.set(
+    semanticPartitionMembershipName(declaration.name),
+    truthy(evalNumber(declaration.partitionPredicate, context)) ? 1 : 0,
+  );
+}
+
+function semanticPartitionMembershipName(name: string): string {
+  return `${name}__bg_partition_membership`;
 }
 
 function evalSemanticVectorConstructor(
@@ -5147,7 +5223,13 @@ function runSemanticCollectiveOperations(
     const current = active();
     if (current.length === 0) break;
     if (operation.kind === "branch") {
-      const consequent = current.filter((context) => truthy(evalNumber(operation.condition, context)));
+      for (const context of current) context.activeCollectiveContexts = current;
+      let consequent: SemanticReferenceContext[];
+      try {
+        consequent = current.filter((context) => truthy(evalNumber(operation.condition, context)));
+      } finally {
+        for (const context of current) delete context.activeCollectiveContexts;
+      }
       const alternate = current.filter((context) => !consequent.includes(context));
       mergeSemanticCollectiveControls(controls, runSemanticCollectiveScopedOperations(operation.consequent, consequent));
       mergeSemanticCollectiveControls(controls, runSemanticCollectiveScopedOperations(operation.alternate, alternate));
@@ -5276,7 +5358,10 @@ function semanticOperationsContainSubgroupCall(operations: readonly SemanticKern
 
 function semanticExpressionContainsSubgroupCall(expression: SemanticExpression): boolean {
   if (expression.kind === "call") {
-    if (expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" && SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return true;
+    if (expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" &&
+      (SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) ||
+        expression.callee.name === "cg::reduce" ||
+        expression.callee.name === "cooperative_groups::reduce")) return true;
     return semanticExpressionContainsSubgroupCall(expression.callee) || expression.args.some(semanticExpressionContainsSubgroupCall);
   }
   if (expression.kind === "member") return semanticExpressionContainsSubgroupCall(expression.object);

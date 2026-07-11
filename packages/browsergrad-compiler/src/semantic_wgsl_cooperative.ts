@@ -19,6 +19,7 @@ export interface SemanticCooperativeReduceHelper {
   readonly valueType: Exclude<ReturnType<typeof semanticExpressionValueType>, undefined | "void">;
   readonly tileSize: number;
   readonly masked: boolean;
+  readonly partitioned: boolean;
   readonly operation: "add" | "min" | "max";
 }
 
@@ -34,7 +35,7 @@ export function semanticWgslCooperativeGroupCallSupported(
     expression.callee.property !== "meta_group_size"
   ) return false;
   const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
-  return group !== undefined && !group.partitioned && group.kind !== "binary" && group.kind !== "coalesced";
+  return group !== undefined && group.kind !== "coalesced";
 }
 
 export function semanticWgslCooperativeReduceCallSupported(
@@ -51,6 +52,7 @@ export function emitSemanticCooperativeGroupCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
   activeFunction?: string,
+  partitionScratchName?: string,
 ): string | undefined {
   if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return undefined;
   const groupName = expression.callee.object.name;
@@ -60,6 +62,24 @@ export function emitSemanticCooperativeGroupCall(
     ? undefined
     : ir.functions.find((fn) => fn.name === activeFunction)?.params
       .find((param) => param.name === groupName && param.cooperativeGroupKind !== undefined);
+  if (group.partitioned && partitionScratchName !== undefined) {
+    const tileSize = group.tileSize ?? 32;
+    const workgroupSize = semanticCooperativeWorkgroupSize(ir);
+    const lane = `((${semanticCooperativeLocalLinearRank(ir)}) % ${tileSize}u)`;
+    const base = `((${semanticCooperativeLocalLinearRank(ir)}) - ${lane})`;
+    const terms = Array.from({ length: tileSize }, (_, index) =>
+      `select(0u, ${partitionScratchName}[${base} + ${index}u], ${index}u < ${lane} && (${base} + ${index}u) < ${workgroupSize}u)`);
+    const sizeTerms = Array.from({ length: tileSize }, (_, index) =>
+      `select(0u, ${partitionScratchName}[${base} + ${index}u], (${base} + ${index}u) < ${workgroupSize}u)`);
+    if (expression.callee.property === "thread_rank") {
+      const rank = terms.length === 0 ? "0u" : `(${terms.join(" + ")})`;
+      return expression.valueType === "uint" ? rank : `i32(${rank})`;
+    }
+    if (expression.callee.property === "size") {
+      const size = sizeTerms.length === 0 ? "0u" : `(${sizeTerms.join(" + ")})`;
+      return expression.valueType === "uint" ? size : `i32(${size})`;
+    }
+  }
   if (expression.callee.property === "thread_rank") {
     if (groupParam) return semanticCooperativeGroupRankParamName(groupParam.name);
     const rank = group.kind === "grid"
@@ -124,6 +144,7 @@ export function semanticCooperativeReduceHelperFor(
       valueType,
       tileSize: 32,
       masked,
+      partitioned: false,
       operation: logicalWarpOperation,
     };
   }
@@ -131,17 +152,19 @@ export function semanticCooperativeReduceHelperFor(
   const [groupArg, valueArg, operationArg] = expression.args;
   if (!groupArg || groupArg.kind !== "symbol" || !valueArg || !isPlusOperation(operationArg)) return undefined;
   const group = semanticCooperativeGroupInfo(ir, groupArg.name);
-  if (!group || (group.kind !== "tile" && group.kind !== "thread")) return undefined;
+  if (!group || (group.kind !== "tile" && group.kind !== "thread" && group.kind !== "binary")) return undefined;
   const valueType = semanticExpressionValueType(valueArg);
   if (valueType !== "float" && valueType !== "double" && valueType !== "half" && valueType !== "int" && valueType !== "uint") return undefined;
-  const tileSize = group.tileSize ?? 32;
+  const parent = group.partitionParent ? semanticCooperativeGroupInfo(ir, group.partitionParent) : undefined;
+  const tileSize = group.tileSize ?? parent?.tileSize ?? 32;
   const typeName = wgslValueScalar(valueType).replace(/[^A-Za-z0-9_]/gu, "_");
   return {
     name: `bg_semantic_cg_reduce_${typeName}_${tileSize}`,
     scratchName: `bg_semantic_cg_reduce_${typeName}_${tileSize}_scratch`,
     valueType,
     tileSize,
-    masked: false,
+    masked: group.partitioned === true || group.kind === "binary",
+    partitioned: group.partitioned === true || group.kind === "binary",
     operation: "add",
   };
 }

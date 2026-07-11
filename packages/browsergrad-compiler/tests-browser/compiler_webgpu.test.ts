@@ -4910,6 +4910,41 @@ __global__ void topologyAtomic(int *out) {
     expect([...actual.buffers.out as Int32Array]).toEqual([4]);
   });
 
+  it("runs divergent binary-partition reductions through uniform semantic WebGPU collectives", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void partitionSums(const int *input, int *sums, int *counts) {
+  cg::thread_block block = cg::this_thread_block();
+  auto tile = cg::tiled_partition<4>(block);
+  int value = input[threadIdx.x];
+  auto part = cg::binary_partition(tile, value & 1);
+  if (value & 1) {
+    int sum = cg::reduce(part, value, cg::plus<int>());
+    if (part.thread_rank() == 0) { atomicAdd(&sums[0], sum); atomicAdd(&counts[0], part.size()); }
+  } else {
+    int sum = cg::reduce(part, value, cg::plus<int>());
+    if (part.thread_rank() == 0) { atomicAdd(&sums[1], sum); atomicAdd(&counts[1], part.size()); }
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: {
+        input: new Int32Array([1, 2, 3, 4]),
+        sums: new Int32Array(2),
+        counts: new Int32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.kernelIr.requiredFeatures).not.toContain("subgroups");
+    expect([...actual.buffers.sums as Int32Array]).toEqual([...expected.buffers.sums as Int32Array]);
+    expect([...actual.buffers.counts as Int32Array]).toEqual([...expected.buffers.counts as Int32Array]);
+    expect([...actual.buffers.sums as Int32Array]).toEqual([4, 6]);
+    expect([...actual.buffers.counts as Int32Array]).toEqual([2, 2]);
+  });
+
   it("runs nested helpers over helper-local dynamic shared memory on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

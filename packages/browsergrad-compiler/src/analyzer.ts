@@ -629,7 +629,6 @@ export function analyzeCudaLite(
           }
           validateDeclaredSymbolName(statement.name, statement.span, diagnostics);
           if (statement.partitionPredicate) {
-            activeRequiredFeatures.add("subgroups");
             validateScalarOperand(walkExpression(statement.partitionPredicate, scope), statement.partitionPredicate.span, diagnostics);
           }
           const parent = statement.partitionParent ? lookupSymbol(statement.partitionParent, scope, statement.span) : undefined;

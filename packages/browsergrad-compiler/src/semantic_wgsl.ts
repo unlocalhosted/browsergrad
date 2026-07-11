@@ -214,6 +214,7 @@ import {
   semanticWgslCooperativeReduceCallSupported,
 } from "./semantic_wgsl_cooperative.js";
 import {
+  semanticCooperativeGroupInfo,
   semanticCooperativeGroupRankParamName,
   semanticCooperativeGroupSizeParamName,
 } from "./semantic_cooperative_groups.js";
@@ -383,6 +384,11 @@ export function emitSemanticKernelIrWgsl(
   const atomicDeviceGlobals = semanticAtomicDeviceGlobalNames(ir.operations);
   const atomicShared = semanticAtomicSharedNames(ir.operations, ir.functions);
   const cooperativeReduceHelpers = semanticCooperativeReduceHelpers(ir);
+  const ballotHelpers = [...semanticBallotHelpers(ir)];
+  if (cooperativeReduceHelpers.some((helper) => helper.partitioned) &&
+    !ballotHelpers.some((helper) => helper.name === semanticBallotHelper().name)) {
+    ballotHelpers.push(semanticBallotHelper());
+  }
   const f16Mode = effectiveSemanticF16Mode(ir, options);
   const bindings: WgslKernelBindingInput[] = ir.params
     .filter((param) => param.addressSpace === "storage")
@@ -518,7 +524,7 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticBitwiseReduceHelpers(ir)) {
     lines.push(`var<workgroup> ${semanticBitwiseReduceScratchName(helper)}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
   }
-  for (const helper of semanticBallotHelpers(ir)) {
+  for (const helper of ballotHelpers) {
     lines.push(`var<workgroup> ${helper.scratchName}: array<u32, ${semanticWorkgroupSize(ir)}>;`);
   }
   for (const helper of cooperativeReduceHelpers) {
@@ -562,7 +568,7 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticBitwiseReduceHelpers(ir)) {
     lines.push("", ...emitSemanticBitwiseReduceHelper(helper, ir));
   }
-  for (const helper of semanticBallotHelpers(ir)) {
+  for (const helper of ballotHelpers) {
     lines.push("", ...emitSemanticBallotHelper(helper, ir));
   }
   for (const helper of cooperativeReduceHelpers) {
@@ -634,6 +640,7 @@ function unsupportedSemanticWgslOperation(
   operations: readonly SemanticKernelIrOperation[],
   ir: SemanticKernelIrModule,
   allowReturnValue = false,
+  predicated = false,
 ): SemanticKernelIrOperation | undefined {
   for (const operation of operations) {
     switch (operation.kind) {
@@ -641,6 +648,7 @@ function unsupportedSemanticWgslOperation(
       case "cooperative-group-declare":
         break;
       case "declare":
+        if (operation.init && semanticExpressionContainsPartitionedReduce(operation.init, ir) && !predicated) return operation;
         if (operation.target.addressSpace === "shared") {
           if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
           break;
@@ -699,14 +707,14 @@ function unsupportedSemanticWgslOperation(
           (!semanticPredicatedOperationsSupported(operation.consequent) || !semanticPredicatedOperationsSupported(operation.alternate))
         ) return operation;
         {
-          const unsupported = unsupportedSemanticWgslOperation(operation.consequent, ir, allowReturnValue) ??
-          unsupportedSemanticWgslOperation(operation.alternate, ir, allowReturnValue);
+          const unsupported = unsupportedSemanticWgslOperation(operation.consequent, ir, allowReturnValue, true) ??
+          unsupportedSemanticWgslOperation(operation.alternate, ir, allowReturnValue, true);
           if (unsupported) return unsupported;
         }
         break;
       case "block":
         {
-          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue);
+          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue, predicated);
           if (unsupported) return unsupported;
         }
         break;
@@ -715,7 +723,7 @@ function unsupportedSemanticWgslOperation(
         if (operation.condition && !semanticWgslConditionSupported(operation.condition, ir)) return operation;
         if (operation.update && !semanticWgslExpressionSupported(operation.update, "scalar", ir)) return operation;
         {
-          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue);
+          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue, predicated);
           if (unsupported) return unsupported;
         }
         break;
@@ -1997,6 +2005,8 @@ function emitSemanticOperation(
         return [
           `${prefix}{`,
           ...emitSemanticPredicatedOperations(operation.consequent, condition, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
+          `${prefix}}`,
+          `${prefix}{`,
           ...emitSemanticPredicatedOperations(operation.alternate, `!(${condition})`, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
           `${prefix}}`,
         ];
@@ -2061,8 +2071,12 @@ function emitSemanticPredicatedOperations(
   for (const operation of operations) {
     if (operation.kind === "branch") {
       const condition = emitTruthiness(operation.condition, ir, names, options);
-      lines.push(...emitSemanticPredicatedOperations(operation.consequent, `(${predicate}) && (${condition})`, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
-      lines.push(...emitSemanticPredicatedOperations(operation.alternate, `(${predicate}) && !(${condition})`, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+      lines.push(`${prefix}{`);
+      lines.push(...emitSemanticPredicatedOperations(operation.consequent, `(${predicate}) && (${condition})`, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+      lines.push(`${prefix}}`);
+      lines.push(`${prefix}{`);
+      lines.push(...emitSemanticPredicatedOperations(operation.alternate, `(${predicate}) && !(${condition})`, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+      lines.push(`${prefix}}`);
       continue;
     }
     if (operation.kind === "loop" && semanticOperationsContainWorkgroupCollective(operation.body)) {
@@ -2221,8 +2235,21 @@ function semanticExpressionContainsWorkgroupCollective(expression: SemanticExpre
       cudaVoteOpForCall(expression.callee.name) === "any" ||
       cudaVoteOpForCall(expression.callee.name) === "all" ||
       cudaArithmeticReduceOpForCall(expression.callee.name) !== undefined ||
-      expression.callee.name === "__activemask")) return true;
+      expression.callee.name === "__activemask" ||
+      expression.callee.name === "cg::reduce" ||
+      expression.callee.name === "cooperative_groups::reduce")) return true;
   return semanticExpressionChildren(expression).some(semanticExpressionContainsWorkgroupCollective);
+}
+
+function semanticExpressionContainsPartitionedReduce(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (expression.kind === "call" && expression.callee.kind === "symbol" &&
+    (expression.callee.name === "cg::reduce" || expression.callee.name === "cooperative_groups::reduce") &&
+    expression.args[0]?.kind === "symbol" &&
+    semanticCooperativeGroupInfo(ir, expression.args[0].name)?.partitioned === true) return true;
+  return semanticExpressionChildren(expression).some((child) => semanticExpressionContainsPartitionedReduce(child, ir));
 }
 
 function emitSemanticSurfaceReadStore(
@@ -3526,16 +3553,30 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
       if (semanticWgslCooperativeGroupCallSupported(expression, ir)) {
-        const emitted = emitSemanticCooperativeGroupCall(expression, ir, options.activeFunction);
+        const emitted = emitSemanticCooperativeGroupCall(
+          expression,
+          ir,
+          options.activeFunction,
+          semanticBallotHelper().scratchName,
+        );
         if (emitted !== undefined) return emitted;
       }
       if (semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir))) {
         const helper = semanticCooperativeReduceHelperFor(ir, expression);
         const value = semanticCooperativeReduceValue(expression);
         if (helper && value) {
-          const mask = helper.masked && expression.args[0]
-            ? emitSemanticExpressionAs(expression.args[0], ir, names, "u32", options, textureSpecializations)
+          const partitionGroup = helper.partitioned && expression.args[0]?.kind === "symbol"
+            ? semanticCooperativeGroupInfo(ir, expression.args[0].name)
             : undefined;
+          const partitionPredicate = options.activeCollectivePredicate ??
+            (partitionGroup?.partitionPredicate === undefined
+              ? undefined
+              : emitTruthiness(partitionGroup.partitionPredicate, ir, names, options));
+          const mask = helper.partitioned && partitionPredicate !== undefined
+            ? `${semanticBallotHelper().name}(${partitionPredicate}, 0xffffffffu, local_id)`
+            : helper.masked && expression.args[0]
+              ? emitSemanticExpressionAs(expression.args[0], ir, names, "u32", options, textureSpecializations)
+              : undefined;
           const emitted = emitSemanticCooperativeReduceCall(
             expression,
             ir,

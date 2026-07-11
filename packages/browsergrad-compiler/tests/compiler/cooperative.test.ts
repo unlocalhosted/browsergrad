@@ -1606,7 +1606,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         operation.kind === "cooperative-group-declare" && operation.declaration.name === "part"
       );
 
-      expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
       expect(partition).toMatchObject({
         kind: "cooperative-group-declare",
         declaration: {
@@ -1618,11 +1618,40 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
           },
         },
       });
-      expect(compiled.wgsl).toContain("subgroupBallot");
+      expect(compiled.wgsl).toContain("workgroupBarrier");
       expect(compiled.wgsl).toContain("countOneBits");
       expect(compiled.wgsl).toContain("bg_warp_partition_reduce_sum_int_1(value");
       expect(compiled.wgsl).not.toContain("!= 0) != 0");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
+    });
+
+  it("runs divergent binary-partition reductions through uniform semantic collectives", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void partitionSums(const int *input, int *sums, int *counts) {
+    cg::thread_block block = cg::this_thread_block();
+    auto tile = cg::tiled_partition<4>(block);
+    int value = input[threadIdx.x];
+    auto part = cg::binary_partition(tile, value & 1);
+    if (value & 1) {
+      int sum = cg::reduce(part, value, cg::plus<int>());
+      if (part.thread_rank() == 0) { atomicAdd(&sums[0], sum); atomicAdd(&counts[0], part.size()); }
+    } else {
+      int sum = cg::reduce(part, value, cg::plus<int>());
+      if (part.thread_rank() == 0) { atomicAdd(&sums[1], sum); atomicAdd(&counts[1], part.size()); }
+    }
+  }`, { workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { input: new Int32Array([1, 2, 3, 4]), sums: new Int32Array(2), counts: new Int32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.requiredFeatures).not.toContain("subgroups");
+      expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
+      expect([...result.buffers.sums as Int32Array]).toEqual([4, 6]);
+      expect([...result.buffers.counts as Int32Array]).toEqual([2, 2]);
     });
 
   it("keeps cooperative topology values typed inside semantic atomic arguments", () => {
