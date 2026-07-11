@@ -812,6 +812,35 @@ __global__ void asyncCopy(const float* input, float* output) {
     expect([...actual.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
+  it("runs cp.async numeric shared byte addresses through real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void asyncCopyBytes(const float* input, float* output) {
+  extern __shared__ float smem[];
+  float* tile = smem + 4;
+  uint smem_base = __cvta_generic_to_shared(tile);
+  uint smem_dst = smem_base + threadIdx.x * 8;
+  CP_ASYNC_CG(smem_dst, &input[threadIdx.x * 2], 8);
+  CP_ASYNC_COMMIT_GROUP();
+  CP_ASYNC_WAIT_GROUP(0);
+  __syncthreads();
+  output[threadIdx.x] = float(tile[threadIdx.x * 2]) + float(tile[threadIdx.x * 2 + 1]);
+}`, { workgroupSize: [2, 1, 1], dynamicSharedMemory: { smem: 8 } });
+    const input = {
+      buffers: {
+        input: new Float32Array([1, 2, 3, 4]),
+        output: new Float32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.output as Float32Array]).toEqual([...expected.buffers.output as Float32Array]);
+    expect([...actual.buffers.output as Float32Array]).toEqual([3, 7]);
+  });
+
   it("runs u32-backed bool pointer storage through real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
@@ -5010,7 +5039,7 @@ __global__ void dynamic_shared_alias(uint* out) {
 
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
-    expect([...actual.buffers.out as Uint32Array]).toEqual([2, 7]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([8, 7]);
   });
 
   it("runs retirement-count reductions as host WebGPU phases", async () => {

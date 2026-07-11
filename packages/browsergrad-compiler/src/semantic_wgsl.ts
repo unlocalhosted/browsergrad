@@ -3580,7 +3580,9 @@ function emitSemanticExpression(
       if (expression.callee.kind === "symbol" && expression.callee.name === "__cvta_generic_to_shared") {
         const ref = semanticWgslSharedAddressCallRef(expression);
         if (!ref) throw semanticWgslError("__cvta_generic_to_shared requires modeled shared memory", expression.span);
-        return emitSemanticSharedPointerArgBaseIndex(ref, ir, names);
+        const elementBytes = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
+        const index = emitSemanticSharedPointerArgBaseIndex(ref, ir, names);
+        return elementBytes === 1 ? index : `(${index} * ${elementBytes}u)`;
       }
       if (semanticWgslCooperativeGroupCallSupported(expression, ir)) {
         const emitted = emitSemanticCooperativeGroupCall(

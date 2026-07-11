@@ -5675,11 +5675,11 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect([...result.buffers.out as Uint32Array]).toEqual([5, 4, 3]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([5, 16, 3]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
-      expect(compiled.wgsl).toContain("out[1u] = u32(4u);");
+      expect(compiled.wgsl).toContain("out[1u] = u32((4u * 4u));");
       expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
     });
 
@@ -5698,9 +5698,9 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect([...result.buffers.out as Uint32Array]).toEqual([0, 23]);
-      expect(compiled.wgsl).toContain("out[0] = u32(u32(0u))");
-      expect(compiled.wgsl).toContain("out[1] = u32(u32(((u32(1) * 12u) + (u32(2) * 4u) + u32(3))))");
+      expect([...result.buffers.out as Uint32Array]).toEqual([0, 92]);
+      expect(compiled.wgsl).toContain("out[0] = u32(u32((0u) * 4u));");
+      expect(compiled.wgsl).toContain("out[1] = u32(u32((((u32(1) * 12u) + (u32(2) * 4u) + u32(3))) * 4u));");
     });
 
   it("resolves dynamic shared-memory pointer aliases into semantic memory refs", () => {
@@ -5720,7 +5720,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
-      expect([...result.buffers.out as Uint32Array]).toEqual([2, 7]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([8, 7]);
       expect(compiled.kernelIr.operations.some((operation) =>
         operation.kind === "declare" && operation.target.name === "tile")).toBe(false);
       expect(compiled.wgsl).toContain("smem[2u] = 7.0;");

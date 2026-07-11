@@ -3570,7 +3570,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "__cvta_generic_to_shared") {
     const target = expression.args[0];
     if (!target) throw compilerFailure("__cvta_generic_to_shared expects pointer argument");
-    return lvalueStorageIndex(resolvePointerArgument(target, context), context);
+    return lvalueByteOffset(resolvePointerArgument(target, context), context);
   }
   if (isAddressSpacePredicateCall(name)) {
     const target = expression.args[0];

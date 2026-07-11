@@ -6340,11 +6340,12 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (name === "__cvta_generic_to_shared") {
     const target = expression.args[0];
     if (!target) return "0u";
+    const elementBytes = wgslElementByteSize(devicePointerValueTypeForExpression(target, context));
     const sharedIndex = emitSharedAddressIndex(target, context.ir, (expression) => emitExpression(expression, context));
-    if (sharedIndex) return `u32(${sharedIndex})`;
+    if (sharedIndex) return elementBytes === 1 ? `u32(${sharedIndex})` : `u32((${sharedIndex}) * ${elementBytes}u)`;
     const parts = devicePointerArgumentParts(target, context);
     if (!parts) throw featureError("unsupported-device-pointer-param", "__cvta_generic_to_shared expects a storage or shared pointer", target.span);
-    return `u32(${parts.base})`;
+    return elementBytes === 1 ? `u32(${parts.base})` : `u32((${parts.base}) * ${elementBytes}u)`;
   }
   if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return "0";
   if (isCudaBarrierCallName(name)) return "workgroupBarrier()";

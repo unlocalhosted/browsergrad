@@ -2160,15 +2160,11 @@ function semanticCpAsyncOperation(
   if (!isCudaCpAsyncCopyCall(callee)) return undefined;
   const [targetSource, sourceSource, byteCountSource] = expression.args;
   if (!targetSource || !sourceSource) return undefined;
-  const target = semanticPointerArgumentMemoryRef(targetSource, scope);
   const source = semanticPointerArgumentMemoryRef(sourceSource, scope);
   const byteCount = byteCountSource === undefined ? undefined : staticNumberValue(lowerExpression(byteCountSource, scope));
   if (
-    !target ||
     !source ||
-    target.valueType === undefined ||
-    target.valueType !== source.valueType ||
-    target.fields.length > 0 ||
+    source.valueType === undefined ||
     source.fields.length > 0 ||
     byteCount === undefined ||
     !Number.isInteger(byteCount) ||
@@ -2178,7 +2174,107 @@ function semanticCpAsyncOperation(
   if (elementBytes <= 0 || byteCount % elementBytes !== 0) return undefined;
   const elements = byteCount / elementBytes;
   if (elements < 1 || elements > 16) return undefined;
+  const pointerTarget = semanticPointerArgumentMemoryRef(targetSource, scope);
+  const target = pointerTarget ?? semanticCpAsyncSharedByteTarget(targetSource, source.valueType, scope);
+  if (
+    !target ||
+    target.valueType !== source.valueType ||
+    target.fields.length > 0
+  ) return undefined;
   return { kind: "copy", source, target, elements, span };
+}
+
+interface SemanticSharedByteAddress {
+  readonly root: SemanticMemoryRef;
+  readonly byteOffset: SemanticExpression;
+}
+
+function semanticCpAsyncSharedByteTarget(
+  expression: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticMemoryRef | undefined {
+  const address = semanticSharedByteAddress(lowerExpression(expression, scope), scope, new Set());
+  const elementBytes = sizeofCudaType(valueType);
+  if (
+    !address ||
+    !elementBytes ||
+    !semanticExpressionKnownMultipleOf(address.byteOffset, elementBytes) ||
+    address.root.fields.length > 0 ||
+    address.root.addressSpace !== "shared"
+  ) return undefined;
+  return {
+    ...address.root,
+    valueType,
+    indices: [divideIndexExpression(address.byteOffset, elementBytes, expression.span)],
+    fields: [],
+    span: expression.span,
+  };
+}
+
+function semanticSharedByteAddress(
+  expression: SemanticExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  seen: Set<string>,
+): SemanticSharedByteAddress | undefined {
+  if (expression.kind === "cast") return semanticSharedByteAddress(expression.expression, scope, seen);
+  if (expression.kind === "symbol") {
+    if (seen.has(expression.name)) return undefined;
+    const init = scope.get(expression.name)?.init;
+    if (!init) return undefined;
+    const nextSeen = new Set(seen);
+    nextSeen.add(expression.name);
+    return semanticSharedByteAddress(init, scope, nextSeen);
+  }
+  if (expression.kind === "call" && expression.callee.kind === "symbol" && expression.callee.name === "__cvta_generic_to_shared") {
+    const target = expression.args[0];
+    if (!target) return undefined;
+    const root = memoryRefFromExpression(target.kind === "unary" && target.operator === "&" ? target.argument : target);
+    if (!root || root.addressSpace !== "shared" || root.fields.length > 0 || root.indices.length > 1) return undefined;
+    const rootElementBytes = sizeofCudaType(root.valueType ?? "uchar");
+    if (!rootElementBytes) return undefined;
+    const index = root.indices[0] ?? zeroExpression(expression.span);
+    return {
+      root: { ...root, indices: [], fields: [] },
+      byteOffset: multiplyIndexExpression(index, rootElementBytes, expression.span),
+    };
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    const left = semanticSharedByteAddress(expression.left, scope, seen);
+    const right = semanticSharedByteAddress(expression.right, scope, seen);
+    if (left && !right) return { ...left, byteOffset: binaryIndexExpression(expression.operator, left.byteOffset, expression.right, expression.span) };
+    if (right && !left && expression.operator === "+") return { ...right, byteOffset: binaryIndexExpression("+", right.byteOffset, expression.left, expression.span) };
+  }
+  return undefined;
+}
+
+function divideIndexExpression(expression: SemanticExpression, divisor: number, span: SourceSpan): SemanticExpression {
+  if (divisor === 1) return expression;
+  return binaryIndexExpression("/", expression, intNumberExpression(divisor, span), span);
+}
+
+function semanticExpressionKnownMultipleOf(expression: SemanticExpression, divisor: number): boolean {
+  if (divisor === 1) return true;
+  const staticValue = staticNumberValue(expression);
+  if (staticValue !== undefined) return Number.isInteger(staticValue) && staticValue % divisor === 0;
+  if (expression.kind === "cast") return semanticExpressionKnownMultipleOf(expression.expression, divisor);
+  if (expression.kind !== "binary") return false;
+  if (expression.operator === "+" || expression.operator === "-") {
+    return semanticExpressionKnownMultipleOf(expression.left, divisor) && semanticExpressionKnownMultipleOf(expression.right, divisor);
+  }
+  if (expression.operator === "*") {
+    return semanticExpressionKnownMultipleOf(expression.left, divisor) || semanticExpressionKnownMultipleOf(expression.right, divisor);
+  }
+  return false;
+}
+
+function binaryIndexExpression(
+  operator: string,
+  left: SemanticExpression,
+  right: SemanticExpression,
+  span: SourceSpan,
+): SemanticExpression {
+  return { kind: "binary", operator, left, right, ...optionalValueType(expressionValueType(left) ?? "uint"), span };
 }
 
 function semanticPointerArgumentMemoryRef(
@@ -3075,6 +3171,7 @@ function symbolForVar(
     ...(statement.packedByteLanes === undefined ? {} : { packedByteLanes: statement.packedByteLanes }),
     ...(statement.dynamicShared === true ? { dynamicShared: true } : {}),
     ...(pointerAlias === undefined ? {} : pointerAlias),
+    ...(statement.init === undefined ? {} : { init: lowerExpression(statement.init, scope) }),
     constant: false,
     dimensions: statement.dimensions,
     addressSpace: statement.storage,

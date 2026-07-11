@@ -4496,6 +4496,51 @@ __global__ void sharedHelperScoped(float *out) {
       expect([...semanticResult.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
+  it("lowers cp.async numeric shared byte addresses through semantic provenance", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void async_copy_bytes(const float *input, float *output) {
+    extern __shared__ float smem[];
+    float* tile = smem + 4;
+    uint smem_base = __cvta_generic_to_shared(tile);
+    uint smem_dst = smem_base + threadIdx.x * 8;
+    CP_ASYNC_CG(smem_dst, &input[threadIdx.x * 2], 8);
+    CP_ASYNC_COMMIT_GROUP();
+    CP_ASYNC_WAIT_GROUP(0);
+    __syncthreads();
+    output[threadIdx.x] = float(tile[threadIdx.x * 2]) + float(tile[threadIdx.x * 2 + 1]);
+  }`, { workgroupSize: [2, 1, 1], dynamicSharedMemory: { smem: 8 } });
+      const input = {
+        buffers: {
+          input: new Float32Array([1, 2, 3, 4]),
+          output: new Float32Array(2),
+        },
+      };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(JSON.stringify(compiled.kernelIr.operations)).toContain('"kind":"copy"');
+      expect(compiled.wgsl).toContain(" / 4u)");
+      expect(compiled.wgsl).not.toContain("f32((u32((4 * 4))");
+      expect([...semanticResult.buffers.output as Float32Array]).toEqual([3, 7]);
+    });
+
+  it("rejects unproven cp.async shared byte alignment from semantic lowering", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void unaligned_async_copy(const float *input, float *output) {
+    extern __shared__ float smem[];
+    uint smem_base = __cvta_generic_to_shared(smem);
+    CP_ASYNC_CG(smem_base + threadIdx.x, &input[0], 4);
+    CP_ASYNC_WAIT_ALL();
+    output[0] = smem[0];
+  }`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { smem: 1 } });
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(false);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
+      expect(JSON.stringify(compiled.kernelIr.operations)).not.toContain('"kind":"copy"');
+    });
+
   it("lowers cuRAND calls against storage-backed state arrays", () => {
       const compiled = compileCudaLiteKernelForWebGpu(`
   __global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {

@@ -2415,7 +2415,8 @@ function evalSemanticSharedAddressCall(
   const arg = expression.args[0];
   const ref = arg ? semanticReferenceSharedAddressMemoryRef(arg) : undefined;
   if (!ref || ref.addressSpace !== "shared") throw semanticReferenceError("__cvta_generic_to_shared requires modeled shared memory", expression.span);
-  return flatIndex(ref, context) + (context.sharedOffsets.get(ref.base) ?? 0);
+  const elementBytes = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
+  return (flatIndex(ref, context) + (context.sharedOffsets.get(ref.base) ?? 0)) * elementBytes;
 }
 
 function semanticReferenceSharedAddressMemoryRef(arg: SemanticExpression): SemanticMemoryRef | undefined {
