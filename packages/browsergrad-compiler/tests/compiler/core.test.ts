@@ -506,7 +506,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       };
       const launch = { gridDim: [1, 1, 1] as const, blockDim: [8, 1, 1] as const };
       const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         input,
         launch,
@@ -3069,13 +3069,15 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     int idx = threadIdx.x;
     out[idx] = bfind(input[idx]);
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { out: new Uint32Array(4), input: new Uint32Array([0, 1, 16, 0x80000000]) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
       expect(compiled.wgsl).toContain("countLeadingZeros");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.functions.flatMap((fn) => fn.body).some((operation) => operation.kind === "inline-asm")).toBe(false);
       expect([...result.buffers.out as Uint32Array]).toEqual([0xffffffff, 0, 4, 31]);
     });
 

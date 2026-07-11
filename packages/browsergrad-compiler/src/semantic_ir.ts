@@ -1028,8 +1028,26 @@ function lowerInlineAsmBuiltinRegisterAssignment(
 ): SemanticKernelIrOperation | undefined {
   const op = classifyInlineAsm(statement.template);
   const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
-  if (statement.inputs.length !== 0 || outputs.length !== 1) return undefined;
-  const value = op?.kind === "special-register-u32"
+  if (outputs.length !== 1) return undefined;
+  const bfindInput = op?.kind === "bfind-u32"
+    ? op.immediate === undefined
+      ? statement.inputs.length === 1 ? lowerExpression(statement.inputs[0]!, scope) : undefined
+      : statement.inputs.length === 0 ? semanticUintLiteralExpression(op.immediate, statement.span) : undefined
+    : undefined;
+  const value = op?.kind === "bfind-u32" && bfindInput !== undefined
+    ? semanticUintBinaryExpression(
+        "-",
+        semanticUintLiteralExpression(31, statement.span),
+        castScalarExpression(
+          semanticCallExpression("__clz", [bfindInput], "int", statement.span),
+          "uint",
+          statement.span,
+        ),
+        statement.span,
+      )
+    : statement.inputs.length !== 0
+      ? undefined
+      : op?.kind === "special-register-u32"
     ? semanticSpecialRegisterExpression(op.register, statement.span)
     : op?.kind === "laneid"
       ? semanticLaneIdExpression(statement.span)

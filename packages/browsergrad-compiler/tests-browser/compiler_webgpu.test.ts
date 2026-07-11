@@ -3288,6 +3288,30 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs semantic inline PTX bfind through native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ uint bfind(uint word) {
+  uint ret;
+  asm volatile("bfind.u32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void bfindKernel(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = bfind(input[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(4), input: new Uint32Array([0, 1, 16, 0x80000000]) },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([0xffffffff, 0, 4, 31]);
+  });
+
   it("runs surface writes through WebGPU storage-backed surfaces", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(SURFACE_WRITE, { workgroupSize: [2, 2, 1] });
