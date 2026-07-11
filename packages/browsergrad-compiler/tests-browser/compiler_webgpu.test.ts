@@ -352,6 +352,27 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs storage-pointer helpers with fixed local arrays through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void weighted_pair(const float *input, float *out) {
+  float weights[3];
+  weights[0] = 1.0f; weights[1] = 2.0f; weights[2] = 3.0f;
+  out[0] = input[0] * weights[0] + input[1] * weights[1] + input[2] * weights[2];
+}
+__global__ void helperLocalArray(const float *input, float *out) {
+  if (threadIdx.x < 1) weighted_pair(input, out);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { input: new Float32Array([2, 3, 4]), out: new Float32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([20]);
+  });
+
   it("runs inline PTX CUDA dimension special registers through native WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

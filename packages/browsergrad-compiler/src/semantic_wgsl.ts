@@ -170,7 +170,6 @@ import {
 import {
   semanticConstantMemorySymbols as constantMemorySymbols,
   semanticDeviceGlobalMemorySymbols as deviceGlobalMemorySymbols,
-  semanticLocalMemorySymbols as localMemorySymbols,
   semanticSharedMemorySymbols as sharedMemorySymbols,
   semanticSurfaceSymbols as surfaceSymbols,
   semanticTextureSymbols as textureSymbols,
@@ -1186,7 +1185,8 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
   if (semanticWgslSharedScalarVectorView(ref, ir)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
-  const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
+  const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace) ??
+    (ref.addressSpace === "local" ? semanticFunctionLocalArraySymbol(ir, ref.base) : undefined);
   return symbol !== undefined && symbol.valueType === ref.valueType;
 }
 
@@ -1604,7 +1604,7 @@ function semanticWgslFunctionBodyShapeSupported(
   operations: readonly SemanticKernelIrOperation[],
   allowAtomic = false,
 ): boolean {
-  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true });
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true, allowLocalArrays: true });
 }
 
 function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {
@@ -1616,6 +1616,7 @@ function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["fu
     allowCooperativeOps: true,
     allowSharedMemory: true,
     allowDeviceGlobals: true,
+    allowLocalArrays: true,
   });
 }
 
@@ -5664,7 +5665,7 @@ function emitSemanticMemoryRef(
       }
       return `*${nameFor(ref.base, names)}`;
     }
-    const local = localMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
+    const local = localArraySymbol(ir, ref.base);
     if (!local && ref.indices.length === 0) return nameFor(ref.base, names);
     if (!local) throw semanticWgslError(`unknown local memory '${ref.base}'`, ref.span);
     if (ref.indices.length === 1 && local.dimensions.length > 1) {
@@ -5832,11 +5833,39 @@ function surfaceReadHelperName(name: string, names: ReadonlyMap<string, string>)
   return `bg_sem_surf2dread_${nameFor(name, names)}`;
 }
 
-function localArraySymbol(ir: SemanticKernelIrModule, name: string): SemanticKernelIrModule["memory"][number] | undefined {
-  return ir.memory.find((symbol) => symbol.kind === "local" && symbol.name === name && symbol.dimensions.length > 0);
+function localArraySymbol(ir: SemanticKernelIrModule, name: string): SemanticKernelIrModule["params"][number] | undefined {
+  return ir.memory.find((symbol) => symbol.kind === "local" && symbol.name === name && symbol.dimensions.length > 0) ??
+    semanticFunctionLocalArraySymbol(ir, name);
 }
 
-function emitLocalArrayType(symbol: SemanticKernelIrModule["memory"][number]): string {
+function semanticFunctionLocalArraySymbol(
+  ir: SemanticKernelIrModule,
+  name: string,
+): SemanticKernelIrModule["params"][number] | undefined {
+  const matches: SemanticKernelIrModule["params"][number][] = [];
+  const collect = (operations: readonly SemanticKernelIrOperation[]): void => {
+    for (const operation of operations) {
+      if (operation.kind === "declare" && operation.target.addressSpace === "local" && operation.target.name === name && operation.target.dimensions.length > 0) {
+        matches.push(operation.target);
+      }
+      if (operation.kind === "branch") {
+        collect(operation.consequent);
+        collect(operation.alternate);
+      }
+      if (operation.kind === "loop" || operation.kind === "block") collect(operation.body);
+    }
+  };
+  for (const fn of ir.functions) collect(fn.body);
+  const first = matches[0];
+  if (!first) return undefined;
+  return matches.every((item) =>
+    item.valueType === first.valueType &&
+    item.dimensions.length === first.dimensions.length &&
+    item.dimensions.every((dimension, index) => dimension === first.dimensions[index])
+  ) ? first : undefined;
+}
+
+function emitLocalArrayType(symbol: SemanticKernelIrModule["params"][number]): string {
   return emitSemanticNestedArrayType(symbol.dimensions, wgslValueType(symbol.valueType));
 }
 

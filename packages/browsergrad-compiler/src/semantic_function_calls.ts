@@ -72,12 +72,14 @@ export interface SemanticFunctionBodyShapeOptions {
   readonly allowBarrierFence?: boolean;
   readonly allowAtomic?: boolean;
   readonly allowSharedMemory?: boolean;
+  readonly allowLocalArrays?: boolean;
 }
 
 export interface SemanticPointerFunctionBodyOptions {
   readonly allowCooperativeOps?: boolean;
   readonly allowSharedMemory?: boolean;
   readonly allowDeviceGlobals?: boolean;
+  readonly allowLocalArrays?: boolean;
 }
 
 export function semanticFunctionBodyShapeSupported(
@@ -88,7 +90,8 @@ export function semanticFunctionBodyShapeSupported(
     if (operation.kind === "cooperative-group-declare" || operation.kind === "dim3-declare") return true;
     if (operation.kind === "declare") {
       if (options.allowSharedMemory && operation.target.addressSpace === "shared") return !operation.target.pointer && operation.init === undefined;
-      return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0;
+      return operation.target.addressSpace === "local" && !operation.target.pointer &&
+        (operation.target.dimensions.length === 0 || options.allowLocalArrays === true);
     }
     if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage" || operation.target.addressSpace === "shared" || operation.target.addressSpace === "device-global";
     if (operation.kind === "atomic") return options.allowAtomic === true;
@@ -112,8 +115,25 @@ export function semanticPointerFunctionBodySupported(
     .map((param) => param.name));
   const allowedMemoryRoots = new Set(pointerParams);
   if (options.allowSharedMemory) collectSemanticFunctionSharedRoots(fn.body, allowedMemoryRoots);
+  if (options.allowLocalArrays) collectSemanticFunctionLocalArrayRoots(fn.body, allowedMemoryRoots);
   return pointerParams.size > 0 &&
     fn.body.every((operation) => semanticPointerFunctionOperationSupported(operation, allowedMemoryRoots, memoryRefFromIndex, atomicCallTarget, options));
+}
+
+function collectSemanticFunctionLocalArrayRoots(
+  operations: readonly SemanticKernelIrOperation[],
+  roots: Set<string>,
+): void {
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.target.addressSpace === "local" && operation.target.dimensions.length > 0) {
+      roots.add(operation.target.name);
+    }
+    if (operation.kind === "branch") {
+      collectSemanticFunctionLocalArrayRoots(operation.consequent, roots);
+      collectSemanticFunctionLocalArrayRoots(operation.alternate, roots);
+    }
+    if (operation.kind === "loop" || operation.kind === "block") collectSemanticFunctionLocalArrayRoots(operation.body, roots);
+  }
 }
 
 function collectSemanticFunctionSharedRoots(
@@ -145,7 +165,7 @@ function semanticPointerFunctionOperationSupported(
     }
     return operation.target.addressSpace === "local" &&
       !operation.target.pointer &&
-      operation.target.dimensions.length === 0 &&
+      (operation.target.dimensions.length === 0 || options.allowLocalArrays === true) &&
       (operation.init === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
   }
   if (operation.kind === "atomic") return operation.target !== undefined && (pointerParams.has(operation.target.base) || options.allowDeviceGlobals === true && operation.target.addressSpace === "device-global");

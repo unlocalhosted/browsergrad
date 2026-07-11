@@ -199,6 +199,7 @@ interface SemanticReferenceContext {
   readonly scalars: Readonly<Record<string, number>>;
   readonly vectors: Readonly<Record<string, WgslTypedArray>>;
   readonly locals: Map<string, SemanticValue>;
+  readonly localDimensions: Map<string, readonly number[]>;
   readonly blockIdx: ReferenceVector3;
   readonly threadIdx: ReferenceVector3;
   readonly blockDim: ReferenceVector3;
@@ -278,6 +279,7 @@ export function runCompiledKernelSemanticReference(
                 scalars,
                 vectors,
                 locals: new Map(),
+                localDimensions: new Map(),
                 blockIdx: referenceVectorFromTuple([bx, by, bz]),
                 threadIdx: referenceVectorFromTuple([tx, ty, tz]),
                 blockDim,
@@ -866,7 +868,7 @@ function semanticReferenceFunctionBodyShapeSupported(
   operations: readonly SemanticKernelIrOperation[],
   allowAtomic = false,
 ): boolean {
-  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true });
+  return semanticFunctionBodyShapeContractSupported(operations, { allowBlock: true, allowBarrierFence: true, allowAtomic, allowSharedMemory: true, allowLocalArrays: true });
 }
 
 function semanticReferenceFunctionHasSharedPointer(fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number]): boolean {
@@ -878,6 +880,7 @@ function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKerne
     allowCooperativeOps: true,
     allowSharedMemory: true,
     allowDeviceGlobals: true,
+    allowLocalArrays: true,
   });
 }
 
@@ -1306,6 +1309,7 @@ function execSemanticOperations(
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") break;
+        if (operation.target.dimensions.length > 0) context.localDimensions.set(operation.target.name, operation.target.dimensions);
         context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         break;
       case "store":
@@ -1404,9 +1408,11 @@ function execSemanticScopedOperations(
   context: SemanticReferenceContext,
 ): SemanticControl {
   const savedLocals = new Map<string, SemanticValue | undefined>();
+  const savedDimensions = new Map<string, readonly number[] | undefined>();
   for (const operation of operations) {
     if (operation.kind !== "declare" || savedLocals.has(operation.target.name)) continue;
     savedLocals.set(operation.target.name, context.locals.get(operation.target.name));
+    savedDimensions.set(operation.target.name, context.localDimensions.get(operation.target.name));
   }
   try {
     return execSemanticOperations(operations, context);
@@ -1414,6 +1420,10 @@ function execSemanticScopedOperations(
     for (const [name, value] of savedLocals) {
       if (value === undefined) context.locals.delete(name);
       else context.locals.set(name, value);
+    }
+    for (const [name, dimensions] of savedDimensions) {
+      if (dimensions === undefined) context.localDimensions.delete(name);
+      else context.localDimensions.set(name, dimensions);
     }
   }
 }
@@ -1429,7 +1439,10 @@ function* execSemanticBarrierOperations(
       case "cooperative-group-declare":
         break;
       case "declare":
-        if (operation.target.addressSpace !== "shared") context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
+        if (operation.target.addressSpace !== "shared") {
+          if (operation.target.dimensions.length > 0) context.localDimensions.set(operation.target.name, operation.target.dimensions);
+          context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
+        }
         break;
       case "store":
       case "copy":
@@ -1497,9 +1510,11 @@ function* execSemanticBarrierScopedOperations(
   barrierFunctions: ReadonlySet<string>,
 ): SemanticBarrierGenerator {
   const savedLocals = new Map<string, SemanticValue | undefined>();
+  const savedDimensions = new Map<string, readonly number[] | undefined>();
   for (const operation of operations) {
     if (operation.kind !== "declare" || savedLocals.has(operation.target.name)) continue;
     savedLocals.set(operation.target.name, context.locals.get(operation.target.name));
+    savedDimensions.set(operation.target.name, context.localDimensions.get(operation.target.name));
   }
   try {
     return yield* execSemanticBarrierOperations(operations, context, barrierFunctions);
@@ -1507,6 +1522,10 @@ function* execSemanticBarrierScopedOperations(
     for (const [name, value] of savedLocals) {
       if (value === undefined) context.locals.delete(name);
       else context.locals.set(name, value);
+    }
+    for (const [name, dimensions] of savedDimensions) {
+      if (dimensions === undefined) context.localDimensions.delete(name);
+      else context.localDimensions.set(name, dimensions);
     }
   }
 }
@@ -4236,6 +4255,7 @@ function createSemanticFunctionContext(
     scalars: context.scalars,
     vectors: context.vectors,
     locals,
+    localDimensions: new Map(),
     blockIdx: context.blockIdx,
     threadIdx: context.threadIdx,
     blockDim: context.blockDim,
@@ -4786,6 +4806,7 @@ function semanticReferenceVectorStorageStride(ref: SemanticMemoryRef, context: S
 function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
   if (ref.addressSpace === "local" || ref.addressSpace === "shared") {
     const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
+    const localDimensions = ref.addressSpace === "local" ? context.localDimensions.get(ref.base) : undefined;
     if (ref.addressSpace === "shared" && !symbol) {
       if (!context.sharedMemory.has(ref.base)) throw semanticReferenceError(`unknown shared array '${ref.base}'`, ref.span);
       const pointerParam = context.compiled.kernelIr.functions
@@ -4800,9 +4821,11 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
       if (ref.indices.length !== 1) throw semanticReferenceError(`shared pointer '${ref.base}' index rank mismatch`, ref.span);
       return (context.sharedOffsets.get(ref.base) ?? 0) + Math.trunc(evalNumber(ref.indices[0]!, context));
     }
-    if (!symbol) throw semanticReferenceError(`unknown ${ref.addressSpace} array '${ref.base}'`, ref.span);
+    if (!symbol && !localDimensions) throw semanticReferenceError(`unknown ${ref.addressSpace} array '${ref.base}'`, ref.span);
     if (ref.addressSpace === "shared" && ref.indices.length === 0) return 0;
-    const dimensions = ref.addressSpace === "shared" ? semanticReferenceSharedDimensions(context.compiled, symbol) : symbol.dimensions;
+    const dimensions = ref.addressSpace === "shared"
+      ? semanticReferenceSharedDimensions(context.compiled, symbol!)
+      : localDimensions ?? symbol!.dimensions;
     if (ref.addressSpace === "local" && ref.indices.length === 1 && dimensions.length > 1) {
       return Math.trunc(evalNumber(ref.indices[0]!, context));
     }
