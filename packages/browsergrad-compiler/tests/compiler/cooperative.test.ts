@@ -1063,6 +1063,43 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("ptr<workgroup, array<vec2<f32>, 2>>");
     });
 
+  it("specializes nested helpers from helper-local dynamic shared memory", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void fold(float *values, uint tid, const cg::thread_block &cta) {
+    if (tid < 2u) values[tid] += values[tid + 2u];
+    cg::sync(cta);
+    if (tid == 0u) values[0] += values[1];
+    cg::sync(cta);
+  }
+  __device__ void stage(const float *input, float *out, const cg::thread_block &cta) {
+    extern __shared__ float values[];
+    uint tid = threadIdx.x;
+    values[tid] = input[tid];
+    cg::sync(cta);
+    fold(values, tid, cta);
+    if (tid == 0u) out[0] = values[0];
+  }
+  __global__ void nestedDynamicShared(const float *input, float *out) {
+    const cg::thread_block cta = cg::this_thread_block();
+    stage(input, out, cta);
+  }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { values: 4 } });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { input: new Float32Array([1, 2, 3, 4]), out: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.functions.find((fn) => fn.name === "fold")?.params[0]).toMatchObject({
+        addressSpace: "shared",
+        dimensions: [4],
+        pointerCarrierValueType: "float",
+      });
+      expect(compiled.wgsl).toContain("ptr<workgroup, array<f32, 4>>");
+      expect([...result.buffers.out as Float32Array]).toEqual([10]);
+    });
+
   it("rejects divergent calls to helpers that contain barriers", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ void sync_tile(float *tile) { __syncthreads(); }

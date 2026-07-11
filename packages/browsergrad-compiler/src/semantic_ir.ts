@@ -612,11 +612,20 @@ export function lowerSemanticModelToKernelIr(
   const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
     .filter((symbol) => symbol.addressSpace === "shared")
     .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
-  const sharedMemoryDimensions = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.dimensions] as const));
-  const sharedMemoryValueTypes = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.valueType] as const));
   const resolved = resolveSemanticFunctionOverloads(
     loweredOperations,
     semantic.functions.filter((fn) => reachable.functionNames.has(fn.name) && !isSemanticGeneratedRandomCall(fn.name)),
+  );
+  const resolvedFunctionSharedMemory = resolved.functions.flatMap((fn) =>
+    collectDeclaredMemory(fn.body)
+      .filter((symbol) => symbol.addressSpace === "shared")
+      .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory))
+  );
+  const sharedMemoryDimensions = new Map(
+    [...sharedMemorySymbols, ...resolvedFunctionSharedMemory].map((symbol) => [symbol.name, symbol.dimensions] as const),
+  );
+  const sharedMemoryValueTypes = new Map(
+    [...sharedMemorySymbols, ...resolvedFunctionSharedMemory].map((symbol) => [symbol.name, symbol.valueType] as const),
   );
   const specializedFunctions = specializeSharedPointerFunctions(
     resolved.operations,

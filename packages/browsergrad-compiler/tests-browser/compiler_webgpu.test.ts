@@ -4888,6 +4888,35 @@ __global__ void topologyAtomic(int *out) {
     expect([...actual.buffers.out as Int32Array]).toEqual([4]);
   });
 
+  it("runs nested helpers over helper-local dynamic shared memory on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void fold(float *values, uint tid, const cg::thread_block &cta) {
+  if (tid < 2u) values[tid] += values[tid + 2u];
+  cg::sync(cta);
+  if (tid == 0u) values[0] += values[1];
+  cg::sync(cta);
+}
+__device__ void stage(const float *input, float *out, const cg::thread_block &cta) {
+  extern __shared__ float values[];
+  uint tid = threadIdx.x;
+  values[tid] = input[tid];
+  cg::sync(cta);
+  fold(values, tid, cta);
+  if (tid == 0u) out[0] = values[0];
+}
+__global__ void nestedDynamicShared(const float *input, float *out) {
+  const cg::thread_block cta = cg::this_thread_block();
+  stage(input, out, cta);
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { values: 4 } });
+    const input = { buffers: { input: new Float32Array([1, 2, 3, 4]), out: new Float32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([10]);
+  });
+
   it("runs compiled half2 vector storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = testDevice();
