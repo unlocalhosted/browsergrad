@@ -84,6 +84,10 @@ export function semanticAtomicSupportsFloat(op: SemanticAtomicOp | undefined): b
   return op === "add" || op === "sub" || op === "min" || op === "max" || op === "exchange" || op === "cas";
 }
 
+export function semanticAtomicUsesF32Storage(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "float" || valueType === "double";
+}
+
 export function semanticAtomicSupportsBfloatAdd(
   callee: string | undefined,
   targetType: CudaLiteScalarType | undefined,
@@ -97,7 +101,7 @@ export function semanticAtomicReferenceValueTypeSupported(
 ): boolean {
   return valueType === "uint" ||
     valueType === "int" ||
-    valueType === "float" && semanticAtomicSupportsFloat(op) ||
+    semanticAtomicUsesF32Storage(valueType) && semanticAtomicSupportsFloat(op) ||
     valueType === "bf16" && op === "add";
 }
 

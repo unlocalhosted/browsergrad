@@ -1145,11 +1145,8 @@ describe("CUDA-lite compiler: Atomics", () => {
 
   it("supports CUDA double atomicAdd through explicit f32 compatibility lowering", () => {
       const compiled = compileCudaLiteKernel(`
-  __device__ void addValue(double *result, double value) {
-    atomicAdd(result, value);
-  }
   __global__ void atomic_sum(double* result) {
-    addValue(result, 1.5);
+    atomicAdd(result, 1.5);
   }`, { workgroupSize: [2, 1, 1], f64Mode: "f32" });
       const result = runCompiledKernelReference(
         compiled,
@@ -1160,11 +1157,19 @@ describe("CUDA-lite compiler: Atomics", () => {
         },
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { result: new Float32Array([0]) } },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
 
       expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32");
-      expect(compiled.wgsl).not.toContain("fn bg_ptr_atomicAdd_f32");
       expect([...result.buffers.result as Float32Array]).toEqual([3]);
+      expect([...semanticResult.buffers.result as Float32Array]).toEqual([3]);
     });
 
   it("supports CUDA bf16 atomicAdd through CAS-backed native WebGPU storage", () => {

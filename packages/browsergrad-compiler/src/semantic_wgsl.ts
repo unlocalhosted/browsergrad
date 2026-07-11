@@ -76,6 +76,7 @@ import {
   semanticAtomicScalarArgumentIndices,
   semanticAtomicSupportsBfloatAdd,
   semanticAtomicSupportsFloat,
+  semanticAtomicUsesF32Storage,
 } from "./semantic_atomic_intrinsics.js";
 import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
@@ -464,7 +465,7 @@ export function emitSemanticKernelIrWgsl(
   }
   for (const helper of semanticFloatAtomicHelpers(
     allAtomicOperations,
-    ir.functions.some((fn) => fn.params.some((param) => param.pointer && param.addressSpace === "storage" && param.valueType === "float")),
+    ir.functions.some((fn) => fn.params.some((param) => param.pointer && param.addressSpace === "storage" && semanticAtomicUsesF32Storage(param.valueType))),
   )) {
     lines.push("", ...helper);
   }
@@ -1066,7 +1067,7 @@ function semanticPointerAtomicHelperName(callee: string, valueType: CudaLiteScal
 
 function semanticWgslPointerAtomicCallSupported(callee: string, valueType: CudaLiteScalarType): boolean {
   const op = semanticAtomicOperation(callee);
-  if (valueType === "float") return op === "add" || op === "sub" || op === "min" || op === "max" || op === "exchange" || op === "cas";
+  if (semanticAtomicUsesF32Storage(valueType)) return op === "add" || op === "sub" || op === "min" || op === "max" || op === "exchange" || op === "cas";
   if (valueType === "int" || valueType === "uint") return op === "add" || op === "sub" || op === "min" || op === "max" || op === "and" || op === "or" || op === "xor" || op === "exchange" || op === "cas";
   return false;
 }
@@ -1083,7 +1084,7 @@ function emitSemanticStoragePointerReadValue(valueType: CudaLiteScalarType, stor
 function emitSemanticStoragePointerReadScalarValue(valueType: CudaLiteScalarType, access: string, atomic: boolean): string {
   if (!atomic) return access;
   const loaded = `atomicLoad(&${access})`;
-  return valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+  return semanticAtomicUsesF32Storage(valueType) ? `bitcast<f32>(${loaded})` : loaded;
 }
 
 function emitSemanticStoragePointerWriteValue(valueType: CudaLiteScalarType, storage: string, index: string, value: string, atomic: boolean): string {
@@ -1095,7 +1096,7 @@ function emitSemanticStoragePointerWriteValue(valueType: CudaLiteScalarType, sto
 
 function emitSemanticStoragePointerWriteScalarValue(valueType: CudaLiteScalarType, access: string, value: string, atomic: boolean): string {
   if (!atomic) return `${access} = ${value};`;
-  const stored = valueType === "float" ? `bitcast<u32>(${value})` : value;
+  const stored = semanticAtomicUsesF32Storage(valueType) ? `bitcast<u32>(${value})` : value;
   return `atomicStore(&${access}, ${stored});`;
 }
 
@@ -2336,7 +2337,7 @@ function emitSemanticAtomicStoreValue(
   options: EmitSemanticKernelIrWgslOptions,
   textureSpecializations: SemanticTextureDescriptorSpecializations,
 ): string {
-  if (valueType === "float") {
+  if (semanticAtomicUsesF32Storage(valueType)) {
     return `bitcast<u32>(f32(${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)}))`;
   }
   return emitSemanticExpressionAs(value, ir, names, wgslAtomicScalar(valueType), options, textureSpecializations);
@@ -2729,7 +2730,7 @@ function emitSemanticAtomic(
     const value = emitSemanticExpressionAs(operands[0]!, ir, names, "f32", options, textureSpecializations);
     return `_ = ${bfloatAtomicAddHelperName(semanticWgslAtomicAddressSpace(operation.target))}(&${target}, ${value})`;
   }
-  const floatAtomicKind = operation.target.valueType === "float" ? semanticWgslFloatAtomicCallKind(operation.callee) : undefined;
+  const floatAtomicKind = semanticAtomicUsesF32Storage(operation.target.valueType) ? semanticWgslFloatAtomicCallKind(operation.callee) : undefined;
   if (floatAtomicKind) {
     const addressSpace = semanticWgslAtomicAddressSpace(operation.target);
     if (floatAtomicKind === "Exchange") {
@@ -2770,7 +2771,7 @@ function semanticWgslAtomicValueTypeSupported(callee: string, valueType: CudaLit
   if (valueType === "uint" || valueType === "int") {
     return wgslAtomicCalleeForCudaAtomic(callee) !== undefined || wgslIntegerLoopAtomicKindForCudaAtomic(callee) !== undefined;
   }
-  if (valueType === "float") return semanticAtomicSupportsFloat(atomicOp);
+  if (semanticAtomicUsesF32Storage(valueType)) return semanticAtomicSupportsFloat(atomicOp);
   return semanticAtomicSupportsBfloatAdd(callee, valueType);
 }
 
@@ -2835,7 +2836,7 @@ function semanticFloatAtomicHelpers(
       helperKeys.add(`BfloatAdd:${semanticWgslAtomicAddressSpace(target)}`);
       return;
     }
-    if (target?.valueType !== "float") return;
+    if (!target || !semanticAtomicUsesF32Storage(target.valueType)) return;
     const kind = semanticWgslFloatAtomicCallKind(expression.callee.name);
     if (kind && kind !== "Exchange" && kind !== "CompareExchange") {
       helperKeys.add(`${kind}:${semanticWgslAtomicAddressSpace(target)}`);
@@ -2860,7 +2861,7 @@ function collectSemanticFloatAtomicHelpers(
     if (operation.kind === "atomic" && operation.target && semanticAtomicSupportsBfloatAdd(operation.callee, operation.target.valueType)) {
       helperKeys.add(`BfloatAdd:${semanticWgslAtomicAddressSpace(operation.target)}`);
     }
-    if (operation.kind === "atomic" && operation.target?.valueType === "float") {
+    if (operation.kind === "atomic" && operation.target && semanticAtomicUsesF32Storage(operation.target.valueType)) {
       const kind = semanticWgslFloatAtomicCallKind(operation.callee);
       if (kind && kind !== "Exchange" && kind !== "CompareExchange") helperKeys.add(`${kind}:${semanticWgslAtomicAddressSpace(operation.target)}`);
     }
@@ -4395,7 +4396,7 @@ function emitSemanticAtomicCall(
     if (!value) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing value`, expression.span);
     return `${bfloatAtomicAddHelperName(semanticWgslAtomicAddressSpace(target))}(&${memoryRef}, ${emitSemanticExpressionAs(value, ir, names, "f32", options, textureSpecializations)})`;
   }
-  const floatAtomicKind = target.valueType === "float" ? semanticWgslFloatAtomicCallKind(expression.callee.name) : undefined;
+  const floatAtomicKind = semanticAtomicUsesF32Storage(target.valueType) ? semanticWgslFloatAtomicCallKind(expression.callee.name) : undefined;
   if (floatAtomicKind) {
     if (floatAtomicKind === "Exchange") {
       const [value] = operands;

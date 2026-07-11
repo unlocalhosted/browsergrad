@@ -3431,6 +3431,31 @@ __global__ void reduce4(int *g_idata, int *g_odata, unsigned int n) {
   }
   if (cta.thread_rank() == 0) g_odata[blockIdx.x] = mySum;
 }`,
+  cudaSamplesFinalError: `
+static __global__ void finalError(double *x, double *g_sum) {
+  cg::thread_block cta = cg::this_thread_block();
+  extern __shared__ double warpSum[];
+  double sum = 0.0;
+  int globalThreadId = blockIdx.x * blockDim.x + threadIdx.x;
+  for (int i = globalThreadId; i < 512; i += blockDim.x * gridDim.x) {
+    double d = x[i] - 1.0;
+    sum += fabs(d);
+  }
+  cg::thread_block_tile<32> tile32 = cg::tiled_partition<32>(cta);
+  for (int offset = tile32.size() / 2; offset > 0; offset /= 2) {
+    sum += tile32.shfl_down(sum, offset);
+  }
+  if (tile32.thread_rank() == 0) warpSum[threadIdx.x / warpSize] = sum;
+  cg::sync(cta);
+  double blockSum = 0.0;
+  if (threadIdx.x < (blockDim.x / warpSize)) blockSum = warpSum[threadIdx.x];
+  if (threadIdx.x < 32) {
+    for (int offset = tile32.size() / 2; offset > 0; offset /= 2) {
+      blockSum += tile32.shfl_down(blockSum, offset);
+    }
+    if (tile32.thread_rank() == 0) atomicAdd(g_sum, blockSum);
+  }
+}`,
   cooperativeTileVoteMask: `
 namespace cg = cooperative_groups;
 __global__ void cooperativeTileVoteMask(int *out) {
@@ -14345,6 +14370,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [32] },
+          },
+          {
+            name: "corpus:cuda-samples:finalError-f32-compatible-atomic",
+            corpusId: "cuda-samples",
+            source: SOURCES.cudaSamplesFinalError,
+            options: { workgroupSize: [256, 1, 1], dynamicSharedMemory: { warpSum: 8 }, features: { subgroups: true }, f64Mode: "f32" },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [2, 1, 1], blockDim: [256, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array(512).fill(2),
+                g_sum: new Float32Array(1),
+              },
+            }),
+            output: "g_sum",
+            expectedOutput: { type: "Float32Array", data: [512] },
           },
           {
             name: "corpus:cuda-samples:reduce4-logical-tile-shuffle",
