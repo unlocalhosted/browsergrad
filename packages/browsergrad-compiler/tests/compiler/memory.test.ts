@@ -5767,9 +5767,12 @@ __global__ void localOut(float *out) {
       );
 
       expect([...result.buffers.out as Uint32Array]).toEqual([30, 20, 30]);
-      expect(compiled.wgsl).toContain("var bg_x_base: u32 = 0u;");
-      expect(compiled.wgsl).toContain("bg_x_base = (bg_x_base + u32(bg_uniforms.offset));");
-      expect(compiled.wgsl).toContain("x[(bg_x_base + u32(0))]");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var x__bg_ptr_offset: i32 = 0;");
+      expect(compiled.wgsl).toContain("x__bg_ptr_offset = (x__bg_ptr_offset + bg_uniforms.offset);");
+      expect(compiled.wgsl).toContain("x[u32((x__bg_ptr_offset + 0))]");
 
       const constPointee = compileCudaLiteKernel(`
   __global__ void const_pointer_rebase(const uint* x, uint* out, int offset) {

@@ -2200,10 +2200,24 @@ function semanticStoragePointerRebaseOperation(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   span: SourceSpan,
 ): SemanticKernelIrOperation | undefined {
-  if (source.kind !== "assignment" || source.operator !== "=") return undefined;
-  const targetExpression = lowerExpression(source.left, scope);
+  const targetSource = source.kind === "assignment" && (source.operator === "=" || source.operator === "+=" || source.operator === "-=")
+    ? source.left
+    : source.kind === "update" && (source.operator === "++" || source.operator === "--")
+      ? source.argument
+      : undefined;
+  if (!targetSource) return undefined;
+  const targetExpression = lowerExpression(targetSource, scope);
   const target = memoryRefFromExpression(targetExpression);
   if (!target || target.addressSpace !== "storage" || target.indices.length !== 0 || target.fields.length !== 0) return undefined;
+  if (source.kind === "assignment" && (source.operator === "+=" || source.operator === "-=")) {
+    const value = lowerExpression(source.right, scope);
+    return { kind: "store", target, value, operator: source.operator, reads: collectMemoryRefs(value), span };
+  }
+  if (source.kind === "update") {
+    const value = intNumberExpression(1, span);
+    return { kind: "store", target, value, operator: source.operator === "++" ? "+=" : "-=", reads: [], span };
+  }
+  if (source.kind !== "assignment") return undefined;
   const value = lowerExpression(source.right, scope);
   const rebase = semanticStoragePointerRebaseValue(target, value);
   if (!rebase) return undefined;
