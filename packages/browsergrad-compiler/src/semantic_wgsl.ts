@@ -1245,6 +1245,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (ref.addressSpace === "local" && semanticWgslFunctionLocalPointerParam(ir, ref.base)) return true;
   if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
+  if (semanticWgslLocalScalarVectorView(ref, ir)) return true;
   if (semanticWgslSharedScalarVectorView(ref, ir)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace) ??
@@ -1294,6 +1295,14 @@ function semanticWgslLocalVectorLaneRefSupported(ref: SemanticMemoryRef, ir: Sem
     !isSemanticFloatVectorType(ref.valueType) &&
     isSemanticFloatVectorType(semanticDeclaredLocalVectorType(ir, ref.base)) &&
     ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar", ir));
+}
+
+function semanticWgslLocalScalarVectorView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  const valueType = ref.valueType;
+  if (ref.addressSpace !== "local" || ref.fields.length > 0 || ref.indices.length !== 1 || !valueType || !isSemanticFloatVectorType(valueType)) return false;
+  const scalar = cudaVectorScalarType(valueType);
+  const local = localArraySymbol(ir, ref.base);
+  return scalar !== undefined && local?.valueType === scalar;
 }
 
 function semanticDeclaredLocalVectorType(ir: SemanticKernelIrModule, name: string): CudaLiteScalarType | undefined {
@@ -1464,6 +1473,7 @@ function semanticWgslVectorIndexSupported(
   ir?: SemanticKernelIrModule,
 ): boolean {
   const ref = memoryRefFromIndexExpression(expression);
+  if (ref && ir && semanticWgslLocalScalarVectorView(ref, ir)) return false;
   if (ref && !(ref.addressSpace === "local" && isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.target, ir?.functions)))) return false;
   return isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.target, ir?.functions)) &&
     semanticWgslExpressionSupported(expression.target, "any", ir) &&
@@ -3512,6 +3522,9 @@ function emitSemanticExpression(
         if (semanticWgslPackedSharedByteRoot(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
           return emitSemanticMemoryRead(ref, ir, names, options);
+        }
+        if (semanticWgslLocalScalarVectorView(ref, ir)) {
+          return emitSemanticVectorMemoryRead(ref, ir, names, options);
         }
         if (isSemanticFloatVectorType(ref.valueType) && ref.addressSpace === "local") {
           return emitSemanticMemoryRef(ref, ir, names, options);
@@ -5942,6 +5955,13 @@ function emitSemanticVectorMemoryRead(
 ): string {
   const valueType = semanticStorageVectorType(ref.valueType);
   if (!valueType) throw semanticWgslError("semantic WGSL vector read requires vector memory type", ref.span);
+  if (semanticWgslLocalScalarVectorView(ref, ir)) {
+    const scalar = cudaVectorScalarType(valueType);
+    if (scalar === undefined) throw semanticWgslError("semantic WGSL local vector view requires scalar lanes", ref.span);
+    return `${wgslValueType(valueType)}(${Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
+      emitSemanticMemoryRef(semanticCopyMemoryRefAt({ ...ref, valueType: scalar }, lane), ir, names, options)
+    ).join(", ")})`;
+  }
   if (semanticWgslSharedVectorMemoryRef(ref, ir)) return emitSemanticMemoryRef(ref, ir, names, options);
   const base = emitFlatStorageVectorBaseIndex(ref, ir, names, options);
   const storage = nameFor(ref.base, names);

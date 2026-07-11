@@ -2038,6 +2038,35 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
     });
 
+  it("lowers reinterpreted 128-bit half pack copies through semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  #define LDST128BITS(value) (reinterpret_cast<float4 *>(&(value))[0])
+  #define HALF2(value) (reinterpret_cast<half2 *>(&(value))[0])
+  __global__ void half_pack_reinterpret(const half* input, half* output) {
+    half pack[8];
+    LDST128BITS(pack[0]) = LDST128BITS(input[0]);
+    half2 pair = HALF2(pack[2]);
+    LDST128BITS(output[0]) = LDST128BITS(pack[0]);
+    output[0] = pair.x;
+    output[1] = pair.y;
+  }`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {
+            input: createWgslFloat16Array([1, 2, 3, 4, 5, 6, 7, 8]),
+            output: createWgslFloat16Array(8),
+          },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.operations.filter((operation) => operation.kind === "copy")).toHaveLength(2);
+      expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3, 4, 3, 4, 5, 6, 7, 8]);
+    });
+
   it("supports CUDA vector scalar constructors", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void vector_splat(float4 *out, uint4 *kinds) {

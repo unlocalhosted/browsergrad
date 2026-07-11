@@ -5082,4 +5082,35 @@ __global__ void half2_add(const half2* x, half2* y) {
 
     expect(Array.from(actual.buffers.y as Iterable<number>)).toEqual(Array.from(expected.buffers.y as Iterable<number>));
   });
+
+  it("runs reinterpreted 128-bit half pack copies on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
+    const device = testDevice();
+    const features = await detectKernelFeatures(device);
+    if (!features.shaderF16 || !features.float16Array) return;
+    const compiled = compileCudaLiteKernel(`
+#define LDST128BITS(value) (reinterpret_cast<float4 *>(&(value))[0])
+#define HALF2(value) (reinterpret_cast<half2 *>(&(value))[0])
+__global__ void half_pack_reinterpret(const half* input, half* output) {
+  half pack[8];
+  LDST128BITS(pack[0]) = LDST128BITS(input[0]);
+  half2 pair = HALF2(pack[2]);
+  LDST128BITS(output[0]) = LDST128BITS(pack[0]);
+  output[0] = pair.x;
+  output[1] = pair.y;
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        input: createWgslFloat16Array([1, 2, 3, 4, 5, 6, 7, 8]),
+        output: createWgslFloat16Array(8),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(device, compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(Array.from(actual.buffers.output as Iterable<number>)).toEqual(Array.from(expected.buffers.output as Iterable<number>));
+    expect(Array.from(actual.buffers.output as Iterable<number>)).toEqual([3, 4, 3, 4, 5, 6, 7, 8]);
+  });
 });

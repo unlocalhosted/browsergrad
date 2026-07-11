@@ -558,6 +558,7 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
   if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
+  if (semanticReferenceLocalScalarVectorView(ref, compiled)) return true;
   if (semanticReferenceSharedScalarVectorView(ref, compiled)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
@@ -582,6 +583,15 @@ function semanticReferenceSharedScalarVectorView(ref: SemanticMemoryRef, compile
   const scalar = cudaVectorScalarType(valueType);
   return scalar !== undefined && compiled.kernelIr.memory.some((symbol) =>
     symbol.name === ref.base && symbol.kind === "shared" && symbol.valueType === scalar,
+  );
+}
+
+function semanticReferenceLocalScalarVectorView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  const valueType = ref.valueType;
+  if (ref.addressSpace !== "local" || ref.fields.length > 0 || ref.indices.length !== 1 || !valueType || !isSemanticFloatVectorType(valueType)) return false;
+  const scalar = cudaVectorScalarType(valueType);
+  return scalar !== undefined && compiled.kernelIr.memory.some((symbol) =>
+    symbol.name === ref.base && symbol.kind === "local" && symbol.valueType === scalar,
   );
 }
 
@@ -4700,6 +4710,10 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    if (semanticReferenceLocalScalarVectorView(ref, context.compiled)) {
+      const base = flatIndex(ref, context);
+      return Array.from({ length: laneCount }, (_, lane) => Number(buffer[base + lane] ?? 0));
+    }
     const value = buffer[flatIndex(ref, context)];
     if (!Array.isArray(value)) throw semanticReferenceError(`local vector array '${ref.base}' contains scalar value`, ref.span);
     return Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));

@@ -1451,6 +1451,8 @@ function lowerStatement(
         const target = memoryRefFromExpression(expression.target);
         if (target) {
           const value = semanticSequencedAssignmentValue(expression.value);
+          const reinterpretedCopy = semanticReinterpretedScalarCopy(target, value, expression.operator, scope, statement.span);
+          if (reinterpretedCopy) return reinterpretedCopy;
           return {
             kind: "store",
             target,
@@ -1596,6 +1598,36 @@ function lowerStatement(
     case "break":
       return { kind: "break", span: statement.span };
   }
+}
+
+function semanticReinterpretedScalarCopy(
+  target: SemanticMemoryRef,
+  value: SemanticExpression,
+  operator: string,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (operator !== "=" || target.fields.length > 0 || target.indices.length === 0) return undefined;
+  const source = memoryRefFromExpression(value);
+  if (!source || source.fields.length > 0 || source.indices.length === 0 || source.valueType !== target.valueType) return undefined;
+  const viewType = target.valueType;
+  if (!isCudaVectorType(viewType)) return undefined;
+  const targetRoot = scope.get(target.base);
+  const sourceRoot = scope.get(source.base);
+  const scalarType = targetRoot?.valueType;
+  if (!scalarType || scalarType !== sourceRoot?.valueType || isCudaVectorType(scalarType)) return undefined;
+  const viewBytes = sizeofCudaType(viewType);
+  const scalarBytes = sizeofCudaType(scalarType);
+  if (!viewBytes || !scalarBytes || viewBytes % scalarBytes !== 0) return undefined;
+  const elements = viewBytes / scalarBytes;
+  if (elements < 1 || elements > 16) return undefined;
+  return {
+    kind: "copy",
+    source: { ...source, valueType: scalarType },
+    target: { ...target, valueType: scalarType },
+    elements,
+    span,
+  };
 }
 
 function semanticSequencedAssignmentValue(expression: SemanticExpression): SemanticExpression {
