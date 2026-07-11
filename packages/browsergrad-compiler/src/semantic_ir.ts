@@ -64,11 +64,12 @@ import {
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
 import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
-import { cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
 import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
 import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.js";
+import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -1464,7 +1465,14 @@ function lowerExpression(
       if (pointerComparison) return pointerComparison;
       const left = lowerExpression(expression.left, scope);
       const right = lowerExpression(expression.right, scope);
-      return { kind: "binary", operator: expression.operator, left, right, ...optionalValueType(COMPARISON_OPERATORS.has(expression.operator) ? "bool" : expressionValueType(left) ?? expressionValueType(right)), span: expression.span };
+      return {
+        kind: "binary",
+        operator: expression.operator,
+        left,
+        right,
+        ...optionalValueType(semanticBinaryResultValueType(expression.operator, left, right)),
+        span: expression.span,
+      };
     }
     case "conditional": {
       const consequent = lowerExpression(expression.consequent, scope);
@@ -3109,6 +3117,19 @@ function expressionAddressSpace(expression: SemanticExpression): SemanticAddress
   return "unknown";
 }
 
+function semanticBinaryResultValueType(
+  operator: string,
+  left: SemanticExpression,
+  right: SemanticExpression,
+): CudaLiteScalarType | undefined {
+  if (COMPARISON_OPERATORS.has(operator)) return "bool";
+  const leftType = expressionValueType(left);
+  const rightType = expressionValueType(right);
+  if (isCudaVectorType(leftType)) return leftType;
+  if (isCudaVectorType(rightType)) return rightType;
+  return leftType ?? rightType;
+}
+
 function expressionValueType(expression: SemanticExpression | undefined): CudaLiteScalarType | undefined {
   if (!expression || expression.kind === "initializer") return undefined;
   return "valueType" in expression ? expression.valueType : undefined;
@@ -3116,6 +3137,10 @@ function expressionValueType(expression: SemanticExpression | undefined): CudaLi
 
 function semanticIntrinsicReturnType(name: string | undefined, args: readonly SemanticExpression[]): CudaLiteScalarType | undefined {
   if (name === undefined) return undefined;
+  const vectorConstructorType = cudaVectorConstructorType(name);
+  if (vectorConstructorType) return vectorConstructorType;
+  const vectorMathReturnType = semanticVectorMathReturnType(name, args);
+  if (vectorMathReturnType) return vectorMathReturnType;
   const bfloat16ReturnType = cudaBfloat16IntrinsicReturnType(name, args.some((arg) => expressionValueType(arg) === "bf16"));
   if (bfloat16ReturnType) return bfloat16ReturnType;
   if (isBfloat162VectorName(name)) return "bf162";

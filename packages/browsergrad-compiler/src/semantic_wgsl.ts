@@ -156,6 +156,7 @@ import {
 } from "./semantic_function_calls.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
 import { semanticDirectByteStorageParamSupported } from "./semantic_byte_storage.js";
+import { semanticVectorMathCallSupported } from "./semantic_vector_math.js";
 import {
   semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
@@ -1316,6 +1317,7 @@ function semanticWgslScalarCallSupported(
   const fn = ir.functions.find((item) => item.name === callee);
   if (fn && isSemanticFloatVectorType(fn.returnType)) return false;
   return semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
+    (callee === "dot" || callee === "length") && semanticVectorMathCallSupported(callee, expression.args) ||
     semanticWgslFunctionCallSupported(expression, ir) ||
     semanticWgslAtomicCallSupported(expression, ir) ||
     semanticWgslCurandCallSupported(expression, ir) ||
@@ -1770,7 +1772,11 @@ function semanticWgslExpressionSupported(
         semanticWgslBf162CallSupported(expression, ir) ||
         semanticWgslVectorConstructorSupported(expression, expected, ir) ||
         expected === "scalar" && semanticWgslVectorAtCallSupported(expression, ir) ||
-        expected === "any" && semanticWgslVectorLerpCallSupported(expression, ir);
+        expected === "any" && (semanticWgslVectorLerpCallSupported(expression, ir) ||
+          expression.callee.kind === "symbol" && semanticVectorMathCallSupported(expression.callee.name, expression.args)) ||
+        expected === "scalar" && expression.callee.kind === "symbol" &&
+          (expression.callee.name === "dot" || expression.callee.name === "length") &&
+          semanticVectorMathCallSupported(expression.callee.name, expression.args);
     case "texture-read":
       return ir !== undefined &&
         (expected === "any" || semanticTextureSurfaceValueTypeSupported(expression.valueType)) &&
@@ -3157,6 +3163,9 @@ function emitSemanticExpression(
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorLerpCallSupported(expression, ir)) return emitSemanticVectorLerpCall(expression, ir, names, options, textureSpecializations);
+      if (expression.callee.kind === "symbol" && semanticVectorMathCallSupported(expression.callee.name, expression.args)) {
+        return emitSemanticVectorMathCall(expression, ir, names, options, textureSpecializations);
+      }
       if (semanticWgslHalf2CallSupported(expression, ir)) return emitSemanticHalf2Call(expression, ir, names, options, textureSpecializations);
       if (semanticWgslBf162CallSupported(expression, ir)) return emitSemanticBf162Call(expression, ir, names, options, textureSpecializations);
       if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations);
@@ -3434,6 +3443,20 @@ function emitSemanticVectorLerpCall(
   const end = emitSemanticExpression(right, ir, names, options, textureSpecializations);
   const factor = emitSemanticVectorOperand(amount, valueType as CudaLiteScalarType, ir, names, options, textureSpecializations);
   return `fma(${factor}, (${end} - ${start}), ${start})`;
+}
+
+function emitSemanticVectorMathCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): string {
+  if (expression.callee.kind !== "symbol" || !semanticVectorMathCallSupported(expression.callee.name, expression.args)) {
+    throw semanticWgslError("semantic WGSL vector math call is unsupported", expression.span);
+  }
+  return `${expression.callee.name}(${expression.args.map((arg) =>
+    emitSemanticExpression(arg, ir, names, options, textureSpecializations)).join(", ")})`;
 }
 
 function emitSemanticHalf2Call(

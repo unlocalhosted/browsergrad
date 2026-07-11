@@ -5372,6 +5372,32 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([4, 10, 1, 8]);
     });
 
+  it("lowers native vector math through pointer-bearing vector-return helpers", () => {
+      const compiled = compileCudaLiteKernelForWebGpu(`
+  __device__ float3 vector_force(float3 a, float3 b, float4 *bias) {
+    float3 delta = b - a;
+    float magnitude = length(delta);
+    float3 direction = normalize(delta);
+    float energy = dot(direction, direction);
+    float3 tangent = cross(direction, make_float3(0.0f, 0.0f, 1.0f));
+    return energy * direction + tangent + make_float3(bias[0]);
+  }
+  __global__ void vector_math_helper(float4 *bias, float4 *out) {
+    float3 force = vector_force(make_float3(0.0f), make_float3(3.0f, 4.0f, 0.0f), bias);
+    out[0] = make_float4(force, length(make_float3(3.0f, 4.0f, 0.0f)));
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = { buffers: { bias: new Float32Array([1, 2, 3, 0]), out: new Float32Array(4) } };
+      const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("dot(direction, direction)");
+      expect(compiled.wgsl).toContain("normalize(delta)");
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([...new Float32Array([2.4, 2.2, 3, 5])]);
+    });
+
   it("casts device-function scalar compound assignments from promoted operands in WGSL", () => {
       const compiled = compileCudaLiteKernelForWebGpu(`
   __device__ int scale_box(unsigned char ul, unsigned char um, float fscale) {

@@ -3462,6 +3462,29 @@ __global__ void pointerOverload(int *signedInput, uint *unsignedInput, int *out)
     expect([...actual.buffers.out as Int32Array]).toEqual([5, 7]);
   });
 
+  it("runs native vector math through pointer-bearing vector-return helpers", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ float3 vector_force(float3 a, float3 b, float4 *bias) {
+  float3 delta = b - a;
+  float magnitude = length(delta);
+  float3 direction = normalize(delta);
+  float energy = dot(direction, direction);
+  float3 tangent = cross(direction, make_float3(0.0f, 0.0f, 1.0f));
+  return energy * direction + tangent + make_float3(bias[0]);
+}
+__global__ void vectorMathHelper(float4 *bias, float4 *out) {
+  float3 force = vector_force(make_float3(0.0f), make_float3(3.0f, 4.0f, 0.0f), bias);
+  out[0] = make_float4(force, length(make_float3(3.0f, 4.0f, 0.0f)));
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { bias: new Float32Array([1, 2, 3, 0]), out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...new Float32Array([2.4, 2.2, 3, 5])]);
+  });
+
   it("runs same-width shared pointer reinterpret helpers through semantic WGSL", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
