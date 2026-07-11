@@ -25,6 +25,7 @@ import {
 } from "./types.js";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
+import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
 import {
   isCudaBuiltinVectorSymbolName,
   isCudaUniformBuiltinVectorSymbolName,
@@ -791,6 +792,7 @@ export function analyzeCudaLite(
         diagnostics,
         options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE,
         barrierFunctionNames,
+        cudaUniformScalarFunctionNames(ast.functions, new Set(ast.deviceGlobals.map((global) => global.name))),
       );
     }
     activeRequiredFeatures = previousRequiredFeatures;
@@ -807,6 +809,7 @@ export function analyzeCudaLite(
     diagnostics,
     options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE,
     barrierFunctionNames,
+    cudaUniformScalarFunctionNames(ast.functions, new Set(ast.deviceGlobals.map((global) => global.name))),
   );
   markExactAtomicPointerUsage(ast, kernel, options, atomicParams, atomicShared, atomicDeviceGlobals);
 
@@ -4906,9 +4909,11 @@ function validateDivergentReturnsBeforeBarriers(
   diagnostics: CudaLiteDiagnostic[],
   workgroupSize: readonly [number, number, number],
   barrierFunctionNames: ReadonlySet<string>,
+  uniformScalarFunctionNames: ReadonlySet<string>,
 ): CudaLiteBarrierUniformityFact {
-  const uniformity = collectBarrierUniformity(statements, params, workgroupSize);
+  const uniformity = collectBarrierUniformity(statements, params, workgroupSize, uniformScalarFunctionNames);
   const barrierStatementStarts: number[] = [];
+  const unverifiedControlStatementStarts: number[] = [];
   let verified = true;
   const visitBlock = (
     body: readonly CudaLiteStatement[],
@@ -4957,6 +4962,7 @@ function validateDivergentReturnsBeforeBarriers(
       case "return":
         if (divergentDepth > 0 && barrierLater) {
           verified = false;
+          unverifiedControlStatementStarts.push(statement.span.start);
           diagnostics.push(warning(
             "divergent-return-before-barrier",
             "thread-dependent return before a later barrier would make WGSL barrier control flow non-uniform",
@@ -4967,6 +4973,7 @@ function validateDivergentReturnsBeforeBarriers(
       case "break":
         if (divergentDepth > 0 && barrierLater) {
           verified = false;
+          unverifiedControlStatementStarts.push(statement.span.start);
           diagnostics.push(warning(
             "divergent-break-before-barrier",
             "thread-dependent break before a later barrier would make WGSL barrier control flow non-uniform",
@@ -4977,6 +4984,7 @@ function validateDivergentReturnsBeforeBarriers(
       case "continue":
         if (divergentDepth > 0 && continueBarrierLater) {
           verified = false;
+          unverifiedControlStatementStarts.push(statement.span.start);
           diagnostics.push(error(
             "divergent-continue-before-barrier",
             "thread-dependent continue before a later barrier would make WGSL barrier control flow non-uniform",
@@ -4985,22 +4993,33 @@ function validateDivergentReturnsBeforeBarriers(
         }
         return { containsBarrier: false };
       case "if": {
-        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
+        const conditionNonUniform = expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity);
+        const nestedDivergentDepth = divergentDepth + (conditionNonUniform ? 1 : 0);
         const consequentHasBarrier = visitBlock(statement.consequent, nestedDivergentDepth, barrierLater, continueBarrierLater);
         const alternateHasBarrier = statement.alternate ? visitBlock(statement.alternate, nestedDivergentDepth, barrierLater, continueBarrierLater) : false;
+        if (conditionNonUniform && (consequentHasBarrier || alternateHasBarrier)) unverifiedControlStatementStarts.push(statement.span.start);
         return { containsBarrier: consequentHasBarrier || alternateHasBarrier };
       }
       case "for": {
-        const nestedDivergentDepth = divergentDepth + (statement.condition && expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
-        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater, false) };
+        const conditionNonUniform = statement.condition !== undefined && expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity);
+        const nestedDivergentDepth = divergentDepth + (conditionNonUniform ? 1 : 0);
+        const containsBarrier = visitBlock(statement.body, nestedDivergentDepth, barrierLater, false);
+        if (conditionNonUniform && containsBarrier) unverifiedControlStatementStarts.push(statement.span.start);
+        return { containsBarrier };
       }
       case "while": {
-        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
-        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater, false) };
+        const conditionNonUniform = expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity);
+        const nestedDivergentDepth = divergentDepth + (conditionNonUniform ? 1 : 0);
+        const containsBarrier = visitBlock(statement.body, nestedDivergentDepth, barrierLater, false);
+        if (conditionNonUniform && containsBarrier) unverifiedControlStatementStarts.push(statement.span.start);
+        return { containsBarrier };
       }
       case "do-while": {
-        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
-        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater, false) };
+        const conditionNonUniform = expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity);
+        const nestedDivergentDepth = divergentDepth + (conditionNonUniform ? 1 : 0);
+        const containsBarrier = visitBlock(statement.body, nestedDivergentDepth, barrierLater, false);
+        if (conditionNonUniform && containsBarrier) unverifiedControlStatementStarts.push(statement.span.start);
+        return { containsBarrier };
       }
       default:
         return { containsBarrier: false };
@@ -5008,7 +5027,11 @@ function validateDivergentReturnsBeforeBarriers(
   };
 
   visitBlock(statements, 0);
-  return { verified, barrierStatementStarts: barrierStatementStarts.sort((left, right) => left - right) };
+  return {
+    verified,
+    barrierStatementStarts: barrierStatementStarts.sort((left, right) => left - right),
+    unverifiedControlStatementStarts: [...new Set(unverifiedControlStatementStarts)].sort((left, right) => left - right),
+  };
 }
 
 function cudaBarrierFunctionNames(functions: readonly CudaLiteDeviceFunction[]): ReadonlySet<string> {
@@ -5055,16 +5078,18 @@ interface BarrierUniformityContext {
   readonly locals: ReadonlyMap<string, boolean>;
   readonly cooperativeGroups: ReadonlyMap<string, CudaLiteCooperativeGroupDecl>;
   readonly workgroupSize: readonly [number, number, number];
+  readonly uniformScalarFunctionNames: ReadonlySet<string>;
 }
 
 function collectBarrierUniformity(
   statements: readonly CudaLiteStatement[],
   params: ReadonlyMap<string, CudaLiteParam>,
   workgroupSize: readonly [number, number, number],
+  uniformScalarFunctionNames: ReadonlySet<string>,
 ): BarrierUniformityContext {
   const locals = new Map<string, boolean>();
   const cooperativeGroups = new Map<string, CudaLiteCooperativeGroupDecl>();
-  const context: BarrierUniformityContext = { params, locals, cooperativeGroups, workgroupSize };
+  const context: BarrierUniformityContext = { params, locals, cooperativeGroups, workgroupSize, uniformScalarFunctionNames };
   const visitStatements = (body: readonly CudaLiteStatement[]): void => {
     for (const statement of body) {
       if (statement.kind === "var") {
@@ -5110,6 +5135,9 @@ function expressionMayBeNonUniformBeforeBarrier(
   }
   if (expression.kind === "call") {
     const callee = expression.callee;
+    if (callee.kind === "identifier" && (context.uniformScalarFunctionNames.has(callee.name) || isSemanticMathCallName(callee.name))) {
+      return expression.args.some((arg) => expressionMayBeNonUniformBeforeBarrier(arg, context));
+    }
     if (callee.kind === "member" && callee.object.kind === "identifier") {
       const group = context.cooperativeGroups.get(callee.object.name);
       if (group) {
@@ -5130,6 +5158,42 @@ function expressionMayBeNonUniformBeforeBarrier(
     if (expressionMayBeNonUniformBeforeBarrier(child, context)) nonUniform = true;
   });
   return nonUniform;
+}
+
+function cudaUniformScalarFunctionNames(
+  functions: readonly CudaLiteDeviceFunction[],
+  deviceGlobalNames: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const userFunctionNames = new Set(functions.map((fn) => fn.name));
+  const uniform = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const fn of functions) {
+      if (uniform.has(fn.name) || fn.params.some((param) => param.pointer)) continue;
+      const params = new Map(fn.params.map((param) => [param.name, param]));
+      let safe = true;
+      walkCudaLiteExpressions(fn.body, (expression) => {
+        if (!safe || expressionIsDivergent(expression, params)) {
+          safe = false;
+          return;
+        }
+        if (expression.kind === "identifier" && deviceGlobalNames.has(expression.name)) {
+          safe = false;
+          return;
+        }
+        if (expression.kind === "call") {
+          const callee = expressionName(expression.callee);
+          if (callee !== undefined && userFunctionNames.has(callee) && !uniform.has(callee)) safe = false;
+        }
+      });
+      if (safe) {
+        uniform.add(fn.name);
+        changed = true;
+      }
+    }
+  }
+  return uniform;
 }
 
 function cooperativeGroupMetaRankMayBeNonUniform(

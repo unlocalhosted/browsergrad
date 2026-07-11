@@ -439,6 +439,7 @@ export interface CudaLiteTextureDescriptor {
 export interface CudaLiteBarrierUniformityFact {
   readonly verified: boolean;
   readonly barrierStatementStarts: readonly number[];
+  readonly unverifiedControlStatementStarts: readonly number[];
 }
 
 export interface CudaLiteBarrierUniformityFacts {

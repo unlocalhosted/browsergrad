@@ -365,6 +365,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+      expect(compiled.analysis.barrierUniformity.kernel.unverifiedControlStatementStarts).toEqual([expect.any(Number)]);
       expect(compiled.wgsl.match(/\bactive_byte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = active_byte_pointer_array_diff_index_helper\(/u);
       expect(compiled.wgsl).toMatch(/summary\[.+\] = i32\(\(summary\[.+\] \+ select\(0, select\(.+ \/ 4\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\)\);/u);
@@ -2595,6 +2596,24 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("for (var row");
       expect(compiled.wgsl).toContain("bg_uniforms.N");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
+    });
+
+  it("treats pure scalar math helper results as uniform barrier bounds", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void helperBoundBarrier(float *x, int N) {
+    extern __shared__ float scratch[];
+    int tid = threadIdx.x;
+    int tiles = div_ceil(N, 4);
+    for (int tile = 0; tile < tiles; ++tile) {
+      scratch[tid] = x[tile * 4 + tid];
+      __syncthreads();
+      x[tile * 4 + tid] = scratch[tid] + 1.0f;
+    }
+  }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+      expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
+      expect(compiled.analysis.barrierUniformity.kernel.unverifiedControlStatementStarts).toEqual([]);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     });
 
   it("keeps nested predicated barriers uniform after active-lane early returns", () => {
