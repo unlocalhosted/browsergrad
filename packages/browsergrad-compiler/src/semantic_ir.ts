@@ -3258,7 +3258,15 @@ function optionalValueType(valueType: CudaLiteScalarType | undefined): { readonl
 }
 
 function numberLiteralType(raw: string): CudaLiteScalarType {
-  if (/^0x/iu.test(raw)) return /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw) ? "uint" : "int";
+  if (/^0x/iu.test(raw)) {
+    if (/(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw)) return "uint";
+    const digits = raw.replace(/^0x/iu, "").replace(/[lL]+$/u, "");
+    try {
+      return BigInt(`0x${digits}`) > 0x7fffffffn ? "uint" : "int";
+    } catch {
+      return "int";
+    }
+  }
   return /[.eE]|[fF]$/u.test(raw) ? "float" : /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw) ? "uint" : "int";
 }
 

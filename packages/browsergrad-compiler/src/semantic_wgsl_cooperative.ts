@@ -6,6 +6,7 @@ import type {
 import { semanticExpressionChildren, semanticOperationExpressions } from "./semantic_ir_walk.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 import { wgslValueScalar } from "./semantic_wgsl_types.js";
+import { isCudaWarpSumCallName } from "./cuda_subgroup_calls.js";
 import {
   semanticCooperativeGroupInfo,
   semanticCooperativeGroupRankParamName,
@@ -17,6 +18,7 @@ export interface SemanticCooperativeReduceHelper {
   readonly scratchName: string;
   readonly valueType: Exclude<ReturnType<typeof semanticExpressionValueType>, undefined | "void">;
   readonly tileSize: number;
+  readonly masked: boolean;
 }
 
 export function semanticWgslCooperativeGroupCallSupported(
@@ -40,7 +42,7 @@ export function semanticWgslCooperativeReduceCallSupported(
   valueSupported: (value: SemanticExpression) => boolean,
 ): boolean {
   const helper = semanticCooperativeReduceHelperFor(ir, expression);
-  const value = expression.args[1];
+  const value = semanticCooperativeReduceValue(expression);
   return helper !== undefined && value !== undefined && valueSupported(value);
 }
 
@@ -91,22 +93,40 @@ export function emitSemanticCooperativeReduceCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
   value: string,
+  mask?: string,
 ): string | undefined {
   const helper = semanticCooperativeReduceHelperFor(ir, expression);
-  return helper === undefined ? undefined : `${helper.name}(${value}, local_id)`;
+  if (helper === undefined) return undefined;
+  if (helper.masked && mask === undefined) return undefined;
+  return `${helper.name}(${value}${helper.masked ? `, ${mask}` : ""}, local_id)`;
 }
 
 export function semanticCooperativeReduceHelperFor(
   ir: SemanticKernelIrModule,
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
 ): SemanticCooperativeReduceHelper | undefined {
-  if (expression.callee.kind !== "symbol" || !isCooperativeReduceName(expression.callee.name)) return undefined;
+  if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function") return undefined;
+  if (isCudaWarpSumCallName(expression.callee.name)) {
+    const valueArg = semanticCooperativeReduceValue(expression);
+    const valueType = valueArg ? semanticExpressionValueType(valueArg) : undefined;
+    if (valueType !== "float" && valueType !== "double" && valueType !== "half" && valueType !== "int" && valueType !== "uint") return undefined;
+    const typeName = wgslValueScalar(valueType).replace(/[^A-Za-z0-9_]/gu, "_");
+    const masked = expression.args.length === 2;
+    return {
+      name: `bg_semantic_warp_reduce_sum_${typeName}_32${masked ? "_masked" : ""}`,
+      scratchName: `bg_semantic_warp_reduce_sum_${typeName}_32${masked ? "_masked" : ""}_scratch`,
+      valueType,
+      tileSize: 32,
+      masked,
+    };
+  }
+  if (!isCooperativeReduceName(expression.callee.name)) return undefined;
   const [groupArg, valueArg, operationArg] = expression.args;
   if (!groupArg || groupArg.kind !== "symbol" || !valueArg || !isPlusOperation(operationArg)) return undefined;
   const group = semanticCooperativeGroupInfo(ir, groupArg.name);
   if (!group || (group.kind !== "tile" && group.kind !== "thread")) return undefined;
   const valueType = semanticExpressionValueType(valueArg);
-  if (valueType !== "float" && valueType !== "double" && valueType !== "int" && valueType !== "uint") return undefined;
+  if (valueType !== "float" && valueType !== "double" && valueType !== "half" && valueType !== "int" && valueType !== "uint") return undefined;
   const tileSize = group.tileSize ?? 32;
   const typeName = wgslValueScalar(valueType).replace(/[^A-Za-z0-9_]/gu, "_");
   return {
@@ -114,7 +134,15 @@ export function semanticCooperativeReduceHelperFor(
     scratchName: `bg_semantic_cg_reduce_${typeName}_${tileSize}_scratch`,
     valueType,
     tileSize,
+    masked: false,
   };
+}
+
+export function semanticCooperativeReduceValue(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): SemanticExpression | undefined {
+  if (expression.callee.kind === "symbol" && isCudaWarpSumCallName(expression.callee.name)) return expression.args.at(-1);
+  return expression.args[1];
 }
 
 export function semanticCooperativeReduceHelpers(
@@ -137,12 +165,12 @@ export function emitSemanticCooperativeReduceHelper(
   const workgroupSize = ir.workgroupSize[0] * ir.workgroupSize[1] * ir.workgroupSize[2];
   const start = Math.max(1, Math.floor(Math.min(helper.tileSize, workgroupSize) / 2));
   return [
-    `fn ${helper.name}(value_arg: ${type}, local_id: vec3<u32>) -> ${type} {`,
+    `fn ${helper.name}(value_arg: ${type}${helper.masked ? ", mask_arg: u32" : ""}, local_id: vec3<u32>) -> ${type} {`,
     `  let rank: u32 = ${semanticCooperativeLocalLinearRank(ir)};`,
     `  let width: u32 = min(${helper.tileSize}u, ${workgroupSize}u);`,
     "  let lane: u32 = rank % width;",
     "  let base: u32 = rank - lane;",
-    `  ${helper.scratchName}[rank] = value_arg;`,
+    `  ${helper.scratchName}[rank] = ${helper.masked ? "select(" + zeroForScalar(type) + ", value_arg, (mask_arg & (1u << lane)) != 0u)" : "value_arg"};`,
     "  workgroupBarrier();",
     `  var stride: u32 = ${start}u;`,
     "  while (stride > 0u) {",
@@ -157,6 +185,13 @@ export function emitSemanticCooperativeReduceHelper(
     "  return result;",
     "}",
   ];
+}
+
+function zeroForScalar(type: ReturnType<typeof wgslValueScalar>): string {
+  if (type === "u32") return "0u";
+  if (type === "i32") return "0";
+  if (type === "f16") return "f16(0.0)";
+  return "0.0";
 }
 
 function semanticModuleExpressions(ir: SemanticKernelIrModule): readonly SemanticExpression[] {

@@ -38,6 +38,7 @@ import {
   isCudaLegacyShuffleCallName as legacyShuffleCall,
   isCudaLegacyVoteCallName as legacyVoteCall,
   isCudaShuffleCallName,
+  isCudaWarpSumCallName,
 } from "./cuda_subgroup_calls.js";
 import { referenceTypedArrayForScalar as typedArrayForScalar } from "./reference_scalars.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
@@ -662,7 +663,7 @@ function semanticReferenceCurandCallSupported(
 }
 
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
-  if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return false;
+  if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return false;
   const scalarArgs = semanticSubgroupScalarArguments(expression.callee.name, expression.args);
   return scalarArgs !== undefined && scalarArgs.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
 }
@@ -2045,7 +2046,7 @@ function evalSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return semanticReferenceActiveMask(context);
-  const value = expression.args[legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
+  const value = expression.args[isCudaWarpSumCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);
   if (context.compiled.subgroupMode === "scalar") {
@@ -2053,14 +2054,22 @@ function evalSemanticSubgroupCall(
     if (voteOp !== undefined) return truthy(scalar) ? 1 : 0;
     return scalar;
   }
-  const peers = semanticWarpContexts(context);
+  const mask = isCudaWarpSumCallName(name) && expression.args.length === 2
+    ? evalNumber(expression.args[0]!, context) >>> 0
+    : undefined;
+  const peers = semanticWarpContexts(context).filter((peer) =>
+    mask === undefined || (mask & (1 << (semanticLocalLinearRank(peer) % 32))) !== 0
+  );
   if (voteOp === "any") return peers.some((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
   if (voteOp === "all") return peers.every((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
   if (voteOp === "ballot") {
+    const activeMask = legacyVoteCall(name) ? 0xffffffff : evalNumber(expression.args[0]!, context) >>> 0;
     let mask = 0;
     for (const peer of peers) {
+      const lane = semanticLocalLinearRank(peer) % 32;
+      if ((activeMask & (1 << lane)) === 0) continue;
       if (!truthy(evalNumber(value, peer))) continue;
-      mask |= 1 << (semanticLocalLinearRank(peer) % 32);
+      mask |= 1 << lane;
     }
     return mask >>> 0;
   }
@@ -5002,7 +5011,7 @@ function semanticOperationsContainSubgroupCall(operations: readonly SemanticKern
 
 function semanticExpressionContainsSubgroupCall(expression: SemanticExpression): boolean {
   if (expression.kind === "call") {
-    if (expression.callee.kind === "symbol" && SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return true;
+    if (expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" && SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return true;
     return semanticExpressionContainsSubgroupCall(expression.callee) || expression.args.some(semanticExpressionContainsSubgroupCall);
   }
   if (expression.kind === "member") return semanticExpressionContainsSubgroupCall(expression.object);

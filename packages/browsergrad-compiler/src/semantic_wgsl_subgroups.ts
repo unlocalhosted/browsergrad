@@ -37,6 +37,12 @@ export interface SemanticMatchAnyHelper {
   readonly tileSize: number;
 }
 
+export interface SemanticBallotHelper {
+  readonly name: string;
+  readonly scratchName: string;
+  readonly tileSize: number;
+}
+
 export type SemanticBitwiseReduceOp = CudaBitwiseReduceOp;
 
 export interface SemanticBitwiseReduceHelper {
@@ -121,6 +127,71 @@ export function semanticMatchAnyHelpers(ir: SemanticKernelIrModule): readonly Se
   collectSemanticMatchAnyHelpers(ir.operations, helpers);
   for (const fn of ir.functions) collectSemanticMatchAnyHelpers(fn.body, helpers);
   return [...helpers.values()];
+}
+
+export function semanticBallotHelper(tileSize = 32): SemanticBallotHelper {
+  const name = `bg_semantic_ballot_${tileSize}`;
+  return { name, scratchName: `${name}_scratch`, tileSize };
+}
+
+export function semanticBallotHelpers(ir: SemanticKernelIrModule): readonly SemanticBallotHelper[] {
+  let used = false;
+  const visitExpression = (expression: SemanticExpression): void => {
+    if (expression.kind === "call" && expression.callee.kind === "symbol" &&
+      (expression.callee.name === "__ballot" || expression.callee.name === "__ballot_sync")) used = true;
+    for (const child of semanticExpressionChildren(expression)) visitExpression(child);
+  };
+  const visitOperations = (operations: readonly SemanticKernelIrOperation[]): void => {
+    for (const operation of operations) {
+      if (operation.kind === "declare" && operation.init) visitExpression(operation.init);
+      if (operation.kind === "store") visitExpression(operation.value);
+      if (operation.kind === "atomic" || operation.kind === "call") operation.args.forEach(visitExpression);
+      if (operation.kind === "expression") visitExpression(operation.expression);
+      if (operation.kind === "branch") {
+        visitExpression(operation.condition);
+        visitOperations(operation.consequent);
+        visitOperations(operation.alternate);
+      }
+      if (operation.kind === "loop") {
+        if (operation.init && !isSemanticKernelIrOperation(operation.init)) visitExpression(operation.init);
+        if (operation.condition) visitExpression(operation.condition);
+        if (operation.update) visitExpression(operation.update);
+        visitOperations(operation.body);
+      }
+      if (operation.kind === "return" && operation.value) visitExpression(operation.value);
+      if (operation.kind === "block") visitOperations(operation.body);
+    }
+  };
+  visitOperations(ir.operations);
+  for (const fn of ir.functions) visitOperations(fn.body);
+  return used ? [semanticBallotHelper()] : [];
+}
+
+export function emitSemanticBallotHelper(
+  helper: SemanticBallotHelper,
+  ir: SemanticKernelIrModule,
+): readonly string[] {
+  const workgroupSize = semanticWorkgroupSize(ir);
+  return [
+    `fn ${helper.name}(predicate_arg: bool, active_mask_arg: u32, local_id: vec3<u32>) -> u32 {`,
+    `  let bg_linear_rank: u32 = ${semanticLocalLinearRank(ir)};`,
+    `  let bg_lane: u32 = bg_linear_rank % ${helper.tileSize}u;`,
+    `  let bg_base: u32 = bg_linear_rank - bg_lane;`,
+    `  ${helper.scratchName}[bg_linear_rank] = select(0u, 1u, predicate_arg && (active_mask_arg & (1u << bg_lane)) != 0u);`,
+    "  workgroupBarrier();",
+    "  var bg_mask: u32 = 0u;",
+    "  var bg_source_lane: u32 = 0u;",
+    `  while (bg_source_lane < ${helper.tileSize}u) {`,
+    "    let bg_source_rank: u32 = bg_base + bg_source_lane;",
+    `    if (bg_source_rank < ${workgroupSize}u && ${helper.scratchName}[bg_source_rank] != 0u) {`,
+    "      bg_mask = bg_mask | (1u << bg_source_lane);",
+    "    }",
+    "    bg_source_lane = bg_source_lane + 1u;",
+    "  }",
+    "  workgroupBarrier();",
+    "  return bg_mask;",
+    "}",
+  ];
 }
 
 function collectSemanticMatchAnyHelpers(

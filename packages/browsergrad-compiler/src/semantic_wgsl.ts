@@ -92,6 +92,7 @@ import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
 import {
   cudaArithmeticReduceOpForCall,
   cudaVoteOpForCall,
+  isCudaWarpSumCallName,
 } from "./cuda_subgroup_calls.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
@@ -179,6 +180,7 @@ import {
 } from "./semantic_wgsl_usage.js";
 import {
   emitSemanticBitwiseReduceHelper,
+  emitSemanticBallotHelper,
   emitSemanticMatchAnyHelper,
   emitSemanticWarpShuffleHelper,
   legacyShuffleCall,
@@ -187,6 +189,8 @@ import {
   semanticBitwiseReduceHelpers,
   semanticBitwiseReduceOpForCall,
   semanticBitwiseReduceScratchName,
+  semanticBallotHelper,
+  semanticBallotHelpers,
   semanticMatchAnyHelper,
   semanticMatchAnyHelpers,
   semanticMatchAnyScratchName,
@@ -203,6 +207,7 @@ import {
   emitSemanticCooperativeReduceHelper,
   semanticCooperativeReduceHelperFor,
   semanticCooperativeReduceHelpers,
+  semanticCooperativeReduceValue,
   semanticWgslCooperativeGroupCallSupported,
   semanticWgslCooperativeReduceCallSupported,
 } from "./semantic_wgsl_cooperative.js";
@@ -502,6 +507,9 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticBitwiseReduceHelpers(ir)) {
     lines.push(`var<workgroup> ${semanticBitwiseReduceScratchName(helper)}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
   }
+  for (const helper of semanticBallotHelpers(ir)) {
+    lines.push(`var<workgroup> ${helper.scratchName}: array<u32, ${semanticWorkgroupSize(ir)}>;`);
+  }
   for (const helper of cooperativeReduceHelpers) {
     lines.push(`var<workgroup> ${helper.scratchName}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
   }
@@ -542,6 +550,9 @@ export function emitSemanticKernelIrWgsl(
   }
   for (const helper of semanticBitwiseReduceHelpers(ir)) {
     lines.push("", ...emitSemanticBitwiseReduceHelper(helper, ir));
+  }
+  for (const helper of semanticBallotHelpers(ir)) {
+    lines.push("", ...emitSemanticBallotHelper(helper, ir));
   }
   for (const helper of cooperativeReduceHelpers) {
     lines.push("", ...emitSemanticCooperativeReduceHelper(helper, ir));
@@ -1393,7 +1404,7 @@ function semanticWgslSubgroupCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir?: SemanticKernelIrModule,
 ): boolean {
-  if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) || ir?.requiredFeatures.includes("subgroups") !== true) return false;
+  if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) || ir?.requiredFeatures.includes("subgroups") !== true) return false;
   const scalarArgs = semanticSubgroupScalarArguments(expression.callee.name, expression.args);
   if (scalarArgs === undefined || !scalarArgs.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir))) return false;
   if (semanticBitwiseReduceOpForCall(expression.callee.name)) {
@@ -1861,7 +1872,7 @@ function emitSemanticOperation(
       if (operation.expression.kind === "sequence") return emitSemanticSequenceStatement(operation.expression, ir, names, indentLevel, options, textureSpecializations);
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options, textureSpecializations)};`];
     case "branch": {
-      if (semanticOperationsContainWarpShuffle(operation.consequent) || semanticOperationsContainWarpShuffle(operation.alternate)) {
+      if (semanticOperationsContainWorkgroupCollective(operation.consequent) || semanticOperationsContainWorkgroupCollective(operation.alternate)) {
         const condition = emitTruthiness(operation.condition, ir, names, options);
         return [
           `${prefix}{`,
@@ -1934,7 +1945,7 @@ function emitSemanticPredicatedOperations(
       lines.push(...emitSemanticPredicatedOperations(operation.alternate, `(${predicate}) && !(${condition})`, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
       continue;
     }
-    if (operation.kind === "loop" && semanticOperationsContainWarpShuffle(operation.body)) {
+    if (operation.kind === "loop" && semanticOperationsContainWorkgroupCollective(operation.body)) {
       if (operation.loopKind !== "for" || operation.update?.kind === "sequence") {
         throw semanticWgslError("semantic WGSL supports predicated cooperative shuffle only in canonical for loops", operation.span);
       }
@@ -1946,7 +1957,7 @@ function emitSemanticPredicatedOperations(
       lines.push(`${prefix}}`);
       continue;
     }
-    if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWarpShuffle(operation.expression.value)) {
+    if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWorkgroupCollective(operation.expression.value)) {
       if (operation.expression.target.kind !== "symbol" || operation.expression.target.addressSpace !== "local") {
         throw semanticWgslError("predicated cooperative shuffle requires local scalar assignment", operation.span);
       }
@@ -1961,7 +1972,7 @@ function emitSemanticPredicatedOperations(
       lines.push(`${prefix}}`);
       continue;
     }
-    if (semanticOperationContainsWarpShuffle(operation)) {
+    if (semanticOperationContainsWorkgroupCollective(operation)) {
       throw semanticWgslError("semantic WGSL does not support this predicated cooperative shuffle shape", operation.span);
     }
     lines.push(`${prefix}if (${predicate}) {`);
@@ -1971,28 +1982,31 @@ function emitSemanticPredicatedOperations(
   return lines;
 }
 
-function semanticOperationsContainWarpShuffle(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.some(semanticOperationContainsWarpShuffle);
+function semanticOperationsContainWorkgroupCollective(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some(semanticOperationContainsWorkgroupCollective);
 }
 
-function semanticOperationContainsWarpShuffle(operation: SemanticKernelIrOperation): boolean {
-  if (operation.kind === "declare") return operation.init !== undefined && semanticExpressionContainsWarpShuffle(operation.init);
-  if (operation.kind === "store") return semanticExpressionContainsWarpShuffle(operation.value) || operation.target.indices.some(semanticExpressionContainsWarpShuffle);
-  if (operation.kind === "atomic" || operation.kind === "call") return operation.args.some(semanticExpressionContainsWarpShuffle);
-  if (operation.kind === "expression") return semanticExpressionContainsWarpShuffle(operation.expression);
-  if (operation.kind === "branch") return semanticExpressionContainsWarpShuffle(operation.condition) || semanticOperationsContainWarpShuffle(operation.consequent) || semanticOperationsContainWarpShuffle(operation.alternate);
-  if (operation.kind === "loop") return (operation.init !== undefined && !isSemanticKernelIrOperation(operation.init) && semanticExpressionContainsWarpShuffle(operation.init)) ||
-    (operation.condition !== undefined && semanticExpressionContainsWarpShuffle(operation.condition)) ||
-    (operation.update !== undefined && semanticExpressionContainsWarpShuffle(operation.update)) ||
-    semanticOperationsContainWarpShuffle(operation.body);
-  if (operation.kind === "block") return semanticOperationsContainWarpShuffle(operation.body);
-  if (operation.kind === "return") return operation.value !== undefined && semanticExpressionContainsWarpShuffle(operation.value);
+function semanticOperationContainsWorkgroupCollective(operation: SemanticKernelIrOperation): boolean {
+  if (operation.kind === "declare") return operation.init !== undefined && semanticExpressionContainsWorkgroupCollective(operation.init);
+  if (operation.kind === "store") return semanticExpressionContainsWorkgroupCollective(operation.value) || operation.target.indices.some(semanticExpressionContainsWorkgroupCollective);
+  if (operation.kind === "atomic" || operation.kind === "call") return operation.args.some(semanticExpressionContainsWorkgroupCollective);
+  if (operation.kind === "expression") return semanticExpressionContainsWorkgroupCollective(operation.expression);
+  if (operation.kind === "branch") return semanticExpressionContainsWorkgroupCollective(operation.condition) || semanticOperationsContainWorkgroupCollective(operation.consequent) || semanticOperationsContainWorkgroupCollective(operation.alternate);
+  if (operation.kind === "loop") return (operation.init !== undefined && !isSemanticKernelIrOperation(operation.init) && semanticExpressionContainsWorkgroupCollective(operation.init)) ||
+    (operation.condition !== undefined && semanticExpressionContainsWorkgroupCollective(operation.condition)) ||
+    (operation.update !== undefined && semanticExpressionContainsWorkgroupCollective(operation.update)) ||
+    semanticOperationsContainWorkgroupCollective(operation.body);
+  if (operation.kind === "block") return semanticOperationsContainWorkgroupCollective(operation.body);
+  if (operation.kind === "return") return operation.value !== undefined && semanticExpressionContainsWorkgroupCollective(operation.value);
   return false;
 }
 
-function semanticExpressionContainsWarpShuffle(expression: SemanticExpression): boolean {
-  if (expression.kind === "call" && expression.callee.kind === "symbol" && semanticShuffleOpForCall(expression.callee.name) !== undefined) return true;
-  return semanticExpressionChildren(expression).some(semanticExpressionContainsWarpShuffle);
+function semanticExpressionContainsWorkgroupCollective(expression: SemanticExpression): boolean {
+  if (expression.kind === "call" && expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" &&
+    (semanticShuffleOpForCall(expression.callee.name) !== undefined ||
+      isCudaWarpSumCallName(expression.callee.name) ||
+      cudaVoteOpForCall(expression.callee.name) === "ballot")) return true;
+  return semanticExpressionChildren(expression).some(semanticExpressionContainsWorkgroupCollective);
 }
 
 function emitSemanticSurfaceReadStore(
@@ -3241,9 +3255,17 @@ function emitSemanticExpression(
       }
       if (semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir))) {
         const helper = semanticCooperativeReduceHelperFor(ir, expression);
-        const value = expression.args[1];
+        const value = semanticCooperativeReduceValue(expression);
         if (helper && value) {
-          const emitted = emitSemanticCooperativeReduceCall(expression, ir, emitSemanticExpressionAs(value, ir, names, wgslValueScalar(helper.valueType), options, textureSpecializations));
+          const mask = helper.masked && expression.args[0]
+            ? emitSemanticExpressionAs(expression.args[0], ir, names, "u32", options, textureSpecializations)
+            : undefined;
+          const emitted = emitSemanticCooperativeReduceCall(
+            expression,
+            ir,
+            emitSemanticExpressionAs(value, ir, names, wgslValueScalar(helper.valueType), options, textureSpecializations),
+            mask,
+          );
           if (emitted !== undefined) return emitted;
         }
       }
@@ -4473,14 +4495,17 @@ function emitSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return "subgroupBallot(true).x";
-  const value = expression.args[legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
+  const value = expression.args[isCudaWarpSumCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);
   if (voteOp === "any" || voteOp === "all" || voteOp === "ballot") {
     const predicate = emitTruthiness(value, ir, names, options);
     if (voteOp === "any") return `select(0u, 1u, subgroupAny(${predicate}))`;
     if (voteOp === "all") return `select(0u, 1u, subgroupAll(${predicate}))`;
-    return `subgroupBallot(${predicate}).x`;
+    const activeMask = legacyVoteCall(name)
+      ? "0xffffffffu"
+      : emitSemanticExpressionAs(expression.args[0]!, ir, names, "u32", options, textureSpecializations);
+    return `${semanticBallotHelper().name}(${predicate}, ${activeMask}, local_id)`;
   }
   if (voteOp === "match-any") {
     const valueType = semanticExpressionValueType(value);

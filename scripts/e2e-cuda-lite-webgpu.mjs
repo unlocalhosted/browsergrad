@@ -3456,6 +3456,34 @@ static __global__ void finalError(double *x, double *g_sum) {
     if (tile32.thread_rank() == 0) atomicAdd(g_sum, blockSum);
   }
 }`,
+  cudaSamplesReduce7: `
+template <typename T = int, unsigned int blockSize = 256, bool nIsPow2 = 1>
+__global__ void reduce7(const int *g_idata, int *g_odata, unsigned int n) {
+  extern __shared__ int sdata[];
+  unsigned int tid = threadIdx.x;
+  unsigned int gridSize = 256 * gridDim.x;
+  unsigned int maskLength = (256 & 31);
+  maskLength = (maskLength > 0) ? (32 - maskLength) : maskLength;
+  const unsigned int mask = (0xffffffff) >> maskLength;
+  int mySum = 0;
+  unsigned int i = blockIdx.x * 256 * 2 + threadIdx.x;
+  gridSize = gridSize << 1;
+  while (i < n) {
+    mySum += g_idata[i];
+    if ((i + 256) < n) mySum += g_idata[i + 256];
+    i += gridSize;
+  }
+  mySum = warpReduceSum(mask, mySum);
+  if ((tid % warpSize) == 0) sdata[tid / warpSize] = mySum;
+  __syncthreads();
+  const unsigned int shmem_extent = (256 / warpSize) > 0 ? (256 / warpSize) : 1;
+  const unsigned int ballot_result = __ballot_sync(mask, tid < shmem_extent);
+  if (tid < shmem_extent) {
+    mySum = sdata[tid];
+    mySum = warpReduceSum(ballot_result, mySum);
+  }
+  if (tid == 0) g_odata[blockIdx.x] = mySum;
+}`,
   cooperativeTileVoteMask: `
 namespace cg = cooperative_groups;
 __global__ void cooperativeTileVoteMask(int *out) {
@@ -14370,6 +14398,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [32] },
+          },
+          {
+            name: "corpus:cuda-samples:reduce7-masked-warp-reduction",
+            corpusId: "cuda-samples",
+            source: SOURCES.cudaSamplesReduce7,
+            options: { workgroupSize: [256, 1, 1], dynamicSharedMemory: { sdata: 256 }, features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [256, 1, 1] },
+            input: () => ({
+              buffers: {
+                g_idata: new Int32Array(512).fill(1),
+                g_odata: new Int32Array(1),
+              },
+              scalars: { n: 512 },
+            }),
+            output: "g_odata",
+            expectedOutput: { type: "Int32Array", data: [512] },
           },
           {
             name: "corpus:cuda-samples:finalError-f32-compatible-atomic",

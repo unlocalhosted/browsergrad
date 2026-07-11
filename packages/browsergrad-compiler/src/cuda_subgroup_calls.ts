@@ -4,12 +4,23 @@ export const CUDA_LEGACY_SHUFFLE_CALL_NAMES = ["__shfl", "__shfl_down", "__shfl_
 export const CUDA_SYNC_SHUFFLE_CALL_NAMES = ["__shfl_sync", "__shfl_down_sync", "__shfl_up_sync", "__shfl_xor_sync"] as const;
 export const CUDA_ARITHMETIC_REDUCE_CALL_NAMES = ["__reduce_add_sync", "__reduce_min_sync", "__reduce_max_sync"] as const;
 export const CUDA_BITWISE_REDUCE_CALL_NAMES = ["__reduce_and_sync", "__reduce_or_sync", "__reduce_xor_sync"] as const;
+export const CUDA_WARP_SUM_CALL_NAMES = [
+  "warpReduceSum",
+  "warp_reduce_sum",
+  "warp_reduce_sum_f32",
+  "warp_reduce_sum_f16",
+  "warp_reduce_sum_f16_f16",
+  "warp_reduce_sum_f16_f32",
+  "warp_reduce_sum_i8_i32",
+  "warp_reduce_sum_i32_i32",
+] as const;
 export const CUDA_SUBGROUP_CALL_NAMES = [
   "__activemask",
   ...CUDA_LEGACY_VOTE_CALL_NAMES,
   ...CUDA_SYNC_VOTE_CALL_NAMES,
   ...CUDA_ARITHMETIC_REDUCE_CALL_NAMES,
   ...CUDA_BITWISE_REDUCE_CALL_NAMES,
+  ...CUDA_WARP_SUM_CALL_NAMES,
   ...CUDA_LEGACY_SHUFFLE_CALL_NAMES,
   ...CUDA_SYNC_SHUFFLE_CALL_NAMES,
 ] as const;
@@ -60,10 +71,14 @@ export function cudaShuffleOpForCall(name: string | undefined): CudaShuffleOp | 
 }
 
 export function cudaArithmeticReduceOpForCall(name: string | undefined): CudaArithmeticReduceOp | undefined {
-  if (name === "__reduce_add_sync") return "add";
+  if (name === "__reduce_add_sync" || isCudaWarpSumCallName(name)) return "add";
   if (name === "__reduce_min_sync") return "min";
   if (name === "__reduce_max_sync") return "max";
   return undefined;
+}
+
+export function isCudaWarpSumCallName(name: string | undefined): boolean {
+  return CUDA_WARP_SUM_CALL_NAMES.some((candidate) => candidate === name);
 }
 
 export function cudaBitwiseReduceOpForCall(name: string | undefined): CudaBitwiseReduceOp | undefined {

@@ -489,8 +489,28 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("out[0] = i32(bg_warp_reduce_sum_int_32(bg_uniforms.value, 32u, local_id))");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_i32_32_masked(bg_uniforms.value, bg_uniforms.mask, local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([7]);
+    });
+
+  it("applies masked warp reductions to logical CUDA lanes", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void maskedWarpSum(int* out) {
+    int value = threadIdx.x + 1;
+    int reduced = warpReduceSum(5u, value);
+    if (threadIdx.x == 0) out[0] = reduced;
+  }`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("(mask_arg & (1u << lane)) != 0u");
+      expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });
 
   it("infers subgroup reduction value types for mixed scalar math", () => {
@@ -549,7 +569,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.wgsl).toContain("subgroupAny");
       expect(compiled.wgsl).toContain("subgroupAll");
-      expect(compiled.wgsl).toContain("subgroupBallot");
+      expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
       expect(compiled.wgsl).toContain("subgroupAdd(input[0u])");
       expect(compiled.wgsl).toContain("countOneBits");
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -586,7 +606,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("subgroupAny");
       expect(compiled.wgsl).toContain("subgroupAll");
-      expect(compiled.wgsl).toContain("subgroupBallot");
+      expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
       expect(compiled.wgsl).toContain("subgroupAdd");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         1, 0, 10, 2,
@@ -630,7 +650,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("subgroupAny");
       expect(compiled.wgsl).toContain("subgroupAll");
-      expect(compiled.wgsl).toContain("subgroupBallot");
+      expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
       expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         1, 0, 10,
@@ -1692,7 +1712,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
-      expect(compiled.wgsl).toContain("bg_warp_reduce_sum_int_32(x[i], 32u, local_id)");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_i32_32(x[u32(i)], local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([7]);
     });
 
