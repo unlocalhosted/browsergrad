@@ -673,6 +673,27 @@ __global__ void namedConstants(float* out, uint* kinds) {
     expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo([...expected.buffers.out as Float32Array][0]!, 6);
   });
 
+  it("runs constant-table reads inside local out-pointer helpers", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__constant__ float weights[2] = {2.0f, 3.0f};
+__device__ float weighted(float value, uint *selected) {
+  *selected = value > 1.0f ? 1u : 0u;
+  return value * weights[*selected];
+}
+__global__ void constantLocalOut(float *out) {
+  uint selected = 0u;
+  out[0] = weighted(2.0f, &selected);
+  out[1] = (float)selected;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([6, 1]);
+  });
+
   it("runs mixed signedness assignment and modulo through real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(SIGNEDNESS_MIX, { workgroupSize: [2, 1, 1] });

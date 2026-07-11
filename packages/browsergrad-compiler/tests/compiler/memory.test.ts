@@ -885,6 +885,30 @@ __global__ void shared_reinterpret(int *out) {
       expect([...result.buffers.out as Float32Array]).toEqual([2, 4]);
     });
 
+  it("allows readonly constant tables inside local out-pointer helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __constant__ float weights[2] = {2.0f, 3.0f};
+  __device__ float weighted(float value, uint *selected) {
+    *selected = value > 1.0f ? 1u : 0u;
+    return value * weights[*selected];
+  }
+  __global__ void constantLocalOut(float *out) {
+    uint selected = 0u;
+    out[0] = weighted(2.0f, &selected);
+    out[1] = (float)selected;
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("selected: ptr<function, u32>");
+      expect([...result.buffers.out as Float32Array]).toEqual([6, 1]);
+    });
+
   it("lowers vector reinterpret memory-view helpers through semantic WGSL", () => {
       const compiled = compileCudaLiteKernelForWebGpu(`
   __device__ float4 ld_vec(const float* address) {

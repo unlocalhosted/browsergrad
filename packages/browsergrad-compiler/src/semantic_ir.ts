@@ -785,6 +785,19 @@ function specializeLocalPointerFunctions(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
 ): readonly CudaLiteSemanticFunction[] {
+  let current = functions;
+  for (let pass = 0; pass <= functions.length; pass++) {
+    const next = specializeLocalPointerFunctionsOnce(operations, current);
+    if (next.every((fn, index) => fn === current[index])) return next;
+    current = next;
+  }
+  return current;
+}
+
+function specializeLocalPointerFunctionsOnce(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+): readonly CudaLiteSemanticFunction[] {
   const calls = [
     ...collectSemanticFunctionCalls(operations),
     ...functions.flatMap((fn) => collectSemanticFunctionCalls(fn.body)),

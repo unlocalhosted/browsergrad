@@ -881,6 +881,7 @@ function semanticReferencePointerFunctionBodySupported(fn: CompiledCudaLiteKerne
     allowSharedMemory: true,
     allowDeviceGlobals: true,
     allowLocalArrays: true,
+    allowConstantMemory: true,
   });
 }
 

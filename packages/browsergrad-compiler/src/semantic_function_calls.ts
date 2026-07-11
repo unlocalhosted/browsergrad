@@ -80,6 +80,7 @@ export interface SemanticPointerFunctionBodyOptions {
   readonly allowSharedMemory?: boolean;
   readonly allowDeviceGlobals?: boolean;
   readonly allowLocalArrays?: boolean;
+  readonly allowConstantMemory?: boolean;
 }
 
 export function semanticFunctionBodyShapeSupported(
@@ -229,7 +230,10 @@ function semanticPointerFunctionExpressionAccessesSupported(
   let supported = true;
   walkSemanticExpression(expression, (item) => {
     const ref = memoryRefFromIndex(item);
-    if (ref && !pointerParams.has(ref.base) && !(options.allowDeviceGlobals === true && ref.addressSpace === "device-global")) supported = false;
+    if (ref &&
+      !pointerParams.has(ref.base) &&
+      !(options.allowDeviceGlobals === true && ref.addressSpace === "device-global") &&
+      !(options.allowConstantMemory === true && ref.addressSpace === "constant")) supported = false;
     if (item.kind !== "call") return;
     const target = atomicCallTarget(item);
     if (target && !pointerParams.has(target.base) && !(options.allowDeviceGlobals === true && target.addressSpace === "device-global")) supported = false;

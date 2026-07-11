@@ -651,7 +651,9 @@ function unsupportedSemanticWgslOperation(
         if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init, operation.target.valueType, ir)) return operation;
         if (operation.target.dimensions.length === 0) {
           const vectorTarget = isSemanticFloatVectorType(operation.target.valueType);
-          if (operation.init && !semanticWgslExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", ir)) return operation;
+          if (operation.init && !semanticWgslExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", ir)) {
+            return unsupportedSemanticWgslNestedExpressionOperation(operation.init, ir) ?? operation;
+          }
         }
         break;
       case "store":
@@ -751,6 +753,43 @@ function unsupportedSemanticWgslOperation(
         return operation;
     }
   }
+  return undefined;
+}
+
+function unsupportedSemanticWgslNestedExpressionOperation(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  seen = new Set<string>(),
+): SemanticKernelIrOperation | undefined {
+  if (expression.kind === "call" && expression.callee.kind === "symbol" && !seen.has(expression.callee.name)) {
+    const calleeName = expression.callee.name;
+    const fn = ir.functions.find((candidate) => candidate.name === calleeName);
+    if (fn) {
+      const nextSeen = new Set(seen).add(fn.name);
+      const unsupported = unsupportedSemanticWgslOperation(fn.body, ir, true);
+      if (unsupported) return unsupported;
+      for (const operation of fn.body) {
+        const nested = unsupportedSemanticWgslOperationExpression(operation);
+        if (!nested) continue;
+        const result = unsupportedSemanticWgslNestedExpressionOperation(nested, ir, nextSeen);
+        if (result) return result;
+      }
+    }
+  }
+  for (const child of semanticExpressionChildren(expression)) {
+    const unsupported = unsupportedSemanticWgslNestedExpressionOperation(child, ir, seen);
+    if (unsupported) return unsupported;
+  }
+  return undefined;
+}
+
+function unsupportedSemanticWgslOperationExpression(
+  operation: SemanticKernelIrOperation,
+): SemanticExpression | undefined {
+  if (operation.kind === "declare") return operation.init;
+  if (operation.kind === "expression") return operation.expression;
+  if (operation.kind === "return") return operation.value;
+  if (operation.kind === "store") return operation.value;
   return undefined;
 }
 
@@ -1632,6 +1671,7 @@ function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["fu
     allowSharedMemory: true,
     allowDeviceGlobals: true,
     allowLocalArrays: true,
+    allowConstantMemory: true,
   });
 }
 
@@ -6052,6 +6092,7 @@ function emitFlatStorageIndex(
     return `u32(${terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`})`;
   }
   const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(ref.base);
+  if (!hasOffset && ref.indices.length === 0) return "0u";
   if (!hasOffset && ref.indices.length === 1) {
     return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
   }
@@ -6070,6 +6111,7 @@ function emitSemanticRootStorageIndex(
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(ref.base);
+  if (!hasOffset && ref.indices.length === 0) return "0u";
   if (!hasOffset && ref.indices.length === 1) {
     return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
   }
