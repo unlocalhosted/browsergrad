@@ -18,7 +18,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | CUDA-samples semantic-direct lowering is now `282/354`, up from `161/354`; `72` direct kernels still use AST WGSL fallback, compile/codegen remains `357/357`, and hard failures remain `0` |
 | Current focus | Remove semantic WGSL fallback classes while preserving browser-native execution and semantic-reference truth where modeled |
-| Active work item | CUDA-samples `reduce4` semantic preflight stops on normalized line 31 chained assignment `sdata[tid] = mySum = mySum + sdata[tid + s]`; lower nested assignment values into ordered semantic operations while preserving single evaluation |
+| Active work item | CUDA-samples `reduce4` semantic preflight stops at normalized line 45 on `tile32.shfl_down(...)` inside a first-warp branch. Chained assignment at line 31 already lowers correctly. Next design must preserve logical 32-lane CUDA semantics without assuming WebGPU subgroup size or inserting a divergent workgroup barrier |
 | Skip policy | No unexpected skips. Feature-gated WebGPU cases must declare `requiredFeatures`; capability-required gates use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated non-compiler dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
