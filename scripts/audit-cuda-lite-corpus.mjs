@@ -296,7 +296,7 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
     return {
       ok: true,
       source,
-      semanticIrDirectWgsl: semanticIrDirectWgslFor(compiled),
+      semanticIrDirectWgsl: semanticIrWgslCoverageFor(compiled),
     };
   } catch (error) {
     return { ok: false, source, error };
@@ -386,18 +386,22 @@ function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kerne
     return {
       ok: true,
       source,
-      semanticIrDirectWgsl: semanticIrDirectWgslFor(compiled),
+      semanticIrDirectWgsl: semanticIrWgslCoverageFor(compiled),
     };
   } catch (error) {
     return { ok: false, source, error };
   }
 }
 
-function semanticIrDirectWgslFor(compiled) {
+function semanticIrWgslCoverageFor(compiled) {
   if (canEmitSemanticKernelIrWgsl(compiled.kernelIr)) return { semanticIrDirectWgslOk: true };
+  const lift = webGpuLiftFor(compiled);
   return {
     semanticIrDirectWgslOk: false,
     semanticIrDirectWgslBlocker: semanticKernelIrWgslPreflightBlocker(compiled.kernelIr) ?? "semantic WGSL preflight rejected",
+    ...(lift.kind === "host-retirement-reduction"
+      ? { semanticIrWebGpuPlanOk: true, semanticIrWebGpuPlanKind: lift.kind }
+      : {}),
   };
 }
 
@@ -419,9 +423,11 @@ function shouldRetryWithReverseContext(error) {
 const failures = results.filter((result) => !result.ok);
 const directLoweringOk = results.length - failures.length;
 const semanticIrDirectWgslOk = results.filter((result) => result.directLoweringOk && result.semanticIrDirectWgslOk).length;
-const legacyAstDirectWgslFallback = directLoweringOk - semanticIrDirectWgslOk;
+const semanticIrHostPlanOk = results.filter((result) => result.directLoweringOk && result.semanticIrWebGpuPlanOk).length;
+const semanticIrWebGpuOk = semanticIrDirectWgslOk + semanticIrHostPlanOk;
+const legacyAstDirectWgslFallback = directLoweringOk - semanticIrWebGpuOk;
 const legacyAstDirectWgslBlockers = countBy(
-  results.filter((result) => result.directLoweringOk && !result.semanticIrDirectWgslOk),
+  results.filter((result) => result.directLoweringOk && !result.semanticIrDirectWgslOk && !result.semanticIrWebGpuPlanOk),
   (result) => result.semanticIrDirectWgslBlocker ?? "unknown",
 );
 const hostPlanCompiledOk = failures.filter((failure) => failure.webGpuPlanLiftOk).length;
@@ -445,6 +451,8 @@ const summary = {
     planCompiledOk: compileCodegenOk,
     planCompileGaps: compileCodegenGaps,
     semanticIrDirectWgslOk,
+    semanticIrHostPlanOk,
+    semanticIrWebGpuOk,
     legacyAstDirectWgslFallback,
     legacyAstDirectWgslBlockers,
     compileCodegenOnlyOk: compileCodegenOk,
@@ -456,7 +464,9 @@ const summary = {
     planCompiledOk: "Parsed, analyzed, lowered, and emitted direct WGSL or a host-orchestrated WebGPU plan under compileFeatureProfile assumptions.",
     planCompileGaps: "Extracted kernels that did not compile/codegen into direct WGSL or a host-orchestrated WebGPU plan.",
     semanticIrDirectWgslOk: "Direct-dispatch kernels emitted from semantic IR without the AST WGSL fallback.",
-    legacyAstDirectWgslFallback: "Direct-dispatch kernels that still require the AST WGSL fallback.",
+    semanticIrHostPlanOk: "Host-orchestrated kernels whose every dispatch emits from semantic IR without the AST WGSL fallback.",
+    semanticIrWebGpuOk: "Kernels whose direct or host-orchestrated WebGPU execution emits entirely from semantic IR.",
+    legacyAstDirectWgslFallback: "Compiled kernels whose WebGPU execution still requires the AST WGSL fallback.",
     compileCodegenOnlyOk: "Parsed, analyzed, lowered, and emitted WGSL or host WebGPU plan from pinned corpus source under compileFeatureProfile assumptions.",
     fixtureBackedExecutedOk: "Requires explicit input/output fixtures; this corpus audit does not synthesize them.",
     browserWebGpuExecutedOk: "Covered by separate browser E2E gates, not by this corpus audit.",
@@ -474,6 +484,8 @@ const summary = {
   planCompileGaps: compileCodegenGaps,
   webGpuDirectCompiledOk: directLoweringOk,
   semanticIrDirectWgslOk,
+  semanticIrHostPlanOk,
+  semanticIrWebGpuOk,
   legacyAstDirectWgslFallback,
   legacyAstDirectWgslBlockers,
   webGpuHostPlanCompiledOk: hostPlanCompiledOk,
@@ -569,6 +581,8 @@ function kernelManifestRows(items, includeSources = false) {
       compileCodegenOk: planCompiledOk,
       ...(item.semanticIrDirectWgslOk === undefined ? {} : { semanticIrDirectWgslOk: item.semanticIrDirectWgslOk }),
       ...(item.semanticIrDirectWgslBlocker === undefined ? {} : { semanticIrDirectWgslBlocker: item.semanticIrDirectWgslBlocker }),
+      ...(item.semanticIrWebGpuPlanOk === undefined ? {} : { semanticIrWebGpuPlanOk: item.semanticIrWebGpuPlanOk }),
+      ...(item.semanticIrWebGpuPlanKind === undefined ? {} : { semanticIrWebGpuPlanKind: item.semanticIrWebGpuPlanKind }),
       ...(item.webGpuPlanLiftKind === undefined ? {} : { webGpuPlanLiftKind: item.webGpuPlanLiftKind }),
       ...(item.webGpuPlanLiftBlockerCode === undefined ? {} : { webGpuPlanLiftBlockerCode: item.webGpuPlanLiftBlockerCode }),
       ...(includeSources && item.source !== undefined ? { source: item.source } : {}),

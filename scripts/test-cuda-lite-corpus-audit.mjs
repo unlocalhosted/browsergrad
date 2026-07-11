@@ -159,6 +159,49 @@ __global__ void InactiveDynamic(float *out) {
   out[0] += 2.0f;
 }
 
+__device__ void retirement_fold(float *values, uint tid, const cg::thread_block &cta) {
+  if (tid < 2u) values[tid] += values[tid + 2u];
+  cg::sync(cta);
+  if (tid == 0u) values[0] += values[1];
+  cg::sync(cta);
+}
+
+__device__ void retirement_partial(const float *input, float *out, uint n, const cg::thread_block &cta) {
+  extern __shared__ float partial[];
+  uint tid = threadIdx.x;
+  uint index = blockIdx.x * blockDim.x + tid;
+  partial[tid] = index < n ? input[index] : 0.0f;
+  cg::sync(cta);
+  retirement_fold(partial, tid, cta);
+  if (tid == 0u) out[blockIdx.x] = partial[0];
+}
+
+__device__ uint retirement_count = 0u;
+__global__ void RetirementReduce(const float *input, float *out, uint n) {
+  const cg::thread_block cta = cg::this_thread_block();
+  retirement_partial(input, out, n, cta);
+  if (gridDim.x > 1u) {
+    uint tid = threadIdx.x;
+    __shared__ bool amLast;
+    extern __shared__ float scratch[];
+    __threadfence();
+    if (tid == 0u) {
+      uint ticket = atomicInc(&retirement_count, gridDim.x);
+      amLast = ticket == gridDim.x - 1u;
+    }
+    cg::sync(cta);
+    if (amLast) {
+      uint i = tid;
+      float sum = 0.0f;
+      while (i < gridDim.x) { sum += out[i]; i += blockDim.x; }
+      scratch[tid] = sum;
+      cg::sync(cta);
+      retirement_fold(scratch, tid, cta);
+      if (tid == 0u) { out[0] = scratch[0]; retirement_count = 0u; }
+    }
+  }
+}
+
 __global__ void multiGpuConjugateGradient(int *I,
                                           int *J,
                                           float *val,
@@ -236,6 +279,10 @@ void launch_inactive_dynamic(float *out) {
   InactiveDynamic<<<1, 1>>>(out);
 }
 
+void launch_retirement(const float *input, float *out, uint n) {
+  RetirementReduce<<<3, 4, 32>>>(input, out, n);
+}
+
 void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, float *p, float *r, double *dot_result, int nnz, int N, float tol, MultiDeviceData data) {
   multiGpuConjugateGradient<<<1, 32>>>(I, J, val, x, Ax, p, r, dot_result, nnz, N, tol, data);
 }
@@ -252,27 +299,33 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
     process.exit(result.status ?? 1);
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assertEqual(report.summary.totalKernelDefinitions, 14, "total kernel count");
+  assertEqual(report.summary.totalKernelDefinitions, 15, "total kernel count");
   assertEqual(report.summary.corpusKernelExecution, "compile-codegen-only", "corpus execution mode");
   assertEqual(report.summary.corpusExecutionMode, "compile-codegen-only", "corpus execution mode alias");
-  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 14, "compile/codegen-only tier count");
-  assertEqual(report.summary.executionTierCounts.planCompiledOk, 14, "plan-compiled tier count");
+  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 15, "compile/codegen-only tier count");
+  assertEqual(report.summary.executionTierCounts.planCompiledOk, 15, "plan-compiled tier count");
   assertEqual(report.summary.executionTierCounts.planCompileGaps, 0, "plan-compiled gap count");
   assertEqual(report.summary.executionTierCounts.fixtureBackedExecutedOk, 0, "fixture execution tier count");
   assertEqual(report.summary.executionTierCounts.browserWebGpuExecutedOk, 0, "browser execution tier count");
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
-  assertEqual(report.summary.planCompiledOk, 14, "plan compiled count");
+  assertEqual(report.summary.planCompiledOk, 15, "plan compiled count");
   assertEqual(report.summary.planCompileGaps, 0, "plan compiled gaps");
-  assertEqual(report.summary.singleDispatchPlanCompiledOk, 12, "single-dispatch plan compiled count");
+  assertEqual(report.summary.singleDispatchPlanCompiledOk, 13, "single-dispatch plan compiled count");
   assertEqual(report.summary.hostOrchestratedPlanCompiledOk, 2, "host-orchestrated plan compiled count");
   assertEqual(report.summary.browserExecutedOk, 0, "browser executed count");
   assertEqual(report.summary.outputVerifiedOk, 0, "output verified count");
   assertEqual(report.summary.deprecatedCompilePlanAliases.webGpuRunnableOk, "planCompiledOk", "deprecated runnable alias");
-  assertEqual(report.summary.webGpuDirectCompiledOk, 12, "reverse include kernel direct WGSL compiled");
+  assertEqual(report.summary.webGpuDirectCompiledOk, 13, "reverse include kernel direct WGSL compiled");
   assertEqual(
-    report.summary.semanticIrDirectWgslOk + report.summary.legacyAstDirectWgslFallback,
+    report.summary.semanticIrDirectWgslOk + report.summary.semanticIrHostPlanOk + report.summary.legacyAstDirectWgslFallback,
     report.summary.webGpuDirectCompiledOk,
-    "semantic and AST direct WGSL coverage partition",
+    "semantic direct, semantic host, and AST fallback coverage partition",
+  );
+  assertEqual(report.summary.semanticIrHostPlanOk, 1, "semantic host-plan count");
+  assertEqual(
+    report.summary.semanticIrWebGpuOk,
+    report.summary.semanticIrDirectWgslOk + report.summary.semanticIrHostPlanOk,
+    "total semantic WebGPU coverage",
   );
   assertEqual(
     Object.values(report.summary.legacyAstDirectWgslBlockers).reduce((total, count) => total + count, 0),
@@ -280,7 +333,7 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
     "AST direct WGSL blocker coverage partition",
   );
   assertEqual(report.summary.webGpuHostPlanCompiledOk, 2, "reverse include kernel host-plan compiled");
-  assertEqual(report.summary.compileCodegenOk, 14, "reverse include kernel compile/codegen count");
+  assertEqual(report.summary.compileCodegenOk, 15, "reverse include kernel compile/codegen count");
   assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
   assertEqual(report.summary.webGpuRunnableOk, undefined, "legacy runnable count omitted from top-level summary");
