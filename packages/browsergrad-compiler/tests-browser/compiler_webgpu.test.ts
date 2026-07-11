@@ -3282,6 +3282,26 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
   });
 
+  it("runs surf1Dwrite through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void write1d(cudaSurfaceObject_t outputSurf) {
+  int x = threadIdx.x;
+  surf1Dwrite(10.0f + (float)x, outputSurf, x * sizeof(float));
+}`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {},
+      surfaces: { outputSurf: { width: 2, height: 1, data: new Float32Array(2) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
+    expect([...actual.buffers.outputSurf as Float32Array]).toEqual([10, 11]);
+  });
+
   it("runs surf2Dread through WebGPU storage-backed surfaces", async () => {
     if (!deviceCheck.available) return;
     const source = `

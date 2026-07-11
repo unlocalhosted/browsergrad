@@ -1191,13 +1191,16 @@ function lowerStatement(
         }
       }
       if (expression.kind === "call" && expression.callee.kind === "symbol") {
-        if (isCudaSemanticSurfaceWriteCallName(expression.callee.name) && expression.args.length >= 4) {
+        if (
+          isCudaSemanticSurfaceWriteCallName(expression.callee.name) &&
+          expression.args.length >= (expression.callee.name === "surf1Dwrite" ? 3 : 4)
+        ) {
           return {
             kind: "surface-write",
             value: expression.args[0]!,
             surface: expression.args[1]!,
             xBytes: expression.args[2]!,
-            y: expression.args[3]!,
+            y: expression.callee.name === "surf1Dwrite" ? zeroExpression(expression.span) : expression.args[3]!,
             ...(semanticSurfaceWriteUsesZ(expression.callee.name) && expression.args[4] !== undefined ? { z: expression.args[4]! } : {}),
             span: statement.span,
           };

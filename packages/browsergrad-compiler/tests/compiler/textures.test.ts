@@ -1782,6 +1782,27 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).not.toContain("bg_tex2d_f32_texSrc");
     });
 
+  it("lowers surf1Dwrite through semantic surface IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void write1d(cudaSurfaceObject_t outputSurf) {
+    int x = threadIdx.x;
+    surf1Dwrite(10.0f + (float)x, outputSurf, x * sizeof(float));
+  }`, { workgroupSize: [2, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {},
+          surfaces: { outputSurf: { width: 2, height: 1, data: new Float32Array(2) } },
+        },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.operations).toContainEqual(expect.objectContaining({ kind: "surface-write" }));
+      expect([...result.buffers.outputSurf as Float32Array]).toEqual([10, 11]);
+    });
+
   it("lowers cubemap texture reads through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void sample(float *out, cudaTextureObject_t tex) {

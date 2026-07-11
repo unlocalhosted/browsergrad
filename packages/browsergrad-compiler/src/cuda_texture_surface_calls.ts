@@ -18,6 +18,7 @@ export const CUDA_SURFACE_WRITE_CALLS = new Set([
 ]);
 
 export const CUDA_SEMANTIC_SURFACE_WRITE_CALLS = new Set([
+  "surf1Dwrite",
   "surf2Dwrite",
   "surf2DLayeredwrite",
   "surf3Dwrite",
