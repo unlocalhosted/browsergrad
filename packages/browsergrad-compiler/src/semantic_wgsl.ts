@@ -1626,6 +1626,7 @@ function semanticWgslSubgroupCallSupported(
 ): boolean {
   if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) ||
     ir?.requiredFeatures.includes("subgroups") !== true && ir?.subgroupMode !== "scalar") return false;
+  if (expression.callee.name === "bg_subgroup_add" && ir?.subgroupMode !== "scalar") return false;
   const scalarArgs = semanticSubgroupScalarArguments(expression.callee.name, expression.args);
   if (scalarArgs === undefined || !scalarArgs.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir))) return false;
   if (semanticBitwiseReduceOpForCall(expression.callee.name)) {
@@ -5407,7 +5408,7 @@ function emitSemanticSubgroupCall(
     if (ir.subgroupMode === "scalar") return "1u";
     return `${semanticBallotHelper().name}(${options.activeCollectivePredicate ?? "true"}, 0xffffffffu, local_id)`;
   }
-  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
+  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : name === "bg_subgroup_add" || legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);
   if (ir.subgroupMode === "scalar") {

@@ -2501,7 +2501,7 @@ function evalSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return semanticReferenceActiveMask(context);
-  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
+  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : name === "bg_subgroup_add" || legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);
   if (context.compiled.subgroupMode === "scalar") {

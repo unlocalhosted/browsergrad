@@ -130,7 +130,9 @@ export function semanticCooperativeReduceHelperFor(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
 ): SemanticCooperativeReduceHelper | undefined {
   if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function") return undefined;
+  if (expression.callee.name === "bg_subgroup_add") return undefined;
   const arithmeticOperation = cudaArithmeticReduceOpForCall(expression.callee.name);
+  if (ir.subgroupMode === "scalar" && arithmeticOperation !== undefined) return undefined;
   const logicalWarpOperation = isCudaWarpSumCallName(expression.callee.name) ? "add" : arithmeticOperation;
   if (logicalWarpOperation) {
     const valueArg = semanticCooperativeReduceValue(expression);

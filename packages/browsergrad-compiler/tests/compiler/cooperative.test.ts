@@ -2935,6 +2935,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [32, 1, 1],
       });
       expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("enable subgroups;");
       expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Any|All)/u);
     });
@@ -2958,6 +2961,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect([...result.buffers.x as Float32Array]).toEqual([1, 2, 3, 4]);
     });
 
