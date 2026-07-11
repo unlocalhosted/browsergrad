@@ -4191,11 +4191,20 @@ __global__ void sharedHelperScoped(float *out) {
         { buffers: { out: new Uint32Array(2), sum: new Float32Array(1) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(2), sum: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("pack2x16float");
       expect(compiled.wgsl).toContain("unpack2x16float");
       expect([...result.buffers.out as Uint32Array]).toEqual([0x40003c00, 0x44004200]);
       expect([...result.buffers.sum as Float32Array]).toEqual([10]);
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([...result.buffers.out as Uint32Array]);
+      expect([...semanticResult.buffers.sum as Float32Array]).toEqual([10]);
     });
 
   it("packs half pointer views over shared byte storage into 16-bit lanes", () => {

@@ -1867,6 +1867,24 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
     });
 
+  it("lowers warp_reduce_max through semantic subgroup reduction", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void warp_max(const float* x, float* out) {
+    int i = threadIdx.x;
+    out[i] = warp_reduce_max(x[i]);
+  }`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { x: new Float32Array([1, 7, 3, 5]), out: new Float32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("warp_reduce_max");
+      expect([...result.buffers.out as Float32Array]).toEqual([7, 7, 7, 7]);
+    });
+
   it("lowers integer warp reduction aliases", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void reduce_int_alias(const int *x, int *out) {

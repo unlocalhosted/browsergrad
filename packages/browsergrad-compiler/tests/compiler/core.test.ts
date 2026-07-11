@@ -4414,6 +4414,20 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect([...result.buffers.out as Uint32Array]).toEqual([5, 7]);
     });
 
+  it("types half-to-float arithmetic as float in semantic declarations", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void half_max_scale(half* values, float* out, float scale) {
+    half* lanes = values;
+    float maximum = __half2float(__hmax(lanes[0], lanes[1])) * scale;
+    out[0] = maximum;
+  }`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+      const declaration = compiled.kernelIr.operations.find((operation) =>
+        operation.kind === "declare" && operation.target.name === "maximum");
+
+      expect(declaration).toMatchObject({ kind: "declare", init: { kind: "binary", valueType: "float" } });
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    });
+
   it("parses inline PTX clobber sections as an unsupported semantic gap", () => {
       expect(() => compileCudaLiteKernel(`
   __global__ void clobberAsm(float *out, float *in) {

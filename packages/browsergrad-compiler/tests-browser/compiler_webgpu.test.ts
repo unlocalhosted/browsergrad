@@ -1498,6 +1498,22 @@ __global__ void uniformBarrierLoop(float *x) {
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
 
+  it("runs warp_reduce_max through semantic WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void warpMax(const float* x, float* out) {
+  int i = threadIdx.x;
+  out[i] = warp_reduce_max(x[i]);
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const input = { buffers: { x: new Float32Array([1, 7, 3, 5]), out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs scoped local declarations through semantic WGSL on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
@@ -5040,6 +5056,32 @@ __global__ void dynamic_shared_alias(uint* out) {
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([8, 7]);
+  });
+
+  it("runs packed half pointer views over local uint carriers on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void localHalfOverlay(uint* out, float* sum) {
+  uint regs[1][2];
+  regs[0][0] = 0u;
+  regs[0][1] = 0u;
+  half* view = reinterpret_cast<half*>(&(regs[0][0]));
+  view[0] = __float2half(1.0f);
+  view[1] = __float2half(2.0f);
+  view[2] = __float2half(3.0f);
+  view[3] = __float2half(4.0f);
+  sum[0] = __half2float(view[0]) + __half2float(view[1]) + __half2float(view[2]) + __half2float(view[3]);
+  out[0] = regs[0][0];
+  out[1] = regs[0][1];
+}`, { workgroupSize: [1, 1, 1], f16Mode: "f32" });
+    const input = { buffers: { out: new Uint32Array(2), sum: new Float32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.sum as Float32Array]).toEqual([10]);
   });
 
   it("runs retirement-count reductions as host WebGPU phases", async () => {

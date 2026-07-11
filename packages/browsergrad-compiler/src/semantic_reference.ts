@@ -38,7 +38,7 @@ import {
   isCudaLegacyShuffleCallName as legacyShuffleCall,
   isCudaLegacyVoteCallName as legacyVoteCall,
   isCudaShuffleCallName,
-  isCudaWarpSumCallName,
+  isCudaWarpReduceCallName,
 } from "./cuda_subgroup_calls.js";
 import { referenceTypedArrayForScalar as typedArrayForScalar } from "./reference_scalars.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
@@ -557,6 +557,7 @@ function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledC
 
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
+  if (semanticReferenceLocalPackedHalfView(ref, compiled)) return true;
   if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
   if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
@@ -565,6 +566,11 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol === undefined || symbol.valueType === ref.valueType;
+}
+
+function semanticReferenceLocalPackedHalfView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  return ref.addressSpace === "local" && ref.pointerBaseIsScalarLane === true && ref.valueType === "half" &&
+    compiled.kernelIr.memory.some((symbol) => symbol.kind === "local" && symbol.name === ref.base && symbol.valueType === "uint");
 }
 
 function semanticReferencePackedSharedByteRoot(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -2278,7 +2284,7 @@ function evalSemanticSubgroupCall(
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return semanticReferenceActiveMask(context);
-  const value = expression.args[isCudaWarpSumCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
+  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);
   if (context.compiled.subgroupMode === "scalar") {
@@ -2287,7 +2293,7 @@ function evalSemanticSubgroupCall(
     return scalar;
   }
   const mask = expression.args.length === 2 &&
-    (isCudaWarpSumCallName(name) || voteOp !== undefined || cudaArithmeticReduceOpForCall(name) !== undefined)
+    (isCudaWarpReduceCallName(name) || voteOp !== undefined || cudaArithmeticReduceOpForCall(name) !== undefined)
     ? evalNumber(expression.args[0]!, context) >>> 0
     : undefined;
   const peers = semanticWarpContexts(context).filter((peer) =>
@@ -4624,6 +4630,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     base: target.name,
     addressSpace: target.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
     ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
     indices,
@@ -4645,6 +4652,11 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     if (!Array.isArray(buffer)) {
       if (ref.indices.length === 0 && typeof buffer === "number") return buffer;
       throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    }
+    if (semanticReferenceLocalPackedHalfView(ref, context.compiled)) {
+      const halfIndex = flatIndex(ref, context);
+      const word = Number(buffer[Math.trunc(halfIndex / 2)] ?? 0) >>> 0;
+      return float16BitsToFloat32(halfIndex % 2 === 0 ? word & 0xffff : word >>> 16);
     }
     const index = flatIndex(ref, context);
     return Number(buffer[index] ?? 0);
@@ -4710,6 +4722,16 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
         return;
       }
       throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    }
+    if (semanticReferenceLocalPackedHalfView(ref, context.compiled)) {
+      const halfIndex = flatIndex(ref, context);
+      const wordIndex = Math.trunc(halfIndex / 2);
+      const previous = Number(buffer[wordIndex] ?? 0) >>> 0;
+      const bits = float32ToFloat16Bits(value) & 0xffff;
+      buffer[wordIndex] = halfIndex % 2 === 0
+        ? ((previous & 0xffff0000) | bits) >>> 0
+        : ((previous & 0x0000ffff) | (bits << 16)) >>> 0;
+      return;
     }
     const index = flatIndex(ref, context);
     if (index >= 0 && index < buffer.length) buffer[index] = value;

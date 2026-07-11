@@ -93,7 +93,7 @@ import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
 import {
   cudaArithmeticReduceOpForCall,
   cudaVoteOpForCall,
-  isCudaWarpSumCallName,
+  isCudaWarpReduceCallName,
 } from "./cuda_subgroup_calls.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
@@ -1240,6 +1240,7 @@ function emitSemanticStoragePointerAtomicValue(
 
 function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (!semanticWgslMemoryRefSupported(ref, ir)) return false;
+  if (semanticWgslLocalPackedHalfView(ref, ir)) return true;
   if (semanticWgslLocalPackedByteRawView(ref, ir)) return true;
   if (semanticWgslPackedSharedByteRoot(ref, ir)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
@@ -1252,6 +1253,11 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace) ??
     (ref.addressSpace === "local" ? semanticFunctionLocalArraySymbol(ir, ref.base) : undefined);
   return symbol !== undefined && symbol.valueType === ref.valueType;
+}
+
+function semanticWgslLocalPackedHalfView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  const root = localArraySymbol(ir, ref.base);
+  return ref.addressSpace === "local" && ref.pointerBaseIsScalarLane === true && ref.valueType === "half" && root?.valueType === "uint";
 }
 
 function semanticWgslPackedSharedByteRoot(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
@@ -2314,7 +2320,7 @@ function semanticOperationContainsWorkgroupCollective(operation: SemanticKernelI
 function semanticExpressionContainsWorkgroupCollective(expression: SemanticExpression): boolean {
   if (expression.kind === "call" && expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" &&
     (semanticShuffleOpForCall(expression.callee.name) !== undefined ||
-      isCudaWarpSumCallName(expression.callee.name) ||
+      isCudaWarpReduceCallName(expression.callee.name) ||
       cudaVoteOpForCall(expression.callee.name) === "ballot" ||
       cudaVoteOpForCall(expression.callee.name) === "any" ||
       cudaVoteOpForCall(expression.callee.name) === "all" ||
@@ -2644,7 +2650,11 @@ function emitSemanticStore(
   if (semanticWgslVectorFieldMemoryRefSupported(operation.target)) {
     return emitSemanticVectorFieldMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
   }
-  if (semanticWgslPackedSharedByteRoot(operation.target, ir) || semanticWgslDirectByteRawView(operation.target, ir)) {
+  if (
+    semanticWgslPackedSharedByteRoot(operation.target, ir) ||
+    semanticWgslDirectByteRawView(operation.target, ir) ||
+    semanticWgslLocalPackedHalfView(operation.target, ir)
+  ) {
     const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
     if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
     const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
@@ -3592,6 +3602,7 @@ function emitSemanticExpression(
       if (ref) {
         if (semanticWgslDirectByteRawView(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslPackedSharedByteRoot(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
+        if (semanticWgslLocalPackedHalfView(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
           return emitSemanticMemoryRead(ref, ir, names, options);
         }
@@ -4607,6 +4618,12 @@ function emitSemanticMemoryRead(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  if (semanticWgslLocalPackedHalfView(ref, ir)) {
+    const halfIndex = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
+    const packed = emitSemanticLocalPackedHalfWord(ref, halfIndex, ir, names);
+    const lane = `unpack2x16float(${packed})[(${halfIndex} & 1u)]`;
+    return effectiveSemanticF16Mode(ir, options) === "native" ? `f16(${lane})` : lane;
+  }
   if (semanticWgslDirectByteRawView(ref, ir)) {
     const base = emitFlatStorageIndex({ ...ref, valueType: "uchar" }, ir, names, options);
     const storage = nameFor(ref.base, names);
@@ -4662,6 +4679,12 @@ function emitSemanticMemoryWrite(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  if (semanticWgslLocalPackedHalfView(ref, ir)) {
+    const halfIndex = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
+    const word = emitSemanticLocalPackedHalfWord(ref, halfIndex, ir, names);
+    const bits = `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`;
+    return `${word} = select((${word} & 0xffff0000u) | ${bits}, (${word} & 0x0000ffffu) | (${bits} << 16u), (${halfIndex} & 1u) != 0u)`;
+  }
   if (semanticWgslDirectByteRawView(ref, ir)) {
     const base = emitFlatStorageIndex({ ...ref, valueType: "uchar" }, ir, names, options);
     const storage = nameFor(ref.base, names);
@@ -4690,6 +4713,17 @@ function emitSemanticMemoryWrite(
   }
   const target = emitSemanticMemoryRef(ref, ir, names, options);
   return `${target} = ${value}`;
+}
+
+function emitSemanticLocalPackedHalfWord(
+  ref: SemanticMemoryRef,
+  halfIndex: string,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  const local = localArraySymbol(ir, ref.base);
+  if (!local) throw semanticWgslError(`unknown packed local memory '${ref.base}'`, ref.span);
+  return `${nameFor(ref.base, names)}${emitFlatLocalArrayIndexes(`(${halfIndex} / 2u)`, local.dimensions)}`;
 }
 
 function emitSemanticPackedSharedByteIndex(
@@ -4998,7 +5032,7 @@ function emitSemanticSubgroupCall(
   if (name === "__activemask") {
     return `${semanticBallotHelper().name}(${options.activeCollectivePredicate ?? "true"}, 0xffffffffu, local_id)`;
   }
-  const value = expression.args[isCudaWarpSumCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
+  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);
   if (voteOp === "any" || voteOp === "all" || voteOp === "ballot") {
@@ -6138,6 +6172,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     base: flattened.base.name,
     addressSpace: flattened.base.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
     ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
     indices: flattened.indices,

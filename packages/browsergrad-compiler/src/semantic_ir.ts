@@ -3250,6 +3250,19 @@ function localPointerAliasForInitializer(
         pointerBaseIsScalarLane: true,
       };
     }
+    const sourceBytes = sourceType === undefined ? undefined : sizeofCudaType(sourceType);
+    if (
+      alias?.pointerBaseIndices?.length === 1 &&
+      alias.pointerAddressSpace === "local" &&
+      sourceBytes !== undefined && targetBytes !== undefined &&
+      sourceBytes > targetBytes && sourceBytes % targetBytes === 0
+    ) {
+      return {
+        ...alias,
+        pointerBaseIndices: [multiplyIndexExpression(alias.pointerBaseIndices[0]!, sourceBytes / targetBytes, expression.span)],
+        pointerBaseIsScalarLane: true,
+      };
+    }
     return alias;
   }
   if (expression.kind === "call" && localPointerIdentityCallName(expression.callee)) {
@@ -3984,6 +3997,15 @@ function semanticIntrinsicReturnType(name: string | undefined, args: readonly Se
   if (vectorMathReturnType) return vectorMathReturnType;
   const bfloat16ReturnType = cudaBfloat16IntrinsicReturnType(name, args.some((arg) => expressionValueType(arg) === "bf16"));
   if (bfloat16ReturnType) return bfloat16ReturnType;
+  if (name === "__half2float") return "float";
+  if (
+    name === "__float2half" || name.startsWith("__float2half_") ||
+    name.startsWith("__int2half_") || name.startsWith("__uint2half_") ||
+    name.startsWith("__short2half_") || name.startsWith("__ushort2half_") ||
+    name === "__short_as_half" || name === "__ushort_as_half"
+  ) return "half";
+  if (name === "__half_as_short") return "int";
+  if (name === "__half_as_ushort") return "uint";
   if (isBfloat162VectorName(name)) return "bf162";
   if (name === "__hisnan2" ||
     name === "__heq2" || name === "__hne2" || name === "__hgt2" || name === "__hge2" || name === "__hlt2" || name === "__hle2" ||
