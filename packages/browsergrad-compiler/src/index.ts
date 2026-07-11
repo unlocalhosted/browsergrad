@@ -125,7 +125,6 @@ export {
   type CudaWebGpuExecutionPlanOptions,
   type CudaWebGpuExecutionStatus,
 } from "./webgpu_orchestration.js";
-export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
