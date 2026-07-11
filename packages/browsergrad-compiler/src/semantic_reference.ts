@@ -69,6 +69,9 @@ import type {
 import { CudaLiteCompilerError } from "./types.js";
 import {
   evalInlineAsmArithmetic,
+  evalInlineAsmBytePerm,
+  evalInlineAsmCompare,
+  evalInlineAsmLop3,
   evalInlineAsmMinMax,
   evalInlineAsmShift,
   evalInlineAsmUnaryInt,
@@ -2719,6 +2722,10 @@ function evalSemanticPtxIntegerCall(
   if (info?.family === "shift") return evalInlineAsmShift(info.op, args[0] ?? 0, args[1] ?? 0, info.signed);
   if (info?.family === "minmax") return evalInlineAsmMinMax(info.op, args[0] ?? 0, args[1] ?? 0, info.signed);
   if (info?.family === "unary") return evalInlineAsmUnaryInt(info.op, args[0] ?? 0);
+  if (info?.family === "prmt") return evalInlineAsmBytePerm(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+  if (info?.family === "lop3") return evalInlineAsmLop3(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0, args[3] ?? 0);
+  if (info?.family === "select") return (args[2] ?? 0) !== 0 ? args[0] ?? 0 : args[1] ?? 0;
+  if (info?.family === "compare") return Number(evalInlineAsmCompare(info.op, args[0] ?? 0, args[1] ?? 0, info.signed));
   throw semanticReferenceError(`unknown semantic PTX integer call '${expression.callee.name}'`, expression.span);
 }
 

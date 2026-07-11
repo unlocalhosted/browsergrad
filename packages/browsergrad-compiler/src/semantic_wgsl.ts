@@ -24,7 +24,11 @@ import type {
 import { CudaLiteCompilerError } from "./types.js";
 import {
   emitInlineArithmeticWgsl,
+  emitInlineBytePermWgsl,
+  emitInlineCompareWgsl,
+  emitInlineLop3Wgsl,
   emitInlineMinMaxWgsl,
+  emitInlineSelectWgsl,
   emitInlineShiftWgsl,
   emitInlineUnaryIntWgsl,
 } from "./features/inline_ptx/wgsl.js";
@@ -5374,7 +5378,19 @@ function emitSemanticPtxIntegerCall(
       ? emitInlineShiftWgsl(info.op, args[0] ?? "0u", args[1] ?? "0u", info.signed)
       : info.family === "minmax"
         ? emitInlineMinMaxWgsl(info.op, args[0] ?? "0u", args[1] ?? "0u", info.signed)
-        : emitInlineUnaryIntWgsl(info.op, args[0] ?? "0u");
+        : info.family === "unary"
+          ? emitInlineUnaryIntWgsl(info.op, args[0] ?? "0u")
+          : info.family === "prmt"
+            ? emitInlineBytePermWgsl(args[0] ?? "0u", args[1] ?? "0u", args[2] ?? "0u")
+            : info.family === "lop3"
+              ? emitInlineLop3Wgsl(args[0] ?? "0u", args[1] ?? "0u", args[2] ?? "0u", args[3] ?? "0u")
+              : info.family === "select"
+                ? emitInlineSelectWgsl(args[0] ?? "0u", args[1] ?? "0u", args[2] ?? "0u")
+                : emitInlineCompareWgsl(
+                    info.op,
+                    info.signed ? `bitcast<i32>(${args[0] ?? "0u"})` : args[0] ?? "0u",
+                    info.signed ? `bitcast<i32>(${args[1] ?? "0u"})` : args[1] ?? "0u",
+                  );
   return expression.valueType === "int" ? `bitcast<i32>(${emitted})` : emitted;
 }
 

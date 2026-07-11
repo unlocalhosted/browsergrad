@@ -1927,10 +1927,13 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(compiled.wgsl).toContain("(((nan_value) != (nan_value)) || ((1.0) != (1.0)))");
-      expect(compiled.wgsl).toContain("!(((nan_value) != (nan_value)) || ((1.0) != (1.0)))");
-      expect(compiled.wgsl).toContain("((bitcast<u32>(f32((-0.0))) & 0x80000000u) != 0u)");
-      expect(compiled.wgsl).toContain("bitcast<f32>(0x7fc00000u)");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("((nan_value) != (nan_value) || (1.0) != (1.0))");
+      expect(compiled.wgsl).toContain("!((nan_value) != (nan_value) || (1.0) != (1.0))");
+      expect(compiled.wgsl).toContain("((bitcast<u32>(-(0.0)) & 0x80000000u) != 0u)");
+      expect(compiled.wgsl).toContain("bitcast<f32>(2143289344u)");
       expect(compiled.wgsl).toContain("(abs(bitcast<f32>(0x7f800000u)) > 3.4028234663852886e38)");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 0, 1, 1, 1, 1, 1, 1, 1, 0]);
     });
@@ -3316,7 +3319,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.wgsl).toContain("202u");
-      expect(compiled.wgsl).toContain("0x96");
+      expect(compiled.wgsl).toContain("150");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         0x12345678,
         0x87654321,
@@ -4053,7 +4056,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
-      expect(compiled.wgsl).toContain("bg_round_even_f32");
+      expect(compiled.wgsl).toContain("bg_semantic_round_even_f32");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         2,
         2,

@@ -2,7 +2,11 @@ export type SemanticPtxIntegerCallInfo =
   | { readonly family: "arithmetic"; readonly op: "add" | "sub" | "mul-lo" | "mad-lo" }
   | { readonly family: "shift"; readonly op: "shl" | "shr"; readonly signed: boolean }
   | { readonly family: "minmax"; readonly op: "min" | "max"; readonly signed: boolean }
-  | { readonly family: "unary"; readonly op: "neg" | "abs" };
+  | { readonly family: "unary"; readonly op: "neg" | "abs" }
+  | { readonly family: "prmt" }
+  | { readonly family: "lop3" }
+  | { readonly family: "select" }
+  | { readonly family: "compare"; readonly op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; readonly signed: boolean };
 
 export function semanticPtxIntegerCallInfo(name: string): SemanticPtxIntegerCallInfo | undefined {
   const arithmetic = /^__bg_ptx_arithmetic_(add|sub|mul_lo|mad_lo)$/u.exec(name)?.[1];
@@ -12,5 +16,12 @@ export function semanticPtxIntegerCallInfo(name: string): SemanticPtxIntegerCall
   const minmax = /^__bg_ptx_(min|max)_([su])$/u.exec(name);
   if (minmax) return { family: "minmax", op: minmax[1] as "min" | "max", signed: minmax[2] === "s" };
   const unary = /^__bg_ptx_(neg|abs)$/u.exec(name)?.[1];
-  return unary ? { family: "unary", op: unary as "neg" | "abs" } : undefined;
+  if (unary) return { family: "unary", op: unary as "neg" | "abs" };
+  if (name === "__bg_ptx_prmt") return { family: "prmt" };
+  if (name === "__bg_ptx_lop3") return { family: "lop3" };
+  if (name === "__bg_ptx_select") return { family: "select" };
+  const compare = /^__bg_ptx_compare_(eq|ne|lt|le|gt|ge)_([su])$/u.exec(name);
+  return compare
+    ? { family: "compare", op: compare[1] as "eq" | "ne" | "lt" | "le" | "gt" | "ge", signed: compare[2] === "s" }
+    : undefined;
 }

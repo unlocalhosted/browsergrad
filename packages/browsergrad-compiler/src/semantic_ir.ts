@@ -36,6 +36,7 @@ import {
   cudaVibMinMaxInfo,
   isCudaFrexpCallName as isFrexpCallName,
   isCudaModfCallName as isModfCallName,
+  isCudaNanPayloadCallName as isNanPayloadCallName,
   isCudaRemquoCallName as isRemquoCallName,
   isCudaSincosCallName as isSincosCallName,
   isCudaSincosPiCallName as isSincosPiCallName,
@@ -67,6 +68,7 @@ import {
   classifyInlineAsm,
   expectedInlineAsmF32SourceInputs,
   type InlineAsmF32Source,
+  type InlineAsmIntSource,
   type InlineAsmOp,
   type PtxSpecialU32Register,
 } from "./features/inline_ptx/model.js";
@@ -1499,6 +1501,11 @@ function lowerInlineAsmBuiltinRegisterAssignment(
   const floatBinaryArgs = floatBinarySources !== undefined && floatBinaryInputs === statement.inputs.length
     ? floatBinarySources.map((source) => semanticInlineAsmF32Source(source, statement, outputs, scope))
     : undefined;
+  const conversionSource = op?.kind === "convert-f32-to-int"
+    ? semanticInlineAsmF32Source(op.source ?? { kind: "operand", index: outputs.length }, statement, outputs, scope)
+    : op?.kind === "convert-int-to-f32"
+      ? semanticInlineAsmIntSource(op.source ?? { kind: "operand", index: outputs.length }, statement, outputs, scope, op.fromSigned)
+      : undefined;
   const bitInput = op && (op.kind === "bfind-u32" || op.kind === "ffs-b32" || op.kind === "popc-b32" || op.kind === "clz-b32" || op.kind === "brev-b32")
     ? op.immediate === undefined
       ? statement.inputs.length === 1 ? lowerExpression(statement.inputs[0]!, scope) : undefined
@@ -1530,8 +1537,26 @@ function lowerInlineAsmBuiltinRegisterAssignment(
       ? semanticCallExpression("__brev", [bitInput], "uint", statement.span)
     : integerValue !== undefined
       ? integerValue
+    : op?.kind === "convert-f32-to-int" && conversionSource !== undefined
+      ? semanticCallExpression(
+          `__float2${op.toSigned ? "int" : "uint"}_${op.rounding === "rm" ? "rd" : op.rounding === "rp" ? "ru" : op.rounding}`,
+          [conversionSource],
+          op.toSigned ? "int" : "uint",
+          statement.span,
+        )
+    : op?.kind === "convert-int-to-f32" && conversionSource !== undefined
+      ? semanticCallExpression(op.fromSigned ? "__int2float_rn" : "__uint2float_rn", [conversionSource], "float", statement.span)
+    : op?.kind === "u8x4-sad-add" && statement.inputs.length === 3
+      ? semanticCallExpression(
+          "__usad4",
+          statement.inputs.map((input) => castScalarExpression(lowerExpression(input, scope), "uint", statement.span)),
+          "uint",
+          statement.span,
+        )
     : statement.inputs.length !== 0
       ? undefined
+      : op?.kind === "globaltimer-u64"
+        ? semanticCallExpression("clock64", [], "uint", statement.span)
       : op?.kind === "special-register-u32"
     ? semanticSpecialRegisterExpression(op.register, statement.span)
     : op?.kind === "laneid"
@@ -1589,6 +1614,34 @@ function semanticInlineAsmIntegerExpression(
       return semanticInlineAsmIntegerCall(`__bg_ptx_${op.op}_${op.signed ? "s" : "u"}`, operands, targetValueType, statement.span);
     case "unary-int-b32":
       return semanticInlineAsmIntegerCall(`__bg_ptx_${op.op}`, operands, targetValueType, statement.span);
+    case "prmt-b32":
+      return semanticInlineAsmIntegerCall(
+        "__bg_ptx_prmt",
+        op.selectorImmediate === undefined ? inputs : [...inputs, semanticUintLiteralExpression(op.selectorImmediate, statement.span)],
+        targetValueType,
+        statement.span,
+      );
+    case "lop3-b32": {
+      let inputIndex = 0;
+      const data = (op.dataImmediates ?? [undefined, undefined, undefined]).map((value) =>
+        value === undefined ? inputs[inputIndex++] : semanticUintLiteralExpression(value, statement.span)
+      );
+      const lut = op.immLut === undefined ? inputs[inputIndex] : semanticUintLiteralExpression(op.immLut, statement.span);
+      return lut === undefined || data.some((value) => value === undefined)
+        ? undefined
+        : semanticInlineAsmIntegerCall("__bg_ptx_lop3", [...data as SemanticExpression[], lut], targetValueType, statement.span);
+    }
+    case "select-b32": {
+      let inputIndex = 0;
+      const trueValue = op.trueImmediate === undefined ? inputs[inputIndex++] : semanticUintLiteralExpression(op.trueImmediate, statement.span);
+      const falseValue = op.falseImmediate === undefined ? inputs[inputIndex++] : semanticUintLiteralExpression(op.falseImmediate, statement.span);
+      const predicate = inputs[inputIndex];
+      return trueValue === undefined || falseValue === undefined || predicate === undefined
+        ? undefined
+        : semanticInlineAsmIntegerCall("__bg_ptx_select", [trueValue, falseValue, predicate], targetValueType, statement.span);
+    }
+    case "compare-b32":
+      return semanticInlineAsmIntegerCall(`__bg_ptx_compare_${op.op}_${op.signed ? "s" : "u"}`, operands, targetValueType, statement.span);
     default:
       return undefined;
   }
@@ -1631,6 +1684,25 @@ function semanticInlineAsmF32Source(
     ? outputs[source.index]
     : statement.inputs[source.index - outputs.length];
   return expression === undefined ? undefined : lowerExpression(expression, scope);
+}
+
+function semanticInlineAsmIntSource(
+  source: InlineAsmIntSource,
+  statement: CudaLiteAsmStatement,
+  outputs: readonly CudaLiteExpression[],
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  signed: boolean,
+): SemanticExpression | undefined {
+  const valueType = signed ? "int" : "uint";
+  if (source.kind === "immediate") {
+    return castScalarExpression(semanticUintLiteralExpression(source.value, statement.span), valueType, statement.span);
+  }
+  const expression = source.index < outputs.length
+    ? outputs[source.index]
+    : statement.inputs[source.index - outputs.length];
+  return expression === undefined
+    ? undefined
+    : castScalarExpression(lowerExpression(expression, scope), valueType, statement.span);
 }
 
 function semanticLaneIdExpression(span: SourceSpan): SemanticExpression {
@@ -2210,6 +2282,14 @@ function lowerExpression(
       if (expression.callee.kind === "identifier" && (expression.callee.name === "sizeof" || expression.callee.name === "alignof")) {
         const value = semanticSizeofAlignofValue(expression.callee.name, expression.args[0], scope);
         if (value !== undefined) return intNumberExpression(value, expression.span);
+      }
+      if (expression.callee.kind === "identifier" && isNanPayloadCallName(expression.callee.name)) {
+        return semanticCallExpression(
+          "__uint_as_float",
+          [semanticUintLiteralExpression(0x7fc00000, expression.span)],
+          "float",
+          expression.span,
+        );
       }
       const generatedRandom = expression.callee.kind === "identifier" && isSemanticGeneratedRandomCall(expression.callee.name)
         ? semanticGeneratedRandomReturnType(expression.callee.name)
