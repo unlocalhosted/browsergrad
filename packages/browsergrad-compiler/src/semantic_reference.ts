@@ -558,6 +558,7 @@ function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledC
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
   if (semanticReferenceLocalPackedHalfView(ref, compiled)) return true;
+  if (semanticReferenceLocalScalarBitViewRootType(ref, compiled) !== undefined) return true;
   if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
   if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
@@ -566,6 +567,17 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol === undefined || symbol.valueType === ref.valueType;
+}
+
+function semanticReferenceLocalScalarBitViewRootType(
+  ref: SemanticMemoryRef,
+  compiled: CompiledCudaLiteKernel,
+): CudaLiteScalarType | undefined {
+  if (ref.addressSpace !== "local" || ref.fields.length > 0 || ref.indices.length !== 1) return undefined;
+  if (ref.valueType !== "float" && ref.valueType !== "uint" && ref.valueType !== "int") return undefined;
+  const root = compiled.kernelIr.memory.find((symbol) => symbol.kind === "local" && symbol.name === ref.base && symbol.dimensions.length > 0);
+  if (root?.valueType !== "float" && root?.valueType !== "uint" && root?.valueType !== "int") return undefined;
+  return root.valueType === ref.valueType ? undefined : root.valueType;
 }
 
 function semanticReferenceLocalPackedHalfView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -4659,6 +4671,12 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
       return float16BitsToFloat32(halfIndex % 2 === 0 ? word & 0xffff : word >>> 16);
     }
     const index = flatIndex(ref, context);
+    const bitRootType = semanticReferenceLocalScalarBitViewRootType(ref, context.compiled);
+    if (bitRootType !== undefined) {
+      const raw = Number(buffer[index] ?? 0);
+      const bits = bitRootType === "float" ? float32ToUintBits(raw) : raw >>> 0;
+      return ref.valueType === "float" ? uintBitsToFloat32(bits) : ref.valueType === "int" ? bits | 0 : bits;
+    }
     return Number(buffer[index] ?? 0);
   }
   if (ref.addressSpace === "shared") {
@@ -4734,7 +4752,14 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
       return;
     }
     const index = flatIndex(ref, context);
-    if (index >= 0 && index < buffer.length) buffer[index] = value;
+    if (index >= 0 && index < buffer.length) {
+      const bitRootType = semanticReferenceLocalScalarBitViewRootType(ref, context.compiled);
+      if (bitRootType === undefined) buffer[index] = value;
+      else {
+        const bits = ref.valueType === "float" ? float32ToUintBits(value) : value >>> 0;
+        buffer[index] = bitRootType === "float" ? uintBitsToFloat32(bits) : bitRootType === "int" ? bits | 0 : bits;
+      }
+    }
     return;
   }
   if (ref.addressSpace === "shared") {

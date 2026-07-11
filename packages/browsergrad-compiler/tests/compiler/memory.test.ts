@@ -4165,10 +4165,18 @@ __global__ void sharedHelperScoped(float *out) {
         { buffers: { out: new Float32Array(1) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("bitcast<f32>(regs[");
       expect(compiled.wgsl).toContain("bitcast<u32>");
       expect([...result.buffers.out as Float32Array]).toEqual([5.5]);
+      expect([...semanticResult.buffers.out as Float32Array]).toEqual([5.5]);
     });
 
   it("packs scalar half pointer views over 32-bit local carriers", () => {
