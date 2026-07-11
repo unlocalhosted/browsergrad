@@ -1942,10 +1942,19 @@ __global__ void shared_helper_result(int *out, int n) {
         { buffers: { out: new Float32Array(13), kinds: new Uint32Array(2) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(13), kinds: new Uint32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
       const out = [...result.buffers.out as Float32Array];
 
-      expect(compiled.wgsl).toContain("return bitcast<f32>(bits);");
-      expect(compiled.wgsl).toContain("3.4028234663852886e38");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect([...semanticResult.buffers.kinds as Uint32Array]).toEqual([4, 64]);
+      expect(Number.isNaN((semanticResult.buffers.out as Float32Array)[3])).toBe(true);
+      expect(compiled.wgsl).toContain("fn bg_f32_inf() -> f32");
+      expect(compiled.wgsl).toContain("fn bg_f32_nan() -> f32");
+      expect(compiled.wgsl).toContain("bitcast<f32>(0x7f7fffffu)");
       expect(compiled.wgsl).toContain("3.141592653589793");
       expect(out[0]).toBe(Number.POSITIVE_INFINITY);
       expect(out[1]).toBeLessThan(-3e38);

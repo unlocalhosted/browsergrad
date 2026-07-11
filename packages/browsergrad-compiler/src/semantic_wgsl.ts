@@ -26,7 +26,7 @@ import { sizeofCudaType } from "./type_layout.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
-import { emitBfloatConversionHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers } from "./wgsl_support_helpers.js";
+import { emitBfloatConversionHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers } from "./wgsl_support_helpers.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
@@ -467,6 +467,7 @@ export function emitSemanticKernelIrWgsl(
   }
   if (semanticUsesCubemapTextureRead(ir)) lines.push("", ...emitCubeTextureAtlasHelpers());
   lines.push("", ...emitSemanticNumericHelpers());
+  if (semanticUsesSpecialFloatConstant(ir)) lines.push("", ...emitSpecialFloatConstantHelpers());
   if (semanticUsesGeneratedRandom(ir)) lines.push("", ...emitSemanticGeneratedRandomHelpers());
   if (semanticUsesBfloatHelper(ir)) {
     lines.push("", ...emitBfloatConversionHelpers());
@@ -598,6 +599,16 @@ function semanticUsesGeneratedRandom(ir: SemanticKernelIrModule): boolean {
   let used = false;
   const visit = (expression: SemanticExpression) => {
     if (expression.kind === "call" && expression.callee.kind === "symbol" && isSemanticGeneratedRandomCall(expression.callee.name)) used = true;
+  };
+  walkSemanticOperations(ir.operations, visit);
+  for (const fn of ir.functions) walkSemanticOperations(fn.body, visit);
+  return used;
+}
+
+function semanticUsesSpecialFloatConstant(ir: SemanticKernelIrModule): boolean {
+  let used = false;
+  const visit = (expression: SemanticExpression) => {
+    if (expression.kind === "literal" && typeof expression.value === "number" && !Number.isFinite(expression.value)) used = true;
   };
   walkSemanticOperations(ir.operations, visit);
   for (const fn of ir.functions) walkSemanticOperations(fn.body, visit);
@@ -6278,13 +6289,21 @@ function semanticMathCallReturnsHalf(callee: string): boolean {
 
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {
   const type = expectedType ?? wgslScalar(valueType);
+  if (type === "f32" && Math.abs(value) === 3.4028234663852886e38) {
+    return value < 0 ? "bitcast<f32>(0xff7fffffu)" : "bitcast<f32>(0x7f7fffffu)";
+  }
+  if (!Number.isFinite(value)) {
+    const f32 = Number.isNaN(value) ? "bg_f32_nan()" : value < 0 ? "-bg_f32_inf()" : "bg_f32_inf()";
+    return type === "f16" ? `f16(${f32})` : f32;
+  }
   if (type === "bool") return value === 0 ? "false" : "true";
   if (type === "u32") return `${Math.trunc(value) >>> 0}u`;
   if (type === "i32" && value > 2147483647) return `bitcast<i32>(${Math.trunc(value) >>> 0}u)`;
   if (type === "i32") return String(Math.trunc(value));
-  if (type === "f16") return `f16(${Number.isInteger(value) ? `${value}.0` : String(value)})`;
-  if (Number.isInteger(value)) return `${value}.0`;
-  return String(value);
+  const literal = String(value);
+  const floatLiteral = /[.eE]/u.test(literal) ? literal : `${literal}.0`;
+  if (type === "f16") return `f16(${floatLiteral})`;
+  return floatLiteral;
 }
 
 function zeroExpression(span: SourceSpan): SemanticExpression {

@@ -62,6 +62,7 @@ import {
   isCudaVoteCallName,
 } from "./cuda_subgroup_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
+import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import {
   classifyInlineAsm,
   expectedInlineAsmF32SourceInputs,
@@ -1748,6 +1749,19 @@ function lowerExpression(
       return { kind: "literal", literalKind: "string", value: expression.value, span: expression.span };
     case "identifier": {
       const symbol = scope.get(expression.name);
+      const namedConstant = symbol === undefined ? CUDA_NAMED_CONSTANTS.get(expression.name) : undefined;
+      if (namedConstant) {
+        return {
+          kind: "literal",
+          literalKind: "number",
+          value: namedConstant.value,
+          valueType: namedConstant.valueType,
+          span: expression.span,
+        };
+      }
+      if (symbol === undefined && expression.name === "nullptr") {
+        return { kind: "literal", literalKind: "number", value: 0, valueType: "voidptr", span: expression.span };
+      }
       return {
         kind: "symbol",
         name: symbol?.name ?? expression.name,
