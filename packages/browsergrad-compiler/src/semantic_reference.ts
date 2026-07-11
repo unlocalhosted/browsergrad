@@ -67,6 +67,13 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
+import {
+  evalInlineAsmArithmetic,
+  evalInlineAsmMinMax,
+  evalInlineAsmShift,
+  evalInlineAsmUnaryInt,
+} from "./features/inline_ptx/reference.js";
+import { semanticPtxIntegerCallInfo } from "./semantic_inline_ptx.js";
 import { sizeofCudaType } from "./type_layout.js";
 import type {
   SemanticExpression,
@@ -1213,6 +1220,8 @@ function semanticReferenceExpressionSupported(
         (expression.operator === "++" || expression.operator === "--");
     case "call":
       return semanticReferenceSharedAddressCallSupported(expression) ||
+        expression.callee.kind === "symbol" && semanticPtxIntegerCallInfo(expression.callee.name) !== undefined &&
+          expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled)) ||
         compiled !== undefined && semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
@@ -2668,6 +2677,9 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       return value;
     }
     case "call":
+      if (expression.callee.kind === "symbol" && expression.callee.name.startsWith("__bg_ptx_")) {
+        return evalSemanticPtxIntegerCall(expression, context);
+      }
       if (semanticReferenceSharedAddressCallSupported(expression)) return evalSemanticSharedAddressCall(expression, context);
       if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return evalSemanticCooperativeGroupCall(expression, context);
       if (semanticReferenceCooperativeReduceCallSupported(expression, context.compiled)) return evalSemanticCooperativeReduceCall(expression, context);
@@ -2694,6 +2706,20 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "update":
       return evalUpdate(expression, context);
   }
+}
+
+function evalSemanticPtxIntegerCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic PTX integer call requires symbol callee", expression.span);
+  const args = expression.args.map((arg) => evalNumber(arg, context) >>> 0);
+  const info = semanticPtxIntegerCallInfo(expression.callee.name);
+  if (info?.family === "arithmetic") return evalInlineAsmArithmetic(info.op, args[0] ?? 0, args[1] ?? 0, args[2] ?? 0);
+  if (info?.family === "shift") return evalInlineAsmShift(info.op, args[0] ?? 0, args[1] ?? 0, info.signed);
+  if (info?.family === "minmax") return evalInlineAsmMinMax(info.op, args[0] ?? 0, args[1] ?? 0, info.signed);
+  if (info?.family === "unary") return evalInlineAsmUnaryInt(info.op, args[0] ?? 0);
+  throw semanticReferenceError(`unknown semantic PTX integer call '${expression.callee.name}'`, expression.span);
 }
 
 function semanticReferenceSharedAddressCallSupported(

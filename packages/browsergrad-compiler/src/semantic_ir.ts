@@ -1504,7 +1504,7 @@ function lowerInlineAsmBuiltinRegisterAssignment(
       ? statement.inputs.length === 1 ? lowerExpression(statement.inputs[0]!, scope) : undefined
       : statement.inputs.length === 0 ? semanticUintLiteralExpression(op.immediate, statement.span) : undefined
     : undefined;
-  const integerValue = op === undefined ? undefined : semanticInlineAsmIntegerExpression(op, statement, scope);
+  const integerValue = op === undefined ? undefined : semanticInlineAsmIntegerExpression(op, statement, scope, expressionValueType(target));
   const value = op?.kind === "fma-rn-f32" && fmaArgs?.length === 3 && fmaArgs.every((arg) => arg !== undefined)
     ? semanticCallExpression("fma", fmaArgs as readonly SemanticExpression[], "float", statement.span)
     : op?.kind === "float-binary-rn-f32" && floatBinaryArgs?.length === 2 && floatBinaryArgs.every((arg) => arg !== undefined)
@@ -1560,6 +1560,7 @@ function semanticInlineAsmIntegerExpression(
   op: InlineAsmOp,
   statement: CudaLiteAsmStatement,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  targetValueType: CudaLiteScalarType | undefined,
 ): SemanticExpression | undefined {
   const signed = op.kind === "convert-b32" ? op.toSigned : "signed" in op ? op.signed : false;
   const valueType: CudaLiteScalarType = signed ? "int" : "uint";
@@ -1571,6 +1572,8 @@ function semanticInlineAsmIntegerExpression(
   const binary = (operator: string, left: SemanticExpression | undefined, right: SemanticExpression | undefined): SemanticExpression | undefined =>
     left === undefined || right === undefined ? undefined : { kind: "binary", operator, left, right, valueType, span: statement.span };
   switch (op.kind) {
+    case "arithmetic-b32":
+      return semanticInlineAsmIntegerCall(`__bg_ptx_arithmetic_${op.op.replace("-", "_")}`, operands, targetValueType, statement.span);
     case "bitwise-b32":
       if (op.op === "not") {
         const argument = operands[0];
@@ -1580,9 +1583,25 @@ function semanticInlineAsmIntegerExpression(
     case "move-b32":
     case "convert-b32":
       return operands[0];
+    case "shift-b32":
+      return semanticInlineAsmIntegerCall(`__bg_ptx_shift_${op.op}_${op.signed ? "s" : "u"}`, operands, targetValueType, statement.span);
+    case "minmax-b32":
+      return semanticInlineAsmIntegerCall(`__bg_ptx_${op.op}_${op.signed ? "s" : "u"}`, operands, targetValueType, statement.span);
+    case "unary-int-b32":
+      return semanticInlineAsmIntegerCall(`__bg_ptx_${op.op}`, operands, targetValueType, statement.span);
     default:
       return undefined;
   }
+}
+
+function semanticInlineAsmIntegerCall(
+  name: string,
+  args: readonly SemanticExpression[],
+  valueType: CudaLiteScalarType | undefined,
+  span: SourceSpan,
+): SemanticExpression | undefined {
+  if (args.length === 0 || valueType === undefined || valueType === "void") return undefined;
+  return semanticCallExpression(name, args, valueType, span);
 }
 
 function semanticFloatBinaryExpression(

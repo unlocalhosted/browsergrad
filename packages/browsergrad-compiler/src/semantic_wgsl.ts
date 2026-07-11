@@ -22,6 +22,13 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
+import {
+  emitInlineArithmeticWgsl,
+  emitInlineMinMaxWgsl,
+  emitInlineShiftWgsl,
+  emitInlineUnaryIntWgsl,
+} from "./features/inline_ptx/wgsl.js";
+import { semanticPtxIntegerCallInfo } from "./semantic_inline_ptx.js";
 import { promotedCudaScalarType } from "./wgsl_value_conversion.js";
 import { sizeofCudaType } from "./type_layout.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
@@ -1517,6 +1524,9 @@ function semanticWgslScalarCallSupported(
   if (semanticWgslCooperativeGroupCallSupported(expression, ir)) return true;
   if (expression.callee.kind !== "symbol") return false;
   const callee = expression.callee.name;
+  if (semanticPtxIntegerCallInfo(callee) !== undefined) {
+    return expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+  }
   if (callee === "__cvta_generic_to_shared") return semanticWgslSharedAddressCallRef(expression) !== undefined;
   if (SEMANTIC_CURAND_VECTOR_CALLS.has(callee) || SEMANTIC_HALF2_VECTOR_CALLS.has(callee) || SEMANTIC_BF162_VECTOR_CALLS.has(callee) || cudaVectorConstructorType(callee)) return false;
   const fn = ir.functions.find((item) => item.name === callee);
@@ -1989,6 +1999,8 @@ function semanticWgslExpressionSupported(
       return expression.expressions.every((item) => semanticWgslExpressionSupported(item, "scalar", ir));
     case "call":
       return semanticWgslSharedAddressCallRef(expression) !== undefined ||
+        expression.callee.kind === "symbol" && semanticPtxIntegerCallInfo(expression.callee.name) !== undefined &&
+          expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir)) ||
         ir !== undefined && semanticWgslCooperativeGroupCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
         ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
@@ -3987,6 +3999,9 @@ function emitSemanticExpression(
       }
       if (semanticWgslSubgroupCallSupported(expression, ir)) return emitSemanticSubgroupCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslAddressPredicateCallSupported(expression)) return emitSemanticAddressPredicateCall(expression);
+      if (expression.callee.kind === "symbol" && semanticPtxIntegerCallInfo(expression.callee.name) !== undefined) {
+        return emitSemanticPtxIntegerCall(expression, ir, names, options, textureSpecializations);
+      }
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorLerpCallSupported(expression, ir)) return emitSemanticVectorLerpCall(expression, ir, names, options, textureSpecializations);
@@ -5340,6 +5355,27 @@ function emitSemanticAddressPredicateCall(expression: Extract<SemanticExpression
       kind !== undefined ? addressSpace === kind :
         false;
   return matches ? "1" : "0";
+}
+
+function emitSemanticPtxIntegerCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): string {
+  if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic PTX integer call requires symbol callee", expression.span);
+  const info = semanticPtxIntegerCallInfo(expression.callee.name);
+  if (!info) throw semanticWgslError(`unknown semantic PTX integer call '${expression.callee.name}'`, expression.span);
+  const args = expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "u32", options, textureSpecializations));
+  const emitted = info.family === "arithmetic"
+    ? emitInlineArithmeticWgsl(info.op, args[0] ?? "0u", args[1] ?? "0u", args[2] ?? "0u")
+    : info.family === "shift"
+      ? emitInlineShiftWgsl(info.op, args[0] ?? "0u", args[1] ?? "0u", info.signed)
+      : info.family === "minmax"
+        ? emitInlineMinMaxWgsl(info.op, args[0] ?? "0u", args[1] ?? "0u", info.signed)
+        : emitInlineUnaryIntWgsl(info.op, args[0] ?? "0u");
+  return expression.valueType === "int" ? `bitcast<i32>(${emitted})` : emitted;
 }
 
 function emitSemanticSubgroupCall(

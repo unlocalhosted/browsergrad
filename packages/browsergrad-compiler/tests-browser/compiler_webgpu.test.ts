@@ -5445,4 +5445,31 @@ __global__ void guarded_barrier(int *out) {
     expect([...expected.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
     expect([...actual.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
   });
+
+  it("runs exact semantic integer PTX edge cases on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void integer_ptx_edges(uint *out) {
+  uint mul_value;
+  uint shift_value;
+  uint min_value;
+  uint abs_value;
+  asm volatile("mul.lo.u32 %0, %1, %2;" : "=r"(mul_value) : "r"(0x12345678u), "r"(0x87654321u));
+  asm volatile("shr.s32 %0, %1, %2;" : "=r"(shift_value) : "r"(0x80000000u), "r"(40u));
+  asm volatile("min.s32 %0, %1, %2;" : "=r"(min_value) : "r"(0xffffffffu), "r"(1u));
+  asm volatile("abs.s32 %0, %1;" : "=r"(abs_value) : "r"(0x80000000u));
+  out[0] = mul_value;
+  out[1] = shift_value;
+  out[2] = min_value;
+  out[3] = abs_value;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Uint32Array]).toEqual([0x70b88d78, 0xffffffff, 0xffffffff, 0x80000000]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([0x70b88d78, 0xffffffff, 0xffffffff, 0x80000000]);
+  });
 });
