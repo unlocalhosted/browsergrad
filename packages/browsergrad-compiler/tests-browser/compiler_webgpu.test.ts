@@ -4804,7 +4804,7 @@ __global__ void qsort_shape(uint *indata, uint *outdata, uint offset, uint len, 
     }
     if (min_idx != i) { outdata[offset + min_idx] = outdata[offset + i]; outdata[offset + i] = min_val; }
   }
-  if (atomicData != nullptr) atomicData[0] = len;
+  if (atomicData) atomicData[0] = len;
 }`, { workgroupSize: [1, 1, 1] });
     const input = {
       buffers: { indata: new Uint32Array([4, 1, 3, 2]), outdata: new Uint32Array(4), atomicData: new Uint32Array(1) },

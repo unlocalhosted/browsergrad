@@ -5643,16 +5643,17 @@ __global__ void localOut(float *out) {
   __global__ void pointer_null_guard(const uint* x, uint* out) {
     if (x != NULL) out[0] = x[0];
     if (x == nullptr) out[1] = 99u;
+    if (x) out[2] = x[0];
   }`, { workgroupSize: [1, 1, 1] });
       const nullGuardResult = runCompiledKernelReference(
         nullGuard,
-        { buffers: { x: new Uint32Array([42]), out: new Uint32Array(2) } },
+        { buffers: { x: new Uint32Array([42]), out: new Uint32Array(3) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
-      expect([...nullGuardResult.buffers.out as Uint32Array]).toEqual([42, 0]);
+      expect([...nullGuardResult.buffers.out as Uint32Array]).toEqual([42, 0, 42]);
       expect(canEmitSemanticKernelIrWgsl(nullGuard.kernelIr)).toBe(true);
       expect(nullGuard.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(nullGuard.wgsl).toContain("if (true) {");
+      expect(nullGuard.wgsl.match(/if \(true\) \{/gu)).toHaveLength(2);
       expect(nullGuard.wgsl).toContain("if (false) {");
 
       const pointerIdentity = compileCudaLiteKernel(`

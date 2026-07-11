@@ -676,7 +676,7 @@ function unsupportedSemanticWgslOperation(
         if (!semanticWgslExpressionSupported(operation.expression, "scalar", ir)) return operation;
         break;
       case "branch":
-        if (!semanticWgslExpressionSupported(operation.condition, "scalar", ir)) return operation;
+        if (!semanticWgslConditionSupported(operation.condition, ir)) return operation;
         if (
           (semanticOperationsContainWorkgroupCollective(operation.consequent) || semanticOperationsContainWorkgroupCollective(operation.alternate)) &&
           (!semanticPredicatedOperationsSupported(operation.consequent) || !semanticPredicatedOperationsSupported(operation.alternate))
@@ -695,7 +695,7 @@ function unsupportedSemanticWgslOperation(
         break;
       case "loop":
         if (operation.init && !semanticWgslLoopInitSupported(operation.init, ir)) return operation;
-        if (operation.condition && !semanticWgslExpressionSupported(operation.condition, "scalar", ir)) return operation;
+        if (operation.condition && !semanticWgslConditionSupported(operation.condition, ir)) return operation;
         if (operation.update && !semanticWgslExpressionSupported(operation.update, "scalar", ir)) return operation;
         {
           const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue);
@@ -1345,7 +1345,7 @@ function semanticWgslScalarStoreValueSupported(
       return semanticWgslScalarStoreValueSupported(expression.left, ir) &&
         semanticWgslScalarStoreValueSupported(expression.right, ir);
     case "conditional":
-      return semanticWgslExpressionSupported(expression.condition, "scalar", ir) &&
+      return semanticWgslConditionSupported(expression.condition, ir) &&
         semanticWgslScalarStoreValueSupported(expression.consequent, ir) &&
         semanticWgslScalarStoreValueSupported(expression.alternate, ir);
     case "sequence": {
@@ -5626,6 +5626,7 @@ function emitTruthiness(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  if (expression.kind === "symbol" && expression.addressSpace === "storage") return "true";
   if (semanticExpressionValueType(expression) === "bool") {
     return emitSemanticExpression(expression, ir, names, options);
   }
@@ -5635,6 +5636,11 @@ function emitTruthiness(
   const scalar = semanticExpressionWgslScalar(expression);
   const zero = scalar === "u32" ? "0u" : scalar === "f32" ? "0.0" : "0";
   return `(${emitSemanticExpression(expression, ir, names, options)} != ${zero})`;
+}
+
+function semanticWgslConditionSupported(expression: SemanticExpression, ir?: SemanticKernelIrModule): boolean {
+  return expression.kind === "symbol" && expression.addressSpace === "storage" ||
+    semanticWgslExpressionSupported(expression, "scalar", ir);
 }
 
 function emitSemanticMemoryRef(

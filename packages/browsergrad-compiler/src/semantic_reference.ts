@@ -376,13 +376,13 @@ function unsupportedSemanticReferenceOperation(
         if (!semanticReferenceExpressionSupported(operation.expression, "scalar", compiled)) return operation;
         break;
       case "branch":
-        if (!semanticReferenceExpressionSupported(operation.condition, "scalar", compiled)) return operation;
+        if (!semanticReferenceConditionSupported(operation.condition, compiled)) return operation;
         break;
       case "block":
         break;
       case "loop":
         if (operation.init && !semanticReferenceLoopInitSupported(operation.init, compiled)) return operation;
-        if (operation.condition && !semanticReferenceExpressionSupported(operation.condition, "scalar", compiled)) return operation;
+        if (operation.condition && !semanticReferenceConditionSupported(operation.condition, compiled)) return operation;
         if (operation.update && !semanticReferenceExpressionSupported(operation.update, "scalar", compiled)) return operation;
         break;
       case "return":
@@ -1075,7 +1075,7 @@ function semanticReferenceExpressionSupported(
       return semanticReferenceExpressionSupported(expression.left, "scalar", compiled) &&
         semanticReferenceExpressionSupported(expression.right, "scalar", compiled);
     case "conditional":
-      return semanticReferenceExpressionSupported(expression.condition, "scalar", compiled) &&
+      return semanticReferenceConditionSupported(expression.condition, compiled) &&
         semanticReferenceExpressionSupported(expression.consequent, expected, compiled) &&
         semanticReferenceExpressionSupported(expression.alternate, expected, compiled);
     case "assignment":
@@ -1265,6 +1265,11 @@ function isStoragePointerNullComparison(expression: Extract<SemanticExpression, 
   if (expression.operator !== "==" && expression.operator !== "!=") return false;
   return isStorageSymbol(expression.left) && isNullLiteral(expression.right) ||
     isStorageSymbol(expression.right) && isNullLiteral(expression.left);
+}
+
+function semanticReferenceConditionSupported(expression: SemanticExpression, compiled?: CompiledCudaLiteKernel): boolean {
+  return expression.kind === "symbol" && expression.addressSpace === "storage" ||
+    semanticReferenceExpressionSupported(expression, "scalar", compiled);
 }
 
 function isStorageSymbol(expression: SemanticExpression): boolean {
