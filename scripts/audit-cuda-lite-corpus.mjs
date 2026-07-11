@@ -38,6 +38,7 @@ const {
   compileCudaLiteKernel,
   canEmitSemanticKernelIrWgsl,
   semanticKernelIrWgslPreflightBlocker,
+  semanticKernelIrWgslPreflightFailure,
   createCudaRuntimePlan,
   createCudaWebGpuExecutionPlan,
   describeCudaDiagnostic,
@@ -396,9 +397,11 @@ function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kerne
 function semanticIrWgslCoverageFor(compiled) {
   if (canEmitSemanticKernelIrWgsl(compiled.kernelIr)) return { semanticIrDirectWgslOk: true };
   const lift = webGpuLiftFor(compiled);
+  const failure = semanticKernelIrWgslPreflightFailure(compiled.kernelIr);
   return {
     semanticIrDirectWgslOk: false,
-    semanticIrDirectWgslBlocker: semanticKernelIrWgslPreflightBlocker(compiled.kernelIr) ?? "semantic WGSL preflight rejected",
+    semanticIrDirectWgslBlocker: failure?.message ?? semanticKernelIrWgslPreflightBlocker(compiled.kernelIr) ?? "semantic WGSL preflight rejected",
+    ...(failure === undefined ? {} : { semanticIrDirectWgslBlockerSpan: failure.span }),
     ...(lift.kind === "host-retirement-reduction"
       ? { semanticIrWebGpuPlanOk: true, semanticIrWebGpuPlanKind: lift.kind }
       : {}),
@@ -581,6 +584,7 @@ function kernelManifestRows(items, includeSources = false) {
       compileCodegenOk: planCompiledOk,
       ...(item.semanticIrDirectWgslOk === undefined ? {} : { semanticIrDirectWgslOk: item.semanticIrDirectWgslOk }),
       ...(item.semanticIrDirectWgslBlocker === undefined ? {} : { semanticIrDirectWgslBlocker: item.semanticIrDirectWgslBlocker }),
+      ...(item.semanticIrDirectWgslBlockerSpan === undefined ? {} : { semanticIrDirectWgslBlockerSpan: item.semanticIrDirectWgslBlockerSpan }),
       ...(item.semanticIrWebGpuPlanOk === undefined ? {} : { semanticIrWebGpuPlanOk: item.semanticIrWebGpuPlanOk }),
       ...(item.semanticIrWebGpuPlanKind === undefined ? {} : { semanticIrWebGpuPlanKind: item.semanticIrWebGpuPlanKind }),
       ...(item.webGpuPlanLiftKind === undefined ? {} : { webGpuPlanLiftKind: item.webGpuPlanLiftKind }),
