@@ -784,8 +784,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("subgroupMin");
-      expect(compiled.wgsl).toContain("subgroupMax");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_min_u32_32_masked");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_max_u32_32_masked");
+      expect(compiled.wgsl).not.toContain("subgroupMin");
+      expect(compiled.wgsl).not.toContain("subgroupMax");
       expect([...result.buffers.out as Uint32Array]).toEqual([2, 9, 2, 9, 2, 9, 2, 9]);
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([2, 9, 2, 9, 2, 9, 2, 9]);
     });
@@ -869,7 +871,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.wgsl).toContain("// browsergrad-semantic-wgsl: direct semantic IR emission");
       expect(compiled.wgsl).toContain("enable subgroups;");
-      expect(compiled.wgsl).toContain("subgroupBallot(true).x");
+      expect(compiled.wgsl).toContain("bg_semantic_ballot_32(true, 0xffffffffu, local_id)");
+      expect(compiled.wgsl).not.toContain("subgroupBallot(true).x");
       expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-subgroup");
       expect([...result.buffers.out as Uint32Array]).toEqual([15, 15, 15, 15]);

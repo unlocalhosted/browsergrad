@@ -198,6 +198,7 @@ interface SemanticReferenceContext {
   readonly gridDim: ReferenceVector3;
   readonly blockContexts: readonly SemanticReferenceContext[];
   readonly trace: MutableTrace;
+  activeCollectiveContexts?: readonly SemanticReferenceContext[];
   returnValue?: SemanticValue;
 }
 
@@ -2028,13 +2029,13 @@ function evalNumber(expression: SemanticExpression, context: SemanticReferenceCo
 
 function semanticReferenceActiveMask(context: SemanticReferenceContext): number {
   if (context.compiled.subgroupMode === "scalar") return 1;
-  const blockSize = semanticBlockSize(context);
   const rank = semanticLocalLinearRank(context);
   const warpBase = Math.floor(rank / 32) * 32;
-  const warpEnd = Math.min(warpBase + 32, blockSize);
   let mask = 0;
-  for (let thread = warpBase; thread < warpEnd; thread++) {
-    mask |= 1 << (thread - warpBase);
+  for (const peer of semanticWarpContexts(context)) {
+    const peerRank = semanticLocalLinearRank(peer);
+    if (peerRank < warpBase || peerRank >= warpBase + 32) continue;
+    mask |= 1 << (peerRank - warpBase);
   }
   return mask >>> 0;
 }
@@ -2111,7 +2112,7 @@ function semanticWarpContexts(context: SemanticReferenceContext): readonly Seman
   const rank = semanticLocalLinearRank(context);
   const warpBase = Math.floor(rank / 32) * 32;
   const warpEnd = Math.min(warpBase + 32, semanticBlockSize(context));
-  return context.blockContexts.filter((peer) => {
+  return (context.activeCollectiveContexts ?? context.blockContexts).filter((peer) => {
     const peerRank = semanticLocalLinearRank(peer);
     return peerRank >= warpBase && peerRank < warpEnd;
   });
@@ -4902,9 +4903,14 @@ function runSemanticCollectiveOperations(
       mergeSemanticCollectiveControls(controls, runSemanticCollectiveLoop(operation, current));
       continue;
     }
-    for (const context of current) {
-      const control = execSemanticOperations([operation], context);
-      if (control !== "fallthrough") controls.set(context, control);
+    for (const context of current) context.activeCollectiveContexts = current;
+    try {
+      for (const context of current) {
+        const control = execSemanticOperations([operation], context);
+        if (control !== "fallthrough") controls.set(context, control);
+      }
+    } finally {
+      for (const context of current) delete context.activeCollectiveContexts;
     }
   }
   return controls;

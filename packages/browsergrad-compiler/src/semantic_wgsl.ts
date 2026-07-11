@@ -278,7 +278,9 @@ export interface SemanticKernelIrWgslPreflightFailure {
   readonly span: SourceSpan;
 }
 
-export interface EmitSemanticKernelIrWgslOptions extends SemanticTextureDescriptorOptions {}
+export interface EmitSemanticKernelIrWgslOptions extends SemanticTextureDescriptorOptions {
+  readonly activeCollectivePredicate?: string;
+}
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
 const PACKED_SHARED_U8_STORE = "bg_semantic_packed_shared_u8_store";
@@ -1966,9 +1968,27 @@ function emitSemanticPredicatedOperations(
         throw semanticWgslError("predicated cooperative shuffle requires typed scalar assignment", operation.span);
       }
       const temporary = nameFor(`bg_collective_${operation.span.start}`, names);
-      lines.push(`${prefix}let ${temporary}: ${wgslValueScalar(valueType)} = ${emitSemanticLocalScalarExpressionAs(operation.expression.value, valueType, ir, names, options, textureSpecializations)};`);
+      const collectiveOptions = { ...options, activeCollectivePredicate: predicate };
+      lines.push(`${prefix}let ${temporary}: ${wgslValueScalar(valueType)} = ${emitSemanticLocalScalarExpressionAs(operation.expression.value, valueType, ir, names, collectiveOptions, textureSpecializations)};`);
       lines.push(`${prefix}if (${predicate}) {`);
       lines.push(`${"  ".repeat(indentLevel + 1)}${emitSemanticAssignmentStatement({ ...operation.expression, value: { kind: "symbol", name: temporary, valueType, addressSpace: "local", span: operation.span } }, ir, names, options, textureSpecializations)};`);
+      lines.push(`${prefix}}`);
+      continue;
+    }
+    if (operation.kind === "store" && semanticExpressionContainsWorkgroupCollective(operation.value) &&
+      !operation.target.indices.some(semanticExpressionContainsWorkgroupCollective)) {
+      const valueType = operation.target.valueType;
+      if (!valueType || valueType === "void" || isSemanticFloatVectorType(valueType)) {
+        throw semanticWgslError("predicated cooperative store requires typed scalar value", operation.span);
+      }
+      const temporary = nameFor(`bg_collective_${operation.span.start}`, names);
+      const collectiveOptions = { ...options, activeCollectivePredicate: predicate };
+      lines.push(`${prefix}let ${temporary}: ${wgslValueScalar(valueType)} = ${emitSemanticLocalScalarExpressionAs(operation.value, valueType, ir, names, collectiveOptions, textureSpecializations)};`);
+      lines.push(`${prefix}if (${predicate}) {`);
+      lines.push(...emitSemanticOperation({
+        ...operation,
+        value: { kind: "symbol", name: temporary, valueType, addressSpace: "local", span: operation.span },
+      }, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
       lines.push(`${prefix}}`);
       continue;
     }
@@ -2008,7 +2028,8 @@ function semanticExpressionContainsWorkgroupCollective(expression: SemanticExpre
       cudaVoteOpForCall(expression.callee.name) === "ballot" ||
       cudaVoteOpForCall(expression.callee.name) === "any" ||
       cudaVoteOpForCall(expression.callee.name) === "all" ||
-      expression.callee.name === "__reduce_add_sync")) return true;
+      cudaArithmeticReduceOpForCall(expression.callee.name) !== undefined ||
+      expression.callee.name === "__activemask")) return true;
   return semanticExpressionChildren(expression).some(semanticExpressionContainsWorkgroupCollective);
 }
 
@@ -4497,7 +4518,9 @@ function emitSemanticSubgroupCall(
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
-  if (name === "__activemask") return "subgroupBallot(true).x";
+  if (name === "__activemask") {
+    return `${semanticBallotHelper().name}(${options.activeCollectivePredicate ?? "true"}, 0xffffffffu, local_id)`;
+  }
   const value = expression.args[isCudaWarpSumCallName(name) ? expression.args.length - 1 : legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);

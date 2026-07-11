@@ -2486,6 +2486,15 @@ __global__ void vibPredicateIntrinsic(uint *out) {
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
 }`,
+  divergentActiveMask: `
+__global__ void divergentActiveMask(uint *out) {
+  int tid = threadIdx.x;
+  if ((tid & 1) == 0) {
+    out[tid] = __activemask();
+  } else {
+    out[tid] = __activemask();
+  }
+}`,
   semanticVote: `
 __global__ void semanticVote(uint *input, uint *out) {
   int tid = threadIdx.x;
@@ -2503,6 +2512,14 @@ __global__ void semanticMaskedVote(uint *out) {
   out[tid * 4 + 1] = __all_sync(mask, tid != 1);
   out[tid * 4 + 2] = __ballot_sync(mask, (tid & 1) == 0);
   out[tid * 4 + 3] = __reduce_add_sync(mask, uint(tid + 1));
+}`,
+  semanticMaskedMinMax: `
+__global__ void semanticMaskedMinMax(int *out) {
+  int tid = threadIdx.x;
+  uint mask = 5u;
+  int value = tid == 1 ? -100 : (tid == 3 ? 100 : tid + 3);
+  out[tid * 2] = __reduce_min_sync(mask, value);
+  out[tid * 2 + 1] = __reduce_max_sync(mask, value);
 }`,
   legacyVote: `
 __global__ void legacyVote(uint *input, uint *out) {
@@ -14487,6 +14504,20 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [15, 15, 15, 15] },
           },
           {
+            name: "subgroup:divergent-activemask",
+            source: SOURCES.divergentActiveMask,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [5, 10, 5, 10] },
+          },
+          {
             name: "subgroup:semantic-vote-reduce",
             source: SOURCES.semanticVote,
             options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
@@ -14514,6 +14545,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0, 1, 5, 4, 0, 1, 5, 4, 0, 1, 5, 4, 0, 1, 5, 4] },
+          },
+          {
+            name: "subgroup:semantic-masked-min-max",
+            source: SOURCES.semanticMaskedMinMax,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [3, 5, 3, 5, 3, 5, 3, 5] },
           },
           {
             name: "subgroup:legacy-vote",
