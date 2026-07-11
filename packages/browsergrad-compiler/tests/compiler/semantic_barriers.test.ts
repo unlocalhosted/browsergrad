@@ -77,4 +77,51 @@ __global__ void initialized_after_return(const int *input, int *out) {
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...result.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
   });
+
+  it("keeps uniform barrier loops running after divergent early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void loop_barrier_after_return(int *out) {
+  __shared__ int values[4];
+  int tid = threadIdx.x;
+  if (tid >= 3) return;
+  for (int i = 0; i < 2; ++i) {
+    values[tid] = tid + 1;
+    __syncthreads();
+    out[tid] += values[tid];
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("for (");
+    expect([...result.buffers.out as Int32Array]).toEqual([2, 4, 6, 0]);
+  });
+
+  it("lifts guarded shared-memory barriers into uniform control", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void guarded_barrier(int *out) {
+  __shared__ int values[4];
+  int tid = threadIdx.x;
+  if (tid < 3) {
+    int value = tid + 1;
+    values[tid] = value;
+    __syncthreads();
+    out[tid] = values[tid];
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("var bg_active_lane: bool");
+    expect([...result.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
+  });
 });

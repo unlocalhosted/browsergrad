@@ -5423,4 +5423,26 @@ __global__ void initialized_after_return(const int *input, int *out) {
     expect([...expected.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
     expect([...actual.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
   });
+
+  it("lifts guarded shared-memory barriers on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void guarded_barrier(int *out) {
+  __shared__ int values[4];
+  int tid = threadIdx.x;
+  if (tid < 3) {
+    values[tid] = tid + 1;
+    __syncthreads();
+    out[tid] = values[tid];
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Int32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
+  });
 });

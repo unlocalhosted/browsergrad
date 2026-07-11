@@ -83,6 +83,7 @@ import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
 import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
+import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
 import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
@@ -694,7 +695,18 @@ export function lowerSemanticModelToKernelIr(
     })),
     ...lowerStatements(analysis.kernel.body, scope),
   ];
-  const loweredOperations = lowerSemanticEarlyReturnsBeforeDirectBarriers(rawOperations, semantic.functions, analysis.kernel.span);
+  const barrierBranchOperations = lowerSemanticDivergentBarrierBranches(
+    rawOperations,
+    semantic.functions,
+    analysis.kernel.span,
+    analysis.barrierUniformity.kernel,
+  );
+  const loweredOperations = lowerSemanticEarlyReturnsBeforeDirectBarriers(
+    barrierBranchOperations,
+    semantic.functions,
+    analysis.kernel.span,
+    analysis.barrierUniformity.kernel,
+  );
   const localMemory = collectDeclaredMemory(loweredOperations);
   const reachable = collectReachableAnalysisNames(analysis);
   const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
@@ -754,17 +766,111 @@ export function lowerSemanticModelToKernelIr(
   };
 }
 
+function lowerSemanticDivergentBarrierBranches(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+  kernelSpan: SourceSpan,
+  barrierProof: CudaLiteAnalysis["barrierUniformity"]["kernel"],
+): readonly SemanticKernelIrOperation[] {
+  if (barrierProof.unverifiedControlStatementStarts.length !== 1) return operations;
+  const barrierFunctions = semanticIrBarrierFunctionNames(functions);
+  const branchStart = barrierProof.unverifiedControlStatementStarts[0]!;
+  const branchIndex = operations.findIndex((operation) =>
+    operation.kind === "branch" && operation.span.start === branchStart && operation.alternate.length === 0 &&
+    semanticIrOperationsContainBarrier(operation.consequent, barrierFunctions) && !semanticOperationContainsVoidReturn(operation)
+  );
+  if (branchIndex < 0) return operations;
+  const branch = operations[branchIndex]!;
+  if (branch.kind !== "branch") return operations;
+  if (semanticPredicatedBarrierTransformUnsafe(branch.consequent, barrierFunctions)) return operations;
+  const predicate: CudaLiteSemanticSymbol = {
+    name: "bg_active_lane",
+    kind: "local",
+    valueType: "bool",
+    dimensions: [],
+    addressSpace: "local",
+    span: kernelSpan,
+  };
+  const predicateExpression = semanticSymbolExpression(predicate, kernelSpan);
+  const declaration: SemanticKernelIrOperation = {
+    kind: "declare",
+    target: predicate,
+    init: branch.condition,
+    span: branch.span,
+  };
+  const lowered = lowerSemanticPredicatedBarrierOperations(branch.consequent, predicateExpression, barrierFunctions);
+  return [...operations.slice(0, branchIndex), declaration, ...lowered, ...operations.slice(branchIndex + 1)];
+}
+
+function semanticPredicatedBarrierTransformUnsafe(
+  operations: readonly SemanticKernelIrOperation[],
+  barrierFunctions: ReadonlySet<string>,
+): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === "call" && barrierFunctions.has(operation.callee)) return true;
+    if (operation.kind === "declare") {
+      return operation.target.addressSpace !== "local" || operation.target.pointer ||
+        operation.target.dimensions.length > 0 && operation.init !== undefined;
+    }
+    if (operation.kind === "branch" && semanticIrOperationsContainBarrier([operation], barrierFunctions)) return true;
+    if (operation.kind === "loop" || operation.kind === "block") {
+      return semanticPredicatedBarrierTransformUnsafe(operation.body, barrierFunctions);
+    }
+    return false;
+  });
+}
+
+function lowerSemanticPredicatedBarrierOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  predicate: SemanticExpression,
+  barrierFunctions: ReadonlySet<string>,
+): readonly SemanticKernelIrOperation[] {
+  return operations.flatMap((operation): readonly SemanticKernelIrOperation[] => {
+    if (semanticIrOperationsContainBarrier([operation], barrierFunctions)) {
+      if (operation.kind === "loop" || operation.kind === "block") {
+        return [{ ...operation, body: lowerSemanticPredicatedBarrierOperations(operation.body, predicate, barrierFunctions) }];
+      }
+      if (operation.kind === "branch") {
+        return lowerSemanticPredicatedBarrierOperations(operation.consequent, predicate, barrierFunctions);
+      }
+      return [operation];
+    }
+    if (operation.kind === "declare") {
+      if (operation.target.addressSpace !== "local" || operation.target.pointer || operation.target.dimensions.length > 0 && operation.init !== undefined) return [operation];
+      if (operation.init === undefined) return [operation];
+      const { init: _init, ...declaration } = operation;
+      return [declaration, semanticActiveLaneBranch(predicate, [{
+        kind: "expression",
+        expression: {
+          kind: "assignment",
+          operator: "=",
+          target: semanticSymbolExpression(operation.target, operation.span),
+          value: operation.init,
+          ...optionalValueType(operation.target.valueType),
+          span: operation.span,
+        },
+        span: operation.span,
+      }], operation.span)];
+    }
+    return [semanticActiveLaneBranch(predicate, [operation], operation.span)];
+  });
+}
+
 function lowerSemanticEarlyReturnsBeforeDirectBarriers(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
   kernelSpan: SourceSpan,
+  barrierProof: CudaLiteAnalysis["barrierUniformity"]["kernel"],
 ): readonly SemanticKernelIrOperation[] {
+  const barrierFunctions = semanticIrBarrierFunctionNames(functions);
   const firstReturnBeforeBarrier = operations.findIndex((operation, index) =>
     semanticOperationContainsVoidReturn(operation) &&
-    operations.slice(index + 1).some((later) => later.kind === "barrier")
+    semanticIrOperationsContainBarrier(operations.slice(index + 1), barrierFunctions)
   );
   if (firstReturnBeforeBarrier < 0) return operations;
   const affected = operations.slice(firstReturnBeforeBarrier);
+  const returnStarts = semanticVoidReturnStarts(affected);
+  if (barrierProof.unverifiedControlStatementStarts.some((start) => !returnStarts.has(start))) return operations;
   const pointerFunctions = new Map(functions.filter((fn) => fn.params.some((param) => param.pointer)).map((fn) => [fn.name, fn] as const));
   if (!semanticVoidReturnsAreTerminal(affected)) return operations;
   if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions))) return operations;
@@ -784,41 +890,72 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
     init: booleanExpression(true, kernelSpan),
     span: kernelSpan,
   };
-  const lowered = affected.flatMap((operation): readonly SemanticKernelIrOperation[] => {
-    const rewritten = rewriteSemanticVoidReturnsAsInactive(operation, active);
-    if (operation.kind === "barrier") return [rewritten];
-    if (operation.kind === "declare") {
-      if (operation.target.addressSpace === "shared" || operation.init === undefined) return [rewritten];
-      if (operation.target.dimensions.length > 0) return [rewritten];
-      const { init: _init, ...declaration } = operation;
-      return [declaration, {
-        kind: "branch",
-        condition: activeExpression,
-        consequent: [{
-          kind: "expression",
-          expression: {
-            kind: "assignment",
-            operator: "=",
-            target: semanticSymbolExpression(operation.target, operation.span),
-            value: operation.init,
-            ...optionalValueType(operation.target.valueType),
-            span: operation.span,
-          },
-          span: operation.span,
-        }],
-        alternate: [],
-        span: operation.span,
-      }];
-    }
-    return [{
-      kind: "branch",
-      condition: activeExpression,
-      consequent: [rewritten],
-      alternate: [],
-      span: operation.span,
-    }];
-  });
+  const lowered = lowerSemanticActiveLaneOperations(affected, active, activeExpression, barrierFunctions);
   return [...operations.slice(0, firstReturnBeforeBarrier), declare, ...lowered];
+}
+
+function semanticVoidReturnStarts(operations: readonly SemanticKernelIrOperation[]): ReadonlySet<number> {
+  const starts = new Set<number>();
+  const visit = (items: readonly SemanticKernelIrOperation[]): void => {
+    for (const operation of items) {
+      if (operation.kind === "return" && operation.value === undefined) starts.add(operation.span.start);
+      else if (operation.kind === "branch") {
+        visit(operation.consequent);
+        visit(operation.alternate);
+      } else if (operation.kind === "loop" || operation.kind === "block") visit(operation.body);
+    }
+  };
+  visit(operations);
+  return starts;
+}
+
+function lowerSemanticActiveLaneOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  active: CudaLiteSemanticSymbol,
+  activeExpression: SemanticExpression,
+  barrierFunctions: ReadonlySet<string>,
+): readonly SemanticKernelIrOperation[] {
+  return operations.flatMap((operation): readonly SemanticKernelIrOperation[] => {
+    const rewritten = rewriteSemanticVoidReturnsAsInactive(operation, active);
+    if (semanticIrOperationsContainBarrier([operation], barrierFunctions)) {
+      if (operation.kind === "loop" || operation.kind === "block") {
+        return [{ ...operation, body: lowerSemanticActiveLaneOperations(operation.body, active, activeExpression, barrierFunctions) }];
+      }
+      if (operation.kind === "branch") {
+        return [{
+          ...operation,
+          consequent: lowerSemanticActiveLaneOperations(operation.consequent, active, activeExpression, barrierFunctions),
+          alternate: lowerSemanticActiveLaneOperations(operation.alternate, active, activeExpression, barrierFunctions),
+        }];
+      }
+      return [rewritten];
+    }
+    if (operation.kind === "declare") {
+      if (operation.target.addressSpace === "shared" || operation.init === undefined || operation.target.dimensions.length > 0) return [rewritten];
+      const { init: _init, ...declaration } = operation;
+      return [declaration, semanticActiveLaneBranch(activeExpression, [{
+        kind: "expression",
+        expression: {
+          kind: "assignment",
+          operator: "=",
+          target: semanticSymbolExpression(operation.target, operation.span),
+          value: operation.init,
+          ...optionalValueType(operation.target.valueType),
+          span: operation.span,
+        },
+        span: operation.span,
+      }], operation.span)];
+    }
+    return [semanticActiveLaneBranch(activeExpression, [rewritten], operation.span)];
+  });
+}
+
+function semanticActiveLaneBranch(
+  activeExpression: SemanticExpression,
+  consequent: readonly SemanticKernelIrOperation[],
+  span: SourceSpan,
+): SemanticKernelIrOperation {
+  return { kind: "branch", condition: activeExpression, consequent, alternate: [], span };
 }
 
 function semanticVoidReturnsAreTerminal(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -863,7 +1000,7 @@ function semanticActiveLaneTransformUnsafe(
     return operation.target.addressSpace !== "local" || operation.target.pointer ||
       operation.target.dimensions.length > 0 && operation.init !== undefined && (
         !semanticExpressionSideEffectFree(operation.init) ||
-        semanticExpressionContainsCall(operation.init) ||
+        semanticExpressionContainsUnsafeActiveLaneDeclarationCall(operation.init) ||
         collectMemoryRefs(operation.init).length > 0
       );
   }
@@ -873,6 +1010,16 @@ function semanticActiveLaneTransformUnsafe(
   }
   if (operation.kind === "block") return operation.body.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions));
   return false;
+}
+
+function semanticExpressionContainsUnsafeActiveLaneDeclarationCall(expression: SemanticExpression): boolean {
+  let unsafe = false;
+  walkSemanticExpression(expression, (item) => {
+    if (item.kind !== "call") return;
+    const name = semanticCallName(item.callee);
+    if (name === undefined || !isSemanticMathCallName(name) && semanticIntrinsicReturnType(name, item.args) === undefined) unsafe = true;
+  });
+  return unsafe;
 }
 
 
