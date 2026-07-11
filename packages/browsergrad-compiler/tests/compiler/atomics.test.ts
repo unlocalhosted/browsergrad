@@ -794,9 +794,10 @@ describe("CUDA-lite compiler: Atomics", () => {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("add_dynamic_shared_scalar(1u, (0u + u32((0 + ((0 + 1) * 3))))");
-      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(lanes_buffer, (lanes_base + u32(lane)), value)");
-      expect(compiled.wgsl).not.toContain("add_dynamic_shared_scalar(1u, ((0u + u32(0)) + u32((0 + 1)))");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("add_dynamic_shared_scalar(&scratch, u32((1 * 3)), tid");
+      expect(compiled.wgsl).toContain("bg_atomicAdd_f32_workgroup(&(*lanes__bg_shared_ptr)[(lanes__bg_shared_ptr_base + u32(lane))], value)");
       expect([...result.buffers.out as Float32Array]).toEqual([2.5, 12.5]);
     });
 

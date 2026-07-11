@@ -125,6 +125,7 @@ export interface CudaLiteSemanticSymbol {
   readonly initialized?: boolean;
   readonly init?: SemanticExpression;
   readonly dimensions: readonly number[];
+  readonly dynamicShared?: boolean;
   readonly addressSpace: SemanticAddressSpace;
   readonly span: SourceSpan;
 }
@@ -3072,6 +3073,7 @@ function symbolForVar(
     valueType: statement.valueType,
     pointer: statement.pointer,
     ...(statement.packedByteLanes === undefined ? {} : { packedByteLanes: statement.packedByteLanes }),
+    ...(statement.dynamicShared === true ? { dynamicShared: true } : {}),
     ...(pointerAlias === undefined ? {} : pointerAlias),
     constant: false,
     dimensions: statement.dimensions,
@@ -3203,7 +3205,9 @@ function localPointerAliasForInitializer(
         pointerBaseIndices: [zeroExpression(expression.span)],
       };
     }
-    if (!root || (root.kind !== "local" && root.kind !== "shared") || root.dimensions.length !== 1 || root.pointer) return undefined;
+    if (!root || (root.kind !== "local" && root.kind !== "shared") || root.pointer ||
+      root.kind === "local" && root.dimensions.length !== 1 ||
+      root.kind === "shared" && root.dimensions.length !== 1 && root.dynamicShared !== true) return undefined;
     return {
       pointerRoot: root.name,
       pointerAddressSpace: root.addressSpace,

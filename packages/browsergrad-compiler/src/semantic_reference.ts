@@ -1123,7 +1123,8 @@ function semanticReferenceExpressionSupported(
             : semanticReferenceAssignmentMemoryRefSupported(expression.argument, compiled))) &&
         (expression.operator === "++" || expression.operator === "--");
     case "call":
-      return compiled !== undefined && semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
+      return semanticReferenceSharedAddressCallSupported(expression) ||
+        compiled !== undefined && semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceAtomicCallSupported(expression, compiled) ||
@@ -1207,6 +1208,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
   if (expression.kind === "call") {
     if (semanticReferenceCooperativeReduceCallSupported(expression, compiled)) return false;
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
+      semanticReferenceSharedAddressCallSupported(expression) ||
       semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
       semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
       semanticReferenceCurandCallSupported(expression, compiled) ||
@@ -2368,6 +2370,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       return value;
     }
     case "call":
+      if (semanticReferenceSharedAddressCallSupported(expression)) return evalSemanticSharedAddressCall(expression, context);
       if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return evalSemanticCooperativeGroupCall(expression, context);
       if (semanticReferenceCooperativeReduceCallSupported(expression, context.compiled)) return evalSemanticCooperativeReduceCall(expression, context);
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
@@ -2393,6 +2396,37 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "update":
       return evalUpdate(expression, context);
   }
+}
+
+function semanticReferenceSharedAddressCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): boolean {
+  if (expression.callee.kind !== "symbol" || expression.callee.name !== "__cvta_generic_to_shared") return false;
+  const arg = expression.args[0];
+  if (!arg) return false;
+  const ref = semanticReferenceSharedAddressMemoryRef(arg);
+  return ref?.addressSpace === "shared";
+}
+
+function evalSemanticSharedAddressCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  const arg = expression.args[0];
+  const ref = arg ? semanticReferenceSharedAddressMemoryRef(arg) : undefined;
+  if (!ref || ref.addressSpace !== "shared") throw semanticReferenceError("__cvta_generic_to_shared requires modeled shared memory", expression.span);
+  return flatIndex(ref, context) + (context.sharedOffsets.get(ref.base) ?? 0);
+}
+
+function semanticReferenceSharedAddressMemoryRef(arg: SemanticExpression): SemanticMemoryRef | undefined {
+  return memoryRefFromIndexExpression(arg) ?? (arg.kind === "symbol" && arg.addressSpace === "shared" ? {
+    base: arg.name,
+    addressSpace: arg.addressSpace,
+    ...(arg.valueType === undefined ? {} : { valueType: arg.valueType }),
+    indices: [],
+    fields: [],
+    span: arg.span,
+  } : undefined);
 }
 
 function semanticReferenceStoragePointerIdentity(

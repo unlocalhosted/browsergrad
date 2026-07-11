@@ -4993,6 +4993,26 @@ __global__ void nestedDynamicShared(const float *input, float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([10]);
   });
 
+  it("runs dynamic shared-memory pointer aliases on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamic_shared_alias(uint* out) {
+  extern __shared__ float smem[];
+  float* tile = smem + 2;
+  tile[0] = 7.0f;
+  out[0] = __cvta_generic_to_shared(tile);
+  out[1] = uint(smem[2]);
+}`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { smem: 4 } });
+    const input = { buffers: { out: new Uint32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([2, 7]);
+  });
+
   it("runs retirement-count reductions as host WebGPU phases", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

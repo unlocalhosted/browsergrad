@@ -5676,9 +5676,10 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect([...result.buffers.out as Uint32Array]).toEqual([5, 4, 3]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
-      expect(compiled.wgsl).toMatch(/var tile_\d+_base: u32 = u32\(4\);/u);
-      expect(compiled.wgsl).toMatch(/out\[1\] = u32\(u32\(tile_\d+_base\)\);/u);
+      expect(compiled.wgsl).toContain("out[1u] = u32(4u);");
       expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
     });
 
@@ -5700,6 +5701,29 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 23]);
       expect(compiled.wgsl).toContain("out[0] = u32(u32(0u))");
       expect(compiled.wgsl).toContain("out[1] = u32(u32(((u32(1) * 12u) + (u32(2) * 4u) + u32(3))))");
+    });
+
+  it("resolves dynamic shared-memory pointer aliases into semantic memory refs", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void dynamic_shared_alias(uint* out) {
+    extern __shared__ float smem[];
+    float* tile = smem + 2;
+    tile[0] = 7.0f;
+    out[0] = __cvta_generic_to_shared(tile);
+    out[1] = uint(smem[2]);
+  }`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { smem: 4 } });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect([...result.buffers.out as Uint32Array]).toEqual([2, 7]);
+      expect(compiled.kernelIr.operations.some((operation) =>
+        operation.kind === "declare" && operation.target.name === "tile")).toBe(false);
+      expect(compiled.wgsl).toContain("smem[2u] = 7.0;");
     });
 
   it("lowers CUDA assignment expression chains as ordered statements", () => {

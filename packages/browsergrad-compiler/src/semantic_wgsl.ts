@@ -1442,6 +1442,7 @@ function semanticWgslScalarCallSupported(
   if (semanticWgslCooperativeGroupCallSupported(expression, ir)) return true;
   if (expression.callee.kind !== "symbol") return false;
   const callee = expression.callee.name;
+  if (callee === "__cvta_generic_to_shared") return semanticWgslSharedAddressCallRef(expression) !== undefined;
   if (SEMANTIC_CURAND_VECTOR_CALLS.has(callee) || SEMANTIC_HALF2_VECTOR_CALLS.has(callee) || SEMANTIC_BF162_VECTOR_CALLS.has(callee) || cudaVectorConstructorType(callee)) return false;
   const fn = ir.functions.find((item) => item.name === callee);
   if (fn && isSemanticFloatVectorType(fn.returnType)) return false;
@@ -1911,7 +1912,8 @@ function semanticWgslExpressionSupported(
     case "sequence":
       return expression.expressions.every((item) => semanticWgslExpressionSupported(item, "scalar", ir));
     case "call":
-      return ir !== undefined && semanticWgslCooperativeGroupCallSupported(expression, ir) ||
+      return semanticWgslSharedAddressCallRef(expression) !== undefined ||
+        ir !== undefined && semanticWgslCooperativeGroupCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
         ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslAtomicCallSupported(expression, ir) ||
@@ -3575,6 +3577,11 @@ function emitSemanticExpression(
     case "sequence":
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
+      if (expression.callee.kind === "symbol" && expression.callee.name === "__cvta_generic_to_shared") {
+        const ref = semanticWgslSharedAddressCallRef(expression);
+        if (!ref) throw semanticWgslError("__cvta_generic_to_shared requires modeled shared memory", expression.span);
+        return emitSemanticSharedPointerArgBaseIndex(ref, ir, names);
+      }
       if (semanticWgslCooperativeGroupCallSupported(expression, ir)) {
         const emitted = emitSemanticCooperativeGroupCall(
           expression,
@@ -3636,6 +3643,23 @@ function emitSemanticExpression(
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
   }
+}
+
+function semanticWgslSharedAddressCallRef(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): SemanticMemoryRef | undefined {
+  if (expression.callee.kind !== "symbol" || expression.callee.name !== "__cvta_generic_to_shared") return undefined;
+  const arg = expression.args[0];
+  if (!arg) return undefined;
+  const ref = memoryRefFromIndexExpression(arg) ?? (arg.kind === "symbol" && arg.addressSpace === "shared" ? {
+    base: arg.name,
+    addressSpace: arg.addressSpace,
+    ...(arg.valueType === undefined ? {} : { valueType: arg.valueType }),
+    indices: [],
+    fields: [],
+    span: arg.span,
+  } : undefined);
+  return ref?.addressSpace === "shared" ? ref : undefined;
 }
 
 function emitSemanticSurfaceRead(

@@ -4916,7 +4916,9 @@ __global__ void sharedHelperScoped(float *out) {
       );
 
       expect(compiled.wgsl).not.toContain("var sdataB");
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32(1u, ((0u + u32((0 + 2))) + u32(tid))");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("sdataA[u32((2 + tid))] = x[u32((tid + 2))]");
       expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
     });
 
