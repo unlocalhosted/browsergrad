@@ -1445,10 +1445,53 @@ function lowerStatementOperations(
   if (conditionalAssignment) return conditionalAssignment;
   const conditionalVarInit = semanticConditionalVarInitOperations(statement, scope);
   if (conditionalVarInit) return conditionalVarInit;
+  const conditionalReturn = semanticConditionalReturnOperations(statement, scope);
+  if (conditionalReturn) return conditionalReturn;
+  const conditionalCallArgs = semanticConditionalCallArgumentOperations(statement, scope);
+  if (conditionalCallArgs) return conditionalCallArgs;
   const mathOutVarDecl = semanticMathOutVarDeclOperations(statement, scope);
   const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
   const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
+}
+
+function semanticConditionalReturnOperations(
+  statement: CudaLiteStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "return" || statement.value === undefined) return undefined;
+  const materialized = materializeConditionalCalls(lowerExpression(statement.value, scope));
+  if (materialized.operations.length === 0) return undefined;
+  return [
+    ...materialized.operations,
+    { kind: "return", value: materialized.expression, span: statement.span },
+  ];
+}
+
+function semanticConditionalCallArgumentOperations(
+  statement: CudaLiteStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "expr" || statement.expression.kind !== "call") return undefined;
+  const call = lowerExpression(statement.expression, scope);
+  if (call.kind !== "call" || call.callee.kind !== "symbol") return undefined;
+  const operations: SemanticKernelIrOperation[] = [];
+  const args = call.args.map((arg) => {
+    const materialized = materializeConditionalCalls(arg);
+    operations.push(...materialized.operations);
+    return materialized.expression;
+  });
+  if (operations.length === 0) return undefined;
+  return [
+    ...operations,
+    {
+      kind: "call",
+      callee: call.callee.name,
+      args,
+      reads: args.flatMap((arg) => collectMemoryRefs(arg)),
+      span: statement.span,
+    },
+  ];
 }
 
 function semanticConditionalVarInitOperations(

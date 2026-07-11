@@ -764,13 +764,22 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
 
   __global__ void nestedConditionalHelperReturn(uint *storage, uint *out, int enabled) {
     out[0] = nested_return_conditional_wrapper(storage, enabled);
-  }`, { workgroupSize: [4, 1, 1] });
+  }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toMatch(/var bg_return_value_\d+: u32 = 0u;/u);
-      expect(compiled.wgsl).toContain("if ((enabled != 0))");
-      expect(compiled.wgsl).toContain("bg_return_value_");
-      expect(compiled.wgsl).toContain("= (3u + nested_return_conditional_helper_with_pointer_side_effect");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toMatch(/var bg__bg_condition_value_\d+_\d+: u32;/u);
+      expect(compiled.wgsl).toContain("if ((u32(enabled) != 0u))");
+      expect(compiled.wgsl).toMatch(/return \(3u \+ bg__bg_condition_value_\d+_\d+\);/u);
       expect(compiled.wgsl).not.toContain("select(0u, nested_return_conditional_helper_with_pointer_side_effect");
+
+      const result = runCompiledKernelSemanticReference(compiled, {
+        buffers: { storage: new Uint32Array([2]), out: new Uint32Array(1) },
+        scalars: { enabled: 1 },
+      }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
+      expect([...result.buffers.storage as Uint32Array]).toEqual([9]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([12]);
     });
 
   it("preserves nested conditional helper-call laziness in call arguments", () => {
@@ -786,12 +795,21 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
 
   __global__ void nestedConditionalHelperArg(uint *storage, uint *out, int enabled) {
     nested_arg_sink(3u + (enabled != 0 ? nested_arg_conditional_helper_with_pointer_side_effect(storage, 7u) : 0u), out);
-  }`, { workgroupSize: [4, 1, 1] });
+  }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("if ((bg_uniforms.enabled != 0))");
-      expect(compiled.wgsl).toContain("nested_arg_sink((3u + nested_arg_conditional_helper_with_pointer_side_effect");
-      expect(compiled.wgsl).toContain("nested_arg_sink((3u + 0u)");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toMatch(/nested_arg_sink\(\(3u \+ bg__bg_condition_value_\d+_\d+\)/u);
       expect(compiled.wgsl).not.toContain("select(0u, nested_arg_conditional_helper_with_pointer_side_effect");
+
+      const result = runCompiledKernelSemanticReference(compiled, {
+        buffers: { storage: new Uint32Array([2]), out: new Uint32Array(1) },
+        scalars: { enabled: 1 },
+      }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
+      expect([...result.buffers.storage as Uint32Array]).toEqual([9]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([12]);
     });
 
   it("preserves nested conditional helper-call laziness in branch conditions", () => {

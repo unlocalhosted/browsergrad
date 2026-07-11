@@ -4888,6 +4888,16 @@ function emitSemanticFunctionArgs(
   if (param?.pointer && param.addressSpace === "storage") {
     const ref = semanticPointerArgMemoryRef(arg);
     if (!ref || ref.addressSpace !== "storage") throw semanticWgslError("semantic WGSL storage pointer helper argument must be modeled storage", arg.span);
+    const forwarded = options.activeFunction === undefined
+      ? undefined
+      : ir.functions.find((candidate) => candidate.name === options.activeFunction)?.params.find((candidate) =>
+        candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "storage");
+    if (forwarded) {
+      return [
+        nameFor(semanticPointerBufferParamName(ref.base), names),
+        emitSemanticPointerArgBaseIndex(ref, ir, names, options),
+      ];
+    }
     const bufferId = semanticStoragePointerBufferId(ref.base, ir);
     if (bufferId === undefined) throw semanticWgslError(`semantic WGSL unknown storage pointer base '${ref.base}'`, arg.span);
     return [`${bufferId}u`, emitSemanticPointerArgBaseIndex(ref, ir, names, options)];
