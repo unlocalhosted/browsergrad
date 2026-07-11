@@ -3092,13 +3092,14 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     int idx = threadIdx.x;
     out[idx] = popc_ptx(input[idx]);
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { out: new Uint32Array(4), input: new Uint32Array([0, 1, 0xf0f0f0f0, 0xffffffff]) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
       expect(compiled.wgsl).toContain("countOneBits");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 16, 32]);
     });
 
@@ -3113,13 +3114,14 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     int idx = threadIdx.x;
     out[idx] = ffs_ptx(input[idx]);
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { out: new Int32Array(4), input: new Uint32Array([0, 1, 8, 0x80000000]) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
       expect(compiled.wgsl).toContain("countTrailingZeros");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 4, 32]);
     });
 
@@ -3140,7 +3142,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     out[idx] = clz_ptx(input[idx]);
     out[idx + 4] = brev_ptx(input[idx]);
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { out: new Uint32Array(8), input: new Uint32Array([0, 1, 0x01234567, 0xffffffff]) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
@@ -3148,6 +3150,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
 
       expect(compiled.wgsl).toContain("countLeadingZeros");
       expect(compiled.wgsl).toContain("reverseBits");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([32, 31, 7, 0, 0, 0x80000000, 0xe6a2c480, 0xffffffff]);
     });
 
@@ -3186,7 +3189,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     out[idx + 12] = clz_imm_ptx();
     out[idx + 16] = brev_imm_ptx();
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { out: new Uint32Array(20) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
@@ -3196,6 +3199,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(compiled.wgsl).toContain("countTrailingZeros");
       expect(compiled.wgsl).toContain("countOneBits");
       expect(compiled.wgsl).toContain("reverseBits");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([
         15,
         15,

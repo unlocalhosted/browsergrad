@@ -1029,22 +1029,31 @@ function lowerInlineAsmBuiltinRegisterAssignment(
   const op = classifyInlineAsm(statement.template);
   const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
   if (outputs.length !== 1) return undefined;
-  const bfindInput = op?.kind === "bfind-u32"
+  const target = lowerExpression(outputs[0]!, scope);
+  const bitInput = op && (op.kind === "bfind-u32" || op.kind === "ffs-b32" || op.kind === "popc-b32" || op.kind === "clz-b32" || op.kind === "brev-b32")
     ? op.immediate === undefined
       ? statement.inputs.length === 1 ? lowerExpression(statement.inputs[0]!, scope) : undefined
       : statement.inputs.length === 0 ? semanticUintLiteralExpression(op.immediate, statement.span) : undefined
     : undefined;
-  const value = op?.kind === "bfind-u32" && bfindInput !== undefined
+  const value = op?.kind === "bfind-u32" && bitInput !== undefined
     ? semanticUintBinaryExpression(
         "-",
         semanticUintLiteralExpression(31, statement.span),
         castScalarExpression(
-          semanticCallExpression("__clz", [bfindInput], "int", statement.span),
+          semanticCallExpression("__clz", [bitInput], "int", statement.span),
           "uint",
           statement.span,
         ),
         statement.span,
       )
+    : op?.kind === "ffs-b32" && bitInput !== undefined
+      ? semanticCallExpression("__ffs", [bitInput], "int", statement.span)
+    : op?.kind === "popc-b32" && bitInput !== undefined
+      ? castScalarExpression(semanticCallExpression("__popc", [bitInput], "int", statement.span), "uint", statement.span)
+    : op?.kind === "clz-b32" && bitInput !== undefined
+      ? castScalarExpression(semanticCallExpression("__clz", [bitInput], "int", statement.span), "uint", statement.span)
+    : op?.kind === "brev-b32" && bitInput !== undefined
+      ? semanticCallExpression("__brev", [bitInput], "uint", statement.span)
     : statement.inputs.length !== 0
       ? undefined
       : op?.kind === "special-register-u32"
@@ -1057,7 +1066,6 @@ function lowerInlineAsmBuiltinRegisterAssignment(
           ? semanticLaneMaskLtExpression(statement.span)
       : undefined;
   if (!value) return undefined;
-  const target = lowerExpression(outputs[0]!, scope);
   return {
     kind: "expression",
     expression: {
