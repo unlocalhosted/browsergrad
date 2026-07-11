@@ -2415,7 +2415,7 @@ function emitSemanticPredicatedOperations(
         continue;
       }
       if (operation.target.addressSpace !== "local" || operation.target.dimensions.length > 0 ||
-        valueType === undefined || valueType === "void" || isSemanticFloatVectorType(valueType)) {
+        valueType === undefined || valueType === "void") {
         throw semanticWgslError("predicated cooperative shuffle requires local scalar declaration", operation.span);
       }
       if (operation.init && semanticExpressionContainsWorkgroupCollective(operation.init)) {
@@ -2523,8 +2523,7 @@ function semanticPredicatedOperationsSupported(operations: readonly SemanticKern
       return operation.target.addressSpace === "local" && !operation.target.pointer && (
         operation.init === undefined ||
         operation.target.dimensions.length === 0 &&
-          operation.target.valueType !== undefined && operation.target.valueType !== "void" &&
-          !isSemanticFloatVectorType(operation.target.valueType)
+          operation.target.valueType !== undefined && operation.target.valueType !== "void"
       );
     }
     if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWorkgroupCollective(operation.expression.value)) {

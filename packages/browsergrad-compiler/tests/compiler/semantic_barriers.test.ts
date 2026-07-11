@@ -56,4 +56,25 @@ __global__ void nested_collective_after_return(uint *out) {
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
   });
+
+  it("predicates memory-reading declaration initializers after early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void initialized_after_return(const int *input, int *out) {
+  __shared__ int values[4];
+  int tid = threadIdx.x;
+  if (tid >= 3) return;
+  int value = input[tid];
+  values[tid] = value;
+  __syncthreads();
+  out[tid] = values[tid];
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Int32Array([10, 20, 30]), out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...result.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
+  });
 });

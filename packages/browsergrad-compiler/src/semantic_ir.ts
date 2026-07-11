@@ -83,7 +83,6 @@ import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
 import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
-import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
 import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
@@ -785,16 +784,39 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
     init: booleanExpression(true, kernelSpan),
     span: kernelSpan,
   };
-  const lowered = affected.map((operation): SemanticKernelIrOperation => {
+  const lowered = affected.flatMap((operation): readonly SemanticKernelIrOperation[] => {
     const rewritten = rewriteSemanticVoidReturnsAsInactive(operation, active);
-    if (operation.kind === "barrier" || operation.kind === "declare") return rewritten;
-    return {
+    if (operation.kind === "barrier") return [rewritten];
+    if (operation.kind === "declare") {
+      if (operation.target.addressSpace === "shared" || operation.init === undefined) return [rewritten];
+      if (operation.target.dimensions.length > 0) return [rewritten];
+      const { init: _init, ...declaration } = operation;
+      return [declaration, {
+        kind: "branch",
+        condition: activeExpression,
+        consequent: [{
+          kind: "expression",
+          expression: {
+            kind: "assignment",
+            operator: "=",
+            target: semanticSymbolExpression(operation.target, operation.span),
+            value: operation.init,
+            ...optionalValueType(operation.target.valueType),
+            span: operation.span,
+          },
+          span: operation.span,
+        }],
+        alternate: [],
+        span: operation.span,
+      }];
+    }
+    return [{
       kind: "branch",
       condition: activeExpression,
       consequent: [rewritten],
       alternate: [],
       span: operation.span,
-    };
+    }];
   });
   return [...operations.slice(0, firstReturnBeforeBarrier), declare, ...lowered];
 }
@@ -837,11 +859,12 @@ function semanticActiveLaneTransformUnsafe(
   })) return true;
   if (operation.kind === "loop") return semanticOperationContainsVoidReturn(operation);
   if (operation.kind === "declare") {
+    if (operation.target.addressSpace === "shared") return operation.target.pointer || operation.init !== undefined;
     return operation.target.addressSpace !== "local" || operation.target.pointer ||
-      operation.init !== undefined && (
+      operation.target.dimensions.length > 0 && operation.init !== undefined && (
         !semanticExpressionSideEffectFree(operation.init) ||
-        semanticExpressionContainsUnsafeActiveLaneDeclarationCall(operation.init) ||
-        !semanticActiveLaneDeclarationIsAddressOnly(operation.init) && collectMemoryRefs(operation.init).length > 0
+        semanticExpressionContainsCall(operation.init) ||
+        collectMemoryRefs(operation.init).length > 0
       );
   }
   if (operation.kind === "branch") {
@@ -852,24 +875,6 @@ function semanticActiveLaneTransformUnsafe(
   return false;
 }
 
-function semanticActiveLaneDeclarationIsAddressOnly(expression: SemanticExpression): boolean {
-  return expression.kind === "call" && semanticCallName(expression.callee) === "__cvta_generic_to_shared";
-}
-
-function semanticExpressionContainsUnsafeActiveLaneDeclarationCall(expression: SemanticExpression): boolean {
-  let unsafe = false;
-  walkSemanticExpression(expression, (item) => {
-    if (item.kind !== "call") return;
-    const name = semanticCallName(item.callee);
-    if (
-      name === undefined ||
-      name !== "__cvta_generic_to_shared" &&
-      !isSemanticMathCallName(name) &&
-      semanticIntrinsicReturnType(name, item.args) === undefined
-    ) unsafe = true;
-  });
-  return unsafe;
-}
 
 function rewriteSemanticVoidReturnsAsInactive(
   operation: SemanticKernelIrOperation,

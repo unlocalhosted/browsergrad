@@ -5401,4 +5401,26 @@ __global__ void nested_collective_after_return(uint *out) {
     expect([...expected.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
   });
+
+  it("predicates memory-reading initializers after early returns on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void initialized_after_return(const int *input, int *out) {
+  __shared__ int values[4];
+  int tid = threadIdx.x;
+  if (tid >= 3) return;
+  int value = input[tid];
+  values[tid] = value;
+  __syncthreads();
+  out[tid] = values[tid];
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { input: new Int32Array([10, 20, 30]), out: new Int32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
+  });
 });

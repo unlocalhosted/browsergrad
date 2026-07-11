@@ -960,7 +960,9 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("textureLoad(texArg");
       expect(compiled.wgsl).toContain("value");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
     });
@@ -1015,7 +1017,9 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("textureLoad(texArg");
       expect(compiled.wgsl).toContain("read_deep_texture_outer");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
     });
@@ -1043,8 +1047,11 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
-      expect(compiled.wgsl).toContain("bg_tex2d_uint4_tex");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("fn read_mixed_texture_scalar");
+      expect(compiled.wgsl).toContain("fn read_mixed_texture_vec");
+      expect(compiled.wgsl).toContain("textureLoad(texArg");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
     });
 
@@ -1097,8 +1104,10 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
-      expect(compiled.wgsl).toContain("bg_surf2dwrite_surf");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("textureLoad(texArg");
+      expect(compiled.wgsl).toContain("bg_sem_surf2dwrite");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
     });
 
