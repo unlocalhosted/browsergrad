@@ -75,6 +75,26 @@ export function semanticBarrierOperationsMatchUniformityProof(
   return visit(operations) && hasBarrier;
 }
 
+export function semanticBarrierOperationsMatchActiveLaneProof(
+  operations: readonly SemanticKernelIrOperation[],
+  proof: CudaLiteBarrierUniformityFact | undefined,
+  barrierFunctions: ReadonlySet<string> = new Set(),
+): boolean {
+  if (!proof || semanticOperationsContainReturn(operations)) return false;
+  const provenStarts = new Set(proof.barrierStatementStarts);
+  let hasBarrier = false;
+  const visit = (items: readonly SemanticKernelIrOperation[]): boolean => items.every((operation) => {
+    if (semanticOperationIsBarrier(operation, barrierFunctions)) {
+      hasBarrier = true;
+      return provenStarts.has(operation.span.start);
+    }
+    if (operation.kind === "branch") return visit(operation.consequent) && visit(operation.alternate);
+    if (operation.kind === "loop" || operation.kind === "block") return visit(operation.body);
+    return true;
+  });
+  return visit(operations) && hasBarrier;
+}
+
 function semanticOperationsContainReturn(operations: readonly SemanticKernelIrOperation[]): boolean {
   return operations.some((operation) =>
     operation.kind === "return" ||

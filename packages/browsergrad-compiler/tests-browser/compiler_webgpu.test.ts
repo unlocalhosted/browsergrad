@@ -5373,4 +5373,32 @@ __global__ void local_half2_to_float2(float *out) {
     expect([...expected.buffers.out as Float32Array]).toEqual([1, 2]);
     expect([...actual.buffers.out as Float32Array]).toEqual([1, 2]);
   });
+
+  it("runs nested predicated collectives after early returns on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void nested_collective_after_return(uint *out) {
+  __shared__ uint values[4];
+  uint tid = threadIdx.x;
+  if (tid >= 3u) return;
+  uint regs[2];
+  regs[0] = tid + 1u;
+  {
+    for (int i = 0; i < 1; ++i) {
+      regs[1] = __shfl_sync(0xffffffffu, regs[0], 0, 4);
+    }
+  }
+  values[tid] = regs[1];
+  __syncthreads();
+  out[tid] = values[tid];
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
+  });
 });

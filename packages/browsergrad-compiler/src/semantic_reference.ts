@@ -149,6 +149,7 @@ import {
   semanticTextureSurfaceValueTypeSupported,
 } from "./semantic_texture_surface.js";
 import {
+  semanticBarrierOperationsMatchActiveLaneProof,
   semanticBarrierOperationsMatchUniformityProof,
   semanticBarrierFunctionNames,
   semanticBarrierShapeSupported,
@@ -539,7 +540,8 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
   if (shared.length === 0) return true;
   const proof = compiled.kernelIr.barrierUniformity.kernel;
   return (ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane") &&
-      semanticBarrierShapeSupported(ir.operations, barrierFunctions)) ||
+      (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+        semanticBarrierOperationsMatchActiveLaneProof(ir.operations, proof, barrierFunctions))) ||
     semanticBarrierOperationsMatchUniformityProof(ir.operations, proof, barrierFunctions);
 }
 

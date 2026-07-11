@@ -147,6 +147,7 @@ import {
   semanticTextureSurfaceValueTypeSupported,
 } from "./semantic_texture_surface.js";
 import {
+  semanticBarrierOperationsMatchActiveLaneProof,
   semanticBarrierOperationsMatchUniformityProof,
   semanticBarrierFunctionNames,
   semanticBarrierShapeSupported,
@@ -888,9 +889,14 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
   if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
   if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
     const activeLaneLowered = ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane");
-    return (activeLaneLowered && semanticBarrierShapeSupported(ir.operations, barrierFunctions)) || operationsHaveOnlyTopLevelBarriers(ir.operations);
+    return (activeLaneLowered && (
+      semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+      semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)
+    )) || operationsHaveOnlyTopLevelBarriers(ir.operations);
   }
+  const activeLaneLowered = ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane");
   return (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+      activeLaneLowered && semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions) ||
       semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
     ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
       semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
@@ -2374,6 +2380,12 @@ function emitSemanticPredicatedOperations(
   const lines: string[] = [];
   const prefix = "  ".repeat(indentLevel);
   for (const operation of operations) {
+    if (operation.kind === "block" && semanticOperationsContainWorkgroupCollective(operation.body)) {
+      lines.push(`${prefix}{`);
+      lines.push(...emitSemanticPredicatedOperations(operation.body, predicate, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+      lines.push(`${prefix}}`);
+      continue;
+    }
     if (operation.kind === "branch") {
       const condition = emitTruthiness(operation.condition, ir, names, options);
       lines.push(`${prefix}{`);
@@ -2398,6 +2410,10 @@ function emitSemanticPredicatedOperations(
     }
     if (operation.kind === "declare") {
       const valueType = operation.target.valueType;
+      if (operation.target.addressSpace === "local" && !operation.target.pointer && operation.init === undefined) {
+        lines.push(...emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+        continue;
+      }
       if (operation.target.addressSpace !== "local" || operation.target.dimensions.length > 0 ||
         valueType === undefined || valueType === "void" || isSemanticFloatVectorType(valueType)) {
         throw semanticWgslError("predicated cooperative shuffle requires local scalar declaration", operation.span);
@@ -2494,6 +2510,9 @@ function semanticOperationsContainWorkgroupCollective(operations: readonly Seman
 
 function semanticPredicatedOperationsSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
   return operations.every((operation) => {
+    if (operation.kind === "block" && semanticOperationsContainWorkgroupCollective(operation.body)) {
+      return semanticPredicatedOperationsSupported(operation.body);
+    }
     if (operation.kind === "branch") {
       return semanticPredicatedOperationsSupported(operation.consequent) && semanticPredicatedOperationsSupported(operation.alternate);
     }
@@ -2501,9 +2520,12 @@ function semanticPredicatedOperationsSupported(operations: readonly SemanticKern
       return operation.loopKind === "for" && operation.update?.kind !== "sequence" && semanticPredicatedOperationsSupported(operation.body);
     }
     if (operation.kind === "declare") {
-      return operation.target.addressSpace === "local" && operation.target.dimensions.length === 0 &&
-        operation.target.valueType !== undefined && operation.target.valueType !== "void" &&
-        !isSemanticFloatVectorType(operation.target.valueType);
+      return operation.target.addressSpace === "local" && !operation.target.pointer && (
+        operation.init === undefined ||
+        operation.target.dimensions.length === 0 &&
+          operation.target.valueType !== undefined && operation.target.valueType !== "void" &&
+          !isSemanticFloatVectorType(operation.target.valueType)
+      );
     }
     if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWorkgroupCollective(operation.expression.value)) {
       const target = operation.expression.target;

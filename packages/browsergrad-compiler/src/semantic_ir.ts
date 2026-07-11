@@ -83,6 +83,7 @@ import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
 import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
+import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
 import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
@@ -765,7 +766,7 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
   );
   if (firstReturnBeforeBarrier < 0) return operations;
   const affected = operations.slice(firstReturnBeforeBarrier);
-  const pointerFunctions = new Set(functions.filter((fn) => fn.params.some((param) => param.pointer)).map((fn) => fn.name));
+  const pointerFunctions = new Map(functions.filter((fn) => fn.params.some((param) => param.pointer)).map((fn) => [fn.name, fn] as const));
   if (!semanticVoidReturnsAreTerminal(affected)) return operations;
   if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions))) return operations;
 
@@ -786,7 +787,7 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
   };
   const lowered = affected.map((operation): SemanticKernelIrOperation => {
     const rewritten = rewriteSemanticVoidReturnsAsInactive(operation, active);
-    if (operation.kind === "barrier") return rewritten;
+    if (operation.kind === "barrier" || operation.kind === "declare") return rewritten;
     return {
       kind: "branch",
       condition: activeExpression,
@@ -824,17 +825,50 @@ function semanticOperationContainsVoidReturn(operation: SemanticKernelIrOperatio
 
 function semanticActiveLaneTransformUnsafe(
   operation: SemanticKernelIrOperation,
-  pointerFunctions: ReadonlySet<string>,
+  pointerFunctions: ReadonlyMap<string, CudaLiteSemanticFunction>,
 ): boolean {
-  if (collectSemanticFunctionCalls([operation]).some((call) => pointerFunctions.has(call.callee))) return true;
+  if (collectSemanticFunctionCalls([operation]).some((call) => {
+    const fn = pointerFunctions.get(call.callee);
+    return fn?.params.some((param, index) => {
+      if (!param.pointer) return false;
+      const ref = call.args[index] === undefined ? undefined : semanticIrPointerArgumentMemoryRef(call.args[index]!);
+      return ref === undefined || ref.addressSpace !== "local" && ref.addressSpace !== "shared";
+    }) ?? false;
+  })) return true;
   if (operation.kind === "loop") return semanticOperationContainsVoidReturn(operation);
-  if (operation.kind === "declare") return true;
+  if (operation.kind === "declare") {
+    return operation.target.addressSpace !== "local" || operation.target.pointer ||
+      operation.init !== undefined && (
+        !semanticExpressionSideEffectFree(operation.init) ||
+        semanticExpressionContainsUnsafeActiveLaneDeclarationCall(operation.init) ||
+        !semanticActiveLaneDeclarationIsAddressOnly(operation.init) && collectMemoryRefs(operation.init).length > 0
+      );
+  }
   if (operation.kind === "branch") {
     return operation.consequent.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions)) ||
       operation.alternate.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions));
   }
   if (operation.kind === "block") return operation.body.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions));
   return false;
+}
+
+function semanticActiveLaneDeclarationIsAddressOnly(expression: SemanticExpression): boolean {
+  return expression.kind === "call" && semanticCallName(expression.callee) === "__cvta_generic_to_shared";
+}
+
+function semanticExpressionContainsUnsafeActiveLaneDeclarationCall(expression: SemanticExpression): boolean {
+  let unsafe = false;
+  walkSemanticExpression(expression, (item) => {
+    if (item.kind !== "call") return;
+    const name = semanticCallName(item.callee);
+    if (
+      name === undefined ||
+      name !== "__cvta_generic_to_shared" &&
+      !isSemanticMathCallName(name) &&
+      semanticIntrinsicReturnType(name, item.args) === undefined
+    ) unsafe = true;
+  });
+  return unsafe;
 }
 
 function rewriteSemanticVoidReturnsAsInactive(
