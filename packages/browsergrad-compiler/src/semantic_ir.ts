@@ -62,7 +62,12 @@ import {
   isCudaVoteCallName,
 } from "./cuda_subgroup_calls.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES } from "./intrinsics.js";
-import { classifyInlineAsm, type PtxSpecialU32Register } from "./features/inline_ptx/model.js";
+import {
+  classifyInlineAsm,
+  expectedInlineAsmF32SourceInputs,
+  type InlineAsmF32Source,
+  type PtxSpecialU32Register,
+} from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
@@ -1030,12 +1035,25 @@ function lowerInlineAsmBuiltinRegisterAssignment(
   const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
   if (outputs.length !== 1) return undefined;
   const target = lowerExpression(outputs[0]!, scope);
+  const fmaSources = op?.kind === "fma-rn-f32"
+    ? op.sources ?? [
+        { kind: "operand", index: outputs.length },
+        { kind: "operand", index: outputs.length + 1 },
+        { kind: "operand", index: 0 },
+      ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source, InlineAsmF32Source]
+    : undefined;
+  const fmaInputs = fmaSources === undefined ? undefined : expectedInlineAsmF32SourceInputs(fmaSources, outputs.length);
+  const fmaArgs = fmaSources !== undefined && fmaInputs === statement.inputs.length
+    ? fmaSources.map((source) => semanticInlineAsmF32Source(source, statement, outputs, scope))
+    : undefined;
   const bitInput = op && (op.kind === "bfind-u32" || op.kind === "ffs-b32" || op.kind === "popc-b32" || op.kind === "clz-b32" || op.kind === "brev-b32")
     ? op.immediate === undefined
       ? statement.inputs.length === 1 ? lowerExpression(statement.inputs[0]!, scope) : undefined
       : statement.inputs.length === 0 ? semanticUintLiteralExpression(op.immediate, statement.span) : undefined
     : undefined;
-  const value = op?.kind === "bfind-u32" && bitInput !== undefined
+  const value = op?.kind === "fma-rn-f32" && fmaArgs?.length === 3 && fmaArgs.every((arg) => arg !== undefined)
+    ? semanticCallExpression("fma", fmaArgs as readonly SemanticExpression[], "float", statement.span)
+    : op?.kind === "bfind-u32" && bitInput !== undefined
     ? semanticUintBinaryExpression(
         "-",
         semanticUintLiteralExpression(31, statement.span),
@@ -1078,6 +1096,19 @@ function lowerInlineAsmBuiltinRegisterAssignment(
     },
     span: statement.span,
   };
+}
+
+function semanticInlineAsmF32Source(
+  source: InlineAsmF32Source,
+  statement: CudaLiteAsmStatement,
+  outputs: readonly CudaLiteExpression[],
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  if (source.kind === "immediate") return numberExpression(source.value, statement.span);
+  const expression = source.index < outputs.length
+    ? outputs[source.index]
+    : statement.inputs[source.index - outputs.length];
+  return expression === undefined ? undefined : lowerExpression(expression, scope);
 }
 
 function semanticLaneIdExpression(span: SourceSpan): SemanticExpression {

@@ -3282,9 +3282,10 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
       },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
-    const expected = runCompiledKernelReference(compiled, input, launch);
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 

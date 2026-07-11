@@ -2857,7 +2857,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     );
     out[idx] = sum;
   }`, { workgroupSize: [2, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         {
           buffers: {
@@ -2869,7 +2869,8 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("sum = fma(A[idx], B[idx], sum);");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("sum = fma(A[u32(idx)], B[u32(idx)], sum);");
       expect([...result.buffers.out as Float32Array]).toEqual([18, 35]);
     });
 
@@ -2885,7 +2886,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     asm volatile("fma.rn.f32 %0, 4.0f, 0.5f, %1;" : "=f"(literalMix) : "f"(A[idx]));
     out[idx] = sum + direct + literalMix;
   }`, { workgroupSize: [2, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         {
           buffers: {
@@ -2897,9 +2898,10 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("sum = fma(A[idx], 2.0, sum);");
-      expect(compiled.wgsl).toContain("direct = fma(3.0, B[idx], 1.0);");
-      expect(compiled.wgsl).toContain("literalMix = fma(4.0, 0.5, A[idx]);");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("sum = fma(A[u32(idx)], 2.0, sum);");
+      expect(compiled.wgsl).toContain("direct = fma(3.0, B[u32(idx)], 1.0);");
+      expect(compiled.wgsl).toContain("literalMix = fma(4.0, 0.5, A[u32(idx)]);");
       expect([...result.buffers.out as Float32Array]).toEqual([31, 47]);
     });
 
