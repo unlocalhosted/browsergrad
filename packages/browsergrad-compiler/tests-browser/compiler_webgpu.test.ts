@@ -4872,6 +4872,22 @@ __global__ void predicatedDeclarationScan(uint *out) {
     ]);
   });
 
+  it("runs cooperative topology values inside atomic arguments on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void topologyAtomic(int *out) {
+  const cg::thread_block block = cg::this_thread_block();
+  const auto tile = cg::tiled_partition<4>(block);
+  if (tile.thread_rank() == 0) atomicAdd(out, tile.size());
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Int32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Int32Array]).toEqual([4]);
+  });
+
   it("runs compiled half2 vector storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = testDevice();

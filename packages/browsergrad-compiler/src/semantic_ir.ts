@@ -145,6 +145,16 @@ export interface CudaLiteSemanticFunction {
   readonly span: SourceSpan;
 }
 
+export interface SemanticCooperativeGroupDeclaration {
+  readonly kind: "cooperative-group";
+  readonly groupKind: "thread" | "block" | "grid" | "tile" | "coalesced" | "binary";
+  readonly name: string;
+  readonly tileSize?: number;
+  readonly partitionParent?: string;
+  readonly partitionPredicate?: SemanticExpression;
+  readonly span: SourceSpan;
+}
+
 export interface CudaLiteSemanticLaunchableEntry {
   readonly kind: "kernel" | "device-function";
   readonly name: string;
@@ -299,7 +309,7 @@ export type SemanticExpression =
 export type SemanticKernelIrOperation =
   | { readonly kind: "declare"; readonly target: CudaLiteSemanticSymbol; readonly init?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "dim3-declare"; readonly name: string; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
-  | { readonly kind: "cooperative-group-declare"; readonly declaration: CudaLiteCooperativeGroupDecl; readonly span: SourceSpan }
+  | { readonly kind: "cooperative-group-declare"; readonly declaration: SemanticCooperativeGroupDeclaration; readonly span: SourceSpan }
   | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
   | { readonly kind: "copy"; readonly source: SemanticMemoryRef; readonly target: SemanticMemoryRef; readonly elements: number; readonly span: SourceSpan }
@@ -357,6 +367,11 @@ export function walkSemanticOperation(
       return;
     case "dim3-declare":
       for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "cooperative-group-declare":
+      if (operation.declaration.partitionPredicate) {
+        walkSemanticExpression(operation.declaration.partitionPredicate, visitExpression);
+      }
       return;
     case "load":
       walkSemanticMemoryRef(operation.source, visitExpression);
@@ -420,7 +435,6 @@ export function walkSemanticOperation(
     case "block":
       walkSemanticOperations(operation.body, visitExpression);
       return;
-    case "cooperative-group-declare":
     case "barrier":
     case "fence":
     case "inline-asm":
@@ -1336,7 +1350,19 @@ function lowerStatement(
       return { kind: "dim3-declare", name: statement.name, args: statement.args.map((arg) => lowerExpression(arg, scope)), span: statement.span };
     case "cooperative-group":
       scope.set(statement.name, semanticSymbolForCooperativeGroup(statement));
-      return { kind: "cooperative-group-declare", declaration: statement, span: statement.span };
+      return {
+        kind: "cooperative-group-declare",
+        declaration: {
+          kind: "cooperative-group",
+          groupKind: statement.groupKind,
+          name: statement.name,
+          ...(statement.tileSize === undefined ? {} : { tileSize: statement.tileSize }),
+          ...(statement.partitionParent === undefined ? {} : { partitionParent: statement.partitionParent }),
+          ...(statement.partitionPredicate === undefined ? {} : { partitionPredicate: lowerExpression(statement.partitionPredicate, scope) }),
+          span: statement.span,
+        },
+        span: statement.span,
+      };
     case "kernel-launch":
       return { kind: "device-launch", launch: lowerDeviceLaunch(statement, scope), span: statement.span };
     case "asm": {

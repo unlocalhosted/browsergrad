@@ -4,6 +4,8 @@ export interface SemanticCooperativeGroupInfo {
   readonly kind: "thread" | "block" | "grid" | "tile" | "coalesced" | "binary";
   readonly tileSize?: number;
   readonly partitioned?: boolean;
+  readonly partitionParent?: string;
+  readonly partitionPredicate?: import("./semantic_ir.js").SemanticExpression;
 }
 
 export function semanticCooperativeGroupInfo(
@@ -20,6 +22,8 @@ export function semanticCooperativeGroupInfo(
       kind: declaration.declaration.groupKind,
       ...(declaration.declaration.tileSize === undefined ? {} : { tileSize: declaration.declaration.tileSize }),
       ...(declaration.declaration.partitionParent === undefined ? {} : { partitioned: true }),
+      ...(declaration.declaration.partitionParent === undefined ? {} : { partitionParent: declaration.declaration.partitionParent }),
+      ...(declaration.declaration.partitionPredicate === undefined ? {} : { partitionPredicate: declaration.declaration.partitionPredicate }),
     };
   }
   const param = ir.functions.flatMap((fn) => fn.params)

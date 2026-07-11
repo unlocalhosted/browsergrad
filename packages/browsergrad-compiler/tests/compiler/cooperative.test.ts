@@ -1501,12 +1501,45 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { buffers: { input: new Int32Array([3]), out: new Int32Array(1) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const partition = compiled.kernelIr.operations.find((operation) =>
+        operation.kind === "cooperative-group-declare" && operation.declaration.name === "part"
+      );
 
       expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(partition).toMatchObject({
+        kind: "cooperative-group-declare",
+        declaration: {
+          partitionParent: "tile",
+          partitionPredicate: {
+            kind: "binary",
+            left: { kind: "binary", left: { kind: "symbol", name: "value", valueType: "int" } },
+            valueType: "bool",
+          },
+        },
+      });
       expect(compiled.wgsl).toContain("subgroupBallot");
       expect(compiled.wgsl).toContain("countOneBits");
       expect(compiled.wgsl).toContain("bg_warp_partition_reduce_sum_int_1(value");
       expect(compiled.wgsl).not.toContain("!= 0) != 0");
+      expect([...result.buffers.out as Int32Array]).toEqual([4]);
+    });
+
+  it("keeps cooperative topology values typed inside semantic atomic arguments", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void topologyAtomic(int *out) {
+    const cg::thread_block block = cg::this_thread_block();
+    const auto tile = cg::tiled_partition<4>(block);
+    if (tile.thread_rank() == 0) atomicAdd(out, tile.size());
+  }`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("atomicAdd(&out[0u], 4)");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });
 

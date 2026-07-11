@@ -1311,7 +1311,7 @@ function semanticWgslAtomicSupported(
   }
   const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
   return operation.args.length >= scalarArgIndices.length + 1 &&
-    scalarArgIndices.every((index) => semanticWgslExpressionSupported(operation.args[index]!, "scalar"));
+    scalarArgIndices.every((index) => semanticWgslExpressionSupported(operation.args[index]!, "scalar", ir));
 }
 
 function semanticWgslStoreValueSupported(

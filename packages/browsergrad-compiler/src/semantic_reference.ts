@@ -632,7 +632,7 @@ function semanticReferenceAtomicSupported(
   }
   const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
   return operation.args.length >= scalarArgIndices.length + 1 &&
-    scalarArgIndices.every((index) => semanticReferenceExpressionSupported(operation.args[index]!, "scalar"));
+    scalarArgIndices.every((index) => semanticReferenceExpressionSupported(operation.args[index]!, "scalar", compiled));
 }
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
