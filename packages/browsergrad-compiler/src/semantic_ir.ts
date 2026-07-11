@@ -2707,11 +2707,19 @@ function hasLaterLocalPointerAliasAssignment(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): boolean {
   for (const statement of statements) {
-    if (statement.kind !== "expr") continue;
-    const expression = statement.expression;
-    if (expression.kind !== "assignment" || expression.operator !== "=" || expression.left.kind !== "identifier" || expression.left.name !== name) continue;
-    const alias = localPointerAliasForInitializer(expression.right, scope);
-    return alias !== undefined && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace);
+    if (statement.kind === "expr") {
+      const expression = statement.expression;
+      if (expression.kind !== "assignment" || expression.operator !== "=" || expression.left.kind !== "identifier" || expression.left.name !== name) continue;
+      const alias = localPointerAliasForInitializer(expression.right, scope);
+      return alias !== undefined && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace);
+    }
+    if (statement.kind === "block" && hasLaterLocalPointerAliasAssignment(name, statement.body, scope)) return true;
+    if (
+      (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") &&
+      hasLaterLocalPointerAliasAssignment(name, statement.body, scope)
+    ) {
+      return true;
+    }
   }
   return false;
 }

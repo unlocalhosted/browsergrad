@@ -2061,6 +2061,31 @@ __global__ void shared_reinterpret(int *out) {
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 0]);
     });
 
+  it("lowers NULL-initialized pointer aliases rebound inside nested loops", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void nestedLoopPointer(float* out) {
+    float *p = NULL;
+    for (int i = 0; i < 1; i++) {
+      for (int j = 0; j < 1; j++) {
+        p = out + i + j;
+        *p = 7.0f;
+      }
+    }
+  }
+  `, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelReference(
+        compiled,
+        { buffers: { out: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.kernelIr.operations.some((operation) => operation.kind === "declare" && operation.target.pointer)).toBe(false);
+      expect([...result.buffers.out as Float32Array]).toEqual([7]);
+    });
+
   it("keeps same-named direct storage pointer aliases distinct across C block scopes", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void scopedPointerHandles(float* out) {

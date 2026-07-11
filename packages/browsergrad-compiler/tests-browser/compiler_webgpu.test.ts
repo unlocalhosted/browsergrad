@@ -2782,6 +2782,30 @@ __global__ void assigned_pointer_atomic(uint* counter, uint* out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
   });
 
+  it("runs nested-loop pointer rebinding through semantic WGSL", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void nested_loop_pointer(float* out) {
+  float* ptr = NULL;
+  for (int i = 0; i < 2; i++) {
+    for (int j = 0; j < 2; j++) {
+      ptr = out + i * 2 + j;
+      *ptr = (float)(i * 2 + j + 1);
+    }
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
   it("runs branch-rebound local pointer atomics through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
