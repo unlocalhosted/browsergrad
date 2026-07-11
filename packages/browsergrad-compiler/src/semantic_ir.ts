@@ -1038,12 +1038,13 @@ function lowerStatement(
         }
         const target = memoryRefFromExpression(expression.target);
         if (target) {
+          const value = semanticSequencedAssignmentValue(expression.value);
           return {
             kind: "store",
             target,
-            value: expression.value,
+            value,
             operator: expression.operator,
-            reads: collectMemoryRefs(expression.value),
+            reads: collectMemoryRefs(value),
             span: statement.span,
           };
         }
@@ -1180,6 +1181,16 @@ function lowerStatement(
     case "break":
       return { kind: "break", span: statement.span };
   }
+}
+
+function semanticSequencedAssignmentValue(expression: SemanticExpression): SemanticExpression {
+  if (expression.kind !== "assignment") return expression;
+  return {
+    kind: "sequence",
+    expressions: [expression, expression.target],
+    ...optionalValueType(expression.valueType ?? expressionValueType(expression.target)),
+    span: expression.span,
+  };
 }
 
 function semanticResultCallOperation(
@@ -1374,6 +1385,8 @@ function lowerExpression(
       const args = expression.args.map((arg) => preservePointerArgs
         ? lowerExpression(arg, scope)
         : pointerAliasValueExpression(arg, scope, arg.span) ?? lowerExpression(arg, scope));
+      const cooperativeShuffle = semanticCooperativeShuffleCall(expression, args, scope);
+      if (cooperativeShuffle) return cooperativeShuffle;
       if (expression.callee.kind === "identifier" && CUDA_CACHE_HINT_LOADS.has(expression.callee.name)) {
         const load = cacheHintLoadExpression(expression, scope);
         if (load) return load;
@@ -1508,6 +1521,33 @@ function lowerExpression(
       return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
     }
   }
+}
+
+function semanticCooperativeShuffleCall(
+  expression: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  args: readonly SemanticExpression[],
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): Extract<SemanticExpression, { readonly kind: "call" }> | undefined {
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "identifier") return undefined;
+  const op = expression.callee.property;
+  if (op !== "shfl" && op !== "shfl_down" && op !== "shfl_up" && op !== "shfl_xor") return undefined;
+  const group = scope.get(expression.callee.object.name);
+  if (group?.cooperativeGroupKind !== "tile" || args.length !== 2) return undefined;
+  const value = args[0]!;
+  const index = args[1]!;
+  const width = intNumberExpression(group.tileSize ?? 32, expression.span);
+  return {
+    kind: "call",
+    callee: {
+      kind: "symbol",
+      name: `__${op}`,
+      addressSpace: "builtin",
+      span: expression.callee.span,
+    },
+    args: [value, index, width],
+    ...optionalValueType(expressionValueType(value)),
+    span: expression.span,
+  };
 }
 
 function semanticCooperativeGroupCallValueType(

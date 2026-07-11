@@ -3393,6 +3393,44 @@ __global__ void cooperativeTileScan(const int *input, int *out) {
   out[threadIdx.x * 2 + 1] = exclusive + lane;
   out[8 + threadIdx.x] = cg::inclusive_scan(block, value);
 }`,
+  cooperativeFirstTileShuffle: `
+namespace cg = cooperative_groups;
+__global__ void cooperativeFirstTileShuffle(const float *input, float *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<32> tile32 = cg::tiled_partition<32>(block);
+  int tid = block.thread_rank();
+  float value = input[tid];
+  if (tid < 32) {
+    for (int offset = 16; offset > 0; offset >>= 1) {
+      value += tile32.shfl_down(value, offset);
+    }
+    if (tid == 0) out[0] = value;
+  }
+}`,
+  cudaSamplesReduce4: `
+template <class T = int, unsigned int blockSize = 256>
+__global__ void reduce4(int *g_idata, int *g_odata, unsigned int n) {
+  cg::thread_block cta = cg::this_thread_block();
+  extern __shared__ int sdata[];
+  unsigned int tid = threadIdx.x;
+  unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
+  int mySum = (i < n) ? g_idata[i] : 0;
+  if (i + 256 < n) mySum += g_idata[i + 256];
+  sdata[tid] = mySum;
+  cg::sync(cta);
+  for (unsigned int s = blockDim.x / 2; s > 32; s >>= 1) {
+    if (tid < s) sdata[tid] = mySum = mySum + sdata[tid + s];
+    cg::sync(cta);
+  }
+  cg::thread_block_tile<32> tile32 = cg::tiled_partition<32>(cta);
+  if (cta.thread_rank() < 32) {
+    mySum += sdata[tid + 32];
+    for (int offset = tile32.size() / 2; offset > 0; offset /= 2) {
+      mySum += tile32.shfl_down(mySum, offset);
+    }
+  }
+  if (cta.thread_rank() == 0) g_odata[blockIdx.x] = mySum;
+}`,
   cooperativeTileVoteMask: `
 namespace cg = cooperative_groups;
 __global__ void cooperativeTileVoteMask(int *out) {
@@ -14292,6 +14330,38 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [1, 0, 3, 2, 6, 5, 10, 9, 1, 3, 6, 10] },
+          },
+          {
+            name: "cooperative:first-tile-shuffle",
+            source: SOURCES.cooperativeFirstTileShuffle,
+            options: { workgroupSize: [64, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+            input: () => ({
+              buffers: {
+                input: new Float32Array(64).fill(1),
+                out: new Float32Array(1),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [32] },
+          },
+          {
+            name: "corpus:cuda-samples:reduce4-logical-tile-shuffle",
+            corpusId: "cuda-samples",
+            source: SOURCES.cudaSamplesReduce4,
+            options: { workgroupSize: [256, 1, 1], dynamicSharedMemory: { sdata: 256 }, features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [256, 1, 1] },
+            input: () => ({
+              buffers: {
+                g_idata: new Int32Array(512).fill(1),
+                g_odata: new Int32Array(1),
+              },
+              scalars: { n: 512 },
+            }),
+            output: "g_odata",
+            expectedOutput: { type: "Int32Array", data: [512] },
           },
           {
             name: "cooperative:tile-vote-mask",

@@ -190,6 +190,7 @@ import {
   semanticMatchAnyHelpers,
   semanticMatchAnyScratchName,
   semanticShuffleOpForCall,
+  semanticShuffleTileSize,
   semanticWarpShuffleHelper,
   semanticWarpShuffleHelpers,
   semanticWarpShuffleScratchName,
@@ -1859,6 +1860,15 @@ function emitSemanticOperation(
       if (operation.expression.kind === "sequence") return emitSemanticSequenceStatement(operation.expression, ir, names, indentLevel, options, textureSpecializations);
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options, textureSpecializations)};`];
     case "branch": {
+      if (semanticOperationsContainWarpShuffle(operation.consequent) || semanticOperationsContainWarpShuffle(operation.alternate)) {
+        const condition = emitTruthiness(operation.condition, ir, names, options);
+        return [
+          `${prefix}{`,
+          ...emitSemanticPredicatedOperations(operation.consequent, condition, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
+          ...emitSemanticPredicatedOperations(operation.alternate, `!(${condition})`, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
+          `${prefix}}`,
+        ];
+      }
       const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names, options)}) {`];
       lines.push(...emitSemanticOperations(operation.consequent, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
       if (operation.alternate.length > 0) {
@@ -1902,6 +1912,86 @@ function emitSemanticOperation(
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
+}
+
+function emitSemanticPredicatedOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  predicate: string,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  allowReturnValue: boolean,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): readonly string[] {
+  const lines: string[] = [];
+  const prefix = "  ".repeat(indentLevel);
+  for (const operation of operations) {
+    if (operation.kind === "branch") {
+      const condition = emitTruthiness(operation.condition, ir, names, options);
+      lines.push(...emitSemanticPredicatedOperations(operation.consequent, `(${predicate}) && (${condition})`, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+      lines.push(...emitSemanticPredicatedOperations(operation.alternate, `(${predicate}) && !(${condition})`, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+      continue;
+    }
+    if (operation.kind === "loop" && semanticOperationsContainWarpShuffle(operation.body)) {
+      if (operation.loopKind !== "for" || operation.update?.kind === "sequence") {
+        throw semanticWgslError("semantic WGSL supports predicated cooperative shuffle only in canonical for loops", operation.span);
+      }
+      const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names, options, textureSpecializations) : "";
+      const condition = operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "true";
+      const update = operation.update ? emitSemanticLoopUpdate(operation.update, ir, names, options, textureSpecializations) : "";
+      lines.push(`${prefix}for (${init}; ${condition}; ${update}) {`);
+      lines.push(...emitSemanticPredicatedOperations(operation.body, predicate, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+      lines.push(`${prefix}}`);
+      continue;
+    }
+    if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWarpShuffle(operation.expression.value)) {
+      if (operation.expression.target.kind !== "symbol" || operation.expression.target.addressSpace !== "local") {
+        throw semanticWgslError("predicated cooperative shuffle requires local scalar assignment", operation.span);
+      }
+      const valueType = operation.expression.target.valueType;
+      if (!valueType || valueType === "void" || isSemanticFloatVectorType(valueType)) {
+        throw semanticWgslError("predicated cooperative shuffle requires typed scalar assignment", operation.span);
+      }
+      const temporary = nameFor(`bg_collective_${operation.span.start}`, names);
+      lines.push(`${prefix}let ${temporary}: ${wgslValueScalar(valueType)} = ${emitSemanticLocalScalarExpressionAs(operation.expression.value, valueType, ir, names, options, textureSpecializations)};`);
+      lines.push(`${prefix}if (${predicate}) {`);
+      lines.push(`${"  ".repeat(indentLevel + 1)}${emitSemanticAssignmentStatement({ ...operation.expression, value: { kind: "symbol", name: temporary, valueType, addressSpace: "local", span: operation.span } }, ir, names, options, textureSpecializations)};`);
+      lines.push(`${prefix}}`);
+      continue;
+    }
+    if (semanticOperationContainsWarpShuffle(operation)) {
+      throw semanticWgslError("semantic WGSL does not support this predicated cooperative shuffle shape", operation.span);
+    }
+    lines.push(`${prefix}if (${predicate}) {`);
+    lines.push(...emitSemanticOperation(operation, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+    lines.push(`${prefix}}`);
+  }
+  return lines;
+}
+
+function semanticOperationsContainWarpShuffle(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some(semanticOperationContainsWarpShuffle);
+}
+
+function semanticOperationContainsWarpShuffle(operation: SemanticKernelIrOperation): boolean {
+  if (operation.kind === "declare") return operation.init !== undefined && semanticExpressionContainsWarpShuffle(operation.init);
+  if (operation.kind === "store") return semanticExpressionContainsWarpShuffle(operation.value) || operation.target.indices.some(semanticExpressionContainsWarpShuffle);
+  if (operation.kind === "atomic" || operation.kind === "call") return operation.args.some(semanticExpressionContainsWarpShuffle);
+  if (operation.kind === "expression") return semanticExpressionContainsWarpShuffle(operation.expression);
+  if (operation.kind === "branch") return semanticExpressionContainsWarpShuffle(operation.condition) || semanticOperationsContainWarpShuffle(operation.consequent) || semanticOperationsContainWarpShuffle(operation.alternate);
+  if (operation.kind === "loop") return (operation.init !== undefined && !isSemanticKernelIrOperation(operation.init) && semanticExpressionContainsWarpShuffle(operation.init)) ||
+    (operation.condition !== undefined && semanticExpressionContainsWarpShuffle(operation.condition)) ||
+    (operation.update !== undefined && semanticExpressionContainsWarpShuffle(operation.update)) ||
+    semanticOperationsContainWarpShuffle(operation.body);
+  if (operation.kind === "block") return semanticOperationsContainWarpShuffle(operation.body);
+  if (operation.kind === "return") return operation.value !== undefined && semanticExpressionContainsWarpShuffle(operation.value);
+  return false;
+}
+
+function semanticExpressionContainsWarpShuffle(expression: SemanticExpression): boolean {
+  if (expression.kind === "call" && expression.callee.kind === "symbol" && semanticShuffleOpForCall(expression.callee.name) !== undefined) return true;
+  return semanticExpressionChildren(expression).some(semanticExpressionContainsWarpShuffle);
 }
 
 function emitSemanticSurfaceReadStore(
@@ -4408,7 +4498,7 @@ function emitSemanticSubgroupCall(
   if (shuffleOp) {
     const valueType = semanticExpressionValueType(value);
     if (!valueType || valueType === "void") throw semanticWgslError(`${name} expects scalar value operand`, expression.span);
-    const helper = semanticWarpShuffleHelper(shuffleOp, valueType, 32);
+    const helper = semanticWarpShuffleHelper(shuffleOp, valueType, semanticShuffleTileSize(expression));
     const indexArg = legacyShuffleCall(name) ? expression.args[1] : expression.args[2];
     const widthArg = legacyShuffleCall(name) ? expression.args[2] : expression.args[3];
     const index = indexArg ? emitSemanticExpressionAs(indexArg, ir, names, "u32", options, textureSpecializations) : "0u";

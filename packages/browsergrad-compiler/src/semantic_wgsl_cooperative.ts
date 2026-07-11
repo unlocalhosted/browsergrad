@@ -59,7 +59,7 @@ export function emitSemanticCooperativeGroupCall(
     const rank = group.kind === "grid"
       ? semanticCooperativeGlobalLinearRank(ir)
       : group.kind === "tile"
-      ? `i32(${semanticCooperativeLocalLinearRank(ir)} % ${group.tileSize ?? 32}u)`
+      ? `i32((${semanticCooperativeLocalLinearRank(ir)}) % ${group.tileSize ?? 32}u)`
       : `i32(${semanticCooperativeLocalLinearRank(ir)})`;
     return expression.valueType === "uint" ? `u32(${rank})` : rank;
   }
@@ -74,7 +74,7 @@ export function emitSemanticCooperativeGroupCall(
   }
   if (expression.callee.property === "meta_group_rank") {
     const rank = group.kind === "tile"
-      ? `i32(${semanticCooperativeLocalLinearRank(ir)} / ${group.tileSize ?? 32}u)`
+      ? `i32((${semanticCooperativeLocalLinearRank(ir)}) / ${group.tileSize ?? 32}u)`
       : "0";
     return expression.valueType === "uint" ? `u32(${rank})` : rank;
   }

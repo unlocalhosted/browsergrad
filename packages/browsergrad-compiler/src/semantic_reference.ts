@@ -276,11 +276,11 @@ export function runCompiledKernelSemanticReference(
           }
         }
         const barrierFunctions = semanticBarrierFunctionNames(compiled.kernelIr);
-        if (semanticOperationsContainBarrier(compiled.kernelIr.operations, barrierFunctions)) {
+        if (semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) {
+          runSemanticCollectiveOperations(compiled.kernelIr.operations, blockContexts);
+        } else if (semanticOperationsContainBarrier(compiled.kernelIr.operations, barrierFunctions)) {
           runSemanticBarrierScheduler(compiled.kernelIr.operations, blockContexts, barrierFunctions);
-        }
-        else if (semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) runSemanticSubgroupPhases(compiled.kernelIr.operations, blockContexts);
-        else for (const context of blockContexts) execSemanticOperations(compiled.kernelIr.operations, context);
+        } else for (const context of blockContexts) execSemanticOperations(compiled.kernelIr.operations, context);
       }
     }
   }
@@ -4868,32 +4868,112 @@ function runSemanticBarrierScheduler(
   }
 }
 
-function runSemanticSubgroupPhases(
+function runSemanticCollectiveOperations(
   operations: readonly SemanticKernelIrOperation[],
   contexts: readonly SemanticReferenceContext[],
-): void {
-  for (const segment of semanticBarrierSegments(operations)) {
-    for (const operation of segment) {
-      for (const context of contexts) {
-        const control = execSemanticOperations([operation], context);
-        if (control === "break" || control === "continue") {
-          throw semanticReferenceError(`semantic reference unexpected ${control} across subgroup phase`, context.compiled.kernelIr.span);
-        }
+): ReadonlyMap<SemanticReferenceContext, SemanticControl> {
+  const controls = new Map<SemanticReferenceContext, SemanticControl>();
+  const active = (): SemanticReferenceContext[] => contexts.filter((context) => !controls.has(context));
+  for (const operation of operations) {
+    const current = active();
+    if (current.length === 0) break;
+    if (operation.kind === "branch") {
+      const consequent = current.filter((context) => truthy(evalNumber(operation.condition, context)));
+      const alternate = current.filter((context) => !consequent.includes(context));
+      mergeSemanticCollectiveControls(controls, runSemanticCollectiveScopedOperations(operation.consequent, consequent));
+      mergeSemanticCollectiveControls(controls, runSemanticCollectiveScopedOperations(operation.alternate, alternate));
+      continue;
+    }
+    if (operation.kind === "block") {
+      mergeSemanticCollectiveControls(controls, runSemanticCollectiveScopedOperations(operation.body, current));
+      continue;
+    }
+    if (operation.kind === "loop") {
+      mergeSemanticCollectiveControls(controls, runSemanticCollectiveLoop(operation, current));
+      continue;
+    }
+    for (const context of current) {
+      const control = execSemanticOperations([operation], context);
+      if (control !== "fallthrough") controls.set(context, control);
+    }
+  }
+  return controls;
+}
+
+function runSemanticCollectiveScopedOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  contexts: readonly SemanticReferenceContext[],
+): ReadonlyMap<SemanticReferenceContext, SemanticControl> {
+  const saved = contexts.map((context) => {
+    const locals = new Map<string, SemanticValue | undefined>();
+    for (const operation of operations) {
+      if (operation.kind === "declare" && !locals.has(operation.target.name)) locals.set(operation.target.name, context.locals.get(operation.target.name));
+    }
+    return [context, locals] as const;
+  });
+  try {
+    return runSemanticCollectiveOperations(operations, contexts);
+  } finally {
+    for (const [context, locals] of saved) {
+      for (const [name, value] of locals) {
+        if (value === undefined) context.locals.delete(name);
+        else context.locals.set(name, value);
       }
     }
   }
 }
 
-function semanticBarrierSegments(operations: readonly SemanticKernelIrOperation[]): readonly (readonly SemanticKernelIrOperation[])[] {
-  const segments: SemanticKernelIrOperation[][] = [[]];
-  for (const operation of operations) {
-    if (operation.kind === "barrier") {
-      segments.push([]);
-      continue;
-    }
-    segments.at(-1)!.push(operation);
+function runSemanticCollectiveLoop(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "loop" }>,
+  contexts: readonly SemanticReferenceContext[],
+): ReadonlyMap<SemanticReferenceContext, SemanticControl> {
+  if (operation.loopKind === "for" && operation.init) {
+    for (const context of contexts) execSemanticLoopInit(operation.init, context);
   }
-  return segments;
+  const completed = new Map<SemanticReferenceContext, SemanticControl>();
+  let active = [...contexts];
+  for (let guard = 0; active.length > 0; guard++) {
+    if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
+    if (operation.loopKind !== "do-while" && operation.condition) {
+      const continuing: SemanticReferenceContext[] = [];
+      for (const context of active) {
+        if (truthy(evalNumber(operation.condition, context))) continuing.push(context);
+        else completed.set(context, "fallthrough");
+      }
+      active = continuing;
+      if (active.length === 0) break;
+    }
+    const bodyControls = runSemanticCollectiveScopedOperations(operation.body, active);
+    const continuing: SemanticReferenceContext[] = [];
+    for (const context of active) {
+      const control = bodyControls.get(context) ?? "fallthrough";
+      if (control === "return") completed.set(context, control);
+      else if (control === "break") completed.set(context, "fallthrough");
+      else continuing.push(context);
+    }
+    active = continuing;
+    if (operation.loopKind === "for" && operation.update) {
+      for (const context of active) evalNumber(operation.update, context);
+    }
+    if (operation.loopKind === "do-while" && operation.condition) {
+      const repeating: SemanticReferenceContext[] = [];
+      for (const context of active) {
+        if (truthy(evalNumber(operation.condition, context))) repeating.push(context);
+        else completed.set(context, "fallthrough");
+      }
+      active = repeating;
+    }
+  }
+  return completed;
+}
+
+function mergeSemanticCollectiveControls(
+  target: Map<SemanticReferenceContext, SemanticControl>,
+  source: ReadonlyMap<SemanticReferenceContext, SemanticControl>,
+): void {
+  for (const [context, control] of source) {
+    if (control !== "fallthrough") target.set(context, control);
+  }
 }
 
 function semanticOperationsContainSubgroupCall(operations: readonly SemanticKernelIrOperation[]): boolean {

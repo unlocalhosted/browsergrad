@@ -98,13 +98,22 @@ function collectSemanticWarpShuffleExpressionHelpers(
     const value = expression.args[legacyShuffleCall(expression.callee.name) ? 0 : 1];
     const valueType = value ? semanticExpressionValueType(value) : undefined;
     if (op && valueType && valueType !== "void") {
-      const helper = semanticWarpShuffleHelper(op, valueType, 32);
+      const helper = semanticWarpShuffleHelper(op, valueType, semanticShuffleTileSize(expression));
       helpers.set(helper.key, helper);
     }
   }
   for (const child of semanticExpressionChildren(expression)) {
     collectSemanticWarpShuffleExpressionHelpers(child, helpers);
   }
+}
+
+export function semanticShuffleTileSize(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): number {
+  if (expression.callee.kind !== "symbol") return 32;
+  const width = expression.args[legacyShuffleCall(expression.callee.name) ? 2 : 3];
+  if (width?.kind !== "literal" || width.literalKind !== "number" || typeof width.value !== "number" || !Number.isFinite(width.value)) return 32;
+  return Math.max(1, Math.min(32, Math.trunc(width.value)));
 }
 
 export function semanticMatchAnyHelpers(ir: SemanticKernelIrModule): readonly SemanticMatchAnyHelper[] {

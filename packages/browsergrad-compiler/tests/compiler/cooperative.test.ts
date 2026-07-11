@@ -674,10 +674,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_32");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_32");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_32");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_uint_32");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_4");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_4");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_4");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_uint_4");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         12, 11, 10, 11,
         12, 12, 10, 10,
@@ -720,10 +720,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_32");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_32");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_32");
-      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_uint_32");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_4");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_4");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_4");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_uint_4");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         12, 11, 10, 11,
         12, 12, 10, 10,
@@ -940,10 +940,40 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.wgsl).toContain("enable subgroups;");
-      expect(compiled.wgsl).toContain("bg_warp_shuffle_down_float_16(val, u32(offset), 16u, local_id)");
-      expect(compiled.wgsl).toContain("(i32(local_id.x) % 16)");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_float_16(val, u32(offset), 16u, local_id)");
+      expect(compiled.wgsl).toContain("i32((local_id.x) % 16u)");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect([...result.buffers.output as Float32Array]).toEqual([16]);
+    });
+
+  it("uniformly lowers logical-tile shuffles guarded to the first tile", () => {
+      const compiled = compileCudaLiteKernel(`
+  namespace cg = cooperative_groups;
+  __global__ void firstTileReduce(const float *input, float *output) {
+    cg::thread_block block = cg::this_thread_block();
+    auto tile32 = cg::tiled_partition<32>(block);
+    int tid = block.thread_rank();
+    float val = input[tid];
+    if (tid < 32) {
+      for (int offset = 16; offset > 0; offset >>= 1) {
+        val += tile32.shfl_down(val, offset);
+      }
+      if (tid == 0) { output[0] = val; }
+    }
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [64, 1, 1],
+      });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { input: new Float32Array(64).fill(1), output: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("let bg_collective_");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_float_32(val, u32(offset), 32u, local_id)");
+      expect([...result.buffers.output as Float32Array]).toEqual([32]);
     });
 
   it("accepts const-qualified cooperative-group declarations", () => {
@@ -1351,9 +1381,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [8, 4, 1],
       });
 
-      expect(compiled.wgsl).toContain("bg_warp_shuffle_up_float_8(val, 1u, 8u, local_id)");
-      expect(compiled.wgsl).toContain("bg_warp_shuffle_xor_float_8(val, 2u, 8u, local_id)");
-      expect(compiled.wgsl).toContain("(i32(local_id.x + local_id.y * 8u) % 8)");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_float_8(val, 1u, 8u, local_id)");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_float_8(val, 2u, 8u, local_id)");
+      expect(compiled.wgsl).toContain("i32((local_id.x + local_id.y * 8u) % 8u)");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 

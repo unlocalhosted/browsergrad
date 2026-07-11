@@ -1433,7 +1433,7 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       expect(compiled.wgsl).toContain("fn sumReduction");
       expect(compiled.wgsl).toContain("g__bg_group_rank: i32, g__bg_group_size: i32");
       expect(compiled.wgsl).toContain("sumReduction(i32(local_id.x), 4");
-      expect(compiled.wgsl).toContain("sumReduction(i32(local_id.x % 2u), 2");
+      expect(compiled.wgsl).toContain("sumReduction(i32((local_id.x) % 2u), 2");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 
@@ -5607,7 +5607,7 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       );
 
       expect([...result.buffers.out as Float32Array]).toEqual([7, 7]);
-      expect(compiled.wgsl).toContain("sdata[u32(tid)] = (mySum = (mySum + sdata[u32((tid + 1))]));");
+      expect(compiled.wgsl).toContain("mySum = (mySum + sdata[u32((tid + 1))]);\n    sdata[u32(tid)] = mySum;");
   });
 
   it("emits semantic WGSL for lexical blocks with local declarations", () => {
