@@ -805,9 +805,10 @@ describe("CUDA-lite compiler: Core compiler contracts", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sizeof");
-      expect(compiled.wgsl).toContain("out[0] = u32(1)");
-      expect(compiled.wgsl).toContain("out[2] = u32(16)");
-      expect(compiled.wgsl).toContain("out[3] = u32(4)");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("out[0u] = 1u");
+      expect(compiled.wgsl).toContain("out[2u] = 16u");
+      expect(compiled.wgsl).toContain("out[3u] = 4u");
       expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 16, 4, 16]);
     });
 

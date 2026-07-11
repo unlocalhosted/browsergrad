@@ -155,6 +155,7 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
+import { semanticDirectByteStorageParamSupported } from "./semantic_byte_storage.js";
 import {
   semanticLocalScalarValueTypeSupported,
   semanticLocalValueTypeSupported,
@@ -201,7 +202,7 @@ interface SemanticReferenceContext {
 type MutableTrace = MutableReferenceTrace;
 
 export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLiteKernel): boolean {
-  return compiled.kernelIr.params.every(semanticReferenceParamSupported) &&
+  return compiled.kernelIr.params.every((param) => semanticReferenceParamSupported(param, compiled)) &&
     compiled.kernelIr.memory.every(semanticReferenceMemorySymbolSupported) &&
     semanticReferenceTextureDescriptorsSupported(compiled) &&
     semanticReferenceSharedShapeSupported(compiled) &&
@@ -408,8 +409,15 @@ function unsupportedSemanticReferenceOperation(
   return undefined;
 }
 
-function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr"]["params"][number]): boolean {
-  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticReferenceValueTypeSupported(param.valueType);
+function semanticReferenceParamSupported(
+  param: CompiledCudaLiteKernel["kernelIr"]["params"][number],
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (param.addressSpace === "storage") {
+    return Boolean(param.pointer) && (param.valueType === "uchar"
+      ? semanticDirectByteStorageParamSupported(compiled.kernelIr, param.name)
+      : semanticReferenceValueTypeSupported(param.valueType));
+  }
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
@@ -4414,7 +4422,7 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
   }
   if (!isSemanticFloatVectorType(ref.valueType)) {
     if (typeof value !== "number") throw semanticReferenceError("semantic reference scalar write received vector value", ref.span);
-    writeMemory(ref, value, context);
+    writeMemory(ref, coerceSemanticScalarValue(value, ref.valueType), context);
     return;
   }
   if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector write received scalar value", ref.span);

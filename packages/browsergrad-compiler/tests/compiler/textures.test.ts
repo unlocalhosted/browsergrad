@@ -1318,6 +1318,29 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([2, 127, 255]);
     });
 
+  it("lowers texture-derived stores through byte-offset uchar storage aliases", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void byteTextureStore(uchar *out, uint pitch, float scale, cudaTextureObject_t tex) {
+    uchar *row = (uchar *)(((char *)out) + blockIdx.x * pitch);
+    int x = threadIdx.x;
+    row[x] = min(max(tex2D<unsigned char>(tex, (float)x + 0.5f, (float)blockIdx.x + 0.5f) * scale, 0.0f), 255.0f);
+    if (blockIdx.x == 0 && x == 0) out[8] = 300;
+  }`, { workgroupSize: [4, 1, 1] });
+      const input = {
+        buffers: { out: new Uint32Array(9) },
+        scalars: { pitch: 4, scale: 2 },
+        textures: { tex: { width: 4, height: 2, data: new Float32Array([1, 2, 130, 200, 3, 4, 5, 6]) } },
+      };
+      const launch = { gridDim: [2, 1, 1], blockDim: [4, 1, 1] } as const;
+      const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("& 0xffu");
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([2, 4, 255, 255, 6, 8, 10, 12, 44]);
+    });
+
   it("lowers templated bf16 and bf162 tex2D reads with native WebGPU f32 storage", () => {
       const compiled = compileCudaLiteKernel(`
   texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;

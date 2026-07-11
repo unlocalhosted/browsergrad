@@ -155,6 +155,7 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
+import { semanticDirectByteStorageParamSupported } from "./semantic_byte_storage.js";
 import {
   semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
@@ -298,7 +299,7 @@ export function semanticKernelIrWgslPreflightFailure(
   if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) {
     return { message: "semantic WGSL does not support required WebGPU features yet", span: ir.span };
   }
-  const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
+  const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param, ir));
   if (unsupportedParam) return { message: `semantic WGSL does not support parameter '${unsupportedParam.name}'`, span: unsupportedParam.span };
   if (!semanticWgslSharedBarrierShapeSupported(ir)) {
     return { message: "semantic WGSL does not support shared-memory barrier shape", span: ir.span };
@@ -685,9 +686,16 @@ function unsupportedSemanticWgslOperation(
   return undefined;
 }
 
-function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][number]): boolean {
+function semanticWgslParamSupported(
+  param: SemanticKernelIrModule["params"][number],
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (param.addressSpace === "storage") {
+    return Boolean(param.pointer) && (param.valueType === "uchar"
+      ? semanticDirectByteStorageParamSupported(ir, param.name)
+      : semanticWgslValueTypeSupported(param.valueType));
+  }
   if (param.valueType === "uchar") return false;
-  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslValueTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
@@ -1313,7 +1321,7 @@ function semanticWgslScalarCallSupported(
     semanticWgslCurandCallSupported(expression, ir) ||
     semanticWgslSubgroupCallSupported(expression, ir) ||
     semanticWgslAddressPredicateCallSupported(expression) ||
-    semanticWgslMathCallSupported(expression) ||
+    semanticWgslMathCallSupported(expression, "scalar", ir) ||
     SEMANTIC_HALF2_SCALAR_CALLS.has(callee) && semanticWgslHalf2CallSupported(expression, ir) ||
     SEMANTIC_BF162_SCALAR_CALLS.has(callee) && semanticWgslBf162CallSupported(expression, ir) ||
     semanticWgslVectorAtCallSupported(expression, ir);
@@ -2154,7 +2162,7 @@ function emitSemanticStore(
     return emitSemanticVectorFieldMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
   }
   if (semanticWgslPackedSharedByteRoot(operation.target, ir)) {
-    const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
+    const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
     if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
     const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
     if (binaryOperator === undefined) throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
@@ -2168,7 +2176,7 @@ function emitSemanticStore(
     semanticWgslFunctionSharedPointerParam(ir, operation.target.base) &&
     !semanticWgslFunctionSharedPointerAtomicParam(ir, operation.target.base)
   ) {
-    const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
+    const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
     if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
     const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
     if (binaryOperator === undefined) throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
@@ -2205,11 +2213,23 @@ function emitSemanticStore(
     }
     return emitSemanticVectorMemoryWrite(operation, ir, names, options, textureSpecializations).join("; ");
   }
-  const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options, textureSpecializations);
+  const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
   if (operation.operator === "=") return `${target} = ${value}`;
   const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
   if (binaryOperator !== undefined) return `${target} = (${target} ${binaryOperator} ${value})`;
   throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function emitSemanticScalarStoreValue(
+  expression: SemanticExpression,
+  valueType: CudaLiteScalarType | undefined,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): string {
+  if (valueType === "uchar") return emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations);
+  return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
 
 function emitSemanticAtomicStoreValue(
@@ -5691,7 +5711,7 @@ function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValue
       return atomicType ? wgslAtomicScalar(atomicType) : wgslValueScalar(expression.valueType);
     }
     case "texture-read":
-      return "f32";
+      return wgslValueScalar(expression.valueType);
     case "surface-read":
       return wgslValueScalar(expression.valueType);
     case "binary": {
