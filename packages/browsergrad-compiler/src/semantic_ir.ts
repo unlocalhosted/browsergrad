@@ -2114,24 +2114,34 @@ function lowerStatement(
           : statement.init
           ? lowerExpression(statement.init, loopScope)
           : undefined;
+        const loweredCondition = statement.condition === undefined
+          ? undefined
+          : materializeConditionalCalls(lowerExpression(statement.condition, loopScope));
+        const body = lowerStatements(statement.body, loopScope);
+        const materializedBody = loweredCondition && loweredCondition.operations.length > 0
+          ? semanticMaterializedLoopBody(loweredCondition, body, statement.span)
+          : body;
         return {
           kind: "loop",
           loopKind: "for",
           ...(init === undefined ? {} : { init }),
-          ...(statement.condition === undefined ? {} : { condition: lowerExpression(statement.condition, loopScope) }),
+          ...(loweredCondition === undefined || loweredCondition.operations.length > 0 ? {} : { condition: loweredCondition.expression }),
           ...(statement.update === undefined ? {} : { update: lowerExpression(statement.update, loopScope) }),
-          body: lowerStatements(statement.body, loopScope),
+          body: materializedBody,
           span: statement.span,
         };
       }
-    case "while":
+    case "while": {
+      const loweredCondition = materializeConditionalCalls(lowerExpression(statement.condition, scope));
+      const body = lowerStatements(statement.body, scope);
       return {
         kind: "loop",
         loopKind: "while",
-        condition: lowerExpression(statement.condition, scope),
-        body: lowerStatements(statement.body, scope),
+        ...(loweredCondition.operations.length === 0 ? { condition: loweredCondition.expression } : {}),
+        body: loweredCondition.operations.length === 0 ? body : semanticMaterializedLoopBody(loweredCondition, body, statement.span),
         span: statement.span,
       };
+    }
     case "do-while":
       return {
         kind: "loop",
@@ -2151,6 +2161,23 @@ function lowerStatement(
     case "break":
       return { kind: "break", span: statement.span };
   }
+}
+
+function semanticMaterializedLoopBody(
+  condition: { readonly operations: readonly SemanticKernelIrOperation[]; readonly expression: SemanticExpression },
+  body: readonly SemanticKernelIrOperation[],
+  span: SourceSpan,
+): readonly SemanticKernelIrOperation[] {
+  return [
+    ...condition.operations,
+    {
+      kind: "branch",
+      condition: condition.expression,
+      consequent: body,
+      alternate: [{ kind: "break", span }],
+      span,
+    },
+  ];
 }
 
 function materializeConditionalCalls(
@@ -2179,6 +2206,37 @@ function materializeConditionalCalls(
     const left = materializeConditionalCalls(expression.left);
     const right = materializeConditionalCalls(expression.right);
     return { operations: [...left.operations, ...right.operations], expression: { ...expression, left: left.expression, right: right.expression } };
+  }
+  if (expression.kind === "binary" && (expression.operator === "&&" || expression.operator === "||")) {
+    const left = materializeConditionalCalls(expression.left);
+    const right = materializeConditionalCalls(expression.right);
+    if (left.operations.length === 0 && right.operations.length === 0) {
+      return { operations: [], expression: { ...expression, left: left.expression, right: right.expression } };
+    }
+    const temp = tempScalarSymbol("__bg.short.circuit", expression.span, "bool");
+    const target = semanticSymbolExpression(temp, expression.span);
+    const assign = (value: SemanticExpression): SemanticKernelIrOperation => ({
+      kind: "expression",
+      expression: { kind: "assignment", operator: "=", target, value, valueType: "bool", span: expression.span },
+      span: expression.span,
+    });
+    const constant = (value: boolean): SemanticExpression => ({
+      kind: "literal",
+      literalKind: "number",
+      value: value ? 1 : 0,
+      valueType: "bool",
+      span: expression.span,
+    });
+    return {
+      operations: [
+        ...left.operations,
+        { kind: "declare", target: temp, span: expression.span },
+        expression.operator === "&&"
+          ? { kind: "branch", condition: left.expression, consequent: [...right.operations, assign(right.expression)], alternate: [assign(constant(false))], span: expression.span }
+          : { kind: "branch", condition: left.expression, consequent: [assign(constant(true))], alternate: [...right.operations, assign(right.expression)], span: expression.span },
+      ],
+      expression: target,
+    };
   }
   if (expression.kind === "cast") {
     const nested = materializeConditionalCalls(expression.expression);

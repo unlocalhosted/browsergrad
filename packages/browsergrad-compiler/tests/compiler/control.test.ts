@@ -846,12 +846,29 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
     for (int i = 0; i < 1 && ((3u + (enabled != 0 ? nested_loop_condition_helper_with_pointer_side_effect(storage, 7u) : 0u)) != 0u); ++i) {
       out[0] = 1u;
     }
-  }`, { workgroupSize: [4, 1, 1] });
+  }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toMatch(/if \(bg_loop_condition_\d+\) \{/u);
-      expect(compiled.wgsl).toContain("bg_uniforms.enabled != 0");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toMatch(/var bg__bg_short_circuit_\d+_\d+: bool;/u);
+      expect(compiled.wgsl).toContain("u32(bg_uniforms.enabled) != 0u");
       expect(compiled.wgsl).toContain("nested_loop_condition_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0u, nested_loop_condition_helper_with_pointer_side_effect");
+
+      const disabled = runCompiledKernelSemanticReference(compiled, {
+        buffers: { storage: new Uint32Array([2]), out: new Uint32Array(1) },
+        scalars: { enabled: 0 },
+      }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
+      expect([...disabled.buffers.storage as Uint32Array]).toEqual([2]);
+      expect([...disabled.buffers.out as Uint32Array]).toEqual([1]);
+
+      const enabled = runCompiledKernelSemanticReference(compiled, {
+        buffers: { storage: new Uint32Array([2]), out: new Uint32Array(1) },
+        scalars: { enabled: 1 },
+      }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
+      expect([...enabled.buffers.storage as Uint32Array]).toEqual([9]);
+      expect([...enabled.buffers.out as Uint32Array]).toEqual([1]);
 
       const sequenceCompiled = compileCudaLiteKernel(`
   __device__ uint nested_sequence_loop_condition_helper_with_pointer_side_effect(uint *ptr, uint add) {
@@ -866,6 +883,9 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(sequenceCompiled.wgsl).toMatch(/loop \{/u);
+      expect(canRunCompiledKernelSemanticReference(sequenceCompiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(sequenceCompiled.kernelIr)).toBe(true);
+      expect(sequenceCompiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(sequenceCompiled.wgsl).toContain("nested_sequence_loop_condition_helper_with_pointer_side_effect");
       expect(sequenceCompiled.wgsl).not.toContain("select(0u, nested_sequence_loop_condition_helper_with_pointer_side_effect");
     });
