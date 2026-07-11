@@ -4826,11 +4826,14 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var status: i32 = (-1);");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var status: i32 = -(1);");
       expect(compiled.wgsl).toContain("status = 0;");
-      expect(compiled.wgsl).toContain("var setStatus: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("flags = 0;");
-      expect(compiled.wgsl).toContain("out[3] = 0u;");
+      expect(compiled.wgsl).toContain("var setStatus: i32 = 0;");
+      expect(compiled.wgsl).toContain("flags = 0u;");
+      expect(compiled.wgsl).toContain("out[3u] = 0u;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(5) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 0, 0, 0, 16]);
     });

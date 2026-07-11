@@ -2313,6 +2313,9 @@ function lowerExpression(
           expression.span,
         );
       }
+      if (expression.callee.kind === "identifier" && expression.callee.name === "cudaSetDeviceFlags") {
+        return intNumberExpression(0, expression.span);
+      }
       const generatedRandom = expression.callee.kind === "identifier" && isSemanticGeneratedRandomCall(expression.callee.name)
         ? semanticGeneratedRandomReturnType(expression.callee.name)
         : undefined;
@@ -2956,11 +2959,25 @@ function semanticMathOutCallResult(
   span: SourceSpan,
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
   if (expression.callee.kind !== "symbol") return undefined;
+  if (expression.callee.name === "cudaGetDeviceFlags") return semanticDeviceFlagsCallResult(source, scope, span);
   if (isVibMinMaxCallName(expression.callee.name)) return semanticVibMinMaxCallResult(source, expression, scope, span);
   if (isModfCallName(expression.callee.name)) return semanticModfCallResult(source, expression, scope, span);
   if (isFrexpCallName(expression.callee.name)) return semanticFrexpCallResult(source, expression, scope, span);
   if (isRemquoCallName(expression.callee.name)) return semanticRemquoCallResult(source, expression, scope, span);
   return undefined;
+}
+
+function semanticDeviceFlagsCallResult(
+  source: CudaLiteCallExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
+  const target = source.args[0] === undefined ? undefined : mathOutTargetExpressionFromSource(source.args[0], scope);
+  if (!target || source.args.length !== 1) return undefined;
+  return {
+    sideEffects: [mathOutStoreOrAssignOperation(target, semanticUintLiteralExpression(0, span), span)],
+    value: intNumberExpression(0, span),
+  };
 }
 
 function semanticModfCallResult(
