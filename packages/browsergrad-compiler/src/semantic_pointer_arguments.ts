@@ -21,7 +21,13 @@ export function semanticPointerArgumentMemoryRef(expression: SemanticExpression)
   }
   if (expression.kind === "index") {
     const ref = semanticPointerArgumentMemoryRef(expression.target);
-    return ref === undefined ? undefined : { ...ref, indices: [...ref.indices, expression.index], span: expression.span };
+    return ref === undefined ? undefined : {
+      ...ref,
+      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+      ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+      indices: [...ref.indices, expression.index],
+      span: expression.span,
+    };
   }
   if (expression.kind !== "binary" || (expression.operator !== "+" && expression.operator !== "-")) return undefined;
   const left = semanticPointerArgumentMemoryRef(expression.left);

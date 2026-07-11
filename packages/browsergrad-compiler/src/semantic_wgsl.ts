@@ -4172,6 +4172,7 @@ function emitSemanticRootStoragePointerArgBaseIndex(
 ): string {
   if (!isSemanticFloatVectorType(root.valueType)) return emitSemanticRootStorageIndex(ref, ir, names, options);
   const base = emitSemanticRootStorageIndex({ ...ref, valueType: "float" }, ir, names, options);
+  if (ref.pointerBaseIsScalarLane === true || !isSemanticFloatVectorType(ref.valueType)) return base;
   const stride = cudaVectorLaneCount(root.valueType);
   return stride === 1 ? base : `(${base} * ${stride}u)`;
 }

@@ -321,7 +321,7 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") {
-          if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
+          if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticReferenceValueTypeSupported(operation.target.valueType)) return operation;
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
@@ -4195,7 +4195,9 @@ function semanticReferencePointerArgBaseIndex(ref: SemanticMemoryRef, context: S
     context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
   const index = flatIndex(ref, context);
   const valueType = root?.valueType;
-  return isSemanticFloatVectorType(valueType) ? index * cudaVectorLaneCount(valueType) : index;
+  return ref.pointerBaseIsScalarLane !== true && isSemanticFloatVectorType(valueType) && isSemanticFloatVectorType(ref.valueType)
+    ? index * cudaVectorLaneCount(valueType)
+    : index;
 }
 
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
@@ -4432,7 +4434,7 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
   if (ref.addressSpace === "shared") {
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
-    const base = flatIndex(ref, context);
+    const base = semanticReferenceSharedVectorBase(ref, context, laneCount);
     return Array.from({ length: laneCount }, (_, lane) => {
       const index = base + lane;
       const ok = index >= 0 && index < buffer.length;
@@ -4494,7 +4496,7 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
   if (ref.addressSpace === "shared") {
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
-    const base = flatIndex(ref, context);
+    const base = semanticReferenceSharedVectorBase(ref, context, laneCount);
     for (let lane = 0; lane < laneCount; lane++) {
       const index = base + lane;
       const laneValue = value[lane] ?? 0;
@@ -4514,6 +4516,22 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     if (ok) buffer[index] = laneValue;
     context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
   }
+}
+
+function semanticReferenceSharedVectorBase(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+  laneCount: number,
+): number {
+  const index = flatIndex(ref, context);
+  const root = context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base && symbol.kind === "shared");
+  if (root !== undefined) return isSemanticFloatVectorType(root.valueType) ? index * laneCount : index;
+  const param = context.compiled.kernelIr.functions
+    .flatMap((fn) => fn.params)
+    .find((symbol) => symbol.name === ref.base && symbol.pointer && symbol.addressSpace === "shared");
+  if (!isSemanticFloatVectorType(param?.valueType)) return index;
+  const offset = context.sharedOffsets.get(ref.base) ?? 0;
+  return offset + (index - offset) * laneCount;
 }
 
 function semanticCopyMemoryRefAt(ref: SemanticMemoryRef, offset: number): SemanticMemoryRef {
@@ -5063,9 +5081,11 @@ function semanticExpressionContainsSubgroupCall(expression: SemanticExpression):
 function semanticReferenceSharedMemory(compiled: CompiledCudaLiteKernel): Map<string, WgslTypedArray> {
   const out = new Map<string, WgslTypedArray>();
   for (const symbol of compiled.kernelIr.memory.filter((item) => item.kind === "shared")) {
+    const vectorType = semanticStorageVectorType(symbol.valueType);
+    const lanes = vectorType === undefined ? 1 : cudaVectorLaneCount(vectorType);
     out.set(
       symbol.name,
-      typedArrayForScalar(symbol.valueType, totalElements(semanticReferenceSharedDimensions(compiled, symbol))),
+      typedArrayForScalar(symbol.valueType, totalElements(semanticReferenceSharedDimensions(compiled, symbol)) * lanes),
     );
   }
   return out;

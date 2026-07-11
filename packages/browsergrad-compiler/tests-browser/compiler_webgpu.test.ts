@@ -2412,6 +2412,37 @@ __global__ void storage_byte_helper(uchar *bytes, uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([8]);
   });
 
+  it("runs fixed local pointer-array slots as shared vector aliases", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ float3 add_pointer_array_values(float3 *a, float3 *b, float3 *c) {
+  return *a + *b + *c;
+}
+__global__ void local_pointer_array(float *out) {
+  __shared__ float3 values[3];
+  values[0] = make_float3(1.0f, 2.0f, 3.0f);
+  values[1] = make_float3(4.0f, 5.0f, 6.0f);
+  values[2] = make_float3(7.0f, 8.0f, 9.0f);
+  float3 *v[3];
+  v[0] = &values[0];
+  v[1] = &values[1];
+  v[2] = &values[2];
+  float3 sum = add_pointer_array_values(v[0], v[1], v[2]);
+  out[0] = sum.x;
+  out[1] = sum.y;
+  out[2] = sum.z;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(3) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([12, 15, 18]);
+  });
+
   it("runs cubemap texture reads through semantic WGSL on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

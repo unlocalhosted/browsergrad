@@ -1078,10 +1078,20 @@ __global__ void shared_reinterpret(int *out) {
     slots[1] = out + 2;
     summary[0] = cas_uint_vector_slot(slots[0], 21u, 81u);
   }`, { workgroupSize: [1, 1, 1] });
+      const out = new Uint32Array(12);
+      out[6] = 21;
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out, summary: new Uint32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicCompareExchange_u32(");
-      expect(compiled.wgsl).toContain("bg_ptr_atomicCompareExchange_u32(slot_buffer, ((slot_base + u32((0 * 4))) + u32(2)), compare, value)");
+      expect(compiled.wgsl).toMatch(/bg_ptr_atomicCompareExchange_u32\(slot_buffer, [^\n]*slot_base[^\n]*2[^\n]*compare, value\)/u);
       expect(compiled.wgsl).not.toContain("atomicCompareExchangeWeak((slot_base + 2u)");
+      expect([...result.buffers.out as Uint32Array]).toEqual([0, 0, 0, 0, 0, 0, 81, 0, 0, 0, 0, 0]);
+      expect([...result.buffers.summary as Uint32Array]).toEqual([21]);
     });
 
   it("guards active-lane pointer-array assignments without scalar select fallback", () => {
@@ -1299,9 +1309,15 @@ __global__ void shared_reinterpret(int *out) {
     uint *right = reinterpret_cast<uint*>(out);
     summary[0] = left - right;
   }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(8), summary: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("summary[0u] = 1;");
+      expect(compiled.wgsl).toContain("summary[0u] = ((1 * 4) - (0 * 4));");
+      expect([...result.buffers.summary as Int32Array]).toEqual([4]);
     });
 
   it("scales inline cast pointer differences over byte roots", () => {
@@ -1365,7 +1381,7 @@ __global__ void shared_reinterpret(int *out) {
     bump_roundtrip_vec(vecView, idx, make_float4(scale, scale * 2.0f, scale * 3.0f, scale * 4.0f));
   }`, { workgroupSize: [2, 1, 1] });
 
-      expect(compiled.wgsl).toContain("bump_roundtrip_vec(0u, (1u * 4u), idx");
+      expect(compiled.wgsl).toMatch(/bump_roundtrip_vec\(0u, [^\n]*1 \* 4[^\n]*, idx/u);
       expect(compiled.wgsl).toContain("bg_ptr_read_f32x4(out_buffer, (out_base + (u32(idx) * 4u)))");
       expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(out_buffer, (out_base + (u32(idx) * 4u)), vec4<f32>");
     });
@@ -2990,6 +3006,37 @@ __global__ void sharedPointerAlias(float *out) {
       expect(compiled.wgsl).toContain("fn bump_storage_byte");
       expect([...result.buffers.bytes as Uint32Array]).toEqual([3, 8]);
       expect([...result.buffers.out as Uint32Array]).toEqual([8]);
+    });
+
+  it("resolves fixed local pointer-array slots into shared vector aliases", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ float3 add_pointer_array_values(float3 *a, float3 *b, float3 *c) {
+    return *a + *b + *c;
+  }
+  __global__ void localPointerArray(float *out) {
+    __shared__ float3 values[3];
+    values[0] = make_float3(1.0f, 2.0f, 3.0f);
+    values[1] = make_float3(4.0f, 5.0f, 6.0f);
+    values[2] = make_float3(7.0f, 8.0f, 9.0f);
+    float3 *v[3];
+    v[0] = &values[0];
+    v[1] = &values[1];
+    v[2] = &values[2];
+    float3 sum = add_pointer_array_values(v[0], v[1], v[2]);
+    out[0] = sum.x;
+    out[1] = sum.y;
+    out[2] = sum.z;
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(3) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect([...result.buffers.out as Float32Array]).toEqual([12, 15, 18]);
     });
 
   it("scales helper pointer params when byte storage is viewed as wider values", () => {
