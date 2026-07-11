@@ -1443,10 +1443,42 @@ function lowerStatementOperations(
   if (chainedStores) return chainedStores;
   const conditionalAssignment = semanticConditionalLocalAssignmentOperations(statement, scope);
   if (conditionalAssignment) return conditionalAssignment;
+  const conditionalVarInit = semanticConditionalVarInitOperations(statement, scope);
+  if (conditionalVarInit) return conditionalVarInit;
   const mathOutVarDecl = semanticMathOutVarDeclOperations(statement, scope);
   const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
   const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
+}
+
+function semanticConditionalVarInitOperations(
+  statement: CudaLiteStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "var" || statement.init === undefined) return undefined;
+  const target = symbolForVar(statement, scope);
+  if (target.pointer || target.dimensions.length > 0) return undefined;
+  const initScope = new Map(scope).set(target.name, target);
+  const materialized = materializeConditionalCalls(lowerExpression(statement.init, initScope));
+  if (materialized.operations.length === 0) return undefined;
+  scope.set(target.name, target);
+  const targetExpression = semanticSymbolExpression(target, statement.span);
+  return [
+    { kind: "declare", target, span: statement.span },
+    ...materialized.operations,
+    {
+      kind: "expression",
+      expression: {
+        kind: "assignment",
+        operator: "=",
+        target: targetExpression,
+        value: materialized.expression,
+        ...optionalValueType(target.valueType),
+        span: statement.span,
+      },
+      span: statement.span,
+    },
+  ];
 }
 
 function semanticConditionalLocalAssignmentOperations(

@@ -667,9 +667,13 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
     out[0] = total;
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(compiled.wgsl).toContain("var total: u32 = 0u;");
-      expect(compiled.wgsl).toContain("if ((bg_uniforms.enabled != 0))");
-      expect(compiled.wgsl).toContain("total = conditional_var_init_helper_with_pointer_side_effect");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var total: u32;");
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toContain("= conditional_var_init_helper_with_pointer_side_effect");
+      expect(compiled.wgsl).toMatch(/total = bg__bg_condition_value_\d+_\d+;/u);
       expect(compiled.wgsl).not.toContain("select(0u, conditional_var_init_helper_with_pointer_side_effect");
     });
 
@@ -685,9 +689,13 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
     out[0] = total;
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(compiled.wgsl).toContain("var total: u32 = 0u;");
-      expect(compiled.wgsl).toContain("if ((bg_uniforms.enabled != 0))");
-      expect(compiled.wgsl).toContain("total = (3u + nested_conditional_var_init_helper_with_pointer_side_effect");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var total: u32;");
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toContain("= nested_conditional_var_init_helper_with_pointer_side_effect");
+      expect(compiled.wgsl).toMatch(/total = \(3u \+ bg__bg_condition_value_\d+_\d+\);/u);
       expect(compiled.wgsl).not.toContain("select(0u, nested_conditional_var_init_helper_with_pointer_side_effect");
     });
 
