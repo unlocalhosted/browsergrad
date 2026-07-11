@@ -82,6 +82,7 @@ import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef 
 import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.js";
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
+import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
 import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
@@ -4165,6 +4166,8 @@ function expressionValueType(expression: SemanticExpression | undefined): CudaLi
 
 function semanticIntrinsicReturnType(name: string | undefined, args: readonly SemanticExpression[]): CudaLiteScalarType | undefined {
   if (name === undefined) return undefined;
+  const half2VectorReturnType = semanticHalf2VectorReturnType(name);
+  if (half2VectorReturnType) return half2VectorReturnType;
   const vectorConstructorType = cudaVectorConstructorType(name);
   if (vectorConstructorType) return vectorConstructorType;
   const vectorMathReturnType = semanticVectorMathReturnType(name, args);

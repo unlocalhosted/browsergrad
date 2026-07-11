@@ -583,6 +583,7 @@ function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledC
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
   if (semanticReferenceLocalPackedHalfView(ref, compiled)) return true;
+  if (semanticReferenceLocalPackedHalf2View(ref, compiled)) return true;
   if (semanticReferenceLocalScalarBitViewRootType(ref, compiled) !== undefined) return true;
   if (semanticReferenceLocalVectorBitViewRootType(ref, compiled) !== undefined) return true;
   if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
@@ -609,6 +610,12 @@ function semanticReferenceLocalScalarBitViewRootType(
 function semanticReferenceLocalPackedHalfView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   return ref.addressSpace === "local" && ref.pointerBaseIsScalarLane === true && ref.valueType === "half" &&
     compiled.kernelIr.memory.some((symbol) => symbol.kind === "local" && symbol.name === ref.base && symbol.valueType === "uint");
+}
+
+function semanticReferenceLocalPackedHalf2View(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  if (ref.addressSpace !== "local" || ref.fields.length > 0 || ref.indices.length !== 1 || ref.valueType !== "half2") return false;
+  const root = compiled.kernelIr.memory.find((symbol) => symbol.kind === "local" && symbol.name === ref.base && symbol.dimensions.length > 0);
+  return root?.valueType === "uint";
 }
 
 function semanticReferencePackedSharedByteRoot(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -5069,6 +5076,10 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    if (semanticReferenceLocalPackedHalf2View(ref, context.compiled)) {
+      const bits = Number(buffer[flatIndex(ref, context)] ?? 0) >>> 0;
+      return [float16BitsToFloat32(bits & 0xffff), float16BitsToFloat32(bits >>> 16)];
+    }
     if (semanticReferenceLocalScalarVectorView(ref, context.compiled)) {
       const base = flatIndex(ref, context);
       return Array.from({ length: laneCount }, (_, lane) => Number(buffer[base + lane] ?? 0));
@@ -5140,6 +5151,12 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     const index = flatIndex(ref, context);
+    if (semanticReferenceLocalPackedHalf2View(ref, context.compiled)) {
+      const low = float32ToFloat16Bits(Number(value[0] ?? 0)) & 0xffff;
+      const high = float32ToFloat16Bits(Number(value[1] ?? 0)) & 0xffff;
+      if (index >= 0 && index < buffer.length) buffer[index] = ((high << 16) | low) >>> 0;
+      return;
+    }
     if (index >= 0 && index < buffer.length) {
       (buffer as SemanticValue[])[index] = Array.from({ length: laneCount }, (_, lane) => Number(value[lane] ?? 0));
     }

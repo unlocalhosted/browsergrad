@@ -5352,4 +5352,25 @@ __global__ void semantic_wmma(float *A, float *B, float *C) {
     expect([...expected.buffers.C as Float32Array]).toEqual([20, 23, 44, 51]);
     expect([...actual.buffers.C as Float32Array]).toEqual([20, 23, 44, 51]);
   });
+
+  it("runs packed half2 views over local uint arrays on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+#define HALF2(value) (reinterpret_cast<half2 *>(&(value))[0])
+__global__ void local_half2_to_float2(float *out) {
+  uint words[1];
+  words[0] = 0x40003c00u;
+  float2 value = __half22float2(HALF2(words[0]));
+  out[0] = value.x;
+  out[1] = value.y;
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Float32Array]).toEqual([1, 2]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([1, 2]);
+  });
 });
