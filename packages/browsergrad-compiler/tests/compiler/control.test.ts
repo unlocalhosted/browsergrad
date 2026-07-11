@@ -956,6 +956,27 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       expect([...result.buffers.out as Int32Array]).toEqual([18, 12]);
       expect([...semanticResult.buffers.out as Int32Array]).toEqual([18, 12]);
     });
+
+  it("lowers bool storage pointers through u32 WebGPU carriers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void boolStorage(bool *flags, uint *out) {
+    bool before = flags[0];
+    flags[1] = !before;
+    flags[2] = before || flags[1];
+    out[0] = flags[1] ? 7u : 3u;
+    out[1] = flags[2] ? 11u : 5u;
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = { buffers: { flags: new Uint32Array([0, 0, 0]), out: new Uint32Array(2) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const result = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("flags: array<u32>");
+      expect(compiled.wgsl).toContain("flags[1u] = select(0u, 1u, !(before));");
+      expect([...result.buffers.flags as Uint32Array]).toEqual([0, 1, 1]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([7, 11]);
+    });
 });
 export {
   fs,

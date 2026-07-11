@@ -5472,4 +5472,25 @@ __global__ void integer_ptx_edges(uint *out) {
     expect([...expected.buffers.out as Uint32Array]).toEqual([0x70b88d78, 0xffffffff, 0xffffffff, 0x80000000]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([0x70b88d78, 0xffffffff, 0xffffffff, 0x80000000]);
   });
+
+  it("runs bool storage pointers through u32 carriers on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void boolStorage(bool *flags, uint *out) {
+  bool before = flags[0];
+  flags[1] = !before;
+  flags[2] = before || flags[1];
+  out[0] = flags[1] ? 7u : 3u;
+  out[1] = flags[2] ? 11u : 5u;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { flags: new Uint32Array([0, 0, 0]), out: new Uint32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.flags as Uint32Array]).toEqual([0, 1, 1]);
+    expect([...actual.buffers.flags as Uint32Array]).toEqual([0, 1, 1]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([7, 11]);
+  });
 });

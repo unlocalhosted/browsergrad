@@ -4473,7 +4473,7 @@ __global__ void sharedHelperScoped(float *out) {
       );
 
       expect(compiled.wgsl).toContain("var<storage, read_write> flags: array<u32>;");
-      expect(compiled.wgsl).toContain("flags[u32(idx)] = (u32((idx & 1)) != 0u);");
+      expect(compiled.wgsl).toContain("flags[u32(idx)] = select(0u, 1u, (u32((idx & 1)) != 0u));");
       expect(compiled.wgsl).not.toContain("bg_ptr_write_bool");
       expect([...result.buffers.flags as Uint32Array]).toEqual([0, 1, 0, 1]);
     });

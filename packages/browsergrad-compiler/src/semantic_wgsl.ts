@@ -1499,6 +1499,7 @@ function semanticWgslScalarStoreValueSupported(
     case "call":
       return semanticWgslScalarCallSupported(expression, ir);
     case "binary":
+      if (expression.valueType === "bool") return semanticWgslExpressionSupported(expression, "scalar", ir);
       return semanticWgslScalarStoreValueSupported(expression.left, ir) &&
         semanticWgslScalarStoreValueSupported(expression.right, ir);
     case "conditional":
@@ -3073,6 +3074,9 @@ function emitSemanticScalarStoreValue(
   options: EmitSemanticKernelIrWgslOptions,
   textureSpecializations: SemanticTextureDescriptorSpecializations,
 ): string {
+  if (valueType === "bool") {
+    return `select(0u, 1u, ${emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations)})`;
+  }
   if (valueType === "uchar") return emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
@@ -6440,7 +6444,7 @@ function emitTruthiness(
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.kind === "symbol" && expression.addressSpace === "storage") return "true";
-  if (semanticExpressionValueType(expression) === "bool") {
+  if (semanticExpressionValueType(expression) === "bool" && semanticNativeBoolExpression(expression)) {
     return emitSemanticExpression(expression, ir, names, options);
   }
   if (expression.kind === "binary" && (COMPARISON_OPERATORS.has(expression.operator) || LOGICAL_OPERATORS.has(expression.operator))) {
