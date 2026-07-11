@@ -1,4 +1,3 @@
-import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir.js";
 import type { CudaLiteBarrierUniformityFact } from "./types.js";
 
@@ -33,7 +32,7 @@ export function semanticOperationIsBarrier(
   barrierFunctions: ReadonlySet<string>,
 ): boolean {
   return operation.kind === "barrier" ||
-    operation.kind === "inline-asm" && classifyInlineAsm(operation.statement.template)?.kind === "bar-sync" ||
+    operation.kind === "inline-asm" && operation.op?.kind === "bar-sync" ||
     operation.kind === "call" && barrierFunctions.has(operation.callee);
 }
 

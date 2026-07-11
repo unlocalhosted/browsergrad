@@ -4409,7 +4409,8 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("u32(addr) + 0u");
+      expect(compiled.wgsl).toContain("(a = ((0u + addr) + 0u));");
+      expect(JSON.stringify(compiled.kernelIr.operations)).not.toContain('"statement"');
       expect([...result.buffers.out as Uint32Array]).toEqual([5, 7]);
     });
 

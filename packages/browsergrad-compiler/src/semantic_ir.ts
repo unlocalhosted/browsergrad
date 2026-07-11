@@ -67,6 +67,7 @@ import {
   classifyInlineAsm,
   expectedInlineAsmF32SourceInputs,
   type InlineAsmF32Source,
+  type InlineAsmOp,
   type PtxSpecialU32Register,
 } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -326,11 +327,42 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "barrier"; readonly callee: string; readonly scope: "subgroup" | "workgroup" | "grid"; readonly groupName?: string; readonly span: SourceSpan }
   | { readonly kind: "fence"; readonly callee: string; readonly span: SourceSpan }
   | { readonly kind: "device-launch"; readonly launch: SemanticDeviceLaunch; readonly span: SourceSpan }
-  | { readonly kind: "inline-asm"; readonly statement: CudaLiteAsmStatement; readonly span: SourceSpan }
+  | {
+      readonly kind: "inline-asm";
+      readonly op?: InlineAsmOp;
+      readonly outputs: readonly SemanticExpression[];
+      readonly inputs: readonly SemanticExpression[];
+      readonly span: SourceSpan;
+    }
   | { readonly kind: "return"; readonly value?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "continue"; readonly span: SourceSpan }
   | { readonly kind: "break"; readonly span: SourceSpan }
   | { readonly kind: "block"; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan };
+
+export function semanticInlineAsmLdmatrixAssignments(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
+): readonly SemanticExpression[] | undefined {
+  const op = operation.op;
+  if (op?.kind !== "ldmatrix" || operation.inputs.length !== 1 || operation.outputs.length !== op.matrices) return undefined;
+  const base = operation.inputs[0]!;
+  return operation.outputs.map((target, index) => {
+    const tag = op.transposed ? 0x80000000 : 0;
+    const value = binaryIndexExpression(
+      "+",
+      binaryIndexExpression("+", uintNumberExpression(tag, operation.span), base, operation.span),
+      uintNumberExpression(index * 2, operation.span),
+      operation.span,
+    );
+    return {
+      kind: "assignment",
+      operator: "=",
+      target,
+      value,
+      valueType: "uint",
+      span: operation.span,
+    };
+  });
+}
 
 export interface SemanticDeviceLaunch {
   readonly callee: string;
@@ -439,7 +471,11 @@ export function walkSemanticOperation(
       return;
     case "barrier":
     case "fence":
+      return;
     case "inline-asm":
+      for (const expression of operation.outputs) walkSemanticExpression(expression, visitExpression);
+      for (const expression of operation.inputs) walkSemanticExpression(expression, visitExpression);
+      return;
     case "continue":
     case "break":
       return;
@@ -1407,7 +1443,15 @@ function lowerStatement(
     case "asm": {
       const registerAssignment = lowerInlineAsmBuiltinRegisterAssignment(statement, scope);
       if (registerAssignment) return registerAssignment;
-      return { kind: "inline-asm", statement, span: statement.span };
+      const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+      const op = classifyInlineAsm(statement.template);
+      return {
+        kind: "inline-asm",
+        ...(op === undefined ? {} : { op }),
+        outputs: outputs.map((output) => lowerExpression(output, scope)),
+        inputs: statement.inputs.map((input) => lowerExpression(input, scope)),
+        span: statement.span,
+      };
     }
     case "expr": {
       const cpAsync = semanticCpAsyncOperation(statement.expression, scope, statement.span);
@@ -2708,6 +2752,10 @@ function numberExpression(value: number, span: SourceSpan): SemanticExpression {
 
 function intNumberExpression(value: number, span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value, valueType: "int", span };
+}
+
+function uintNumberExpression(value: number, span: SourceSpan): SemanticExpression {
+  return { kind: "literal", literalKind: "number", value, valueType: "uint", span };
 }
 
 function semanticSizeofAlignofValue(

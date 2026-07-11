@@ -9,7 +9,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import { walkSemanticOperations } from "./semantic_ir.js";
+import { semanticInlineAsmLdmatrixAssignments, walkSemanticOperations } from "./semantic_ir.js";
 import {
   isSemanticKernelIrOperation,
   semanticExpressionChildren,
@@ -27,7 +27,6 @@ import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
 import { emitBfloatConversionHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers } from "./wgsl_support_helpers.js";
-import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
@@ -735,18 +734,20 @@ function unsupportedSemanticWgslOperation(
         break;
       case "inline-asm":
         {
-          const asm = classifyInlineAsm(operation.statement.template);
-          const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
+          const asm = operation.op;
+          const ldmatrix = semanticInlineAsmLdmatrixAssignments(operation);
+          if (ldmatrix?.every((expression) => semanticWgslExpressionSupported(expression, "scalar", ir))) break;
+          if (semanticWgslInlineMmaSupported(operation, ir)) break;
           if (asm?.kind === "cp-async-fence") {
-            if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || outputs.length !== 0) return operation;
+            if (operation.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || operation.outputs.length !== 0) return operation;
             break;
           }
           if (asm?.kind === "membar") {
-            if (operation.statement.inputs.length !== 0 || outputs.length !== 0) return operation;
+            if (operation.inputs.length !== 0 || operation.outputs.length !== 0) return operation;
             break;
           }
           if (asm?.kind === "bar-sync") {
-            if (operation.statement.inputs.length !== (asm.operand === "input0" ? 1 : 0) || outputs.length !== 0) return operation;
+            if (operation.inputs.length !== (asm.operand === "input0" ? 1 : 0) || operation.outputs.length !== 0) return operation;
             break;
           }
           return operation;
@@ -2048,11 +2049,19 @@ function emitSemanticOperation(
       return [`${prefix}storageBarrier();`];
     case "inline-asm":
       {
-        const asm = classifyInlineAsm(operation.statement.template);
-        const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
-        if (asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && outputs.length === 0) return [`${prefix}// cp.async inline asm fence omitted`];
-        if (asm?.kind === "membar" && operation.statement.inputs.length === 0 && outputs.length === 0) return [`${prefix}storageBarrier();`];
-        if (asm?.kind === "bar-sync" && operation.statement.inputs.length === (asm.operand === "input0" ? 1 : 0) && outputs.length === 0) return [`${prefix}workgroupBarrier();`];
+        const asm = operation.op;
+        const ldmatrix = semanticInlineAsmLdmatrixAssignments(operation);
+        if (ldmatrix) {
+          return ldmatrix.map((assignment) =>
+            `${prefix}${emitSemanticExpression(assignment, ir, names, options, textureSpecializations)};`
+          );
+        }
+        if (asm?.kind === "mma-m16n8k16") {
+          return emitSemanticInlineMma(operation, asm.accumulator, ir, names, prefix, options, textureSpecializations);
+        }
+        if (asm?.kind === "cp-async-fence" && operation.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && operation.outputs.length === 0) return [`${prefix}// cp.async inline asm fence omitted`];
+        if (asm?.kind === "membar" && operation.inputs.length === 0 && operation.outputs.length === 0) return [`${prefix}storageBarrier();`];
+        if (asm?.kind === "bar-sync" && operation.inputs.length === (asm.operand === "input0" ? 1 : 0) && operation.outputs.length === 0) return [`${prefix}workgroupBarrier();`];
       }
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
     case "return":
@@ -2068,6 +2077,67 @@ function emitSemanticOperation(
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
+}
+
+function semanticWgslInlineMmaSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const op = operation.op;
+  const countsMatch = op?.kind === "mma-m16n8k16" &&
+    (op.accumulator === "f16"
+      ? operation.outputs.length === 2 && operation.inputs.length === 8
+      : operation.outputs.length === 4 && operation.inputs.length === 10);
+  if (!countsMatch) return false;
+  return operation.inputs.every((input) => semanticWgslExpressionSupported(input, "scalar", ir)) &&
+    operation.outputs.every((output) => semanticWgslInlineOutputSupported(output, ir));
+}
+
+function semanticWgslInlineOutputSupported(output: SemanticExpression, ir: SemanticKernelIrModule): boolean {
+  const assignment: SemanticExpression = {
+    kind: "assignment",
+    operator: "=",
+    target: output,
+    value: { kind: "literal", literalKind: "number", value: 0, valueType: "uint", span: output.span },
+    valueType: "uint",
+    span: output.span,
+  };
+  return semanticWgslExpressionSupported(assignment, "scalar", ir);
+}
+
+function emitSemanticInlineMma(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
+  accumulator: "f16" | "f32",
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  prefix: string,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): readonly string[] {
+  return operation.outputs.map((output, index) => {
+    const target = emitSemanticExpression(output, ir, names, options, textureSpecializations);
+    const a = emitSemanticExpressionAs(operation.inputs[index % 4]!, ir, names, "u32", options, textureSpecializations);
+    const b = emitSemanticExpressionAs(operation.inputs[4 + (index % 2)]!, ir, names, "u32", options, textureSpecializations);
+    if (accumulator === "f16") {
+      const c = emitSemanticExpressionAs(operation.inputs[6 + index]!, ir, names, "u32", options, textureSpecializations);
+      const value = `pack2x16float(unpack2x16float(${c}) + (unpack2x16float(${a}) * unpack2x16float(${b})))`;
+      return `${prefix}${target} = ${semanticInlineMmaOutputValue(output, value, "u32")};`;
+    }
+    const cExpression = operation.inputs[6 + index]!;
+    const cRaw = emitSemanticExpression(cExpression, ir, names, options, textureSpecializations);
+    const cType = semanticExpressionValueType(cExpression);
+    const c = cType === "uint" || cType === "int" ? `bitcast<f32>(u32(${cRaw}))` : `f32(${cRaw})`;
+    const value = `(${c} + dot(unpack2x16float(${a}), unpack2x16float(${b})))`;
+    return `${prefix}${target} = ${semanticInlineMmaOutputValue(output, value, "f32")};`;
+  });
+}
+
+function semanticInlineMmaOutputValue(output: SemanticExpression, value: string, sourceType: "u32" | "f32"): string {
+  const outputType = semanticExpressionValueType(output);
+  if (outputType === "uint") return sourceType === "u32" ? value : `bitcast<u32>(${value})`;
+  if (outputType === "int") return `bitcast<i32>(${value})`;
+  if (outputType === "half") return `f16(${value})`;
+  return sourceType === "u32" ? `u32(${value})` : value;
 }
 
 function emitSemanticPredicatedOperations(

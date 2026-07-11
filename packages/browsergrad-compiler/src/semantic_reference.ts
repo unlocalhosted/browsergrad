@@ -73,6 +73,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
+import { semanticInlineAsmLdmatrixAssignments } from "./semantic_ir.js";
 import { semanticOperationsReferenceRoot } from "./semantic_ir_walk.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
@@ -168,7 +169,6 @@ import {
   semanticStorageVectorType,
   semanticValueTypeSupported,
 } from "./semantic_value_types.js";
-import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, isCudaVectorType } from "./vector_types.js";
 import {
@@ -396,18 +396,20 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "inline-asm":
         {
-          const asm = classifyInlineAsm(operation.statement.template);
-          const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
+          const asm = operation.op;
+          const ldmatrix = semanticInlineAsmLdmatrixAssignments(operation);
+          if (ldmatrix?.every((expression) => semanticReferenceExpressionSupported(expression, "scalar", compiled))) break;
+          if (semanticReferenceInlineMmaSupported(operation, compiled)) break;
           if (asm?.kind === "cp-async-fence") {
-            if (operation.statement.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || outputs.length !== 0) return operation;
+            if (operation.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || operation.outputs.length !== 0) return operation;
             break;
           }
           if (asm?.kind === "membar") {
-            if (operation.statement.inputs.length !== 0 || outputs.length !== 0) return operation;
+            if (operation.inputs.length !== 0 || operation.outputs.length !== 0) return operation;
             break;
           }
           if (asm?.kind === "bar-sync") {
-            if (operation.statement.inputs.length !== (asm.operand === "input0" ? 1 : 0) || outputs.length !== 0) return operation;
+            if (operation.inputs.length !== (asm.operand === "input0" ? 1 : 0) || operation.outputs.length !== 0) return operation;
             break;
           }
           return operation;
@@ -1429,11 +1431,19 @@ function execSemanticOperations(
         break;
       case "inline-asm":
         {
-          const asm = classifyInlineAsm(operation.statement.template);
-          const outputs = operation.statement.outputs ?? (operation.statement.output === undefined ? [] : [operation.statement.output]);
-          const cpAsyncFenceSupported = asm?.kind === "cp-async-fence" && operation.statement.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && outputs.length === 0;
-          const membarSupported = asm?.kind === "membar" && operation.statement.inputs.length === 0 && outputs.length === 0;
-          const barSyncSupported = asm?.kind === "bar-sync" && operation.statement.inputs.length === (asm.operand === "input0" ? 1 : 0) && outputs.length === 0;
+          const asm = operation.op;
+          const ldmatrix = semanticInlineAsmLdmatrixAssignments(operation);
+          if (ldmatrix) {
+            for (const assignment of ldmatrix) evalSemanticExpression(assignment, context);
+            break;
+          }
+          if (asm?.kind === "mma-m16n8k16") {
+            execSemanticInlineMma(operation, asm.accumulator, context);
+            break;
+          }
+          const cpAsyncFenceSupported = asm?.kind === "cp-async-fence" && operation.inputs.length <= (asm.fence === "wait_group" ? 1 : 0) && operation.outputs.length === 0;
+          const membarSupported = asm?.kind === "membar" && operation.inputs.length === 0 && operation.outputs.length === 0;
+          const barSyncSupported = asm?.kind === "bar-sync" && operation.inputs.length === (asm.operand === "input0" ? 1 : 0) && operation.outputs.length === 0;
           if (!cpAsyncFenceSupported && !membarSupported && !barSyncSupported) {
             throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
           }
@@ -1459,6 +1469,83 @@ function execSemanticCopy(
     const target = semanticCopyMemoryRefAt(operation.target, offset);
     writeMemoryValue(target, readMemoryValue(source, context), context);
   }
+}
+
+function semanticReferenceInlineMmaSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  const op = operation.op;
+  const countsMatch = op?.kind === "mma-m16n8k16" &&
+    (op.accumulator === "f16"
+      ? operation.outputs.length === 2 && operation.inputs.length === 8
+      : operation.outputs.length === 4 && operation.inputs.length === 10);
+  if (!countsMatch) return false;
+  return operation.inputs.every((input) => semanticReferenceExpressionSupported(input, "scalar", compiled)) &&
+    operation.outputs.every((output) => semanticReferenceInlineOutputSupported(output, compiled));
+}
+
+function semanticReferenceInlineOutputSupported(
+  output: SemanticExpression,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  const assignment: SemanticExpression = {
+    kind: "assignment",
+    operator: "=",
+    target: output,
+    value: { kind: "literal", literalKind: "number", value: 0, valueType: "uint", span: output.span },
+    valueType: "uint",
+    span: output.span,
+  };
+  return semanticReferenceExpressionSupported(assignment, "scalar", compiled);
+}
+
+function execSemanticInlineMma(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
+  accumulator: "f16" | "f32",
+  context: SemanticReferenceContext,
+): void {
+  const inputs = operation.inputs.map((input) => Number(evalSemanticExpression(input, context)));
+  if (accumulator === "f16") {
+    for (let index = 0; index < operation.outputs.length; index++) {
+      const a = inputs[index % 4]! >>> 0;
+      const b = inputs[4 + (index % 2)]! >>> 0;
+      const c = inputs[6 + index]! >>> 0;
+      const lane0 = float16BitsToFloat32(c & 0xffff) + float16BitsToFloat32(a & 0xffff) * float16BitsToFloat32(b & 0xffff);
+      const lane1 = float16BitsToFloat32(c >>> 16) + float16BitsToFloat32(a >>> 16) * float16BitsToFloat32(b >>> 16);
+      assignSemanticInlineOutput(operation.outputs[index]!, (float32ToFloat16Bits(lane0) | (float32ToFloat16Bits(lane1) << 16)) >>> 0, context);
+    }
+    return;
+  }
+  for (let index = 0; index < operation.outputs.length; index++) {
+    const a = inputs[index % 4]! >>> 0;
+    const b = inputs[4 + (index % 2)]! >>> 0;
+    const cExpression = operation.inputs[6 + index]!;
+    const rawC = inputs[6 + index]!;
+    const cType = semanticExpressionValueType(cExpression);
+    const c = cType === "uint" || cType === "int" ? uintBitsToFloat32(rawC >>> 0) : rawC;
+    const product = float16BitsToFloat32(a & 0xffff) * float16BitsToFloat32(b & 0xffff) +
+      float16BitsToFloat32(a >>> 16) * float16BitsToFloat32(b >>> 16);
+    const output = operation.outputs[index]!;
+    const outputType = semanticExpressionValueType(output);
+    const value = outputType === "uint" || outputType === "int" ? float32ToUintBits(c + product) : c + product;
+    assignSemanticInlineOutput(output, value, context);
+  }
+}
+
+function assignSemanticInlineOutput(
+  target: SemanticExpression,
+  value: number,
+  context: SemanticReferenceContext,
+): void {
+  evalSemanticExpression({
+    kind: "assignment",
+    operator: "=",
+    target,
+    value: { kind: "literal", literalKind: "number", value, ...("valueType" in target && target.valueType ? { valueType: target.valueType } : {}), span: target.span },
+    ...(semanticExpressionValueType(target) === undefined ? {} : { valueType: semanticExpressionValueType(target)! }),
+    span: target.span,
+  }, context);
 }
 
 function execSemanticScopedOperations(
@@ -1545,7 +1632,7 @@ function* execSemanticBarrierOperations(
         yield operation.scope;
         break;
       case "inline-asm":
-        if (classifyInlineAsm(operation.statement.template)?.kind !== "bar-sync") {
+        if (operation.op?.kind !== "bar-sync") {
           execSemanticOperations([operation], context);
           break;
         }
