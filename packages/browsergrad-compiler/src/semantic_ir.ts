@@ -406,6 +406,7 @@ export interface SemanticKernelIrModule {
   readonly requiredFeatures: readonly string[];
   readonly barrierUniformity: CudaLiteAnalysis["barrierUniformity"];
   readonly workgroupSize: KernelLaunch["blockDim"];
+  readonly subgroupMode?: "native" | "scalar";
 }
 
 export function walkSemanticOperations(
@@ -680,6 +681,7 @@ export function lowerSemanticModelToKernelIr(
   options: {
     readonly workgroupSize?: readonly [number, number, number];
     readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
+    readonly subgroupMode?: "native" | "scalar";
   } = {},
 ): SemanticKernelIrModule {
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
@@ -763,6 +765,7 @@ export function lowerSemanticModelToKernelIr(
     requiredFeatures: semantic.requiredFeatures,
     barrierUniformity: analysis.barrierUniformity,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
+    ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
   };
 }
 

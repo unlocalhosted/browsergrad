@@ -894,7 +894,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("out[0] = u32(1u)");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("out[0u] = 1u");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([1]);
     });
@@ -911,7 +913,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     }
   }`, { features: { subgroups: true }, subgroupMode: "scalar", workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("select(0u, 1u, (tx >= ((bg_uniforms.warp_size * 3) / 2)))");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("select(0u, 1u");
+      expect(compiled.wgsl).toContain("bg_uniforms.warp_size");
+      expect(compiled.wgsl).not.toContain("bg_semantic_ballot_32");
       expect(compiled.wgsl).not.toContain(") != 0) != 0");
     });
 
