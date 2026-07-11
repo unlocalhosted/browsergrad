@@ -4164,7 +4164,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     out[idx + 4] = ptx_sub(value);
     out[idx + 8] = ptx_mul(value);
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         {
           buffers: {
@@ -4176,6 +4176,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect([...result.buffers.out as Float32Array]).toEqual([
         3.75,
         0.25,
@@ -4203,7 +4204,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     int idx = threadIdx.x;
     out[idx] = ptx_div(input[idx]);
   }`, { workgroupSize: [4, 1, 1] });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         {
           buffers: {
@@ -4215,6 +4216,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect([...result.buffers.out as Float32Array]).toEqual([
         0.5,
         -1.5,

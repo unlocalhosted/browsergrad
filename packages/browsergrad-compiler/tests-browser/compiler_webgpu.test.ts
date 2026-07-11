@@ -3289,6 +3289,31 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs inline PTX f32 binary arithmetic through semantic WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void ptx_f32_binary(float *out, float *input) {
+  int idx = threadIdx.x;
+  float addValue, subValue, mulValue, divValue;
+  asm volatile("add.rn.f32 %0, %1, 2.0;" : "=f"(addValue) : "f"(input[idx]));
+  asm volatile("sub.rn.f32 %0, %1, 1.0;" : "=f"(subValue) : "f"(input[idx]));
+  asm volatile("mul.rn.f32 %0, %1, -2.0;" : "=f"(mulValue) : "f"(input[idx]));
+  asm volatile("div.rn.f32 %0, %1, 2.0;" : "=f"(divValue) : "f"(input[idx]));
+  out[idx * 4] = addValue;
+  out[idx * 4 + 1] = subValue;
+  out[idx * 4 + 2] = mulValue;
+  out[idx * 4 + 3] = divValue;
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { out: new Float32Array(8), input: new Float32Array([4, -3]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([6, 3, -8, 2, -1, -4, 6, -1.5]);
+  });
+
   it("runs semantic inline PTX bfind through native WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
@@ -4700,6 +4725,7 @@ __global__ void half_inc(half* x) {
   });
 
   it("keeps early-return lanes inactive while all lanes reach a later barrier", async () => {
+    if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void early_return_barrier(float *x, int limit) {
   __shared__ float scratch[4];

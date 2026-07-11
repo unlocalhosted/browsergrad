@@ -1161,6 +1161,16 @@ function lowerInlineAsmBuiltinRegisterAssignment(
   const fmaArgs = fmaSources !== undefined && fmaInputs === statement.inputs.length
     ? fmaSources.map((source) => semanticInlineAsmF32Source(source, statement, outputs, scope))
     : undefined;
+  const floatBinarySources = op?.kind === "float-binary-rn-f32"
+    ? op.sources ?? [
+        { kind: "operand", index: outputs.length },
+        { kind: "operand", index: outputs.length + 1 },
+      ] satisfies readonly [InlineAsmF32Source, InlineAsmF32Source]
+    : undefined;
+  const floatBinaryInputs = floatBinarySources === undefined ? undefined : expectedInlineAsmF32SourceInputs(floatBinarySources, outputs.length);
+  const floatBinaryArgs = floatBinarySources !== undefined && floatBinaryInputs === statement.inputs.length
+    ? floatBinarySources.map((source) => semanticInlineAsmF32Source(source, statement, outputs, scope))
+    : undefined;
   const bitInput = op && (op.kind === "bfind-u32" || op.kind === "ffs-b32" || op.kind === "popc-b32" || op.kind === "clz-b32" || op.kind === "brev-b32")
     ? op.immediate === undefined
       ? statement.inputs.length === 1 ? lowerExpression(statement.inputs[0]!, scope) : undefined
@@ -1168,6 +1178,8 @@ function lowerInlineAsmBuiltinRegisterAssignment(
     : undefined;
   const value = op?.kind === "fma-rn-f32" && fmaArgs?.length === 3 && fmaArgs.every((arg) => arg !== undefined)
     ? semanticCallExpression("fma", fmaArgs as readonly SemanticExpression[], "float", statement.span)
+    : op?.kind === "float-binary-rn-f32" && floatBinaryArgs?.length === 2 && floatBinaryArgs.every((arg) => arg !== undefined)
+      ? semanticFloatBinaryExpression(op.op, floatBinaryArgs[0]!, floatBinaryArgs[1]!, statement.span)
     : op?.kind === "bfind-u32" && bitInput !== undefined
     ? semanticUintBinaryExpression(
         "-",
@@ -1210,6 +1222,22 @@ function lowerInlineAsmBuiltinRegisterAssignment(
       span: statement.span,
     },
     span: statement.span,
+  };
+}
+
+function semanticFloatBinaryExpression(
+  op: "add" | "sub" | "mul" | "div",
+  left: SemanticExpression,
+  right: SemanticExpression,
+  span: SourceSpan,
+): SemanticExpression {
+  return {
+    kind: "binary",
+    operator: op === "add" ? "+" : op === "sub" ? "-" : op === "mul" ? "*" : "/",
+    left,
+    right,
+    valueType: "float",
+    span,
   };
 }
 
