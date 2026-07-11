@@ -59,6 +59,7 @@ import {
   semanticCurandScalarArgumentIndices,
   semanticCurandStateArgumentIndex,
 } from "./semantic_curand_intrinsics.js";
+import { isSemanticGeneratedRandomCall } from "./semantic_generated_random_intrinsics.js";
 import {
   SEMANTIC_ADDRESS_PREDICATE_CALLS,
   SEMANTIC_LOCAL_ARRAY_FILL_CALLS,
@@ -465,6 +466,7 @@ export function emitSemanticKernelIrWgsl(
   }
   if (semanticUsesCubemapTextureRead(ir)) lines.push("", ...emitCubeTextureAtlasHelpers());
   lines.push("", ...emitSemanticNumericHelpers());
+  if (semanticUsesGeneratedRandom(ir)) lines.push("", ...emitSemanticGeneratedRandomHelpers());
   if (semanticUsesBfloatHelper(ir)) {
     lines.push("", ...emitBfloatConversionHelpers());
   }
@@ -589,6 +591,31 @@ export function emitSemanticKernelIrWgsl(
       workgroupSize: ir.workgroupSize,
     }),
   };
+}
+
+function semanticUsesGeneratedRandom(ir: SemanticKernelIrModule): boolean {
+  let used = false;
+  const visit = (expression: SemanticExpression) => {
+    if (expression.kind === "call" && expression.callee.kind === "symbol" && isSemanticGeneratedRandomCall(expression.callee.name)) used = true;
+  };
+  walkSemanticOperations(ir.operations, visit);
+  for (const fn of ir.functions) walkSemanticOperations(fn.body, visit);
+  return used;
+}
+
+function emitSemanticGeneratedRandomHelpers(): readonly string[] {
+  return [
+    "fn bg_random_uniform(state: ptr<function, u32>) -> f32 {",
+    "  *state = (*state * 1664525u) + 1013904223u;",
+    "  return f32(*state & 0x00ffffffu) / 16777216.0;",
+    "}",
+    "fn bg_random_normal(state: ptr<function, u32>) -> f32 {",
+    "  return bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) - 3.0;",
+    "}",
+    "fn bg_random_poisson4(state: ptr<function, u32>) -> i32 {",
+    "  return i32(bg_random_uniform(state) * 8.0);",
+    "}",
+  ];
 }
 
 function unsupportedSemanticWgslOperation(
@@ -1342,6 +1369,7 @@ function semanticWgslScalarCallSupported(
     semanticWgslFunctionCallSupported(expression, ir) ||
     semanticWgslAtomicCallSupported(expression, ir) ||
     semanticWgslCurandCallSupported(expression, ir) ||
+    semanticWgslGeneratedRandomCallSupported(expression) ||
     semanticWgslSubgroupCallSupported(expression, ir) ||
     semanticWgslAddressPredicateCallSupported(expression) ||
     semanticWgslMathCallSupported(expression, "scalar", ir) ||
@@ -1405,6 +1433,19 @@ function semanticWgslCurandCallSupported(
     semanticCurandStateAddressSpace(expression.args[stateIndex]!) !== undefined &&
     semanticCurandScalarArgumentIndices(expression.callee.name)
       .every((index) => semanticWgslExpressionSupported(expression.args[index]!, "scalar", ir));
+}
+
+function semanticWgslGeneratedRandomCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): boolean {
+  return expression.callee.kind === "symbol" &&
+    isSemanticGeneratedRandomCall(expression.callee.name) &&
+    expression.args.length === 1 &&
+    expression.args[0]?.kind === "unary" &&
+    expression.args[0].operator === "&" &&
+    expression.args[0].argument.kind === "symbol" &&
+    expression.args[0].argument.addressSpace === "local" &&
+    expression.args[0].argument.valueType === "uint";
 }
 
 function semanticWgslSubgroupCallSupported(
@@ -1789,6 +1830,7 @@ function semanticWgslExpressionSupported(
         ir !== undefined && semanticWgslAtomicCallSupported(expression, ir) ||
         semanticWgslCurandCallSupported(expression, ir) &&
           (expected === "any" || !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression, ir?.functions))) ||
+        semanticWgslGeneratedRandomCallSupported(expression) ||
         semanticWgslSubgroupCallSupported(expression, ir) ||
         semanticWgslAddressPredicateCallSupported(expression) ||
         semanticWgslMathCallSupported(expression, expected, ir) ||
@@ -3332,6 +3374,11 @@ function emitSemanticExpression(
       }
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslCurandCallSupported(expression, ir)) return emitSemanticCurandCall(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslGeneratedRandomCallSupported(expression)) {
+        const state = expression.args[0]!;
+        if (state.kind !== "unary" || state.argument.kind !== "symbol") throw semanticWgslError("generated random helper expects local uint state", expression.span);
+        return `${expression.callee.kind === "symbol" ? expression.callee.name : ""}(&${nameFor(state.argument.name, names)})`;
+      }
       if (semanticWgslSubgroupCallSupported(expression, ir)) return emitSemanticSubgroupCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslAddressPredicateCallSupported(expression)) return emitSemanticAddressPredicateCall(expression);
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);

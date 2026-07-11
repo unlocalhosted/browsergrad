@@ -3256,6 +3256,38 @@ __global__ void driverSurfaceAlias(CUsurfObject surf) {
     expect([...actual.buffers.surf as Float32Array]).toEqual([3, 13]);
   });
 
+  it("runs normalized random-distribution helpers on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ float bg_random_uniform(uint *state) {
+  *state = (*state * 1664525u) + 1013904223u;
+  return float(*state & 0x00ffffffu) / 16777216.0f;
+}
+__device__ float bg_random_normal(uint *state) {
+  return bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) +
+    bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) - 3.0f;
+}
+__device__ int bg_random_poisson4(uint *state) {
+  return int(bg_random_uniform(state) * 8.0f);
+}
+__global__ void generatedRandom(float* floats, int* ints) {
+  uint state = 1u;
+  floats[0] = bg_random_uniform(&state);
+  floats[1] = bg_random_normal(&state);
+  ints[0] = bg_random_poisson4(&state);
+  ints[1] = int(state);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { floats: new Float32Array(2), ints: new Int32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.floats as Float32Array]).toEqual([...expected.buffers.floats as Float32Array]);
+    expect([...actual.buffers.ints as Int32Array]).toEqual([...expected.buffers.ints as Int32Array]);
+    expect([...actual.buffers.ints as Int32Array]).toEqual([3, -1906155575]);
+  });
+
   it("runs f32 atomic max through WebGPU CAS loop", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(ATOMIC_MAX_FLOAT, { workgroupSize: [4, 1, 1] });

@@ -5583,6 +5583,45 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([5, 7]);
     });
 
+  it("lowers normalized random-distribution helpers as local-state semantic intrinsics", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ float bg_random_uniform(uint *state) {
+    *state = (*state * 1664525u) + 1013904223u;
+    return float(*state & 0x00ffffffu) / 16777216.0f;
+  }
+  __device__ float bg_random_normal(uint *state) {
+    return bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) +
+      bg_random_uniform(state) + bg_random_uniform(state) + bg_random_uniform(state) - 3.0f;
+  }
+  __device__ int bg_random_poisson4(uint *state) {
+    return int(bg_random_uniform(state) * 8.0f);
+  }
+  __global__ void generated_random(unsigned long long base_seed, int count, float* floats, int* ints) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total_threads = gridDim.x * blockDim.x;
+    uint state = uint(base_seed + static_cast<unsigned long long>(tid));
+    uint second_state = uint(static_cast<uint>(base_seed + 17u + tid));
+    for (int i = 0; i < count; ++i) {
+      const int idx = i * total_threads + tid;
+      floats[idx * 2] = bg_random_uniform(&state);
+      floats[idx * 2 + 1] = bg_random_normal(&state);
+      ints[idx * 3] = bg_random_poisson4(&state);
+      ints[idx * 3 + 1] = bg_random_uniform(&second_state) < 0.25f ? 1 : 0;
+      ints[idx * 3 + 2] = int(state);
+    }
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = { buffers: { floats: new Float32Array(2), ints: new Int32Array(3) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const result = runCompiledKernelSemanticReference(compiled, { ...input, scalars: { base_seed: 1, count: 1 } }, launch);
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("fn bg_random_uniform(state: ptr<function, u32>)");
+      expect(compiled.kernelIr.functions.map((fn) => fn.name)).not.toContain("bg_random_uniform");
+      expect([...result.buffers.floats as Float32Array]).toEqual([0.5326144695281982, -0.05544567108154297]);
+      expect([...result.buffers.ints as Int32Array]).toEqual([3, 1, -1906155575]);
+    });
+
   it("supports CUDA div_ceil and shared address conversion helpers", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void address_math(uint* out, int n) {

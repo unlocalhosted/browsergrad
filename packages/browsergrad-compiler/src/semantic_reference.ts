@@ -54,6 +54,7 @@ import {
   referenceVectorFromTuple,
   type ReferenceVector3,
 } from "./reference_vectors.js";
+import { isSemanticGeneratedRandomCall } from "./semantic_generated_random_intrinsics.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
   CompiledCudaLiteKernel,
@@ -623,7 +624,7 @@ function semanticReferenceAtomicSupported(
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
     semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression, "any", compiled) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled) || semanticReferenceVectorMathCallSupported(expression)) ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceGeneratedRandomCallSupported(expression) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression, "any", compiled) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled) || semanticReferenceVectorMathCallSupported(expression)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -667,6 +668,19 @@ function semanticReferenceCurandCallSupported(
     semanticCurandState(expression.args[stateIndex]!) !== undefined &&
     semanticCurandScalarArgumentIndices(expression.callee.name)
       .every((index) => semanticReferenceExpressionSupported(expression.args[index]!, "scalar", compiled));
+}
+
+function semanticReferenceGeneratedRandomCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): boolean {
+  return expression.callee.kind === "symbol" &&
+    isSemanticGeneratedRandomCall(expression.callee.name) &&
+    expression.args.length === 1 &&
+    expression.args[0]?.kind === "unary" &&
+    expression.args[0].operator === "&" &&
+    expression.args[0].argument.kind === "symbol" &&
+    expression.args[0].argument.addressSpace === "local" &&
+    expression.args[0].argument.valueType === "uint";
 }
 
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1071,7 +1085,7 @@ function semanticReferenceExpressionSupported(
       return compiled !== undefined && semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceAtomicCallSupported(expression, compiled) ||
-        semanticReferenceCurandCallSupported(expression, compiled) &&
+        (semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceGeneratedRandomCallSupported(expression)) &&
           (expected === "any" || !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression))) ||
         semanticReferenceSubgroupCallSupported(expression) ||
         semanticReferenceAddressPredicateCallSupported(expression) ||
@@ -1152,6 +1166,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
       semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
       semanticReferenceCurandCallSupported(expression, compiled) ||
+      semanticReferenceGeneratedRandomCallSupported(expression) ||
       semanticReferenceFunctionCallSupported(expression, compiled) ||
       semanticReferenceSubgroupCallSupported(expression) ||
       semanticReferenceAddressPredicateCallSupported(expression) ||
@@ -1916,6 +1931,33 @@ function evalSemanticCurandCall(
   throw semanticReferenceError(`semantic reference does not support cuRAND call '${expression.callee.name}'`, expression.span);
 }
 
+function evalSemanticGeneratedRandomCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (!semanticReferenceGeneratedRandomCallSupported(expression) || expression.callee.kind !== "symbol") {
+    throw semanticReferenceError("generated random helper expects local uint state", expression.span);
+  }
+  const address = expression.args[0]!;
+  if (address.kind !== "unary" || address.argument.kind !== "symbol") {
+    throw semanticReferenceError("generated random helper expects local uint state", expression.span);
+  }
+  const stateName = address.argument.name;
+  const uniform = (): number => {
+    const current = Number(context.locals.get(stateName) ?? 0) >>> 0;
+    const next = (Math.imul(current, 1664525) + 1013904223) >>> 0;
+    context.locals.set(stateName, next);
+    return Math.fround((next & 0x00ffffff) / 16777216);
+  };
+  if (expression.callee.name === "bg_random_uniform") return uniform();
+  if (expression.callee.name === "bg_random_normal") {
+    let sum = uniform();
+    for (let draw = 1; draw < 6; draw++) sum = Math.fround(sum + uniform());
+    return Math.fround(sum - 3);
+  }
+  return Math.trunc(Math.fround(uniform() * 8));
+}
+
 function semanticCurandState(expression: SemanticExpression | undefined): SemanticCurandState | undefined {
   if (!expression) return undefined;
   if (expression.kind === "unary" && expression.operator === "&") {
@@ -2232,6 +2274,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return evalSemanticCooperativeGroupCall(expression, context);
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
       if (semanticReferenceCurandCallSupported(expression, context.compiled)) return evalSemanticCurandCall(expression, context);
+      if (semanticReferenceGeneratedRandomCallSupported(expression)) return evalSemanticGeneratedRandomCall(expression, context);
       if (semanticReferenceSubgroupCallSupported(expression)) return evalSemanticSubgroupCall(expression, context);
       if (semanticReferenceAddressPredicateCallSupported(expression)) return evalSemanticAddressPredicateCall(expression);
       if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);

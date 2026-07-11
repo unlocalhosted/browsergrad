@@ -67,6 +67,10 @@ import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
 import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
+import {
+  isSemanticGeneratedRandomCall,
+  semanticGeneratedRandomReturnType,
+} from "./semantic_generated_random_intrinsics.js";
 import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.js";
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
@@ -584,7 +588,7 @@ export function lowerSemanticModelToKernelIr(
   const sharedMemoryValueTypes = new Map(sharedMemorySymbols.map((symbol) => [symbol.name, symbol.valueType] as const));
   const resolved = resolveSemanticFunctionOverloads(
     loweredOperations,
-    semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
+    semantic.functions.filter((fn) => reachable.functionNames.has(fn.name) && !isSemanticGeneratedRandomCall(fn.name)),
   );
   const specializedFunctions = specializeSharedPointerFunctions(
     resolved.operations,
@@ -1451,11 +1455,23 @@ function lowerExpression(
         const value = semanticSizeofAlignofValue(expression.callee.name, expression.args[0], scope);
         if (value !== undefined) return intNumberExpression(value, expression.span);
       }
+      const generatedRandom = expression.callee.kind === "identifier" && isSemanticGeneratedRandomCall(expression.callee.name)
+        ? semanticGeneratedRandomReturnType(expression.callee.name)
+        : undefined;
       const preservePointerArgs = expression.callee.kind === "identifier" &&
-        (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(expression.callee.name) || SEMANTIC_CURAND_CALLS.has(expression.callee.name));
+        (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(expression.callee.name) || SEMANTIC_CURAND_CALLS.has(expression.callee.name) || generatedRandom !== undefined);
       const args = expression.args.map((arg) => preservePointerArgs
         ? lowerExpression(arg, scope)
         : pointerAliasValueExpression(arg, scope, arg.span) ?? lowerExpression(arg, scope));
+      if (generatedRandom !== undefined && expression.callee.kind === "identifier") {
+        return {
+          kind: "call",
+          callee: { kind: "symbol", name: expression.callee.name, valueType: generatedRandom, addressSpace: "builtin", span: expression.callee.span },
+          args,
+          valueType: generatedRandom,
+          span: expression.span,
+        };
+      }
       const cooperativeShuffle = semanticCooperativeShuffleCall(expression, args, scope);
       if (cooperativeShuffle) return cooperativeShuffle;
       if (expression.callee.kind === "identifier" && CUDA_CACHE_HINT_LOADS.has(expression.callee.name)) {
