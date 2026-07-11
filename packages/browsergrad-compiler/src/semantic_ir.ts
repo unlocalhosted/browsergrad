@@ -600,9 +600,11 @@ export function lowerSemanticModelToKernelIr(
     sharedMemoryDimensions,
     sharedMemoryValueTypes,
   );
-  const barrierFunctions = semanticIrBarrierFunctionNames(specializedFunctions);
+  const localSpecializedFunctions = specializeLocalPointerFunctions(resolved.operations, specializedFunctions);
+  const constantSpecializedFunctions = specializeConstantPointerFunctions(resolved.operations, localSpecializedFunctions);
+  const barrierFunctions = semanticIrBarrierFunctionNames(constantSpecializedFunctions);
   const operations = promoteSemanticBarrierResultCalls(resolved.operations, barrierFunctions);
-  const functions = specializedFunctions.map((fn) => ({
+  const functions = constantSpecializedFunctions.map((fn) => ({
     ...fn,
     body: promoteSemanticBarrierResultCalls(fn.body, barrierFunctions),
   }));
@@ -629,6 +631,65 @@ export function lowerSemanticModelToKernelIr(
     barrierUniformity: analysis.barrierUniformity,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
+}
+
+function specializeLocalPointerFunctions(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+): readonly CudaLiteSemanticFunction[] {
+  const calls = [
+    ...collectSemanticFunctionCalls(operations),
+    ...functions.flatMap((fn) => collectSemanticFunctionCalls(fn.body)),
+  ];
+  return functions.map((fn) => {
+    const fnCalls = calls.filter((call) => call.callee === fn.name);
+    const localPointers = new Map<string, string>();
+    for (const [index, param] of fn.params.entries()) {
+      if (!param.pointer || param.addressSpace !== "storage" || param.dimensions.length !== 0) continue;
+      const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
+      if (refs.length > 0 && refs.every((ref) => ref?.addressSpace === "local" && ref.indices.length === 0)) {
+        localPointers.set(param.name, param.name);
+      }
+    }
+    if (localPointers.size === 0) return fn;
+    return {
+      ...fn,
+      params: fn.params.map((param) => localPointers.has(param.name) ? { ...param, addressSpace: "local" as const } : param),
+      body: rewriteSemanticPointerAddressSpace(fn.body, localPointers, "local"),
+    };
+  });
+}
+
+function specializeConstantPointerFunctions(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+): readonly CudaLiteSemanticFunction[] {
+  const calls = [
+    ...collectSemanticFunctionCalls(operations),
+    ...functions.flatMap((fn) => collectSemanticFunctionCalls(fn.body)),
+  ];
+  return functions.map((fn) => {
+    const fnCalls = calls.filter((call) => call.callee === fn.name);
+    const roots = new Map<string, string>();
+    for (const [index, param] of fn.params.entries()) {
+      if (!param.pointer || !param.constant || param.addressSpace !== "storage") continue;
+      const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
+      const root = refs[0]?.base;
+      if (root && refs.length > 0 && refs.every((ref) => ref?.addressSpace === "constant" && ref.base === root && ref.indices.length === 0)) {
+        roots.set(param.name, root);
+      }
+    }
+    if (roots.size === 0) return fn;
+    return {
+      ...fn,
+      params: fn.params.map((param) => roots.has(param.name) ? {
+        ...param,
+        addressSpace: "constant" as const,
+        pointerAliasOf: roots.get(param.name)!,
+      } : param),
+      body: rewriteSemanticPointerAddressSpace(fn.body, roots, "constant"),
+    };
+  });
 }
 
 function mutableKernelParamShadows(
@@ -806,46 +867,47 @@ function sameSemanticDimensions(dimensions: readonly (readonly number[])[]): boo
 function rewriteSemanticPointerAddressSpace(
   operations: readonly SemanticKernelIrOperation[],
   names: ReadonlyMap<string, string>,
+  addressSpace: "shared" | "constant" | "local" = "shared",
 ): readonly SemanticKernelIrOperation[] {
   return operations.map((operation) => {
-    if (operation.kind === "store") return { ...operation, target: rewriteSemanticMemoryRef(operation.target, names), value: rewriteSemanticExpressionAddressSpace(operation.value, names), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names)) };
-    if (operation.kind === "load") return { ...operation, source: rewriteSemanticMemoryRef(operation.source, names) };
-    if (operation.kind === "atomic") return { ...operation, ...(operation.target === undefined ? {} : { target: rewriteSemanticMemoryRef(operation.target, names) }), args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names)) };
-    if (operation.kind === "call") return { ...operation, args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names)), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names)) };
-    if (operation.kind === "declare") return operation.init === undefined ? operation : { ...operation, init: rewriteSemanticExpressionAddressSpace(operation.init, names) };
-    if (operation.kind === "expression") return { ...operation, expression: rewriteSemanticExpressionAddressSpace(operation.expression, names) };
-    if (operation.kind === "branch") return { ...operation, condition: rewriteSemanticExpressionAddressSpace(operation.condition, names), consequent: rewriteSemanticPointerAddressSpace(operation.consequent, names), alternate: rewriteSemanticPointerAddressSpace(operation.alternate, names) };
-    if (operation.kind === "loop") return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSemanticPointerAddressSpace([operation.init], names)[0]! : rewriteSemanticExpressionAddressSpace(operation.init, names) }), ...(operation.condition === undefined ? {} : { condition: rewriteSemanticExpressionAddressSpace(operation.condition, names) }), ...(operation.update === undefined ? {} : { update: rewriteSemanticExpressionAddressSpace(operation.update, names) }), body: rewriteSemanticPointerAddressSpace(operation.body, names) };
-    if (operation.kind === "block") return { ...operation, body: rewriteSemanticPointerAddressSpace(operation.body, names) };
-    if (operation.kind === "return" && operation.value) return { ...operation, value: rewriteSemanticExpressionAddressSpace(operation.value, names) };
+    if (operation.kind === "store") return { ...operation, target: rewriteSemanticMemoryRef(operation.target, names, addressSpace), value: rewriteSemanticExpressionAddressSpace(operation.value, names, addressSpace), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names, addressSpace)) };
+    if (operation.kind === "load") return { ...operation, source: rewriteSemanticMemoryRef(operation.source, names, addressSpace) };
+    if (operation.kind === "atomic") return { ...operation, ...(operation.target === undefined ? {} : { target: rewriteSemanticMemoryRef(operation.target, names, addressSpace) }), args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names, addressSpace)) };
+    if (operation.kind === "call") return { ...operation, args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names, addressSpace)), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names, addressSpace)) };
+    if (operation.kind === "declare") return operation.init === undefined ? operation : { ...operation, init: rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) };
+    if (operation.kind === "expression") return { ...operation, expression: rewriteSemanticExpressionAddressSpace(operation.expression, names, addressSpace) };
+    if (operation.kind === "branch") return { ...operation, condition: rewriteSemanticExpressionAddressSpace(operation.condition, names, addressSpace), consequent: rewriteSemanticPointerAddressSpace(operation.consequent, names, addressSpace), alternate: rewriteSemanticPointerAddressSpace(operation.alternate, names, addressSpace) };
+    if (operation.kind === "loop") return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSemanticPointerAddressSpace([operation.init], names, addressSpace)[0]! : rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) }), ...(operation.condition === undefined ? {} : { condition: rewriteSemanticExpressionAddressSpace(operation.condition, names, addressSpace) }), ...(operation.update === undefined ? {} : { update: rewriteSemanticExpressionAddressSpace(operation.update, names, addressSpace) }), body: rewriteSemanticPointerAddressSpace(operation.body, names, addressSpace) };
+    if (operation.kind === "block") return { ...operation, body: rewriteSemanticPointerAddressSpace(operation.body, names, addressSpace) };
+    if (operation.kind === "return" && operation.value) return { ...operation, value: rewriteSemanticExpressionAddressSpace(operation.value, names, addressSpace) };
     return operation;
   });
 }
 
-function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<string, string>): SemanticMemoryRef {
+function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<string, string>, addressSpace: "shared" | "constant" | "local"): SemanticMemoryRef {
   return {
     ...ref,
-    ...(names.has(ref.base) && ref.addressSpace === "storage" ? { base: names.get(ref.base)!, addressSpace: "shared" as const } : {}),
-    indices: ref.indices.map((index) => rewriteSemanticExpressionAddressSpace(index, names)),
+    ...(names.has(ref.base) && ref.addressSpace === "storage" ? { base: names.get(ref.base)!, addressSpace } : {}),
+    indices: ref.indices.map((index) => rewriteSemanticExpressionAddressSpace(index, names, addressSpace)),
   };
 }
 
-function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, string>): SemanticExpression {
+function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, string>, addressSpace: "shared" | "constant" | "local"): SemanticExpression {
   switch (expression.kind) {
-    case "symbol": return names.has(expression.name) && expression.addressSpace === "storage" ? { ...expression, name: names.get(expression.name)!, addressSpace: "shared" } : expression;
-    case "member": return { ...expression, object: rewriteSemanticExpressionAddressSpace(expression.object, names) };
-    case "index": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names), index: rewriteSemanticExpressionAddressSpace(expression.index, names), ...(expression.addressSpace === "storage" && expression.target.kind === "symbol" && names.has(expression.target.name) ? { addressSpace: "shared" } : {}) };
-    case "call": return { ...expression, callee: rewriteSemanticExpressionAddressSpace(expression.callee, names), args: expression.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names)) };
-    case "texture-read": return { ...expression, texture: rewriteSemanticExpressionAddressSpace(expression.texture, names), x: rewriteSemanticExpressionAddressSpace(expression.x, names), y: rewriteSemanticExpressionAddressSpace(expression.y, names), ...(expression.z === undefined ? {} : { z: rewriteSemanticExpressionAddressSpace(expression.z, names) }) };
-    case "surface-read": return { ...expression, surface: rewriteSemanticExpressionAddressSpace(expression.surface, names), xBytes: rewriteSemanticExpressionAddressSpace(expression.xBytes, names), y: rewriteSemanticExpressionAddressSpace(expression.y, names), ...(expression.z === undefined ? {} : { z: rewriteSemanticExpressionAddressSpace(expression.z, names) }) };
-    case "cast": return { ...expression, expression: rewriteSemanticExpressionAddressSpace(expression.expression, names) };
-    case "unary": return { ...expression, argument: rewriteSemanticExpressionAddressSpace(expression.argument, names) };
-    case "binary": return { ...expression, left: rewriteSemanticExpressionAddressSpace(expression.left, names), right: rewriteSemanticExpressionAddressSpace(expression.right, names) };
-    case "conditional": return { ...expression, condition: rewriteSemanticExpressionAddressSpace(expression.condition, names), consequent: rewriteSemanticExpressionAddressSpace(expression.consequent, names), alternate: rewriteSemanticExpressionAddressSpace(expression.alternate, names) };
-    case "assignment": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names), value: rewriteSemanticExpressionAddressSpace(expression.value, names) };
-    case "update": return { ...expression, argument: rewriteSemanticExpressionAddressSpace(expression.argument, names) };
-    case "initializer": return { ...expression, elements: expression.elements.map((item) => rewriteSemanticExpressionAddressSpace(item, names)) };
-    case "sequence": return { ...expression, expressions: expression.expressions.map((item) => rewriteSemanticExpressionAddressSpace(item, names)) };
+    case "symbol": return names.has(expression.name) && expression.addressSpace === "storage" ? { ...expression, name: names.get(expression.name)!, addressSpace } : expression;
+    case "member": return { ...expression, object: rewriteSemanticExpressionAddressSpace(expression.object, names, addressSpace) };
+    case "index": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names, addressSpace), index: rewriteSemanticExpressionAddressSpace(expression.index, names, addressSpace), ...(expression.addressSpace === "storage" && expression.target.kind === "symbol" && names.has(expression.target.name) ? { addressSpace } : {}) };
+    case "call": return { ...expression, callee: rewriteSemanticExpressionAddressSpace(expression.callee, names, addressSpace), args: expression.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names, addressSpace)) };
+    case "texture-read": return { ...expression, texture: rewriteSemanticExpressionAddressSpace(expression.texture, names, addressSpace), x: rewriteSemanticExpressionAddressSpace(expression.x, names, addressSpace), y: rewriteSemanticExpressionAddressSpace(expression.y, names, addressSpace), ...(expression.z === undefined ? {} : { z: rewriteSemanticExpressionAddressSpace(expression.z, names, addressSpace) }) };
+    case "surface-read": return { ...expression, surface: rewriteSemanticExpressionAddressSpace(expression.surface, names, addressSpace), xBytes: rewriteSemanticExpressionAddressSpace(expression.xBytes, names, addressSpace), y: rewriteSemanticExpressionAddressSpace(expression.y, names, addressSpace), ...(expression.z === undefined ? {} : { z: rewriteSemanticExpressionAddressSpace(expression.z, names, addressSpace) }) };
+    case "cast": return { ...expression, expression: rewriteSemanticExpressionAddressSpace(expression.expression, names, addressSpace) };
+    case "unary": return { ...expression, argument: rewriteSemanticExpressionAddressSpace(expression.argument, names, addressSpace) };
+    case "binary": return { ...expression, left: rewriteSemanticExpressionAddressSpace(expression.left, names, addressSpace), right: rewriteSemanticExpressionAddressSpace(expression.right, names, addressSpace) };
+    case "conditional": return { ...expression, condition: rewriteSemanticExpressionAddressSpace(expression.condition, names, addressSpace), consequent: rewriteSemanticExpressionAddressSpace(expression.consequent, names, addressSpace), alternate: rewriteSemanticExpressionAddressSpace(expression.alternate, names, addressSpace) };
+    case "assignment": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names, addressSpace), value: rewriteSemanticExpressionAddressSpace(expression.value, names, addressSpace) };
+    case "update": return { ...expression, argument: rewriteSemanticExpressionAddressSpace(expression.argument, names, addressSpace) };
+    case "initializer": return { ...expression, elements: expression.elements.map((item) => rewriteSemanticExpressionAddressSpace(item, names, addressSpace)) };
+    case "sequence": return { ...expression, expressions: expression.expressions.map((item) => rewriteSemanticExpressionAddressSpace(item, names, addressSpace)) };
     case "literal": return expression;
   }
 }

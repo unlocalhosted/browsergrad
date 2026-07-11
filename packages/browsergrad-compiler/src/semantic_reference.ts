@@ -193,6 +193,7 @@ interface SemanticReferenceContext {
   readonly sharedMemory: Map<string, WgslTypedArray>;
   readonly sharedOffsets: Map<string, number>;
   readonly storageOffsets: Map<string, number>;
+  readonly localPointerTargets: Map<string, { readonly ref: SemanticMemoryRef; readonly context: SemanticReferenceContext }>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly vectors: Readonly<Record<string, WgslTypedArray>>;
   readonly locals: Map<string, SemanticValue>;
@@ -270,6 +271,7 @@ export function runCompiledKernelSemanticReference(
                 sharedMemory,
                 sharedOffsets: new Map(),
                 storageOffsets: new Map(),
+                localPointerTargets: new Map(),
                 scalars,
                 vectors,
                 locals: new Map(),
@@ -736,7 +738,7 @@ function semanticReferenceFunctionCallSupported(
   const fn = compiled.kernelIr.functions.find((item) => item.name === callee);
   if (!fn || !semanticReferenceLocalValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
-  if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
+  if (fn.params.some((param) => param.pointer && param.addressSpace !== "constant") && !semanticReferencePointerFunctionBodySupported(fn)) return false;
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticReferenceLocalValueTypeSupported)) return false;
   if (!semanticReferenceFunctionBodyShapeSupported(fn.body, semanticReferenceFunctionHasSharedPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
@@ -4148,6 +4150,7 @@ function createSemanticFunctionContext(
   const sharedMemory = new Map(context.sharedMemory);
   const sharedOffsets = new Map(context.sharedOffsets);
   const storageOffsets = new Map(context.storageOffsets);
+  const localPointerTargets = new Map(context.localPointerTargets);
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
     if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, span);
@@ -4173,6 +4176,7 @@ function createSemanticFunctionContext(
       surfaces[param.name] = surface;
       continue;
     }
+    if (param.pointer && param.addressSpace === "constant" && param.pointerAliasOf !== undefined) continue;
     if (param.pointer && param.addressSpace === "storage") {
       const ref = semanticPointerArgMemoryRef(arg);
       if (!ref || ref.addressSpace !== "storage") throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled storage`, arg.span);
@@ -4193,6 +4197,14 @@ function createSemanticFunctionContext(
       sharedOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, context));
       continue;
     }
+    if (param.pointer && param.addressSpace === "local") {
+      const ref = semanticPointerArgMemoryRef(arg);
+      if (!ref || ref.addressSpace !== "local" || ref.indices.length !== 0) {
+        throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be a local scalar`, arg.span);
+      }
+      localPointerTargets.set(param.name, { ref, context });
+      continue;
+    }
     locals.set(param.name, isSemanticFloatVectorType(param.valueType)
       ? evalSemanticExpression(arg, context)
       : coerceSemanticScalarValue(evalNumber(arg, context), param.valueType));
@@ -4208,6 +4220,7 @@ function createSemanticFunctionContext(
     sharedMemory,
     sharedOffsets,
     storageOffsets,
+    localPointerTargets,
     scalars: context.scalars,
     vectors: context.vectors,
     locals,
@@ -4330,8 +4343,13 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     return value;
   }
   if (ref.addressSpace === "local") {
+    const target = context.localPointerTargets.get(ref.base);
+    if (target) return readMemory(localPointerTargetRef(target.ref, ref), target.context);
     const buffer = context.locals.get(ref.base);
-    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    if (!Array.isArray(buffer)) {
+      if (ref.indices.length === 0 && typeof buffer === "number") return buffer;
+      throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    }
     const index = flatIndex(ref, context);
     return Number(buffer[index] ?? 0);
   }
@@ -4384,8 +4402,19 @@ function readMemoryValue(ref: SemanticMemoryRef, context: SemanticReferenceConte
 function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticReferenceContext): void {
   if (ref.addressSpace === "constant") throw semanticReferenceError(`cannot write constant memory '${ref.base}'`, ref.span);
   if (ref.addressSpace === "local") {
+    const target = context.localPointerTargets.get(ref.base);
+    if (target) {
+      writeMemory(localPointerTargetRef(target.ref, ref), value, target.context);
+      return;
+    }
     const buffer = context.locals.get(ref.base);
-    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    if (!Array.isArray(buffer)) {
+      if (ref.indices.length === 0 && typeof buffer === "number") {
+        context.locals.set(ref.base, value);
+        return;
+      }
+      throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    }
     const index = flatIndex(ref, context);
     if (index >= 0 && index < buffer.length) buffer[index] = value;
     return;
@@ -4409,6 +4438,16 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   const ok = index >= 0 && index < buffer.length;
   if (ok) buffer[index] = value;
   context.trace.writes.push({ name: ref.base, index, value, ok });
+}
+
+function localPointerTargetRef(target: SemanticMemoryRef, access: SemanticMemoryRef): SemanticMemoryRef {
+  return {
+    ...target,
+    ...(access.valueType === undefined && target.valueType === undefined ? {} : { valueType: access.valueType ?? target.valueType! }),
+    indices: [...target.indices, ...access.indices.filter((index) => !(index.kind === "literal" && index.value === 0))],
+    fields: [...target.fields, ...access.fields],
+    span: access.span,
+  };
 }
 
 function packedSemanticSharedByteIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {

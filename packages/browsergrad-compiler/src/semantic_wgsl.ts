@@ -1173,6 +1173,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (semanticWgslLocalPackedByteRawView(ref, ir)) return true;
   if (semanticWgslPackedSharedByteRoot(ref, ir)) return semanticPackedSharedByteViewSupported(ref.valueType);
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
+  if (ref.addressSpace === "local" && semanticWgslFunctionLocalPointerParam(ir, ref.base)) return true;
   if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
   if (semanticWgslSharedScalarVectorView(ref, ir)) return true;
@@ -1507,7 +1508,7 @@ function semanticWgslFunctionCallSupported(
   const fn = ir.functions.find((item) => item.name === callee);
   if (!fn || !semanticWgslLocalValueTypeSupported(fn.returnType)) return false;
   if (fn.params.some((param) => !semanticWgslFunctionParamSupported(param))) return false;
-  if (fn.params.some((param) => param.pointer) && !semanticWgslPointerFunctionBodySupported(fn)) return false;
+  if (fn.params.some((param) => param.pointer && param.addressSpace !== "constant") && !semanticWgslPointerFunctionBodySupported(fn)) return false;
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslLocalValueTypeSupported)) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasSharedPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
@@ -2687,6 +2688,7 @@ function emitSemanticFunctionParamType(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
   atomicSharedPointer = false,
 ): string {
+  if (param.pointer && param.addressSpace === "local") return `ptr<function, ${wgslValueType(param.valueType)}>`;
   if (param.pointer && param.addressSpace === "shared") {
     if (param.pointerCarrierValueType === "uchar") {
       const words = Math.ceil((param.dimensions[0] ?? 1) / 4);
@@ -2709,6 +2711,7 @@ function emitSemanticFunctionParams(
   atomicSharedPointer = false,
   mutableValueParam = false,
 ): readonly string[] {
+  if (param.pointer && param.addressSpace === "constant" && param.pointerAliasOf !== undefined) return [];
   if (param.cooperativeGroupKind !== undefined) {
     return [
       `${semanticCooperativeGroupRankParamName(param.name)}: i32`,
@@ -4154,6 +4157,7 @@ function emitSemanticFunctionArgs(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
+  if (param?.pointer && param.addressSpace === "constant" && param.pointerAliasOf !== undefined) return [];
   if (param?.cooperativeGroupKind !== undefined) {
     if (arg.kind !== "symbol") throw semanticWgslError("semantic WGSL cooperative-group argument must be a symbol", arg.span);
     const groupCall = (property: "thread_rank" | "size"): Extract<SemanticExpression, { readonly kind: "call" }> => ({
@@ -4177,6 +4181,13 @@ function emitSemanticFunctionArgs(
       ? `&${nameFor(ref.base, names)}`
       : nameFor(sourceParam.pointerAliasOf ?? sourceParam.name, names);
     return param.pointerAliasOf === undefined ? [pointer, base] : [base];
+  }
+  if (param?.pointer && param.addressSpace === "local") {
+    const ref = semanticPointerArgMemoryRef(arg);
+    if (!ref || ref.addressSpace !== "local" || ref.indices.length !== 0) {
+      throw semanticWgslError("semantic WGSL local pointer helper argument must be a local scalar", arg.span);
+    }
+    return [`&${nameFor(ref.base, names)}`];
   }
   if (param?.pointer && param.addressSpace === "storage") {
     const ref = semanticPointerArgMemoryRef(arg);
@@ -5579,6 +5590,12 @@ function emitSemanticMemoryRef(
     return `${nameFor(ref.base, names)}[${emitFlatDeviceGlobalIndex(symbol, ref.indices, ir, names, ref.span)}]`;
   }
   if (ref.addressSpace === "local") {
+    if (semanticWgslFunctionLocalPointerParam(ir, ref.base)) {
+      if (ref.indices.length > 1 || ref.indices[0] && !semanticExpressionIsZero(ref.indices[0])) {
+        throw semanticWgslError(`local scalar pointer '${ref.base}' cannot be indexed`, ref.span);
+      }
+      return `*${nameFor(ref.base, names)}`;
+    }
     const local = localMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
     if (!local && ref.indices.length === 0) return nameFor(ref.base, names);
     if (!local) throw semanticWgslError(`unknown local memory '${ref.base}'`, ref.span);
@@ -5602,6 +5619,15 @@ function emitSemanticMemoryRef(
     return `${nameFor(ref.base, names)}[${emitFlatSharedIndex(shared, ref.indices, ir, names)}]`;
   }
   throw semanticWgslError(`semantic WGSL does not support ${ref.addressSpace} memory refs`, ref.span);
+}
+
+function semanticWgslFunctionLocalPointerParam(
+  ir: SemanticKernelIrModule,
+  name: string,
+): SemanticKernelIrModule["functions"][number]["params"][number] | undefined {
+  return ir.functions.flatMap((fn) => fn.params).find((param) =>
+    param.name === name && param.pointer && param.addressSpace === "local" && param.dimensions.length === 0
+  );
 }
 
 function emitSemanticAtomicLoad(ref: SemanticMemoryRef, memoryRef: string): string {

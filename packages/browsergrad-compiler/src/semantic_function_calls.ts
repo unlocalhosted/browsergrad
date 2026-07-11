@@ -16,7 +16,12 @@ export function semanticFunctionParamContractSupported(
   valueTypeSupported: (valueType: CudaLiteScalarType | undefined) => boolean,
 ): boolean {
   if (param.cooperativeGroupKind !== undefined) return !param.pointer && param.addressSpace === "local";
-  if (param.pointer) return (param.addressSpace === "storage" || param.addressSpace === "shared") && valueTypeSupported(param.valueType);
+  if (param.pointer) return (
+    param.addressSpace === "storage" ||
+    param.addressSpace === "shared" ||
+    param.addressSpace === "local" && param.dimensions.length === 0 ||
+    param.addressSpace === "constant" && param.pointerAliasOf !== undefined
+  ) && valueTypeSupported(param.valueType);
   return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";
 }
 
@@ -36,7 +41,10 @@ export function semanticFunctionArgAddressContractSupported(
   if (param.cooperativeGroupKind !== undefined) return arg.kind === "symbol";
   if (param.pointer) {
     const ref = pointerRef(arg);
-    return (param.addressSpace === "storage" || param.addressSpace === "shared") && ref?.addressSpace === param.addressSpace;
+    if (param.addressSpace === "constant" && param.pointerAliasOf !== undefined) {
+      return ref?.addressSpace === "constant" && ref.base === param.pointerAliasOf;
+    }
+    return (param.addressSpace === "storage" || param.addressSpace === "shared" || param.addressSpace === "local") && ref?.addressSpace === param.addressSpace;
   }
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
   if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";
@@ -100,7 +108,7 @@ export function semanticPointerFunctionBodySupported(
   options: SemanticPointerFunctionBodyOptions = {},
 ): boolean {
   const pointerParams = new Set(fn.params
-    .filter((param) => param.pointer && (param.addressSpace === "storage" || param.addressSpace === "shared"))
+    .filter((param) => param.pointer && (param.addressSpace === "storage" || param.addressSpace === "shared" || param.addressSpace === "local"))
     .map((param) => param.name));
   const allowedMemoryRoots = new Set(pointerParams);
   if (options.allowSharedMemory) collectSemanticFunctionSharedRoots(fn.body, allowedMemoryRoots);

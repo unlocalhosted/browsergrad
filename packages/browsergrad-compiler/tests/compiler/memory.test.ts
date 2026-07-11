@@ -4993,10 +4993,69 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32, 3>");
-      expect(compiled.wgsl).toContain("return coeffs[index]");
+      expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32>");
+      expect(compiled.wgsl).toContain("return coeffs[u32(index)]");
       expect([...result.buffers.out as Float32Array]).toEqual([7]);
     });
+
+  it("specializes vector constant roots in device pointer helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __constant__ float4 matrix[1];
+  __device__ float4 add_row(const float4 *rows, float4 value) {
+    return rows[0] + value;
+  }
+  __global__ void apply(float *out) {
+    float3 value = make_float3(add_row(matrix, make_float4(1.0f, 2.0f, 3.0f, 4.0f)));
+    out[0] = value.x;
+    out[1] = value.y;
+    out[2] = value.z;
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = {
+        buffers: { out: new Float32Array(3) },
+        constants: { matrix: new Float32Array([10, 20, 30, 40]) },
+      };
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        input,
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      const helper = compiled.kernelIr.functions.find((fn) => fn.name === "add_row");
+
+      expect(helper?.params[0]?.addressSpace).toBe("constant");
+      expect(helper?.params[0]?.pointerAliasOf).toBe("matrix");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("fn add_row(value: vec4<f32>");
+      expect(compiled.wgsl).toContain("vec4<f32>(matrix[");
+      expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33]);
+    });
+
+  it("passes local scalar out-pointers through semantic device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int bounds(float value, float *low, float *high) {
+  *low = value - 1.0f;
+  *high = value + 1.0f;
+  return 1;
+}
+__global__ void localOut(float *out) {
+  float low, high;
+  int hit = bounds(4.0f, &low, &high);
+  out[0] = low;
+  out[1] = high;
+  out[2] = hit;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("low: ptr<function, f32>");
+    expect(compiled.wgsl).toContain("bounds(4.0, &low, &high");
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 1]);
+  });
 
   it("supports local read pointers into CUDA constant arrays", () => {
       const compiled = compileCudaLiteKernel(`

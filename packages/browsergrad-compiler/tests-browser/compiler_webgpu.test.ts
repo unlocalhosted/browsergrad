@@ -547,6 +547,32 @@ __global__ void offsetPointerDeref(uint *data, uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([10, 20, 11, 21]);
   });
 
+  it("runs local scalar out-pointer helpers through semantic IR on native WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ int bounds(float value, float *low, float *high) {
+  *low = value - 1.0f;
+  *high = value + 1.0f;
+  return 1;
+}
+__global__ void localOut(float *out) {
+  float low, high;
+  int hit = bounds(4.0f, &low, &high);
+  out[0] = low;
+  out[1] = high;
+  out[2] = hit;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(3) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([3, 5, 1]);
+  });
+
   it("runs common CUDA float math builtins through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(FLOAT_MATH, { workgroupSize: [2, 1, 1] });

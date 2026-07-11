@@ -2,7 +2,7 @@ import type { SemanticExpression, SemanticMemoryRef } from "./semantic_ir.js";
 
 export function semanticPointerArgumentMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {
   if (expression.kind === "symbol") {
-    if (expression.addressSpace !== "storage" && expression.addressSpace !== "shared") return undefined;
+    if (expression.addressSpace !== "storage" && expression.addressSpace !== "shared" && expression.addressSpace !== "constant" && expression.addressSpace !== "local") return undefined;
     return {
       base: expression.name,
       addressSpace: expression.addressSpace,
