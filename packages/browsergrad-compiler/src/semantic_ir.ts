@@ -70,6 +70,7 @@ import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
 import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.js";
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
+import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -3151,6 +3152,11 @@ function memberValueType(object: SemanticExpression, property: string): CudaLite
     if (builtinType) return builtinType;
   }
   const objectType = expressionValueType(object);
+  const storageFields = semanticStorageVectorFieldIndices(objectType, property);
+  if (objectType === "complex64" && storageFields !== undefined) {
+    if (storageFields.length === 1) return "float";
+    return "float2";
+  }
   const swizzleType = cudaVectorSwizzleType(objectType, property);
   if (swizzleType !== undefined) {
     return swizzleType;

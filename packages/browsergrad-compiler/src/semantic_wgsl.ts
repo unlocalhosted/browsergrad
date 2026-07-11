@@ -161,6 +161,7 @@ import { semanticVectorMathCallSupported } from "./semantic_vector_math.js";
 import {
   semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
+  semanticStorageVectorFieldIndices,
   semanticStorageVectorType,
   semanticValueTypeSupported,
 } from "./semantic_value_types.js";
@@ -248,7 +249,7 @@ import {
 } from "./semantic_wgsl_texture_descriptors.js";
 import { emitCubeTextureAtlasHelpers } from "./wgsl_texture_surface.js";
 import { semanticUniformLayout } from "./semantic_uniform_layout.js";
-import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, isCudaVectorType } from "./vector_types.js";
 import {
   rewriteF16BindingsToF32,
   rewriteF16WgslToF32,
@@ -1180,8 +1181,8 @@ function semanticWgslCopySupported(
 
 function semanticWgslVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared" && ref.addressSpace !== "local") return false;
-  if (ref.fields.length !== 1 || !isCudaVectorType(ref.containerValueType)) return false;
-  const lanes = cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!);
+  if (ref.fields.length !== 1) return false;
+  const lanes = semanticStorageVectorFieldIndices(ref.containerValueType, ref.fields[0]!);
   if (lanes === undefined || new Set(lanes).size !== lanes.length) return false;
   return ref.indices.length > 0 && ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
 }
@@ -1354,8 +1355,7 @@ function semanticWgslVectorMemberSupported(
 ): boolean {
   const valueType = semanticExpressionValueType(expression.object);
   return semanticWgslExpressionSupported(expression.object, "any", ir) &&
-    isCudaVectorType(valueType) &&
-    cudaVectorSwizzleType(valueType, expression.property) !== undefined;
+    semanticStorageVectorFieldIndices(valueType, expression.property) !== undefined;
 }
 
 function semanticWgslVectorIndexSupported(
@@ -2477,9 +2477,9 @@ function emitSemanticVectorFieldMemoryWrite(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
-  const containerType = operation.target.containerValueType;
-  if (!isCudaVectorType(containerType)) throw semanticWgslError("semantic WGSL vector field write requires vector container", operation.span);
-  const lanes = cudaVectorSwizzleIndices(containerType, operation.target.fields[0] ?? "");
+  const containerType = semanticStorageVectorType(operation.target.containerValueType);
+  if (!containerType) throw semanticWgslError("semantic WGSL vector field write requires vector container", operation.span);
+  const lanes = semanticStorageVectorFieldIndices(operation.target.containerValueType, operation.target.fields[0] ?? "");
   if (lanes === undefined) throw semanticWgslError("semantic WGSL vector field write requires modeled lanes", operation.span);
   if (semanticWgslSharedVectorMemoryRef({ ...operation.target, valueType: containerType, fields: [] }, ir)) {
     const target = emitSemanticMemoryRef({ ...operation.target, valueType: containerType, fields: [] }, ir, names, options);
@@ -5343,7 +5343,7 @@ function emitSemanticMember(
         return `num_workgroups.${expression.property}`;
     }
   }
-  if (!isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.object, ir?.functions))) {
+  if (semanticStorageVectorType(semanticExpressionVectorValueType(expression.object, ir?.functions)) === undefined) {
     throw semanticWgslError("semantic WGSL supports builtin vector members only", expression.span);
   }
   return `${emitSemanticExpression(expression.object, ir, names, options)}.${semanticVectorFieldName(expression)}`;
@@ -5351,7 +5351,7 @@ function emitSemanticMember(
 
 function semanticVectorFieldName(expression: Extract<SemanticExpression, { readonly kind: "member" }>): string {
   const valueType = semanticExpressionVectorValueType(expression.object);
-  const fields = valueType === undefined ? undefined : cudaVectorSwizzleIndices(valueType, expression.property);
+  const fields = semanticStorageVectorFieldIndices(valueType, expression.property);
   return fields?.map((field) => ["x", "y", "z", "w"][field]).join("") ?? expression.property;
 }
 

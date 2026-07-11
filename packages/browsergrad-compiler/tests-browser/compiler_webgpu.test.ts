@@ -3060,6 +3060,32 @@ __global__ void complex_helper(cufftComplex* a, cufftComplex* b, float scale) {
     expect([...actual.buffers.a as Float32Array]).toEqual([-3.5, 8, -5.5, 26]);
   });
 
+  it("runs direct cufftComplex lane reads and writes through semantic WGSL", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale) {
+  int i = threadIdx.x;
+  dst[i].x = -src[i].x / scale;
+  dst[i].y = -src[i].y / scale;
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        src: new Float32Array([2, -4, 6, -8]),
+        dst: new Float32Array(4),
+      },
+      scalars: { scale: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
+    expect([...actual.buffers.dst as Float32Array]).toEqual([-1, 2, -3, 4]);
+  });
+
   it("runs supported inline PTX fma through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(ASM_FMA, { workgroupSize: [2, 1, 1] });

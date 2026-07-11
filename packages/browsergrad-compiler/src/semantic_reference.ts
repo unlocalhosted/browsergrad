@@ -162,12 +162,13 @@ import {
   semanticLocalScalarValueTypeSupported,
   semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
+  semanticStorageVectorFieldIndices,
   semanticStorageVectorType,
   semanticValueTypeSupported,
 } from "./semantic_value_types.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
-import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
+import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, isCudaVectorType } from "./vector_types.js";
 import {
   semanticCooperativeGroupInfo,
   semanticCooperativeGroupRankParamName,
@@ -584,8 +585,8 @@ function semanticReferenceCopySupported(
 }
 
 function semanticReferenceVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  if (ref.fields.length !== 1 || !isCudaVectorType(ref.containerValueType)) return false;
-  const lanes = cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!);
+  if (ref.fields.length !== 1) return false;
+  const lanes = semanticStorageVectorFieldIndices(ref.containerValueType, ref.fields[0]!);
   if (lanes === undefined || new Set(lanes).size !== lanes.length) return false;
   return ref.indices.length > 0 && ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
 }
@@ -1259,8 +1260,7 @@ function semanticReferenceVectorMemberSupported(
 ): boolean {
   const valueType = semanticExpressionValueType(expression.object);
   return semanticReferenceExpressionSupported(expression.object, "any", compiled) &&
-    isCudaVectorType(valueType) &&
-    cudaVectorSwizzleType(valueType, expression.property) !== undefined;
+    semanticStorageVectorFieldIndices(valueType, expression.property) !== undefined;
 }
 
 function execSemanticOperations(
@@ -4539,14 +4539,15 @@ function semanticCopyMemoryRefAt(ref: SemanticMemoryRef, offset: number): Semant
 }
 
 function vectorFieldMemoryLanes(ref: SemanticMemoryRef): readonly number[] | undefined {
-  return isCudaVectorType(ref.containerValueType) && ref.fields.length === 1
-    ? cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!)
+  return ref.fields.length === 1
+    ? semanticStorageVectorFieldIndices(ref.containerValueType, ref.fields[0]!)
     : undefined;
 }
 
 function readVectorContainerMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number[] {
-  if (!isCudaVectorType(ref.containerValueType)) throw semanticReferenceError("semantic reference vector field requires vector container", ref.span);
-  const laneCount = cudaVectorLaneCount(ref.containerValueType);
+  const containerType = semanticStorageVectorType(ref.containerValueType);
+  if (!containerType) throw semanticReferenceError("semantic reference vector field requires vector container", ref.span);
+  const laneCount = cudaVectorLaneCount(containerType);
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
@@ -4573,8 +4574,9 @@ function readVectorContainerMemory(ref: SemanticMemoryRef, context: SemanticRefe
 }
 
 function writeVectorContainerMemory(ref: SemanticMemoryRef, value: readonly number[], context: SemanticReferenceContext): void {
-  if (!isCudaVectorType(ref.containerValueType)) throw semanticReferenceError("semantic reference vector field requires vector container", ref.span);
-  const laneCount = cudaVectorLaneCount(ref.containerValueType);
+  const containerType = semanticStorageVectorType(ref.containerValueType);
+  if (!containerType) throw semanticReferenceError("semantic reference vector field requires vector container", ref.span);
+  const laneCount = cudaVectorLaneCount(containerType);
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);

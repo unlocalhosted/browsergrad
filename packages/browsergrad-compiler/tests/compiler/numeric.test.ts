@@ -2672,8 +2672,10 @@ __global__ void shared_helper_result(int *out, int n) {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("var<storage, read_write> data: array<vec2<f32>>;");
-      expect(compiled.wgsl).toContain("data[u32(idx)].x");
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("var<storage, read_write> data: array<f32>;");
+      expect(compiled.wgsl).toContain("data[((u32(idx) * 2u) + 0u)]");
+      expect(compiled.wgsl).toContain("data[((u32(idx) * 2u) + 1u)]");
       expect([...result.buffers.mag as Float32Array]).toEqual([5, 13]);
     });
 
@@ -2739,6 +2741,33 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(compiled.wgsl).toContain("a[((u32(i) * 2u) + 1u)]");
       expect(compiled.wgsl).not.toContain("f32(vec2<f32>");
       expect([...result.buffers.a as Float32Array]).toEqual([-3.5, 8, -5.5, 26]);
+    });
+
+  it("lowers direct cufftComplex lane reads and writes through semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void complexLanes(cufftComplex *src, cufftComplex *dst, float scale) {
+    int i = threadIdx.x;
+    dst[i].x = -src[i].x / scale;
+    dst[i].y = -src[i].y / scale;
+  }`, { workgroupSize: [2, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {
+            src: new Float32Array([2, -4, 6, -8]),
+            dst: new Float32Array(4),
+          },
+          scalars: { scale: 2 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("dst[((u32(i) * 2u) + 0u)]");
+      expect(compiled.wgsl).toContain("dst[((u32(i) * 2u) + 1u)]");
+      expect([...result.buffers.dst as Float32Array]).toEqual([-1, 2, -3, 4]);
     });
 
   it("lowers cuComplex helper builtins natively", () => {
