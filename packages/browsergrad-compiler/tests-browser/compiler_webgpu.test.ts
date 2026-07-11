@@ -4699,6 +4699,29 @@ __global__ void half_inc(half* x) {
     expect(Array.from(actual.buffers.x as Iterable<number>)).toEqual(Array.from(expected.buffers.x as Iterable<number>));
   });
 
+  it("keeps early-return lanes inactive while all lanes reach a later barrier", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void early_return_barrier(float *x, int limit) {
+  __shared__ float scratch[4];
+  int tid = threadIdx.x;
+  if (tid >= limit) {
+    scratch[tid] = 0.0f;
+    return;
+  }
+  scratch[tid] = x[tid];
+  __syncthreads();
+  x[tid] = scratch[tid] + 1.0f;
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { limit: 3 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
+    expect([...actual.buffers.x as Float32Array]).toEqual([2, 3, 4, 4]);
+  });
+
   it("runs compiled half2 vector storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });

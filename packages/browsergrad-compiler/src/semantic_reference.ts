@@ -502,7 +502,9 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
   }
   if (shared.length === 0) return true;
   const proof = compiled.kernelIr.barrierUniformity.kernel;
-  return semanticBarrierOperationsMatchUniformityProof(compiled.kernelIr.operations, proof, semanticBarrierFunctionNames(compiled.kernelIr));
+  return (ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane") &&
+      semanticBarrierShapeSupported(ir.operations, barrierFunctions)) ||
+    semanticBarrierOperationsMatchUniformityProof(ir.operations, proof, barrierFunctions);
 }
 
 function semanticReferenceLoopInitSupported(

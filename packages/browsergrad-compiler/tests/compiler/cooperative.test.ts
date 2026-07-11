@@ -327,7 +327,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { buffers: { out: new Float32Array(4) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { out: new Float32Array(4) } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
@@ -2148,17 +2148,19 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     __syncthreads();
     x[tid] = scratch[tid] + 1.0f;
   }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
-      const result = runCompiledKernelReference(
+      const result = runCompiledKernelSemanticReference(
         compiled,
-        { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 4 } },
+        { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 3 } },
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
       expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
-      expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
+      expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 4]);
     });
 
   it("keeps barriers uniform inside tiled loops after active-lane early returns", () => {
@@ -2233,9 +2235,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
-      expect(compiled.wgsl).toContain("if (bg_active_lane) {\n    scratch[tid] = f32(x[tid]);\n  }");
+      expect(compiled.wgsl).toContain("scratch[u32(tid)] = x[u32(tid)];");
       expect(compiled.wgsl).not.toContain("return;");
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
     });
@@ -2378,7 +2381,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("scratch[tid] =");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("scratch[u32(tid)] =");
       expect(compiled.wgsl).toContain("100u");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
       expect(compiled.wgsl).not.toContain("return;");

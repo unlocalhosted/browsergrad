@@ -936,8 +936,9 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("100.0");
-      expect(compiled.wgsl).toContain("bg_surf2dwrite_surf");
+      expect(compiled.wgsl).toContain("surf[");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
     });
 

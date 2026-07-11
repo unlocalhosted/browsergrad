@@ -793,7 +793,8 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
   if (!containsBarrier) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
   if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
   if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
-    return operationsHaveOnlyTopLevelBarriers(ir.operations);
+    const activeLaneLowered = ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane");
+    return (activeLaneLowered && semanticBarrierShapeSupported(ir.operations, barrierFunctions)) || operationsHaveOnlyTopLevelBarriers(ir.operations);
   }
   return (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
       semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
@@ -6128,6 +6129,7 @@ function semanticMathCallReturnsHalf(callee: string): boolean {
 
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {
   const type = expectedType ?? wgslScalar(valueType);
+  if (type === "bool") return value === 0 ? "false" : "true";
   if (type === "u32") return `${Math.trunc(value) >>> 0}u`;
   if (type === "i32" && value > 2147483647) return `bitcast<i32>(${Math.trunc(value) >>> 0}u)`;
   if (type === "i32") return String(Math.trunc(value));
