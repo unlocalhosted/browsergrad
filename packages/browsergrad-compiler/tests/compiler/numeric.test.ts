@@ -2731,8 +2731,12 @@ __global__ void shared_helper_result(int *out, int n) {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn ComplexMul");
-      expect(compiled.wgsl).toContain("a[u32(i)] = ComplexScale");
+      expect(compiled.wgsl).toContain("a[((u32(i) * 2u) + 0u)]");
+      expect(compiled.wgsl).toContain("a[((u32(i) * 2u) + 1u)]");
       expect(compiled.wgsl).not.toContain("f32(vec2<f32>");
       expect([...result.buffers.a as Float32Array]).toEqual([-3.5, 8, -5.5, 26]);
     });

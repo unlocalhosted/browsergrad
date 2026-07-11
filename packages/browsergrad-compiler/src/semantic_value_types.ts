@@ -22,3 +22,8 @@ export function semanticValueTypeSupported(valueType: CudaLiteScalarType | undef
 export function semanticLocalValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return semanticLocalScalarValueTypeSupported(valueType) || isSemanticFloatVectorType(valueType);
 }
+
+export function semanticStorageVectorType(valueType: CudaLiteScalarType | undefined): CudaLiteScalarType | undefined {
+  if (valueType === "complex64") return "float2";
+  return isSemanticFloatVectorType(valueType) ? valueType : undefined;
+}

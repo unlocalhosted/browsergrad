@@ -162,6 +162,7 @@ import {
   semanticLocalScalarValueTypeSupported,
   semanticLocalValueTypeSupported,
   semanticScalarValueTypeSupported,
+  semanticStorageVectorType,
   semanticValueTypeSupported,
 } from "./semantic_value_types.js";
 import { classifyInlineAsm } from "./features/inline_ptx/model.js";
@@ -422,7 +423,7 @@ function semanticReferenceParamSupported(
   if (param.addressSpace === "storage") {
     return Boolean(param.pointer) && (param.valueType === "uchar"
       ? semanticDirectByteStorageParamSupported(compiled.kernelIr, param.name)
-      : semanticReferenceValueTypeSupported(param.valueType));
+      : param.valueType === "complex64" || semanticReferenceValueTypeSupported(param.valueType));
   }
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType) || isCudaVectorType(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
@@ -1605,7 +1606,7 @@ function storeValueExpression(
     const left = readMemoryValue(operation.target, context);
     return evalVectorFieldAssignment(operation.operator, left, right, operation.span);
   }
-  if (isSemanticFloatVectorType(operation.target.valueType)) {
+  if (semanticStorageVectorType(operation.target.valueType) !== undefined) {
     const right = evalSemanticExpression(operation.value, context);
     if (operation.operator === "=") return right;
     const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
@@ -2454,7 +2455,7 @@ function readIndexExpression(expression: Extract<SemanticExpression, { kind: "in
   }
   const ref = memoryRefFromIndexExpression(expression);
   if (!ref) throw semanticReferenceError("semantic reference supports only direct storage indexing", expression.span);
-  if (isSemanticFloatVectorType(ref.valueType)) return readVectorMemory(ref, context);
+  if (semanticStorageVectorType(ref.valueType) !== undefined) return readVectorMemory(ref, context);
   return readMemory(ref, context);
 }
 
@@ -4413,8 +4414,9 @@ function atomicMemoryUsesFloatBits(ref: SemanticMemoryRef, context: SemanticRefe
 }
 
 function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number[] {
-  if (!isSemanticFloatVectorType(ref.valueType)) throw semanticReferenceError("semantic reference vector read requires vector memory type", ref.span);
-  const laneCount = cudaVectorLaneCount(ref.valueType);
+  const valueType = semanticStorageVectorType(ref.valueType);
+  if (!valueType) throw semanticReferenceError("semantic reference vector read requires vector memory type", ref.span);
+  const laneCount = cudaVectorLaneCount(valueType);
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
@@ -4467,13 +4469,14 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     writeVectorContainerMemory(ref, next, context);
     return;
   }
-  if (!isSemanticFloatVectorType(ref.valueType)) {
+  const vectorType = semanticStorageVectorType(ref.valueType);
+  if (!vectorType) {
     if (typeof value !== "number") throw semanticReferenceError("semantic reference scalar write received vector value", ref.span);
     writeMemory(ref, coerceSemanticScalarValue(value, ref.valueType), context);
     return;
   }
   if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector write received scalar value", ref.span);
-  const laneCount = cudaVectorLaneCount(ref.valueType);
+  const laneCount = cudaVectorLaneCount(vectorType);
   if (ref.addressSpace === "local") {
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
@@ -4600,8 +4603,8 @@ function writeVectorContainerMemory(ref: SemanticMemoryRef, value: readonly numb
 function semanticReferenceVectorStorageStride(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
   const root = context.compiled.kernelIr.params.find((param) => param.name === ref.base) ??
     context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
-  const valueType = root?.valueType;
-  return isSemanticFloatVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
+  const valueType = semanticStorageVectorType(root?.valueType);
+  return valueType === undefined ? 1 : cudaVectorLaneCount(valueType);
 }
 
 function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
