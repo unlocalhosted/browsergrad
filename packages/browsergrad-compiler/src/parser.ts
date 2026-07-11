@@ -1044,6 +1044,7 @@ class Parser {
         storage: storageInfo.storage,
         valueType,
         pointer,
+        ...(!constexpr && !constQualified ? {} : { constant: true }),
         ...(packedByteLanes === undefined ? {} : { packedByteLanes }),
         name: name.value,
         dimensions,

@@ -38,6 +38,7 @@ import {
   type CompiledCudaLiteKernel,
   type CompiledKernelInput,
   type CompileCudaLiteOptions,
+  type CudaLiteDiagnostic,
   type KernelLaunch,
   type ReferenceKernelResult,
 } from "./types.js";
@@ -86,6 +87,7 @@ export function compileCudaLiteKernel(
   }
   const semantic = createCudaLiteSemanticModel(analysis);
   const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
+  const diagnostics = reconcileSemanticRuntimeDiagnostics(analysis.diagnostics, kernelIr.operations);
   const semanticWgslOptions = {
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
@@ -103,7 +105,7 @@ export function compileCudaLiteKernel(
         ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
       },
     );
-  const loweringPlan = createCudaLoweringPlan(analysis.diagnostics);
+  const loweringPlan = createCudaLoweringPlan(diagnostics);
   return {
     ast,
     semantic,
@@ -111,7 +113,7 @@ export function compileCudaLiteKernel(
     analysis,
     wgsl: emitted.wgsl,
     wgslProgram: emitted.program,
-    diagnostics: analysis.diagnostics,
+    diagnostics,
     loweringPlan,
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
     ...(options.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: options.dynamicSharedMemory }),
@@ -119,6 +121,30 @@ export function compileCudaLiteKernel(
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
   };
+}
+
+function reconcileSemanticRuntimeDiagnostics(
+  diagnostics: readonly CudaLiteDiagnostic[],
+  operations: CompiledCudaLiteKernel["kernelIr"]["operations"],
+): readonly CudaLiteDiagnostic[] {
+  const hasDeviceLaunch = semanticOperationsContainKind(operations, "device-launch");
+  return diagnostics.filter((diagnostic) =>
+    diagnostic.code !== "cuda-dynamic-launch-host-orchestration" || hasDeviceLaunch,
+  );
+}
+
+function semanticOperationsContainKind(
+  operations: CompiledCudaLiteKernel["kernelIr"]["operations"],
+  kind: CompiledCudaLiteKernel["kernelIr"]["operations"][number]["kind"],
+): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === kind) return true;
+    if (operation.kind === "block" || operation.kind === "loop") return semanticOperationsContainKind(operation.body, kind);
+    if (operation.kind === "branch") {
+      return semanticOperationsContainKind(operation.consequent, kind) || semanticOperationsContainKind(operation.alternate, kind);
+    }
+    return false;
+  });
 }
 
 function validateTextureDescriptorOptions(options: CompileCudaLiteOptions): void {

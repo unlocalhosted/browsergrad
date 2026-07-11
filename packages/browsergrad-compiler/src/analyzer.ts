@@ -521,6 +521,7 @@ export function analyzeCudaLite(
       kind: statement.storage === "shared" ? "shared" : "local",
       valueType: statement.valueType,
       pointer: statement.pointer,
+      ...(statement.constant === undefined ? {} : { constant: statement.constant }),
       ...(pointerRoot ? { pointerRoot } : {}),
       dimensions,
       ...(statement.matrixTile === undefined ? {} : { matrixTile: statement.matrixTile }),

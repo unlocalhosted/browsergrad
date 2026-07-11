@@ -310,12 +310,12 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
   assertEqual(report.summary.planCompiledOk, 15, "plan compiled count");
   assertEqual(report.summary.planCompileGaps, 0, "plan compiled gaps");
-  assertEqual(report.summary.singleDispatchPlanCompiledOk, 13, "single-dispatch plan compiled count");
-  assertEqual(report.summary.hostOrchestratedPlanCompiledOk, 2, "host-orchestrated plan compiled count");
+  assertEqual(report.summary.singleDispatchPlanCompiledOk, 14, "single-dispatch plan compiled count");
+  assertEqual(report.summary.hostOrchestratedPlanCompiledOk, 1, "host-orchestrated plan compiled count");
   assertEqual(report.summary.browserExecutedOk, 0, "browser executed count");
   assertEqual(report.summary.outputVerifiedOk, 0, "output verified count");
   assertEqual(report.summary.deprecatedCompilePlanAliases.webGpuRunnableOk, "planCompiledOk", "deprecated runnable alias");
-  assertEqual(report.summary.webGpuDirectCompiledOk, 13, "reverse include kernel direct WGSL compiled");
+  assertEqual(report.summary.webGpuDirectCompiledOk, 14, "reverse include kernel direct WGSL compiled");
   assertEqual(
     report.summary.semanticIrDirectWgslOk + report.summary.semanticIrHostPlanOk + report.summary.legacyAstDirectWgslFallback,
     report.summary.webGpuDirectCompiledOk,
@@ -332,7 +332,7 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
     report.summary.legacyAstDirectWgslFallback,
     "AST direct WGSL blocker coverage partition",
   );
-  assertEqual(report.summary.webGpuHostPlanCompiledOk, 2, "reverse include kernel host-plan compiled");
+  assertEqual(report.summary.webGpuHostPlanCompiledOk, 1, "reverse include kernel host-plan compiled");
   assertEqual(report.summary.compileCodegenOk, 15, "reverse include kernel compile/codegen count");
   assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
@@ -343,18 +343,14 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
   assertEqual(report.summary.webGpuLiftedOk, undefined, "legacy lifted count omitted from top-level summary");
   assertEqual(report.summary.webGpuHostOrchestratedOk, undefined, "legacy host-orchestrated count omitted from top-level summary");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
-  assertEqual(report.summary.referenceFallbackOk, 2, "runtime fallbacks compile through host plans");
-  assertEqual(report.failures.length, 2, "only strict direct compile has gaps");
+  assertEqual(report.summary.referenceFallbackOk, 1, "runtime fallbacks compile through host plans");
+  assertEqual(report.failures.length, 1, "only reachable strict direct compile has gaps");
   assertEqual(
     report.failures.find((failure) => failure.kernelName === "GridSyncDouble")?.webGpuPlanLiftKind,
     "grid-sync-phases",
     "grid sync fallback host plan kind",
   );
-  assertEqual(
-    report.failures.find((failure) => failure.kernelName === "InactiveDynamic")?.webGpuPlanLiftKind,
-    "host-pruned-runtime",
-    "host-pruned runtime fallback plan kind",
-  );
+  assertEqual(report.failures.some((failure) => failure.kernelName === "InactiveDynamic"), false, "dead dynamic launch is pruned by semantic IR");
 
   const emitted = spawnSync("node", [
     "scripts/audit-cuda-lite-corpus.mjs",

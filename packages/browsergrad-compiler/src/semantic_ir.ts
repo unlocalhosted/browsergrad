@@ -1637,6 +1637,13 @@ function lowerStatement(
     }
     case "if": {
       const condition = lowerExpression(statement.condition, scope);
+      const constantCondition = staticNumberValue(condition);
+      if (constantCondition !== undefined) {
+        const selectedScope = new Map(scope);
+        const body = lowerStatementsWithScope(constantCondition !== 0 ? statement.consequent : statement.alternate ?? [], selectedScope);
+        mergeBlockLocalPointerAliases(scope, selectedScope);
+        return { kind: "block", body, span: statement.span };
+      }
       const consequentScope = new Map(scope);
       const alternateScope = new Map(scope);
       const consequent = lowerStatementsWithScope(statement.consequent, consequentScope);
@@ -1907,6 +1914,10 @@ function lowerExpression(
       return { kind: "literal", literalKind: "string", value: expression.value, span: expression.span };
     case "identifier": {
       const symbol = scope.get(expression.name);
+      const constantValue = symbol?.constant && symbol.init ? staticNumberValue(symbol.init) : undefined;
+      if (constantValue !== undefined) {
+        return { kind: "literal", literalKind: "number", value: constantValue, ...optionalValueType(symbol?.valueType), span: expression.span };
+      }
       const namedConstant = symbol === undefined ? CUDA_NAMED_CONSTANTS.get(expression.name) : undefined;
       if (namedConstant) {
         return {
@@ -2969,17 +2980,48 @@ function isFiniteStaticNumberExpression(expression: SemanticExpression): boolean
 }
 
 function staticNumberValue(expression: SemanticExpression): number | undefined {
-  if (
-    expression.kind === "literal" &&
-    expression.literalKind === "number" &&
-    typeof expression.value === "number" &&
-    Number.isFinite(expression.value)
-  ) {
-    return expression.value;
-  }
-  if (expression.kind === "unary" && expression.operator === "-") {
+  if (expression.kind === "literal" && expression.literalKind === "number" && typeof expression.value === "number" && Number.isFinite(expression.value)) return expression.value;
+  if (expression.kind === "cast" && !expression.pointer) return staticNumberValue(expression.expression);
+  if (expression.kind === "unary" && (expression.operator === "-" || expression.operator === "+" || expression.operator === "!" || expression.operator === "~")) {
     const value = staticNumberValue(expression.argument);
-    return value === undefined ? undefined : -value;
+    if (value === undefined) return undefined;
+    if (expression.operator === "-") return -value;
+    if (expression.operator === "+") return value;
+    if (expression.operator === "!") return value === 0 ? 1 : 0;
+    return ~Math.trunc(value);
+  }
+  if (expression.kind === "conditional") {
+    const condition = staticNumberValue(expression.condition);
+    return condition === undefined ? undefined : staticNumberValue(condition !== 0 ? expression.consequent : expression.alternate);
+  }
+  if (expression.kind === "binary") {
+    const left = staticNumberValue(expression.left);
+    if (left === undefined) return undefined;
+    if (expression.operator === "&&" && left === 0) return 0;
+    if (expression.operator === "||" && left !== 0) return 1;
+    const right = staticNumberValue(expression.right);
+    if (right === undefined) return undefined;
+    switch (expression.operator) {
+      case "+": return left + right;
+      case "-": return left - right;
+      case "*": return left * right;
+      case "/": return right === 0 ? undefined : Math.trunc(left / right);
+      case "%": return right === 0 ? undefined : Math.trunc(left) % Math.trunc(right);
+      case "<<": return Math.trunc(left) << (Math.trunc(right) & 31);
+      case ">>": return Math.trunc(left) >> (Math.trunc(right) & 31);
+      case "&": return Math.trunc(left) & Math.trunc(right);
+      case "|": return Math.trunc(left) | Math.trunc(right);
+      case "^": return Math.trunc(left) ^ Math.trunc(right);
+      case "==": return left === right ? 1 : 0;
+      case "!=": return left !== right ? 1 : 0;
+      case "<": return left < right ? 1 : 0;
+      case "<=": return left <= right ? 1 : 0;
+      case ">": return left > right ? 1 : 0;
+      case ">=": return left >= right ? 1 : 0;
+      case "&&": return right !== 0 ? 1 : 0;
+      case "||": return right !== 0 ? 1 : 0;
+      default: return undefined;
+    }
   }
   return undefined;
 }
@@ -3394,7 +3436,7 @@ function symbolForVar(
     ...(statement.dynamicShared === true ? { dynamicShared: true } : {}),
     ...(pointerAlias === undefined ? {} : pointerAlias),
     ...(statement.init === undefined ? {} : { init: lowerExpression(statement.init, scope) }),
-    constant: false,
+    constant: statement.constant ?? false,
     dimensions: matrixTile ? [Math.max(1, totalElements(statement.dimensions)) * matrixTileElementCount(matrixTile)] : statement.dimensions,
     ...(matrixTile === undefined ? {} : { matrixTile, matrixTileArrayDimensions: statement.dimensions }),
     addressSpace: statement.storage,
