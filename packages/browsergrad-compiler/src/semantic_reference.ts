@@ -5203,6 +5203,9 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
     const dimensions = ref.addressSpace === "shared"
       ? semanticReferenceSharedDimensions(context.compiled, symbol!)
       : localDimensions ?? symbol!.dimensions;
+    if (ref.addressSpace === "shared" && ref.pointerBaseIsScalarLane === true && ref.indices.length === 1) {
+      return Math.trunc(evalNumber(ref.indices[0]!, context));
+    }
     if (ref.addressSpace === "local" && ref.indices.length === 1 && dimensions.length > 1) {
       return Math.trunc(evalNumber(ref.indices[0]!, context));
     }

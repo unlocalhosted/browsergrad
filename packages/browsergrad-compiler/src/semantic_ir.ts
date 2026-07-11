@@ -2298,6 +2298,7 @@ function semanticCpAsyncSharedByteTarget(
   return {
     ...address.root,
     valueType,
+    pointerBaseIsScalarLane: true,
     indices: [divideIndexExpression(address.byteOffset, elementBytes, expression.span)],
     fields: [],
     span: expression.span,
@@ -2322,10 +2323,14 @@ function semanticSharedByteAddress(
     const target = expression.args[0];
     if (!target) return undefined;
     const root = memoryRefFromExpression(target.kind === "unary" && target.operator === "&" ? target.argument : target);
-    if (!root || root.addressSpace !== "shared" || root.fields.length > 0 || root.indices.length > 1) return undefined;
+    if (!root || root.addressSpace !== "shared" || root.fields.length > 0) return undefined;
     const rootElementBytes = sizeofCudaType(root.valueType ?? "uchar");
     if (!rootElementBytes) return undefined;
-    const index = root.indices[0] ?? zeroExpression(expression.span);
+    const symbol = scope.get(root.base);
+    if (root.indices.length > 1 && (!symbol || symbol.dimensions.length < root.indices.length)) return undefined;
+    const index = root.indices.length <= 1
+      ? root.indices[0] ?? zeroExpression(expression.span)
+      : flatIndexExpressionForDimensions(symbol!.dimensions, root.indices, expression.span);
     return {
       root: { ...root, indices: [], fields: [] },
       byteOffset: multiplyIndexExpression(index, rootElementBytes, expression.span),

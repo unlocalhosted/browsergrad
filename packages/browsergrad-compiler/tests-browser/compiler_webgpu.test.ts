@@ -5091,6 +5091,27 @@ __global__ void shared_2d_address(uint* out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([24]);
   });
 
+  it("runs cp.async into multidimensional shared byte addresses on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void async_copy_2d(const float* input, float* output) {
+  __shared__ float tile[2][4];
+  uint address = __cvta_generic_to_shared(&tile[1][0]);
+  CP_ASYNC_CG(address, &input[0], 8);
+  CP_ASYNC_WAIT_ALL();
+  __syncthreads();
+  output[0] = tile[1][0] + tile[1][1];
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { input: new Float32Array([1, 2]), output: new Float32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.output as Float32Array]).toEqual([3]);
+    expect([...actual.buffers.output as Float32Array]).toEqual([3]);
+  });
+
   it("runs packed half pointer views over local uint carriers on real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(`

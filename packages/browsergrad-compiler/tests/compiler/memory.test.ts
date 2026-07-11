@@ -4613,24 +4613,6 @@ __global__ void sharedHelperScoped(float *out) {
       expect([...semanticResult.buffers.output as Float32Array]).toEqual([3, 7]);
     });
 
-  it("computes byte addresses for multidimensional shared elements", () => {
-      const compiled = compileCudaLiteKernel(`
-  __global__ void shared_2d_address(uint *out) {
-    __shared__ uint tile[2][4];
-    out[0] = __cvta_generic_to_shared(&tile[1][2]);
-  }`, { workgroupSize: [1, 1, 1] });
-      const result = runCompiledKernelSemanticReference(
-        compiled,
-        { buffers: { out: new Uint32Array(1) } },
-        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-      );
-
-      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
-      expect(compiled.wgsl).toContain("* 4u)");
-      expect([...result.buffers.out as Uint32Array]).toEqual([24]);
-    });
-
   it("rejects unproven cp.async shared byte alignment from semantic lowering", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void unaligned_async_copy(const float *input, float *output) {
