@@ -4504,16 +4504,14 @@ function semanticModfCallResult(
   span: SourceSpan,
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
   const value = expression.args[0];
-  const intpartTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
+  const intpartTarget = source.args[1] === undefined ? undefined : mathOutTargetExpressionFromSource(source.args[1], scope);
   if (value === undefined || !intpartTarget || !semanticExpressionSideEffectFree(value)) return undefined;
-  const intpartRef = memoryRefFromExpression(intpartTarget);
-  if (!intpartRef) return undefined;
   const temp = tempScalarSymbol("__bg.modf.value", span, "float");
   const tempValue = semanticSymbolExpression(temp, value.span);
   return {
     sideEffects: [
       { kind: "declare", target: temp, init: value, span },
-      storeOperation(intpartRef, unaryFloatCallExpression("__bg_modf_intpart", tempValue, expression.span), span),
+      mathOutStoreOrAssignOperation(intpartTarget, unaryFloatCallExpression("__bg_modf_intpart", tempValue, expression.span), span),
     ],
     value: unaryFloatCallExpression("__bg_modf_fraction", tempValue, expression.span),
   };
@@ -4547,17 +4545,15 @@ function semanticRemquoCallResult(
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
   const dividend = expression.args[0];
   const divisor = expression.args[1] ? staticNumberValue(expression.args[1]) : undefined;
-  const quotientTarget = source.args[2] === undefined ? undefined : pointerAliasValueExpression(source.args[2], scope, source.args[2].span);
+  const quotientTarget = source.args[2] === undefined ? undefined : mathOutTargetExpressionFromSource(source.args[2], scope);
   if (dividend === undefined || divisor === undefined || divisor === 0 || !quotientTarget || !semanticExpressionSideEffectFree(dividend)) return undefined;
-  const quotientRef = memoryRefFromExpression(quotientTarget);
-  if (!quotientRef) return undefined;
   const temp = tempScalarSymbol("__bg.remquo.dividend", span, "float");
   const tempValue = semanticSymbolExpression(temp, dividend.span);
   const divisorValue = numberExpression(divisor, expression.span);
   return {
     sideEffects: [
       { kind: "declare", target: temp, init: dividend, span },
-      storeOperation(quotientRef, binaryIntCallExpression("__bg_remquo_quotient", tempValue, divisorValue, expression.span), span),
+      mathOutStoreOrAssignOperation(quotientTarget, binaryIntCallExpression("__bg_remquo_quotient", tempValue, divisorValue, expression.span), span),
     ],
     value: binaryFloatCallExpression("__bg_remquo_remainder", tempValue, divisorValue, expression.span),
   };

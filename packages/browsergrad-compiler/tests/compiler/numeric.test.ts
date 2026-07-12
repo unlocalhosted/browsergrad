@@ -1306,9 +1306,10 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
-      expect(compiled.wgsl).toContain("bg_round_even_f32(7.0 / 2.0)");
-      expect(compiled.wgsl).toContain("quo[1] = i32(bg_remquo_quo_");
-      expect(compiled.wgsl).toContain("quo[2] = i32(bg_remquo_quo_");
+      expect(compiled.wgsl).toContain("var bg__bg_remquo_dividend_");
+      expect(compiled.wgsl).toContain("localQuo = select(");
+      expect(compiled.wgsl).toContain("quo[1u] = select(");
+      expect(compiled.wgsl).toContain("quo[2u] = select(");
       expect([...result.buffers.out as Float32Array]).toEqual([-1, 1]);
       expect([...result.buffers.quo as Int32Array]).toEqual([4, 2, -4]);
     });
@@ -1540,10 +1541,10 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
-      expect(compiled.wgsl).toContain("fn bg_modf(");
-      expect(compiled.wgsl).toContain("bg_modf(3.75, &localInt)");
-      expect(compiled.wgsl).toContain("out[3] = f32(bg_modf_int_");
-      expect(compiled.wgsl).toContain("out[6] = f32(bg_modf_int_");
+      expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
+      expect(compiled.wgsl).toContain("localInt = select(trunc(");
+      expect(compiled.wgsl).toContain("out[3u] = select(trunc(");
+      expect(compiled.wgsl).toContain("out[6u] = select(trunc(");
       expect([...result.buffers.out as Float32Array]).toEqual([0.75, 3, -0.25, -2, 0.5, 5, 8]);
     });
 
