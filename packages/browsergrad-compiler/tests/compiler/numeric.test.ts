@@ -2115,7 +2115,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("vec3<f32>(f32((value).x), f32((value).y), f32((value).z))");
+      expect(compiled.wgsl).toContain("vec3<f32>(f32(value.x), f32(value.y), f32(value.z))");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3]);
     });
@@ -2132,7 +2132,7 @@ __global__ void shared_helper_result(int *out, int n) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("vec4<f32>(f32((raw).x), f32((raw).y), f32((raw).z), f32((raw).w))");
+      expect(compiled.wgsl).toContain("vec4<f32>(f32(raw.x), f32(raw.y), f32(raw.z), f32(raw.w))");
       expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 11]);
     });
 
@@ -2156,7 +2156,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("vec4<f32>(f32((xyz).x), f32((xyz).y), f32((xyz).z), f32(7.0))");
+      expect(compiled.wgsl).toContain("vec4<f32>(f32(xyz.x), f32(xyz.y), f32(xyz.z), f32(7.0))");
       expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 5, 7]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([2, 3, 5, 7]);
     });

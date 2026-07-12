@@ -4507,6 +4507,12 @@ function emitSemanticExpression(
     );
   }
   if (expression.kind === "call") {
+    if (semanticWgslVectorConstructorSupported(expression, "any", ir)) {
+      return emitSemanticVectorConstructorExpression(expression, ir, names, options, textureSpecializations);
+    }
+    if (semanticWgslVectorAtCallSupported(expression, ir)) {
+      return emitSemanticVectorAtCallExpression(expression, ir, names, options, textureSpecializations);
+    }
     const fn = semanticTypedValueFunctionForCall(expression, ir);
     if (fn) return emitSemanticTypedValueFunctionCall(expression, fn, ir, names, options, textureSpecializations);
   }
@@ -5048,26 +5054,44 @@ function emitSemanticVectorConstructor(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  return emitSemanticVectorConstructorExpression(expression, ir, names, options, textureSpecializations).code;
+}
+
+function emitSemanticVectorConstructorExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): TypedWgslExpression {
   const valueType = expression.callee.kind === "symbol" ? cudaVectorConstructorType(expression.callee.name) : undefined;
   if (!isSemanticFloatVectorType(valueType)) throw semanticWgslError("semantic WGSL vector constructor requires vector target", expression.span);
   const fields = ["x", "y", "z", "w"];
   const targetLanes = cudaVectorLaneCount(valueType);
   const targetScalar = wgslVectorScalar(valueType);
   const targetType = wgslValueType(valueType);
+  if (!isWgslVectorType(targetType)) throw semanticWgslError(`invalid WGSL vector type '${targetType}'`, expression.span);
   if (expression.args.length === 1 && !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.args[0]!, ir?.functions))) {
-    const scalar = emitSemanticExpressionAs(expression.args[0]!, ir, names, targetScalar, options, textureSpecializations).code;
-    return `${targetType}(${Array.from({ length: targetLanes }, () => `${targetScalar}(${scalar})`).join(", ")})`;
+    const scalar = emitSemanticExpressionAs(expression.args[0]!, ir, names, targetScalar, options, textureSpecializations);
+    const lanes = Array.from({ length: targetLanes }, () =>
+      convertTypedWgslExpression(scalar, targetScalar, `${targetScalar}(${scalar.code})`)
+    );
+    return createTypedWgslConstructor(targetType, lanes, expression.span);
   }
   const lanes = expression.args.flatMap((arg) => {
     const argType = semanticExpressionVectorValueType(arg, ir?.functions);
     if (isSemanticFloatVectorType(argType)) {
-      const value = emitSemanticExpression(arg, ir, names, options, textureSpecializations).code;
-      return Array.from({ length: cudaVectorLaneCount(argType) }, (_, lane) => `${targetScalar}((${value}).${fields[lane]})`);
+      const value = emitSemanticExpression(arg, ir, names, options, textureSpecializations);
+      return Array.from({ length: cudaVectorLaneCount(argType) }, (_, lane) => {
+        const member = createTypedWgslMemberAccess(value, fields[lane]!, wgslVectorScalar(argType), arg.span);
+        return convertTypedWgslExpression(member, targetScalar, `${targetScalar}(${member.code})`);
+      });
     }
-    return [`${targetScalar}(${emitSemanticExpressionAs(arg, ir, names, targetScalar, options, textureSpecializations).code})`];
+    const scalar = emitSemanticExpressionAs(arg, ir, names, targetScalar, options, textureSpecializations);
+    return [convertTypedWgslExpression(scalar, targetScalar, `${targetScalar}(${scalar.code})`)];
   });
-  while (lanes.length < targetLanes) lanes.push(zeroForType(targetScalar));
-  return `${targetType}(${lanes.slice(0, targetLanes).join(", ")})`;
+  while (lanes.length < targetLanes) lanes.push(createTypedWgslZero(targetScalar, expression.span));
+  return createTypedWgslConstructor(targetType, lanes.slice(0, targetLanes), expression.span);
 }
 
 function emitSemanticVectorAtCall(
@@ -5077,9 +5101,24 @@ function emitSemanticVectorAtCall(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  return emitSemanticVectorAtCallExpression(expression, ir, names, options, textureSpecializations).code;
+}
+
+function emitSemanticVectorAtCallExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): TypedWgslExpression {
   const [target, index] = expression.args;
   if (!target || !index) throw semanticWgslError("semantic WGSL vec_at requires vector and index", expression.span);
-  return `${emitSemanticExpression(target, ir, names, options, textureSpecializations).code}[${emitSemanticExpressionAs(index, ir, names, "u32", options, textureSpecializations).code}]`;
+  return createTypedWgslIndexAccess(
+    emitSemanticExpression(target, ir, names, options, textureSpecializations),
+    emitSemanticExpressionAs(index, ir, names, "u32", options, textureSpecializations),
+    semanticExpressionWgslType(expression, ir),
+    expression.span,
+  );
 }
 
 function emitSemanticVectorLerpCall(
