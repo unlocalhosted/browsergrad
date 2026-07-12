@@ -700,17 +700,32 @@ export function lowerSemanticModelToKernelIr(
   const mutableParams = mutableKernelParamShadows(analysis, semantic.params);
   for (const shadow of mutableParams) scope.set(shadow.sourceName, shadow.symbol);
   const sourceBarrierFunctions = semanticIrBarrierFunctionNames(semantic.functions);
-  const loweredSourceFunctions = semantic.functions.map((fn): CudaLiteSemanticFunction => {
+  const guardedBarrierFunctionNames = new Map(
+    [...sourceBarrierFunctions].map((name) => [name, semanticGuardedBarrierFunctionName(name)] as const),
+  );
+  const loweredOriginalFunctions = semantic.functions.map((fn): CudaLiteSemanticFunction => {
     const proof = analysis.barrierUniformity.functions[fn.name];
     if (proof === undefined || !sourceBarrierFunctions.has(fn.name)) return fn;
     const promoted = promoteSemanticBarrierResultCalls(fn.body, sourceBarrierFunctions);
-    const loweredBranches = lowerSemanticDivergentBarrierBranches(promoted, semantic.functions, fn.span, proof);
+    const loweredBranches = lowerSemanticDivergentBarrierBranches(
+      promoted,
+      semantic.functions,
+      fn.span,
+      proof,
+      guardedBarrierFunctionNames,
+    );
     const body = lowerSemanticEarlyReturnsBeforeDirectBarriers(loweredBranches, semantic.functions, fn.span, proof);
     return {
       ...fn,
       body: markSemanticWorkgroupUniformControl(body, proof.workgroupUniformControlStatementStarts),
     };
   });
+  const guardedBarrierFunctions = createSemanticGuardedBarrierFunctions(
+    semantic.functions,
+    sourceBarrierFunctions,
+    guardedBarrierFunctionNames,
+  );
+  const loweredSourceFunctions = [...loweredOriginalFunctions, ...guardedBarrierFunctions];
   const rawOperations = [
     ...mutableParams.map((shadow): SemanticKernelIrOperation => ({
       kind: "declare",
@@ -726,6 +741,7 @@ export function lowerSemanticModelToKernelIr(
     loweredSourceFunctions,
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
+    guardedBarrierFunctionNames,
   );
   const activeLaneOperations = lowerSemanticEarlyReturnsBeforeDirectBarriers(
     barrierBranchOperations,
@@ -739,12 +755,13 @@ export function lowerSemanticModelToKernelIr(
   );
   const localMemory = collectDeclaredMemory(loweredOperations);
   const reachable = collectReachableAnalysisNames(analysis);
+  const reachableSemanticFunctions = collectReachableSemanticFunctionNames(loweredOperations, loweredSourceFunctions);
   const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
     .filter((symbol) => symbol.addressSpace === "shared")
     .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
   const resolved = resolveSemanticFunctionOverloads(
     loweredOperations,
-    loweredSourceFunctions.filter((fn) => reachable.functionNames.has(fn.name) && !isSemanticGeneratedRandomCall(fn.name)),
+    loweredSourceFunctions.filter((fn) => reachableSemanticFunctions.has(fn.name) && !isSemanticGeneratedRandomCall(fn.name)),
   );
   const resolvedFunctionSharedMemory = resolved.functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body)
@@ -825,11 +842,48 @@ function markSemanticWorkgroupUniformControl(
   });
 }
 
+const SEMANTIC_GUARDED_BARRIER_FUNCTION_SUFFIX = "__bg_guarded_barrier";
+
+function semanticGuardedBarrierFunctionName(name: string): string {
+  return `${name}${SEMANTIC_GUARDED_BARRIER_FUNCTION_SUFFIX}`;
+}
+
+function createSemanticGuardedBarrierFunctions(
+  functions: readonly CudaLiteSemanticFunction[],
+  barrierFunctions: ReadonlySet<string>,
+  guardedBarrierFunctionNames: ReadonlyMap<string, string>,
+): readonly CudaLiteSemanticFunction[] {
+  return functions.filter((fn) => barrierFunctions.has(fn.name)).map((fn): CudaLiteSemanticFunction => {
+    const active: CudaLiteSemanticSymbol = {
+      name: "bg_call_active",
+      kind: "param",
+      valueType: "bool",
+      pointer: false,
+      constant: true,
+      dimensions: [],
+      addressSpace: "local",
+      span: fn.span,
+    };
+    return {
+      ...fn,
+      name: guardedBarrierFunctionNames.get(fn.name)!,
+      params: [...fn.params, active],
+      body: lowerSemanticPredicatedBarrierOperations(
+        promoteSemanticBarrierResultCalls(fn.body, barrierFunctions),
+        semanticSymbolExpression(active, fn.span),
+        barrierFunctions,
+        guardedBarrierFunctionNames,
+      ),
+    };
+  });
+}
+
 function lowerSemanticDivergentBarrierBranches(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
   kernelSpan: SourceSpan,
   barrierProof: CudaLiteAnalysis["barrierUniformity"]["kernel"],
+  guardedBarrierFunctionNames: ReadonlyMap<string, string> = new Map(),
 ): readonly SemanticKernelIrOperation[] {
   if (barrierProof.unverifiedControlStatementStarts.length !== 1) return operations;
   const barrierFunctions = semanticIrBarrierFunctionNames(functions);
@@ -841,7 +895,7 @@ function lowerSemanticDivergentBarrierBranches(
   if (branchIndex < 0) return operations;
   const branch = operations[branchIndex]!;
   if (branch.kind !== "branch") return operations;
-  if (semanticPredicatedBarrierTransformUnsafe(branch.consequent, barrierFunctions)) return operations;
+  if (semanticPredicatedBarrierTransformUnsafe(branch.consequent, barrierFunctions, guardedBarrierFunctionNames)) return operations;
   const predicate: CudaLiteSemanticSymbol = {
     name: "bg_active_lane",
     kind: "local",
@@ -857,24 +911,32 @@ function lowerSemanticDivergentBarrierBranches(
     init: branch.condition,
     span: branch.span,
   };
-  const lowered = lowerSemanticPredicatedBarrierOperations(branch.consequent, predicateExpression, barrierFunctions);
+  const lowered = lowerSemanticPredicatedBarrierOperations(
+    branch.consequent,
+    predicateExpression,
+    barrierFunctions,
+    guardedBarrierFunctionNames,
+  );
   return [...operations.slice(0, branchIndex), declaration, ...lowered, ...operations.slice(branchIndex + 1)];
 }
 
 function semanticPredicatedBarrierTransformUnsafe(
   operations: readonly SemanticKernelIrOperation[],
   barrierFunctions: ReadonlySet<string>,
+  guardedBarrierFunctionNames: ReadonlyMap<string, string>,
 ): boolean {
   return operations.some((operation) => {
-    if (operation.kind === "call" && barrierFunctions.has(operation.callee)) return true;
+    if (operation.kind === "call" && barrierFunctions.has(operation.callee)) {
+      return !guardedBarrierFunctionNames.has(operation.callee);
+    }
     if (operation.kind === "declare") {
       return operation.target.addressSpace !== "local" || operation.target.pointer ||
         operation.target.dimensions.length > 0 && operation.init !== undefined;
     }
     if (operation.kind === "branch" && semanticIrOperationsContainBarrier([operation], barrierFunctions)) return true;
     if (operation.kind === "loop" || operation.kind === "block") {
-      return semanticPredicatedBarrierTransformUnsafe(operation.body, barrierFunctions) ||
-        (operation.kind === "loop" && operation.continuing !== undefined && semanticPredicatedBarrierTransformUnsafe(operation.continuing, barrierFunctions));
+      return semanticPredicatedBarrierTransformUnsafe(operation.body, barrierFunctions, guardedBarrierFunctionNames) ||
+        (operation.kind === "loop" && operation.continuing !== undefined && semanticPredicatedBarrierTransformUnsafe(operation.continuing, barrierFunctions, guardedBarrierFunctionNames));
     }
     return false;
   });
@@ -884,15 +946,20 @@ function lowerSemanticPredicatedBarrierOperations(
   operations: readonly SemanticKernelIrOperation[],
   predicate: SemanticExpression,
   barrierFunctions: ReadonlySet<string>,
+  guardedBarrierFunctionNames: ReadonlyMap<string, string> = new Map(),
 ): readonly SemanticKernelIrOperation[] {
   return operations.flatMap((operation): readonly SemanticKernelIrOperation[] => {
     if (semanticIrOperationsContainBarrier([operation], barrierFunctions)) {
+      if (operation.kind === "call" && barrierFunctions.has(operation.callee)) {
+        const guarded = guardedBarrierFunctionNames.get(operation.callee);
+        return guarded === undefined ? [operation] : [{ ...operation, callee: guarded, args: [...operation.args, predicate] }];
+      }
       if (operation.kind === "loop" || operation.kind === "block") {
-        return [{ ...operation, body: lowerSemanticPredicatedBarrierOperations(operation.body, predicate, barrierFunctions),
-          ...(operation.kind === "loop" && operation.continuing !== undefined ? { continuing: lowerSemanticPredicatedBarrierOperations(operation.continuing, predicate, barrierFunctions) } : {}) }];
+        return [{ ...operation, body: lowerSemanticPredicatedBarrierOperations(operation.body, predicate, barrierFunctions, guardedBarrierFunctionNames),
+          ...(operation.kind === "loop" && operation.continuing !== undefined ? { continuing: lowerSemanticPredicatedBarrierOperations(operation.continuing, predicate, barrierFunctions, guardedBarrierFunctionNames) } : {}) }];
       }
       if (operation.kind === "branch") {
-        return lowerSemanticPredicatedBarrierOperations(operation.consequent, predicate, barrierFunctions);
+        return lowerSemanticPredicatedBarrierOperations(operation.consequent, predicate, barrierFunctions, guardedBarrierFunctionNames);
       }
       return [operation];
     }
@@ -1529,6 +1596,23 @@ function collectReachableAnalysisNames(analysis: CudaLiteAnalysis): {
   }
 
   return { symbolNames, functionNames };
+}
+
+function collectReachableSemanticFunctionNames(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+): ReadonlySet<string> {
+  const names = new Set<string>();
+  const pending = collectSemanticFunctionCalls(operations).map((call) => call.callee);
+  for (let index = 0; index < pending.length; index++) {
+    const name = pending[index]!;
+    if (names.has(name)) continue;
+    names.add(name);
+    for (const fn of functions.filter((candidate) => candidate.name === name)) {
+      pending.push(...collectSemanticFunctionCalls(fn.body).map((call) => call.callee));
+    }
+  }
+  return names;
 }
 
 function lowerStatements(

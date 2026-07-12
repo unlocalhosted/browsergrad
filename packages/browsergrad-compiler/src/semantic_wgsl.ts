@@ -917,9 +917,19 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
     ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
       semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
       fn.body.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane") &&
-        semanticBarrierOperationsMatchActiveLaneProof(fn.body, ir.barrierUniformity.functions[fn.name], barrierFunctions) ||
-      semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name], barrierFunctions)
+        semanticBarrierOperationsMatchActiveLaneProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions) ||
+      semanticBarrierOperationsMatchUniformityProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions)
     );
+}
+
+function semanticBarrierFunctionProof(
+  ir: SemanticKernelIrModule,
+  name: string,
+): SemanticKernelIrModule["barrierUniformity"]["kernel"] | undefined {
+  return ir.barrierUniformity.functions[name] ??
+    (name.endsWith("__bg_guarded_barrier")
+      ? ir.barrierUniformity.functions[name.slice(0, -"__bg_guarded_barrier".length)]
+      : undefined);
 }
 
 function semanticDirectBarriersHaveAnalyzerProof(ir: SemanticKernelIrModule): boolean {

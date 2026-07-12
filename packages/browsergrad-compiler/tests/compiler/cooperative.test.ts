@@ -14,7 +14,6 @@ import {
   compileCudaLiteKernel,
   emitSemanticKernelIrWgsl,
   semanticKernelIrWgslPreflightBlocker,
-  semanticKernelIrWgslPreflightFailure,
   prepareCompiledKernelWebGpu,
   canEmitSemanticKernelIrWgsl,
   canRunCompiledKernelSemanticReference,
@@ -1106,7 +1105,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([10]);
     });
 
-  it("rejects divergent calls to helpers that contain barriers", () => {
+  it("uniformizes divergent calls to helpers that contain barriers", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ void sync_tile(float *tile) { __syncthreads(); }
   __global__ void divergent_helper_barrier(float *out) {
@@ -1114,13 +1113,15 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     if (threadIdx.x == 0) sync_tile(tile);
     out[threadIdx.x] = 1.0f;
   }`, { workgroupSize: [2, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
-      expect(semanticKernelIrWgslPreflightBlocker(compiled.kernelIr)).toBe("semantic WGSL does not support shared-memory barrier shape");
-      expect(semanticKernelIrWgslPreflightFailure(compiled.kernelIr)).toMatchObject({
-        message: "semantic WGSL does not support shared-memory barrier shape",
-        span: { line: 3, column: 3 },
-      });
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("sync_tile__bg_guarded_barrier");
+      expect([...result.buffers.out as Float32Array]).toEqual([1, 1]);
     });
 
   it("classifies grid-wide cooperative sync as host-orchestrated WebGPU lowering", () => {
@@ -2198,6 +2199,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     __syncthreads();
   }`, { workgroupSize: [4, 1, 1] });
 
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("helper_with_barrier__bg_guarded_barrier");
       expect(compiled.wgsl).toContain("bg_call_active: bool");
       expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_call_active)");

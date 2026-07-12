@@ -1466,6 +1466,34 @@ __global__ void sharedUniformBreak(uint *out) {
     expect([...actual.buffers.out as Uint32Array]).toEqual([1, 1, 1, 1]);
   });
 
+  it("runs guarded semantic barrier-helper clones", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void helper_with_barrier(uint *out, uint value) {
+  __syncthreads();
+  out[threadIdx.x] = value + (uint)threadIdx.x;
+  __syncthreads();
+}
+__global__ void predicatedBarrierHelper(uint *out) {
+  __shared__ uint ready;
+  if (threadIdx.x == 0) atomicExch(&ready, 1u);
+  __syncthreads();
+  if (ready == 1u) {
+    helper_with_barrier(out, 7u);
+    out[threadIdx.x + 4] = 9u;
+  }
+  __syncthreads();
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(8) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Uint32Array]).toEqual([7, 8, 9, 10, 9, 9, 9, 9]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([7, 8, 9, 10, 9, 9, 9, 9]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `
