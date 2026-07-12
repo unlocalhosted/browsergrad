@@ -3,13 +3,35 @@ import type { SourceSpan } from "./types.js";
 
 export type WgslExpressionType = SemanticWgslValueType;
 
-declare const typedWgslExpression: unique symbol;
+const typedWgslExpression: unique symbol = Symbol("typed-wgsl-expression");
 
 export interface TypedWgslExpression {
   readonly code: string;
   readonly type: WgslExpressionType;
   readonly span: SourceSpan;
   readonly [typedWgslExpression]: true;
+}
+
+type TypedWgslExpressionNode =
+  | { readonly kind: "leaf"; readonly code: string }
+  | { readonly kind: "conversion"; readonly targetType: WgslExpressionType; readonly source: TypedWgslExpressionValue }
+  | { readonly kind: "bool-to-numeric"; readonly targetType: "f16" | "f32" | "i32" | "u32"; readonly source: TypedWgslExpressionValue }
+  | { readonly kind: "binary"; readonly operator: WgslBinaryOperator; readonly left: TypedWgslExpressionValue; readonly right: TypedWgslExpressionValue }
+  | { readonly kind: "unary"; readonly operator: WgslUnaryOperator; readonly operand: TypedWgslExpressionValue }
+  | { readonly kind: "select"; readonly alternate: TypedWgslExpressionValue; readonly consequent: TypedWgslExpressionValue; readonly condition: TypedWgslExpressionValue };
+
+class TypedWgslExpressionValue implements TypedWgslExpression {
+  readonly [typedWgslExpression] = true;
+
+  constructor(
+    private readonly node: TypedWgslExpressionNode,
+    readonly type: WgslExpressionType,
+    readonly span: SourceSpan,
+  ) {}
+
+  get code(): string {
+    return printTypedWgslExpressionNode(this.node);
+  }
 }
 
 export type WgslBinaryOperator =
@@ -29,7 +51,7 @@ export function createTypedWgslExpression(
   type: WgslExpressionType,
   span: SourceSpan,
 ): TypedWgslExpression {
-  return { code, type, span } as TypedWgslExpression;
+  return new TypedWgslExpressionValue({ kind: "leaf", code }, type, span);
 }
 
 export function convertTypedWgslExpression(
@@ -40,7 +62,9 @@ export function convertTypedWgslExpression(
   if (source.type !== targetType && (!isNumericScalar(source.type) || !isNumericScalar(targetType))) {
     throw new TypeError(`WGSL conversion from '${source.type}' to '${targetType}' requires explicit legalization`);
   }
-  return createTypedWgslExpression(code, targetType, source.span);
+  return code === `${targetType}(${source.code})`
+    ? new TypedWgslExpressionValue({ kind: "conversion", targetType, source: expressionValue(source) }, targetType, source.span)
+    : createTypedWgslExpression(code, targetType, source.span);
 }
 
 export function legalizeTypedWgslBoolToNumeric(
@@ -50,9 +74,11 @@ export function legalizeTypedWgslBoolToNumeric(
   if (source.type !== "bool") {
     throw new TypeError(`WGSL bool-to-numeric legalization requires bool, received '${source.type}'`);
   }
-  const zero = targetType === "u32" ? "0u" : targetType === "i32" ? "0" : targetType === "f16" ? "f16(0.0)" : "0.0";
-  const one = targetType === "u32" ? "1u" : targetType === "i32" ? "1" : targetType === "f16" ? "f16(1.0)" : "1.0";
-  return createTypedWgslExpression(`select(${zero}, ${one}, ${source.code})`, targetType, source.span);
+  return new TypedWgslExpressionValue(
+    { kind: "bool-to-numeric", targetType, source: expressionValue(source) },
+    targetType,
+    source.span,
+  );
 }
 
 export function emitTypedWgslBinary(
@@ -63,14 +89,14 @@ export function emitTypedWgslBinary(
 ): TypedWgslExpression {
   if (logicalOperators.has(operator)) {
     requireTypes(operator, left, right, "bool", "bool");
-    return createTypedWgslExpression(`(${left.code} ${operator} ${right.code})`, "bool", span);
+    return binaryExpression(operator, left, right, "bool", span);
   }
 
   if (operator === "<<" || operator === ">>") {
     if (!isInteger(left.type) || right.type !== "u32") {
       throw new TypeError(`WGSL '${operator}' requires an integer left operand and u32 shift count, received ${left.type} and ${right.type}`);
     }
-    return createTypedWgslExpression(`(${left.code} ${operator} ${right.code})`, left.type, span);
+    return binaryExpression(operator, left, right, left.type, span);
   }
 
   if (left.type !== right.type) {
@@ -84,7 +110,7 @@ export function emitTypedWgslBinary(
   }
 
   const resultType = comparisonOperators.has(operator) ? "bool" : left.type;
-  return createTypedWgslExpression(`(${left.code} ${operator} ${right.code})`, resultType, span);
+  return binaryExpression(operator, left, right, resultType, span);
 }
 
 export function emitTypedWgslUnary(
@@ -94,20 +120,16 @@ export function emitTypedWgslUnary(
 ): TypedWgslExpression {
   if (operator === "!") {
     if (operand.type !== "bool") throw new TypeError(`WGSL '!' requires bool, received ${operand.type}`);
-    return createTypedWgslExpression(`!(${operand.code})`, "bool", span);
+    return unaryExpression(operator, operand, "bool", span);
   }
   if (operator === "~") {
     if (!isInteger(operand.type)) throw new TypeError(`WGSL '~' requires an integer operand, received ${operand.type}`);
-    return createTypedWgslExpression(`~(${operand.code})`, operand.type, span);
+    return unaryExpression(operator, operand, operand.type, span);
   }
   if (!isNumeric(operand.type)) {
     throw new TypeError(`WGSL '${operator}' requires a numeric operand, received ${operand.type}`);
   }
-  return createTypedWgslExpression(
-    operator === "+" ? operand.code : `-(${operand.code})`,
-    operand.type,
-    span,
-  );
+  return unaryExpression(operator, operand, operand.type, span);
 }
 
 export function emitTypedWgslSelect(
@@ -122,11 +144,62 @@ export function emitTypedWgslSelect(
   if (alternate.type !== consequent.type) {
     throw new TypeError(`WGSL select requires matching result types, received ${alternate.type} and ${consequent.type}`);
   }
-  return createTypedWgslExpression(
-    `select(${alternate.code}, ${consequent.code}, ${condition.code})`,
+  return new TypedWgslExpressionValue(
+    {
+      kind: "select",
+      alternate: expressionValue(alternate),
+      consequent: expressionValue(consequent),
+      condition: expressionValue(condition),
+    },
     alternate.type,
     span,
   );
+}
+
+function binaryExpression(
+  operator: WgslBinaryOperator,
+  left: TypedWgslExpression,
+  right: TypedWgslExpression,
+  type: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  return new TypedWgslExpressionValue({
+    kind: "binary",
+    operator,
+    left: expressionValue(left),
+    right: expressionValue(right),
+  }, type, span);
+}
+
+function unaryExpression(
+  operator: WgslUnaryOperator,
+  operand: TypedWgslExpression,
+  type: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  return new TypedWgslExpressionValue({ kind: "unary", operator, operand: expressionValue(operand) }, type, span);
+}
+
+function expressionValue(expression: TypedWgslExpression): TypedWgslExpressionValue {
+  if (!(expression instanceof TypedWgslExpressionValue)) {
+    throw new TypeError("typed WGSL expressions must be created by the typed WGSL constructors");
+  }
+  return expression;
+}
+
+function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
+  switch (node.kind) {
+    case "leaf": return node.code;
+    case "conversion": return `${node.targetType}(${node.source.code})`;
+    case "bool-to-numeric": {
+      const zero = node.targetType === "u32" ? "0u" : node.targetType === "i32" ? "0" : node.targetType === "f16" ? "f16(0.0)" : "0.0";
+      const one = node.targetType === "u32" ? "1u" : node.targetType === "i32" ? "1" : node.targetType === "f16" ? "f16(1.0)" : "1.0";
+      return `select(${zero}, ${one}, ${node.source.code})`;
+    }
+    case "binary": return `(${node.left.code} ${node.operator} ${node.right.code})`;
+    case "unary": return node.operator === "+" ? node.operand.code : `${node.operator}(${node.operand.code})`;
+    case "select": return `select(${node.alternate.code}, ${node.consequent.code}, ${node.condition.code})`;
+  }
 }
 
 function requireTypes(
