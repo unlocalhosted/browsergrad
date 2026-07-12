@@ -946,13 +946,13 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
   if (!containsBarrier) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
   if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
   if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
-    const activeLaneLowered = ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane");
+    const activeLaneLowered = semanticOperationsHaveActiveLaneDeclaration(ir.operations);
     return (activeLaneLowered && (
       semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
       semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)
     )) || operationsHaveOnlyTopLevelBarriers(ir.operations);
   }
-  const activeLaneLowered = ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane");
+  const activeLaneLowered = semanticOperationsHaveActiveLaneDeclaration(ir.operations);
   return (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
       activeLaneLowered && semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions) ||
       semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
@@ -962,6 +962,17 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
         semanticBarrierOperationsMatchActiveLaneProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions) ||
       semanticBarrierOperationsMatchUniformityProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions)
     );
+}
+
+function semanticOperationsHaveActiveLaneDeclaration(
+  operations: readonly SemanticKernelIrOperation[],
+): boolean {
+  return operations.some((operation) =>
+    operation.kind === "declare" &&
+      (operation.target.name === "bg_active_lane" ||
+        operation.target.name.startsWith("bg_barrier_loop_active_") ||
+        operation.target.name.startsWith("bg_loop_active_"))
+  );
 }
 
 function semanticBarrierFunctionProof(

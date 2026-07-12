@@ -2896,13 +2896,19 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       out[tid] = out[tid] + 10u;
     }
   }`, { workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelReference(
+        compiled,
+        { buffers: { out: new Uint32Array(4) }, scalars: { N: 2 } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-break-before-barrier");
-      expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
-      expect(compiled.wgsl).toContain("bg_active_lane = (bg_active_lane && !((tid >= bg_uniforms.N)));");
+      expect(compiled.wgsl).toMatch(/var bg_loop_active_\d+: bool = true;/u);
+      expect(compiled.wgsl).toMatch(/bg_loop_active_\d+ = false;/u);
       expect(compiled.wgsl).toContain("workgroupBarrier();");
-      expect(compiled.wgsl).toContain("if (bg_active_lane) {\n    if ((tid < bg_uniforms.N))");
+      expect(compiled.wgsl).toContain("if ((u32(tid) < u32(bg_uniforms.N)))");
       expect(compiled.wgsl).not.toContain("if ((tid >= bg_uniforms.N)) {\n      break;");
+      expect([...result.buffers.out as Uint32Array]).toEqual([12, 12, 0, 0]);
     });
 
   it("keeps post-loop barriers uniform after nested divergent breaks", () => {
@@ -2922,10 +2928,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-break-before-barrier");
-      expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
-      expect(compiled.wgsl).toContain("bg_active_lane = (bg_active_lane && !((out[tid] >= 0u)));");
+      expect(compiled.wgsl).toMatch(/var bg_loop_active_\d+: bool = true;/u);
+      expect(compiled.wgsl).toMatch(/bg_loop_active_\d+ = false;/u);
       expect(compiled.wgsl).toContain("workgroupBarrier();");
-      expect(compiled.wgsl).toContain("if (bg_active_lane) {\n    if ((tid < bg_uniforms.N))");
+      expect(compiled.wgsl).toContain("if ((u32(tid) < u32(bg_uniforms.N)))");
       expect(compiled.wgsl).not.toContain("if ((out[tid] >= 0u)) {\n        break;");
     });
 
@@ -2957,9 +2963,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       for (const compiled of [whileCompiled, doWhileCompiled]) {
         expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-break-before-barrier");
-        expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
-        expect(compiled.wgsl).toContain("bg_active_lane = (bg_active_lane && !((tid >= bg_uniforms.N)));");
+        expect(compiled.wgsl).toMatch(/var bg_loop_active_\d+: bool = true;/u);
+        expect(compiled.wgsl).toMatch(/bg_loop_active_\d+ = false;/u);
         expect(compiled.wgsl).toContain("workgroupBarrier();");
+        expect(compiled.wgsl).toContain("i += 1;");
         expect(compiled.wgsl).not.toContain("if ((tid >= bg_uniforms.N)) {\n      break;");
       }
     });
