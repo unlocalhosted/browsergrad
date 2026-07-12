@@ -260,11 +260,14 @@ import {
   emitSemanticCooperativeGroupCall,
   emitSemanticCooperativeReduceHelper,
   emitSemanticCooperativeScanHelper,
+  emitSemanticCooperativeVectorReduceHelper,
   semanticCooperativeReduceHelperFor,
   semanticCooperativeReduceHelpers,
   semanticCooperativeReduceValue,
   semanticCooperativeScanHelperFor,
   semanticCooperativeScanHelpers,
+  semanticCooperativeVectorReduceHelperFor,
+  semanticCooperativeVectorReduceHelpers,
   semanticWgslCooperativeGroupCallSupported,
   semanticWgslCooperativeReduceCallSupported,
   semanticWgslCooperativeScanCallSupported,
@@ -576,6 +579,7 @@ function emitSemanticKernelIrWgslFromIr(
   const atomicShared = semanticAtomicSharedNames(ir.operations, ir.functions);
   const cooperativeReduceHelpers = semanticCooperativeReduceHelpers(ir);
   const cooperativeScanHelpers = semanticCooperativeScanHelpers(ir);
+  const cooperativeVectorReduceHelpers = semanticCooperativeVectorReduceHelpers(ir);
   const syncthreadsPredicateHelpers = semanticSyncthreadsPredicateHelpers(ir);
   const warpShuffleHelpers = ir.subgroupMode === "scalar" ? [] : semanticWarpShuffleHelpers(ir);
   const matchAnyHelpers = ir.subgroupMode === "scalar" ? [] : semanticMatchAnyHelpers(ir);
@@ -738,6 +742,9 @@ function emitSemanticKernelIrWgslFromIr(
   for (const helper of cooperativeScanHelpers) {
     lines.push(`var<workgroup> ${helper.scratchName}: array<${wgslValueScalar(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
   }
+  for (const helper of cooperativeVectorReduceHelpers) {
+    lines.push(`var<workgroup> ${helper.scratchName}: array<${wgslValueType(helper.valueType)}, ${semanticWorkgroupSize(ir)}>;`);
+  }
   for (const helper of syncthreadsPredicateHelpers) {
     lines.push(`var<workgroup> ${helper.scratchName}: array<u32, ${semanticWorkgroupSize(ir)}>;`);
   }
@@ -787,6 +794,9 @@ function emitSemanticKernelIrWgslFromIr(
   }
   for (const helper of cooperativeScanHelpers) {
     lines.push("", ...emitSemanticCooperativeScanHelper(helper, ir));
+  }
+  for (const helper of cooperativeVectorReduceHelpers) {
+    lines.push("", ...emitSemanticCooperativeVectorReduceHelper(helper, ir));
   }
   for (const helper of syncthreadsPredicateHelpers) {
     lines.push("", ...emitSemanticSyncthreadsPredicateHelper(helper, ir));
@@ -1883,6 +1893,7 @@ function semanticWgslExpressionSupported(
         ir !== undefined && semanticWgslCooperativeGroupCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslCoalescedGroupCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
+        ir !== undefined && semanticWgslCooperativeVectorReduceCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslCooperativeScanCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
         ir !== undefined && semanticWgslSyncthreadsPredicateCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslFunctionCallSupported(expression, ir) ||
@@ -4196,6 +4207,8 @@ function emitSemanticExpression(
     if (cooperativeGroup) return cooperativeGroup;
     const cooperativeReduce = emitSemanticTypedCooperativeReduceCall(expression, ir, names, options, textureSpecializations);
     if (cooperativeReduce) return cooperativeReduce;
+    const cooperativeVectorReduce = emitSemanticTypedCooperativeVectorReduceCall(expression, ir, names, options, textureSpecializations);
+    if (cooperativeVectorReduce) return cooperativeVectorReduce;
     const cooperativeScan = emitSemanticTypedCooperativeScanCall(expression, ir, names, options, textureSpecializations);
     if (cooperativeScan) return cooperativeScan;
     const syncthreadsPredicate = emitSemanticTypedSyncthreadsPredicateCall(expression, ir, names, options);
@@ -5789,6 +5802,40 @@ function emitSemanticTypedCooperativeReduceCall(
   }
   args.push(createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span));
   return createTypedWgslCall(helper.name, args, scalar, expression.span);
+}
+
+function semanticWgslCooperativeVectorReduceCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const helper = semanticCooperativeVectorReduceHelperFor(ir, expression);
+  return helper !== undefined && expression.args[1] !== undefined && semanticWgslExpressionSupported(expression.args[1], "any", ir);
+}
+
+function emitSemanticTypedCooperativeVectorReduceCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): TypedWgslExpression | undefined {
+  if (!semanticWgslCooperativeVectorReduceCallSupported(expression, ir)) return undefined;
+  const helper = semanticCooperativeVectorReduceHelperFor(ir, expression);
+  const value = expression.args[1];
+  if (!helper || !value) return undefined;
+  const type = semanticExpressionWgslType(value, ir);
+  if (!isWgslVectorType(type)) return undefined;
+  return createTypedWgslCall(
+    helper.name,
+    [
+      emitSemanticExpression(value, ir, names, options, textureSpecializations),
+      createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
+      createTypedWgslIdentifier("workgroup_id", "vec3<u32>", expression.span),
+      createTypedWgslIdentifier("num_workgroups", "vec3<u32>", expression.span),
+    ],
+    type,
+    expression.span,
+  );
 }
 
 function emitSemanticTypedCooperativeScanCall(

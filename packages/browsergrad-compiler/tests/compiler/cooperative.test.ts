@@ -1743,12 +1743,12 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn bg_cg_reduce_merge_pair_float2_32");
-      expect(compiled.wgsl).toContain("var<workgroup> bg_cg_reduce_merge_pair_float2_32_scratch");
+      expect(compiled.wgsl).toContain("fn bg_semantic_cg_reduce_merge_pair_float2_32");
+      expect(compiled.wgsl).toContain("var<workgroup> bg_semantic_cg_reduce_merge_pair_float2_32_scratch");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
-      expect(compiled.wgsl).toContain("merge_pair(bg_cg_reduce_merge_pair_float2_32_scratch[bg_linear_rank]");
+      expect(compiled.wgsl).toContain("merge_pair(bg_semantic_cg_reduce_merge_pair_float2_32_scratch[rank]");
       const mergeFnIndex = compiled.wgsl!.indexOf("fn merge_pair(");
-      const reduceHelperIndex = compiled.wgsl!.indexOf("fn bg_cg_reduce_merge_pair_float2_32");
+      const reduceHelperIndex = compiled.wgsl!.indexOf("fn bg_semantic_cg_reduce_merge_pair_float2_32");
       expect(mergeFnIndex).toBeGreaterThanOrEqual(0);
       expect(mergeFnIndex).toBeLessThan(reduceHelperIndex);
       expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);

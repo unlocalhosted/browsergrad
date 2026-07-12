@@ -866,13 +866,13 @@ export function lowerSemanticModelToKernelIr(
   );
   const localMemory = collectDeclaredMemory(loweredOperations);
   const reachable = collectReachableAnalysisNames(analysis);
-  const reachableSemanticFunctions = collectReachableSemanticFunctionNames(loweredOperations, loweredSourceFunctions);
+  const reachableSemanticFunctions = collectReachableSemanticFunctionIds(loweredOperations, loweredSourceFunctions);
   const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
     .filter((symbol) => symbol.addressSpace === "shared")
     .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
   const resolved = resolveSemanticFunctionOverloads(
     loweredOperations,
-    loweredSourceFunctions.filter((fn) => reachableSemanticFunctions.has(fn.name) && !isSemanticGeneratedRandomCall(fn.name)),
+    loweredSourceFunctions.filter((fn) => reachableSemanticFunctions.has(fn.id.key) && !isSemanticGeneratedRandomCall(fn.name)),
   );
   const resolvedFunctionSharedMemory = resolved.functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body)
@@ -2204,21 +2204,31 @@ function collectReachableAnalysisNames(analysis: CudaLiteAnalysis): {
   return { symbolNames, functionNames };
 }
 
-function collectReachableSemanticFunctionNames(
+function collectReachableSemanticFunctionIds(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
 ): ReadonlySet<string> {
-  const names = new Set<string>();
-  const pending = collectSemanticFunctionCalls(operations).map((call) => call.callee);
+  const ids = new Set<string>();
+  const pending = semanticReferencedFunctions(operations, functions);
   for (let index = 0; index < pending.length; index++) {
-    const name = pending[index]!;
-    if (names.has(name)) continue;
-    names.add(name);
-    for (const fn of functions.filter((candidate) => candidate.name === name)) {
-      pending.push(...collectSemanticFunctionCalls(fn.body).map((call) => call.callee));
-    }
+    const fn = pending[index]!;
+    if (ids.has(fn.id.key)) continue;
+    ids.add(fn.id.key);
+    pending.push(...semanticReferencedFunctions(fn.body, functions));
   }
-  return names;
+  return ids;
+}
+
+function semanticReferencedFunctions(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+): CudaLiteSemanticFunction[] {
+  const names = new Set(collectSemanticFunctionCalls(operations).map((call) => call.callee));
+  const ids = new Set<string>();
+  walkSemanticOperations(operations, (expression) => {
+    if (expression.kind === "symbol" && expression.addressSpace === "function") ids.add(expression.id.key);
+  });
+  return functions.filter((fn) => names.has(fn.name) || ids.has(fn.id.key));
 }
 
 function lowerStatements(

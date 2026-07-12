@@ -3,9 +3,11 @@ import type {
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
 } from "./semantic_ir.js";
+import type { CudaLiteScalarType } from "./types.js";
+import { semanticIdsEqual } from "./semantic_ids.js";
 import { semanticExpressionChildren, semanticOperationExpressions } from "./semantic_ir_walk.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
-import { wgslValueScalar } from "./semantic_wgsl_types.js";
+import { wgslValueScalar, wgslValueType } from "./semantic_wgsl_types.js";
 import { cudaArithmeticReduceOpForCall, isCudaWarpReduceCallName, isCudaWarpSumCallName } from "./cuda_subgroup_calls.js";
 import {
   semanticCooperativeGroupInfo,
@@ -29,6 +31,14 @@ export interface SemanticCooperativeScanHelper {
   readonly valueType: "float" | "double" | "half" | "int" | "uint";
   readonly tileSize: number;
   readonly inclusive: boolean;
+}
+
+export interface SemanticCooperativeVectorReduceHelper {
+  readonly name: string;
+  readonly scratchName: string;
+  readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly tileSize: number;
+  readonly reducerName: string;
 }
 
 export function semanticWgslCooperativeGroupCallSupported(
@@ -241,6 +251,66 @@ export function semanticCooperativeScanHelpers(
     if (helper) helpers.set(helper.name, helper);
   }
   return [...helpers.values()];
+}
+
+export function semanticCooperativeVectorReduceHelperFor(
+  ir: SemanticKernelIrModule,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): SemanticCooperativeVectorReduceHelper | undefined {
+  if (expression.callee.kind !== "symbol" || !isCooperativeReduceName(expression.callee.name)) return undefined;
+  const [groupArg, valueArg, reducerArg] = expression.args;
+  if (groupArg?.kind !== "symbol" || !valueArg || reducerArg?.kind !== "symbol" || reducerArg.addressSpace !== "function") return undefined;
+  const group = semanticCooperativeGroupInfo(ir, groupArg.name);
+  if (!group || group.kind !== "tile" || group.partitioned) return undefined;
+  const valueType = semanticExpressionValueType(valueArg);
+  if (valueType !== "float2" && valueType !== "float3" && valueType !== "float4") return undefined;
+  const reducer = ir.functions.find((fn) => semanticIdsEqual(fn.id, reducerArg.id));
+  if (!reducer || reducer.returnType !== valueType || reducer.params.length !== 2 || reducer.params.some((param) => param.valueType !== valueType || param.pointer)) return undefined;
+  const tileSize = group.tileSize ?? 32;
+  const name = `bg_semantic_cg_reduce_${reducer.name}_${valueType}_${tileSize}`;
+  return { name, scratchName: `${name}_scratch`, valueType, tileSize, reducerName: reducer.name };
+}
+
+export function semanticCooperativeVectorReduceHelpers(
+  ir: SemanticKernelIrModule,
+): readonly SemanticCooperativeVectorReduceHelper[] {
+  const helpers = new Map<string, SemanticCooperativeVectorReduceHelper>();
+  for (const expression of semanticModuleExpressions(ir)) {
+    if (expression.kind !== "call") continue;
+    const helper = semanticCooperativeVectorReduceHelperFor(ir, expression);
+    if (helper) helpers.set(helper.name, helper);
+  }
+  return [...helpers.values()];
+}
+
+export function emitSemanticCooperativeVectorReduceHelper(
+  helper: SemanticCooperativeVectorReduceHelper,
+  ir: SemanticKernelIrModule,
+): readonly string[] {
+  const type = wgslValueType(helper.valueType);
+  const workgroupSize = semanticCooperativeWorkgroupSize(ir);
+  const start = Math.max(1, Math.floor(Math.min(helper.tileSize, workgroupSize) / 2));
+  return [
+    `fn ${helper.name}(value_arg: ${type}, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> ${type} {`,
+    `  let rank: u32 = ${semanticCooperativeLocalLinearRank(ir)};`,
+    `  let width: u32 = min(${helper.tileSize}u, ${workgroupSize}u);`,
+    "  let lane: u32 = rank % width;",
+    "  let base: u32 = rank - lane;",
+    `  ${helper.scratchName}[rank] = value_arg;`,
+    "  workgroupBarrier();",
+    `  var stride: u32 = ${start}u;`,
+    "  while (stride > 0u) {",
+    `    if (lane < stride && (lane + stride) < width && (rank + stride) < ${workgroupSize}u) {`,
+    `      ${helper.scratchName}[rank] = ${helper.reducerName}(${helper.scratchName}[rank], ${helper.scratchName}[rank + stride], local_id, workgroup_id, num_workgroups);`,
+    "    }",
+    "    workgroupBarrier();",
+    "    stride = stride / 2u;",
+    "  }",
+    `  let result: ${type} = ${helper.scratchName}[base];`,
+    "  workgroupBarrier();",
+    "  return result;",
+    "}",
+  ];
 }
 
 export function emitSemanticCooperativeScanHelper(

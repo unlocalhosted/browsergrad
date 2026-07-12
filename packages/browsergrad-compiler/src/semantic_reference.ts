@@ -1056,8 +1056,17 @@ function semanticReferenceCooperativeReduceCallSupported(
   const [groupArg, valueArg] = expression.args;
   if (groupArg?.kind !== "symbol" || !valueArg) return false;
   const group = semanticCooperativeGroupInfo(compiled.kernelIr, groupArg.name);
-  return group !== undefined && group.kind !== "grid" && group.kind !== "coalesced" &&
-    semanticReferenceExpressionSupported(valueArg, "scalar", compiled);
+  if (group === undefined || group.kind === "grid" || group.kind === "coalesced") return false;
+  if (semanticReferenceExpressionSupported(valueArg, "scalar", compiled)) return true;
+  const reducerArg = expression.args[2];
+  const valueType = semanticExpressionValueType(valueArg);
+  const reducer = reducerArg?.kind === "symbol" && reducerArg.addressSpace === "function"
+    ? compiled.kernelIr.functions.find((fn) => semanticIdsEqual(fn.id, reducerArg.id))
+    : undefined;
+  return valueType !== undefined && isSemanticFloatVectorType(valueType) &&
+    semanticReferenceExpressionSupported(valueArg, "any", compiled) && reducer?.returnType === valueType &&
+    reducer.params.length === 2 && reducer.params.every((param) => !param.pointer && param.valueType === valueType) &&
+    unsupportedSemanticReferenceOperation(reducer.body, compiled, true) === undefined;
 }
 
 function semanticReferenceCooperativeScanCallSupported(
@@ -4766,13 +4775,50 @@ function evalSemanticCoalescedGroupCall(
 function evalSemanticCooperativeReduceCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
-): number {
+): SemanticValue {
   const [groupArg, valueArg] = expression.args;
   if (groupArg?.kind !== "symbol" || !valueArg) {
     throw semanticReferenceError("semantic cooperative reduce requires group and value", expression.span);
   }
-  return semanticReferenceCooperativeContexts(groupArg.name, context)
-    .reduce((sum, peer) => sum + evalNumber(valueArg, peer), 0);
+  const valueType = semanticExpressionValueType(valueArg);
+  if (valueType !== undefined && isSemanticFloatVectorType(valueType)) {
+    const reducerArg = expression.args[2];
+    const reducer = reducerArg?.kind === "symbol"
+      ? context.compiled.kernelIr.functions.find((fn) => semanticIdsEqual(fn.id, reducerArg.id))
+      : undefined;
+    if (!reducer) throw semanticReferenceError("semantic vector cooperative reduce requires resolved reducer", expression.span);
+    const values = semanticReferenceCooperativeContexts(groupArg.name, context)
+      .map((peer) => evalSemanticExpression(valueArg, peer));
+    const first = values.shift();
+    if (!Array.isArray(first)) throw semanticReferenceError("semantic vector cooperative reduce requires vector values", valueArg.span);
+    return values.reduce<SemanticValue>((left, right) => {
+      if (!Array.isArray(left) || !Array.isArray(right)) throw semanticReferenceError("semantic vector cooperative reduce requires vector values", valueArg.span);
+      return evalSemanticVectorReducer(reducer, left, right, valueType, context, expression.span);
+    }, first);
+  }
+  return semanticReferenceCooperativeContexts(groupArg.name, context).reduce((sum, peer) => sum + evalNumber(valueArg, peer), 0);
+}
+
+function evalSemanticVectorReducer(
+  reducer: CompiledCudaLiteKernel["kernelIr"]["functions"][number],
+  left: readonly number[],
+  right: readonly number[],
+  valueType: CudaLiteScalarType,
+  context: SemanticReferenceContext,
+  span: SourceSpan,
+): SemanticValue {
+  const vectorExpression = (value: readonly number[]): SemanticExpression => ({
+    kind: "call",
+    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(`make_${valueType}`), name: `make_${valueType}`, addressSpace: "builtin", span },
+    args: value.map((lane) => ({ kind: "literal", literalKind: "number", value: lane, valueType: "float", span })),
+    valueType,
+    span,
+  });
+  const reducerContext = { ...context };
+  delete reducerContext.activeCollectiveContexts;
+  const child = runSemanticFunction(reducer, [vectorExpression(left), vectorExpression(right)], reducerContext, span);
+  if (!Array.isArray(child.returnValue)) throw semanticReferenceError(`semantic vector reducer '${reducer.name}' did not return vector`, reducer.span);
+  return child.returnValue;
 }
 
 function evalSemanticCooperativeScanCall(
