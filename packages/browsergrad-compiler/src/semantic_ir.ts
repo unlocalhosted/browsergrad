@@ -699,6 +699,17 @@ export function lowerSemanticModelToKernelIr(
   const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
   const mutableParams = mutableKernelParamShadows(analysis, semantic.params);
   for (const shadow of mutableParams) scope.set(shadow.sourceName, shadow.symbol);
+  const sourceBarrierFunctions = semanticIrBarrierFunctionNames(semantic.functions);
+  const loweredSourceFunctions = semantic.functions.map((fn): CudaLiteSemanticFunction => {
+    const proof = analysis.barrierUniformity.functions[fn.name];
+    if (proof === undefined || !sourceBarrierFunctions.has(fn.name)) return fn;
+    const promoted = promoteSemanticBarrierResultCalls(fn.body, sourceBarrierFunctions);
+    const loweredBranches = lowerSemanticDivergentBarrierBranches(promoted, semantic.functions, fn.span, proof);
+    return {
+      ...fn,
+      body: lowerSemanticEarlyReturnsBeforeDirectBarriers(loweredBranches, semantic.functions, fn.span, proof),
+    };
+  });
   const rawOperations = [
     ...mutableParams.map((shadow): SemanticKernelIrOperation => ({
       kind: "declare",
@@ -708,17 +719,16 @@ export function lowerSemanticModelToKernelIr(
     })),
     ...lowerStatements(analysis.kernel.body, scope),
   ];
-  const sourceBarrierFunctions = semanticIrBarrierFunctionNames(semantic.functions);
   const promotedRawOperations = promoteSemanticBarrierResultCalls(rawOperations, sourceBarrierFunctions);
   const barrierBranchOperations = lowerSemanticDivergentBarrierBranches(
     promotedRawOperations,
-    semantic.functions,
+    loweredSourceFunctions,
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
   );
   const loweredOperations = lowerSemanticEarlyReturnsBeforeDirectBarriers(
     barrierBranchOperations,
-    semantic.functions,
+    loweredSourceFunctions,
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
   );
@@ -729,7 +739,7 @@ export function lowerSemanticModelToKernelIr(
     .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
   const resolved = resolveSemanticFunctionOverloads(
     loweredOperations,
-    semantic.functions.filter((fn) => reachable.functionNames.has(fn.name) && !isSemanticGeneratedRandomCall(fn.name)),
+    loweredSourceFunctions.filter((fn) => reachable.functionNames.has(fn.name) && !isSemanticGeneratedRandomCall(fn.name)),
   );
   const resolvedFunctionSharedMemory = resolved.functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body)

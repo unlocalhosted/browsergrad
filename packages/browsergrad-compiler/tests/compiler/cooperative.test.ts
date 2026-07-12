@@ -2421,6 +2421,33 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.kernelIr.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane")).toBe(false);
     });
 
+  it("lowers early returns inside uniformly called barrier helpers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void helperEarlyReturnBarrier(float *out, int N) {
+    __shared__ float tile[4];
+    int tid = threadIdx.x;
+    if (tid >= N) return;
+    tile[tid] = out[tid];
+    __syncthreads();
+    out[tid] = tile[tid] + 1.0f;
+  }
+  __global__ void callEarlyReturnBarrierHelper(float *out, int N) {
+    helperEarlyReturnBarrier(out, N);
+  }`, { workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 3 } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("fn helperEarlyReturnBarrier");
+      expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+      expect(compiled.wgsl).not.toContain("if ((u32(tid) >= u32(N))) {\n    return;");
+      expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 4]);
+    });
+
   it("keeps barriers uniform inside tiled loops after active-lane early returns", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void earlyReturnLoopBarrier(float *x, int N) {

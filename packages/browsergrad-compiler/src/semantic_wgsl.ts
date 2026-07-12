@@ -915,6 +915,8 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
       semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
     ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
       semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
+      fn.body.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane") &&
+        semanticBarrierOperationsMatchActiveLaneProof(fn.body, ir.barrierUniformity.functions[fn.name], barrierFunctions) ||
       semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name], barrierFunctions)
     );
 }

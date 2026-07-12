@@ -1414,6 +1414,30 @@ __global__ void earlyReturnBarrierHelper(const float *input, float *out, int N) 
     expect([...actual.buffers.out as Float32Array]).toEqual([3, 5, 7, 0]);
   });
 
+  it("runs active-lane early returns inside barrier helpers", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ void helperEarlyReturnBarrier(float *out, int N) {
+  __shared__ float tile[4];
+  int tid = threadIdx.x;
+  if (tid >= N) return;
+  tile[tid] = out[tid];
+  __syncthreads();
+  out[tid] = tile[tid] + 1.0f;
+}
+__global__ void callEarlyReturnBarrierHelper(float *out, int N) {
+  helperEarlyReturnBarrier(out, N);
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 3 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Float32Array]).toEqual([2, 3, 4, 4]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([2, 3, 4, 4]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `
