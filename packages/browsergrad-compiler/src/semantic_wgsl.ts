@@ -7134,8 +7134,10 @@ function emitSemanticBinary(
   if (isSemanticStoragePointerIdentityComparison(expression, ir)) {
     const left = emitSemanticStoragePointerIdentity(expression.left, ir, names, options);
     const right = emitSemanticStoragePointerIdentity(expression.right, ir, names, options);
-    const equal = `((${left.buffer}) == (${right.buffer}) && (${left.base}) == (${right.base}))`;
-    return createTrustedWgslExpression(expression.operator === "==" ? equal : `!${equal}`, "bool", expression.span);
+    const buffersEqual = emitTypedWgslBinary("==", left.buffer, right.buffer, expression.span);
+    const basesEqual = emitTypedWgslBinary("==", left.base, right.base, expression.span);
+    const equal = emitTypedWgslBinary("&&", buffersEqual, basesEqual, expression.span);
+    return expression.operator === "==" ? equal : emitTypedWgslUnary("!", equal, expression.span);
   }
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return emitTypedWgslBinary(
@@ -7216,7 +7218,7 @@ function emitSemanticStoragePointerIdentity(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions,
-): { readonly buffer: string; readonly base: string } {
+): { readonly buffer: TypedWgslExpression; readonly base: TypedWgslExpression } {
   if (expression.kind !== "symbol") throw semanticWgslError("semantic storage pointer identity requires symbols", expression.span);
   const ownerParam = options.activeFunction === undefined
     ? undefined
@@ -7224,25 +7226,39 @@ function emitSemanticStoragePointerIdentity(
       param.name === expression.name && param.pointer && param.addressSpace === "storage");
   if (ownerParam) {
     return {
-      buffer: nameFor(semanticPointerBufferParamName(expression.name), names),
-      base: nameFor(semanticPointerBaseParamName(expression.name), names),
+      buffer: createTypedWgslIdentifier(nameFor(semanticPointerBufferParamName(expression.name), names), "u32", expression.span),
+      base: createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(expression.name), names), "u32", expression.span),
     };
   }
   const bufferId = semanticStoragePointerBufferId(expression.name, ir);
   const root = ir.params.find((param) => param.name === expression.name && param.pointer && param.addressSpace === "storage");
   if (bufferId === undefined || root?.valueType === undefined || root.valueType === "void") throw semanticWgslError(`unknown storage pointer '${expression.name}'`, expression.span);
   return {
-    buffer: `${bufferId}u`,
-    base: emitSemanticRootStoragePointerArgBaseIndex({
-      baseId: semanticMemoryIdFromSymbol(root.id),
-      base: expression.name,
-      addressSpace: "storage",
-      valueType: root.valueType,
-      indices: [],
-      fields: [],
-      span: expression.span,
-    }, root, ir, names, options),
+    buffer: createTypedWgslLiteral(`${bufferId}u`, "u32", expression.span),
+    base: emitSemanticRootStoragePointerIdentityBase(root, ir, names, options, expression.span),
   };
+}
+
+function emitSemanticRootStoragePointerIdentityBase(
+  root: SemanticKernelIrModule["params"][number],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  span: SourceSpan,
+): TypedWgslExpression {
+  const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(root.name);
+  const base = hasOffset
+    ? convertTypedWgslExpression(
+        createTypedWgslIdentifier(nameFor(storageOffsetSymbol(root.name), names), "i32", span),
+        "u32",
+        `u32(${nameFor(storageOffsetSymbol(root.name), names)})`,
+      )
+    : createTypedWgslZero("u32", span);
+  if (!isCudaVectorType(root.valueType)) return base;
+  const stride = cudaVectorLaneCount(root.valueType);
+  return stride === 1
+    ? base
+    : emitTypedWgslBinary("*", base, createTypedWgslLiteral(`${stride}u`, "u32", span), span);
 }
 
 function emitSemanticVectorOperand(

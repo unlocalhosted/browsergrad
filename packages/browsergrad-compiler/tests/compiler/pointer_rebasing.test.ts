@@ -98,7 +98,7 @@ describe("CUDA-lite compiler: Pointer rebasing", () => {
       );
       expect([...pointerIdentityResult.buffers.out as Uint32Array]).toEqual([1, 2]);
       expect(canEmitSemanticKernelIrWgsl(pointerIdentity.wgslLegalizedKernelIr)).toBe(true);
-      expect(pointerIdentity.wgsl).toContain("!((0u) == (1u) && (0u) == (0u))");
+      expect(pointerIdentity.wgsl).toContain("!(((0u == 1u) && (0u == 0u))))");
       expect(pointerIdentity.wgsl).toContain("out[1u] = 2u;");
 
       const helperPointerIdentity = compileCudaLiteKernel(`
