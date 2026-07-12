@@ -103,6 +103,7 @@ export {
 export {
   createTypedWgslIdentifier,
   createTypedWgslLiteral,
+  createTypedWgslZero,
   createTypedWgslCall,
   createTypedWgslConstructor,
   isWgslVectorType,

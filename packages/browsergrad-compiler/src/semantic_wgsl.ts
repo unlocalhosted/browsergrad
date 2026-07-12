@@ -113,6 +113,7 @@ import {
   createTrustedWgslExpression,
   createTypedWgslIdentifier,
   createTypedWgslLiteral,
+  createTypedWgslZero,
   createTypedWgslCall,
   createTypedWgslConstructor,
   isWgslVectorType,
@@ -2484,7 +2485,7 @@ function emitSemanticOperation(
       const init = operation.init
         ? emitSemanticInitExpression(operation.init, operation.target.valueType, ir, names, options, textureSpecializations)
         : isSemanticFloatVectorType(operation.target.valueType)
-        ? createTrustedWgslExpression(zeroForType(type), type, operation.span)
+        ? createTypedWgslZero(type, operation.span)
         : undefined;
       const statement = createTypedWgslVariableStatement("var", nameFor(operation.target.name, names), type, init, operation.span);
       return [`${prefix}${statement.code}`];

@@ -4,6 +4,7 @@ import {
   createTypedWgslIdentifier,
   createTypedWgslCall,
   createTypedWgslConstructor,
+  createTypedWgslZero,
   createTypedWgslLocalAssignmentStatement,
   createTypedWgslReturnStatement,
   createTypedWgslVariableStatement,
@@ -145,5 +146,11 @@ describe("typed WGSL expressions", () => {
       [createTypedWgslIdentifier("x", "u32", span), createTypedWgslIdentifier("y", "u32", span)],
       span,
     )).toThrow("requires one splat or 3 lanes");
+  });
+
+  it("constructs canonical typed scalar and vector zero values", () => {
+    expect(createTypedWgslZero("u32", span)).toMatchObject({ code: "0u", type: "u32", span });
+    expect(createTypedWgslZero("vec3<i32>", span)).toMatchObject({ code: "vec3<i32>(0)", type: "vec3<i32>", span });
+    expect(createTypedWgslZero("vec2<f16>", span)).toMatchObject({ code: "vec2<f16>(f16(0.0))", type: "vec2<f16>", span });
   });
 });

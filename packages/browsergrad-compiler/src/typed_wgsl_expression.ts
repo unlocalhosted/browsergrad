@@ -77,6 +77,19 @@ export function createTypedWgslLiteral(
   return new TypedWgslExpressionValue({ kind: "leaf", code }, type, span);
 }
 
+export function createTypedWgslZero(
+  type: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (type === "bool") return createTypedWgslLiteral("false", "bool", span);
+  if (type === "f16") return createTypedWgslLiteral("f16(0.0)", "f16", span);
+  if (type === "f32") return createTypedWgslLiteral("0.0", "f32", span);
+  if (type === "i32") return createTypedWgslLiteral("0", "i32", span);
+  if (type === "u32") return createTypedWgslLiteral("0u", "u32", span);
+  const scalar = vectorScalarType(type);
+  return createTypedWgslConstructor(type, [createTypedWgslZero(scalar, span)], span);
+}
+
 export function createTypedWgslCall(
   callee: string,
   args: readonly TypedWgslExpression[],
