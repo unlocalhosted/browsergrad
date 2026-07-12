@@ -359,6 +359,10 @@ const PACKED_SHARED_U8_STORE = "bg_semantic_packed_shared_u8_store";
 const PACKED_SHARED_U8_ADD = "bg_semantic_packed_shared_u8_add";
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
+const TYPED_NATIVE_WGSL_MATH_CALLS = new Set([
+  "sqrt", "inverseSqrt", "exp", "exp2", "log", "log2", "abs", "floor", "ceil", "trunc",
+  "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+]);
 
 export function canEmitSemanticKernelIrWgsl(
   legalized: WgslLegalizedIrArtifact<SemanticKernelIrModule>,
@@ -4507,6 +4511,15 @@ function emitSemanticExpression(
     );
   }
   if (expression.kind === "call") {
+    const nativeMath = semanticTypedNativeMathCallee(expression, ir);
+    if (nativeMath) {
+      return createTypedWgslCall(
+        nativeMath,
+        expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations)),
+        "f32",
+        expression.span,
+      );
+    }
     if (semanticWgslVectorConstructorSupported(expression, "any", ir)) {
       return emitSemanticVectorConstructorExpression(expression, ir, names, options, textureSpecializations);
     }
@@ -4533,6 +4546,15 @@ function emitSemanticExpression(
     semanticExpressionWgslType(expression, ir),
     expression.span,
   );
+}
+
+function semanticTypedNativeMathCallee(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): string | undefined {
+  if (expression.callee.kind !== "symbol" || semanticExpressionWgslType(expression, ir) !== "f32") return undefined;
+  const callee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
+  return callee !== undefined && TYPED_NATIVE_WGSL_MATH_CALLS.has(callee) ? callee : undefined;
 }
 
 function semanticWgslSymbolHasTypedEmission(
