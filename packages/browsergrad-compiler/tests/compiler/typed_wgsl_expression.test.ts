@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertTypedWgslExpression,
   createTypedWgslIdentifier,
+  createTypedWgslCall,
   createTypedWgslLocalAssignmentStatement,
   createTypedWgslReturnStatement,
   createTypedWgslVariableStatement,
@@ -114,5 +115,15 @@ describe("typed WGSL expressions", () => {
       createTypedWgslIdentifier("scale", "f32", span),
       span,
     )).toMatchObject({ code: "value *= scale;", span });
+  });
+
+  it("builds calls from validated callee and argument nodes", () => {
+    expect(createTypedWgslCall(
+      "read_value",
+      [createTypedWgslIdentifier("index", "u32", span)],
+      "f32",
+      span,
+    )).toMatchObject({ code: "read_value(index)", type: "f32", span });
+    expect(() => createTypedWgslCall("read-value()", [], "f32", span)).toThrow("invalid WGSL callee");
   });
 });

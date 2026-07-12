@@ -113,6 +113,7 @@ import {
   createTrustedWgslExpression,
   createTypedWgslIdentifier,
   createTypedWgslLiteral,
+  createTypedWgslCall,
   isTypedWgslLiteralCode,
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
@@ -3238,11 +3239,7 @@ function emitSemanticReturnValue(
   if (expression.kind === "assignment") {
     const lines = emitSemanticExpressionStatement(expression, ir, names, indentLevel, options, textureSpecializations);
     const returnType = semanticActiveFunctionReturnType(ir, options, expression.span);
-    const value = createTrustedWgslExpression(
-      emitSemanticAssignmentResult(expression, ir, names, options),
-      semanticExpressionWgslType(expression, ir),
-      expression.span,
-    );
+    const value = emitSemanticAssignmentResultExpression(expression, ir, names, options);
     const statement = createTypedWgslReturnStatement(wgslValueType(returnType), value, expression.span);
     return [...lines, `${prefix}${statement.code}`];
   }
@@ -3285,6 +3282,39 @@ function emitSemanticAssignmentResult(
   const ref = semanticWgslAssignmentMemoryRef(expression.target, ir);
   if (ref) return emitSemanticMemoryRef(ref, ir, names, options);
   throw semanticWgslError("semantic WGSL cannot return assignment result", expression.span);
+}
+
+function emitSemanticAssignmentResultExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): TypedWgslExpression {
+  if (expression.target.kind === "symbol") {
+    return createTypedWgslIdentifier(
+      nameFor(expression.target.name, names),
+      semanticExpressionWgslType(expression, ir),
+      expression.span,
+    );
+  }
+  return createTrustedWgslExpression(
+    emitSemanticAssignmentResult(expression, ir, names, options),
+    semanticExpressionWgslType(expression, ir),
+    expression.span,
+  );
+}
+
+function emitSemanticTruthinessExpression(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): TypedWgslExpression {
+  return createTrustedWgslExpression(
+    emitTruthiness(expression, ir, names, options),
+    "bool",
+    expression.span,
+  );
 }
 
 function semanticWgslSurfaceReadTarget(expression: SemanticExpression): { readonly name: string; readonly valueType?: CudaLiteScalarType } | undefined {
@@ -4462,11 +4492,7 @@ function emitSemanticConditional(
     }
     return emitSemanticExpression(arm, ir, names, options, textureSpecializations);
   };
-  const condition = createTrustedWgslExpression(
-    emitTruthiness(expression.condition, ir, names, options),
-    "bool",
-    expression.condition.span,
-  );
+  const condition = emitSemanticTruthinessExpression(expression.condition, ir, names, options);
   const emitted = emitTypedWgslSelect(
     emitArm(expression.alternate),
     emitArm(expression.consequent),
@@ -7026,8 +7052,12 @@ function emitSemanticUnary(
       throw semanticWgslError("semantic WGSL pointer dereference requires modeled local storage pointer", expression.span);
     }
     const valueType = declaration.target.valueType ?? "float";
-    return createTrustedWgslExpression(
-      `${semanticPointerReadHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(expression.argument.name), names)}, ${nameFor(semanticPointerBaseParamName(expression.argument.name), names)})`,
+    return createTypedWgslCall(
+      semanticPointerReadHelperName(valueType),
+      [
+        createTypedWgslIdentifier(nameFor(semanticPointerBufferParamName(expression.argument.name), names), "u32", expression.argument.span),
+        createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(expression.argument.name), names), "u32", expression.argument.span),
+      ],
       resultType,
       expression.span,
     );
@@ -7035,7 +7065,7 @@ function emitSemanticUnary(
   if (expression.operator === "!") {
     return emitTypedWgslUnary(
       "!",
-      createTrustedWgslExpression(emitTruthiness(expression.argument, ir, names, options), "bool", expression.argument.span),
+      emitSemanticTruthinessExpression(expression.argument, ir, names, options),
       expression.span,
     );
   }
@@ -7079,8 +7109,8 @@ function emitSemanticBinary(
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return emitTypedWgslBinary(
       expression.operator as "&&" | "||",
-      createTrustedWgslExpression(emitTruthiness(expression.left, ir, names, options), "bool", expression.left.span),
-      createTrustedWgslExpression(emitTruthiness(expression.right, ir, names, options), "bool", expression.right.span),
+      emitSemanticTruthinessExpression(expression.left, ir, names, options),
+      emitSemanticTruthinessExpression(expression.right, ir, names, options),
       expression.span,
     );
   }

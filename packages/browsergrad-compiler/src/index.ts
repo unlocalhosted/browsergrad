@@ -103,6 +103,7 @@ export {
 export {
   createTypedWgslIdentifier,
   createTypedWgslLiteral,
+  createTypedWgslCall,
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
   emitTypedWgslBinary,

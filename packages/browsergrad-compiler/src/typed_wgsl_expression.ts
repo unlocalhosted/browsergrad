@@ -18,7 +18,8 @@ type TypedWgslExpressionNode =
   | { readonly kind: "bool-to-numeric"; readonly targetType: "f16" | "f32" | "i32" | "u32"; readonly source: TypedWgslExpressionValue }
   | { readonly kind: "binary"; readonly operator: WgslBinaryOperator; readonly left: TypedWgslExpressionValue; readonly right: TypedWgslExpressionValue }
   | { readonly kind: "unary"; readonly operator: WgslUnaryOperator; readonly operand: TypedWgslExpressionValue }
-  | { readonly kind: "select"; readonly alternate: TypedWgslExpressionValue; readonly consequent: TypedWgslExpressionValue; readonly condition: TypedWgslExpressionValue };
+  | { readonly kind: "select"; readonly alternate: TypedWgslExpressionValue; readonly consequent: TypedWgslExpressionValue; readonly condition: TypedWgslExpressionValue }
+  | { readonly kind: "call"; readonly callee: string; readonly args: readonly TypedWgslExpressionValue[] };
 
 class TypedWgslExpressionValue implements TypedWgslExpression {
   readonly [typedWgslExpression] = true;
@@ -72,6 +73,22 @@ export function createTypedWgslLiteral(
 ): TypedWgslExpression {
   if (!isTypedWgslLiteralCode(code, type)) throw new TypeError(`invalid WGSL ${type} literal '${code}'`);
   return new TypedWgslExpressionValue({ kind: "leaf", code }, type, span);
+}
+
+export function createTypedWgslCall(
+  callee: string,
+  args: readonly TypedWgslExpression[],
+  resultType: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(callee)) {
+    throw new TypeError(`invalid WGSL callee '${callee}'`);
+  }
+  return new TypedWgslExpressionValue(
+    { kind: "call", callee, args: args.map(expressionValue) },
+    resultType,
+    span,
+  );
 }
 
 export function isTypedWgslLiteralCode(
@@ -234,6 +251,7 @@ function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
     case "binary": return `(${node.left.code} ${node.operator} ${node.right.code})`;
     case "unary": return node.operator === "+" ? node.operand.code : `${node.operator}(${node.operand.code})`;
     case "select": return `select(${node.alternate.code}, ${node.consequent.code}, ${node.condition.code})`;
+    case "call": return `${node.callee}(${node.args.map((arg) => arg.code).join(", ")})`;
   }
 }
 
