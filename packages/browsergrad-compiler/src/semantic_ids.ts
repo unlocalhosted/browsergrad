@@ -4,58 +4,83 @@ declare const semanticSymbolIdBrand: unique symbol;
 declare const semanticFunctionIdBrand: unique symbol;
 declare const semanticMemoryIdBrand: unique symbol;
 
-export type SemanticSymbolId = string & { readonly [semanticSymbolIdBrand]: true };
-export type SemanticFunctionId = string & { readonly [semanticFunctionIdBrand]: true };
-export type SemanticMemoryId = string & { readonly [semanticMemoryIdBrand]: true };
+export interface SemanticSymbolId {
+  readonly key: string;
+  readonly [semanticSymbolIdBrand]: true;
+}
+
+export interface SemanticFunctionId {
+  readonly key: string;
+  readonly [semanticFunctionIdBrand]: true;
+}
+
+export interface SemanticMemoryId {
+  readonly key: string;
+  readonly [semanticMemoryIdBrand]: true;
+}
+
+type SemanticId = SemanticSymbolId | SemanticFunctionId | SemanticMemoryId;
+
+function createSemanticId<T extends SemanticId>(key: string): T {
+  return Object.freeze({ key }) as T;
+}
+
+export function semanticIdKey(id: SemanticId): string {
+  return id.key;
+}
+
+export function semanticIdsEqual(left: SemanticId, right: SemanticId): boolean {
+  return left.key === right.key;
+}
 
 export function createSemanticSymbolId(
   kind: string,
   name: string,
   span: SourceSpan,
 ): SemanticSymbolId {
-  return `${kind}:${span.start}:${name}` as SemanticSymbolId;
+  return createSemanticId(`${kind}:${span.start}:${name}`);
 }
 
 export function createSemanticFunctionId(
   name: string,
   span: SourceSpan,
 ): SemanticFunctionId {
-  return `function:${span.start}:${name}` as SemanticFunctionId;
+  return createSemanticId(`function:${span.start}:${name}`);
 }
 
 export function createBuiltinSemanticSymbolId(name: string): SemanticSymbolId {
-  return `builtin:${name}` as SemanticSymbolId;
+  return createSemanticId(`builtin:${name}`);
 }
 
 export function createGeneratedSemanticSymbolId(
   name: string,
   span: SourceSpan,
 ): SemanticSymbolId {
-  return `generated:${span.start}:${name}` as SemanticSymbolId;
+  return createSemanticId(`generated:${span.start}:${name}`);
 }
 
 export function createUnresolvedSemanticSymbolId(
   name: string,
   span: SourceSpan,
 ): SemanticSymbolId {
-  return `unresolved:${span.start}:${name}` as SemanticSymbolId;
+  return createSemanticId(`unresolved:${span.start}:${name}`);
 }
 
 export function semanticMemoryIdFromSymbol(id: SemanticSymbolId): SemanticMemoryId {
-  return id as string as SemanticMemoryId;
+  return id as unknown as SemanticMemoryId;
 }
 
 export function semanticSymbolIdFromMemory(id: SemanticMemoryId): SemanticSymbolId {
-  return id as string as SemanticSymbolId;
+  return id as unknown as SemanticSymbolId;
 }
 
 export function semanticSymbolIdFromFunction(id: SemanticFunctionId): SemanticSymbolId {
-  return id as string as SemanticSymbolId;
+  return id as unknown as SemanticSymbolId;
 }
 
 export function createUnresolvedSemanticMemoryId(
   name: string,
   span: SourceSpan,
 ): SemanticMemoryId {
-  return `unresolved-memory:${span.start}:${name}` as SemanticMemoryId;
+  return createSemanticId(`unresolved-memory:${span.start}:${name}`);
 }

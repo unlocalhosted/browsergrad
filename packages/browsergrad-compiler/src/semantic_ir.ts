@@ -105,6 +105,8 @@ import {
   createUnresolvedSemanticSymbolId,
   createSemanticFunctionId,
   createSemanticSymbolId,
+  semanticIdKey,
+  semanticIdsEqual,
   semanticMemoryIdFromSymbol,
   semanticSymbolIdFromMemory,
   type SemanticFunctionId,
@@ -1799,7 +1801,7 @@ function specializeConstantPointerFunctions(
       const root = refs[0];
       if (root && refs.length > 0 && refs.every((ref) =>
         ref?.addressSpace === "constant" &&
-        ref.baseId === root.baseId &&
+        semanticIdsEqual(ref.baseId, root.baseId) &&
         (ref.indices.length === 0 || ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]))
       )) {
         roots.set(param.name, { name: root.base, id: root.baseId });
@@ -5088,7 +5090,7 @@ function dedupeMemoryRefs(refs: readonly SemanticMemoryRef[]): readonly Semantic
   const seen = new Set<string>();
   const out: SemanticMemoryRef[] = [];
   for (const ref of refs) {
-    const key = `${ref.baseId}:${ref.addressSpace}:${ref.span.start}:${ref.span.end}`;
+    const key = `${semanticIdKey(ref.baseId)}:${ref.addressSpace}:${ref.span.start}:${ref.span.end}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(ref);
@@ -5337,7 +5339,8 @@ function localPointerAliasForInitializer(
     if (
       root === undefined ||
       addressSpace === undefined ||
-      root !== alternate.pointerRoot ||
+      alternate.pointerRoot === undefined ||
+      !semanticIdsEqual(root, alternate.pointerRoot) ||
       addressSpace !== alternate.pointerAddressSpace ||
       consequent.pointerBaseIndices?.length !== 1 ||
       alternate.pointerBaseIndices?.length !== 1 ||
@@ -5682,7 +5685,7 @@ function mergeBranchLocalPointerAliases(
       !right?.pointerRoot ||
       !sameSymbolDeclaration(current, left) ||
       !sameSymbolDeclaration(current, right) ||
-      left.pointerRoot !== right.pointerRoot ||
+      !semanticIdsEqual(left.pointerRoot, right.pointerRoot) ||
       left.pointerAddressSpace !== right.pointerAddressSpace ||
       left.pointerBaseIsScalarLane !== right.pointerBaseIsScalarLane ||
       !semanticPointerAliasAddressSpaceSupported(left.pointerAddressSpace) ||
@@ -5971,7 +5974,7 @@ function localPointerAliasDifferenceExpression(
   if (expression.operator !== "-") return undefined;
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
-  if (!left || !right || left.root !== right.root || left.unitBytes !== right.unitBytes) return undefined;
+  if (!left || !right || !semanticIdsEqual(left.root, right.root) || left.unitBytes !== right.unitBytes) return undefined;
   const difference = semanticCastExpression(
     subtractIndexExpressions(left.index, right.index, expression.span),
     "int",
@@ -6012,7 +6015,7 @@ function localPointerAliasComparisonExpression(
   }
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
-  if (!left || !right || left.root !== right.root) return undefined;
+  if (!left || !right || !semanticIdsEqual(left.root, right.root)) return undefined;
   const indexComparisonOperator = left.valid || right.valid ? "==" : expression.operator;
   const indexComparison: SemanticExpression = {
     kind: "binary",
@@ -6050,7 +6053,7 @@ function semanticPointerAliasScalarIndex(
   if (!alias?.pointerSelection) return undefined;
   const consequent = semanticPointerAliasScalarIndex(alias.pointerSelection.consequent, span);
   const alternate = semanticPointerAliasScalarIndex(alias.pointerSelection.alternate, span);
-  if (!consequent || !alternate || consequent.root !== alternate.root || consequent.valid || alternate.valid ||
+  if (!consequent || !alternate || !semanticIdsEqual(consequent.root, alternate.root) || consequent.valid || alternate.valid ||
     consequent.unitBytes !== alternate.unitBytes || consequent.scalarLane !== alternate.scalarLane) return undefined;
   return {
     root: consequent.root,

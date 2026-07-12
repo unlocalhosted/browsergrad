@@ -61,7 +61,7 @@ __global__ void identity_kernel(float *out) { out[0] = 1.0f; }
         ...store,
         target: {
           ...store.target,
-          baseId: "memory:forged:out" as typeof store.target.baseId,
+          baseId: { key: "memory:forged:out" } as unknown as typeof store.target.baseId,
         },
       }],
     } as SemanticKernelIrModule;

@@ -6,7 +6,11 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
+import {
+  semanticIdKey,
+  semanticIdsEqual,
+  semanticMemoryIdFromSymbol,
+} from "./semantic_ids.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type SourceSpan } from "./types.js";
 import type { VerifiedIr } from "./compiler_phases.js";
 
@@ -78,25 +82,26 @@ function collectSemanticIrIdentities(
   const symbolNamesById = new Map<string, string>();
   const memoryById = new Map<string, CudaLiteSemanticSymbol>();
   const register = (symbol: CudaLiteSemanticSymbol): void => {
-    const existing = symbolsById.get(symbol.id);
+    const key = semanticIdKey(symbol.id);
+    const existing = symbolsById.get(key);
     if (existing !== undefined && (
       existing.name !== symbol.name ||
       existing.kind !== symbol.kind ||
       existing.span.start !== symbol.span.start ||
       existing.span.end !== symbol.span.end
     )) {
-      report(`IR symbol identity '${symbol.id}' is shared by '${existing.name}' and '${symbol.name}'`, symbol.span);
+      report(`IR symbol identity '${key}' is shared by '${existing.name}' and '${symbol.name}'`, symbol.span);
       return;
     }
-    symbolsById.set(symbol.id, symbol);
-    symbolNamesById.set(symbol.id, symbol.name);
-    memoryById.set(semanticMemoryIdFromSymbol(symbol.id), symbol);
+    symbolsById.set(key, symbol);
+    symbolNamesById.set(key, symbol.name);
+    memoryById.set(semanticIdKey(semanticMemoryIdFromSymbol(symbol.id)), symbol);
   };
   const collectOperations = (operations: readonly SemanticKernelIrOperation[]): void => {
     for (const operation of operations) {
       if (operation.kind === "declare" || operation.kind === "dim3-declare") register(operation.target);
       if (operation.kind === "cooperative-group-declare") {
-        symbolNamesById.set(operation.declaration.id, operation.declaration.name);
+        symbolNamesById.set(semanticIdKey(operation.declaration.id), operation.declaration.name);
       }
       if (operation.kind === "branch") {
         collectOperations(operation.consequent);
@@ -121,7 +126,7 @@ function collectSemanticIrIdentities(
     symbolsById,
     symbolNamesById,
     memoryById,
-    functionIds: new Set(ir.functions.map((fn) => fn.id)),
+    functionIds: new Set(ir.functions.map((fn) => semanticIdKey(fn.id))),
   };
 }
 
@@ -132,26 +137,26 @@ function verifySymbol(
   report: (message: string, span: SourceSpan) => void,
 ): void {
   verifySpan(symbol.span, `symbol '${symbol.name}'`, report);
-  if (!symbol.id) report(`IR symbol '${symbol.name}' identity must not be empty`, symbol.span);
+  if (!semanticIdKey(symbol.id)) report(`IR symbol '${symbol.name}' identity must not be empty`, symbol.span);
   if (!symbol.name) report("IR symbol name must not be empty", symbol.span);
   if (symbol.dimensions.some((value) => !Number.isInteger(value) || value < 0)) {
     report(`IR symbol '${symbol.name}' has an invalid dimension`, symbol.span);
   }
-  if (symbol.pointerRoot !== undefined && !identityContext.memoryById.has(symbol.pointerRoot)) {
-    report(`IR pointer '${symbol.name}' has dangling root identity '${symbol.pointerRoot}'`, symbol.span);
+  if (symbol.pointerRoot !== undefined && !identityContext.memoryById.has(semanticIdKey(symbol.pointerRoot))) {
+    report(`IR pointer '${symbol.name}' has dangling root identity '${semanticIdKey(symbol.pointerRoot)}'`, symbol.span);
   }
   if (symbol.pointerMemoryAlias !== undefined) {
-    const target = identityContext.memoryById.get(symbol.pointerMemoryAlias);
+    const target = identityContext.memoryById.get(semanticIdKey(symbol.pointerMemoryAlias));
     if (target === undefined) {
-      report(`IR pointer '${symbol.name}' has dangling constant-memory alias '${symbol.pointerMemoryAlias}'`, symbol.span);
+      report(`IR pointer '${symbol.name}' has dangling constant-memory alias '${semanticIdKey(symbol.pointerMemoryAlias)}'`, symbol.span);
     } else if (target.addressSpace !== "constant") {
       report(`IR pointer '${symbol.name}' aliases non-constant memory '${target.name}'`, symbol.span);
     }
   }
   if (symbol.pointerParamAlias !== undefined) {
-    const target = fn?.params.find((param) => param.id === symbol.pointerParamAlias);
+    const target = fn?.params.find((param) => semanticIdsEqual(param.id, symbol.pointerParamAlias!));
     if (target === undefined) {
-      report(`IR pointer '${symbol.name}' has dangling parameter alias '${symbol.pointerParamAlias}'`, symbol.span);
+      report(`IR pointer '${symbol.name}' has dangling parameter alias '${semanticIdKey(symbol.pointerParamAlias)}'`, symbol.span);
     } else if (!target.pointer || target.addressSpace !== symbol.addressSpace) {
       report(`IR pointer '${symbol.name}' aliases incompatible parameter '${target.name}'`, symbol.span);
     }
@@ -225,17 +230,18 @@ function verifyExpression(
   verifySpan(expression.span, `expression '${expression.kind}'`, report);
   if (expression.kind === "symbol") {
     if (!expression.name) report("IR symbol expression name must not be empty", expression.span);
-    if (!expression.id) report("IR symbol expression identity must not be empty", expression.span);
-    if (expression.addressSpace === "unknown" || expression.id.startsWith("unresolved:")) {
+    const id = semanticIdKey(expression.id);
+    if (!id) report("IR symbol expression identity must not be empty", expression.span);
+    if (expression.addressSpace === "unknown" || id.startsWith("unresolved:")) {
       report(`IR symbol expression '${expression.name}' is unresolved`, expression.span);
     } else if (
-      !expression.id.startsWith("builtin:") &&
-      !identityContext.symbolNamesById.has(expression.id) &&
-      !identityContext.functionIds.has(expression.id)
+      !id.startsWith("builtin:") &&
+      !identityContext.symbolNamesById.has(id) &&
+      !identityContext.functionIds.has(id)
     ) {
-      report(`IR symbol expression '${expression.name}' has dangling identity '${expression.id}'`, expression.span);
+      report(`IR symbol expression '${expression.name}' has dangling identity '${id}'`, expression.span);
     } else {
-      const ownerName = identityContext.symbolNamesById.get(expression.id);
+      const ownerName = identityContext.symbolNamesById.get(id);
       if (ownerName !== undefined && ownerName !== expression.name) {
         report(`IR symbol expression '${expression.name}' identity belongs to '${ownerName}'`, expression.span);
       }
@@ -252,12 +258,13 @@ function verifyMemoryRef(
 ): void {
   verifySpan(ref.span, `memory reference '${ref.base}'`, report);
   if (!ref.base) report(`IR ${operation.kind} has an empty memory root`, ref.span);
-  if (!ref.baseId || ref.baseId.startsWith("unresolved-memory:")) {
+  const baseId = semanticIdKey(ref.baseId);
+  if (!baseId || baseId.startsWith("unresolved-memory:")) {
     report(`IR ${operation.kind} has an unresolved memory root '${ref.base}'`, ref.span);
   } else {
-    const target = identityContext.memoryById.get(ref.baseId);
+    const target = identityContext.memoryById.get(baseId);
     if (target === undefined) {
-      report(`IR ${operation.kind} has dangling memory identity '${ref.baseId}'`, ref.span);
+      report(`IR ${operation.kind} has dangling memory identity '${baseId}'`, ref.span);
     } else if (target.name !== ref.base) {
       report(`IR ${operation.kind} memory root '${ref.base}' does not match identity owner '${target.name}'`, ref.span);
     }

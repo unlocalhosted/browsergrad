@@ -14,6 +14,7 @@ import {
   type SemanticKernelIrModule,
   type VerifiedSemanticKernelIr,
 } from "../../src/index.js";
+import { semanticIdKey } from "../../src/semantic_ids.js";
 
 describe("compiler phase contracts", () => {
   it("requires ordered, verified compiler stages", () => {
@@ -24,6 +25,10 @@ describe("compiler phase contracts", () => {
 
     expect(semantic.environment.symbols.get(out.id)).toBe(out);
     expect(semantic.environment.symbolsByName.get("out")).toEqual([out.id]);
+    if (false) {
+      // @ts-expect-error semantic identity is not a source/backend name
+      const _name: string = out.id;
+    }
     const canonical = lowerSemanticModelToKernelIr(analysis, semantic, { workgroupSize: [1, 1, 1] });
     const runtimeLowered = lowerSemanticCudaRuntime(canonical);
     assertValidSemanticKernelIr(runtimeLowered);
@@ -42,7 +47,7 @@ describe("compiler phase contracts", () => {
     const out = semantic.params[0]!;
 
     expect(() => createSemanticEnvironment([out, out], [])).toThrow(
-      `duplicate semantic symbol id '${out.id}'`,
+      `duplicate semantic symbol id '${semanticIdKey(out.id)}'`,
     );
   });
 

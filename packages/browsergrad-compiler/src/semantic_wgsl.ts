@@ -21,6 +21,7 @@ import {
   createSemanticSymbolId,
   createUnresolvedSemanticMemoryId,
   createUnresolvedSemanticSymbolId,
+  semanticIdsEqual,
   semanticMemoryIdFromSymbol,
 } from "./semantic_ids.js";
 import {
@@ -1230,7 +1231,7 @@ function semanticLocalStoragePointerDeclaration(
 ): Extract<SemanticKernelIrOperation, { readonly kind: "declare" }> | undefined {
   if (expression.kind !== "symbol" || expression.addressSpace !== "local") return undefined;
   return semanticLocalPointerDeclarations(ir).find((operation) =>
-    operation.target.id === expression.id &&
+    semanticIdsEqual(operation.target.id, expression.id) &&
     semanticPointerDeclarationNeedsRuntimeState(operation) &&
     semanticLocalPointerStorageRef(operation) !== undefined
   );
@@ -3711,7 +3712,7 @@ function semanticFunctionParamAliasName(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): string | undefined {
   const aliasId = param.pointerParamAlias;
-  return aliasId === undefined ? undefined : fn.params.find((candidate) => candidate.id === aliasId)?.name;
+  return aliasId === undefined ? undefined : fn.params.find((candidate) => semanticIdsEqual(candidate.id, aliasId))?.name;
 }
 
 function semanticParamAliasName(

@@ -8,6 +8,7 @@ import type {
 import { isSemanticKernelIrOperation, walkSemanticExpression } from "./semantic_ir.js";
 import type { CudaLiteScalarType } from "./types.js";
 import { isSemanticFloatVectorType } from "./semantic_vector_intrinsics.js";
+import { semanticIdsEqual } from "./semantic_ids.js";
 
 export type SemanticFunctionExpressionMode = "scalar" | "any";
 
@@ -42,7 +43,7 @@ export function semanticFunctionArgAddressContractSupported(
   if (param.pointer) {
     const ref = pointerRef(arg);
     if (param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined) {
-      return ref?.addressSpace === "constant" && ref.baseId === param.pointerMemoryAlias;
+      return ref?.addressSpace === "constant" && semanticIdsEqual(ref.baseId, param.pointerMemoryAlias);
     }
     if (param.addressSpace === "storage") return ref?.addressSpace === "storage" || ref?.addressSpace === "device-global";
     return (param.addressSpace === "shared" || param.addressSpace === "local") && ref?.addressSpace === param.addressSpace;
