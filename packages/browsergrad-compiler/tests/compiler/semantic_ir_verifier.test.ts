@@ -72,4 +72,29 @@ __global__ void identity_kernel(float *out) { out[0] = 1.0f; }
       span: store.target.span,
     }));
   });
+
+  it("rejects forged device-launch identities even when callee names match", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *out) { out[0] = 1.0f; }
+__global__ void parent(float *out) { child<<<1, 1>>>(out); }
+`, { kernelName: "parent", referenceDynamicParallelism: true });
+    const launch = compiled.kernelIr.operations.find((operation) => operation.kind === "device-launch");
+    if (launch?.kind !== "device-launch") throw new Error("expected device launch operation");
+    const invalid = {
+      ...compiled.kernelIr,
+      operations: [{
+        ...launch,
+        launch: {
+          ...launch.launch,
+          calleeId: { key: "function:forged:child" } as unknown as typeof launch.launch.calleeId,
+        },
+      }],
+    } as SemanticKernelIrModule;
+
+    expect(verifySemanticKernelIr(invalid)).toContainEqual(expect.objectContaining({
+      code: "internal-lowering-invariant",
+      message: "IR device launch 'child' has unresolved function identity 'function:forged:child'",
+      span: launch.span,
+    }));
+  });
 });

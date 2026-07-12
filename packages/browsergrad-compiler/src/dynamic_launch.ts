@@ -13,6 +13,7 @@ import {
   type SemanticExpression,
   type SemanticKernelIrOperation,
 } from "./semantic_ir.js";
+import { semanticIdsEqual } from "./semantic_ids.js";
 import type {
   CompiledCudaLiteKernel,
   CompiledKernelInput,
@@ -117,7 +118,7 @@ export function createCudaHostDynamicLaunchPlan(
 
   const planned: CudaHostDynamicLaunch[] = [];
   for (const item of launches) {
-    const childKernel = findLaunchableKernel(compiled, item.launch.callee);
+    const childKernel = findLaunchableKernel(compiled, item.launch);
     if (!childKernel) return unsupported("unknown-child-kernel", `unknown dynamic kernel '${item.launch.callee}'`);
     const childBlock = evaluateSemanticLaunchVector(item.launch.block, item.env, input);
     const childGrid = evaluateSemanticLaunchVector(item.launch.grid, item.env, input);
@@ -145,9 +146,9 @@ export function createCudaHostDynamicLaunchPlan(
 
 function findLaunchableKernel(
   compiled: CompiledCudaLiteKernel,
-  name: string,
+  launch: SemanticDeviceLaunch,
 ): CudaLiteSemanticLaunchableEntry | undefined {
-  return compiled.semantic.launchableEntries.find((entry) => entry.name === name);
+  return compiled.kernelIr.launchableEntries.find((entry) => semanticIdsEqual(entry.id, launch.calleeId));
 }
 
 function unsupported(code: CudaHostDynamicLaunchBlockerCode, message: string): CudaHostDynamicLaunchPlan {

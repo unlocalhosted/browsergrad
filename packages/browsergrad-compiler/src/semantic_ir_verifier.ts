@@ -31,6 +31,7 @@ interface SemanticIrIdentityContext {
   readonly symbolNamesById: ReadonlyMap<string, string>;
   readonly memoryById: ReadonlyMap<string, CudaLiteSemanticSymbol>;
   readonly functionIds: ReadonlySet<string>;
+  readonly functionNamesById: ReadonlyMap<string, string>;
 }
 
 export function verifySemanticKernelIr(
@@ -136,7 +137,8 @@ function collectSemanticIrIdentities(
     symbolsById,
     symbolNamesById,
     memoryById,
-    functionIds: new Set(ir.functions.map((fn) => semanticIdKey(fn.id))),
+    functionIds: new Set([...ir.functions, ...ir.launchableEntries].map((fn) => semanticIdKey(fn.id))),
+    functionNamesById: new Map([...ir.functions, ...ir.launchableEntries].map((fn) => [semanticIdKey(fn.id), fn.name])),
   };
 }
 
@@ -218,6 +220,15 @@ function verifyOperations(
         report(`Non-void function '${fn.name}' must return a value`, operation.span);
       }
     }
+    if (operation.kind === "device-launch") {
+      const calleeId = semanticIdKey(operation.launch.calleeId);
+      const calleeName = identityContext.functionNamesById.get(calleeId);
+      if (calleeId.startsWith("unresolved-function:") || calleeName === undefined) {
+        report(`IR device launch '${operation.launch.callee}' has unresolved function identity '${calleeId}'`, operation.span);
+      } else if (calleeName !== operation.launch.callee) {
+        report(`IR device launch '${operation.launch.callee}' identity belongs to '${calleeName}'`, operation.span);
+      }
+    }
 
     if (operation.kind === "branch") {
       verifyOperations(operation.consequent, fn, loopDepth, identityContext, report);
@@ -255,6 +266,14 @@ function verifyExpression(
       if (ownerName !== undefined && ownerName !== expression.name) {
         report(`IR symbol expression '${expression.name}' identity belongs to '${ownerName}'`, expression.span);
       }
+    }
+  } else if (expression.kind === "pointer-valid") {
+    const id = semanticIdKey(expression.pointerId);
+    const ownerName = identityContext.symbolNamesById.get(id);
+    if (ownerName === undefined) {
+      report(`IR pointer validity '${expression.pointer}' has dangling identity '${id}'`, expression.span);
+    } else if (ownerName !== expression.pointer) {
+      report(`IR pointer validity '${expression.pointer}' identity belongs to '${ownerName}'`, expression.span);
     }
   }
   for (const child of expressionChildren(expression)) verifyExpression(child, identityContext, report);

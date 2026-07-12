@@ -78,6 +78,17 @@ export function semanticSymbolIdFromFunction(id: SemanticFunctionId): SemanticSy
   return id as unknown as SemanticSymbolId;
 }
 
+export function semanticFunctionIdFromSymbol(id: SemanticSymbolId): SemanticFunctionId {
+  return id as unknown as SemanticFunctionId;
+}
+
+export function createUnresolvedSemanticFunctionId(
+  name: string,
+  span: SourceSpan,
+): SemanticFunctionId {
+  return createSemanticId(`unresolved-function:${span.start}:${name}`);
+}
+
 export function createUnresolvedSemanticMemoryId(
   name: string,
   span: SourceSpan,

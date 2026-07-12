@@ -86,6 +86,7 @@ import {
 import { semanticPtxIntegerCallInfo } from "./semantic_inline_ptx.js";
 import { sizeofCudaType } from "./type_layout.js";
 import type {
+  CudaLiteSemanticSymbol,
   SemanticExpression,
   SemanticKernelIrOperation,
   SemanticMatrixTileRef,
@@ -96,6 +97,7 @@ import {
   createBuiltinSemanticSymbolId,
   createSemanticSymbolId,
   createUnresolvedSemanticMemoryId,
+  semanticIdsEqual,
   semanticMemoryIdFromSymbol,
 } from "./semantic_ids.js";
 import {
@@ -2998,7 +3000,10 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "symbol":
       return symbolValue(expression.name, context, expression.span);
     case "pointer-valid":
-      return (context.storageOffsets.get(expression.pointer) ?? 0) !== 0xffffffff ? 1 : 0;
+      {
+        const pointer = semanticPointerValidityOwner(expression, context.compiled.kernelIr);
+        return (context.storageOffsets.get(pointer.name) ?? 0) !== 0xffffffff ? 1 : 0;
+      }
     case "member":
       {
         const byteVectorMember = semanticDirectByteVectorMemberRef(expression, context.compiled.kernelIr);
@@ -5975,6 +5980,18 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   const storageParam = context.compiled.kernelIr.params.find((param) => param.name === name && param.addressSpace === "storage");
   if (storageParam) return context.buffers.has(name) ? 1 : 0;
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);
+}
+
+function semanticPointerValidityOwner(
+  expression: Extract<SemanticExpression, { readonly kind: "pointer-valid" }>,
+  ir: CompiledCudaLiteKernel["kernelIr"],
+): CudaLiteSemanticSymbol {
+  const owner = [...ir.params, ...ir.functions.flatMap((fn) => fn.params)]
+    .find((symbol) => semanticIdsEqual(symbol.id, expression.pointerId));
+  if (!owner || owner.name !== expression.pointer) {
+    throw semanticReferenceError(`unresolved pointer validity identity for '${expression.pointer}'`, expression.span);
+  }
+  return owner;
 }
 
 function memberValue(

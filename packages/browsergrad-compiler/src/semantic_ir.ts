@@ -105,12 +105,15 @@ import type { AnalyzedCudaLiteModule } from "./analyzer.js";
 import {
   createBuiltinSemanticSymbolId,
   createGeneratedSemanticSymbolId,
+  createUnresolvedSemanticFunctionId,
   createUnresolvedSemanticSymbolId,
   createSemanticFunctionId,
   createSemanticSymbolId,
   semanticIdKey,
   semanticIdsEqual,
+  semanticFunctionIdFromSymbol,
   semanticMemoryIdFromSymbol,
+  semanticSymbolIdFromFunction,
   semanticSymbolIdFromMemory,
   type SemanticFunctionId,
   type SemanticMemoryId,
@@ -294,6 +297,7 @@ export type SemanticExpression =
     }
   | {
       readonly kind: "pointer-valid";
+      readonly pointerId: SemanticSymbolId;
       readonly pointer: string;
       readonly valueType: "bool";
       readonly span: SourceSpan;
@@ -464,6 +468,7 @@ export function semanticInlineAsmLdmatrixAssignments(
 }
 
 export interface SemanticDeviceLaunch {
+  readonly calleeId: SemanticFunctionId;
   readonly callee: string;
   readonly grid: readonly SemanticExpression[];
   readonly block: readonly SemanticExpression[];
@@ -478,6 +483,7 @@ export interface SemanticKernelIrModule {
   readonly params: readonly CudaLiteSemanticSymbol[];
   readonly memory: readonly CudaLiteSemanticSymbol[];
   readonly functions: readonly CudaLiteSemanticFunction[];
+  readonly launchableEntries: readonly CudaLiteSemanticLaunchableEntry[];
   readonly operations: readonly SemanticKernelIrOperation[];
   readonly requiredFeatures: readonly string[];
   readonly barrierUniformity: CudaLiteAnalysis["barrierUniformity"];
@@ -782,6 +788,9 @@ export function lowerSemanticModelToKernelIr(
 ): CanonicalSemanticKernelIr {
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
   const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
+  for (const entry of semantic.launchableEntries) {
+    if (!scope.has(entry.name)) scope.set(entry.name, symbolForLaunchableEntry(entry));
+  }
   const mutableParams = mutableKernelParamShadows(analysis, semantic.params);
   for (const shadow of mutableParams) scope.set(shadow.sourceName, shadow.symbol);
   const sourceBarrierFunctions = semanticIrBarrierFunctionNames(semantic.functions);
@@ -924,6 +933,7 @@ export function lowerSemanticModelToKernelIr(
       })),
     ],
     functions,
+    launchableEntries: semantic.launchableEntries,
     operations,
     requiredFeatures: semantic.requiredFeatures,
     barrierUniformity: analysis.barrierUniformity,
@@ -3988,7 +3998,11 @@ function lowerDeviceLaunch(
   statement: CudaLiteKernelLaunchStatement,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): SemanticDeviceLaunch {
+  const callee = scope.get(statement.callee);
   return {
+    calleeId: callee?.kind === "function"
+      ? semanticFunctionIdFromSymbol(callee.id)
+      : createUnresolvedSemanticFunctionId(statement.callee, statement.span),
     callee: statement.callee,
     grid: statement.grid.map((arg) => lowerExpression(arg, scope)),
     block: statement.block.map((arg) => lowerExpression(arg, scope)),
@@ -5254,6 +5268,20 @@ function symbolForSemanticFunctionDeclaration(fn: CudaLiteSemanticFunction): Cud
   };
 }
 
+function symbolForLaunchableEntry(entry: CudaLiteSemanticLaunchableEntry): CudaLiteSemanticSymbol {
+  return {
+    id: semanticSymbolIdFromFunction(entry.id),
+    name: entry.name,
+    kind: "function",
+    valueType: "void",
+    pointer: false,
+    constant: true,
+    dimensions: [],
+    addressSpace: "function",
+    span: entry.span,
+  };
+}
+
 function symbolForFunctionParam(param: CudaLiteParam, functionName: string, collidesWithGlobal: boolean): CudaLiteSemanticSymbol {
   const symbol = symbolForParam(param);
   if (symbol.addressSpace === "texture" || symbol.addressSpace === "surface") return symbol;
@@ -5448,7 +5476,7 @@ function localPointerAliasForInitializer(
         pointerAddressSpace: root.addressSpace,
         pointerBaseIndices: [zeroExpression(expression.span)],
         ...(root.pointerMayBeNull === true
-          ? { pointerValid: { kind: "pointer-valid" as const, pointer: root.name, valueType: "bool" as const, span: expression.span } }
+          ? { pointerValid: { kind: "pointer-valid" as const, pointerId: root.id, pointer: root.name, valueType: "bool" as const, span: expression.span } }
           : {}),
       };
     }

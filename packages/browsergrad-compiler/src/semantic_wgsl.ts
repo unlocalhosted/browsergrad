@@ -4,6 +4,7 @@ import {
   type WgslValueType,
 } from "@unlocalhosted/browsergrad-kernels";
 import type {
+  CudaLiteSemanticSymbol,
   SemanticExpression,
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
@@ -2253,8 +2254,7 @@ function semanticWgslExpressionSupported(
         expression.addressSpace === "shared" ||
         isCudaBuiltinVectorSymbolName(expression.name);
     case "pointer-valid":
-      return ir?.functions.some((fn) => fn.params.some((param) =>
-        param.name === expression.pointer && param.pointer && param.addressSpace === "storage")) ?? false;
+      return ir === undefined ? false : semanticWgslPointerValidityOwner(expression, ir) !== undefined;
     case "member":
       if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return expression.object.kind === "symbol" &&
@@ -2358,6 +2358,17 @@ function semanticWgslExpressionContainsSideEffectingCall(
   return semanticExpressionChildren(expression).some((child) =>
     semanticWgslExpressionContainsSideEffectingCall(child, ir, visited)
   );
+}
+
+function semanticWgslPointerValidityOwner(
+  expression: Extract<SemanticExpression, { readonly kind: "pointer-valid" }>,
+  ir: SemanticKernelIrModule,
+): CudaLiteSemanticSymbol | undefined {
+  const owner = [...ir.params, ...ir.functions.flatMap((fn) => fn.params)]
+    .find((symbol) => semanticIdsEqual(symbol.id, expression.pointerId));
+  return owner?.name === expression.pointer && owner.pointer && owner.addressSpace === "storage"
+    ? owner
+    : undefined;
 }
 
 function semanticWgslOperationsHaveObservableSideEffects(
@@ -4457,7 +4468,11 @@ function renderSemanticExpression(
       }
       return nameFor(expression.name, names);
     case "pointer-valid":
-      return `(${nameFor(semanticPointerBaseParamName(expression.pointer), names)} != 4294967295u)`;
+      {
+        const pointer = semanticWgslPointerValidityOwner(expression, ir);
+        if (!pointer) throw semanticWgslError(`unresolved pointer validity identity for '${expression.pointer}'`, expression.span);
+        return `(${nameFor(semanticPointerBaseParamName(pointer.name), names)} != 4294967295u)`;
+      }
     case "member":
       return emitSemanticMember(expression, ir, names, options);
     case "index": {
