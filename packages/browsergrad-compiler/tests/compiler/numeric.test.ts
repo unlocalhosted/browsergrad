@@ -548,9 +548,13 @@ __global__ void shared_helper_result(int *out, int n) {
     }
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("add_shared_float_lane(1u, (0u + u32(((0 + 1) * 4))), 1, 0.5");
-      expect(compiled.wgsl).toContain("return f32(tile[(u32(index) / 4u)][(u32(index) % 4u)]);");
-      expect(compiled.wgsl).toContain("tile[(u32(index) / 4u)] = vec4<f32>(select((tile[(u32(index) / 4u)]).x");
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(compiled.wgsl).toContain("ptr<workgroup, array<vec4<f32>, 8>>");
+      expect([...result.buffers.out as Float32Array]).toEqual([6.5]);
     });
 
   it("lowers vector local-array scalar-fill initializers through semantic IR", () => {

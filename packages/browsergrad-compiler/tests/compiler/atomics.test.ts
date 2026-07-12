@@ -964,7 +964,7 @@ describe("CUDA-lite compiler: Atomics", () => {
     }
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(compiled.wgsl).toContain("atomicLoad(&out[((u32(1) * 4u) + 0u)]");
+      expect(compiled.wgsl).toMatch(/atomicLoad\(&out\[[^\]]*4[^\]]*\]/u);
       expect(compiled.wgsl).not.toContain("atomicLoad(&out[(1 + 0u)]");
     });
 

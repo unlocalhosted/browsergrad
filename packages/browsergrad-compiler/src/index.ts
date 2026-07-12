@@ -59,6 +59,7 @@ export type {
   CanonicalIr,
   RuntimeLoweredIr,
   VerifiedIr,
+  TypeCheckedIr,
   WgslLegalizedIr,
 } from "./compiler_phases.js";
 export type {
@@ -89,6 +90,12 @@ export {
   verifySemanticKernelIr,
   type SemanticIrVerificationIssue,
 } from "./semantic_ir_verifier.js";
+export {
+  assertTypeCheckedSemanticKernelIr,
+  checkSemanticKernelIrTypes,
+  type SemanticTypeIssue,
+  type TypeCheckedSemanticKernelIr,
+} from "./semantic_type_check.js";
 export { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
 export {

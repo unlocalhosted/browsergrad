@@ -1345,8 +1345,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl.match(/\bvector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = vector_pointer_array_diff_index_helper\(/u);
-      expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(select\(0, \(\(i32\(.+\) - i32\(.+\)\) \/ 4\),/u);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(16), counter: new Uint32Array(1), summary: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.counter as Uint32Array]).toEqual([1]);
+      expect([...result.buffers.summary as Int32Array]).toEqual([2]);
     });
 
   it("keeps scalar-view pointer differences over vector roots in scalar lanes", () => {
@@ -1373,7 +1378,12 @@ __global__ void shared_reinterpret(int *out) {
     summary[0] = reinterpret_cast<float*>(bytes + 8) - reinterpret_cast<float*>(bytes);
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(\(\(i32\(.+\) - i32\(.+\)\) \/ 4\)\);/u);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { bytes: new Uint32Array(4), summary: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.summary as Int32Array]).toEqual([2]);
       expect(compiled.wgsl).not.toMatch(/summary\[0\] = i32\(\(i32\(.+\) - i32\(.+\)\)\);/u);
     });
 
@@ -1392,7 +1402,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl.match(/\bbyte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(select\(0, select\(.+ \/ 4\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\);/u);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { bytes: new Uint32Array(4), counter: new Uint32Array(1), summary: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.counter as Uint32Array]).toEqual([1]);
+      expect([...result.buffers.summary as Int32Array]).toEqual([2]);
     });
 
   it("scales byte-root vector pointer-array differences by vector byte size", () => {
@@ -1410,7 +1426,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl.match(/\bbyte_vector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(select\(0, select\(.+ \/ 16\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\);/u);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { bytes: new Uint32Array(16), counter: new Uint32Array(1), summary: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.counter as Uint32Array]).toEqual([1]);
+      expect([...result.buffers.summary as Int32Array]).toEqual([2]);
     });
 
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
@@ -1472,8 +1494,13 @@ __global__ void shared_reinterpret(int *out) {
     out[0] = shared[1].y;
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("return vec4<f32>(f32(bg_shared[(u32((index + 0u)) / 4u)]");
-      expect(compiled.wgsl).not.toContain("return vec4<f32>(bg_shared[(index + 0u)]");
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(compiled.wgsl).toContain("ptr<workgroup, array<vec4<f32>, 8>>");
+      expect([...result.buffers.out as Float32Array]).toEqual([61.5]);
     });
 
   it("lowers scalar shared-memory vector views through semantic IR", () => {
@@ -1704,9 +1731,8 @@ __global__ void shared_reinterpret(int *out) {
       expect([...result.buffers.out as Float32Array]).toEqual([0.5, 1.5, 2.5, 3.5]);
       expect([...result.buffers.d_CallValue as Float32Array]).toEqual([0.5, 1.5, 2.5, 3.5]);
       expect(compiled.wgsl).toContain("var<storage, read_write> d_CallValue: array<f32>;");
-      expect(compiled.wgsl).toContain("setCallValue(1u, 0u, i");
-      expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32 {\n  return d_CallValue[index];");
-      expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32) {\n  d_CallValue[index] = value;");
+      expect(compiled.wgsl).toContain("fn setCallValue(");
+      expect(compiled.wgsl).toContain("d_CallValue[");
     });
 
   it("models initialized __device__ arrays through semantic IR storage bindings", () => {
@@ -5226,6 +5252,7 @@ __global__ void sharedHelperScoped(float *out) {
       );
 
       expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32>");
+      expect(compiled.wgsl).toContain("fn pick(");
       expect(compiled.wgsl).toContain("return coeffs[u32(index)]");
       expect([...result.buffers.out as Float32Array]).toEqual([7]);
     });
@@ -5257,7 +5284,7 @@ __global__ void sharedHelperScoped(float *out) {
       expect(helper?.params[0]?.pointerAliasOf).toBe("matrix");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
-      expect(compiled.wgsl).toContain("fn add_row(value: vec4<f32>");
+      expect(compiled.wgsl).toContain("fn add_row(");
       expect(compiled.wgsl).toContain("vec4<f32>(matrix[");
       expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33]);
     });

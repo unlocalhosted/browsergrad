@@ -2777,7 +2777,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.wgsl).toContain("fn bg_curand(state: ptr<function, u32>) -> u32");
-      expect(compiled.wgsl).toContain("var x: u32 = u32(bg_curand(&state))");
+      expect(compiled.wgsl).toContain("var x: u32 = bg_curand(&state)");
       expect([...result.buffers.out as Uint32Array].some((value) => value !== 0)).toBe(true);
     });
 

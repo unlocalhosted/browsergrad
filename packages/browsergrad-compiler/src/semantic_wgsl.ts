@@ -101,6 +101,7 @@ import {
 } from "./semantic_atomic_intrinsics.js";
 import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import type { VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
+import type { TypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
 import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
@@ -373,7 +374,7 @@ function semanticWgslOperationFailureDetail(
 }
 
 export function emitSemanticKernelIrWgsl(
-  ir: VerifiedSemanticKernelIr,
+  ir: TypeCheckedSemanticKernelIr<VerifiedSemanticKernelIr>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): SemanticKernelIrWgslOutput {
   assertValidSemanticKernelIr(ir);

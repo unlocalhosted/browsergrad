@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeCudaLite,
   assertValidSemanticKernelIr,
+  assertTypeCheckedSemanticKernelIr,
   createCudaLiteSemanticModel,
   createSemanticEnvironment,
   emitSemanticKernelIrWgsl,
@@ -24,6 +25,7 @@ describe("compiler phase contracts", () => {
     const canonical = lowerSemanticModelToKernelIr(analysis, semantic, { workgroupSize: [1, 1, 1] });
     const runtimeLowered = lowerSemanticCudaRuntime(canonical);
     assertValidSemanticKernelIr(runtimeLowered);
+    assertTypeCheckedSemanticKernelIr(runtimeLowered);
     const store = runtimeLowered.operations.find((operation) => operation.kind === "store");
     expect(store?.kind === "store" ? store.target.baseId : undefined).toBe(out.id);
     const emitted = emitSemanticKernelIrWgsl(runtimeLowered);
@@ -47,6 +49,10 @@ describe("compiler phase contracts", () => {
       analyzeCudaLite({} as CudaLiteModule);
       // @ts-expect-error raw IR has not passed mandatory verifier
       emitSemanticKernelIrWgsl({} as SemanticKernelIrModule);
+      const verified = {} as SemanticKernelIrModule;
+      assertValidSemanticKernelIr(verified);
+      // @ts-expect-error verified IR has not passed mandatory semantic type checking
+      emitSemanticKernelIrWgsl(verified);
     }
     expect(true).toBe(true);
   });

@@ -563,6 +563,44 @@ export function isSemanticMathCallName(name: string): boolean {
   return SEMANTIC_MATH_CALLS.has(name);
 }
 
+export function semanticMathCallReturnType(
+  name: string | undefined,
+  args: readonly SemanticExpression[],
+): CudaLiteScalarType | undefined {
+  if (name === undefined) return undefined;
+  const callee = SEMANTIC_MATH_CALLS.get(name);
+  if (callee === undefined) return undefined;
+  const first = args[0] === undefined ? undefined : semanticExpressionValueType(args[0]);
+  if (callee === "lerp" && first !== undefined && isSemanticFloatVectorType(first)) return first;
+  if (callee.startsWith("dp")) return args[2] === undefined ? undefined : semanticExpressionValueType(args[2]);
+  if (callee === "assert") return "void";
+  if (callee === "builtin_inf" || callee === "uint_as_float" || callee === "int_as_float" || callee === "half_to_float" || callee === "bf16_to_float" || callee === "int_to_float" || callee === "uint_to_float") return "float";
+  if (
+    callee === "isinf" || callee === "isfinite" || callee === "isnan" || callee === "signbit" || callee === "isnormal" ||
+    callee === "isgreater" || callee === "isgreaterequal" || callee === "isless" || callee === "islessequal" || callee === "islessgreater" || callee === "isunordered" ||
+    callee === "half_isinf" || callee === "half_isnan"
+  ) return "uint";
+  if (
+    callee === "float_as_int" || callee === "ilogb" || callee === "frexp_exponent" || callee === "remquo_quotient" || callee === "i16_lane" ||
+    callee === "mul24" || callee === "mulhi" || callee === "imad" || callee.startsWith("float_to_int_") || callee.startsWith("half_to_int_") ||
+    callee.startsWith("half_to_short_") || callee === "half_as_short" || callee.startsWith("bf16_to_int_") || callee.startsWith("bf16_to_short_") ||
+    callee === "bf16_as_short" || callee === "bf16_to_char_rz"
+  ) return "int";
+  if (
+    callee === "clock" || callee === "float_as_uint" || callee === "u16_lane" || callee === "umul" || callee === "umul24" || callee === "umulhi" ||
+    callee === "umad" || callee === "umin" || callee === "popc" || callee === "clz" || callee === "clzll" || callee === "ffs" || callee === "brev" ||
+    callee === "byte_perm" || callee.startsWith("funnelshift_") || callee.startsWith("float_to_uint_") || callee.startsWith("half_to_uint_") ||
+    callee.startsWith("half_to_ushort_") || callee === "half_as_ushort" || callee.startsWith("bf16_to_uint_") || callee.startsWith("bf16_to_ushort_") ||
+    callee === "bf16_as_ushort" || callee === "bf16_to_uchar_rz" || callee === "float_to_fp8" || callee.startsWith("v") ||
+    callee === "sad" || callee === "usad" || callee === "usad4" || callee === "uhadd" || callee === "urhadd"
+  ) return "uint";
+  if (callee === "rhadd" || callee === "hadd") return first ?? "int";
+  if (callee === "div_ceil" || callee === "min" || callee === "max" || callee === "abs" || callee === "add" || callee === "sub" || callee === "mul") {
+    return first ?? "float";
+  }
+  return "float";
+}
+
 const SEMANTIC_VECTOR_MIN_MAX_CALLS: ReadonlySet<string> = new Set([
   "fmin", "fminf", "min", "fmax", "fmaxf", "max",
 ]);

@@ -255,7 +255,10 @@ export function runCompiledKernelSemanticReference(
 ): ReferenceKernelResult {
   assertValidSemanticKernelIr(compiled.kernelIr);
   const unsupported = unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled);
-  if (unsupported) throw semanticReferenceError(`semantic reference does not support ${unsupported.kind}`, unsupported.span);
+  if (unsupported) {
+    const owner = unsupported.kind === "declare" ? ` '${unsupported.target.name}'` : "";
+    throw semanticReferenceError(`semantic reference does not support ${unsupported.kind}${owner}`, unsupported.span);
+  }
   if (!semanticReferenceSharedShapeSupported(compiled)) {
     throw semanticReferenceError("semantic reference does not support complex shared-memory barrier shape", compiled.kernelIr.span);
   }

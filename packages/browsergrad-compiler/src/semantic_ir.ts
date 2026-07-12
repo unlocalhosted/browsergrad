@@ -75,7 +75,7 @@ import {
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
-import { SEMANTIC_CURAND_CALLS } from "./semantic_curand_intrinsics.js";
+import { SEMANTIC_CURAND_CALLS, SEMANTIC_CURAND_VECTOR_RETURN_TYPES } from "./semantic_curand_intrinsics.js";
 import {
   isSemanticGeneratedRandomCall,
   semanticGeneratedRandomReturnType,
@@ -84,8 +84,12 @@ import { semanticPointerArgumentMemoryRef as semanticIrPointerArgumentMemoryRef 
 import { resolveSemanticFunctionOverloads } from "./semantic_function_overloads.js";
 import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
-import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
-import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
+import {
+  isSemanticBf162OverloadedVectorCall,
+  semanticBf162VectorReturnType,
+  semanticHalf2VectorReturnType,
+} from "./semantic_vector_intrinsics.js";
+import { isSemanticMathCallName, semanticMathCallReturnType } from "./semantic_math_intrinsics.js";
 import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
@@ -1487,7 +1491,11 @@ function specializeConstantPointerFunctions(
       if (!param.pointer || !param.constant || param.addressSpace !== "storage") continue;
       const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
       const root = refs[0]?.base;
-      if (root && refs.length > 0 && refs.every((ref) => ref?.addressSpace === "constant" && ref.base === root && ref.indices.length === 0)) {
+      if (root && refs.length > 0 && refs.every((ref) =>
+        ref?.addressSpace === "constant" &&
+        ref.base === root &&
+        (ref.indices.length === 0 || ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]))
+      )) {
         roots.set(param.name, root);
       }
     }
@@ -3188,6 +3196,7 @@ function lowerExpression(
           kind: "symbol",
           id: createBuiltinSemanticSymbolId(expression.name),
           name: expression.name,
+          valueType: "uint3",
           addressSpace: "builtin",
           span: expression.span,
         };
@@ -5577,8 +5586,18 @@ function localPointerAliasDifferenceExpression(
   if (expression.operator !== "-") return undefined;
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
-  if (!left || !right || left.root !== right.root) return undefined;
-  return subtractIndexExpressions(left.index, right.index, expression.span);
+  if (!left || !right || left.root !== right.root || left.unitBytes !== right.unitBytes) return undefined;
+  const difference = subtractIndexExpressions(left.index, right.index, expression.span);
+  return left.unitBytes === undefined || left.unitBytes === 1
+    ? difference
+    : {
+        kind: "binary",
+        operator: "/",
+        left: difference,
+        right: intNumberExpression(left.unitBytes, expression.span),
+        valueType: "int",
+        span: expression.span,
+      };
 }
 
 function localPointerAliasComparisonExpression(
@@ -5612,21 +5631,26 @@ function localPointerAliasComparisonExpression(
 function localPointerAliasScalarIndex(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
-): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression } | undefined {
+): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number } | undefined {
   return semanticPointerAliasScalarIndex(localPointerAliasForInitializer(expression, scope), expression.span);
 }
 
 function semanticPointerAliasScalarIndex(
   alias: SemanticPointerAlias | undefined,
   span: SourceSpan,
-): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression } | undefined {
+): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number } | undefined {
   if (alias?.pointerRoot && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) && alias.pointerBaseIndices?.length === 1) {
-    return { root: alias.pointerRoot, index: alias.pointerBaseIndices[0]!, ...(alias.pointerValid === undefined ? {} : { valid: alias.pointerValid }) };
+    return {
+      root: alias.pointerRoot,
+      index: alias.pointerBaseIndices[0]!,
+      ...(alias.pointerValid === undefined ? {} : { valid: alias.pointerValid }),
+      ...(alias.pointerBaseUnitBytes === undefined ? {} : { unitBytes: alias.pointerBaseUnitBytes }),
+    };
   }
   if (!alias?.pointerSelection) return undefined;
   const consequent = semanticPointerAliasScalarIndex(alias.pointerSelection.consequent, span);
   const alternate = semanticPointerAliasScalarIndex(alias.pointerSelection.alternate, span);
-  if (!consequent || !alternate || consequent.root !== alternate.root || consequent.valid || alternate.valid) return undefined;
+  if (!consequent || !alternate || consequent.root !== alternate.root || consequent.valid || alternate.valid || consequent.unitBytes !== alternate.unitBytes) return undefined;
   return {
     root: consequent.root,
     index: {
@@ -5637,6 +5661,7 @@ function semanticPointerAliasScalarIndex(
       valueType: expressionValueType(consequent.index) ?? expressionValueType(alternate.index) ?? "int",
       span,
     },
+    ...(consequent.unitBytes === undefined ? {} : { unitBytes: consequent.unitBytes }),
   };
 }
 
@@ -5814,8 +5839,31 @@ function expressionValueType(expression: SemanticExpression | undefined): CudaLi
 
 function semanticIntrinsicReturnType(name: string | undefined, args: readonly SemanticExpression[]): CudaLiteScalarType | undefined {
   if (name === undefined) return undefined;
+  if (name === "__half2_as_uint" || name === "__bfloat162_as_uint" || name === "__nv_bfloat162_as_uint") return "uint";
+  const curandVectorReturnType = SEMANTIC_CURAND_VECTOR_RETURN_TYPES.get(name);
+  if (curandVectorReturnType) return curandVectorReturnType;
+  if (name === "curand" || name === "curand_poisson") return "uint";
+  if (name === "curand_uniform" || name === "curand_uniform_double" || name === "curand_normal" || name === "curand_normal_double" ||
+    name === "curand_log_normal" || name === "curand_log_normal_double") return "float";
+  if (name === "__low2float" || name === "__high2float") return "float";
+  if (name === "__low2bfloat16" || name === "__high2bfloat16") return "bf16";
+  if (name === "vec_at") {
+    const vectorType = expressionValueType(args[0]);
+    return isCudaVectorType(vectorType) ? cudaVectorScalarType(vectorType) : undefined;
+  }
+  if (name === "cg::reduce" || name === "cg::inclusive_scan" || name === "cg::exclusive_scan") return expressionValueType(args[1]);
+  if (name === "make_cuComplex" || name === "make_cuFloatComplex" || name === "make_cuDoubleComplex" ||
+    name === "cuCaddf" || name === "cuCsubf" || name === "cuCmulf" || name === "cuCdivf" || name === "cuConjf" ||
+    name === "cuCadd" || name === "cuCsub" || name === "cuCmul" || name === "cuCdiv" || name === "cuConj") return "complex64";
+  if (name === "cuCabsf" || name === "cuCrealf" || name === "cuCimagf" || name === "cuCabs" || name === "cuCreal" || name === "cuCimag") return "float";
+  if (isSemanticBf162OverloadedVectorCall(name) && args.some((arg) => expressionValueType(arg) === "bf162")) {
+    const overloaded = semanticBf162VectorReturnType(name);
+    if (overloaded) return overloaded;
+  }
   const half2VectorReturnType = semanticHalf2VectorReturnType(name);
   if (half2VectorReturnType) return half2VectorReturnType;
+  const bf162VectorReturnType = semanticBf162VectorReturnType(name);
+  if (bf162VectorReturnType) return bf162VectorReturnType;
   const vectorConstructorType = cudaVectorConstructorType(name);
   if (vectorConstructorType) return vectorConstructorType;
   const vectorMathReturnType = semanticVectorMathReturnType(name, args);
@@ -5841,6 +5889,8 @@ function semanticIntrinsicReturnType(name: string | undefined, args: readonly Se
     name === "__hbequ2" || name === "__hbneu2" || name === "__hbgtu2" || name === "__hbgeu2" || name === "__hbltu2" || name === "__hbleu2") return "bool";
   if (name === "__low2half" || name === "__high2half") return "half";
   if (name === "__halves2half2" || name === "__half2half2" || name === "__low2half2" || name === "__high2half2" || name === "__lows2half2" || name === "__highs2half2" || name === "__lowhigh2highlow") return "half2";
+  const mathReturnType = semanticMathCallReturnType(name, args);
+  if (mathReturnType) return mathReturnType;
   void args;
   return undefined;
 }
