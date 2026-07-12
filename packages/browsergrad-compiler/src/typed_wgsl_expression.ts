@@ -2,6 +2,7 @@ import type { SemanticWgslValueType } from "./semantic_wgsl_types.js";
 import type { SourceSpan } from "./types.js";
 
 export type WgslExpressionType = SemanticWgslValueType;
+export type WgslVectorType = Extract<WgslExpressionType, `vec${number}<${string}>`>;
 
 const typedWgslExpression: unique symbol = Symbol("typed-wgsl-expression");
 
@@ -19,7 +20,8 @@ type TypedWgslExpressionNode =
   | { readonly kind: "binary"; readonly operator: WgslBinaryOperator; readonly left: TypedWgslExpressionValue; readonly right: TypedWgslExpressionValue }
   | { readonly kind: "unary"; readonly operator: WgslUnaryOperator; readonly operand: TypedWgslExpressionValue }
   | { readonly kind: "select"; readonly alternate: TypedWgslExpressionValue; readonly consequent: TypedWgslExpressionValue; readonly condition: TypedWgslExpressionValue }
-  | { readonly kind: "call"; readonly callee: string; readonly args: readonly TypedWgslExpressionValue[] };
+  | { readonly kind: "call"; readonly callee: string; readonly args: readonly TypedWgslExpressionValue[] }
+  | { readonly kind: "constructor"; readonly targetType: WgslVectorType; readonly args: readonly TypedWgslExpressionValue[] };
 
 class TypedWgslExpressionValue implements TypedWgslExpression {
   readonly [typedWgslExpression] = true;
@@ -89,6 +91,33 @@ export function createTypedWgslCall(
     resultType,
     span,
   );
+}
+
+export function createTypedWgslConstructor(
+  targetType: WgslVectorType,
+  args: readonly TypedWgslExpression[],
+  span: SourceSpan,
+): TypedWgslExpression {
+  const scalar = vectorScalarType(targetType);
+  const laneCount = vectorLaneCount(targetType);
+  if (args.length !== 1 && args.length !== laneCount) {
+    throw new TypeError(`WGSL '${targetType}' constructor requires one splat or ${laneCount} lanes, received ${args.length}`);
+  }
+  if (args.some((arg) => arg.type !== scalar)) {
+    throw new TypeError(`WGSL '${targetType}' constructor received incompatible argument`);
+  }
+  return new TypedWgslExpressionValue(
+    { kind: "constructor", targetType, args: args.map(expressionValue) },
+    targetType,
+    span,
+  );
+}
+
+export function isWgslVectorType(type: WgslExpressionType): type is WgslVectorType {
+  return type === "vec2<f16>"
+    || type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>"
+    || type === "vec2<i32>" || type === "vec3<i32>" || type === "vec4<i32>"
+    || type === "vec2<u32>" || type === "vec3<u32>" || type === "vec4<u32>";
 }
 
 export function isTypedWgslLiteralCode(
@@ -252,6 +281,7 @@ function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
     case "unary": return node.operator === "+" ? node.operand.code : `${node.operator}(${node.operand.code})`;
     case "select": return `select(${node.alternate.code}, ${node.consequent.code}, ${node.condition.code})`;
     case "call": return `${node.callee}(${node.args.map((arg) => arg.code).join(", ")})`;
+    case "constructor": return `${node.targetType}(${node.args.map((arg) => arg.code).join(", ")})`;
   }
 }
 
@@ -269,6 +299,19 @@ function requireTypes(
 
 function isInteger(type: WgslExpressionType): type is "i32" | "u32" {
   return type === "i32" || type === "u32";
+}
+
+function vectorScalarType(type: WgslVectorType): "f16" | "f32" | "i32" | "u32" {
+  if (type === "vec2<f16>") return "f16";
+  if (type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>") return "f32";
+  if (type === "vec2<i32>" || type === "vec3<i32>" || type === "vec4<i32>") return "i32";
+  return "u32";
+}
+
+function vectorLaneCount(type: WgslVectorType): 2 | 3 | 4 {
+  if (type.startsWith("vec2")) return 2;
+  if (type.startsWith("vec3")) return 3;
+  return 4;
 }
 
 function isNumericScalar(type: WgslExpressionType): type is "f16" | "f32" | "i32" | "u32" {

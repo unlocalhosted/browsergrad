@@ -104,6 +104,8 @@ export {
   createTypedWgslIdentifier,
   createTypedWgslLiteral,
   createTypedWgslCall,
+  createTypedWgslConstructor,
+  isWgslVectorType,
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
   emitTypedWgslBinary,
@@ -113,6 +115,7 @@ export {
   type WgslBinaryOperator,
   type WgslUnaryOperator,
   type WgslExpressionType,
+  type WgslVectorType,
 } from "./typed_wgsl_expression.js";
 export {
   createTypedWgslReturnStatement,

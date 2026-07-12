@@ -3,6 +3,7 @@ import {
   convertTypedWgslExpression,
   createTypedWgslIdentifier,
   createTypedWgslCall,
+  createTypedWgslConstructor,
   createTypedWgslLocalAssignmentStatement,
   createTypedWgslReturnStatement,
   createTypedWgslVariableStatement,
@@ -125,5 +126,24 @@ describe("typed WGSL expressions", () => {
       span,
     )).toMatchObject({ code: "read_value(index)", type: "f32", span });
     expect(() => createTypedWgslCall("read-value()", [], "f32", span)).toThrow("invalid WGSL callee");
+  });
+
+  it("builds vector constructors only from matching scalar lanes", () => {
+    expect(createTypedWgslConstructor(
+      "vec2<f32>",
+      [createTypedWgslIdentifier("x", "f32", span), createTypedWgslIdentifier("y", "f32", span)],
+      span,
+    )).toMatchObject({ code: "vec2<f32>(x, y)", type: "vec2<f32>", span });
+
+    expect(() => createTypedWgslConstructor(
+      "vec2<f32>",
+      [createTypedWgslIdentifier("x", "i32", span)],
+      span,
+    )).toThrow("received incompatible argument");
+    expect(() => createTypedWgslConstructor(
+      "vec3<u32>",
+      [createTypedWgslIdentifier("x", "u32", span), createTypedWgslIdentifier("y", "u32", span)],
+      span,
+    )).toThrow("requires one splat or 3 lanes");
   });
 });

@@ -114,6 +114,8 @@ import {
   createTypedWgslIdentifier,
   createTypedWgslLiteral,
   createTypedWgslCall,
+  createTypedWgslConstructor,
+  isWgslVectorType,
   isTypedWgslLiteralCode,
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
@@ -3868,11 +3870,7 @@ function emitSemanticAssignmentStatement(
   const target = nameFor(expression.target.name, names);
   const targetType = expression.target.valueType;
   const value = targetType !== undefined && isSemanticFloatVectorType(targetType)
-    ? createTrustedWgslExpression(
-        emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations),
-        wgslValueType(targetType),
-        expression.value.span,
-      )
+    ? emitSemanticVectorOperandExpression(expression.value, targetType, ir, names, options, textureSpecializations)
     : emitSemanticInitExpression(expression.value, targetType, ir, names, options, textureSpecializations);
   if (targetType === "uchar" && expression.operator !== "=") {
     const binaryOperator = expression.operator.slice(0, -1);
@@ -7116,9 +7114,10 @@ function emitSemanticBinary(
   }
   if (isSemanticFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
     const valueType = expression.valueType as CudaLiteScalarType;
-    return createTrustedWgslExpression(
-      `(${emitSemanticVectorOperand(expression.left, valueType, ir, names, options, textureSpecializations)} ${expression.operator} ${emitSemanticVectorOperand(expression.right, valueType, ir, names, options, textureSpecializations)})`,
-      wgslValueType(valueType),
+    return emitTypedWgslBinary(
+      expression.operator as Parameters<typeof emitTypedWgslBinary>[0],
+      emitSemanticVectorOperandExpression(expression.left, valueType, ir, names, options, textureSpecializations),
+      emitSemanticVectorOperandExpression(expression.right, valueType, ir, names, options, textureSpecializations),
       expression.span,
     );
   }
@@ -7221,13 +7220,31 @@ function emitSemanticVectorOperand(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  return emitSemanticVectorOperandExpression(expression, valueType, ir, names, options, textureSpecializations).code;
+}
+
+function emitSemanticVectorOperandExpression(
+  expression: SemanticExpression,
+  valueType: CudaLiteScalarType,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): TypedWgslExpression {
   if (isSemanticFloatVectorType(semanticExpressionVectorValueType(expression, ir?.functions))) {
-    return emitSemanticExpression(expression, ir, names, options, textureSpecializations).code;
+    return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   }
   const laneCount = cudaVectorLaneCount(valueType);
   const vectorScalar = wgslVectorScalar(valueType);
-  const scalar = emitSemanticExpressionAs(expression, ir, names, vectorScalar, options, textureSpecializations).code;
-  return `vec${laneCount}<${vectorScalar}>(${Array.from({ length: laneCount }, () => `${vectorScalar}(${scalar})`).join(", ")})`;
+  const scalar = emitSemanticExpressionAs(expression, ir, names, vectorScalar, options, textureSpecializations);
+  const lanes = Array.from({ length: laneCount }, () =>
+    convertTypedWgslExpression(scalar, vectorScalar, `${vectorScalar}(${scalar.code})`)
+  );
+  const vectorType = wgslValueType(valueType);
+  if (!isWgslVectorType(vectorType)) {
+    throw new TypeError(`expected vector WGSL type for '${valueType}', received '${vectorType}'`);
+  }
+  return createTypedWgslConstructor(vectorType, lanes, expression.span);
 }
 
 function semanticBinaryOperandType(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): WgslValueType {
