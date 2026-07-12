@@ -6304,6 +6304,7 @@ function memberValueType(object: SemanticExpression, property: string): CudaLite
     if (builtinType) return builtinType;
   }
   const objectType = expressionValueType(object);
+  if (property === "size" && isCudaVectorType(objectType)) return "int";
   const storageFields = semanticStorageVectorFieldIndices(objectType, property);
   if (objectType === "complex64" && storageFields !== undefined) {
     if (storageFields.length === 1) return "float";

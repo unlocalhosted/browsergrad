@@ -30,7 +30,6 @@ import {
   isSemanticKernelIrOperation,
   semanticAtomicMemoryRootNames,
   semanticExpressionChildren,
-  semanticOperationsReferenceRoot,
 } from "./semantic_ir_walk.js";
 import type {
   CudaLiteDiagnostic,
@@ -47,10 +46,6 @@ import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
 import { emitBfloatConversionHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers } from "./wgsl_support_helpers.js";
 import {
-  SEMANTIC_BF162_SCALAR_CALLS,
-  SEMANTIC_BF162_VECTOR_CALLS,
-  SEMANTIC_HALF2_SCALAR_CALLS,
-  SEMANTIC_HALF2_VECTOR_CALLS,
   semanticBf162CallArgumentsSupported,
   isSemanticHalf2BooleanComparisonCall,
   isSemanticHalf2ComparisonCall,
@@ -65,7 +60,6 @@ import {
 } from "./semantic_vector_intrinsics.js";
 import {
   SEMANTIC_CURAND_CALLS,
-  SEMANTIC_CURAND_VECTOR_CALLS,
   semanticCurandArity,
   semanticCurandScalarArgumentIndices,
   semanticCurandStateArgumentIndex,
@@ -77,9 +71,6 @@ import {
   SEMANTIC_NOOP_CALLS,
   SEMANTIC_SUBGROUP_CALLS,
   semanticAddressPredicateAddressSpace,
-  semanticAssertCallSupported,
-  semanticNoopCallSupported,
-  semanticPrintfCallSupported,
   semanticSubgroupScalarArguments,
 } from "./semantic_builtin_calls.js";
 import {
@@ -140,12 +131,6 @@ import {
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
-import {
-  isCudaBarrierCallName,
-  isCudaCooperativeBarrierCallName,
-  isCudaFenceCallName,
-} from "./cuda_sync_calls.js";
-import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
 import {
   isMatrixTileByteValueType,
   matrixTileElementCount,
@@ -208,10 +193,6 @@ import {
   semanticBarrierShapeSupported,
   semanticOperationsContainBarrier,
 } from "./semantic_barrier_contracts.js";
-import {
-  semanticLocalArrayFillCallSupported,
-  semanticLocalArrayInitSupported as semanticLocalArrayInitContractSupported,
-} from "./semantic_local_arrays.js";
 import {
   semanticFunctionArgSupported as semanticFunctionArgContractSupported,
   semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
@@ -370,48 +351,162 @@ export function semanticKernelIrWgslPreflightFailure(
 function semanticKernelIrWgslPreflightFailureForIr(
   ir: SemanticKernelIrModule,
 ): SemanticKernelIrWgslPreflightFailure | undefined {
-  const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
-  if (unsupported) {
-    const detail = semanticWgslOperationFailureDetail(unsupported, ir);
-    return { message: `semantic WGSL does not support ${unsupported.kind}${detail === undefined ? "" : `: ${detail}`}`, span: unsupported.span };
+  try {
+    emitSemanticKernelIrWgslFromIr(ir);
+    return undefined;
+  } catch (error) {
+    if (!(error instanceof CudaLiteCompilerError)) throw error;
+    return {
+      message: error.message,
+      span: error.diagnostics[0]?.span ?? ir.span,
+    };
   }
-  if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) {
-    return { message: "semantic WGSL does not support required WebGPU features yet", span: ir.span };
-  }
-  const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param, ir));
-  if (unsupportedParam) return { message: `semantic WGSL does not support parameter '${unsupportedParam.name}'`, span: unsupportedParam.span };
+}
+
+function semanticWgslLoweringConstraintFailure(
+  ir: SemanticKernelIrModule,
+): SemanticKernelIrWgslPreflightFailure | undefined {
+  const gridBarrier = semanticGridBarrierInOperations(ir.operations) ??
+    ir.functions.map((fn) => semanticGridBarrierInOperations(fn.body)).find((barrier) => barrier !== undefined);
+  if (gridBarrier) return { message: "semantic WGSL does not support barrier", span: gridBarrier.span };
   if (!semanticWgslSharedBarrierShapeSupported(ir)) {
     return { message: "semantic WGSL does not support shared-memory barrier shape", span: ir.span };
   }
-  const unsupportedMemory = ir.memory.find((symbol) => !semanticWgslMemorySymbolSupported(symbol));
-  if (unsupportedMemory) return { message: `semantic WGSL does not support memory '${unsupportedMemory.name}'`, span: unsupportedMemory.span };
+  const wideByteRef = semanticWidePackedByteRefInOperations(ir.operations) ??
+    ir.functions.map((fn) => semanticWidePackedByteRefInOperations(fn.body)).find((ref) => ref !== undefined);
+  if (wideByteRef) {
+    return { message: "semantic WGSL supports packed byte views up to one 32-bit word", span: wideByteRef.span };
+  }
   return undefined;
 }
 
-function semanticWgslOperationFailureDetail(
-  operation: SemanticKernelIrOperation,
-  ir: SemanticKernelIrModule,
-): string | undefined {
-  if (operation.kind === "call") return semanticWgslVoidFunctionCallFailure(operation, ir);
-  if (operation.kind === "declare") {
-    const target = operation.target;
-    return `'${target.name}' (${target.pointer ? "pointer " : ""}${target.addressSpace} ${target.valueType ?? "unknown"})`;
+function semanticGridBarrierInOperations(
+  operations: readonly SemanticKernelIrOperation[],
+): Extract<SemanticKernelIrOperation, { readonly kind: "barrier" }> | undefined {
+  for (const operation of operations) {
+    if (operation.kind === "barrier" && operation.scope === "grid") return operation;
+    const nested = operation.kind === "branch"
+      ? [...operation.consequent, ...operation.alternate]
+      : operation.kind === "loop"
+        ? [...operation.body, ...(operation.continuing ?? [])]
+        : operation.kind === "block"
+          ? operation.body
+          : [];
+    const barrier = semanticGridBarrierInOperations(nested);
+    if (barrier) return barrier;
   }
-  if (operation.kind === "store") {
-    return `'${operation.target.base}' (${operation.target.addressSpace} ${operation.target.valueType ?? "unknown"}, operator ${operation.operator})`;
-  }
-  if (operation.kind === "atomic") return `'${operation.callee}'`;
   return undefined;
+}
+
+function semanticWidePackedByteRefInOperations(
+  operations: readonly SemanticKernelIrOperation[],
+): SemanticMemoryRef | undefined {
+  for (const operation of operations) {
+    if (operation.kind === "store" && operation.target.addressSpace === "storage" &&
+      operation.target.containerValueType === "uchar" && (operation.target.pointerBaseUnitBytes ?? 0) > 4) {
+      return operation.target;
+    }
+    const nested = operation.kind === "branch"
+      ? [...operation.consequent, ...operation.alternate]
+      : operation.kind === "loop"
+        ? [
+            ...(operation.init && isSemanticKernelIrOperation(operation.init) ? [operation.init] : []),
+            ...operation.body,
+            ...(operation.continuing ?? []),
+          ]
+        : operation.kind === "block"
+          ? operation.body
+          : [];
+    const nestedWide = semanticWidePackedByteRefInOperations(nested);
+    if (nestedWide) return nestedWide;
+  }
+  return undefined;
+}
+
+function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): boolean {
+  const shared = sharedMemorySymbols(ir);
+  const barrierFunctions = semanticBarrierFunctionNames(ir);
+  const containsBarrier = semanticOperationsContainBarrier(ir.operations, barrierFunctions);
+  if (shared.length === 0 && !containsBarrier) return true;
+  if (!shared.every((symbol) => symbol.dimensions.length === 0 || symbol.dimensions.every((dimension) => dimension > 0))) return false;
+  if (ir.functions.some(semanticWgslFunctionHasSharedPointer) && shared.some((symbol) => symbol.dimensions.length > 1)) return false;
+  if (!containsBarrier) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
+  if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
+  if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
+    const activeLaneLowered = semanticOperationsHaveActiveLaneDeclaration(ir.operations);
+    return activeLaneLowered && (
+      semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+      semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)
+    ) || operationsHaveOnlyTopLevelBarriers(ir.operations);
+  }
+  const activeLaneLowered = semanticOperationsHaveActiveLaneDeclaration(ir.operations);
+  return (
+    semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+    activeLaneLowered && semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions) ||
+    semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)
+  ) && ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
+    semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
+    semanticOperationsHaveActiveLaneDeclaration(fn.body) &&
+      semanticBarrierOperationsMatchActiveLaneProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions) ||
+    semanticBarrierOperationsMatchUniformityProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions)
+  );
+}
+
+function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {
+  return fn.params.some((param) => param.pointer && param.addressSpace === "shared");
+}
+
+function semanticOperationsHaveActiveLaneDeclaration(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some((operation) => operation.kind === "declare" && (
+    operation.target.name === "bg_active_lane" ||
+    operation.target.name.startsWith("bg_barrier_loop_active_") ||
+    operation.target.name.startsWith("bg_loop_active_")
+  ));
+}
+
+function semanticBarrierFunctionProof(
+  ir: SemanticKernelIrModule,
+  name: string,
+): SemanticKernelIrModule["barrierUniformity"]["kernel"] | undefined {
+  return ir.barrierUniformity.functions[name] ??
+    (name.endsWith("__bg_guarded_barrier")
+      ? ir.barrierUniformity.functions[name.slice(0, -"__bg_guarded_barrier".length)]
+      : undefined);
+}
+
+function semanticDirectBarriersHaveAnalyzerProof(ir: SemanticKernelIrModule): boolean {
+  return semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, semanticBarrierFunctionNames(ir));
+}
+
+function operationsHaveOnlyTopLevelBarriers(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.every((operation) => operation.kind !== "branch" && operation.kind !== "loop" && operation.kind !== "block");
+}
+
+function operationsHaveNoBarrierOrControlTransfer(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.every((operation) => {
+    if (operation.kind === "barrier" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue") return false;
+    if (operation.kind === "branch") {
+      return operationsHaveNoBarrierOrControlTransfer(operation.consequent) &&
+        operationsHaveNoBarrierOrControlTransfer(operation.alternate);
+    }
+    if (operation.kind === "block" || operation.kind === "loop") return operationsHaveNoBarrierOrControlTransfer(operation.body);
+    return true;
+  });
 }
 
 export function emitSemanticKernelIrWgsl(
   legalized: WgslLegalizedSemanticKernelIr,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): SemanticKernelIrWgslOutput {
-  const ir = legalized.ir;
-  const failure = semanticKernelIrWgslPreflightFailureForIr(ir);
-  if (failure) throw semanticWgslError(failure.message, failure.span);
+  return emitSemanticKernelIrWgslFromIr(legalized.ir, options);
+}
 
+function emitSemanticKernelIrWgslFromIr(
+  ir: SemanticKernelIrModule,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): SemanticKernelIrWgslOutput {
+  const constraintFailure = semanticWgslLoweringConstraintFailure(ir);
+  if (constraintFailure) throw semanticWgslError(constraintFailure.message, constraintFailure.span);
   const textureSpecializations = collectSemanticTextureDescriptorSpecializations(ir, options);
   const storageOffsetBases = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets);
   const rawNames = new Set(ir.params.map((param) => param.name));
@@ -726,210 +821,6 @@ function emitSemanticGeneratedRandomHelpers(): readonly string[] {
   ];
 }
 
-function unsupportedSemanticWgslOperation(
-  operations: readonly SemanticKernelIrOperation[],
-  ir: SemanticKernelIrModule,
-  allowReturnValue = false,
-  predicated = false,
-): SemanticKernelIrOperation | undefined {
-  for (const operation of operations) {
-    switch (operation.kind) {
-      case "dim3-declare":
-      case "cooperative-group-declare":
-        break;
-      case "declare":
-        if (operation.init && semanticExpressionContainsPartitionedReduce(operation.init, ir) && !predicated) return operation;
-        if (operation.target.addressSpace === "shared") {
-          if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticWgslValueTypeSupported(operation.target.valueType)) return operation;
-          break;
-        }
-        if (operation.target.addressSpace !== "local") return operation;
-        if (operation.target.pointer) break;
-        if (operation.target.valueType === "uchar" && operation.target.dimensions.length > 0 && operation.target.matrixTile === undefined) return operation;
-        if (!semanticWgslLocalValueTypeSupported(operation.target.valueType)) return operation;
-        if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init, operation.target.valueType, ir)) return operation;
-        if (operation.target.dimensions.length === 0) {
-          const vectorTarget = isSemanticFloatVectorType(operation.target.valueType);
-          if (operation.init && !semanticWgslExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", ir)) {
-            return unsupportedSemanticWgslNestedExpressionOperation(operation.init, ir) ?? operation;
-          }
-        }
-        break;
-      case "store":
-        if (!semanticWgslAssignmentOperatorSupported(operation.operator)) return operation;
-        if (isSemanticFloatVectorType(operation.target.valueType) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return operation;
-        if (semanticWgslVectorFieldMemoryRefSupported(operation.target) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return operation;
-        if (!semanticWgslTypedMemoryRefSupported(operation.target, ir) && !semanticWgslStorageOffsetStoreSupported(operation, ir)) return operation;
-        if (
-          operation.target.addressSpace === "storage" &&
-          !semanticWgslStorageBaseSupported(operation.target.base, ir)
-        ) return operation;
-        if (!semanticWgslStoreValueSupported(operation, ir)) return operation;
-        break;
-      case "copy":
-        if (!semanticWgslCopySupported(operation, ir)) return operation;
-        break;
-      case "copy-fence":
-        if (!isCudaCpAsyncFenceCall(operation.callee)) return operation;
-        break;
-      case "matrix-fill":
-        if (!semanticWgslMatrixRefSupported(operation.fragment, ir) || !semanticWgslExpressionSupported(operation.value, "scalar", ir)) return operation;
-        break;
-      case "matrix-load":
-        if (!semanticWgslMatrixRefSupported(operation.fragment, ir) || !semanticWgslTypedMemoryRefSupported(operation.source, ir) || !semanticWgslExpressionSupported(operation.stride, "scalar", ir)) return operation;
-        break;
-      case "matrix-mma":
-        if (![operation.destination, operation.a, operation.b, operation.accumulator].every((ref) => semanticWgslMatrixRefSupported(ref, ir))) return operation;
-        break;
-      case "matrix-store":
-        if (!semanticWgslTypedMemoryRefSupported(operation.target, ir) || !semanticWgslMatrixRefSupported(operation.fragment, ir) || !semanticWgslExpressionSupported(operation.stride, "scalar", ir)) return operation;
-        break;
-      case "surface-write":
-        if (!semanticWgslSurfaceWriteSupported(operation, ir)) return operation;
-        break;
-      case "surface-read-store":
-        if (!semanticWgslSurfaceReadStoreSupported(operation, ir)) return operation;
-        break;
-      case "atomic":
-        if (!semanticWgslAtomicSupported(operation, ir)) return operation;
-        break;
-      case "call":
-        if (!semanticWgslCallSupported(operation, ir)) {
-          const fn = semanticFunctionForCall(operation, ir.functions);
-          const nested = fn ? unsupportedSemanticWgslOperation(fn.body, ir, true) : undefined;
-          return nested ?? operation;
-        }
-        break;
-      case "expression":
-        if (!semanticWgslExpressionSupported(operation.expression, "scalar", ir)) return operation;
-        break;
-      case "branch":
-        if (!semanticWgslConditionSupported(operation.condition, ir)) return operation;
-        if (
-          (semanticOperationsContainWorkgroupCollective(operation.consequent) || semanticOperationsContainWorkgroupCollective(operation.alternate)) &&
-          (!semanticPredicatedOperationsSupported(operation.consequent) || !semanticPredicatedOperationsSupported(operation.alternate))
-        ) return operation;
-        {
-          const unsupported = unsupportedSemanticWgslOperation(operation.consequent, ir, allowReturnValue, true) ??
-          unsupportedSemanticWgslOperation(operation.alternate, ir, allowReturnValue, true);
-          if (unsupported) return unsupported;
-        }
-        break;
-      case "block":
-        {
-          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue, predicated);
-          if (unsupported) return unsupported;
-        }
-        break;
-      case "loop":
-        if (operation.init && !semanticWgslLoopInitSupported(operation.init, ir)) return operation;
-        if (operation.condition && !semanticWgslConditionSupported(operation.condition, ir)) return operation;
-        if (operation.update && !semanticWgslExpressionSupported(operation.update, "scalar", ir)) return operation;
-        {
-          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir, allowReturnValue, predicated) ??
-            (operation.continuing === undefined ? undefined : unsupportedSemanticWgslOperation(operation.continuing, ir, allowReturnValue, predicated));
-          if (unsupported) return unsupported;
-        }
-        break;
-      case "barrier":
-        if (!semanticWgslBarrierSupported(operation, ir)) return operation;
-        break;
-      case "fence":
-        if (!isCudaFenceCallName(operation.callee)) return operation;
-        break;
-      case "inline-asm":
-        {
-          const asm = operation.op;
-          const ldmatrix = semanticInlineAsmLdmatrixAssignments(operation);
-          if (ldmatrix?.every((expression) => semanticWgslExpressionSupported(expression, "scalar", ir))) break;
-          if (semanticWgslInlineMmaSupported(operation, ir)) break;
-          if (asm?.kind === "cp-async-fence") {
-            if (operation.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || operation.outputs.length !== 0) return operation;
-            break;
-          }
-          if (asm?.kind === "membar") {
-            if (operation.inputs.length !== 0 || operation.outputs.length !== 0) return operation;
-            break;
-          }
-          if (asm?.kind === "bar-sync") {
-            if (operation.inputs.length !== (asm.operand === "input0" ? 1 : 0) || operation.outputs.length !== 0) return operation;
-            break;
-          }
-          return operation;
-        }
-      case "return":
-        if (operation.value && (!allowReturnValue || !semanticWgslExpressionSupported(operation.value, "any", ir))) return operation;
-        break;
-      case "break":
-      case "continue":
-        break;
-      default:
-        return operation;
-    }
-  }
-  return undefined;
-}
-
-function semanticWgslMatrixRefSupported(ref: SemanticMatrixTileRef, ir: SemanticKernelIrModule): boolean {
-  const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === "local");
-  return symbol?.matrixTile !== undefined && ref.indices.length === ref.arrayDimensions.length &&
-    ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar", ir));
-}
-
-function unsupportedSemanticWgslNestedExpressionOperation(
-  expression: SemanticExpression,
-  ir: SemanticKernelIrModule,
-  seen = new Set<string>(),
-): SemanticKernelIrOperation | undefined {
-  if (expression.kind === "call" && expression.callee.kind === "symbol" && !seen.has(expression.callee.name)) {
-    const calleeName = expression.callee.name;
-    const fn = ir.functions.find((candidate) => candidate.name === calleeName);
-    if (fn) {
-      const nextSeen = new Set(seen).add(fn.name);
-      const unsupported = unsupportedSemanticWgslOperation(fn.body, ir, true);
-      if (unsupported) return unsupported;
-      for (const operation of fn.body) {
-        const nested = unsupportedSemanticWgslOperationExpression(operation);
-        if (!nested) continue;
-        const result = unsupportedSemanticWgslNestedExpressionOperation(nested, ir, nextSeen);
-        if (result) return result;
-      }
-    }
-  }
-  for (const child of semanticExpressionChildren(expression)) {
-    const unsupported = unsupportedSemanticWgslNestedExpressionOperation(child, ir, seen);
-    if (unsupported) return unsupported;
-  }
-  return undefined;
-}
-
-function unsupportedSemanticWgslOperationExpression(
-  operation: SemanticKernelIrOperation,
-): SemanticExpression | undefined {
-  if (operation.kind === "declare") return operation.init;
-  if (operation.kind === "expression") return operation.expression;
-  if (operation.kind === "return") return operation.value;
-  if (operation.kind === "store") return operation.value;
-  return undefined;
-}
-
-function semanticWgslParamSupported(
-  param: SemanticKernelIrModule["params"][number],
-  ir: SemanticKernelIrModule,
-): boolean {
-  if (param.addressSpace === "storage") {
-    return Boolean(param.pointer) && (param.valueType === "uchar"
-      ? semanticDirectByteStorageParamSupported(ir, param.name)
-      : param.valueType === "complex64" || semanticWgslValueTypeSupported(param.valueType));
-  }
-  if (param.valueType === "uchar") return false;
-  if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType) || isCudaVectorType(param.valueType);
-  if (param.addressSpace === "texture") return param.valueType === "texture2d";
-  if (param.addressSpace === "surface") return param.valueType === "surface2d";
-  if (param.addressSpace === "pool") return !semanticOperationsReferenceRoot(ir.operations, param.name);
-  return false;
-}
-
 function semanticWgslFunctionParamSupported(
   param: SemanticKernelIrModule["functions"][number]["params"][number],
 ): boolean {
@@ -937,152 +828,6 @@ function semanticWgslFunctionParamSupported(
   if (param.pointer && param.addressSpace === "storage" && param.valueType === "uchar") return true;
   if (!param.pointer && param.addressSpace === "local" && param.valueType === "uchar") return true;
   return semanticFunctionParamContractSupported(param, semanticWgslValueTypeSupported);
-}
-
-function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
-  if (symbol.kind === "local" || symbol.kind === "shared") return true;
-  if (symbol.kind === "constant") {
-    if (!semanticWgslValueTypeSupported(symbol.valueType)) return false;
-    return !symbol.initialized ||
-      symbol.init !== undefined && (
-        symbol.dimensions.length === 0
-          ? isSemanticFloatVectorType(symbol.valueType)
-            ? initializedVectorConstantSupported(symbol)
-            : semanticWgslExpressionSupported(symbol.init, "scalar")
-          : initializedConstantArraySupported(symbol)
-      );
-  }
-  if (symbol.kind === "device-global") return symbol.valueType !== "uchar" && semanticWgslValueTypeSupported(symbol.valueType);
-  if (symbol.kind === "texture") return symbol.valueType === "texture2d";
-  return false;
-}
-
-function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): boolean {
-  const shared = sharedMemorySymbols(ir);
-  const barrierFunctions = semanticBarrierFunctionNames(ir);
-  const containsBarrier = semanticOperationsContainBarrier(ir.operations, barrierFunctions);
-  if (shared.length === 0 && !containsBarrier) return true;
-  const hasSharedPointer = ir.functions.some(semanticWgslFunctionHasSharedPointer);
-  if (!shared.every((symbol) =>
-    symbol.dimensions.length === 0 ||
-    symbol.dimensions.every((dimension) => dimension > 0)
-  )) return false;
-  // Direct shared references use row-major flattened indices. Pointer-helper ABI
-  // remains one-dimensional until its parameter type and base arithmetic are flattened.
-  if (hasSharedPointer && shared.some((symbol) => symbol.dimensions.length > 1)) return false;
-  if (!containsBarrier) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
-  if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
-  if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
-    const activeLaneLowered = semanticOperationsHaveActiveLaneDeclaration(ir.operations);
-    return (activeLaneLowered && (
-      semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
-      semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)
-    )) || operationsHaveOnlyTopLevelBarriers(ir.operations);
-  }
-  const activeLaneLowered = semanticOperationsHaveActiveLaneDeclaration(ir.operations);
-  return (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
-      activeLaneLowered && semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions) ||
-      semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
-    ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
-      semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
-      fn.body.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane") &&
-        semanticBarrierOperationsMatchActiveLaneProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions) ||
-      semanticBarrierOperationsMatchUniformityProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions)
-    );
-}
-
-function semanticOperationsHaveActiveLaneDeclaration(
-  operations: readonly SemanticKernelIrOperation[],
-): boolean {
-  return operations.some((operation) =>
-    operation.kind === "declare" &&
-      (operation.target.name === "bg_active_lane" ||
-        operation.target.name.startsWith("bg_barrier_loop_active_") ||
-        operation.target.name.startsWith("bg_loop_active_"))
-  );
-}
-
-function semanticBarrierFunctionProof(
-  ir: SemanticKernelIrModule,
-  name: string,
-): SemanticKernelIrModule["barrierUniformity"]["kernel"] | undefined {
-  return ir.barrierUniformity.functions[name] ??
-    (name.endsWith("__bg_guarded_barrier")
-      ? ir.barrierUniformity.functions[name.slice(0, -"__bg_guarded_barrier".length)]
-      : undefined);
-}
-
-function semanticDirectBarriersHaveAnalyzerProof(ir: SemanticKernelIrModule): boolean {
-  return semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, semanticBarrierFunctionNames(ir));
-}
-
-function semanticWgslBarrierSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "barrier" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  if (operation.scope === "grid") return false;
-  if (isCudaCooperativeBarrierCallName(operation.callee)) {
-    const kind = operation.groupName === undefined ? undefined : semanticCooperativeGroupKind(ir, operation.groupName);
-    return kind !== undefined && kind !== "grid";
-  }
-  return isCudaBarrierCallName(operation.callee);
-}
-
-function semanticCooperativeGroupKind(ir: SemanticKernelIrModule, name: string): string | undefined {
-  for (const operation of ir.operations) {
-    const kind = semanticCooperativeGroupKindInOperations([operation], name);
-    if (kind !== undefined) return kind;
-  }
-  for (const fn of ir.functions) {
-    const kind = semanticCooperativeGroupKindInOperations(fn.body, name);
-    if (kind !== undefined) return kind;
-    const paramKind = fn.params.find((param) => param.name === name)?.cooperativeGroupKind;
-    if (paramKind !== undefined) return paramKind;
-  }
-  return undefined;
-}
-
-function semanticCooperativeGroupKindInOperations(
-  operations: readonly SemanticKernelIrOperation[],
-  name: string,
-): string | undefined {
-  for (const operation of operations) {
-    if (operation.kind === "cooperative-group-declare" && operation.declaration.name === name) return operation.declaration.groupKind;
-    const nested = operation.kind === "branch"
-      ? [...operation.consequent, ...operation.alternate]
-      : operation.kind === "loop" || operation.kind === "block"
-      ? operation.body
-      : undefined;
-    if (nested) {
-      const kind = semanticCooperativeGroupKindInOperations(nested, name);
-      if (kind !== undefined) return kind;
-    }
-  }
-  return undefined;
-}
-
-function operationsHaveOnlyTopLevelBarriers(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.every((operation) =>
-    operation.kind !== "branch" &&
-    operation.kind !== "loop" &&
-    operation.kind !== "block"
-  );
-}
-
-function operationsHaveNoBarrierOrControlTransfer(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.every((operation) => {
-    if (operation.kind === "barrier" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue") return false;
-    if (operation.kind === "branch") {
-      return operationsHaveNoBarrierOrControlTransfer(operation.consequent) &&
-        operationsHaveNoBarrierOrControlTransfer(operation.alternate);
-    }
-    if (operation.kind === "block" || operation.kind === "loop") return operationsHaveNoBarrierOrControlTransfer(operation.body);
-    return true;
-  });
-}
-
-function semanticWgslRequiredFeaturesSupported(requiredFeatures: readonly string[]): boolean {
-  return requiredFeatures.every((feature) => feature === "shader-f16" || feature === "subgroups");
 }
 
 function effectiveSemanticF16Mode(
@@ -1130,15 +875,6 @@ function semanticWgslAssignmentMemoryRef(
   return memoryRefFromIndexExpression(expression);
 }
 
-function semanticWgslLoopInitSupported(
-  init: SemanticKernelIrOperation | SemanticExpression,
-  ir: SemanticKernelIrModule,
-): boolean {
-  return isSemanticKernelIrOperation(init)
-    ? unsupportedSemanticWgslOperation([init], ir) === undefined
-    : semanticWgslExpressionSupported(init, "scalar", ir);
-}
-
 function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef, ir?: SemanticKernelIrModule): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local") return false;
   if (ref.fields.length > 0) return semanticWgslVectorFieldMemoryRefSupported(ref);
@@ -1146,11 +882,6 @@ function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef, ir?: SemanticKer
   if (ref.addressSpace === "constant" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return semanticWgslScalarTypeSupported(ref.valueType);
   return ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar", ir));
-}
-
-function semanticWgslStorageBaseSupported(base: string, ir: SemanticKernelIrModule): boolean {
-  return ir.params.some((param) => param.name === base && param.addressSpace === "storage") ||
-    ir.functions.some((fn) => fn.params.some((param) => param.name === base && param.pointer && param.addressSpace === "storage"));
 }
 
 function emitSemanticStoragePointerHelpers(
@@ -1633,33 +1364,6 @@ function semanticPackedSharedByteViewSupported(valueType: CudaLiteScalarType | u
     valueType === "half" || valueType === "bf16" || valueType === "half2" || valueType === "bf162";
 }
 
-function semanticWgslCopySupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  const sourceBytes = operation.source.valueType === undefined ? undefined : sizeofCudaType(operation.source.valueType);
-  const targetBytes = operation.target.valueType === undefined ? undefined : sizeofCudaType(operation.target.valueType);
-  return operation.bytes >= 1 &&
-    operation.bytes <= 64 &&
-    operation.bytes % 4 === 0 &&
-    sourceBytes !== undefined &&
-    targetBytes !== undefined &&
-    (sourceBytes === 2 || sourceBytes === 4 || sourceBytes === 1 && semanticWgslByteCopyRoot(operation.source, ir)) &&
-    (targetBytes === 2 || targetBytes === 4 || targetBytes === 1 && semanticWgslByteCopyRoot(operation.target, ir)) &&
-    operation.bytes % sourceBytes === 0 &&
-    operation.bytes % targetBytes === 0 &&
-    operation.source.fields.length === 0 &&
-    operation.target.fields.length === 0 &&
-    operation.target.addressSpace !== "constant" &&
-    semanticWgslTypedMemoryRefSupported(operation.source, ir) &&
-    semanticWgslTypedMemoryRefSupported(operation.target, ir);
-}
-
-function semanticWgslByteCopyRoot(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
-  return semanticWgslPackedSharedByteRoot(ref, ir) ||
-    ref.addressSpace === "storage" && ir.params.some((param) => param.name === ref.base && param.valueType === "uchar");
-}
-
 function semanticWgslVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared" && ref.addressSpace !== "local") return false;
   if (ref.fields.length !== 1) return false;
@@ -1741,109 +1445,6 @@ function semanticWgslStorageOffsetStoreSupported(
     semanticWgslExpressionSupported(operation.value, "scalar");
 }
 
-function semanticWgslAtomicSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  const atomicOp = semanticAtomicOperation(operation.callee);
-  if (!atomicOp) return false;
-  if (!operation.target || (operation.target.addressSpace !== "storage" && operation.target.addressSpace !== "device-global" && operation.target.addressSpace !== "shared")) return false;
-  if (!semanticWgslAtomicMemoryRefSupported(operation.target, ir)) return false;
-  if (!semanticWgslPointerAtomicSupported(operation.callee, operation.target, ir)) return false;
-  if (operation.target.addressSpace === "storage" && operation.target.indices.length !== 1 && !semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) return false;
-  if (operation.target.fields.length > 0) return false;
-  if (!semanticWgslAtomicValueTypeSupported(operation.callee, operation.target.valueType)) return false;
-  if (!semanticWgslAtomicTargetRootSupported(operation.target, ir)) {
-    return false;
-  }
-  const scalarArgIndices = semanticAtomicScalarArgumentIndices(atomicOp);
-  return operation.args.length >= scalarArgIndices.length + 1 &&
-    scalarArgIndices.every((index) => semanticWgslExpressionSupported(operation.args[index]!, "scalar", ir));
-}
-
-function semanticWgslStoreValueSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  const targetVectorType = semanticStorageVectorType(operation.target.valueType);
-  const valueVectorType = semanticExpressionVectorValueType(operation.value, ir?.functions);
-  if (semanticWgslVectorFieldMemoryRefSupported(operation.target)) {
-    return isSemanticFloatVectorType(targetVectorType)
-      ? valueVectorType === targetVectorType && semanticWgslExpressionSupported(operation.value, "any", ir)
-      : semanticWgslScalarStoreValueSupported(operation.value, ir);
-  }
-  if (isSemanticFloatVectorType(targetVectorType)) {
-    return semanticVectorAssignmentOperatorSupported(operation.operator) &&
-      (valueVectorType === targetVectorType
-        ? semanticWgslExpressionSupported(operation.value, "any", ir)
-        : semanticWgslExpressionSupported(operation.value, "scalar", ir));
-  }
-  return semanticWgslScalarStoreValueSupported(operation.value, ir);
-}
-
-function semanticWgslScalarStoreValueSupported(
-  expression: SemanticExpression,
-  ir: SemanticKernelIrModule,
-): boolean {
-  switch (expression.kind) {
-    case "symbol":
-    case "index":
-      return !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression, ir?.functions)) &&
-        semanticWgslExpressionSupported(expression, "scalar", ir);
-    case "call":
-      return semanticWgslScalarCallSupported(expression, ir);
-    case "binary":
-      if (expression.valueType === "bool") return semanticWgslExpressionSupported(expression, "scalar", ir);
-      return semanticWgslScalarStoreValueSupported(expression.left, ir) &&
-        semanticWgslScalarStoreValueSupported(expression.right, ir);
-    case "conditional":
-      return semanticWgslConditionSupported(expression.condition, ir) &&
-        semanticWgslScalarStoreValueSupported(expression.consequent, ir) &&
-        semanticWgslScalarStoreValueSupported(expression.alternate, ir);
-    case "sequence": {
-      const last = expression.expressions.at(-1);
-      return last !== undefined &&
-        expression.expressions.slice(0, -1).every((item) => semanticWgslExpressionSupported(item, "scalar", ir)) &&
-        semanticWgslScalarStoreValueSupported(last, ir);
-    }
-    case "texture-read":
-      return !isSemanticFloatVectorType(expression.valueType) && semanticWgslTextureReadSupported(expression, ir);
-    case "surface-read":
-      return !isSemanticFloatVectorType(expression.valueType) && semanticWgslSurfaceReadSupported(expression, ir);
-    default:
-      return !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression, ir?.functions)) &&
-        semanticWgslExpressionSupported(expression, "scalar", ir);
-  }
-}
-
-function semanticWgslScalarCallSupported(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  if (semanticWgslCooperativeGroupCallSupported(expression, ir)) return true;
-  if (expression.callee.kind !== "symbol") return false;
-  const callee = expression.callee.name;
-  if (semanticPtxIntegerCallInfo(callee) !== undefined) {
-    return expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-  }
-  if (callee === "__cvta_generic_to_shared") return semanticWgslSharedAddressCallRef(expression) !== undefined;
-  if (SEMANTIC_CURAND_VECTOR_CALLS.has(callee) || SEMANTIC_HALF2_VECTOR_CALLS.has(callee) || SEMANTIC_BF162_VECTOR_CALLS.has(callee) || cudaVectorConstructorType(callee)) return false;
-  const fn = ir.functions.find((item) => item.name === callee);
-  if (fn && isSemanticFloatVectorType(fn.returnType)) return false;
-  return semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
-    (callee === "dot" || callee === "length") && semanticVectorMathCallSupported(callee, expression.args) ||
-    semanticWgslFunctionCallSupported(expression, ir) ||
-    semanticWgslAtomicCallSupported(expression, ir) ||
-    semanticWgslCurandCallSupported(expression, ir) ||
-    semanticWgslGeneratedRandomCallSupported(expression) ||
-    semanticWgslSubgroupCallSupported(expression, ir) ||
-    semanticWgslAddressPredicateCallSupported(expression) ||
-    semanticWgslMathCallSupported(expression, "scalar", ir) ||
-    SEMANTIC_HALF2_SCALAR_CALLS.has(callee) && semanticWgslHalf2CallSupported(expression, ir) ||
-    SEMANTIC_BF162_SCALAR_CALLS.has(callee) && semanticWgslBf162CallSupported(expression, ir) ||
-    semanticWgslVectorAtCallSupported(expression, ir);
-}
-
 function semanticWgslVectorMemberSupported(
   expression: Extract<SemanticExpression, { kind: "member" }>,
   ir?: SemanticKernelIrModule,
@@ -1864,14 +1465,6 @@ function semanticWgslVectorIndexSupported(
   return isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.target, ir?.functions)) &&
     semanticWgslExpressionSupported(expression.target, "any", ir) &&
     semanticWgslExpressionSupported(expression.index, "scalar", ir);
-}
-
-function semanticWgslLocalArrayInitSupported(
-  expression: SemanticExpression,
-  targetValueType: CudaLiteScalarType | undefined,
-  ir: SemanticKernelIrModule,
-): boolean {
-  return semanticLocalArrayInitContractSupported(expression, targetValueType, (item, expected) => semanticWgslExpressionSupported(item, expected, ir));
 }
 
 function semanticWgslMathCallSupported(
@@ -1981,8 +1574,7 @@ function semanticWgslFunctionCallSupported(
   if (!semanticFunctionLocalParamValueTypesSupported(fn, semanticWgslLocalValueTypeSupported)) return false;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasAtomicPointer(fn))) return false;
   return expression.args.length === fn.params.length &&
-    expression.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir)) &&
-    unsupportedSemanticWgslOperation(fn.body, ir, true) === undefined;
+    expression.args.every((arg, index) => semanticWgslFunctionArgSupported(arg, fn.params[index], ir));
 }
 
 function semanticWgslFunctionArgSupported(
@@ -2072,10 +1664,6 @@ function semanticWgslFunctionHasAtomicPointer(fn: SemanticKernelIrModule["functi
   return fn.params.some((param) => param.pointer && (param.addressSpace === "shared" || param.addressSpace === "storage"));
 }
 
-function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {
-  return fn.params.some((param) => param.pointer && param.addressSpace === "shared");
-}
-
 function semanticWgslPointerFunctionBodySupported(fn: SemanticKernelIrModule["functions"][number]): boolean {
   return semanticPointerFunctionBodyContractSupported(fn, memoryRefFromIndexExpression, semanticAtomicCallTarget, {
     allowCooperativeOps: true,
@@ -2126,48 +1714,6 @@ function semanticWgslAtomicMemoryRefSupported(
       semanticWgslFunctionStoragePointerParam(ir, ref.base) !== undefined;
 }
 
-function semanticWgslCallSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  if (operation.result !== undefined) {
-    const fn = semanticFunctionForCall(operation, ir.functions);
-    return fn !== undefined &&
-      fn.returnType !== "void" &&
-      fn.returnType === operation.result.valueType &&
-      semanticWgslFunctionCallSupported(semanticCallOperationExpression(operation, fn), ir);
-  }
-  if (operation.callee === "assert") return semanticAssertCallSupported(operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-  if (operation.callee === "printf") return semanticPrintfCallSupported(operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-  if (SEMANTIC_NOOP_CALLS.has(operation.callee)) {
-    return semanticNoopCallSupported(operation.callee, operation.args, (arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-  }
-  if (operation.callee === "curand_init") {
-    return semanticWgslCurandCallSupported({
-      kind: "call",
-      callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(operation.callee), name: operation.callee, addressSpace: "builtin", span: operation.span },
-      args: operation.args,
-      valueType: "uint",
-      span: operation.span,
-    }, ir);
-  }
-  if (operation.callee === "skipahead") {
-    return semanticWgslCurandCallSupported({
-      kind: "call",
-      callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(operation.callee), name: operation.callee, addressSpace: "builtin", span: operation.span },
-      args: operation.args,
-      valueType: "uint",
-      span: operation.span,
-    }, ir);
-  }
-  if (semanticWgslVoidFunctionCallSupported(operation, ir)) return true;
-  return semanticLocalArrayFillCallSupported(
-    operation,
-    (name) => localArraySymbol(ir, name),
-    (item, expected) => semanticWgslExpressionSupported(item, expected, ir),
-  );
-}
-
 function semanticWgslVoidFunctionCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
@@ -2191,8 +1737,6 @@ function semanticWgslVoidFunctionCallFailure(
   const unsupportedArg = operation.args.findIndex((arg, index) => !semanticWgslFunctionArgSupported(arg, fn.params[index], ir));
   if (unsupportedArg >= 0) return `unsupported argument ${unsupportedArg + 1} for '${fn.name}'`;
   if (!semanticWgslFunctionBodyShapeSupported(fn.body, semanticWgslFunctionHasAtomicPointer(fn))) return `unsupported body shape in '${fn.name}'`;
-  const nested = unsupportedSemanticWgslOperation(fn.body, ir, true);
-  if (nested) return `unsupported ${nested.kind} in '${fn.name}'`;
   return undefined;
 }
 
@@ -2213,26 +1757,6 @@ function semanticWgslSurfaceWriteSupported(
 function semanticWgslSurfaceValueSupported(expression: SemanticExpression): boolean {
   const valueType = semanticExpressionValueType(expression);
   return !isSemanticFloatVectorType(valueType) || isCudaVectorType(valueType);
-}
-
-function semanticWgslSurfaceReadStoreSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  return semanticWgslSurfaceReadTarget(operation.target) !== undefined &&
-    semanticWgslSurfaceReadSupported(
-      {
-        kind: "surface-read",
-        callee: operation.z === undefined ? "surf2Dread" : "surf2DLayeredread",
-        surface: operation.surface,
-        xBytes: operation.xBytes,
-        y: operation.y,
-        ...(operation.z === undefined ? {} : { z: operation.z }),
-        valueType: semanticSurfaceReadValueType(operation.valueType ?? semanticWgslSurfaceReadTarget(operation.target)?.valueType),
-        span: operation.span,
-      },
-      ir,
-    );
 }
 
 function semanticWgslAtomicTargetRootSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
@@ -2465,7 +1989,8 @@ function emitSemanticOperation(
           ...emitLocalArrayInit(operation, ir, names, indentLevel, options, textureSpecializations),
         ];
       }
-      const type = wgslValueType(operation.target.valueType);
+      const storageVectorType = semanticStorageVectorType(operation.target.valueType);
+      const type = wgslValueType(storageVectorType ?? operation.target.valueType);
       if (operation.init?.kind === "sequence") {
         const sequence = emitSemanticSequenceParts(operation.init, ir, names, indentLevel, options, textureSpecializations);
         const target = nameFor(operation.target.name, names);
@@ -2477,7 +2002,7 @@ function emitSemanticOperation(
       }
       const init = operation.init
         ? emitSemanticInitExpression(operation.init, operation.target.valueType, ir, names, options, textureSpecializations)
-        : isSemanticFloatVectorType(operation.target.valueType)
+        : storageVectorType !== undefined
         ? createTypedWgslZero(type, operation.span)
         : undefined;
       const statement = createTypedWgslVariableStatement("var", nameFor(operation.target.name, names), type, init, operation.span);
@@ -2730,32 +2255,6 @@ function emitSemanticMatrixInteger(value: string, spec: MatrixTileResolvedSpec):
   return spec.tileValueType === "u8" ? `i32(u32(${value}) & 255u)` : spec.tileValueType === "s8" ? `(i32((u32(${value}) & 255u) << 24u) >> 24)` : `i32(${value})`;
 }
 
-function semanticWgslInlineMmaSupported(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  const op = operation.op;
-  const countsMatch = op?.kind === "mma-m16n8k16" &&
-    (op.accumulator === "f16"
-      ? operation.outputs.length === 2 && operation.inputs.length === 8
-      : operation.outputs.length === 4 && operation.inputs.length === 10);
-  if (!countsMatch) return false;
-  return operation.inputs.every((input) => semanticWgslExpressionSupported(input, "scalar", ir)) &&
-    operation.outputs.every((output) => semanticWgslInlineOutputSupported(output, ir));
-}
-
-function semanticWgslInlineOutputSupported(output: SemanticExpression, ir: SemanticKernelIrModule): boolean {
-  const assignment: SemanticExpression = {
-    kind: "assignment",
-    operator: "=",
-    target: output,
-    value: { kind: "literal", literalKind: "number", value: 0, valueType: "uint", span: output.span },
-    valueType: "uint",
-    span: output.span,
-  };
-  return semanticWgslExpressionSupported(assignment, "scalar", ir);
-}
-
 function emitSemanticInlineMma(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
   accumulator: "f16" | "f32",
@@ -2933,36 +2432,6 @@ function semanticOperationsContainWorkgroupCollective(operations: readonly Seman
   return operations.some(semanticOperationContainsWorkgroupCollective);
 }
 
-function semanticPredicatedOperationsSupported(operations: readonly SemanticKernelIrOperation[]): boolean {
-  return operations.every((operation) => {
-    if (operation.kind === "block" && semanticOperationsContainWorkgroupCollective(operation.body)) {
-      return semanticPredicatedOperationsSupported(operation.body);
-    }
-    if (operation.kind === "branch") {
-      return semanticPredicatedOperationsSupported(operation.consequent) && semanticPredicatedOperationsSupported(operation.alternate);
-    }
-    if (operation.kind === "loop" && semanticOperationsContainWorkgroupCollective(operation.body)) {
-      return operation.loopKind === "for" && operation.update?.kind !== "sequence" && semanticPredicatedOperationsSupported(operation.body);
-    }
-    if (operation.kind === "declare") {
-      return operation.target.addressSpace === "local" && !operation.target.pointer && (
-        operation.init === undefined ||
-        operation.target.dimensions.length === 0 &&
-          operation.target.valueType !== undefined && operation.target.valueType !== "void"
-      );
-    }
-    if (operation.kind === "expression" && operation.expression.kind === "assignment" && semanticExpressionContainsWorkgroupCollective(operation.expression.value)) {
-      const target = operation.expression.target;
-      return target.kind === "symbol" && target.addressSpace === "local" && target.valueType !== undefined && target.valueType !== "void" && !isSemanticFloatVectorType(target.valueType);
-    }
-    if (operation.kind === "store" && semanticExpressionContainsWorkgroupCollective(operation.value) &&
-      !operation.target.indices.some(semanticExpressionContainsWorkgroupCollective)) {
-      return !isSemanticFloatVectorType(operation.target.valueType);
-    }
-    return !semanticOperationContainsWorkgroupCollective(operation);
-  });
-}
-
 function semanticOperationContainsWorkgroupCollective(operation: SemanticKernelIrOperation): boolean {
   if (operation.kind === "declare") return operation.init !== undefined && semanticExpressionContainsWorkgroupCollective(operation.init);
   if (operation.kind === "store") return semanticExpressionContainsWorkgroupCollective(operation.value) || operation.target.indices.some(semanticExpressionContainsWorkgroupCollective);
@@ -2990,17 +2459,6 @@ function semanticExpressionContainsWorkgroupCollective(expression: SemanticExpre
       expression.callee.name === "cg::reduce" ||
       expression.callee.name === "cooperative_groups::reduce")) return true;
   return semanticExpressionChildren(expression).some(semanticExpressionContainsWorkgroupCollective);
-}
-
-function semanticExpressionContainsPartitionedReduce(
-  expression: SemanticExpression,
-  ir: SemanticKernelIrModule,
-): boolean {
-  if (expression.kind === "call" && expression.callee.kind === "symbol" &&
-    (expression.callee.name === "cg::reduce" || expression.callee.name === "cooperative_groups::reduce") &&
-    expression.args[0]?.kind === "symbol" &&
-    semanticCooperativeGroupInfo(ir, expression.args[0].name)?.partitioned === true) return true;
-  return semanticExpressionChildren(expression).some((child) => semanticExpressionContainsPartitionedReduce(child, ir));
 }
 
 function emitSemanticSurfaceReadStore(
@@ -5511,6 +4969,7 @@ function emitSemanticTypedHalfCall(
     return emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("1u", "u32", expression.span), condition, expression.span);
   }
   if (["__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat"].includes(name)) {
+    if (name === "__hadd" && expression.valueType !== "half") return undefined;
     const [left, right] = expression.args;
     if (!left || !right) return undefined;
     const operator = name.includes("add") ? "+" : name.includes("sub") ? "-" : "*";
@@ -7088,6 +6547,16 @@ function emitSemanticTypedCustomMathCall(
       expression.span,
     );
   }
+  if (callee === "funnelshift_l" || callee === "funnelshift_lc" || callee === "funnelshift_r" || callee === "funnelshift_rc") {
+    const [low, high, shift] = expression.args;
+    if (!low || !high || !shift) throw semanticWgslError(`${expression.callee.name} expects three operands`, expression.span);
+    return createTypedWgslCall(
+      `bg_semantic_${callee}_u32`,
+      [low, high, shift].map((arg) => emitSemanticExpressionAs(arg, ir, names, "u32", options, textureSpecializations)),
+      "u32",
+      expression.span,
+    );
+  }
   if (callee === "rhadd" || callee === "hadd" || callee === "uhadd" || callee === "urhadd") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
@@ -7188,7 +6657,7 @@ function emitSemanticTypedCustomMathCall(
     const numerator = emitTypedWgslBinary("-", emitTypedWgslBinary("+", lhs, rhs, expression.span), one, expression.span);
     return emitTypedWgslBinary("/", numerator, rhs, expression.span);
   }
-  if (callee === "clz") {
+  if (callee === "clz" || callee === "clzll") {
     if (!first) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
     const count = createTypedWgslCall(
       "countLeadingZeros",
@@ -7196,7 +6665,10 @@ function emitSemanticTypedCustomMathCall(
       "u32",
       expression.span,
     );
-    return convertTypedWgslExpression(count, "i32", true);
+    const converted = convertTypedWgslExpression(count, "i32", true);
+    return callee === "clzll"
+      ? emitTypedWgslBinary("+", converted, createTypedWgslLiteral("32", "i32", expression.span), expression.span)
+      : converted;
   }
   if (callee === "ffs" || callee === "popc" || callee === "brev") {
     if (!first) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
@@ -8240,8 +7712,8 @@ function semanticExpressionWgslType(
   ir: SemanticKernelIrModule,
 ): TypedWgslExpression["type"] {
   if (semanticNativeBoolExpression(expression)) return "bool";
-  const vectorType = semanticExpressionVectorValueType(expression, ir.functions);
-  return isSemanticFloatVectorType(vectorType) ? wgslValueType(vectorType) : semanticExpressionWgslScalar(expression);
+  const vectorType = semanticStorageVectorType(semanticExpressionVectorValueType(expression, ir.functions));
+  return vectorType === undefined ? semanticExpressionWgslScalar(expression) : wgslValueType(vectorType);
 }
 
 function emitSemanticConditional(
@@ -9072,7 +8544,7 @@ function emitSemanticInitExpression(
 ): TypedWgslExpression {
   if (valueType === "bool") return emitSemanticBoolExpressionValue(expression, ir, names, options, textureSpecializations);
   if (valueType === "uchar") return emitSemanticUcharExpressionValue(expression, ir, names, options, textureSpecializations);
-  if (isSemanticFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  if (semanticStorageVectorType(valueType) !== undefined) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
 
@@ -9477,7 +8949,7 @@ function emitSemanticVectorOperandExpression(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): TypedWgslExpression {
-  if (isSemanticFloatVectorType(semanticExpressionVectorValueType(expression, ir?.functions))) {
+  if (semanticStorageVectorType(semanticExpressionVectorValueType(expression, ir?.functions)) !== undefined) {
     return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   }
   const laneCount = cudaVectorLaneCount(valueType);
@@ -9540,11 +9012,6 @@ function emitTruthiness(
     createTypedWgslLiteral(zero, scalar, expression.span),
     expression.span,
   ).code;
-}
-
-function semanticWgslConditionSupported(expression: SemanticExpression, ir?: SemanticKernelIrModule): boolean {
-  return expression.kind === "symbol" && expression.addressSpace === "storage" ||
-    semanticWgslExpressionSupported(expression, "scalar", ir);
 }
 
 function emitSemanticMemoryRef(
@@ -9796,21 +9263,6 @@ function emitInitializedConstantArray(
     .map((value) => emitSemanticExpressionAs(value, ir, names, wgslValueScalar(symbol.valueType)).code);
   while (values.length < length) values.push(zeroForType(elementType));
   return `const ${nameFor(symbol.name, names)}: ${arrayType} = ${arrayType}(${values.join(", ")});`;
-}
-
-function initializedConstantArraySupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
-  if (!symbol.init || symbol.init.kind !== "initializer") return false;
-  return flattenInitializerExpressions(symbol.init)
-    .slice(0, totalElements(symbol.dimensions))
-    .every((value) => semanticWgslExpressionSupported(value, "scalar"));
-}
-
-function initializedVectorConstantSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
-  if (!symbol.init) return false;
-  if (symbol.init.kind !== "initializer" && !semanticVectorConstantInitCallSupported(symbol.init)) return false;
-  return semanticVectorConstantInitExpressions(symbol.init)
-    .slice(0, cudaVectorLaneCount(symbol.valueType))
-    .every((value) => semanticWgslExpressionSupported(value, "scalar"));
 }
 
 function semanticVectorConstantInitCallSupported(expression: SemanticExpression): boolean {
