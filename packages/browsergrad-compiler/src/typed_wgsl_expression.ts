@@ -1,7 +1,7 @@
-import type { WgslValueType } from "@unlocalhosted/browsergrad-kernels";
+import type { SemanticWgslValueType } from "./semantic_wgsl_types.js";
 import type { SourceSpan } from "./types.js";
 
-export type WgslExpressionType = WgslValueType | "bool";
+export type WgslExpressionType = SemanticWgslValueType;
 
 declare const typedWgslExpression: unique symbol;
 
@@ -28,6 +28,29 @@ export function createTypedWgslExpression(
   span: SourceSpan,
 ): TypedWgslExpression {
   return { code, type, span } as TypedWgslExpression;
+}
+
+export function convertTypedWgslExpression(
+  source: TypedWgslExpression,
+  targetType: WgslExpressionType,
+  code: string,
+): TypedWgslExpression {
+  if (source.type !== targetType && (!isNumericScalar(source.type) || !isNumericScalar(targetType))) {
+    throw new TypeError(`WGSL conversion from '${source.type}' to '${targetType}' requires explicit legalization`);
+  }
+  return createTypedWgslExpression(code, targetType, source.span);
+}
+
+export function legalizeTypedWgslBoolToNumeric(
+  source: TypedWgslExpression,
+  targetType: "f16" | "f32" | "i32" | "u32",
+): TypedWgslExpression {
+  if (source.type !== "bool") {
+    throw new TypeError(`WGSL bool-to-numeric legalization requires bool, received '${source.type}'`);
+  }
+  const zero = targetType === "u32" ? "0u" : targetType === "i32" ? "0" : targetType === "f16" ? "f16(0.0)" : "0.0";
+  const one = targetType === "u32" ? "1u" : targetType === "i32" ? "1" : targetType === "f16" ? "f16(1.0)" : "1.0";
+  return createTypedWgslExpression(`select(${zero}, ${one}, ${source.code})`, targetType, source.span);
 }
 
 export function emitTypedWgslBinary(
@@ -76,4 +99,8 @@ function requireTypes(
 
 function isInteger(type: WgslExpressionType): type is "i32" | "u32" {
   return type === "i32" || type === "u32";
+}
+
+function isNumericScalar(type: WgslExpressionType): type is "f16" | "f32" | "i32" | "u32" {
+  return type === "f16" || type === "f32" || type === "i32" || type === "u32";
 }

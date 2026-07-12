@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createTypedWgslExpression, emitTypedWgslBinary } from "../../src/index.js";
+import {
+  convertTypedWgslExpression,
+  createTypedWgslExpression,
+  emitTypedWgslBinary,
+  legalizeTypedWgslBoolToNumeric,
+} from "../../src/index.js";
 
 const span = { start: 0, end: 1, line: 1, column: 1 };
 
@@ -30,5 +35,20 @@ describe("typed WGSL expressions", () => {
       createTypedWgslExpression("b", "f32", span),
       span,
     )).toThrow("requires integer operands");
+  });
+
+  it("rejects vector-to-scalar conversion without explicit legalization", () => {
+    expect(() => convertTypedWgslExpression(
+      createTypedWgslExpression("value", "vec2<f32>", span),
+      "f32",
+      "f32(value)",
+    )).toThrow("requires explicit legalization");
+  });
+
+  it("legalizes bool carriers through select instead of invalid WGSL casts", () => {
+    expect(legalizeTypedWgslBoolToNumeric(
+      createTypedWgslExpression("predicate", "bool", span),
+      "u32",
+    )).toMatchObject({ code: "select(0u, 1u, predicate)", type: "u32" });
   });
 });

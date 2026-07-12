@@ -105,6 +105,8 @@ export {
 } from "./wgsl_legalization.js";
 export {
   createTypedWgslExpression,
+  convertTypedWgslExpression,
+  legalizeTypedWgslBoolToNumeric,
   emitTypedWgslBinary,
   type TypedWgslExpression,
   type WgslBinaryOperator,
