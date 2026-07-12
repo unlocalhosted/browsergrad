@@ -1217,7 +1217,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl.match(/\bpointer_array_assignment_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = pointer_array_assignment_index_helper\(/u);
+      expect(compiled.wgsl).toMatch(/var bg__bg_pointer_array_index_\d+_\d+: u32 = pointer_array_assignment_index_helper\(/u);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { storage: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 0]);
     });
 
   it("evaluates side-effecting nested pointer-array target indices once", () => {
@@ -1253,7 +1259,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl.match(/\bpointer_array_compare_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = pointer_array_compare_index_helper\(/u);
+      expect(compiled.wgsl).toContain("pointer_array_compare_index_helper(0u, 0u, 1u");
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { storage: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
     });
 
   it("evaluates side-effecting pointer-array var-init comparison indices once", () => {
@@ -1272,7 +1284,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl.match(/\bpointer_array_var_init_compare_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = pointer_array_var_init_compare_index_helper\(/u);
+      expect(compiled.wgsl).toMatch(/var bg__bg_condition_test_\d+_\d+: bool = \(pointer_array_var_init_compare_index_helper\(/u);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { storage: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
     });
 
   it("evaluates side-effecting pointer-array difference indices once", () => {
@@ -1290,9 +1308,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl.match(/\bpointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = pointer_array_diff_index_helper\(/u);
-      expect(compiled.wgsl).toContain("i32((0u + u32(1)))");
-      expect(compiled.wgsl).not.toContain("bg_storage +");
+      expect(compiled.wgsl).toContain("pointer_array_diff_index_helper(0u, 0u, 1u");
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { storage: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 2]);
     });
 
   it("scales vector pointer differences by vector lane width", () => {

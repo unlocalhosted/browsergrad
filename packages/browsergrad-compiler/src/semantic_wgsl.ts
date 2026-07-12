@@ -331,7 +331,7 @@ export function semanticKernelIrWgslPreflightFailure(
 ): SemanticKernelIrWgslPreflightFailure | undefined {
   const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
   if (unsupported) {
-    const detail = unsupported.kind === "call" ? semanticWgslVoidFunctionCallFailure(unsupported, ir) : undefined;
+    const detail = semanticWgslOperationFailureDetail(unsupported, ir);
     return { message: `semantic WGSL does not support ${unsupported.kind}${detail === undefined ? "" : `: ${detail}`}`, span: unsupported.span };
   }
   if (!semanticWgslRequiredFeaturesSupported(ir.requiredFeatures)) {
@@ -344,6 +344,22 @@ export function semanticKernelIrWgslPreflightFailure(
   }
   const unsupportedMemory = ir.memory.find((symbol) => !semanticWgslMemorySymbolSupported(symbol));
   if (unsupportedMemory) return { message: `semantic WGSL does not support memory '${unsupportedMemory.name}'`, span: unsupportedMemory.span };
+  return undefined;
+}
+
+function semanticWgslOperationFailureDetail(
+  operation: SemanticKernelIrOperation,
+  ir: SemanticKernelIrModule,
+): string | undefined {
+  if (operation.kind === "call") return semanticWgslVoidFunctionCallFailure(operation, ir);
+  if (operation.kind === "declare") {
+    const target = operation.target;
+    return `'${target.name}' (${target.pointer ? "pointer " : ""}${target.addressSpace} ${target.valueType ?? "unknown"})`;
+  }
+  if (operation.kind === "store") {
+    return `'${operation.target.base}' (${operation.target.addressSpace} ${operation.target.valueType ?? "unknown"}, operator ${operation.operator})`;
+  }
+  if (operation.kind === "atomic") return `'${operation.callee}'`;
   return undefined;
 }
 

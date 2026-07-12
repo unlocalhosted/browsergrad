@@ -1779,6 +1779,8 @@ function lowerStatementOperations(
   statement: CudaLiteStatement,
   scope: Map<string, CudaLiteSemanticSymbol>,
 ): readonly SemanticKernelIrOperation[] {
+  const dynamicPointerArrayAssignment = semanticDynamicPointerArrayAliasAssignmentOperations(statement, scope);
+  if (dynamicPointerArrayAssignment) return dynamicPointerArrayAssignment;
   const chainedStores = semanticMemoryAssignmentChainOperations(statement, scope);
   if (chainedStores) return chainedStores;
   const conditionalAssignment = semanticConditionalLocalAssignmentOperations(statement, scope);
@@ -1793,6 +1795,48 @@ function lowerStatementOperations(
   const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
   const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
+}
+
+function semanticDynamicPointerArrayAliasAssignmentOperations(
+  statement: CudaLiteStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (
+    statement.kind !== "expr" ||
+    statement.expression.kind !== "assignment" ||
+    statement.expression.operator !== "=" ||
+    statement.expression.left.kind !== "index" ||
+    statement.expression.left.target.kind !== "identifier" ||
+    staticPointerArrayIndex(statement.expression.left.index) !== undefined
+  ) return undefined;
+  const assignment = statement.expression as CudaLiteAssignmentExpression;
+  const left = assignment.left as Extract<CudaLiteExpression, { readonly kind: "index" }>;
+  const targetName = (left.target as Extract<CudaLiteExpression, { readonly kind: "identifier" }>).name;
+  const target = scope.get(targetName);
+  if (!semanticPointerArrayAliasesComplete(target)) return undefined;
+  const replacement = localPointerAliasForInitializer(assignment.right, scope);
+  if (!replacement || !semanticPointerAliasAddressSpaceSupported(replacement.pointerAddressSpace) && !replacement.pointerSelection) return undefined;
+  const loweredIndex = lowerExpression(left.index, scope);
+  const indexType = expressionValueType(loweredIndex);
+  const materialized = semanticExpressionContainsCall(loweredIndex) && indexType && indexType !== "void" && !isCudaVectorType(indexType)
+    ? materializeSemanticExpressionOnce({ operations: [], expression: loweredIndex }, indexType, "__bg.pointer.array.index", left.index.span)
+    : { operations: [] as readonly SemanticKernelIrOperation[], expression: loweredIndex };
+  const aliases = target!.pointerArrayAliases!.map((current, slot): SemanticPointerAlias => ({
+    pointerSelection: {
+      condition: {
+        kind: "binary",
+        operator: "==",
+        left: materialized.expression,
+        right: intNumberExpression(slot, left.index.span),
+        valueType: "bool",
+        span: left.index.span,
+      },
+      consequent: replacement,
+      alternate: current!,
+    },
+  }));
+  scope.set(target!.name, { ...target!, pointerArrayAliases: aliases });
+  return [...materialized.operations, { kind: "expression", expression: zeroExpression(statement.span), span: statement.span }];
 }
 
 function semanticConditionalReturnOperations(
@@ -2552,7 +2596,13 @@ function materializeConditionalCalls(
   expression: SemanticExpression,
 ): { readonly operations: readonly SemanticKernelIrOperation[]; readonly expression: SemanticExpression } {
   if (expression.kind === "conditional" &&
-    (semanticExpressionContainsCall(expression.consequent) || semanticExpressionContainsCall(expression.alternate))) {
+    (semanticExpressionContainsCall(expression.condition) || semanticExpressionContainsCall(expression.consequent) || semanticExpressionContainsCall(expression.alternate))) {
+    const loweredCondition = materializeConditionalCalls(expression.condition);
+    const condition = semanticExpressionContainsCall(loweredCondition.expression)
+      ? materializeSemanticExpressionOnce(loweredCondition, "bool", "__bg.condition.test", expression.condition.span)
+      : loweredCondition;
+    const consequent = materializeConditionalCalls(expression.consequent);
+    const alternate = materializeConditionalCalls(expression.alternate);
     const valueType = expressionValueType(expression);
     if (!valueType || valueType === "void" || isCudaVectorType(valueType)) return { operations: [], expression };
     const temp = tempScalarSymbol("__bg.condition.value", expression.span, valueType);
@@ -2564,8 +2614,15 @@ function materializeConditionalCalls(
     });
     return {
       operations: [
+        ...condition.operations,
         { kind: "declare", target: temp, span: expression.span },
-        { kind: "branch", condition: expression.condition, consequent: [assign(expression.consequent)], alternate: [assign(expression.alternate)], span: expression.span },
+        {
+          kind: "branch",
+          condition: condition.expression,
+          consequent: [...consequent.operations, assign(consequent.expression)],
+          alternate: [...alternate.operations, assign(alternate.expression)],
+          span: expression.span,
+        },
       ],
       expression: target,
     };
@@ -2614,7 +2671,180 @@ function materializeConditionalCalls(
     const nested = materializeConditionalCalls(expression.argument);
     return { operations: nested.operations, expression: { ...expression, argument: nested.expression } };
   }
+  if (expression.kind === "member") {
+    const object = materializeConditionalCalls(expression.object);
+    return { operations: object.operations, expression: { ...expression, object: object.expression } };
+  }
+  if (expression.kind === "index") {
+    const target = materializeConditionalCalls(expression.target);
+    const index = materializeConditionalCalls(expression.index);
+    return {
+      operations: [...target.operations, ...index.operations],
+      expression: { ...expression, target: target.expression, index: index.expression },
+    };
+  }
+  if (expression.kind === "call") {
+    const callee = materializeConditionalCalls(expression.callee);
+    const args = expression.args.map(materializeConditionalCalls);
+    return {
+      operations: [...callee.operations, ...args.flatMap((arg) => arg.operations)],
+      expression: { ...expression, callee: callee.expression, args: args.map((arg) => arg.expression) },
+    };
+  }
+  if (expression.kind === "assignment") {
+    const target = materializeConditionalCalls(expression.target);
+    const value = materializeConditionalCalls(expression.value);
+    return {
+      operations: [...target.operations, ...value.operations],
+      expression: { ...expression, target: target.expression, value: value.expression },
+    };
+  }
+  if (expression.kind === "update") {
+    const argument = materializeConditionalCalls(expression.argument);
+    return { operations: argument.operations, expression: { ...expression, argument: argument.expression } };
+  }
+  if (expression.kind === "sequence") {
+    const parts = expression.expressions.map(materializeConditionalCalls);
+    return {
+      operations: parts.flatMap((part) => part.operations),
+      expression: { ...expression, expressions: parts.map((part) => part.expression) },
+    };
+  }
+  if (expression.kind === "initializer") {
+    const elements = expression.elements.map(materializeConditionalCalls);
+    return {
+      operations: elements.flatMap((element) => element.operations),
+      expression: { ...expression, elements: elements.map((element) => element.expression) },
+    };
+  }
+  if (expression.kind === "texture-read") {
+    const values = [expression.texture, expression.x, expression.y, ...(expression.z ? [expression.z] : [])].map(materializeConditionalCalls);
+    return {
+      operations: values.flatMap((value) => value.operations),
+      expression: {
+        ...expression,
+        texture: values[0]!.expression,
+        x: values[1]!.expression,
+        y: values[2]!.expression,
+        ...(expression.z ? { z: values[3]!.expression } : {}),
+      },
+    };
+  }
+  if (expression.kind === "surface-read") {
+    const values = [expression.surface, expression.xBytes, expression.y, ...(expression.z ? [expression.z] : [])].map(materializeConditionalCalls);
+    return {
+      operations: values.flatMap((value) => value.operations),
+      expression: {
+        ...expression,
+        surface: values[0]!.expression,
+        xBytes: values[1]!.expression,
+        y: values[2]!.expression,
+        ...(expression.z ? { z: values[3]!.expression } : {}),
+      },
+    };
+  }
   return { operations: [], expression };
+}
+
+function materializeSemanticExpressionOnce(
+  lowered: { readonly operations: readonly SemanticKernelIrOperation[]; readonly expression: SemanticExpression },
+  valueType: Exclude<CudaLiteScalarType, "void">,
+  name: string,
+  span: SourceSpan,
+): { readonly operations: readonly SemanticKernelIrOperation[]; readonly expression: SemanticExpression } {
+  const deduplicated = materializeRepeatedSemanticCalls(lowered.expression);
+  const temp = tempScalarSymbol(name, span, valueType);
+  return {
+    operations: [...lowered.operations, ...deduplicated.operations, { kind: "declare", target: temp, init: deduplicated.expression, span }],
+    expression: semanticSymbolExpression(temp, span),
+  };
+}
+
+function materializeRepeatedSemanticCalls(
+  expression: SemanticExpression,
+): { readonly operations: readonly SemanticKernelIrOperation[]; readonly expression: SemanticExpression } {
+  const calls = new Map<string, { readonly expression: Extract<SemanticExpression, { readonly kind: "call" }>; count: number }>();
+  walkSemanticExpression(expression, (item) => {
+    if (item.kind !== "call" || item.callee.kind !== "symbol") return;
+    const valueType = expressionValueType(item);
+    if (!valueType || valueType === "void" || isCudaVectorType(valueType)) return;
+    const key = semanticCallIdentity(item);
+    const existing = calls.get(key);
+    if (existing) existing.count++;
+    else calls.set(key, { expression: item, count: 1 });
+  });
+  const repeated = [...calls].filter(([, call]) => call.count > 1);
+  if (repeated.length === 0) return { operations: [], expression };
+  const replacements = new Map<string, Extract<SemanticExpression, { readonly kind: "symbol" }>>();
+  const operations = repeated.map(([key, call]): SemanticKernelIrOperation => {
+    const valueType = expressionValueType(call.expression)! as Exclude<CudaLiteScalarType, "void">;
+    const temp = tempScalarSymbol("__bg.call.once", call.expression.span, valueType);
+    replacements.set(key, semanticSymbolExpression(temp, call.expression.span));
+    return { kind: "declare", target: temp, init: call.expression, span: call.expression.span };
+  });
+  return { operations, expression: rewriteMaterializedSemanticCalls(expression, replacements) };
+}
+
+function semanticCallIdentity(expression: Extract<SemanticExpression, { readonly kind: "call" }>): string {
+  const name = expression.callee.kind === "symbol" ? expression.callee.name : expression.callee.kind;
+  return `${name}:${expression.span.start}:${expression.span.end}`;
+}
+
+function rewriteMaterializedSemanticCalls(
+  expression: SemanticExpression,
+  replacements: ReadonlyMap<string, Extract<SemanticExpression, { readonly kind: "symbol" }>>,
+): SemanticExpression {
+  if (expression.kind === "call") {
+    const replacement = replacements.get(semanticCallIdentity(expression));
+    if (replacement) return replacement;
+    return {
+      ...expression,
+      callee: rewriteMaterializedSemanticCalls(expression.callee, replacements),
+      args: expression.args.map((arg) => rewriteMaterializedSemanticCalls(arg, replacements)),
+    };
+  }
+  if (expression.kind === "member") return { ...expression, object: rewriteMaterializedSemanticCalls(expression.object, replacements) };
+  if (expression.kind === "index") return {
+    ...expression,
+    target: rewriteMaterializedSemanticCalls(expression.target, replacements),
+    index: rewriteMaterializedSemanticCalls(expression.index, replacements),
+  };
+  if (expression.kind === "cast") return { ...expression, expression: rewriteMaterializedSemanticCalls(expression.expression, replacements) };
+  if (expression.kind === "unary") return { ...expression, argument: rewriteMaterializedSemanticCalls(expression.argument, replacements) };
+  if (expression.kind === "binary") return {
+    ...expression,
+    left: rewriteMaterializedSemanticCalls(expression.left, replacements),
+    right: rewriteMaterializedSemanticCalls(expression.right, replacements),
+  };
+  if (expression.kind === "conditional") return {
+    ...expression,
+    condition: rewriteMaterializedSemanticCalls(expression.condition, replacements),
+    consequent: rewriteMaterializedSemanticCalls(expression.consequent, replacements),
+    alternate: rewriteMaterializedSemanticCalls(expression.alternate, replacements),
+  };
+  if (expression.kind === "assignment") return {
+    ...expression,
+    target: rewriteMaterializedSemanticCalls(expression.target, replacements),
+    value: rewriteMaterializedSemanticCalls(expression.value, replacements),
+  };
+  if (expression.kind === "update") return { ...expression, argument: rewriteMaterializedSemanticCalls(expression.argument, replacements) };
+  if (expression.kind === "initializer") return { ...expression, elements: expression.elements.map((item) => rewriteMaterializedSemanticCalls(item, replacements)) };
+  if (expression.kind === "sequence") return { ...expression, expressions: expression.expressions.map((item) => rewriteMaterializedSemanticCalls(item, replacements)) };
+  if (expression.kind === "texture-read") return {
+    ...expression,
+    texture: rewriteMaterializedSemanticCalls(expression.texture, replacements),
+    x: rewriteMaterializedSemanticCalls(expression.x, replacements),
+    y: rewriteMaterializedSemanticCalls(expression.y, replacements),
+    ...(expression.z ? { z: rewriteMaterializedSemanticCalls(expression.z, replacements) } : {}),
+  };
+  if (expression.kind === "surface-read") return {
+    ...expression,
+    surface: rewriteMaterializedSemanticCalls(expression.surface, replacements),
+    xBytes: rewriteMaterializedSemanticCalls(expression.xBytes, replacements),
+    y: rewriteMaterializedSemanticCalls(expression.y, replacements),
+    ...(expression.z ? { z: rewriteMaterializedSemanticCalls(expression.z, replacements) } : {}),
+  };
+  return expression;
 }
 
 function semanticReinterpretedScalarCopy(
@@ -4653,8 +4883,28 @@ function localPointerAliasForInitializer(
     const target = scope.get(expression.target.name);
     const slot = staticPointerArrayIndex(expression.index);
     const alias = slot === undefined ? undefined : target?.pointerArrayAliases?.[slot];
-    if (alias?.pointerRoot && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) && alias.pointerBaseIndices?.length === 1) {
-      return alias;
+    if (semanticPointerAliasComplete(alias)) return alias;
+    if (slot === undefined && semanticPointerArrayAliasesComplete(target)) {
+      const aliases = target!.pointerArrayAliases as readonly SemanticPointerAlias[];
+      const index = lowerExpression(expression.index, scope);
+      let selected = aliases.at(-1)!;
+      for (let candidate = aliases.length - 2; candidate >= 0; candidate--) {
+        selected = {
+          pointerSelection: {
+            condition: {
+              kind: "binary",
+              operator: "==",
+              left: index,
+              right: intNumberExpression(candidate, expression.index.span),
+              valueType: "bool",
+              span: expression.index.span,
+            },
+            consequent: aliases[candidate]!,
+            alternate: selected,
+          },
+        };
+      }
+      return selected;
     }
   }
   if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
@@ -4815,11 +5065,14 @@ function staticPointerArrayIndex(expression: CudaLiteExpression): number | undef
 function semanticPointerArrayAliasesComplete(symbol: CudaLiteSemanticSymbol | undefined): boolean {
   const extent = symbol?.dimensions.length === 1 ? symbol.dimensions[0] : undefined;
   return extent !== undefined && extent > 0 && symbol?.pointerArrayAliases?.length === extent &&
-    symbol.pointerArrayAliases.every((alias) =>
-      alias?.pointerRoot !== undefined &&
-      semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) &&
-      alias.pointerBaseIndices?.length === 1
-    );
+    symbol.pointerArrayAliases.every(semanticPointerAliasComplete);
+}
+
+function semanticPointerAliasComplete(alias: SemanticPointerAlias | undefined): boolean {
+  if (alias?.pointerRoot !== undefined && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) && alias.pointerBaseIndices?.length === 1) return true;
+  return alias?.pointerSelection !== undefined &&
+    semanticPointerAliasComplete(alias.pointerSelection.consequent) &&
+    semanticPointerAliasComplete(alias.pointerSelection.alternate);
 }
 
 function mergeBlockLocalPointerAliases(
@@ -5179,10 +5432,31 @@ function localPointerAliasScalarIndex(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression } | undefined {
-  if (expression.kind !== "identifier") return undefined;
-  const symbol = scope.get(expression.name);
-  if (!symbol?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(symbol.pointerAddressSpace) || !symbol.pointerBaseIndices || symbol.pointerBaseIndices.length !== 1) return undefined;
-  return { root: symbol.pointerRoot, index: symbol.pointerBaseIndices[0]!, ...(symbol.pointerValid === undefined ? {} : { valid: symbol.pointerValid }) };
+  return semanticPointerAliasScalarIndex(localPointerAliasForInitializer(expression, scope), expression.span);
+}
+
+function semanticPointerAliasScalarIndex(
+  alias: SemanticPointerAlias | undefined,
+  span: SourceSpan,
+): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression } | undefined {
+  if (alias?.pointerRoot && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) && alias.pointerBaseIndices?.length === 1) {
+    return { root: alias.pointerRoot, index: alias.pointerBaseIndices[0]!, ...(alias.pointerValid === undefined ? {} : { valid: alias.pointerValid }) };
+  }
+  if (!alias?.pointerSelection) return undefined;
+  const consequent = semanticPointerAliasScalarIndex(alias.pointerSelection.consequent, span);
+  const alternate = semanticPointerAliasScalarIndex(alias.pointerSelection.alternate, span);
+  if (!consequent || !alternate || consequent.root !== alternate.root || consequent.valid || alternate.valid) return undefined;
+  return {
+    root: consequent.root,
+    index: {
+      kind: "conditional",
+      condition: alias.pointerSelection.condition,
+      consequent: consequent.index,
+      alternate: alternate.index,
+      valueType: expressionValueType(consequent.index) ?? expressionValueType(alternate.index) ?? "int",
+      span,
+    },
+  };
 }
 
 function semanticSymbolExpression(symbol: CudaLiteSemanticSymbol, span: SourceSpan): Extract<SemanticExpression, { readonly kind: "symbol" }> {

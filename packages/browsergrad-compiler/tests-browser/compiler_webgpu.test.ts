@@ -5806,4 +5806,29 @@ __global__ void sharedVectorScalarAtomics(uint* uintOut, float* floatOut) {
     expect([...actual.buffers.uintOut as Uint32Array]).toEqual([7, 8]);
     expect([...actual.buffers.floatOut as Float32Array]).toEqual([7, 8]);
   });
+
+  it("runs dynamic pointer-array mutation through semantic IR on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint choose_pointer_slot(uint* storage) {
+  atomicAdd(storage, 1u);
+  return 1u;
+}
+
+__global__ void dynamicPointerArray(uint* storage) {
+  uint* pointers[2];
+  pointers[0] = storage + 1;
+  pointers[1] = storage + 2;
+  pointers[choose_pointer_slot(storage)] = storage + 3;
+  storage[3] = pointers[1] == storage + 3 ? 7u : 9u;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { storage: new Uint32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
+    expect([...actual.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
+  });
 });
