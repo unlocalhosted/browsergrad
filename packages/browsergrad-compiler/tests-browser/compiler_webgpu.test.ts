@@ -5561,4 +5561,25 @@ __global__ void selectedPackedCopy(const uchar* left, const uchar* right, int* o
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
     expect([...actual.buffers.out as Int32Array]).toEqual([0x0d0e0f10, 0x090a0b0c, 0x05060708, 0x01020304]);
   });
+
+  it("loads float WMMA tiles from half-backed shared bit storage on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedFloatTile(const float* input, float* out) {
+  __shared__ half backing[8];
+  *((int4*)&backing[0]) = *((int4*)&input[0]);
+  __syncthreads();
+  wmma::fragment<wmma::accumulator, 2, 2, 2, float> tile;
+  wmma::load_matrix_sync(tile, (float*)&backing[0], 2, wmma::mem_row_major);
+  wmma::store_matrix_sync(out, tile, 2, wmma::mem_row_major);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const input = { buffers: { input: new Float32Array([1.25, -2.5, 3.75, 4.5]), out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...input.buffers.input]);
+  });
 });

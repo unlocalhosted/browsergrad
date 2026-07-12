@@ -3289,8 +3289,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       });
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(compiled.wgsl).toContain("bg_ptr_read_f32");
-      expect(compiled.wgsl).toContain("bg_ptr_read_f16");
+      expect(compiled.wgsl).toContain("bitcast<f32>(bitcast<u32>(vec2<f16>(shmem[");
+      expect(compiled.wgsl).toContain("f32(shmem[");
     });
 
   it("supports WMMA tf32 precision aliases and fragment lane access", () => {
@@ -3343,6 +3343,26 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain(": i32 = i32(c[");
       expect(compiled.wgsl).toContain("i32(u32(a[");
       expect(compiled.wgsl).toContain("C[(0u + ((bg_wmma_row_");
+    });
+
+  it("loads float WMMA tiles from half-backed shared bit storage", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void sharedFloatTile(const float* input, float* out) {
+    __shared__ half backing[8];
+    *((int4*)&backing[0]) = *((int4*)&input[0]);
+    __syncthreads();
+    wmma::fragment<wmma::accumulator, 2, 2, 2, float> tile;
+    wmma::load_matrix_sync(tile, (float*)&backing[0], 2, wmma::mem_row_major);
+    wmma::store_matrix_sync(out, tile, 2, wmma::mem_row_major);
+  }`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+      const input = { buffers: { input: new Float32Array([1.25, -2.5, 3.75, 4.5]), out: new Float32Array(4) } };
+      const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+      const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bitcast<f32>(bitcast<u32>(vec2<f16>(backing[");
+      expect([...semantic.buffers.out as Float32Array]).toEqual([...input.buffers.input]);
     });
 
   it("validates WMMA fragment metadata and f16 requirements", () => {

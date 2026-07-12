@@ -600,6 +600,7 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (semanticReferenceLocalVectorBitViewRootType(ref, compiled) !== undefined) return true;
   if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
   if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
+  if (semanticReferenceSharedHalfBitView(ref, compiled)) return true;
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticReferenceLocalScalarVectorView(ref, compiled)) return true;
   if (semanticReferenceSharedScalarVectorView(ref, compiled)) return true;
@@ -636,6 +637,12 @@ function semanticReferencePackedSharedByteRoot(ref: SemanticMemoryRef, compiled:
     compiled.kernelIr.functions.some((fn) => fn.params.some((param) =>
       param.name === ref.base && param.pointer && param.addressSpace === "shared" && param.pointerCarrierValueType === "uchar"
     ));
+}
+
+function semanticReferenceSharedHalfBitView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  return ref.addressSpace === "shared" && ref.fields.length === 0 && ref.indices.length === 1 &&
+    (ref.valueType === "float" || ref.valueType === "uint" || ref.valueType === "int") &&
+    compiled.kernelIr.memory.some((symbol) => symbol.kind === "shared" && symbol.name === ref.base && symbol.valueType === "half");
 }
 
 function semanticPackedSharedByteViewSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -1727,6 +1734,10 @@ function* execSemanticBarrierOperations(
       case "store":
       case "copy":
       case "copy-fence":
+      case "matrix-fill":
+      case "matrix-load":
+      case "matrix-mma":
+      case "matrix-store":
       case "surface-write":
       case "surface-read-store":
       case "atomic":
@@ -2077,7 +2088,7 @@ function semanticMatrixMemoryIndex(row: number, col: number, stride: number, lay
 }
 
 function semanticMemoryRefOffset(ref: SemanticMemoryRef, offset: number): SemanticMemoryRef {
-  const literal: SemanticExpression = { kind: "literal", literalKind: "number", value: offset, valueType: "uint", span: ref.span };
+  const literal: SemanticExpression = { kind: "literal", literalKind: "number", value: offset * (ref.pointerBaseUnitBytes ?? 1), valueType: "uint", span: ref.span };
   if (ref.indices.length === 0) return { ...ref, indices: [literal] };
   const last = ref.indices[ref.indices.length - 1]!;
   return { ...ref, indices: [...ref.indices.slice(0, -1), { kind: "binary", operator: "+", left: last, right: literal, valueType: "uint", span: ref.span }] };
@@ -4926,6 +4937,12 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
     if (semanticReferencePackedSharedByteRoot(ref, context.compiled)) {
       return readPackedSemanticSharedByteView(ref, buffer, context);
+    }
+    if (semanticReferenceSharedHalfBitView(ref, context.compiled)) {
+      const index = flatIndex(ref, context);
+      const word = ((float32ToFloat16Bits(Number(buffer[index] ?? 0)) & 0xffff) |
+        ((float32ToFloat16Bits(Number(buffer[index + 1] ?? 0)) & 0xffff) << 16)) >>> 0;
+      return ref.valueType === "float" ? uintBitsToFloat32(word) : ref.valueType === "int" ? word | 0 : word;
     }
     const index = flatIndex(ref, context);
     const ok = index >= 0 && index < buffer.length;

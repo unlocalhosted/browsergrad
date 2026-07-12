@@ -3180,6 +3180,8 @@ function semanticPointerArgumentMemoryRef(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): SemanticMemoryRef | undefined {
+  const dereference = localPointerAliasDerefExpression(expression, scope, expression.span);
+  if (dereference) return memoryRefFromExpression(dereference);
   const lowered = pointerAliasValueExpression(expression, scope, expression.span) ?? lowerExpression(expression, scope);
   const value = lowered.kind === "unary" && lowered.operator === "&" ? lowered.argument : lowered;
   return memoryRefFromExpression(value);
@@ -4125,6 +4127,13 @@ function localPointerAliasForInitializer(
     const alias = localPointerAliasForInitializer(expression.expression, scope);
     const sourceType = pointerAliasTargetValueType(expression.expression, scope);
     const targetBytes = expression.pointerElementBytes ?? sizeofCudaType(expression.valueType);
+    const rootType = alias?.pointerRoot === undefined ? undefined : scope.get(alias.pointerRoot)?.valueType;
+    const rootBytes = rootType === undefined ? undefined : sizeofCudaType(rootType);
+    if (alias && targetBytes !== undefined && rootBytes !== undefined && targetBytes >= rootBytes && targetBytes % rootBytes === 0) {
+      const { pointerBaseUnitBytes: _pointerBaseUnitBytes, ...rest } = alias;
+      const scale = targetBytes / rootBytes;
+      return { ...rest, ...(scale === 1 ? {} : { pointerBaseUnitBytes: scale }) };
+    }
     if (alias && sourceType === "uchar" && targetBytes !== undefined && targetBytes > 1) {
       return { ...alias, pointerBaseUnitBytes: targetBytes };
     }
@@ -4680,6 +4689,7 @@ function localPointerAliasDerefExpression(
     ...optionalValueType(pointerAliasTargetValueType(expression, scope) ?? root.valueType),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
     ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression, root, scope)),
     span,
   };

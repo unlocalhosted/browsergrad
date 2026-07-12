@@ -1293,6 +1293,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (semanticWgslLocalVectorBitViewRootType(ref, ir) !== undefined) return true;
   if (semanticWgslLocalPackedByteRawView(ref, ir)) return true;
   if (semanticWgslPackedSharedByteRoot(ref, ir)) return semanticPackedSharedByteViewSupported(ref.valueType);
+  if (semanticWgslSharedHalfBitView(ref, ir)) return true;
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
   if (ref.addressSpace === "local" && semanticWgslFunctionLocalPointerParam(ir, ref.base)) return true;
   if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
@@ -1303,6 +1304,12 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace) ??
     (ref.addressSpace === "local" ? semanticFunctionLocalArraySymbol(ir, ref.base) : undefined);
   return symbol !== undefined && symbol.valueType === ref.valueType;
+}
+
+function semanticWgslSharedHalfBitView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  return ref.addressSpace === "shared" && ref.fields.length === 0 && ref.indices.length === 1 &&
+    (ref.valueType === "float" || ref.valueType === "uint" || ref.valueType === "int") &&
+    sharedMemorySymbols(ir).some((symbol) => symbol.name === ref.base && symbol.valueType === "half");
 }
 
 function semanticWgslLocalScalarBitViewRootType(
@@ -2365,9 +2372,12 @@ function semanticWgslGeneratedSymbol(name: string, span: SourceSpan): SemanticEx
 }
 
 function semanticWgslMemoryRefOffset(ref: SemanticMemoryRef, offset: SemanticExpression): SemanticMemoryRef {
-  if (ref.indices.length === 0) return { ...ref, indices: [offset] };
+  const scaled = ref.pointerBaseUnitBytes === undefined || ref.pointerBaseUnitBytes === 1
+    ? offset
+    : { kind: "binary", operator: "*", left: offset, right: { kind: "literal", literalKind: "number", value: ref.pointerBaseUnitBytes, valueType: "uint", span: ref.span }, valueType: "uint", span: ref.span } satisfies SemanticExpression;
+  if (ref.indices.length === 0) return { ...ref, indices: [scaled] };
   const last = ref.indices[ref.indices.length - 1]!;
-  return { ...ref, indices: [...ref.indices.slice(0, -1), { kind: "binary", operator: "+", left: last, right: offset, valueType: "uint", span: ref.span }] };
+  return { ...ref, indices: [...ref.indices.slice(0, -1), { kind: "binary", operator: "+", left: last, right: scaled, valueType: "uint", span: ref.span }] };
 }
 
 function semanticWgslMatrixRowsCols(spec: MatrixTileResolvedSpec): readonly [number, number] {
@@ -5054,6 +5064,12 @@ function emitSemanticMemoryRead(
   }
   if (semanticWgslPackedSharedByteRoot(ref, ir)) {
     return emitSemanticPackedSharedByteRead(ref, ir, names, options);
+  }
+  if (semanticWgslSharedHalfBitView(ref, ir)) {
+    const low = emitSemanticMemoryRef({ ...semanticCopyMemoryRefAt(ref, 0), valueType: "half", containerValueType: "half" }, ir, names, options);
+    const high = emitSemanticMemoryRef({ ...semanticCopyMemoryRefAt(ref, 1), valueType: "half", containerValueType: "half" }, ir, names, options);
+    const word = `bitcast<u32>(vec2<f16>(${low}, ${high}))`;
+    return ref.valueType === "float" ? `bitcast<f32>(${word})` : ref.valueType === "int" ? `bitcast<i32>(${word})` : word;
   }
   if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
     const valueType = ref.valueType ?? "float";
