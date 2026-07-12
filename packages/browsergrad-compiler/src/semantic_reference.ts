@@ -1033,6 +1033,20 @@ function semanticReferenceCooperativeGroupCallSupported(
   return group !== undefined && group.kind !== "coalesced";
 }
 
+function semanticReferenceCoalescedGroupCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return false;
+  const group = semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name);
+  if (group?.kind !== "coalesced") return false;
+  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
+    return expression.args.length === 1 && semanticReferenceExpressionSupported(expression.args[0]!, "scalar", compiled);
+  }
+  return expression.callee.property === "shfl" && expression.args.length === 2 &&
+    expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+}
+
 function semanticReferenceCooperativeReduceCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
@@ -1424,6 +1438,7 @@ function semanticReferenceExpressionSupported(
         expression.callee.kind === "symbol" && semanticPtxIntegerCallInfo(expression.callee.name) !== undefined &&
           expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled)) ||
         compiled !== undefined && semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
+        compiled !== undefined && semanticReferenceCoalescedGroupCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceCooperativeScanCallSupported(expression, compiled) ||
         semanticReferenceSyncthreadsPredicateCallSupported(expression, compiled) ||
@@ -1514,6 +1529,7 @@ function semanticReferenceExpressionContainsUnsupportedCall(
     return !(semanticReferenceAtomicCallSupported(expression, compiled) ||
       semanticReferenceSharedAddressCallSupported(expression) ||
       semanticReferenceCooperativeGroupCallSupported(expression, compiled) ||
+      semanticReferenceCoalescedGroupCallSupported(expression, compiled) ||
       semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
       semanticReferenceCooperativeScanCallSupported(expression, compiled) ||
       semanticReferenceSyncthreadsPredicateCallSupported(expression, compiled) ||
@@ -3162,6 +3178,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       }
       if (semanticReferenceSharedAddressCallSupported(expression)) return evalSemanticSharedAddressCall(expression, context);
       if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return evalSemanticCooperativeGroupCall(expression, context);
+      if (semanticReferenceCoalescedGroupCallSupported(expression, context.compiled)) return evalSemanticCoalescedGroupCall(expression, context);
       if (semanticReferenceCooperativeReduceCallSupported(expression, context.compiled)) return evalSemanticCooperativeReduceCall(expression, context);
       if (semanticReferenceCooperativeScanCallSupported(expression, context.compiled)) return evalSemanticCooperativeScanCall(expression, context);
       if (semanticReferenceSyncthreadsPredicateCallSupported(expression, context.compiled)) return evalSemanticSyncthreadsPredicateCall(expression, context);
@@ -4723,6 +4740,27 @@ function evalSemanticCooperativeGroupCall(
     throw semanticReferenceError("semantic reference cooperative-group call requires rank, size, or meta-group topology", expression.span);
   }
   return semanticReferenceCooperativeGroupValue(expression.callee.object.name, expression.callee.property, context);
+}
+
+function evalSemanticCoalescedGroupCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol" || !expression.args[0]) {
+    throw semanticReferenceError("semantic coalesced-group call requires group receiver and value", expression.span);
+  }
+  const peers = semanticReferenceCooperativeContexts(expression.callee.object.name, context);
+  if (expression.callee.property === "ballot") {
+    return peers.reduce((mask, peer) => truthy(evalNumber(expression.args[0]!, peer))
+      ? mask | (1 << (semanticLocalLinearRank(peer) % 32))
+      : mask, 0) >>> 0;
+  }
+  if (expression.callee.property === "any") return Number(peers.some((peer) => truthy(evalNumber(expression.args[0]!, peer))));
+  if (expression.callee.property === "all") return Number(peers.every((peer) => truthy(evalNumber(expression.args[0]!, peer))));
+  const sourceLane = expression.args[1] ? Math.trunc(evalNumber(expression.args[1], context)) : 0;
+  const base = Math.floor(semanticLocalLinearRank(context) / 32) * 32;
+  const source = peers.find((peer) => semanticLocalLinearRank(peer) === base + sourceLane) ?? context;
+  return evalNumber(expression.args[0], source);
 }
 
 function evalSemanticCooperativeReduceCall(
@@ -6569,6 +6607,9 @@ function semanticModuleContainsSubgroupCall(ir: CompiledCudaLiteKernel["kernelIr
 
 function semanticExpressionContainsSubgroupCall(expression: SemanticExpression): boolean {
   if (expression.kind === "call") {
+    if (expression.callee.kind === "member" && expression.callee.object.kind === "symbol" &&
+      (expression.callee.property === "ballot" || expression.callee.property === "any" ||
+        expression.callee.property === "all" || expression.callee.property === "shfl")) return true;
     if (expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" &&
       (SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) ||
         cudaSyncthreadsPredicateReduction(expression.callee.name) !== undefined ||

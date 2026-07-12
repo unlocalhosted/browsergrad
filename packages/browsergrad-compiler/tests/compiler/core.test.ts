@@ -1715,9 +1715,13 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.wgsl).toContain("subgroupBallot");
-      expect(compiled.wgsl).toContain("bg_warp_shuffle_sync_int_1");
+      expect(compiled.wgsl).toContain("subgroupShuffle");
       expect(compiled.wgsl).toContain("countOneBits");
       expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(compiled.kernelIr.operations).toContainEqual(expect.objectContaining({
+        kind: "cooperative-group-declare",
+        declaration: expect.objectContaining({ name: "group", groupKind: "coalesced" }),
+      }));
       expect([...result.buffers.out as Uint32Array]).toEqual([1]);
     });
 

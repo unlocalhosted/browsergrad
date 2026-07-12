@@ -197,7 +197,7 @@ export interface CudaLiteDim3Decl {
   readonly span: SourceSpan;
 }
 
-export type CudaLiteCooperativeGroupKind = "block" | "grid" | "tile" | "thread";
+export type CudaLiteCooperativeGroupKind = "block" | "grid" | "tile" | "thread" | "coalesced";
 
 export interface CudaLiteCooperativeGroupDecl {
   readonly kind: "cooperative-group";

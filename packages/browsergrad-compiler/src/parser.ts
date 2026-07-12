@@ -733,7 +733,7 @@ class Parser {
         if (parent.kind === "identifier") partitionParent = parent.name;
       } else if (factory.value === "coalesced_threads") {
         this.skipBalanced("(", ")");
-        groupKind = "tile";
+        groupKind = "coalesced";
         tileSize = 32;
       } else {
         this.fail("unsupported cooperative group factory", factory.span);
@@ -741,7 +741,7 @@ class Parser {
     } else {
       if (this.tokens[this.index + 1]?.value === "::") this.consumeNamespaceQualifier();
       const type = this.expectIdentifier("cooperative group type");
-      groupKind = type.value === "thread_group" ? "thread" : type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
+      groupKind = type.value === "thread_group" ? "thread" : type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : type.value === "coalesced_group" ? "coalesced" : "tile";
       if (type.value === "thread_block_tile") {
         this.expect("<");
         tileSize = this.parseTemplateIntegerArgument();
@@ -773,7 +773,7 @@ class Parser {
     if (!this.startsCooperativeGroupType()) return undefined;
     if (this.tokens[this.index + 1]?.value === "::") this.consumeNamespaceQualifier();
     const type = this.expectIdentifier("cooperative group type");
-    const groupKind = type.value === "thread_group" ? "thread" : type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
+    const groupKind = type.value === "thread_group" ? "thread" : type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : type.value === "coalesced_group" ? "coalesced" : "tile";
     let tileSize: number | undefined;
     if (type.value === "thread_block_tile") {
       this.expect("<");

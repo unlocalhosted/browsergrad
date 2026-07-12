@@ -1881,6 +1881,7 @@ function semanticWgslExpressionSupported(
         expression.callee.kind === "symbol" && semanticPtxIntegerCallInfo(expression.callee.name) !== undefined &&
           expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir)) ||
         ir !== undefined && semanticWgslCooperativeGroupCallSupported(expression, ir) ||
+        ir !== undefined && semanticWgslCoalescedGroupCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
         ir !== undefined && semanticWgslCooperativeScanCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
         ir !== undefined && semanticWgslSyncthreadsPredicateCallSupported(expression, ir) ||
@@ -2483,6 +2484,9 @@ function semanticOperationContainsWorkgroupCollective(operation: SemanticKernelI
 
 function semanticExpressionContainsWorkgroupCollective(expression: SemanticExpression): boolean {
   if (expression.kind === "call" && semanticSyncthreadsPredicateHelperFor(expression) !== undefined) return true;
+  if (expression.kind === "call" && expression.callee.kind === "member" && expression.callee.object.kind === "symbol" &&
+    (expression.callee.property === "ballot" || expression.callee.property === "any" ||
+      expression.callee.property === "all" || expression.callee.property === "shfl")) return true;
   if (expression.kind === "call" && expression.callee.kind === "symbol" && expression.callee.addressSpace !== "function" &&
     (semanticShuffleOpForCall(expression.callee.name) !== undefined ||
       isCudaWarpReduceCallName(expression.callee.name) ||
@@ -4186,6 +4190,8 @@ function emitSemanticExpression(
     );
   }
   if (expression.kind === "call") {
+    const coalescedGroup = emitSemanticTypedCoalescedGroupCall(expression, ir, names, options, textureSpecializations);
+    if (coalescedGroup) return coalescedGroup;
     const cooperativeGroup = emitSemanticTypedCooperativeGroupCall(expression, ir, options);
     if (cooperativeGroup) return cooperativeGroup;
     const cooperativeReduce = emitSemanticTypedCooperativeReduceCall(expression, ir, names, options, textureSpecializations);
@@ -5835,6 +5841,63 @@ function emitSemanticTypedSyncthreadsPredicateCall(
       createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
     ],
     "i32",
+    expression.span,
+  );
+}
+
+function semanticWgslCoalescedGroupCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (ir.subgroupMode === "scalar" || expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return false;
+  const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
+  if (group?.kind !== "coalesced") return false;
+  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
+    return expression.args.length === 1 && semanticWgslExpressionSupported(expression.args[0]!, "scalar", ir);
+  }
+  return expression.callee.property === "shfl" && expression.args.length === 2 &&
+    expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
+}
+
+function emitSemanticTypedCoalescedGroupCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): TypedWgslExpression | undefined {
+  if (!semanticWgslCoalescedGroupCallSupported(expression, ir) || expression.callee.kind !== "member") return undefined;
+  const method = expression.callee.property;
+  const value = expression.args[0]!;
+  if (method === "ballot") {
+    const ballot = createTypedWgslCall(
+      "subgroupBallot",
+      [emitSemanticTruthinessExpression(value, ir, names, options)],
+      "vec4<u32>",
+      expression.span,
+    );
+    return createTypedWgslMemberAccess(ballot, "x", "u32", expression.span);
+  }
+  if (method === "any" || method === "all") {
+    const vote = createTypedWgslCall(
+      method === "any" ? "subgroupAny" : "subgroupAll",
+      [emitSemanticTruthinessExpression(value, ir, names, options)],
+      "bool",
+      expression.span,
+    );
+    return legalizeTypedWgslBoolToNumeric(vote, expression.valueType === "uint" ? "u32" : "i32");
+  }
+  const valueType = semanticExpressionValueType(value);
+  const index = expression.args[1];
+  if (!valueType || valueType === "void" || !index) return undefined;
+  const scalar = wgslValueScalar(valueType);
+  return createTypedWgslCall(
+    "subgroupShuffle",
+    [
+      emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations),
+      emitSemanticExpressionAs(index, ir, names, "u32", options, textureSpecializations),
+    ],
+    scalar,
     expression.span,
   );
 }
