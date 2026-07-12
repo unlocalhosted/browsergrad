@@ -111,6 +111,9 @@ import type { WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
 import type { WgslLegalizedIrArtifact } from "./compiler_phases.js";
 import {
   createTrustedWgslExpression,
+  createTypedWgslIdentifier,
+  createTypedWgslLiteral,
+  isTypedWgslLiteralCode,
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
   emitTypedWgslBinary,
@@ -4403,6 +4406,16 @@ function emitSemanticExpression(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): TypedWgslExpression {
+  if (expression.kind === "literal" && expression.literalKind === "number") {
+    const type = semanticExpressionWgslType(expression, ir);
+    if (type === "bool" || type === "f16" || type === "f32" || type === "i32" || type === "u32") {
+      const code = emitNumberLiteral(expression.value, expression.valueType);
+      if (isTypedWgslLiteralCode(code, type)) return createTypedWgslLiteral(code, type, expression.span);
+    }
+  }
+  if (expression.kind === "symbol" && expression.addressSpace === "local") {
+    return createTypedWgslIdentifier(nameFor(expression.name, names), semanticExpressionWgslType(expression, ir), expression.span);
+  }
   if (expression.kind === "binary") {
     return emitSemanticBinary(expression, ir, names, options, textureSpecializations);
   }
@@ -7055,7 +7068,7 @@ function emitSemanticBinary(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): TypedWgslExpression {
   if (isSemanticStoragePointerNullComparison(expression)) {
-    return createTrustedWgslExpression(expression.operator === "!=" ? "true" : "false", "bool", expression.span);
+    return createTypedWgslLiteral(expression.operator === "!=" ? "true" : "false", "bool", expression.span);
   }
   if (isSemanticStoragePointerIdentityComparison(expression, ir)) {
     const left = emitSemanticStoragePointerIdentity(expression.left, ir, names, options);
@@ -7231,7 +7244,7 @@ function emitTruthiness(
   return emitTypedWgslBinary(
     "!=",
     emitSemanticExpressionAs(expression, ir, names, scalar, options),
-    createTrustedWgslExpression(zero, scalar, expression.span),
+    createTypedWgslLiteral(zero, scalar, expression.span),
     expression.span,
   ).code;
 }

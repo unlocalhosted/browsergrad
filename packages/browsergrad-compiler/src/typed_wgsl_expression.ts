@@ -65,6 +65,30 @@ export function createTypedWgslIdentifier(
   return new TypedWgslExpressionValue({ kind: "leaf", code: name }, type, span);
 }
 
+export function createTypedWgslLiteral(
+  code: string,
+  type: "bool" | "f16" | "f32" | "i32" | "u32",
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!isTypedWgslLiteralCode(code, type)) throw new TypeError(`invalid WGSL ${type} literal '${code}'`);
+  return new TypedWgslExpressionValue({ kind: "leaf", code }, type, span);
+}
+
+export function isTypedWgslLiteralCode(
+  code: string,
+  type: "bool" | "f16" | "f32" | "i32" | "u32",
+): boolean {
+  return type === "bool"
+    ? code === "true" || code === "false"
+    : type === "u32"
+      ? /^(?:0x[0-9a-fA-F]+|[0-9]+)u$/.test(code)
+      : type === "i32"
+        ? /^-?[0-9]+$/.test(code)
+        : type === "f16"
+          ? /^f16\(-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]+)?\)$/.test(code)
+          : /^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]+)?$/.test(code);
+}
+
 export function convertTypedWgslExpression(
   source: TypedWgslExpression,
   targetType: WgslExpressionType,
