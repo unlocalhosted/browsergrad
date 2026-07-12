@@ -36,6 +36,9 @@ import {
 } from "./types.js";
 import { CUDA_VECTOR_TYPES, cudaVectorTypeAlias, isCudaVectorType } from "./vector_types.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import { markCompilerPhase, type Parsed } from "./compiler_phases.js";
+
+export type ParsedCudaLiteModule = Parsed<CudaLiteModule>;
 
 const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "void">>([
   ["char", "int"],
@@ -174,8 +177,8 @@ const BINARY_PRECEDENCE = new Map<string, number>([
   ["%", 11],
 ]);
 
-export function parseCudaLite(source: string): CudaLiteModule {
-  return new Parser(source).parseModule();
+export function parseCudaLite(source: string): ParsedCudaLiteModule {
+  return markCompilerPhase(new Parser(source).parseModule(), "parsed");
 }
 
 class Parser {

@@ -6,6 +6,9 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type SourceSpan } from "./types.js";
+import type { VerifiedIr } from "./compiler_phases.js";
+
+export type VerifiedSemanticKernelIr<T extends SemanticKernelIrModule = SemanticKernelIrModule> = VerifiedIr<T>;
 
 export interface SemanticIrVerificationIssue {
   readonly code: "internal-lowering-invariant";
@@ -46,9 +49,9 @@ export function verifySemanticKernelIr(
   return issues;
 }
 
-export function assertValidSemanticKernelIr(
-  ir: SemanticKernelIrModule,
-): void {
+export function assertValidSemanticKernelIr<T extends SemanticKernelIrModule>(
+  ir: T,
+): asserts ir is VerifiedSemanticKernelIr<T> {
   const issues = verifySemanticKernelIr(ir);
   if (issues.length === 0) return;
   const diagnostics: readonly CudaLiteDiagnostic[] = issues.map((issue) => ({

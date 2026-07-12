@@ -35,6 +35,7 @@ import {
 import { semanticUniformLayout } from "./semantic_uniform_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import { canEmitSemanticKernelIrWgsl, emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
+import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -264,14 +265,17 @@ function createGridSyncWebGpuPlan(
   if (!gridSyncPhasePlan.supported || gridSyncPhasePlan.phases.length <= 1) return undefined;
   const wgslInput = createWgslRunInput(compiled, input);
   const dispatchCount = dispatchCountForLaunch(launch);
-  const steps = gridSyncPhasePlan.phases.map((phase): WgslKernelSequenceStep => ({
+  const steps = gridSyncPhasePlan.phases.map((phase): WgslKernelSequenceStep => {
+    assertValidSemanticKernelIr(phase);
+    return {
     program: emitSemanticKernelIrWgsl(phase, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
       ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
     }).program,
     launch: { dispatchCount },
     ...(wgslInput.uniforms === undefined ? {} : { uniforms: wgslInput.uniforms }),
-  }));
+    };
+  });
   return {
     supported: true,
     kind: "grid-sync-phases",
@@ -290,7 +294,9 @@ function createRetirementReductionWebGpuPlan(
   const phases = phasePlan.phases.filter((phase): phase is NonNullable<typeof phase> => phase !== undefined);
   if (phases.some((phase) => !canEmitSemanticKernelIrWgsl(phase))) return undefined;
   const wgslInput = createWgslRunInput(compiled, input);
-  const steps = phases.map((phase, index): WgslKernelSequenceStep => ({
+  const steps = phases.map((phase, index): WgslKernelSequenceStep => {
+    assertValidSemanticKernelIr(phase);
+    return {
     program: emitSemanticKernelIrWgsl(phase, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
       ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
@@ -299,7 +305,8 @@ function createRetirementReductionWebGpuPlan(
       dispatchCount: index === 0 ? dispatchCountForLaunch(launch) : launch.blockDim,
     },
     ...(wgslInput.uniforms === undefined ? {} : { uniforms: wgslInput.uniforms }),
-  }));
+    };
+  });
   return {
     supported: true,
     kind: "host-retirement-reduction",

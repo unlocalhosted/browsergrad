@@ -49,6 +49,27 @@ export {
 } from "./types.js";
 
 export { parseCudaLite } from "./parser.js";
+export type { ParsedCudaLiteModule } from "./parser.js";
+export type { AnalyzedCudaLiteModule } from "./analyzer.js";
+export type {
+  CompilerPhase,
+  Parsed,
+  Analyzed,
+  TypedSemantic,
+  CanonicalIr,
+  RuntimeLoweredIr,
+  VerifiedIr,
+  WgslLegalizedIr,
+} from "./compiler_phases.js";
+export type {
+  SemanticFunctionId,
+  SemanticMemoryId,
+  SemanticSymbolId,
+} from "./semantic_ids.js";
+export {
+  createSemanticEnvironment,
+  type SemanticEnvironment,
+} from "./semantic_environment.js";
 export {
   createCudaLiteSemanticModel,
   lowerSemanticModelToKernelIr,

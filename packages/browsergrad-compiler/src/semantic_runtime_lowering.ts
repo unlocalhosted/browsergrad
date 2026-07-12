@@ -9,11 +9,14 @@ import {
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import type {
   SemanticExpression,
-  SemanticKernelIrModule,
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import type { CudaLiteScalarType, SourceSpan } from "./types.js";
+import { markCompilerPhase, type RuntimeLoweredIr } from "./compiler_phases.js";
+import type { CanonicalSemanticKernelIr } from "./semantic_ir.js";
+
+export type RuntimeLoweredSemanticKernelIr = RuntimeLoweredIr<CanonicalSemanticKernelIr>;
 
 interface LoweredRuntimeExpression {
   readonly operations: readonly SemanticKernelIrOperation[];
@@ -21,16 +24,17 @@ interface LoweredRuntimeExpression {
 }
 
 export function lowerSemanticCudaRuntime(
-  ir: SemanticKernelIrModule,
-): SemanticKernelIrModule {
+  ir: CanonicalSemanticKernelIr,
+): RuntimeLoweredSemanticKernelIr {
   const operations = lowerRuntimeOperations(ir.operations);
   const functions = ir.functions.map((fn) => {
     const body = lowerRuntimeOperations(fn.body);
     return body === fn.body ? fn : { ...fn, body };
   });
-  return operations === ir.operations && functions.every((fn, index) => fn === ir.functions[index])
+  const lowered = operations === ir.operations && functions.every((fn, index) => fn === ir.functions[index])
     ? ir
     : { ...ir, operations, functions };
+  return markCompilerPhase(lowered, "runtime-lowered-ir");
 }
 
 function lowerRuntimeOperations(

@@ -7,6 +7,7 @@ import {
   type CompiledCudaLiteKernel,
   CudaLiteCompilerError,
   analyzeCudaLite,
+  assertValidSemanticKernelIr,
   compileCudaLiteOptionsFromKernelFeatures,
   createCudaLiteCompileCacheKey,
   createCudaLiteCompilerCache,
@@ -3344,6 +3345,7 @@ __global__ void sharedPointerAlias(float *out) {
         dimensions: [4],
   });
 
+      assertValidSemanticKernelIr(compiled.kernelIr);
       const semanticWgsl = emitSemanticKernelIrWgsl(compiled.kernelIr).wgsl;
       expect(semanticWgsl).toContain("fn writeShared(values__bg_shared_ptr: ptr<workgroup, array<f32, 4>>");
       expect(semanticWgsl).toContain("writeShared(&sdata");
@@ -5835,11 +5837,16 @@ __global__ void localOut(float *out) {
         { buffers: { x: new Uint32Array([42]), out: new Uint32Array(3) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const zeroPointeeResult = runCompiledKernelSemanticReference(
+        nullGuard,
+        { buffers: { x: new Uint32Array([0]), out: new Uint32Array(3) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
       expect([...nullGuardResult.buffers.out as Uint32Array]).toEqual([42, 0, 42]);
+      expect([...zeroPointeeResult.buffers.out as Uint32Array]).toEqual([0, 0, 0]);
       expect(canEmitSemanticKernelIrWgsl(nullGuard.kernelIr)).toBe(true);
       expect(nullGuard.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(nullGuard.wgsl.match(/if \(true\) \{/gu)).toHaveLength(2);
-      expect(nullGuard.wgsl).toContain("if (false) {");
+      expect(nullGuard.wgsl).not.toContain("x[0u] != 0u");
 
       const pointerIdentity = compileCudaLiteKernel(`
   __global__ void pointer_identity(uint* x, uint* y, uint* out) {
@@ -5854,7 +5861,7 @@ __global__ void localOut(float *out) {
       expect([...pointerIdentityResult.buffers.out as Uint32Array]).toEqual([1, 2]);
       expect(canEmitSemanticKernelIrWgsl(pointerIdentity.kernelIr)).toBe(true);
       expect(pointerIdentity.wgsl).toContain("!((0u) == (1u) && (0u) == (0u))");
-      expect(pointerIdentity.wgsl).toContain("((0u) == (0u) && (0u) == (0u))");
+      expect(pointerIdentity.wgsl).toContain("out[1u] = 2u;");
 
       const helperPointerIdentity = compileCudaLiteKernel(`
   __device__ int same_pointer(uint* left, uint* right) { return left == right; }
@@ -5890,7 +5897,7 @@ __global__ void localOut(float *out) {
       );
       expect([...pointerDistanceResult.buffers.out as Int32Array]).toEqual([3, 2]);
       expect(pointerDistance.wgsl).toContain("i32(");
-      expect(pointerDistance.wgsl).toContain("var width: i32 = (i32((0u + u32(3))) - i32((0u + u32((0 + bg_uniforms.left)))));");
+      expect(pointerDistance.wgsl).toContain("var width: i32 = (3 - bg_uniforms.left);");
 
       const sharedScalarDistance = compileCudaLiteKernel(`
   __global__ void shared_scalar_distance(uint* blocks, uint* out) {

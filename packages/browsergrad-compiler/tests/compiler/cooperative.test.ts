@@ -7,6 +7,7 @@ import {
   type CompiledCudaLiteKernel,
   CudaLiteCompilerError,
   analyzeCudaLite,
+  assertValidSemanticKernelIr,
   compileCudaLiteOptionsFromKernelFeatures,
   createCudaLiteCompileCacheKey,
   createCudaLiteCompilerCache,
@@ -1213,7 +1214,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         addressSpace: "shared",
         dimensions: [16],
       }));
-      const wgsl = phases.phases.map((phase) => emitSemanticKernelIrWgsl(phase).wgsl).join("\n");
+      const wgsl = phases.phases.map((phase) => {
+        assertValidSemanticKernelIr(phase);
+        return emitSemanticKernelIrWgsl(phase).wgsl;
+      }).join("\n");
       expect(wgsl).toContain("var<workgroup> scratch: array<f32, 16>;");
       expect(wgsl).toContain("stride >>= 1");
       expect(wgsl).toContain("num_workgroups.x");
@@ -1260,6 +1264,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       if (phases.supported) {
         expect(phases.phases).toHaveLength(2);
         expect(canEmitSemanticKernelIrWgsl(phases.phases[0]!)).toBe(true);
+        assertValidSemanticKernelIr(phases.phases[0]!);
         const phaseWgsl = emitSemanticKernelIrWgsl(phases.phases[0]!).wgsl;
         expect(phaseWgsl).toContain("fn reduceBlock");
         expect(phaseWgsl).not.toContain("i32(local_id.x) == 0.0");

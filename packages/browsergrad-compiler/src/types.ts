@@ -9,6 +9,7 @@ import type {
   CudaLiteSemanticModel,
   SemanticKernelIrModule,
 } from "./semantic_ir.js";
+import type { CompilerPhase } from "./compiler_phases.js";
 
 export interface SourceSpan {
   readonly start: number;
@@ -489,10 +490,10 @@ export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
 }
 
 export interface CompiledCudaLiteKernel {
-  readonly ast: CudaLiteModule;
-  readonly semantic: CudaLiteSemanticModel;
-  readonly kernelIr: SemanticKernelIrModule;
-  readonly analysis: CudaLiteAnalysis;
+  readonly ast: CudaLiteModule & CompilerPhase<"parsed">;
+  readonly semantic: CudaLiteSemanticModel & CompilerPhase<"typed-semantic">;
+  readonly kernelIr: SemanticKernelIrModule & CompilerPhase<"canonical-ir"> & CompilerPhase<"runtime-lowered-ir"> & CompilerPhase<"verified-ir">;
+  readonly analysis: CudaLiteAnalysis & CompilerPhase<"analyzed">;
   readonly wgsl: string;
   readonly wgslProgram: WgslKernelProgram;
   readonly diagnostics: readonly CudaLiteDiagnostic[];

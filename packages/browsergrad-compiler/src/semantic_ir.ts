@@ -88,6 +88,19 @@ import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
 import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
 import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
 import {
+  markCompilerPhase,
+  type CanonicalIr,
+  type TypedSemantic,
+} from "./compiler_phases.js";
+import type { AnalyzedCudaLiteModule } from "./analyzer.js";
+import {
+  createSemanticFunctionId,
+  createSemanticSymbolId,
+  type SemanticFunctionId,
+  type SemanticSymbolId,
+} from "./semantic_ids.js";
+import { createSemanticEnvironment, type SemanticEnvironment } from "./semantic_environment.js";
+import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
   resolveMatrixTileSpec,
@@ -111,6 +124,7 @@ export type SemanticAddressSpace =
   | "unknown";
 
 export interface CudaLiteSemanticSymbol {
+  readonly id: SemanticSymbolId;
   readonly name: string;
   readonly kind:
     | "param"
@@ -165,6 +179,7 @@ interface SemanticPointerSelection {
 }
 
 export interface CudaLiteSemanticFunction {
+  readonly id: SemanticFunctionId;
   readonly name: string;
   readonly returnType: CudaLiteScalarType;
   readonly params: readonly CudaLiteSemanticSymbol[];
@@ -183,6 +198,7 @@ export interface SemanticCooperativeGroupDeclaration {
 }
 
 export interface CudaLiteSemanticLaunchableEntry {
+  readonly id: SemanticFunctionId;
   readonly kind: "kernel" | "device-function";
   readonly name: string;
   readonly params: readonly CudaLiteSemanticSymbol[];
@@ -198,7 +214,10 @@ export interface CudaLiteSemanticModel {
   readonly functions: readonly CudaLiteSemanticFunction[];
   readonly launchableEntries: readonly CudaLiteSemanticLaunchableEntry[];
   readonly requiredFeatures: readonly string[];
+  readonly environment: SemanticEnvironment;
 }
+
+export type TypedCudaLiteSemanticModel = TypedSemantic<CudaLiteSemanticModel>;
 
 export interface SemanticMemoryRef {
   readonly base: string;
@@ -427,6 +446,8 @@ export interface SemanticKernelIrModule {
   readonly subgroupMode?: "native" | "scalar";
   readonly bindlessTextures?: readonly string[];
 }
+
+export type CanonicalSemanticKernelIr = CanonicalIr<SemanticKernelIrModule>;
 
 export function walkSemanticOperations(
   operations: readonly SemanticKernelIrOperation[],
@@ -660,7 +681,7 @@ const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "|
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, ...CUDA_COOPERATIVE_BARRIER_CALL_NAMES, "grid.sync"]);
 const FENCE_CALLS: ReadonlySet<string> = new Set(CUDA_FENCE_CALL_NAMES);
-export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
+export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): TypedCudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
   const constants = analysis.constants.map(symbolForConstant);
   const deviceGlobals = analysis.deviceGlobals.map(symbolForDeviceGlobal);
@@ -670,40 +691,48 @@ export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLit
   const functions = analysis.functions.map((fn) => symbolForFunction(fn, globalScope));
   const launchableEntries: CudaLiteSemanticLaunchableEntry[] = [
     ...analysis.kernels.map((kernel) => ({
+      id: createSemanticFunctionId(kernel.name, kernel.span),
       kind: "kernel" as const,
       name: kernel.name,
       params: kernel.params.map(symbolForParam),
       span: kernel.span,
     })),
     ...analysis.functions.map((fn) => ({
+      id: createSemanticFunctionId(fn.name, fn.span),
       kind: "device-function" as const,
       name: fn.name,
       params: fn.params.map(symbolForParam),
       span: fn.span,
     })),
   ];
-  return {
+  const symbols = [...params, ...constants, ...deviceGlobals, ...textures];
+  const environment = createSemanticEnvironment(
+    [...symbols, ...functionSymbols, ...functions.flatMap((fn) => fn.params)],
+    functions,
+  );
+  return markCompilerPhase({
     kind: "cuda-lite-semantic-model",
     kernelName: analysis.kernel.name,
     span: analysis.kernel.span,
     params,
-    symbols: [...params, ...constants, ...deviceGlobals, ...textures],
+    symbols,
     functions,
     launchableEntries,
     requiredFeatures: analysis.requiredFeatures,
-  };
+    environment,
+  }, "typed-semantic");
 }
 
 export function lowerSemanticModelToKernelIr(
-  analysis: CudaLiteAnalysis,
-  semantic: CudaLiteSemanticModel,
+  analysis: AnalyzedCudaLiteModule,
+  semantic: TypedCudaLiteSemanticModel,
   options: {
     readonly workgroupSize?: readonly [number, number, number];
     readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
     readonly subgroupMode?: "native" | "scalar";
     readonly bindlessTextures?: readonly string[];
   } = {},
-): SemanticKernelIrModule {
+): CanonicalSemanticKernelIr {
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
   const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
   const mutableParams = mutableKernelParamShadows(analysis, semantic.params);
@@ -805,7 +834,7 @@ export function lowerSemanticModelToKernelIr(
   const functionSharedMemory = functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body).filter((symbol) => symbol.addressSpace === "shared")
   );
-  return {
+  return markCompilerPhase({
     kind: "semantic-kernel-ir",
     name: analysis.kernel.name,
     span: analysis.kernel.span,
@@ -819,6 +848,7 @@ export function lowerSemanticModelToKernelIr(
       ...localMemory.map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
       ...functionSharedMemory.map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
       ...(options.bindlessTextures ?? []).map((name): CudaLiteSemanticSymbol => ({
+        id: createSemanticSymbolId("texture", name, analysis.kernel.span),
         name,
         kind: "texture",
         valueType: "texture2d",
@@ -836,7 +866,7 @@ export function lowerSemanticModelToKernelIr(
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
     ...(options.bindlessTextures === undefined ? {} : { bindlessTextures: options.bindlessTextures }),
-  };
+  }, "canonical-ir");
 }
 
 function markSemanticWorkgroupUniformControl(
@@ -981,6 +1011,7 @@ function createSemanticGuardedBarrierFunctions(
 ): readonly CudaLiteSemanticFunction[] {
   return functions.filter((fn) => barrierFunctions.has(fn.name)).map((fn): CudaLiteSemanticFunction => {
     const active: CudaLiteSemanticSymbol = {
+      id: createSemanticSymbolId("guard-param", `bg_call_active:${fn.name}`, fn.span),
       name: "bg_call_active",
       kind: "param",
       valueType: "bool",
@@ -993,6 +1024,7 @@ function createSemanticGuardedBarrierFunctions(
     return {
       ...fn,
       name: guardedBarrierFunctionNames.get(fn.name)!,
+      id: createSemanticFunctionId(guardedBarrierFunctionNames.get(fn.name)!, fn.span),
       params: [...fn.params, active],
       body: lowerSemanticPredicatedBarrierOperations(
         promoteSemanticBarrierResultCalls(fn.body, barrierFunctions),
@@ -1023,6 +1055,7 @@ function lowerSemanticDivergentBarrierBranches(
   if (branch.kind !== "branch") return operations;
   if (semanticPredicatedBarrierTransformUnsafe(branch.consequent, barrierFunctions, guardedBarrierFunctionNames)) return operations;
   const predicate: CudaLiteSemanticSymbol = {
+    id: createSemanticSymbolId("generated-local", "bg_active_lane", kernelSpan),
     name: "bg_active_lane",
     kind: "local",
     valueType: "bool",
@@ -1131,6 +1164,7 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
   if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions, pointerWrites))) return operations;
 
   const active: CudaLiteSemanticSymbol = {
+    id: createSemanticSymbolId("generated-local", "bg_active_lane", kernelSpan),
     name: "bg_active_lane",
     kind: "local",
     valueType: "bool",
@@ -1942,7 +1976,7 @@ function semanticConditionalLocalAssignmentOperations(
   });
   return [{
     kind: "branch",
-    condition: lowerExpression(conditional.condition, scope),
+    condition: lowerConditionExpression(conditional.condition, scope),
     consequent: [assignment(conditional.consequent)],
     alternate: [assignment(conditional.alternate)],
     span: statement.span,
@@ -2479,7 +2513,7 @@ function lowerStatement(
       return { kind: "expression", expression, span: statement.span };
     }
     case "if": {
-      const loweredCondition = lowerExpression(statement.condition, scope);
+      const loweredCondition = lowerConditionExpression(statement.condition, scope);
       const materializedCondition = materializeConditionalCalls(loweredCondition);
       const condition = materializedCondition.expression;
       const constantCondition = staticNumberValue(condition);
@@ -2515,7 +2549,7 @@ function lowerStatement(
           : undefined;
         const loweredCondition = statement.condition === undefined
           ? undefined
-          : materializeConditionalCalls(lowerExpression(statement.condition, loopScope));
+          : materializeConditionalCalls(lowerConditionExpression(statement.condition, loopScope));
         const body = lowerStatements(statement.body, loopScope);
         const materializedBody = loweredCondition && loweredCondition.operations.length > 0
           ? semanticMaterializedLoopBody(loweredCondition, body, statement.span)
@@ -2531,7 +2565,7 @@ function lowerStatement(
         };
       }
     case "while": {
-      const loweredCondition = materializeConditionalCalls(lowerExpression(statement.condition, scope));
+      const loweredCondition = materializeConditionalCalls(lowerConditionExpression(statement.condition, scope));
       const body = lowerStatements(statement.body, scope);
       return {
         kind: "loop",
@@ -2542,7 +2576,7 @@ function lowerStatement(
       };
     }
     case "do-while": {
-      const loweredCondition = materializeConditionalCalls(lowerExpression(statement.condition, scope));
+      const loweredCondition = materializeConditionalCalls(lowerConditionExpression(statement.condition, scope));
       return {
         kind: "loop",
         loopKind: "do-while",
@@ -3001,6 +3035,7 @@ function promoteSemanticBarrierResultCalls(
 
 function semanticSymbolForCooperativeGroup(statement: CudaLiteCooperativeGroupDecl): CudaLiteSemanticSymbol {
   return {
+    id: createSemanticSymbolId("cooperative-group", statement.name, statement.span),
     name: statement.name,
     kind: "local",
     valueType: "uint",
@@ -3320,7 +3355,7 @@ function lowerExpression(
       const alternate = lowerExpression(expression.alternate, scope);
       return {
         kind: "conditional",
-        condition: lowerExpression(expression.condition, scope),
+        condition: lowerConditionExpression(expression.condition, scope),
         consequent,
         alternate,
         ...optionalValueType(expressionValueType(consequent) ?? expressionValueType(alternate)),
@@ -3349,6 +3384,37 @@ function lowerExpression(
       return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
     }
   }
+}
+
+function lowerConditionExpression(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression {
+  const alias = localPointerAliasForInitializer(expression, scope);
+  const validity = semanticPointerAliasValidity(alias, expression.span);
+  return validity ?? lowerExpression(expression, scope);
+}
+
+function semanticPointerAliasValidity(
+  alias: SemanticPointerAlias | undefined,
+  span: SourceSpan,
+): SemanticExpression | undefined {
+  if (!alias) return undefined;
+  if (alias.pointerRoot && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace)) {
+    return alias.pointerValid ?? booleanExpression(true, span);
+  }
+  if (!alias.pointerSelection) return undefined;
+  const consequent = semanticPointerAliasValidity(alias.pointerSelection.consequent, span);
+  const alternate = semanticPointerAliasValidity(alias.pointerSelection.alternate, span);
+  if (!consequent || !alternate) return undefined;
+  return {
+    kind: "conditional",
+    condition: alias.pointerSelection.condition,
+    consequent,
+    alternate,
+    valueType: "bool",
+    span,
+  };
 }
 
 function semanticIndexedSurfaceLayer(
@@ -4237,8 +4303,10 @@ function semanticSizeofAlignofValue(
 }
 
 function tempScalarSymbol(prefix: string, span: SourceSpan, valueType: CudaLiteScalarType): CudaLiteSemanticSymbol {
+  const name = `${prefix}.${span.start}.${span.end}`;
   return {
-    name: `${prefix}.${span.start}.${span.end}`,
+    id: createSemanticSymbolId("temporary", name, span),
+    name,
     kind: "local",
     valueType,
     addressSpace: "local",
@@ -4596,6 +4664,7 @@ function dedupeMemoryRefs(refs: readonly SemanticMemoryRef[]): readonly Semantic
 
 function symbolForParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
   return {
+    id: createSemanticSymbolId("param", param.name, param.span),
     name: param.name,
     kind: "param",
     valueType: param.valueType,
@@ -4611,6 +4680,7 @@ function symbolForParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
 
 function symbolForConstant(constant: CudaLiteGlobalConstant): CudaLiteSemanticSymbol {
   return {
+    id: createSemanticSymbolId("constant", constant.name, constant.span),
     name: constant.name,
     kind: "constant",
     valueType: constant.valueType,
@@ -4626,6 +4696,7 @@ function symbolForConstant(constant: CudaLiteGlobalConstant): CudaLiteSemanticSy
 
 function symbolForDeviceGlobal(global: CudaLiteDeviceGlobal): CudaLiteSemanticSymbol {
   return {
+    id: createSemanticSymbolId("device-global", global.name, global.span),
     name: global.name,
     kind: "device-global",
     valueType: global.valueType,
@@ -4641,6 +4712,7 @@ function symbolForDeviceGlobal(global: CudaLiteDeviceGlobal): CudaLiteSemanticSy
 
 function symbolForTexture(texture: CudaLiteTexture2D): CudaLiteSemanticSymbol {
   return {
+    id: createSemanticSymbolId("texture", texture.name, texture.span),
     name: texture.name,
     kind: "texture",
     valueType: "texture2d",
@@ -4660,6 +4732,7 @@ function symbolForFunction(
   const params = fn.params.map((param) => symbolForFunctionParam(param, fn.name, globalScope.has(param.name)));
   for (const [index, param] of params.entries()) scope.set(fn.params[index]!.name, param);
   return {
+    id: createSemanticFunctionId(fn.name, fn.span),
     name: fn.name,
     returnType: fn.returnType,
     params,
@@ -4670,6 +4743,7 @@ function symbolForFunction(
 
 function symbolForFunctionDeclaration(fn: CudaLiteDeviceFunction): CudaLiteSemanticSymbol {
   return {
+    id: createSemanticSymbolId("function", fn.name, fn.span),
     name: fn.name,
     kind: "function",
     valueType: fn.returnType,
@@ -4683,6 +4757,7 @@ function symbolForFunctionDeclaration(fn: CudaLiteDeviceFunction): CudaLiteSeman
 
 function symbolForSemanticFunctionDeclaration(fn: CudaLiteSemanticFunction): CudaLiteSemanticSymbol {
   return {
+    id: createSemanticSymbolId("function", fn.name, fn.span),
     name: fn.name,
     kind: "function",
     valueType: fn.returnType,
@@ -4698,7 +4773,8 @@ function symbolForFunctionParam(param: CudaLiteParam, functionName: string, coll
   const symbol = symbolForParam(param);
   if (symbol.addressSpace === "texture" || symbol.addressSpace === "surface") return symbol;
   if (symbol.pointer && symbol.addressSpace === "storage" && symbol.valueType === "uchar" && collidesWithGlobal) {
-    return { ...symbol, name: `__bg_param_${functionName}_${param.name}_${param.span.start}` };
+    const name = `__bg_param_${functionName}_${param.name}_${param.span.start}`;
+    return { ...symbol, id: createSemanticSymbolId("function-param", name, param.span), name };
   }
   if (symbol.pointer) return { ...symbol, pointerMayBeNull: true };
   return { ...symbol, addressSpace: "local" };
@@ -4711,6 +4787,7 @@ function symbolForVar(
   const pointerAlias = statement.pointer ? localPointerAliasForInitializer(statement.init, scope) : undefined;
   const matrixTile = statement.matrixTile ? resolveMatrixTileSpec(statement.matrixTile) : undefined;
   return {
+    id: createSemanticSymbolId(statement.storage === "shared" ? "shared" : "local", statement.name, statement.span),
     name: statement.name,
     kind: statement.storage === "shared" ? "shared" : "local",
     valueType: statement.valueType,
