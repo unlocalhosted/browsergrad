@@ -4917,8 +4917,7 @@ function validateDivergentReturnsBeforeBarriers(
   uniformScalarFunctionNames: ReadonlySet<string>,
 ): CudaLiteBarrierUniformityFact {
   const uniformity = collectBarrierUniformity(statements, params, workgroupSize, uniformScalarFunctionNames);
-  const atomicSharedScalars = collectBarrierAtomicTargetNames(statements);
-  const sharedScalars = new Set([...collectBarrierSharedScalarNames(statements)].filter((name) => !atomicSharedScalars.has(name)));
+  const sharedScalars = collectBarrierSharedScalarNames(statements);
   const barrierStatementStarts: number[] = [];
   const unverifiedControlStatementStarts: number[] = [];
   const workgroupUniformControlStatementStarts: number[] = [];
@@ -5064,21 +5063,6 @@ function collectBarrierSharedScalarNames(
     }
   };
   visit(statements);
-  return names;
-}
-
-function collectBarrierAtomicTargetNames(
-  statements: readonly CudaLiteStatement[],
-): ReadonlySet<string> {
-  const names = new Set<string>();
-  walkCudaLiteExpressions(statements, (expression) => {
-    if (expression.kind !== "call") return;
-    const callee = expressionName(expression.callee);
-    if (callee === undefined || !isSemanticAtomicCallName(callee)) return;
-    const target = atomicTargetExpression(expression.args[0]);
-    const root = target === undefined ? undefined : rootIdentifier(target);
-    if (root !== undefined) names.add(root);
-  });
   return names;
 }
 

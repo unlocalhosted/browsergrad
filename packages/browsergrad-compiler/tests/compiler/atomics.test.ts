@@ -840,11 +840,9 @@ describe("CUDA-lite compiler: Atomics", () => {
     }
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(compiled.wgsl).toContain("var bg_loop_active_");
-      expect(compiled.wgsl).toContain("workgroupBarrier();\n      bg_loop_active_");
-      expect(compiled.wgsl).toContain(" = (bg_loop_active_");
-      expect(compiled.wgsl).toContain(" && !((atomicLoad(&done) == 1u)));");
-      expect(compiled.wgsl).not.toContain("if ((atomicLoad(&done) == 1u)) {\n      break;\n    }\n    workgroupBarrier();");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("divergent-break-before-barrier");
+      expect(compiled.wgsl).toContain("workgroupBarrier();\n    if ((atomicLoad(&done) == 1u)) {\n      break;\n    }\n    workgroupBarrier();");
     });
 
   it("preserves conditional helper-call laziness in atomic addresses", () => {
