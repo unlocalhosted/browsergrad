@@ -708,8 +708,10 @@ export function lowerSemanticModelToKernelIr(
     })),
     ...lowerStatements(analysis.kernel.body, scope),
   ];
+  const sourceBarrierFunctions = semanticIrBarrierFunctionNames(semantic.functions);
+  const promotedRawOperations = promoteSemanticBarrierResultCalls(rawOperations, sourceBarrierFunctions);
   const barrierBranchOperations = lowerSemanticDivergentBarrierBranches(
-    rawOperations,
+    promotedRawOperations,
     semantic.functions,
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
@@ -888,8 +890,9 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
   const returnStarts = semanticVoidReturnStarts(affected);
   if (barrierProof.unverifiedControlStatementStarts.some((start) => !returnStarts.has(start))) return operations;
   const pointerFunctions = new Map(functions.filter((fn) => fn.params.some((param) => param.pointer)).map((fn) => [fn.name, fn] as const));
+  const pointerWrites = semanticFunctionPointerWrites(functions);
   if (!semanticVoidReturnsAreTerminal(affected)) return operations;
-  if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions))) return operations;
+  if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions, pointerWrites))) return operations;
 
   const active: CudaLiteSemanticSymbol = {
     name: "bg_active_lane",
@@ -1005,13 +1008,14 @@ function semanticOperationContainsVoidReturn(operation: SemanticKernelIrOperatio
 function semanticActiveLaneTransformUnsafe(
   operation: SemanticKernelIrOperation,
   pointerFunctions: ReadonlyMap<string, CudaLiteSemanticFunction>,
+  pointerWrites: ReadonlyMap<string, ReadonlySet<number>>,
 ): boolean {
   if (collectSemanticFunctionCalls([operation]).some((call) => {
     const fn = pointerFunctions.get(call.callee);
     return fn?.params.some((param, index) => {
       if (!param.pointer) return false;
       const ref = call.args[index] === undefined ? undefined : semanticIrPointerArgumentMemoryRef(call.args[index]!);
-      return ref === undefined || ref.addressSpace !== "local" && ref.addressSpace !== "shared";
+      return ref === undefined || ref.addressSpace !== "local" && ref.addressSpace !== "shared" && pointerWrites.get(call.callee)?.has(index) === true;
     }) ?? false;
   })) return true;
   if (operation.kind === "loop") return semanticOperationContainsVoidReturn(operation);
@@ -1025,11 +1029,73 @@ function semanticActiveLaneTransformUnsafe(
       );
   }
   if (operation.kind === "branch") {
-    return operation.consequent.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions)) ||
-      operation.alternate.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions));
+    return operation.consequent.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites)) ||
+      operation.alternate.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites));
   }
-  if (operation.kind === "block") return operation.body.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions));
+  if (operation.kind === "block") return operation.body.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites));
   return false;
+}
+
+function semanticFunctionPointerWrites(
+  functions: readonly CudaLiteSemanticFunction[],
+): ReadonlyMap<string, ReadonlySet<number>> {
+  const byName = new Map<string, readonly CudaLiteSemanticFunction[]>();
+  for (const fn of functions) byName.set(fn.name, [...byName.get(fn.name) ?? [], fn]);
+  const writes = new Map<string, Set<number>>();
+  for (const fn of functions) {
+    const written = writes.get(fn.name) ?? new Set<number>();
+    const pointerParams = new Map(fn.params.map((param, index) => [param.name, index] as const).filter(([_, index]) => fn.params[index]!.pointer));
+    for (const base of semanticOperationWriteBases(fn.body)) {
+      const index = pointerParams.get(base);
+      if (index !== undefined) written.add(index);
+    }
+    writes.set(fn.name, written);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const fn of functions) {
+      const ownWrites = writes.get(fn.name)!;
+      const ownPointerParams = new Map(fn.params.map((param, index) => [param.name, index] as const).filter(([_, index]) => fn.params[index]!.pointer));
+      for (const call of collectSemanticFunctionCalls(fn.body)) {
+        if (!byName.has(call.callee)) continue;
+        for (const calleeIndex of writes.get(call.callee) ?? []) {
+          const arg = call.args[calleeIndex];
+          const ref = arg === undefined ? undefined : semanticIrPointerArgumentMemoryRef(arg);
+          const ownIndex = ref === undefined ? undefined : ownPointerParams.get(ref.base);
+          if (ownIndex !== undefined && !ownWrites.has(ownIndex)) {
+            ownWrites.add(ownIndex);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+  return writes;
+}
+
+function semanticOperationWriteBases(
+  operations: readonly SemanticKernelIrOperation[],
+): ReadonlySet<string> {
+  const bases = new Set<string>();
+  for (const operation of operations) {
+    if (operation.kind === "store" || operation.kind === "copy" || operation.kind === "matrix-store") bases.add(operation.target.base);
+    else if (operation.kind === "atomic" && operation.target) bases.add(operation.target.base);
+    else if (operation.kind === "surface-read-store") {
+      for (const ref of collectMemoryRefs(operation.target)) bases.add(ref.base);
+    } else if (operation.kind === "inline-asm") {
+      for (const output of operation.outputs) for (const ref of collectMemoryRefs(output)) bases.add(ref.base);
+    } else if (operation.kind === "branch") {
+      for (const base of semanticOperationWriteBases(operation.consequent)) bases.add(base);
+      for (const base of semanticOperationWriteBases(operation.alternate)) bases.add(base);
+    } else if (operation.kind === "loop" || operation.kind === "block") {
+      for (const base of semanticOperationWriteBases(operation.body)) bases.add(base);
+      if (operation.kind === "loop" && operation.continuing) {
+        for (const base of semanticOperationWriteBases(operation.continuing)) bases.add(base);
+      }
+    }
+  }
+  return bases;
 }
 
 function semanticExpressionContainsUnsafeActiveLaneDeclarationCall(expression: SemanticExpression): boolean {
@@ -2398,23 +2464,39 @@ function promoteSemanticBarrierResultCalls(
   operations: readonly SemanticKernelIrOperation[],
   barrierFunctions: ReadonlySet<string>,
 ): readonly SemanticKernelIrOperation[] {
-  return operations.map((operation) => {
+  return operations.flatMap((operation): readonly SemanticKernelIrOperation[] => {
+    if (
+      operation.kind === "declare" &&
+      operation.init?.kind === "call" &&
+      operation.init.callee.kind === "symbol" &&
+      barrierFunctions.has(operation.init.callee.name)
+    ) {
+      const { init: _init, ...declaration } = operation;
+      return [declaration, {
+        kind: "call",
+        callee: operation.init.callee.name,
+        args: operation.init.args,
+        reads: operation.init.args.flatMap((arg) => collectMemoryRefs(arg)),
+        result: semanticSymbolExpression(operation.target, operation.span),
+        span: operation.span,
+      }];
+    }
     if (operation.kind === "expression" && operation.expression.kind === "assignment") {
       const promoted = semanticResultCallOperation(operation.expression, operation.span);
-      if (promoted && barrierFunctions.has(promoted.callee)) return promoted;
+      if (promoted && barrierFunctions.has(promoted.callee)) return [promoted];
     }
     if (operation.kind === "branch") {
-      return {
+      return [{
         ...operation,
         consequent: promoteSemanticBarrierResultCalls(operation.consequent, barrierFunctions),
         alternate: promoteSemanticBarrierResultCalls(operation.alternate, barrierFunctions),
-      };
+      }];
     }
     if (operation.kind === "loop" || operation.kind === "block") {
-      return { ...operation, body: promoteSemanticBarrierResultCalls(operation.body, barrierFunctions),
-        ...(operation.kind === "loop" && operation.continuing !== undefined ? { continuing: promoteSemanticBarrierResultCalls(operation.continuing, barrierFunctions) } : {}) };
+      return [{ ...operation, body: promoteSemanticBarrierResultCalls(operation.body, barrierFunctions),
+        ...(operation.kind === "loop" && operation.continuing !== undefined ? { continuing: promoteSemanticBarrierResultCalls(operation.continuing, barrierFunctions) } : {}) }];
     }
-    return operation;
+    return [operation];
   });
 }
 

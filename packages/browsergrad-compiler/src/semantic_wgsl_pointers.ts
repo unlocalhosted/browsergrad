@@ -12,7 +12,14 @@ import {
 export function semanticWgslFunctionStoragePointerParam(
   ir: SemanticKernelIrModule,
   base: string,
+  owner?: string | null,
 ): SemanticKernelIrModule["functions"][number]["params"][number] | undefined {
+  if (owner !== undefined) {
+    if (owner === null) return undefined;
+    return ir.functions.find((fn) => fn.name === owner)?.params.find((item) =>
+      item.name === base && item.pointer && item.addressSpace === "storage"
+    );
+  }
   for (const fn of ir.functions) {
     const param = fn.params.find((item) => item.name === base && item.pointer && item.addressSpace === "storage");
     if (param) return param;
@@ -23,7 +30,14 @@ export function semanticWgslFunctionStoragePointerParam(
 export function semanticWgslFunctionSharedPointerParam(
   ir: SemanticKernelIrModule,
   base: string,
+  owner?: string | null,
 ): SemanticKernelIrModule["functions"][number]["params"][number] | undefined {
+  if (owner !== undefined) {
+    if (owner === null) return undefined;
+    return ir.functions.find((fn) => fn.name === owner)?.params.find((item) =>
+      item.name === base && item.pointer && item.addressSpace === "shared"
+    );
+  }
   for (const fn of ir.functions) {
     const param = fn.params.find((item) => item.name === base && item.pointer && item.addressSpace === "shared");
     if (param) return param;

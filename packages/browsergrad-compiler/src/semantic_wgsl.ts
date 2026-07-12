@@ -3033,11 +3033,11 @@ function emitSemanticStore(
     const current = emitSemanticMemoryRead(operation.target, ir, names, options);
     return emitSemanticMemoryWrite(operation.target, `(${current} ${binaryOperator} ${value})`, ir, names, options);
   }
-  if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) {
+  if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base, options.activeFunction ?? null)) {
     return emitSemanticPointerMemoryStore(operation, ir, names, options, textureSpecializations);
   }
   if (
-    semanticWgslFunctionSharedPointerParam(ir, operation.target.base) &&
+    semanticWgslFunctionSharedPointerParam(ir, operation.target.base, options.activeFunction ?? null) &&
     !semanticWgslFunctionSharedPointerAtomicParam(ir, operation.target.base)
   ) {
     if (semanticStorageVectorType(operation.target.valueType) !== undefined) {
@@ -3225,7 +3225,7 @@ function emitSemanticVectorFieldMemoryWrite(
     const assigned = operation.operator === "=" ? value : `(${access} ${operation.operator.slice(0, -1)} ${value})`;
     return [`${access} = ${assigned}`];
   }
-  if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) {
+  if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base, options.activeFunction ?? null)) {
     return emitSemanticPointerVectorFieldMemoryWrite(operation, ir, names, options, textureSpecializations);
   }
   const base = emitFlatStorageVectorBaseIndex(operation.target, ir, names, options);
@@ -3504,7 +3504,7 @@ function emitSemanticAtomic(
   if (!operation.target || (!wgslCallee && !loopAtomicKind && !semanticWgslAtomicValueTypeSupported(operation.callee, operation.target.valueType))) {
     throw semanticWgslError(`semantic WGSL does not support atomic '${operation.callee}'`, operation.span);
   }
-  if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base)) {
+  if (semanticWgslFunctionStoragePointerParam(ir, operation.target.base, options.activeFunction ?? null)) {
     const pointerCall = emitSemanticPointerAtomicCall({
       kind: "call",
       callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
@@ -4004,7 +4004,7 @@ function emitSemanticExpression(
         if (semanticWgslLocalPackedHalf2View(ref, ir)) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslLocalScalarBitViewRootType(ref, ir) !== undefined) return emitSemanticMemoryRead(ref, ir, names, options);
         if (semanticWgslLocalVectorBitViewRootType(ref, ir) !== undefined) return emitSemanticMemoryRead(ref, ir, names, options);
-        if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
+        if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
           return emitSemanticMemoryRead(ref, ir, names, options);
         }
         if (semanticWgslLocalScalarVectorView(ref, ir)) {
@@ -5071,14 +5071,14 @@ function emitSemanticMemoryRead(
     const word = `bitcast<u32>(vec2<f16>(${low}, ${high}))`;
     return ref.valueType === "float" ? `bitcast<f32>(${word})` : ref.valueType === "int" ? `bitcast<i32>(${word})` : word;
   }
-  if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
+  if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const valueType = ref.valueType ?? "float";
     const index = isCudaVectorType(valueType) ? emitFlatStorageVectorBaseIndex(ref, ir, names, options) : emitFlatStorageIndex(ref, ir, names, options);
     return `${semanticPointerReadHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index})`;
   }
-  if (semanticWgslFunctionSharedPointerParam(ir, ref.base)) {
+  if (semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const target = emitSemanticSharedPointerMemoryRef(ref, ir, names, options);
-    const param = semanticWgslFunctionSharedPointerParam(ir, ref.base)!;
+    const param = semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)!;
     return semanticSharedPointerNeedsBitcast(param)
       ? `bitcast<${wgslValueType(param.valueType)}>(${target})`
       : target;
@@ -5150,14 +5150,14 @@ function emitSemanticMemoryWrite(
   if (semanticWgslPackedSharedByteRoot(ref, ir)) {
     return emitSemanticPackedSharedByteWrite(ref, value, ir, names, options);
   }
-  if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
+  if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const valueType = ref.valueType ?? "float";
     const index = isCudaVectorType(valueType) ? emitFlatStorageVectorBaseIndex(ref, ir, names, options) : emitFlatStorageIndex(ref, ir, names, options);
     return `${semanticPointerWriteHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index}, ${value})`;
   }
-  if (semanticWgslFunctionSharedPointerParam(ir, ref.base)) {
+  if (semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const target = emitSemanticSharedPointerMemoryRef(ref, ir, names, options);
-    const param = semanticWgslFunctionSharedPointerParam(ir, ref.base)!;
+    const param = semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)!;
     const stored = semanticSharedPointerNeedsBitcast(param)
       ? `bitcast<${wgslValueType(param.pointerCarrierValueType)}>(${value})`
       : value;
@@ -5447,7 +5447,7 @@ function emitSemanticPointerAtomicCall(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string | undefined {
-  if (!semanticWgslFunctionStoragePointerParam(ir, target.base)) return undefined;
+  if (!semanticWgslFunctionStoragePointerParam(ir, target.base, options.activeFunction ?? null)) return undefined;
   if (expression.callee.kind !== "symbol") {
     throw semanticWgslError("semantic WGSL pointer atomic requires a symbol callee", expression.span);
   }
@@ -6859,7 +6859,7 @@ function emitFlatStorageIndex(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  if (semanticWgslFunctionStoragePointerParam(ir, ref.base)) {
+  if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32", options));
     terms.unshift(`i32(${nameFor(semanticPointerBaseParamName(ref.base), names)})`);
     return `u32(${terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`})`;
@@ -6900,7 +6900,7 @@ function emitFlatStorageVectorBaseIndex(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  const pointerParam = semanticWgslFunctionStoragePointerParam(ir, ref.base);
+  const pointerParam = semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null);
   if (pointerParam) {
     const indexTerms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "u32", options));
     const valueType = semanticStorageVectorType(ref.containerValueType) ?? semanticStorageVectorType(pointerParam.valueType);

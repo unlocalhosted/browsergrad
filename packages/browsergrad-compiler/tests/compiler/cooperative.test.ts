@@ -2365,6 +2365,62 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 4]);
     });
 
+  it("uniformizes value-returning barrier helpers with read-only storage pointers after early returns", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ float readTile(const float *input, float value) {
+    __shared__ float tile[4];
+    int tid = threadIdx.x;
+    tile[tid] = input[tid];
+    __syncthreads();
+    float result = value + tile[(tid + 1) & 3];
+    __syncthreads();
+    return result;
+  }
+  __global__ void earlyReturnBarrierHelper(const float *input, float *out, int N) {
+    int tid = threadIdx.x;
+    if (tid >= N) return;
+    float value = input[tid];
+    float result = readTile(input, value);
+    out[tid] = result;
+  }`, { workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { input: new Float32Array([1, 2, 3, 4]), out: new Float32Array(4) }, scalars: { N: 3 } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+      expect(compiled.wgsl).toContain("readTile(");
+      expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 0]);
+    });
+
+  it("rejects active-lane lifting when a transitive barrier helper writes through storage", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void writeTile(float *out) {
+    __shared__ float tile[4];
+    int tid = threadIdx.x;
+    tile[tid] = (float)tid;
+    __syncthreads();
+    out[tid] = tile[tid];
+  }
+  __device__ float writeTileOuter(float *out) {
+    writeTile(out);
+    return 1.0f;
+  }
+  __global__ void unsafeEarlyReturnBarrierHelper(float *out, int N) {
+    int tid = threadIdx.x;
+    if (tid >= N) return;
+    float result = writeTileOuter(out);
+    out[tid] += result;
+  }`, { workgroupSize: [4, 1, 1] });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
+      expect(semanticKernelIrWgslPreflightBlocker(compiled.kernelIr)).toBe("semantic WGSL does not support shared-memory barrier shape");
+      expect(compiled.kernelIr.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane")).toBe(false);
+    });
+
   it("keeps barriers uniform inside tiled loops after active-lane early returns", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void earlyReturnLoopBarrier(float *x, int N) {
