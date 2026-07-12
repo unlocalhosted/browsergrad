@@ -350,7 +350,7 @@ export function runCompiledKernelSemanticReference(
     }
   }
   const barrierFunctions = semanticBarrierFunctionNames(compiled.kernelIr);
-  if (semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) {
+  if (semanticModuleContainsSubgroupCall(compiled.kernelIr)) {
     for (const blockContexts of contextBlocks) runSemanticCollectiveOperations(compiled.kernelIr.operations, blockContexts);
   } else if (semanticOperationsContainBarrier(compiled.kernelIr.operations, barrierFunctions)) {
     runSemanticBarrierScheduler(compiled.kernelIr.operations, contextBlocks.flat(), barrierFunctions);
@@ -1038,11 +1038,11 @@ function semanticReferenceCooperativeReduceCallSupported(
 ): boolean {
   if (expression.callee.kind !== "symbol" ||
     (expression.callee.name !== "cg::reduce" && expression.callee.name !== "cooperative_groups::reduce")) return false;
-  const [groupArg, valueArg, operationArg] = expression.args;
-  if (groupArg?.kind !== "symbol" || !valueArg || operationArg?.kind !== "call" ||
-    operationArg.callee.kind !== "symbol" || !operationArg.callee.name.endsWith("::plus")) return false;
+  const [groupArg, valueArg] = expression.args;
+  if (groupArg?.kind !== "symbol" || !valueArg) return false;
   const group = semanticCooperativeGroupInfo(compiled.kernelIr, groupArg.name);
-  return group?.partitioned === true && semanticReferenceExpressionSupported(valueArg, "scalar", compiled);
+  return group !== undefined && group.kind !== "grid" && group.kind !== "coalesced" &&
+    semanticReferenceExpressionSupported(valueArg, "scalar", compiled);
 }
 
 function semanticReferenceFunctionArgSupported(
@@ -4751,7 +4751,7 @@ function semanticReferenceCooperativeContexts(
   const tileSize = group.tileSize ?? parent?.tileSize ?? 32;
   const rank = semanticLocalLinearRank(context);
   const base = Math.floor(rank / tileSize) * tileSize;
-  const peers = context.blockContexts.filter((peer) => {
+  const peers = (context.activeCollectiveContexts ?? context.blockContexts).filter((peer) => {
     const peerRank = semanticLocalLinearRank(peer);
     return peerRank >= base && peerRank < base + tileSize;
   });
@@ -5296,12 +5296,32 @@ function runSemanticFunction(
   context: SemanticReferenceContext,
   span: SourceSpan,
 ): SemanticReferenceContext {
-  const child = createSemanticFunctionContext(fn, args, context, span);
-  const control = execSemanticOperations(fn.body, child);
-  if (fn.returnType !== "void" && control !== "return") {
-    throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
+  const activeParents = context.activeCollectiveContexts;
+  if (activeParents === undefined) {
+    const child = createSemanticFunctionContext(fn, args, context, span);
+    const control = execSemanticOperations(fn.body, child);
+    if (fn.returnType !== "void" && control !== "return") {
+      throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
+    }
+    return child;
   }
-  return child;
+
+  const children = activeParents.map((parent) => createSemanticFunctionContext(fn, args, parent, span));
+  const currentRank = semanticLocalLinearRank(context);
+  const child = children.find((candidate) => semanticLocalLinearRank(candidate) === currentRank);
+  if (child === undefined) {
+    throw semanticReferenceError(`semantic reference function '${fn.name}' lost the active lane`, span);
+  }
+  for (const peer of children) peer.activeCollectiveContexts = children;
+  try {
+    const control = execSemanticOperations(fn.body, child);
+    if (fn.returnType !== "void" && control !== "return") {
+      throw semanticReferenceError(`semantic reference function '${fn.name}' did not return scalar`, fn.span);
+    }
+    return child;
+  } finally {
+    for (const peer of children) delete peer.activeCollectiveContexts;
+  }
 }
 
 function semanticReferencePointerArgBaseIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
@@ -6477,6 +6497,11 @@ function semanticOperationsContainSubgroupCall(operations: readonly SemanticKern
     if (operation.kind === "block") return semanticOperationsContainSubgroupCall(operation.body);
     return false;
   });
+}
+
+function semanticModuleContainsSubgroupCall(ir: CompiledCudaLiteKernel["kernelIr"]): boolean {
+  return semanticOperationsContainSubgroupCall(ir.operations) ||
+    ir.functions.some((fn) => semanticOperationsContainSubgroupCall(fn.body));
 }
 
 function semanticExpressionContainsSubgroupCall(expression: SemanticExpression): boolean {

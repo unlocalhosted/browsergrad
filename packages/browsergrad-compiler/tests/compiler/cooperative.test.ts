@@ -1559,7 +1559,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("bg_warp_reduce_sum_float_8(value, 8u, local_id)");
+      expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_f32_8(value, local_id)");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect(compiled.wgsl).not.toContain("enable subgroups;");
       expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
@@ -1713,8 +1713,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("reduce_n(value, i32((local_id.x) % 4u), 4");
-      expect(compiled.wgsl).toContain("if ((u32(i32((local_id.x) % 4u)) == 0u))");
+      expect(compiled.wgsl).toContain("reduce_n(value, i32((local_id.x % 4u)), 4");
+      expect(compiled.wgsl).toContain("if ((u32(i32((local_id.x % 4u))) == 0u))");
       expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_i32_4(value, local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });

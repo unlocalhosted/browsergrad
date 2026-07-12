@@ -269,6 +269,7 @@ function isCooperativeReduceName(name: string): boolean {
 }
 
 function isPlusOperation(expression: SemanticExpression | undefined): boolean {
+  if (expression?.kind === "symbol") return expression.addressSpace === "builtin" && expression.name.endsWith("::plus");
   return expression?.kind === "call" && expression.callee.kind === "symbol" && expression.callee.name.endsWith("::plus");
 }
 
