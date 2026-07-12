@@ -492,7 +492,7 @@ export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
 export interface CompiledCudaLiteKernel {
   readonly ast: CudaLiteModule & CompilerPhase<"parsed">;
   readonly semantic: CudaLiteSemanticModel & CompilerPhase<"typed-semantic">;
-  readonly kernelIr: SemanticKernelIrModule & CompilerPhase<"canonical-ir"> & CompilerPhase<"runtime-lowered-ir"> & CompilerPhase<"verified-ir"> & CompilerPhase<"type-checked-ir">;
+  readonly kernelIr: SemanticKernelIrModule & CompilerPhase<"canonical-ir"> & CompilerPhase<"runtime-lowered-ir"> & CompilerPhase<"verified-ir"> & CompilerPhase<"type-checked-ir"> & CompilerPhase<"wgsl-legalized-ir">;
   readonly analysis: CudaLiteAnalysis & CompilerPhase<"analyzed">;
   readonly wgsl: string;
   readonly wgslProgram: WgslKernelProgram;

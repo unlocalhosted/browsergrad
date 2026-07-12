@@ -89,6 +89,7 @@ export {
   assertValidSemanticKernelIr,
   verifySemanticKernelIr,
   type SemanticIrVerificationIssue,
+  type VerifiedSemanticKernelIr,
 } from "./semantic_ir_verifier.js";
 export {
   assertTypeCheckedSemanticKernelIr,
@@ -96,6 +97,19 @@ export {
   type SemanticTypeIssue,
   type TypeCheckedSemanticKernelIr,
 } from "./semantic_type_check.js";
+export {
+  assertWgslLegalizedSemanticKernelIr,
+  checkSemanticKernelIrWgslLegalization,
+  type WgslLegalizationIssue,
+  type WgslLegalizedSemanticKernelIr,
+} from "./wgsl_legalization.js";
+export {
+  createTypedWgslExpression,
+  emitTypedWgslBinary,
+  type TypedWgslExpression,
+  type WgslBinaryOperator,
+  type WgslExpressionType,
+} from "./typed_wgsl_expression.js";
 export { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
 export {

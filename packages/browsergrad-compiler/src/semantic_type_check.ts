@@ -8,6 +8,7 @@ import type {
 } from "./semantic_ir.js";
 import type { VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type CudaLiteScalarType, type SourceSpan } from "./types.js";
+import { semanticBinaryResultType } from "./semantic_type_rules.js";
 
 export type TypeCheckedSemanticKernelIr<T extends VerifiedSemanticKernelIr = VerifiedSemanticKernelIr> = TypeCheckedIr<T>;
 
@@ -203,6 +204,7 @@ function checkExpression(
     case "binary":
       checkExpression(expression.left, "value", ir, report);
       checkExpression(expression.right, "value", ir, report);
+      checkBinaryResultType(expression, report);
       return;
     case "conditional":
       checkCondition(expression.condition, ir, report);
@@ -223,6 +225,21 @@ function checkExpression(
       return;
     case "sequence":
       expression.expressions.forEach((item, index) => checkExpression(item, index === expression.expressions.length - 1 ? use : "discard", ir, report));
+  }
+}
+
+function checkBinaryResultType(
+  expression: Extract<SemanticExpression, { readonly kind: "binary" }>,
+  report: (message: string, span: SourceSpan) => void,
+): void {
+  const actual = expressionValueType(expression);
+  const expected = semanticBinaryResultType(
+    expression.operator,
+    expressionValueType(expression.left),
+    expressionValueType(expression.right),
+  );
+  if (actual !== undefined && expected !== undefined && actual !== expected) {
+    report(`binary '${expression.operator}' declares '${actual}', expected '${expected}' from its operands`, expression.span);
   }
 }
 

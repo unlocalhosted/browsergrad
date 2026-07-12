@@ -3,6 +3,7 @@ import {
   analyzeCudaLite,
   assertValidSemanticKernelIr,
   assertTypeCheckedSemanticKernelIr,
+  assertWgslLegalizedSemanticKernelIr,
   createCudaLiteSemanticModel,
   createSemanticEnvironment,
   emitSemanticKernelIrWgsl,
@@ -11,6 +12,7 @@ import {
   parseCudaLite,
   type CudaLiteModule,
   type SemanticKernelIrModule,
+  type VerifiedSemanticKernelIr,
 } from "../../src/index.js";
 
 describe("compiler phase contracts", () => {
@@ -26,6 +28,7 @@ describe("compiler phase contracts", () => {
     const runtimeLowered = lowerSemanticCudaRuntime(canonical);
     assertValidSemanticKernelIr(runtimeLowered);
     assertTypeCheckedSemanticKernelIr(runtimeLowered);
+    assertWgslLegalizedSemanticKernelIr(runtimeLowered);
     const store = runtimeLowered.operations.find((operation) => operation.kind === "store");
     expect(store?.kind === "store" ? store.target.baseId : undefined).toBe(out.id);
     const emitted = emitSemanticKernelIrWgsl(runtimeLowered);
@@ -49,9 +52,13 @@ describe("compiler phase contracts", () => {
       analyzeCudaLite({} as CudaLiteModule);
       // @ts-expect-error raw IR has not passed mandatory verifier
       emitSemanticKernelIrWgsl({} as SemanticKernelIrModule);
-      const verified = {} as SemanticKernelIrModule;
-      assertValidSemanticKernelIr(verified);
+      const raw = {} as SemanticKernelIrModule;
+      assertValidSemanticKernelIr(raw);
+      const verified = raw as VerifiedSemanticKernelIr;
       // @ts-expect-error verified IR has not passed mandatory semantic type checking
+      emitSemanticKernelIrWgsl(verified);
+      assertTypeCheckedSemanticKernelIr(verified);
+      // @ts-expect-error type-checked IR has not passed mandatory WGSL legalization
       emitSemanticKernelIrWgsl(verified);
     }
     expect(true).toBe(true);

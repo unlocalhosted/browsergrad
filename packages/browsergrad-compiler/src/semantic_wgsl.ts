@@ -102,6 +102,8 @@ import {
 import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import type { VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
 import type { TypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
+import type { WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
+import { createTypedWgslExpression, emitTypedWgslBinary } from "./typed_wgsl_expression.js";
 import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
@@ -374,7 +376,7 @@ function semanticWgslOperationFailureDetail(
 }
 
 export function emitSemanticKernelIrWgsl(
-  ir: TypeCheckedSemanticKernelIr<VerifiedSemanticKernelIr>,
+  ir: WgslLegalizedSemanticKernelIr<TypeCheckedSemanticKernelIr<VerifiedSemanticKernelIr>>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): SemanticKernelIrWgslOutput {
   assertValidSemanticKernelIr(ir);
@@ -6514,7 +6516,12 @@ function emitSemanticBinary(
     return expression.operator === "==" ? equal : `!${equal}`;
   }
   if (LOGICAL_OPERATORS.has(expression.operator)) {
-    return `(${emitTruthiness(expression.left, ir, names, options)} ${expression.operator} ${emitTruthiness(expression.right, ir, names, options)})`;
+    return emitTypedWgslBinary(
+      expression.operator as "&&" | "||",
+      createTypedWgslExpression(emitTruthiness(expression.left, ir, names, options), "bool", expression.left.span),
+      createTypedWgslExpression(emitTruthiness(expression.right, ir, names, options), "bool", expression.right.span),
+      expression.span,
+    ).code;
   }
   if (isSemanticFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
     const valueType = expression.valueType as CudaLiteScalarType;
@@ -6524,12 +6531,22 @@ function emitSemanticBinary(
     const leftType = semanticExpressionWgslScalar(expression.left) === "u32" ? "u32" : "i32";
     const left = emitSemanticExpressionAs(expression.left, ir, names, leftType, options, textureSpecializations);
     const right = emitSemanticExpressionAs(expression.right, ir, names, "u32", options, textureSpecializations);
-    return `(${left} ${expression.operator} ${right})`;
+    return emitTypedWgslBinary(
+      expression.operator,
+      createTypedWgslExpression(left, leftType, expression.left.span),
+      createTypedWgslExpression(right, "u32", expression.right.span),
+      expression.span,
+    ).code;
   }
   const operandType = semanticBinaryOperandType(expression);
   const left = emitSemanticExpressionAs(expression.left, ir, names, operandType, options, textureSpecializations);
   const right = emitSemanticExpressionAs(expression.right, ir, names, operandType, options, textureSpecializations);
-  return `(${left} ${expression.operator} ${right})`;
+  return emitTypedWgslBinary(
+    expression.operator as Parameters<typeof emitTypedWgslBinary>[0],
+    createTypedWgslExpression(left, operandType, expression.left.span),
+    createTypedWgslExpression(right, operandType, expression.right.span),
+    expression.span,
+  ).code;
 }
 
 function isSemanticStoragePointerNullComparison(
@@ -6650,8 +6667,13 @@ function emitTruthiness(
     return emitSemanticBinary(expression, ir, names, options);
   }
   const scalar = semanticExpressionWgslScalar(expression);
-  const zero = scalar === "u32" ? "0u" : scalar === "f32" ? "0.0" : "0";
-  return `(${emitSemanticExpression(expression, ir, names, options)} != ${zero})`;
+  const zero = scalar === "u32" ? "0u" : scalar === "f32" ? "0.0" : scalar === "f16" ? "f16(0.0)" : "0";
+  return emitTypedWgslBinary(
+    "!=",
+    createTypedWgslExpression(emitSemanticExpressionAs(expression, ir, names, scalar, options), scalar, expression.span),
+    createTypedWgslExpression(zero, scalar, expression.span),
+    expression.span,
+  ).code;
 }
 
 function semanticWgslConditionSupported(expression: SemanticExpression, ir?: SemanticKernelIrModule): boolean {

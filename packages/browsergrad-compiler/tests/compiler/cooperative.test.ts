@@ -9,6 +9,7 @@ import {
   analyzeCudaLite,
   assertValidSemanticKernelIr,
   assertTypeCheckedSemanticKernelIr,
+  assertWgslLegalizedSemanticKernelIr,
   compileCudaLiteOptionsFromKernelFeatures,
   createCudaLiteCompileCacheKey,
   createCudaLiteCompilerCache,
@@ -1218,6 +1219,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       const wgsl = phases.phases.map((phase) => {
         assertValidSemanticKernelIr(phase);
         assertTypeCheckedSemanticKernelIr(phase);
+        assertWgslLegalizedSemanticKernelIr(phase);
         return emitSemanticKernelIrWgsl(phase).wgsl;
       }).join("\n");
       expect(wgsl).toContain("var<workgroup> scratch: array<f32, 16>;");
@@ -1268,6 +1270,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         expect(canEmitSemanticKernelIrWgsl(phases.phases[0]!)).toBe(true);
         assertValidSemanticKernelIr(phases.phases[0]!);
         assertTypeCheckedSemanticKernelIr(phases.phases[0]!);
+        assertWgslLegalizedSemanticKernelIr(phases.phases[0]!);
         const phaseWgsl = emitSemanticKernelIrWgsl(phases.phases[0]!).wgsl;
         expect(phaseWgsl).toContain("fn reduceBlock");
         expect(phaseWgsl).not.toContain("i32(local_id.x) == 0.0");

@@ -110,6 +110,7 @@ import {
   type SemanticSymbolId,
 } from "./semantic_ids.js";
 import { createSemanticEnvironment, type SemanticEnvironment } from "./semantic_environment.js";
+import { semanticBinaryResultType } from "./semantic_type_rules.js";
 import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
@@ -691,7 +692,6 @@ export function isSemanticKernelIrOperation(
 }
 
 const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
-const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, ...CUDA_COOPERATIVE_BARRIER_CALL_NAMES, "grid.sync"]);
 const FENCE_CALLS: ReadonlySet<string> = new Set(CUDA_FENCE_CALL_NAMES);
@@ -3895,7 +3895,14 @@ function binaryIndexExpression(
   right: SemanticExpression,
   span: SourceSpan,
 ): SemanticExpression {
-  return { kind: "binary", operator, left, right, ...optionalValueType(expressionValueType(left) ?? "uint"), span };
+  return {
+    kind: "binary",
+    operator,
+    left,
+    right,
+    ...optionalValueType(semanticBinaryResultType(operator, expressionValueType(left) ?? "uint", expressionValueType(right))),
+    span,
+  };
 }
 
 function semanticPointerArgumentMemoryRef(
@@ -5587,7 +5594,11 @@ function localPointerAliasDifferenceExpression(
   const left = localPointerAliasScalarIndex(expression.left, scope);
   const right = localPointerAliasScalarIndex(expression.right, scope);
   if (!left || !right || left.root !== right.root || left.unitBytes !== right.unitBytes) return undefined;
-  const difference = subtractIndexExpressions(left.index, right.index, expression.span);
+  const difference = semanticCastExpression(
+    subtractIndexExpressions(left.index, right.index, expression.span),
+    "int",
+    expression.span,
+  );
   return left.unitBytes === undefined || left.unitBytes === 1
     ? difference
     : {
@@ -5598,6 +5609,16 @@ function localPointerAliasDifferenceExpression(
         valueType: "int",
         span: expression.span,
       };
+}
+
+function semanticCastExpression(
+  expression: SemanticExpression,
+  valueType: Exclude<CudaLiteScalarType, "void">,
+  span: SourceSpan,
+): SemanticExpression {
+  return expressionValueType(expression) === valueType
+    ? expression
+    : { kind: "cast", valueType, pointer: false, expression, span };
 }
 
 function localPointerAliasComparisonExpression(
@@ -5684,7 +5705,7 @@ function addIndexExpressions(left: SemanticExpression, right: SemanticExpression
     operator: "+",
     left,
     right,
-    ...optionalValueType(expressionValueType(left) ?? expressionValueType(right)),
+    ...optionalValueType(semanticBinaryResultType("+", expressionValueType(left), expressionValueType(right))),
     span,
   };
 }
@@ -5696,7 +5717,7 @@ function subtractIndexExpressions(left: SemanticExpression, right: SemanticExpre
     operator: "-",
     left,
     right,
-    ...optionalValueType(expressionValueType(left) ?? expressionValueType(right)),
+    ...optionalValueType(semanticBinaryResultType("-", expressionValueType(left), expressionValueType(right))),
     span,
   };
 }
@@ -5722,7 +5743,7 @@ function multiplyIndexExpression(left: SemanticExpression, right: number, span: 
     operator: "*",
     left,
     right: { kind: "literal", literalKind: "number", value: right, valueType: "int", span },
-    ...optionalValueType(expressionValueType(left)),
+    ...optionalValueType(semanticBinaryResultType("*", expressionValueType(left), "int")),
     span,
   };
 }
@@ -5824,12 +5845,7 @@ function semanticBinaryResultValueType(
   left: SemanticExpression,
   right: SemanticExpression,
 ): CudaLiteScalarType | undefined {
-  if (COMPARISON_OPERATORS.has(operator)) return "bool";
-  const leftType = expressionValueType(left);
-  const rightType = expressionValueType(right);
-  if (isCudaVectorType(leftType)) return leftType;
-  if (isCudaVectorType(rightType)) return rightType;
-  return leftType ?? rightType;
+  return semanticBinaryResultType(operator, expressionValueType(left), expressionValueType(right));
 }
 
 function expressionValueType(expression: SemanticExpression | undefined): CudaLiteScalarType | undefined {

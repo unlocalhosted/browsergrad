@@ -21,6 +21,7 @@ import {
 } from "./semantic_ir.js";
 import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { assertTypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
+import { assertWgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
 import { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 import {
   canEmitSemanticKernelIrWgsl,
@@ -93,6 +94,7 @@ export function compileCudaLiteKernel(
   const kernelIr = lowerSemanticCudaRuntime(lowerSemanticModelToKernelIr(analysis, semantic, options));
   assertValidSemanticKernelIr(kernelIr);
   assertTypeCheckedSemanticKernelIr(kernelIr);
+  assertWgslLegalizedSemanticKernelIr(kernelIr);
   const diagnostics = reconcileSemanticRuntimeDiagnostics(analysis.diagnostics, kernelIr.operations);
   const semanticWgslOptions = {
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),

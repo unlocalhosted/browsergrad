@@ -37,6 +37,7 @@ import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./v
 import { canEmitSemanticKernelIrWgsl, emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
 import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { assertTypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
+import { assertWgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -269,6 +270,7 @@ function createGridSyncWebGpuPlan(
   const steps = gridSyncPhasePlan.phases.map((phase): WgslKernelSequenceStep => {
     assertValidSemanticKernelIr(phase);
     assertTypeCheckedSemanticKernelIr(phase);
+    assertWgslLegalizedSemanticKernelIr(phase);
     return {
     program: emitSemanticKernelIrWgsl(phase, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
@@ -299,6 +301,7 @@ function createRetirementReductionWebGpuPlan(
   const steps = phases.map((phase, index): WgslKernelSequenceStep => {
     assertValidSemanticKernelIr(phase);
     assertTypeCheckedSemanticKernelIr(phase);
+    assertWgslLegalizedSemanticKernelIr(phase);
     return {
     program: emitSemanticKernelIrWgsl(phase, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
