@@ -17,6 +17,7 @@ import type {
   KernelLaunch,
   SourceSpan,
 } from "./types.js";
+import { requireSemanticValueType, type SemanticValueType } from "./semantic_value_type.js";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { cudaBuiltinVectorMemberValueType } from "./cuda_builtin_symbols.js";
 import {
@@ -74,7 +75,8 @@ import {
 } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
-import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
+import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS, SEMANTIC_NOOP_CALLS } from "./semantic_builtin_calls.js";
+import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { SEMANTIC_CURAND_CALLS, SEMANTIC_CURAND_VECTOR_RETURN_TYPES } from "./semantic_curand_intrinsics.js";
 import {
   isSemanticGeneratedRandomCall,
@@ -249,7 +251,7 @@ export interface SemanticMemoryRef {
   readonly baseId: SemanticMemoryId;
   readonly base: string;
   readonly addressSpace: SemanticAddressSpace;
-  readonly valueType?: CudaLiteScalarType;
+  readonly valueType: SemanticValueType;
   readonly containerValueType?: CudaLiteScalarType;
   readonly pointerBaseIsScalarLane?: boolean;
   readonly pointerBaseUnitBytes?: number;
@@ -271,9 +273,15 @@ export interface SemanticMatrixTileRef {
 export type SemanticExpression =
   | {
       readonly kind: "literal";
-      readonly literalKind: "number" | "string";
-      readonly value: string | number;
-      readonly valueType?: CudaLiteScalarType;
+      readonly literalKind: "number";
+      readonly value: number;
+      readonly valueType: SemanticValueType;
+      readonly span: SourceSpan;
+    }
+  | {
+      readonly kind: "literal";
+      readonly literalKind: "string";
+      readonly value: string;
       readonly span: SourceSpan;
     }
   | {
@@ -294,14 +302,14 @@ export type SemanticExpression =
       readonly kind: "member";
       readonly object: SemanticExpression;
       readonly property: string;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     }
   | {
       readonly kind: "index";
       readonly target: SemanticExpression;
       readonly index: SemanticExpression;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: SemanticValueType;
       readonly addressSpace: SemanticAddressSpace;
       readonly pointerBaseIsScalarLane?: boolean;
       readonly pointerBaseUnitBytes?: number;
@@ -313,7 +321,7 @@ export type SemanticExpression =
       readonly callee: SemanticExpression;
       readonly args: readonly SemanticExpression[];
       readonly templateValueType?: Exclude<CudaLiteScalarType, "void">;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     }
   | {
@@ -323,7 +331,7 @@ export type SemanticExpression =
       readonly x: SemanticExpression;
       readonly y: SemanticExpression;
       readonly z?: SemanticExpression;
-      readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly valueType: SemanticValueType;
       readonly span: SourceSpan;
     }
   | {
@@ -348,7 +356,7 @@ export type SemanticExpression =
       readonly kind: "unary";
       readonly operator: string;
       readonly argument: SemanticExpression;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     }
   | {
@@ -356,7 +364,7 @@ export type SemanticExpression =
       readonly operator: string;
       readonly left: SemanticExpression;
       readonly right: SemanticExpression;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     }
   | {
@@ -364,7 +372,7 @@ export type SemanticExpression =
       readonly condition: SemanticExpression;
       readonly consequent: SemanticExpression;
       readonly alternate: SemanticExpression;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     }
   | {
@@ -372,7 +380,7 @@ export type SemanticExpression =
       readonly operator: string;
       readonly target: SemanticExpression;
       readonly value: SemanticExpression;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     }
   | {
@@ -380,7 +388,7 @@ export type SemanticExpression =
       readonly operator: string;
       readonly argument: SemanticExpression;
       readonly prefix: boolean;
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     }
   | {
@@ -391,7 +399,7 @@ export type SemanticExpression =
   | {
       readonly kind: "sequence";
       readonly expressions: readonly SemanticExpression[];
-      readonly valueType?: CudaLiteScalarType;
+      readonly valueType: CudaLiteScalarType;
       readonly span: SourceSpan;
     };
 
@@ -1044,7 +1052,7 @@ function lowerSemanticLoopActiveOperations(
           operator: "=",
           target: semanticSymbolExpression(operation.target, operation.span),
           value: operation.init,
-          ...optionalValueType(operation.target.valueType),
+          valueType: requiredSemanticValueType(operation.target.valueType, `active-lane assignment '${operation.target.name}'`, operation.span),
           span: operation.span,
         },
         span: operation.span,
@@ -1374,7 +1382,7 @@ function lowerSemanticPredicatedBarrierOperations(
           operator: "=",
           target: semanticSymbolExpression(operation.target, operation.span),
           value: operation.init,
-          ...optionalValueType(operation.target.valueType),
+          valueType: requiredSemanticValueType(operation.target.valueType, `predicated assignment '${operation.target.name}'`, operation.span),
           span: operation.span,
         },
         span: operation.span,
@@ -1506,7 +1514,7 @@ function lowerSemanticActiveLaneOperations(
           operator: "=",
           target: semanticSymbolExpression(operation.target, operation.span),
           value: operation.init,
-          ...optionalValueType(operation.target.valueType),
+          valueType: requiredSemanticValueType(operation.target.valueType, `active-lane assignment '${operation.target.name}'`, operation.span),
           span: operation.span,
         },
         span: operation.span,
@@ -2330,7 +2338,7 @@ function semanticConditionalVarInitOperations(
         operator: "=",
         target: targetExpression,
         value: materialized.expression,
-        ...optionalValueType(target.valueType),
+        valueType: requiredSemanticValueType(target.valueType, `conditional initializer '${target.name}'`, statement.span),
         span: statement.span,
       },
       span: statement.span,
@@ -2357,7 +2365,7 @@ function semanticConditionalLocalAssignmentOperations(
       operator: statement.expression.kind === "assignment" ? statement.expression.operator : "=",
       target,
       value: lowerExpression(value, scope),
-      ...optionalValueType(expressionValueType(target)),
+      valueType: requiredSemanticValueType(expressionValueType(target), "conditional assignment", statement.span),
       span: statement.span,
     },
     span: statement.span,
@@ -3297,7 +3305,7 @@ function semanticReinterpretedScalarCopy(
   const sourceRoot = scope.get(source.base);
   const targetScalarType = targetRoot?.valueType;
   const sourceScalarType = sourceRoot?.valueType;
-  if (!targetScalarType || !sourceScalarType || isCudaVectorType(targetScalarType) || isCudaVectorType(sourceScalarType)) return undefined;
+  if (!targetScalarType || targetScalarType === "void" || !sourceScalarType || sourceScalarType === "void" || isCudaVectorType(targetScalarType) || isCudaVectorType(sourceScalarType)) return undefined;
   const viewBytes = sizeofCudaType(viewType);
   const targetScalarBytes = sizeofCudaType(targetScalarType);
   const sourceScalarBytes = sizeofCudaType(sourceScalarType);
@@ -3331,7 +3339,7 @@ function semanticSequencedAssignmentValue(expression: SemanticExpression): Seman
   return {
     kind: "sequence",
     expressions: [expression, expression.target],
-    ...optionalValueType(expression.valueType ?? expressionValueType(expression.target)),
+    valueType: expression.valueType,
     span: expression.span,
   };
 }
@@ -3540,7 +3548,13 @@ function lowerExpression(
       const symbol = scope.get(expression.name);
       const constantValue = symbol?.constant && symbol.init ? staticNumberValue(symbol.init) : undefined;
       if (constantValue !== undefined) {
-        return { kind: "literal", literalKind: "number", value: constantValue, ...optionalValueType(symbol?.valueType), span: expression.span };
+        return {
+          kind: "literal",
+          literalKind: "number",
+          value: constantValue,
+          valueType: requiredSemanticValueType(symbol?.valueType, `constant '${expression.name}'`, expression.span),
+          span: expression.span,
+        };
       }
       const namedConstant = symbol === undefined ? CUDA_NAMED_CONSTANTS.get(expression.name) : undefined;
       if (namedConstant) {
@@ -3591,7 +3605,7 @@ function lowerExpression(
         kind: "member",
         object,
         property: expression.property,
-        ...optionalValueType(memberValueType(object, expression.property)),
+        valueType: requiredSemanticExpressionType(memberValueType(object, expression.property), `member '${expression.property}'`, expression.span),
         span: expression.span,
       };
     }
@@ -3607,7 +3621,7 @@ function lowerExpression(
         kind: "index",
         target,
         index: lowerExpression(expression.index, scope),
-        ...optionalValueType(indexedExpressionValueType(expression, target, scope)),
+        valueType: requiredSemanticValueType(indexedExpressionValueType(expression, target, scope), "index expression", expression.span),
         addressSpace: expressionAddressSpace(target),
         span: expression.span,
       };
@@ -3619,7 +3633,7 @@ function lowerExpression(
         kind: "index",
         target: semanticSymbolExpression(root, expression.target.span),
         index: matrixLane.indices[0]!,
-        ...optionalValueType(matrixLane.valueType),
+        valueType: requiredSemanticValueType(matrixLane.valueType, "matrix lane index", expression.span),
         addressSpace: "local",
         span: expression.span,
       };
@@ -3710,26 +3724,31 @@ function lowerExpression(
           }
         : lowerExpression(expression.callee, scope);
       const cooperativeGroupValueType = semanticCooperativeGroupCallValueType(expression);
+      const valueType = expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
+        ? "uint"
+        : expression.callee.kind === "identifier" && isCudaVoteCallName(expression.callee.name)
+          ? "uint"
+        : expression.callee.kind === "identifier" && (
+            isCudaArithmeticReduceCallName(expression.callee.name) ||
+            isCudaBitwiseReduceCallName(expression.callee.name) ||
+            isCudaShuffleCallName(expression.callee.name)
+          )
+          ? expressionValueType(legacyShuffleCall(expression.callee.name) ? args[0] : args[1]) ?? "uint"
+        : expression.callee.kind === "identifier" && (expression.callee.name === "clock" || expression.callee.name === "clock64")
+          ? "uint"
+        : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)
+          ? "int"
+          : cooperativeGroupValueType ?? expression.templateValueType ?? semanticIntrinsicReturnType(expression.callee.kind === "identifier" ? expression.callee.name : undefined, args) ?? expressionValueType(callee) ?? expressionValueType(args[0]);
       return {
         kind: "call",
         callee,
         args,
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
-        ...optionalValueType(expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
-          ? "uint"
-          : expression.callee.kind === "identifier" && isCudaVoteCallName(expression.callee.name)
-            ? "uint"
-          : expression.callee.kind === "identifier" && (
-              isCudaArithmeticReduceCallName(expression.callee.name) ||
-              isCudaBitwiseReduceCallName(expression.callee.name) ||
-              isCudaShuffleCallName(expression.callee.name)
-            )
-            ? expressionValueType(legacyShuffleCall(expression.callee.name) ? args[0] : args[1]) ?? "uint"
-          : expression.callee.kind === "identifier" && (expression.callee.name === "clock" || expression.callee.name === "clock64")
-            ? "uint"
-          : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)
-            ? "int"
-            : cooperativeGroupValueType ?? expression.templateValueType ?? semanticIntrinsicReturnType(expression.callee.kind === "identifier" ? expression.callee.name : undefined, args) ?? expressionValueType(callee) ?? expressionValueType(args[0])),
+        valueType: requiredSemanticExpressionType(
+          valueType,
+          `call '${semanticCallName(callee) ?? "<expression>"}'`,
+          expression.span,
+        ),
         span: expression.span,
       };
     }
@@ -3750,7 +3769,7 @@ function lowerExpression(
         kind: "unary",
         operator: expression.operator,
         argument,
-        ...optionalValueType(expression.operator === "&" ? "voidptr" : expression.operator === "!" ? "bool" : expressionValueType(argument)),
+        valueType: requiredSemanticExpressionType(expression.operator === "&" ? "voidptr" : expression.operator === "!" ? "bool" : expressionValueType(argument), `unary '${expression.operator}'`, expression.span),
         span: expression.span,
       };
     }
@@ -3766,7 +3785,7 @@ function lowerExpression(
         operator: expression.operator,
         left,
         right,
-        ...optionalValueType(semanticBinaryResultValueType(expression.operator, left, right)),
+        valueType: requiredSemanticValueType(semanticBinaryResultValueType(expression.operator, left, right), `binary '${expression.operator}'`, expression.span),
         span: expression.span,
       };
     }
@@ -3778,7 +3797,7 @@ function lowerExpression(
         condition: lowerConditionExpression(expression.condition, scope),
         consequent,
         alternate,
-        ...optionalValueType(expressionValueType(consequent) ?? expressionValueType(alternate)),
+        valueType: requiredSemanticExpressionType(expressionValueType(consequent) ?? expressionValueType(alternate), "conditional expression", expression.span),
         span: expression.span,
       };
     }
@@ -3789,19 +3808,19 @@ function lowerExpression(
         operator: expression.operator,
         target: lowerExpression(expression.left, scope),
         value,
-        ...optionalValueType(expressionValueType(value)),
+        valueType: requiredSemanticValueType(expressionValueType(value), `assignment '${expression.operator}'`, expression.span),
         span: expression.span,
       };
     }
     case "update": {
       const argument = lowerExpression(expression.argument, scope);
-      return { kind: "update", operator: expression.operator, argument, prefix: expression.prefix, ...optionalValueType(expressionValueType(argument)), span: expression.span };
+      return { kind: "update", operator: expression.operator, argument, prefix: expression.prefix, valueType: requiredSemanticValueType(expressionValueType(argument), `update '${expression.operator}'`, expression.span), span: expression.span };
     }
     case "initializer":
       return { kind: "initializer", elements: expression.elements.map((element) => lowerExpression(element, scope)), span: expression.span };
     case "sequence": {
       const expressions = expression.expressions.map((item) => lowerExpression(item, scope));
-      return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
+      return { kind: "sequence", expressions, valueType: requiredSemanticExpressionType(expressionValueType(expressions.at(-1)), "sequence expression", expression.span), span: expression.span };
     }
   }
 }
@@ -3918,7 +3937,7 @@ function semanticCooperativeShuffleCall(
       span: expression.callee.span,
     },
     args: [value, index, width],
-    ...optionalValueType(expressionValueType(value)),
+    valueType: requiredSemanticExpressionType(expressionValueType(value), "cooperative shuffle", expression.span),
     span: expression.span,
   };
 }
@@ -4175,7 +4194,7 @@ interface SemanticSharedByteAddress {
 
 function semanticCpAsyncSharedByteTarget(
   expression: CudaLiteExpression,
-  valueType: CudaLiteScalarType,
+  valueType: SemanticValueType,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): SemanticMemoryRef | undefined {
   const address = semanticSharedByteAddress(lowerExpression(expression, scope), scope, new Set());
@@ -4268,7 +4287,7 @@ function binaryIndexExpression(
     operator,
     left,
     right,
-    ...optionalValueType(semanticBinaryResultType(operator, expressionValueType(left) ?? "uint", expressionValueType(right))),
+    valueType: requiredSemanticValueType(semanticBinaryResultType(operator, expressionValueType(left) ?? "uint", expressionValueType(right)), `binary '${operator}'`, span),
     span,
   };
 }
@@ -4893,7 +4912,7 @@ function pointerAliasValueExpression(
           valueType: "uint",
           span,
         },
-    ...optionalValueType(aliasValueType),
+    valueType: requiredSemanticValueType(aliasValueType, "pointer alias value", span),
     addressSpace: root.addressSpace,
     ...(scalar.scalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(scalar.unitBytes === undefined ? {} : { pointerBaseUnitBytes: scalar.unitBytes }),
@@ -4946,7 +4965,7 @@ function mathOutStoreOrAssignOperation(target: SemanticExpression, value: Semant
       operator: "=",
       target,
       value,
-      ...optionalValueType(expressionValueType(target)),
+      valueType: requiredSemanticValueType(expressionValueType(target), "math output assignment", span),
       span,
     },
     span,
@@ -5033,11 +5052,12 @@ function memoryRefFromExpression(expression: SemanticExpression): SemanticMemory
   const parts = flattenMemoryRef(expression);
   if (!parts || !isMemoryAddressSpace(parts.base.addressSpace, parts.indices.length)) return undefined;
   const valueType = expressionValueType(expression);
+  if (valueType === undefined || valueType === "void") return undefined;
   return {
     baseId: semanticMemoryIdFromSymbol(parts.base.id),
     base: parts.base.name,
     addressSpace: parts.base.addressSpace,
-    ...(valueType === undefined ? {} : { valueType }),
+    valueType,
     ...(expression.kind === "member" ? optionalContainerValueType(expressionValueType(expression.object)) : {}),
     ...(expression.kind === "index" ? optionalContainerValueType(expressionValueType(expression.target)) : {}),
     ...(expression.kind === "index" && expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
@@ -5528,12 +5548,15 @@ function hasLaterLocalPointerAliasAssignment(
       return alias !== undefined && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace);
     }
     if (statement.kind === "block" && hasLaterLocalPointerAliasAssignment(name, statement.body, scope)) return true;
-    if (
-      (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") &&
-      hasLaterLocalPointerAliasAssignment(name, statement.body, scope)
-    ) {
-      return true;
+    if (statement.kind === "for") {
+      const loopScope = new Map(scope);
+      if (statement.init?.kind === "var") {
+        const init = symbolForVar(statement.init, loopScope);
+        loopScope.set(init.name, init);
+      }
+      if (hasLaterLocalPointerAliasAssignment(name, statement.body, loopScope)) return true;
     }
+    if ((statement.kind === "while" || statement.kind === "do-while") && hasLaterLocalPointerAliasAssignment(name, statement.body, scope)) return true;
   }
   return false;
 }
@@ -5804,7 +5827,7 @@ function localPointerAliasIndexExpression(
     kind: "index",
     target,
     index,
-    ...optionalValueType(aliasValueType),
+    valueType: requiredSemanticValueType(aliasValueType, "pointer alias index", expression.span),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
@@ -5884,7 +5907,7 @@ function localPointerAliasDerefExpression(
     kind: "index",
     target: semanticSymbolExpression(root, expression.span),
     index: alias.pointerBaseIndices[0]!,
-    ...optionalValueType(pointerAliasTargetValueType(expression, scope) ?? root.valueType),
+    valueType: requiredSemanticValueType(pointerAliasTargetValueType(expression, scope) ?? root.valueType, "pointer dereference", span),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
@@ -5910,7 +5933,7 @@ function semanticPointerSelectionValue(
     condition: selection.condition,
     consequent,
     alternate,
-    ...optionalValueType(expressionValueType(consequent)),
+    valueType: requiredSemanticExpressionType(expressionValueType(consequent), "pointer selection", span),
     span,
   };
 }
@@ -5934,7 +5957,7 @@ function semanticPointerAliasIndexedValue(
       pointerAliasElementOffset(aliasValueType, root.valueType, index, span, alias.pointerBaseUnitBytes),
       span,
     ),
-    ...optionalValueType(aliasValueType),
+    valueType: requiredSemanticValueType(aliasValueType, "indexed pointer alias", span),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
@@ -6090,7 +6113,7 @@ function addIndexExpressions(left: SemanticExpression, right: SemanticExpression
     operator: "+",
     left,
     right,
-    ...optionalValueType(semanticBinaryResultType("+", expressionValueType(left), expressionValueType(right))),
+    valueType: requiredSemanticValueType(semanticBinaryResultType("+", expressionValueType(left), expressionValueType(right)), "index addition", span),
     span,
   };
 }
@@ -6102,7 +6125,7 @@ function subtractIndexExpressions(left: SemanticExpression, right: SemanticExpre
     operator: "-",
     left,
     right,
-    ...optionalValueType(semanticBinaryResultType("-", expressionValueType(left), expressionValueType(right))),
+    valueType: requiredSemanticValueType(semanticBinaryResultType("-", expressionValueType(left), expressionValueType(right)), "index subtraction", span),
     span,
   };
 }
@@ -6128,7 +6151,7 @@ function multiplyIndexExpression(left: SemanticExpression, right: number, span: 
     operator: "*",
     left,
     right: { kind: "literal", literalKind: "number", value: right, valueType: "int", span },
-    ...optionalValueType(semanticBinaryResultType("*", expressionValueType(left), "int")),
+    valueType: requiredSemanticValueType(semanticBinaryResultType("*", expressionValueType(left), "int"), "index multiplication", span),
     span,
   };
 }
@@ -6240,6 +6263,15 @@ function expressionValueType(expression: SemanticExpression | undefined): CudaLi
 
 function semanticIntrinsicReturnType(name: string | undefined, args: readonly SemanticExpression[]): CudaLiteScalarType | undefined {
   if (name === undefined) return undefined;
+  if (
+    name === "printf" ||
+    name === "assert" ||
+    SEMANTIC_NOOP_CALLS.has(name) ||
+    BARRIER_CALLS.has(name) ||
+    FENCE_CALLS.has(name) ||
+    isCudaCpAsyncFenceCall(name)
+  ) return "void";
+  if (isHostManagedRuntimeNoopCall(name)) return "int";
   if (name === "__half2_as_uint" || name === "__bfloat162_as_uint" || name === "__nv_bfloat162_as_uint") return "uint";
   const curandVectorReturnType = SEMANTIC_CURAND_VECTOR_RETURN_TYPES.get(name);
   if (curandVectorReturnType) return curandVectorReturnType;
@@ -6356,7 +6388,7 @@ function optionalValueType(valueType: CudaLiteScalarType | undefined): { readonl
   return valueType === undefined ? {} : { valueType };
 }
 
-function numberLiteralType(raw: string): CudaLiteScalarType {
+function numberLiteralType(raw: string): Exclude<CudaLiteScalarType, "void"> {
   if (/^0x/iu.test(raw)) {
     if (/(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw)) return "uint";
     const digits = raw.replace(/^0x/iu, "").replace(/[lL]+$/u, "");
@@ -6367,6 +6399,23 @@ function numberLiteralType(raw: string): CudaLiteScalarType {
     }
   }
   return /[.eE]|[fF]$/u.test(raw) ? "float" : /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw) ? "uint" : "int";
+}
+
+function requiredSemanticValueType(
+  valueType: CudaLiteScalarType | undefined,
+  owner: string,
+  span: SourceSpan,
+): Exclude<CudaLiteScalarType, "void"> {
+  return requireSemanticValueType(valueType, owner, span);
+}
+
+function requiredSemanticExpressionType(
+  valueType: CudaLiteScalarType | undefined,
+  owner: string,
+  span: SourceSpan,
+): CudaLiteScalarType {
+  if (valueType !== undefined) return valueType;
+  return requireSemanticValueType(valueType, owner, span);
 }
 
 function normalizeWorkgroupSize(value: readonly [number, number, number]): [number, number, number] {

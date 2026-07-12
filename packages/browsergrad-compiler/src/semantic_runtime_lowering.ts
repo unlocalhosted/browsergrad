@@ -15,6 +15,7 @@ import type {
 } from "./semantic_ir.js";
 import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 import type { CudaLiteScalarType, SourceSpan } from "./types.js";
+import { requireSemanticValueType } from "./semantic_value_type.js";
 import { completeRuntimeLowering, type RuntimeLoweredIr } from "./compiler_phases.js";
 import type { CanonicalSemanticKernelIr } from "./semantic_ir.js";
 
@@ -266,7 +267,7 @@ function semanticRuntimeMemoryRef(expression: SemanticExpression): SemanticMemor
     baseId: semanticMemoryIdFromSymbol(target.id),
     base: target.name,
     addressSpace: target.addressSpace,
-    ...(valueType === undefined ? {} : { valueType }),
+    valueType: requireSemanticValueType(valueType, `runtime memory '${target.name}'`, expression.span),
     indices,
     fields: [],
     span: expression.span,

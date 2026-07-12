@@ -73,6 +73,7 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
+import { requireSemanticValueType } from "./semantic_value_type.js";
 import {
   evalInlineAsmArithmetic,
   evalInlineAsmBytePerm,
@@ -1318,7 +1319,7 @@ function semanticReferenceExpressionSupported(
 }
 
 function unsupportedMemoryRef(span: SourceSpan): SemanticMemoryRef {
-  return { baseId: createUnresolvedSemanticMemoryId("", span), base: "", addressSpace: "unknown", indices: [], fields: [], span };
+  return { baseId: createUnresolvedSemanticMemoryId("", span), base: "", addressSpace: "unknown", valueType: "int", indices: [], fields: [], span };
 }
 
 function semanticReferenceOperationsContainUnsupportedCalls(
@@ -1748,12 +1749,16 @@ function assignSemanticInlineOutput(
   value: number,
   context: SemanticReferenceContext,
 ): void {
+  const valueType = semanticExpressionValueType(target);
+  if (valueType === undefined || valueType === "void") {
+    throw semanticReferenceError("inline assembly output has no semantic value type", target.span);
+  }
   evalSemanticExpression({
     kind: "assignment",
     operator: "=",
     target,
-    value: { kind: "literal", literalKind: "number", value, ...("valueType" in target && target.valueType ? { valueType: target.valueType } : {}), span: target.span },
-    ...(semanticExpressionValueType(target) === undefined ? {} : { valueType: semanticExpressionValueType(target)! }),
+    value: { kind: "literal", literalKind: "number", value, valueType, span: target.span },
+    valueType,
     span: target.span,
   }, context);
 }
@@ -3017,17 +3022,17 @@ function evalSemanticSharedAddressCall(
   const arg = expression.args[0];
   const ref = arg ? semanticReferenceSharedAddressMemoryRef(arg) : undefined;
   if (!ref || ref.addressSpace !== "shared") throw semanticReferenceError("__cvta_generic_to_shared requires modeled shared memory", expression.span);
-  const elementBytes = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
+  const elementBytes = sizeofCudaType(ref.valueType) ?? 1;
   return (flatIndex(ref, context) + (context.sharedOffsets.get(ref.base) ?? 0)) * elementBytes;
 }
 
 function semanticReferenceSharedAddressMemoryRef(arg: SemanticExpression): SemanticMemoryRef | undefined {
   const target = arg.kind === "unary" && arg.operator === "&" ? arg.argument : arg;
-  return memoryRefFromIndexExpression(target) ?? (target.kind === "symbol" && target.addressSpace === "shared" ? {
+  return memoryRefFromIndexExpression(target) ?? (target.kind === "symbol" && target.addressSpace === "shared" && target.valueType !== undefined && target.valueType !== "void" ? {
     baseId: semanticMemoryIdFromSymbol(target.id),
     base: target.name,
     addressSpace: target.addressSpace,
-    ...(target.valueType === undefined ? {} : { valueType: target.valueType }),
+    valueType: target.valueType,
     indices: [],
     fields: [],
     span: target.span,
@@ -5117,11 +5122,12 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
     firstArg.argument.kind === "symbol" &&
     (firstArg.argument.addressSpace === "device-global" || firstArg.argument.addressSpace === "shared")
   ) {
+    const valueType = requireSemanticValueType(firstArg.argument.valueType, `atomic target '${firstArg.argument.name}'`, firstArg.argument.span);
     return {
       baseId: semanticMemoryIdFromSymbol(firstArg.argument.id),
       base: firstArg.argument.name,
       addressSpace: firstArg.argument.addressSpace,
-      ...(firstArg.argument.valueType === undefined ? {} : { valueType: firstArg.argument.valueType }),
+      valueType,
       indices: [],
       fields: [],
       span: firstArg.argument.span,
@@ -5129,11 +5135,12 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
   }
   if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
   if (firstArg.kind === "symbol" && (firstArg.addressSpace === "storage" || firstArg.addressSpace === "shared")) {
+    const valueType = requireSemanticValueType(firstArg.valueType, `atomic target '${firstArg.name}'`, firstArg.span);
     return {
       baseId: semanticMemoryIdFromSymbol(firstArg.id),
       base: firstArg.name,
       addressSpace: firstArg.addressSpace,
-      ...(firstArg.valueType === undefined ? {} : { valueType: firstArg.valueType }),
+      valueType,
       indices: [],
       fields: [],
       span: firstArg.span,
@@ -5144,11 +5151,12 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
 
 function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticMemoryRef | undefined {
   if (expression.kind === "symbol" && expression.addressSpace === "device-global") {
+    const valueType = requireSemanticValueType(expression.valueType, `device global '${expression.name}'`, expression.span);
     return {
       baseId: semanticMemoryIdFromSymbol(expression.id),
       base: expression.name,
       addressSpace: expression.addressSpace,
-      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+      valueType,
       indices: [],
       fields: [],
       span: expression.span,
@@ -5167,7 +5175,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     baseId: semanticMemoryIdFromSymbol(target.id),
     base: target.name,
     addressSpace: target.addressSpace,
-    ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    valueType: expression.valueType,
     ...(expression.target.kind === "symbol" && expression.target.valueType !== undefined ? { containerValueType: expression.target.valueType } : {}),
     ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
@@ -5751,16 +5759,16 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
       baseId: semanticMemoryIdFromSymbol(constantSymbol.id),
       base: name,
       addressSpace: "constant",
-      valueType: constantSymbol.valueType as CudaLiteScalarType,
+      valueType: requireSemanticValueType(constantSymbol.valueType, `constant '${name}'`, span),
       indices: [{ kind: "literal", literalKind: "number", value: 0, valueType: "int", span }],
       fields: [],
       span,
     }, context);
   }
   const global = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "device-global");
-  if (global && global.dimensions.length === 0) return readMemory({ baseId: semanticMemoryIdFromSymbol(global.id), base: name, addressSpace: "device-global", indices: [], fields: [], span }, context);
+  if (global && global.dimensions.length === 0) return readMemory({ baseId: semanticMemoryIdFromSymbol(global.id), base: name, addressSpace: "device-global", valueType: requireSemanticValueType(global.valueType, `device global '${name}'`, span), indices: [], fields: [], span }, context);
   const shared = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "shared");
-  if (shared && shared.dimensions.length === 0) return readMemory({ baseId: semanticMemoryIdFromSymbol(shared.id), base: name, addressSpace: "shared", indices: [], fields: [], span }, context);
+  if (shared && shared.dimensions.length === 0) return readMemory({ baseId: semanticMemoryIdFromSymbol(shared.id), base: name, addressSpace: "shared", valueType: requireSemanticValueType(shared.valueType, `shared memory '${name}'`, span), indices: [], fields: [], span }, context);
   const storageParam = context.compiled.kernelIr.params.find((param) => param.name === name && param.addressSpace === "storage");
   if (storageParam) return context.buffers.has(name) ? 1 : 0;
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);

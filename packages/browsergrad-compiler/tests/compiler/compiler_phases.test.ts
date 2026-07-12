@@ -12,9 +12,11 @@ import {
   parseCudaLite,
   type CudaLiteModule,
   type SemanticKernelIrModule,
+  type SemanticExpression,
+  type SemanticMemoryRef,
   type VerifiedSemanticKernelIr,
 } from "../../src/index.js";
-import { semanticIdKey } from "../../src/semantic_ids.js";
+import { semanticIdKey, semanticMemoryIdFromSymbol } from "../../src/semantic_ids.js";
 import {
   completeAnalysis,
   completeRuntimeLowering,
@@ -40,6 +42,26 @@ describe("compiler phase contracts", () => {
     assertWgslLegalizedSemanticKernelIr(runtimeLowered);
     const store = runtimeLowered.operations.find((operation) => operation.kind === "store");
     expect(store?.kind === "store" ? store.target.baseId : undefined).toBe(out.id);
+    if (false) {
+      const value: SemanticExpression = { kind: "literal", literalKind: "number", value: 1, valueType: "int", span: out.span };
+      // @ts-expect-error computed semantic expressions require a result type
+      const _expression: SemanticExpression = {
+        kind: "binary",
+        operator: "+",
+        left: value,
+        right: value,
+        span: out.span,
+      };
+      // @ts-expect-error semantic memory references require a non-void element type
+      const _ref: SemanticMemoryRef = {
+        baseId: semanticMemoryIdFromSymbol(out.id),
+        base: out.name,
+        addressSpace: out.addressSpace,
+        indices: [],
+        fields: [],
+        span: out.span,
+      };
+    }
     const emitted = emitSemanticKernelIrWgsl(runtimeLowered);
 
     expect(emitted.wgsl).toContain("browsergrad-semantic-wgsl");

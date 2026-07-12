@@ -9,6 +9,7 @@ import type {
 import type { VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type CudaLiteScalarType, type SourceSpan } from "./types.js";
 import { semanticBinaryResultType } from "./semantic_type_rules.js";
+import { isSemanticValueType } from "./semantic_value_type.js";
 
 export type TypeCheckedSemanticKernelIr<T extends VerifiedSemanticKernelIr = VerifiedSemanticKernelIr> = TypeCheckedIr<T>;
 
@@ -251,7 +252,7 @@ function checkMemoryRef(
   ir: SemanticKernelIrModule,
   report: (message: string, span: SourceSpan) => void,
 ): void {
-  if (ref.valueType === undefined || ref.valueType === "void") report(`memory reference '${ref.base}' has no value type`, ref.span);
+  if (!isSemanticValueType(ref.valueType)) report(`memory reference '${ref.base}' has no value type`, ref.span);
   ref.indices.forEach((index) => checkExpression(index, "value", ir, report));
 }
 

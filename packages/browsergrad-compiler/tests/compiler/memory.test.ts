@@ -2174,7 +2174,10 @@ __global__ void shared_reinterpret(int *out) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.kernelIr.operations.some((operation) => operation.kind === "declare" && operation.target.pointer)).toBe(false);
+      expect(compiled.kernelIr.operations).toContainEqual(expect.objectContaining({
+        kind: "declare",
+        target: expect.objectContaining({ name: "p", pointer: true }),
+      }));
       expect([...result.buffers.out as Float32Array]).toEqual([7]);
     });
 

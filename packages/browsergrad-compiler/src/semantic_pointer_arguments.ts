@@ -4,11 +4,12 @@ import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 export function semanticPointerArgumentMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {
   if (expression.kind === "symbol") {
     if (expression.addressSpace !== "storage" && expression.addressSpace !== "device-global" && expression.addressSpace !== "shared" && expression.addressSpace !== "constant" && expression.addressSpace !== "local") return undefined;
+    if (expression.valueType === undefined || expression.valueType === "void") return undefined;
     return {
       baseId: semanticMemoryIdFromSymbol(expression.id),
       base: expression.name,
       addressSpace: expression.addressSpace,
-      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+      valueType: expression.valueType,
       indices: [],
       fields: [],
       span: expression.span,
@@ -25,8 +26,8 @@ export function semanticPointerArgumentMemoryRef(expression: SemanticExpression)
     const ref = semanticPointerArgumentMemoryRef(expression.target);
     return ref === undefined ? undefined : {
       ...ref,
-      ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
-      ...((ref.containerValueType ?? ref.valueType) === undefined ? {} : { containerValueType: ref.containerValueType ?? ref.valueType }),
+      valueType: expression.valueType,
+      containerValueType: ref.containerValueType ?? ref.valueType,
       ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
       ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
       ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
