@@ -3,6 +3,7 @@ import {
   convertTypedWgslExpression,
   createTypedWgslExpression,
   createTypedWgslReturnStatement,
+  createTypedWgslVariableStatement,
   emitTypedWgslBinary,
   emitTypedWgslSelect,
   emitTypedWgslUnary,
@@ -84,5 +85,23 @@ describe("typed WGSL expressions", () => {
       createTypedWgslExpression("value", "i32", span),
       span,
     )).toMatchObject({ code: "return value;", span });
+  });
+
+  it("rejects declaration initializer mismatches before WGSL string emission", () => {
+    expect(() => createTypedWgslVariableStatement(
+      "var",
+      "count",
+      "i32",
+      createTypedWgslExpression("1.0", "f32", span),
+      span,
+    )).toThrow("WGSL declaration type mismatch for 'count': initialized 'f32', declared 'i32'");
+
+    expect(createTypedWgslVariableStatement(
+      "var",
+      "count",
+      "i32",
+      createTypedWgslExpression("1", "i32", span),
+      span,
+    )).toMatchObject({ code: "var count: i32 = 1;", span });
   });
 });

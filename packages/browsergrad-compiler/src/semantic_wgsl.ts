@@ -118,7 +118,7 @@ import {
   emitTypedWgslUnary,
   type TypedWgslExpression,
 } from "./typed_wgsl_expression.js";
-import { createTypedWgslReturnStatement } from "./typed_wgsl_statement.js";
+import { createTypedWgslReturnStatement, createTypedWgslVariableStatement } from "./typed_wgsl_statement.js";
 import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
@@ -2472,11 +2472,12 @@ function emitSemanticOperation(
         ];
       }
       const init = operation.init
-        ? ` = ${emitSemanticInitExpression(operation.init, operation.target.valueType, ir, names, options, textureSpecializations)}`
+        ? emitSemanticInitExpression(operation.init, operation.target.valueType, ir, names, options, textureSpecializations)
         : isSemanticFloatVectorType(operation.target.valueType)
-        ? ` = ${zeroForType(wgslValueType(operation.target.valueType))}`
-        : "";
-      return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
+        ? createTypedWgslExpression(zeroForType(type), type, operation.span)
+        : undefined;
+      const statement = createTypedWgslVariableStatement("var", nameFor(operation.target.name, names), type, init, operation.span);
+      return [`${prefix}${statement.code}`];
     }
     case "store":
       return emitSemanticStoreOperation(operation, ir, names, indentLevel, options, textureSpecializations);
@@ -5930,11 +5931,11 @@ function emitSemanticInitExpression(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
-): string {
-  if (valueType === "bool") return emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations);
-  if (valueType === "uchar") return emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations);
-  if (isSemanticFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations).code;
-  return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations).code;
+): TypedWgslExpression {
+  if (valueType === "bool") return createTypedWgslExpression(emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations), "bool", expression.span);
+  if (valueType === "uchar") return createTypedWgslExpression(emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations), "u32", expression.span);
+  if (isSemanticFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
 
 function emitSemanticLocalScalarExpressionAs(
@@ -6007,7 +6008,14 @@ function emitInitializedScalarConstant(
     while (values.length < laneCount) values.push("0.0");
     return `const ${nameFor(symbol.name, names)}: ${valueType} = ${valueType}(${values.join(", ")});`;
   }
-  return `const ${nameFor(symbol.name, names)}: ${wgslValueType(symbol.valueType)} = ${emitSemanticInitExpression(symbol.init ?? zeroExpression(symbol.span), symbol.valueType, ir, names, options)};`;
+  const valueType = wgslValueType(symbol.valueType);
+  return createTypedWgslVariableStatement(
+    "const",
+    nameFor(symbol.name, names),
+    valueType,
+    emitSemanticInitExpression(symbol.init ?? zeroExpression(symbol.span), symbol.valueType, ir, names, options),
+    symbol.span,
+  ).code;
 }
 
 function emitSemanticAtomicCall(

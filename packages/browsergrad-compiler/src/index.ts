@@ -114,6 +114,7 @@ export {
 } from "./typed_wgsl_expression.js";
 export {
   createTypedWgslReturnStatement,
+  createTypedWgslVariableStatement,
   type TypedWgslStatement,
 } from "./typed_wgsl_statement.js";
 export { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
