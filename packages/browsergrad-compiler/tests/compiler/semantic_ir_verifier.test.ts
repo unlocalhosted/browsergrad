@@ -97,4 +97,26 @@ __global__ void parent(float *out) { child<<<1, 1>>>(out); }
       span: launch.span,
     }));
   });
+
+  it("rejects forged operation-call identities even when callee names match", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void helper(float *out) { out[0] = 1.0f; }
+__global__ void call_identity(float *out) { helper(out); }
+`);
+    const call = compiled.kernelIr.operations.find((operation) => operation.kind === "call");
+    if (call?.kind !== "call") throw new Error("expected call operation");
+    const invalid = {
+      ...compiled.kernelIr,
+      operations: [{
+        ...call,
+        calleeId: { key: "function:forged:helper" } as unknown as typeof call.calleeId,
+      }],
+    } as SemanticKernelIrModule;
+
+    expect(verifySemanticKernelIr(invalid)).toContainEqual(expect.objectContaining({
+      code: "internal-lowering-invariant",
+      message: "IR call 'helper' has unresolved callable identity 'function:forged:helper'",
+      span: call.span,
+    }));
+  });
 });

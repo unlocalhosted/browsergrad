@@ -422,7 +422,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "surface-read-store"; readonly target: SemanticExpression; readonly surface: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly valueType?: CudaLiteScalarType; readonly span: SourceSpan }
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
-  | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly result?: Extract<SemanticExpression, { readonly kind: "symbol" }>; readonly span: SourceSpan }
+  | { readonly kind: "call"; readonly calleeId: SemanticSymbolId; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly result?: Extract<SemanticExpression, { readonly kind: "symbol" }>; readonly span: SourceSpan }
   | { readonly kind: "runtime-copy"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly conditionUniformity?: "workgroup"; readonly span: SourceSpan }
@@ -899,7 +899,13 @@ export function lowerSemanticModelToKernelIr(
     ...fn,
     body: promoteSemanticBarrierResultCalls(fn.body, barrierFunctions),
   }));
-  const functionSharedMemory = functions.flatMap((fn) =>
+  const functionIdsByName = new Map(functions.map((fn) => [fn.name, fn.id]));
+  const identifiedOperations = linkSemanticOperationCallIdentities(operations, functionIdsByName);
+  const identifiedFunctions = functions.map((fn) => ({
+    ...fn,
+    body: linkSemanticOperationCallIdentities(fn.body, functionIdsByName),
+  }));
+  const functionSharedMemory = identifiedFunctions.flatMap((fn) =>
     collectDeclaredMemory(fn.body).filter((symbol) => symbol.addressSpace === "shared")
   );
   return completeCanonicalLowering({
@@ -909,7 +915,7 @@ export function lowerSemanticModelToKernelIr(
     symbols: [
       ...semantic.symbols,
       ...functionSymbols,
-      ...functions.map(symbolForSemanticFunctionDeclaration),
+      ...identifiedFunctions.map(symbolForSemanticFunctionDeclaration),
     ],
     params: semantic.params,
     memory: [
@@ -932,9 +938,9 @@ export function lowerSemanticModelToKernelIr(
         span: analysis.kernel.span,
       })),
     ],
-    functions,
+    functions: identifiedFunctions,
     launchableEntries: semantic.launchableEntries,
-    operations,
+    operations: identifiedOperations,
     requiredFeatures: semantic.requiredFeatures,
     barrierUniformity: analysis.barrierUniformity,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
@@ -1000,6 +1006,43 @@ function lowerSemanticDivergentBreaksBeforeBarriers(
       }];
     });
   return lower(operations);
+}
+
+function linkSemanticOperationCallIdentities(
+  operations: readonly SemanticKernelIrOperation[],
+  functionIdsByName: ReadonlyMap<string, SemanticFunctionId>,
+): readonly SemanticKernelIrOperation[] {
+  return operations.map((operation): SemanticKernelIrOperation => {
+    if (operation.kind === "call") {
+      const functionId = functionIdsByName.get(operation.callee);
+      return functionId === undefined
+        ? operation
+        : { ...operation, calleeId: semanticSymbolIdFromFunction(functionId) };
+    }
+    if (operation.kind === "branch") {
+      return {
+        ...operation,
+        consequent: linkSemanticOperationCallIdentities(operation.consequent, functionIdsByName),
+        alternate: linkSemanticOperationCallIdentities(operation.alternate, functionIdsByName),
+      };
+    }
+    if (operation.kind === "block") {
+      return { ...operation, body: linkSemanticOperationCallIdentities(operation.body, functionIdsByName) };
+    }
+    if (operation.kind === "loop") {
+      return {
+        ...operation,
+        ...(operation.init !== undefined && isSemanticKernelIrOperation(operation.init)
+          ? { init: linkSemanticOperationCallIdentities([operation.init], functionIdsByName)[0]! }
+          : {}),
+        body: linkSemanticOperationCallIdentities(operation.body, functionIdsByName),
+        ...(operation.continuing === undefined
+          ? {}
+          : { continuing: linkSemanticOperationCallIdentities(operation.continuing, functionIdsByName) }),
+      };
+    }
+    return operation;
+  });
 }
 
 function semanticCurrentLoopBreakStarts(
@@ -2318,6 +2361,7 @@ function semanticConditionalCallArgumentOperations(
     ...operations,
     {
       kind: "call",
+      calleeId: call.callee.id,
       callee: call.callee.name,
       args,
       reads: args.flatMap((arg) => collectMemoryRefs(arg)),
@@ -2914,6 +2958,7 @@ function lowerStatement(
         }
         return {
           kind: "call",
+          calleeId: expression.callee.id,
           callee: expression.callee.name,
           args: expression.args,
           reads: expression.args.flatMap((arg) => collectMemoryRefs(arg)),
@@ -3368,6 +3413,7 @@ function semanticResultCallOperation(
   ) return undefined;
   return {
     kind: "call",
+    calleeId: expression.value.callee.id,
     callee: expression.value.callee.name,
     args: expression.value.args,
     reads: collectMemoryRefs(expression.value),
@@ -3417,6 +3463,7 @@ function promoteSemanticBarrierResultCalls(
       const { init: _init, ...declaration } = operation;
       return [declaration, {
         kind: "call",
+        calleeId: operation.init.callee.id,
         callee: operation.init.callee.name,
         args: operation.init.args,
         reads: operation.init.args.flatMap((arg) => collectMemoryRefs(arg)),

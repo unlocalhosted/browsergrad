@@ -198,6 +198,7 @@ import {
 import {
   semanticFunctionArgSupported as semanticFunctionArgContractSupported,
   semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
+  semanticFunctionForCall,
   semanticFunctionLocalParamValueTypesSupported,
   semanticFunctionParamContractSupported,
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
@@ -789,7 +790,7 @@ function unsupportedSemanticWgslOperation(
         break;
       case "call":
         if (!semanticWgslCallSupported(operation, ir)) {
-          const fn = ir.functions.find((item) => item.name === operation.callee);
+          const fn = semanticFunctionForCall(operation, ir.functions);
           const nested = fn ? unsupportedSemanticWgslOperation(fn.body, ir, true) : undefined;
           return nested ?? operation;
         }
@@ -2125,7 +2126,7 @@ function semanticWgslCallSupported(
   ir: SemanticKernelIrModule,
 ): boolean {
   if (operation.result !== undefined) {
-    const fn = ir.functions.find((item) => item.name === operation.callee);
+    const fn = semanticFunctionForCall(operation, ir.functions);
     return fn !== undefined &&
       fn.returnType !== "void" &&
       fn.returnType === operation.result.valueType &&
@@ -2174,7 +2175,7 @@ function semanticWgslVoidFunctionCallFailure(
   ir: SemanticKernelIrModule,
 ): string | undefined {
   if (operation.result !== undefined) return "call result requires value-call lowering";
-  const fn = ir.functions.find((item) => item.name === operation.callee);
+  const fn = semanticFunctionForCall(operation, ir.functions);
   if (!fn) return `unknown function '${operation.callee}'`;
   if (fn.returnType !== "void") return `function '${operation.callee}' does not return void`;
   const unsupportedParam = fn.params.find((param) => !semanticWgslFunctionParamSupported(param));
@@ -2388,7 +2389,7 @@ function semanticWgslOperationsHaveObservableSideEffects(
       operation.kind === "surface-write" || operation.kind === "surface-read-store" ||
       operation.kind === "matrix-store" || operation.kind === "device-launch") return true;
     if (operation.kind === "call") {
-      const fn = ir.functions.find((item) => item.name === operation.callee);
+      const fn = semanticFunctionForCall(operation, ir.functions);
       return fn !== undefined && !visited.has(fn.name) &&
         semanticWgslOperationsHaveObservableSideEffects(fn.body, ir, new Set(visited).add(fn.name));
     }
@@ -4087,7 +4088,7 @@ function emitSemanticCall(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   if (operation.result !== undefined) {
-    const fn = ir.functions.find((item) => item.name === operation.callee);
+    const fn = semanticFunctionForCall(operation, ir.functions);
     if (!fn || fn.returnType === "void") throw semanticWgslError(`semantic WGSL call '${operation.callee}' cannot produce a result`, operation.span);
     const call = emitSemanticFunctionCall(semanticCallOperationExpression(operation, fn), ir, names, options, textureSpecializations);
     return [`${"  ".repeat(indentLevel)}${nameFor(operation.result.name, names)} = ${call};`];
@@ -4135,7 +4136,7 @@ function emitSemanticVoidFunctionCall(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
-  const fn = ir.functions.find((item) => item.name === operation.callee);
+  const fn = semanticFunctionForCall(operation, ir.functions);
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${operation.callee}'`, operation.span);
   const callee = semanticFunctionCallName(operation.callee, fn, operation.args, options, textureSpecializations);
   const args = operation.args.flatMap((arg, index) => emitSemanticFunctionArgs(arg, fn.params[index], ir, names, options, textureSpecializations));
@@ -4195,6 +4196,7 @@ function emitSemanticCurandCall(
   if (expression.callee.name === "curand_init") {
     return emitSemanticCurandInit({
       kind: "call",
+      calleeId: expression.callee.id,
       callee: expression.callee.name,
       args: expression.args,
       reads: [],
@@ -7958,7 +7960,7 @@ function semanticAtomicSharedNamesFromOperation(
   }
   const names = new Set<string>();
   if (operation.kind === "call") {
-    const fn = functions.find((item) => item.name === operation.callee);
+    const fn = semanticFunctionForCall(operation, functions);
     const expression: Extract<SemanticExpression, { readonly kind: "call" }> = {
       kind: "call",
       callee: { kind: "symbol", id: fn ? createSemanticSymbolId("function", fn.name, fn.span) : createUnresolvedSemanticSymbolId(operation.callee, operation.span), name: operation.callee, addressSpace: "function", span: operation.span },
@@ -8046,7 +8048,7 @@ function semanticAtomicStorageNamesFromOperation(
   }
   const names = new Set<string>();
   if (operation.kind === "call") {
-    const fn = functions.find((item) => item.name === operation.callee);
+    const fn = semanticFunctionForCall(operation, functions);
     const expression: Extract<SemanticExpression, { readonly kind: "call" }> = {
       kind: "call",
       callee: { kind: "symbol", id: fn ? createSemanticSymbolId("function", fn.name, fn.span) : createUnresolvedSemanticSymbolId(operation.callee, operation.span), name: operation.callee, addressSpace: "function", span: operation.span },
@@ -8114,7 +8116,7 @@ function semanticAtomicDeviceGlobalNamesFromOperation(
   const names = new Set<string>();
   for (const name of semanticAtomicNamesFromOperation(operation, "device-global")) names.add(name);
   if (operation.kind === "call") {
-    const fn = functions.find((candidate) => candidate.name === operation.callee);
+    const fn = semanticFunctionForCall(operation, functions);
     if (fn) {
       const atomicParams = semanticFunctionStoragePointerAtomicParams(fn);
       for (const [index, param] of fn.params.entries()) {

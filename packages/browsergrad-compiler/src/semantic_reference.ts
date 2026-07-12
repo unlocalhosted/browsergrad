@@ -188,6 +188,7 @@ import {
 import {
   semanticFunctionArgSupported as semanticFunctionArgContractSupported,
   semanticFunctionBodyShapeSupported as semanticFunctionBodyShapeContractSupported,
+  semanticFunctionForCall,
   semanticFunctionLocalParamValueTypesSupported,
   semanticFunctionParamContractSupported,
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
@@ -551,7 +552,7 @@ function semanticReferenceOperationsContainUnsupportedCallableSignatures(
 ): boolean {
   for (const operation of operations) {
     if (operation.kind === "call") {
-      const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+      const fn = semanticFunctionForCall(operation, compiled.kernelIr.functions);
       if (fn && fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) {
         return true;
       }
@@ -1154,7 +1155,7 @@ function semanticReferenceCallSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (operation.result !== undefined) {
-    const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+    const fn = semanticFunctionForCall(operation, compiled.kernelIr.functions);
     return fn !== undefined &&
       fn.returnType !== "void" &&
       fn.returnType === operation.result.valueType &&
@@ -1219,7 +1220,7 @@ function semanticReferenceVoidFunctionCallSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   if (operation.result !== undefined) return false;
-  const fn = compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  const fn = semanticFunctionForCall(operation, compiled.kernelIr.functions);
   if (!fn || fn.returnType !== "void") return false;
   if (fn.params.some((param) => !semanticReferenceFunctionParamSupported(param))) return false;
   if (fn.params.some((param) => param.pointer) && !semanticReferencePointerFunctionBodySupported(fn)) return false;
@@ -1974,7 +1975,7 @@ function* execSemanticBarrierFunctionCall(
   context: SemanticReferenceContext,
   barrierFunctions: ReadonlySet<string>,
 ): SemanticBarrierGenerator {
-  const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  const fn = semanticFunctionForCall(operation, context.compiled.kernelIr.functions);
   if (!fn) throw semanticReferenceError(`semantic reference unknown barrier function '${operation.callee}'`, operation.span);
   if ((operation.result === undefined) !== (fn.returnType === "void")) throw semanticReferenceError(`semantic reference barrier call '${operation.callee}' result contract mismatch`, operation.span);
   const child = createSemanticFunctionContext(fn, operation.args, context, operation.span);
@@ -2320,7 +2321,7 @@ function execSemanticCall(
   context: SemanticReferenceContext,
 ): void {
   if (operation.result !== undefined) {
-    const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+    const fn = semanticFunctionForCall(operation, context.compiled.kernelIr.functions);
     if (!fn || fn.returnType === "void") throw semanticReferenceError(`semantic reference call '${operation.callee}' cannot produce a result`, operation.span);
     const child = runSemanticFunction(fn, operation.args, context, operation.span);
     assignSemanticCallResult(operation, fn, child, context);
@@ -2353,7 +2354,7 @@ function execSemanticCall(
     execSemanticVoidFunctionCall(operation, context);
     return;
   }
-  const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  const fn = semanticFunctionForCall(operation, context.compiled.kernelIr.functions);
   if (fn?.returnType === "void" && operation.args.length === fn.params.length) {
     runSemanticFunction(fn, operation.args, context, operation.span);
     return;
@@ -2554,7 +2555,7 @@ function execSemanticVoidFunctionCall(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
 ): void {
-  const fn = context.compiled.kernelIr.functions.find((item) => item.name === operation.callee);
+  const fn = semanticFunctionForCall(operation, context.compiled.kernelIr.functions);
   if (!fn) throw semanticReferenceError(`semantic reference unknown function '${operation.callee}'`, operation.span);
   runSemanticFunction(fn, operation.args, context, operation.span);
 }

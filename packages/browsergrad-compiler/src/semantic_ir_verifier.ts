@@ -228,6 +228,15 @@ function verifyOperations(
         report(`IR device launch '${operation.launch.callee}' identity belongs to '${calleeName}'`, operation.span);
       }
     }
+    if (operation.kind === "call") {
+      const calleeId = semanticIdKey(operation.calleeId);
+      const functionName = identityContext.functionNamesById.get(calleeId);
+      if (functionName !== undefined && functionName !== operation.callee) {
+        report(`IR call '${operation.callee}' identity belongs to '${functionName}'`, operation.span);
+      } else if (functionName === undefined && calleeId !== `builtin:${operation.callee}`) {
+        report(`IR call '${operation.callee}' has unresolved callable identity '${calleeId}'`, operation.span);
+      }
+    }
 
     if (operation.kind === "branch") {
       verifyOperations(operation.consequent, fn, loopDepth, identityContext, report);

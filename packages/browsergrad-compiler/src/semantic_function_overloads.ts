@@ -114,7 +114,14 @@ function resolveOperation(
       return { ...operation, ...(operation.target === undefined ? {} : { target: resolveMemoryRef(operation.target, resolve) }), args: operation.args.map((arg) => resolveExpression(arg, resolve)) };
     case "call": {
       const args = operation.args.map((arg) => resolveExpression(arg, resolve));
-      return { ...operation, callee: resolve(operation.callee, args).name, args, reads: operation.reads.map((ref) => resolveMemoryRef(ref, resolve)) };
+      const resolved = resolve(operation.callee, args);
+      return {
+        ...operation,
+        callee: resolved.name,
+        ...(resolved.id === undefined ? {} : { calleeId: semanticSymbolIdFromFunction(resolved.id) }),
+        args,
+        reads: operation.reads.map((ref) => resolveMemoryRef(ref, resolve)),
+      };
     }
     case "expression":
       return { ...operation, expression: resolveExpression(operation.expression, resolve) };

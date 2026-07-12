@@ -12,6 +12,13 @@ import { semanticIdsEqual } from "./semantic_ids.js";
 
 export type SemanticFunctionExpressionMode = "scalar" | "any";
 
+export function semanticFunctionForCall(
+  call: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  functions: readonly CudaLiteSemanticFunction[],
+): CudaLiteSemanticFunction | undefined {
+  return functions.find((fn) => semanticIdsEqual(fn.id, call.calleeId));
+}
+
 export function semanticFunctionParamContractSupported(
   param: CudaLiteSemanticSymbol,
   valueTypeSupported: (valueType: CudaLiteScalarType | undefined) => boolean,
