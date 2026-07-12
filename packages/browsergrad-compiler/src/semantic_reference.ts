@@ -2132,8 +2132,10 @@ function execSemanticAtomic(
   }
   const value = operation.args[1];
   if (!value) throw semanticReferenceError(`semantic reference atomic '${operation.callee}' missing operand`, operation.span);
-  const oldValue = readAtomicMemory(operation.target, context);
-  const nextValue = semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), operation, context);
+  const targetType = semanticAtomicTargetType(operation);
+  const oldValue = coerceSemanticAtomicValue(readAtomicMemory(operation.target, context), targetType);
+  const operand = coerceSemanticAtomicValue(evalNumber(value, context), targetType);
+  const nextValue = coerceSemanticAtomicValue(semanticAtomicValue(atomicOp, oldValue, operand, operation, context), targetType);
   writeAtomicMemory(operation.target, nextValue, context);
 }
 
@@ -2474,6 +2476,12 @@ function semanticAtomicTargetType(
   return operation.kind === "atomic"
     ? operation.target?.valueType
     : semanticAtomicCallTarget(operation)?.valueType;
+}
+
+function coerceSemanticAtomicValue(value: number, valueType: CudaLiteScalarType | undefined): number {
+  if (valueType === "int") return Math.trunc(value) | 0;
+  if (valueType === "uint") return Math.trunc(value) >>> 0;
+  return value;
 }
 
 function execSemanticLoop(
@@ -3049,8 +3057,11 @@ function evalSemanticAtomicCall(
   if (!atomicOp || !target || !value) {
     throw semanticReferenceError(`semantic reference does not support atomic '${expression.callee.name}'`, expression.span);
   }
-  const oldValue = readAtomicMemory(target, context);
-  writeAtomicMemory(target, semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), expression, context), context);
+  const targetType = semanticAtomicTargetType(expression);
+  const oldValue = coerceSemanticAtomicValue(readAtomicMemory(target, context), targetType);
+  const operand = coerceSemanticAtomicValue(evalNumber(value, context), targetType);
+  const nextValue = coerceSemanticAtomicValue(semanticAtomicValue(atomicOp, oldValue, operand, expression, context), targetType);
+  writeAtomicMemory(target, nextValue, context);
   return oldValue;
 }
 
@@ -4990,9 +5001,10 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
     const buffer = context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+    const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     const base = flatIndex(ref, context);
     let word = 0;
-    for (let byte = 0; byte < 4; byte++) word |= (Number(buffer[base + byte] ?? 0) & 0xff) << (byte * 8);
+    for (let byte = 0; byte < 4; byte++) word |= (Number(bytes[base + byte] ?? 0) & 0xff) << (byte * 8);
     const unsigned = word >>> 0;
     if (ref.valueType === "float") return uintBitsToFloat32(unsigned);
     return ref.valueType === "int" ? word | 0 : unsigned;
@@ -5076,13 +5088,14 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
     const buffer = context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+    const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     const base = flatIndex(ref, context);
     const word = ref.valueType === "float" ? float32ToUintBits(value) : Math.trunc(value) >>> 0;
     for (let byte = 0; byte < 4; byte++) {
       const index = base + byte;
       const byteValue = (word >>> (byte * 8)) & 0xff;
-      const ok = index >= 0 && index < buffer.length;
-      if (ok) buffer[index] = byteValue;
+      const ok = index >= 0 && index < bytes.length;
+      if (ok) bytes[index] = byteValue;
       context.trace.writes.push({ name: ref.base, index, value: byteValue, ok });
     }
     return;

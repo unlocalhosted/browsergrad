@@ -26,7 +26,10 @@ export function semanticPointerArgumentMemoryRef(expression: SemanticExpression)
     return ref === undefined ? undefined : {
       ...ref,
       ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+      ...((ref.containerValueType ?? ref.valueType) === undefined ? {} : { containerValueType: ref.containerValueType ?? ref.valueType }),
       ...(expression.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+      ...(expression.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: expression.pointerBaseUnitBytes }),
+      ...(expression.packedByteLanes === undefined ? {} : { packedByteLanes: expression.packedByteLanes }),
       indices: [...ref.indices, expression.index],
       span: expression.span,
     };

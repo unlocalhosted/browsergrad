@@ -1516,9 +1516,10 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(backendIr(compiled).atomicParams).toContain("scratch");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("scratch: array<atomic<u32>>");
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
-      expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&scratch[(u32(index)) >> 2u], value); }");
+      expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&scratch[(index >> 2u)], value); }");
       expect([...result.buffers.out as Uint32Array]).toEqual([7, 12]);
       expect([...result.buffers.scratch as Uint32Array]).toEqual([12]);
     });
@@ -1555,12 +1556,12 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(backendIr(compiled).atomicParams).toContain("scratch");
-      expect(compiled.wgsl).toContain("case 0u: { return bg_atomicAdd_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
-      expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMin_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
-      expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMax_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
-      expect(compiled.wgsl).toContain("case 0u: { return bg_atomicCompareExchange_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], compare, value); }");
-      expect(compiled.wgsl).toContain("bg_atomicExchange_storage_u32_as_i32(&scratch[(u32((4u) + (0u))) >> 2u], (-11))");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("case 0u: { return bitcast<i32>(atomicAdd(&scratch[(index >> 2u)], bitcast<u32>(value))); }");
+      expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMin_storage_u32_as_i32(&scratch[(index >> 2u)], value); }");
+      expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMax_storage_u32_as_i32(&scratch[(index >> 2u)], value); }");
+      expect(compiled.wgsl).toContain("case 0u: { return bitcast<i32>(atomicCompareExchangeWeak(&scratch[(index >> 2u)], bitcast<u32>(compare), bitcast<u32>(value)).old_value); }");
+      expect(compiled.wgsl).toContain("bitcast<i32>(atomicExchange(&scratch[(4u >> 2u)], bitcast<u32>(-(11))))");
       expect([...result.buffers.out as Int32Array]).toEqual([10, 7, 7, -4, -4, 9, 9, -2, 22, -11]);
       expect([...result.buffers.scratch as Uint32Array]).toEqual([0xfffffffe, 0xfffffff5]);
     });

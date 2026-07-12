@@ -71,6 +71,7 @@ function semanticByteStorageCallSupported(
     const ref = semanticPointerArgumentMemoryRef(arg);
     if (ref?.base !== paramName) return true;
     const targetParam = fn?.params[index];
-    return ref.valueType === "uchar" && (targetParam === undefined || !targetParam.pointer || targetParam.valueType === "uchar");
+    return semanticByteStorageRefSupported(ref) &&
+      (targetParam === undefined || !targetParam.pointer || targetParam.valueType === ref.valueType);
   });
 }

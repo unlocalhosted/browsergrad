@@ -555,6 +555,9 @@ export function emitSemanticKernelIrWgsl(
   )) {
     lines.push("", ...helper);
   }
+  if (semanticHasAtomicByteStorage(ir)) {
+    lines.push("", ...emitSemanticSignedByteAtomicHelpers());
+  }
   if (semanticUsesFp8(ir)) {
     lines.push("", ...emitFp8Helpers());
   }
@@ -1232,11 +1235,14 @@ function emitSemanticStoragePointerReadHelper(
   return [
     `fn ${semanticPointerReadHelperName(valueType)}(buffer: u32, index: u32) -> ${wgslType} {`,
     "  switch buffer {",
-    ...semanticStoragePointerBindings(ir).flatMap((binding) =>
-      semanticPointerStorageCompatible(valueType, binding.valueType)
+    ...semanticStoragePointerBindings(ir).flatMap((binding) => {
+      if (semanticAtomicBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
+        return [`    case ${binding.id}u: { return ${emitSemanticAtomicByteStorageReadValue(valueType, nameFor(binding.name, names), "index")}; }`];
+      }
+      return semanticPointerStorageCompatible(valueType, binding.valueType)
         ? [`    case ${binding.id}u: { return ${emitSemanticStoragePointerReadValue(valueType, nameFor(binding.name, names), "index", atomicStorage.has(binding.name))}; }`]
-        : []
-    ),
+        : [];
+    }),
     "    default: { return " + zeroForType(wgslType) + "; }",
     "  }",
     "}",
@@ -1253,11 +1259,14 @@ function emitSemanticStoragePointerWriteHelper(
   return [
     `fn ${semanticPointerWriteHelperName(valueType)}(buffer: u32, index: u32, value: ${wgslType}) {`,
     "  switch buffer {",
-    ...semanticStoragePointerBindings(ir).flatMap((binding) =>
-      !binding.constant && semanticPointerStorageCompatible(valueType, binding.valueType)
+    ...semanticStoragePointerBindings(ir).flatMap((binding) => {
+      if (!binding.constant && semanticAtomicBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
+        return [`    case ${binding.id}u: { ${emitSemanticAtomicByteStorageWriteValue(valueType, nameFor(binding.name, names), "index", "value")} return; }`];
+      }
+      return !binding.constant && semanticPointerStorageCompatible(valueType, binding.valueType)
         ? [`    case ${binding.id}u: { ${emitSemanticStoragePointerWriteValue(valueType, nameFor(binding.name, names), "index", "value", atomicStorage.has(binding.name))} return; }`]
-        : []
-    ),
+        : [];
+    }),
     "    default: { return; }",
     "  }",
     "}",
@@ -1278,11 +1287,14 @@ function emitSemanticStoragePointerAtomicHelper(
   return [
     `fn ${semanticPointerAtomicHelperName(callee, valueType)}(buffer: u32, index: u32, ${cas ? `compare: ${wgslType}, ` : ""}value: ${wgslType}) -> ${wgslType} {`,
     "  switch buffer {",
-    ...semanticStoragePointerBindings(ir).flatMap((binding) =>
-      !binding.constant && atomicStorage.has(binding.name) && semanticPointerStorageCompatible(valueType, binding.valueType)
+    ...semanticStoragePointerBindings(ir).flatMap((binding) => {
+      if (!binding.constant && semanticAtomicBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
+        return [`    case ${binding.id}u: { return ${emitSemanticAtomicByteStorageAtomicValue(callee, valueType, nameFor(binding.name, names), "index", "compare", "value")}; }`];
+      }
+      return !binding.constant && atomicStorage.has(binding.name) && semanticPointerStorageCompatible(valueType, binding.valueType)
         ? [`    case ${binding.id}u: { return ${emitSemanticStoragePointerAtomicValue(callee, valueType, nameFor(binding.name, names), "index", "compare", "value")}; }`]
-        : []
-    ),
+        : [];
+    }),
     "    default: { return " + zeroForType(wgslType) + "; }",
     "  }",
     "}",
@@ -1313,6 +1325,79 @@ function semanticAtomicPointerCarrierNames(ir: SemanticKernelIrModule): Readonly
     ...semanticAtomicStorageNames(ir.operations, ir.functions),
     ...semanticAtomicDeviceGlobalNames(ir.operations, ir.functions),
   ]);
+}
+
+function semanticHasAtomicByteStorage(ir: SemanticKernelIrModule): boolean {
+  const atomicStorage = semanticAtomicPointerCarrierNames(ir);
+  return semanticStoragePointerBindings(ir).some((binding) =>
+    binding.valueType === "uchar" && atomicStorage.has(binding.name)
+  );
+}
+
+function semanticAtomicBytePointerBindingCompatible(
+  valueType: CudaLiteScalarType,
+  binding: { readonly name: string; readonly valueType?: CudaLiteScalarType },
+  atomicStorage: ReadonlySet<string>,
+): boolean {
+  return binding.valueType === "uchar" && atomicStorage.has(binding.name) &&
+    !isCudaVectorType(valueType) && sizeofCudaType(valueType) === 4;
+}
+
+function emitSemanticAtomicByteStorageReadValue(
+  valueType: CudaLiteScalarType,
+  storage: string,
+  byteIndex: string,
+): string {
+  const loaded = `atomicLoad(&${storage}[(${byteIndex} >> 2u)])`;
+  if (valueType === "int") return `bitcast<i32>(${loaded})`;
+  if (valueType === "float" || valueType === "double") return `bitcast<f32>(${loaded})`;
+  return loaded;
+}
+
+function emitSemanticAtomicByteStorageWriteValue(
+  valueType: CudaLiteScalarType,
+  storage: string,
+  byteIndex: string,
+  value: string,
+): string {
+  const bits = valueType === "uint" ? value : `bitcast<u32>(${value})`;
+  return `atomicStore(&${storage}[(${byteIndex} >> 2u)], ${bits});`;
+}
+
+function emitSemanticAtomicByteStorageAtomicValue(
+  callee: string,
+  valueType: CudaLiteScalarType,
+  storage: string,
+  byteIndex: string,
+  compare: string,
+  value: string,
+): string {
+  const access = `${storage}[(${byteIndex} >> 2u)]`;
+  if (valueType === "uint") return emitSemanticStoragePointerAtomicValue(callee, valueType, storage, `(${byteIndex} >> 2u)`, compare, value);
+  if (valueType === "float" || valueType === "double") {
+    return emitSemanticStoragePointerAtomicValue(callee, valueType, storage, `(${byteIndex} >> 2u)`, compare, value);
+  }
+  const op = semanticAtomicOperation(callee);
+  if (op === "min" || op === "max") return `bg_atomic${op === "min" ? "Min" : "Max"}_storage_u32_as_i32(&${access}, ${value})`;
+  if (op === "cas") return `bitcast<i32>(atomicCompareExchangeWeak(&${access}, bitcast<u32>(${compare}), bitcast<u32>(${value})).old_value)`;
+  const wgslCallee = wgslAtomicCalleeForCudaAtomic(callee);
+  return wgslCallee === undefined ? "0" : `bitcast<i32>(${wgslCallee}(&${access}, bitcast<u32>(${value})))`;
+}
+
+function emitSemanticSignedByteAtomicHelpers(): readonly string[] {
+  const helper = (op: "Min" | "Max", compare: "min" | "max"): readonly string[] => [
+    `fn bg_atomic${op}_storage_u32_as_i32(word: ptr<storage, atomic<u32>, read_write>, value: i32) -> i32 {`,
+    "  var old_bits = atomicLoad(word);",
+    "  loop {",
+    "    let old_value = bitcast<i32>(old_bits);",
+    `    let next_value = ${compare}(old_value, value);`,
+    "    let result = atomicCompareExchangeWeak(word, old_bits, bitcast<u32>(next_value));",
+    "    if (result.exchanged) { return old_value; }",
+    "    old_bits = result.old_value;",
+    "  }",
+    "}",
+  ];
+  return [...helper("Min", "min"), "", ...helper("Max", "max")];
 }
 
 function semanticPointerAtomicHelperName(callee: string, valueType: CudaLiteScalarType): string {
@@ -3655,6 +3740,21 @@ function emitSemanticAtomic(
     if (!pointerCall) throw semanticWgslError(`semantic WGSL pointer atomic '${operation.callee}' is unsupported`, operation.span);
     return `_ = ${pointerCall}`;
   }
+  if (semanticWgslDirectByteRawView(operation.target, ir) && semanticAtomicPointerCarrierNames(ir).has(operation.target.base)) {
+    const byteIndex = emitFlatStorageIndex({ ...operation.target, valueType: "uchar" }, ir, names, options);
+    const operands = operation.args.slice(1, semanticAtomicOperation(operation.callee) === "cas" ? 3 : 2);
+    if (operands.length === 0) throw semanticWgslError(`semantic WGSL atomic '${operation.callee}' missing operand`, operation.span);
+    const scalar = wgslValueScalar(operation.target.valueType);
+    const emitted = operands.map((operand) => emitSemanticExpressionAs(operand!, ir, names, scalar, options, textureSpecializations).code);
+    return `_ = ${emitSemanticAtomicByteStorageAtomicValue(
+      operation.callee,
+      operation.target.valueType ?? "uint",
+      nameFor(operation.target.base, names),
+      byteIndex,
+      emitted[0] ?? "0",
+      emitted.at(-1) ?? "0",
+    )}`;
+  }
   const target = emitSemanticMemoryRef(operation.target, ir, names, options);
   const operands = operation.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);
   if (operands.length === 0 || operands.some((operand) => operand === undefined)) {
@@ -5252,6 +5352,9 @@ function emitSemanticMemoryRead(
   if (semanticWgslDirectByteRawView(ref, ir)) {
     const base = emitFlatStorageIndex({ ...ref, valueType: "uchar" }, ir, names, options);
     const storage = nameFor(ref.base, names);
+    if (semanticAtomicPointerCarrierNames(ir).has(ref.base)) {
+      return emitSemanticAtomicByteStorageReadValue(ref.valueType ?? "uint", storage, base);
+    }
     const word = `(${storage}[${base}] | (${storage}[(${base} + 1u)] << 8u) | (${storage}[(${base} + 2u)] << 16u) | (${storage}[(${base} + 3u)] << 24u))`;
     if (ref.valueType === "float") return `bitcast<f32>(${word})`;
     return ref.valueType === "int" ? `bitcast<i32>(${word})` : word;
@@ -5339,6 +5442,9 @@ function emitSemanticMemoryWrite(
   if (semanticWgslDirectByteRawView(ref, ir)) {
     const base = emitFlatStorageIndex({ ...ref, valueType: "uchar" }, ir, names, options);
     const storage = nameFor(ref.base, names);
+    if (semanticAtomicPointerCarrierNames(ir).has(ref.base)) {
+      return emitSemanticAtomicByteStorageWriteValue(ref.valueType ?? "uint", storage, base, value);
+    }
     const word = ref.valueType === "float" ? `bitcast<u32>(${value})` : `u32(${value})`;
     const temp = `bg_raw_word_${ref.span.start}`;
     const writes = [0, 1, 2, 3].map((byte) =>
@@ -5628,8 +5734,21 @@ function emitSemanticAtomicCall(
   }
   const pointerAtomic = emitSemanticPointerAtomicCall(expression, target, ir, names, options, textureSpecializations);
   if (pointerAtomic) return pointerAtomic;
-  const memoryRef = emitSemanticMemoryRef(target, ir, names, options);
   const operands = expression.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);
+  if (semanticWgslDirectByteRawView(target, ir) && semanticAtomicPointerCarrierNames(ir).has(target.base)) {
+    const byteIndex = emitFlatStorageIndex({ ...target, valueType: "uchar" }, ir, names, options);
+    const scalar = wgslValueScalar(target.valueType);
+    const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, scalar, options, textureSpecializations).code);
+    return emitSemanticAtomicByteStorageAtomicValue(
+      expression.callee.name,
+      target.valueType ?? "uint",
+      nameFor(target.base, names),
+      byteIndex,
+      emitted[0] ?? "0",
+      emitted.at(-1) ?? "0",
+    );
+  }
+  const memoryRef = emitSemanticMemoryRef(target, ir, names, options);
   if (loopAtomicKind) {
     const [limit] = operands;
     if (!limit) throw semanticWgslError(`semantic WGSL atomic '${expression.callee.name}' missing limit`, expression.span);
