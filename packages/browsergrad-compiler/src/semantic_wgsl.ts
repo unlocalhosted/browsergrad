@@ -675,7 +675,7 @@ function unsupportedSemanticWgslOperation(
           break;
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
-        if (operation.target.valueType === "uchar" && operation.target.dimensions.length > 0) return operation;
+        if (operation.target.valueType === "uchar" && operation.target.dimensions.length > 0 && operation.target.matrixTile === undefined) return operation;
         if (!semanticWgslLocalValueTypeSupported(operation.target.valueType)) return operation;
         if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init, operation.target.valueType, ir)) return operation;
         if (operation.target.dimensions.length === 0) {
@@ -1357,8 +1357,8 @@ function semanticWgslCopySupported(
     operation.bytes % 4 === 0 &&
     sourceBytes !== undefined &&
     targetBytes !== undefined &&
-    (sourceBytes === 2 || sourceBytes === 4 || sourceBytes === 1 && semanticWgslPackedSharedByteRoot(operation.source, ir)) &&
-    (targetBytes === 2 || targetBytes === 4 || targetBytes === 1 && semanticWgslPackedSharedByteRoot(operation.target, ir)) &&
+    (sourceBytes === 2 || sourceBytes === 4 || sourceBytes === 1 && semanticWgslByteCopyRoot(operation.source, ir)) &&
+    (targetBytes === 2 || targetBytes === 4 || targetBytes === 1 && semanticWgslByteCopyRoot(operation.target, ir)) &&
     operation.bytes % sourceBytes === 0 &&
     operation.bytes % targetBytes === 0 &&
     operation.source.fields.length === 0 &&
@@ -1366,6 +1366,11 @@ function semanticWgslCopySupported(
     operation.target.addressSpace !== "constant" &&
     semanticWgslTypedMemoryRefSupported(operation.source, ir) &&
     semanticWgslTypedMemoryRefSupported(operation.target, ir);
+}
+
+function semanticWgslByteCopyRoot(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  return semanticWgslPackedSharedByteRoot(ref, ir) ||
+    ref.addressSpace === "storage" && ir.params.some((param) => param.name === ref.base && param.valueType === "uchar");
 }
 
 function semanticWgslVectorFieldMemoryRefSupported(ref: SemanticMemoryRef): boolean {

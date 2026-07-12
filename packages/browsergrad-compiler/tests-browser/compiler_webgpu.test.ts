@@ -5534,4 +5534,31 @@ __global__ void packedSharedCopy(const int* input, int* out) {
     expect([...expected.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
     expect([...actual.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
   });
+
+  it("selects cross-root storage pointers before packed shared copies on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void selectedPackedCopy(const uchar* left, const uchar* right, int* out, int chooseRight) {
+  __shared__ uchar bytes[16];
+  const uchar* selected = chooseRight ? right : left;
+  *((int4*)&bytes[0]) = *((int4*)selected);
+  __syncthreads();
+  *((int4*)&out[0]) = *((int4*)&bytes[0]);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        left: new Uint32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+        right: new Uint32Array([16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]),
+        out: new Int32Array(4),
+      },
+      scalars: { chooseRight: 1 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([0x0d0e0f10, 0x090a0b0c, 0x05060708, 0x01020304]);
+  });
 });

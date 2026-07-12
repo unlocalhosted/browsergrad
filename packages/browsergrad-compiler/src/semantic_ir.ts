@@ -129,6 +129,7 @@ export interface CudaLiteSemanticSymbol {
   readonly pointerBaseIsScalarLane?: boolean;
   readonly pointerBaseUnitBytes?: number;
   readonly pointerValid?: SemanticExpression;
+  readonly pointerSelection?: SemanticPointerSelection;
   readonly pointerArrayAliases?: readonly (SemanticPointerAlias | undefined)[];
   readonly pointerCarrierValueType?: CudaLiteScalarType;
   readonly packedByteLanes?: 2 | 3 | 4;
@@ -152,6 +153,13 @@ interface SemanticPointerAlias {
   readonly pointerBaseIsScalarLane?: boolean;
   readonly pointerBaseUnitBytes?: number;
   readonly pointerValid?: SemanticExpression;
+  readonly pointerSelection?: SemanticPointerSelection;
+}
+
+interface SemanticPointerSelection {
+  readonly condition: SemanticExpression;
+  readonly consequent: SemanticPointerAlias;
+  readonly alternate: SemanticPointerAlias;
 }
 
 export interface CudaLiteSemanticFunction {
@@ -1915,7 +1923,7 @@ function lowerStatement(
     case "var": {
       const target = symbolForVar(statement, scope);
       scope.set(target.name, target);
-      if (target.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices) {
+      if (target.pointerSelection || target.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices) {
         return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       }
       return {
@@ -2004,6 +2012,8 @@ function lowerStatement(
           const value = semanticSequencedAssignmentValue(expression.value);
           const reinterpretedCopy = semanticReinterpretedScalarCopy(target, value, expression.operator, scope, statement.span);
           if (reinterpretedCopy) return reinterpretedCopy;
+          const conditionalCopy = semanticConditionalReinterpretedCopy(target, value, expression.operator, scope, statement.span);
+          if (conditionalCopy) return conditionalCopy;
           return {
             kind: "store",
             target,
@@ -2309,6 +2319,20 @@ function semanticReinterpretedScalarCopy(
     bytes: viewBytes,
     span,
   };
+}
+
+function semanticConditionalReinterpretedCopy(
+  target: SemanticMemoryRef,
+  value: SemanticExpression,
+  operator: string,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (value.kind !== "conditional") return undefined;
+  const consequent = semanticReinterpretedScalarCopy(target, value.consequent, operator, scope, span);
+  const alternate = semanticReinterpretedScalarCopy(target, value.alternate, operator, scope, span);
+  if (!consequent || !alternate) return undefined;
+  return { kind: "branch", condition: value.condition, consequent: [consequent], alternate: [alternate], span };
 }
 
 function semanticSequencedAssignmentValue(expression: SemanticExpression): SemanticExpression {
@@ -4088,7 +4112,7 @@ function symbolForVar(
 function localPointerAliasForInitializer(
   expression: CudaLiteExpression | undefined,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
-): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices" | "pointerBaseIsScalarLane" | "pointerBaseUnitBytes" | "pointerValid"> | undefined {
+): Pick<CudaLiteSemanticSymbol, "pointerRoot" | "pointerAddressSpace" | "pointerBaseIndices" | "pointerBaseIsScalarLane" | "pointerBaseUnitBytes" | "pointerValid" | "pointerSelection"> | undefined {
   if (!expression) return undefined;
   if (expression.kind === "cast" && expression.pointer) {
     const alias = localPointerAliasForInitializer(expression.expression, scope);
@@ -4156,6 +4180,14 @@ function localPointerAliasForInitializer(
       consequent.pointerBaseIsScalarLane !== alternate.pointerBaseIsScalarLane
       || consequent.pointerBaseUnitBytes !== alternate.pointerBaseUnitBytes
     ) {
+      if (
+        semanticPointerAliasAddressSpaceSupported(consequent.pointerAddressSpace) &&
+        consequent.pointerAddressSpace === alternate.pointerAddressSpace &&
+        consequent.pointerBaseIsScalarLane === alternate.pointerBaseIsScalarLane &&
+        consequent.pointerBaseUnitBytes === alternate.pointerBaseUnitBytes
+      ) {
+        return { pointerSelection: { condition, consequent, alternate } };
+      }
       return undefined;
     }
     return {
@@ -4175,6 +4207,10 @@ function localPointerAliasForInitializer(
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     const left = localPointerAliasForInitializer(expression.left, scope);
+    if (left?.pointerSelection) {
+      const offset = lowerExpression(expression.right, scope);
+      return offsetSemanticPointerAliasSelection(left, offset, expression.operator, pointerAliasTargetValueType(expression.left, scope), expression.span);
+    }
     if (left?.pointerRoot && semanticPointerAliasAddressSpaceSupported(left.pointerAddressSpace) && left.pointerBaseIndices?.length === 1) {
       const right = lowerExpression(expression.right, scope);
       const offset = pointerAliasOffsetForBaseUnit(left, pointerAliasTargetValueType(expression.left, scope), right, expression.span);
@@ -4205,6 +4241,7 @@ function localPointerAliasForInitializer(
   }
   if (expression.kind === "identifier") {
     const root = scope.get(expression.name);
+    if (root?.pointerSelection) return { pointerSelection: root.pointerSelection };
     if (root?.pointerRoot && semanticPointerAliasAddressSpaceSupported(root.pointerAddressSpace) && root.pointerBaseIndices?.length === 1) {
       return {
         pointerRoot: root.pointerRoot,
@@ -4300,6 +4337,30 @@ function hasLaterLocalPointerAliasAssignment(
   return false;
 }
 
+function offsetSemanticPointerAliasSelection(
+  alias: SemanticPointerAlias,
+  offset: SemanticExpression,
+  operator: "+" | "-",
+  aliasValueType: CudaLiteScalarType | undefined,
+  span: SourceSpan,
+): SemanticPointerAlias | undefined {
+  if (alias.pointerSelection) {
+    const consequent = offsetSemanticPointerAliasSelection(alias.pointerSelection.consequent, offset, operator, aliasValueType, span);
+    const alternate = offsetSemanticPointerAliasSelection(alias.pointerSelection.alternate, offset, operator, aliasValueType, span);
+    return consequent && alternate
+      ? { pointerSelection: { condition: alias.pointerSelection.condition, consequent, alternate } }
+      : undefined;
+  }
+  if (!alias.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
+  const scaled = pointerAliasOffsetForBaseUnit(alias, aliasValueType, offset, span);
+  return {
+    ...alias,
+    pointerBaseIndices: [operator === "+"
+      ? addIndexExpressions(alias.pointerBaseIndices[0]!, scaled, span)
+      : subtractIndexExpressions(alias.pointerBaseIndices[0]!, scaled, span)],
+  };
+}
+
 function localPointerAliasUpdate(
   expression: CudaLiteExpression,
   scope: Map<string, CudaLiteSemanticSymbol>,
@@ -4324,7 +4385,7 @@ function localPointerAliasUpdate(
   if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length > 0) return false;
   if (expression.operator === "=") {
     const alias = localPointerAliasForInitializer(expression.right, scope);
-    if (!alias || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace)) return false;
+    if (!alias || !alias.pointerSelection && !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace)) return false;
     scope.set(target.name, { ...target, ...alias });
     return true;
   }
@@ -4507,6 +4568,14 @@ function localPointerAliasIndexExpression(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): SemanticExpression | undefined {
   const alias = localPointerAliasForInitializer(expression.target, scope);
+  if (alias?.pointerSelection) {
+    const index = lowerExpression(expression.index, scope);
+    return semanticPointerSelectionValue(
+      alias.pointerSelection,
+      (selected) => semanticPointerAliasIndexedValue(selected, index, expression.target, scope, expression.span),
+      expression.span,
+    );
+  }
   if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || !alias.pointerBaseIndices || alias.pointerBaseIndices.length !== 1) return undefined;
   const root = scope.get(alias.pointerRoot);
   if (!root) return undefined;
@@ -4587,6 +4656,13 @@ function localPointerAliasDerefExpression(
         pointerBaseIndices: [zeroExpression(expression.span)],
       }
     : localPointerAliasForInitializer(expression, scope);
+  if (alias?.pointerSelection) {
+    return semanticPointerSelectionValue(
+      alias.pointerSelection,
+      (selected) => semanticPointerAliasIndexedValue(selected, zeroExpression(span), expression, scope, span),
+      span,
+    );
+  }
   if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || !alias.pointerBaseIndices || alias.pointerBaseIndices.length !== 1) return undefined;
   const root = scope.get(alias.pointerRoot);
   if (!root) return undefined;
@@ -4598,6 +4674,56 @@ function localPointerAliasDerefExpression(
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression, root, scope)),
+    span,
+  };
+}
+
+function semanticPointerSelectionValue(
+  selection: SemanticPointerSelection,
+  value: (alias: SemanticPointerAlias) => SemanticExpression | undefined,
+  span: SourceSpan,
+): SemanticExpression | undefined {
+  const consequent = selection.consequent.pointerSelection
+    ? semanticPointerSelectionValue(selection.consequent.pointerSelection, value, span)
+    : value(selection.consequent);
+  const alternate = selection.alternate.pointerSelection
+    ? semanticPointerSelectionValue(selection.alternate.pointerSelection, value, span)
+    : value(selection.alternate);
+  if (!consequent || !alternate || expressionValueType(consequent) !== expressionValueType(alternate)) return undefined;
+  return {
+    kind: "conditional",
+    condition: selection.condition,
+    consequent,
+    alternate,
+    ...optionalValueType(expressionValueType(consequent)),
+    span,
+  };
+}
+
+function semanticPointerAliasIndexedValue(
+  alias: SemanticPointerAlias,
+  index: SemanticExpression,
+  source: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticExpression | undefined {
+  if (!alias.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
+  const root = scope.get(alias.pointerRoot);
+  if (!root) return undefined;
+  const aliasValueType = pointerAliasTargetValueType(source, scope) ?? root.valueType;
+  return {
+    kind: "index",
+    target: semanticSymbolExpression(root, span),
+    index: addIndexExpressions(
+      alias.pointerBaseIndices[0]!,
+      pointerAliasElementOffset(aliasValueType, root.valueType, index, span, alias.pointerBaseUnitBytes),
+      span,
+    ),
+    ...optionalValueType(aliasValueType),
+    addressSpace: root.addressSpace,
+    ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
+    ...optionalPackedByteLanes(pointerAliasPackedByteLanes(source, root, scope)),
     span,
   };
 }

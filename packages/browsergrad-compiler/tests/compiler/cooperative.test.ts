@@ -3343,7 +3343,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("var c: array<i32, 256>;");
       expect(compiled.wgsl).toContain(": i32 = i32(c[");
       expect(compiled.wgsl).toContain("i32(u32(a[");
-      expect(compiled.wgsl).toContain("write_i32");
+      expect(compiled.wgsl).toContain("C[(0u + ((bg_wmma_row_");
     });
 
   it("validates WMMA fragment metadata and f16 requirements", () => {
