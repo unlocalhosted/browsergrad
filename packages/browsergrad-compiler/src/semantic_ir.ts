@@ -1378,7 +1378,7 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
   const pointerFunctions = new Map(functions.filter((fn) => fn.params.some((param) => param.pointer)).map((fn) => [fn.name, fn] as const));
   const pointerWrites = semanticFunctionPointerWrites(functions);
   if (!semanticVoidReturnsAreTerminal(affected)) return operations;
-  if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions, pointerWrites))) return operations;
+  if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions, pointerWrites, barrierFunctions))) return operations;
 
   const firstAffected = operations[firstReturnBeforeBarrier]!;
   const activeName = firstAffected.kind === "loop"
@@ -1527,16 +1527,21 @@ function semanticActiveLaneTransformUnsafe(
   operation: SemanticKernelIrOperation,
   pointerFunctions: ReadonlyMap<string, CudaLiteSemanticFunction>,
   pointerWrites: ReadonlyMap<string, ReadonlySet<number>>,
+  barrierFunctions: ReadonlySet<string>,
 ): boolean {
   if (collectSemanticFunctionCalls([operation]).some((call) => {
     const fn = pointerFunctions.get(call.callee);
     return fn?.params.some((param, index) => {
       if (!param.pointer) return false;
       const ref = call.args[index] === undefined ? undefined : semanticIrPointerArgumentMemoryRef(call.args[index]!);
-      return ref === undefined || ref.addressSpace !== "local" && ref.addressSpace !== "shared" && pointerWrites.get(call.callee)?.has(index) === true;
+      const writesPointer = pointerWrites.get(call.callee)?.has(index) === true;
+      return writesPointer && (ref === undefined || barrierFunctions.has(call.callee) && ref.addressSpace !== "local" && ref.addressSpace !== "shared");
     }) ?? false;
   })) return true;
-  if (operation.kind === "loop") return semanticOperationContainsVoidReturn(operation);
+  if (operation.kind === "loop") {
+    return operation.body.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites, barrierFunctions)) ||
+      (operation.continuing?.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites, barrierFunctions)) ?? false);
+  }
   if (operation.kind === "declare") {
     if (operation.target.addressSpace === "shared") return operation.target.pointer || operation.init !== undefined;
     return operation.target.addressSpace !== "local" || operation.target.pointer ||
@@ -1547,10 +1552,10 @@ function semanticActiveLaneTransformUnsafe(
       );
   }
   if (operation.kind === "branch") {
-    return operation.consequent.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites)) ||
-      operation.alternate.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites));
+    return operation.consequent.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites, barrierFunctions)) ||
+      operation.alternate.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites, barrierFunctions));
   }
-  if (operation.kind === "block") return operation.body.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites));
+  if (operation.kind === "block") return operation.body.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites, barrierFunctions));
   return false;
 }
 
@@ -2160,6 +2165,20 @@ function semanticConditionalCallArgumentOperations(
     return materialized.expression;
   });
   if (operations.length === 0) return undefined;
+  const materializedCall: Extract<SemanticExpression, { readonly kind: "call" }> = { ...call, args };
+  if (semanticAtomicOperation(call.callee.name) !== undefined) {
+    const target = atomicTargetFromCall(materializedCall);
+    return [
+      ...operations,
+      {
+        kind: "atomic",
+        callee: call.callee.name,
+        ...(target === undefined ? {} : { target }),
+        args,
+        span: statement.span,
+      },
+    ];
+  }
   return [
     ...operations,
     {

@@ -881,7 +881,7 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(u32\(bg_uniforms.enabled\) != 0u\)\)/u);
       expect(compiled.wgsl).toContain("active_conditional_atomic_address_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_atomic_address_helper_with_pointer_side_effect");
     });
