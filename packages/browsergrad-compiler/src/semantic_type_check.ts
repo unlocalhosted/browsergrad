@@ -9,12 +9,11 @@ import type { VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type CudaLiteScalarType, type SourceSpan } from "./types.js";
 import { semanticBinaryResultType } from "./semantic_type_rules.js";
 import { isSemanticValueType } from "./semantic_value_type.js";
+import { completeIrTypeChecking, type TypeCheckedIrArtifact } from "./compiler_phases.js";
 
 const typeCheckedSemanticKernelIrArtifact: unique symbol = Symbol("type-checked-semantic-kernel-ir");
 
-export interface TypeCheckedSemanticKernelIr<T extends SemanticKernelIrModule = SemanticKernelIrModule> {
-  readonly kind: "type-checked-semantic-kernel-ir";
-  readonly ir: T;
+export interface TypeCheckedSemanticKernelIr<T extends SemanticKernelIrModule = SemanticKernelIrModule> extends TypeCheckedIrArtifact<T> {
   readonly verified: VerifiedSemanticKernelIr<T>;
   readonly [typeCheckedSemanticKernelIrArtifact]: true;
 }
@@ -46,12 +45,12 @@ export function typeCheckSemanticKernelIr<T extends SemanticKernelIrModule>(
 ): TypeCheckedSemanticKernelIr<T> {
   const issues = checkSemanticKernelIrTypes(verified);
   if (issues.length === 0) {
-    return Object.freeze({
+    return completeIrTypeChecking(Object.freeze({
       kind: "type-checked-semantic-kernel-ir",
       ir: verified.ir,
       verified,
       [typeCheckedSemanticKernelIrArtifact]: true as const,
-    });
+    }));
   }
   const diagnostics: readonly CudaLiteDiagnostic[] = issues.map((issue) => ({
     code: issue.code,

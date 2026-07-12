@@ -20,7 +20,7 @@ __global__ void packedSharedCopy(const int* input, int* out) {
     const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
     const reference = runCompiledKernelReference(compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("atomicCompareExchangeWeak");
     expect([...semantic.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
     expect([...reference.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
@@ -45,7 +45,7 @@ __global__ void selectedPackedCopy(const uchar* left, const uchar* right, int* o
       scalars: { chooseRight },
     }, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...run(0).buffers.out as Int32Array]).toEqual([0x04030201, 0x08070605, 0x0c0b0a09, 0x100f0e0d]);
     expect([...run(1).buffers.out as Int32Array]).toEqual([0x0d0e0f10, 0x090a0b0c, 0x05060708, 0x01020304]);
   });

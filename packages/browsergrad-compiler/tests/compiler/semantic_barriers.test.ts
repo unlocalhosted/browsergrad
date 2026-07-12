@@ -25,7 +25,7 @@ __global__ void declared_after_return(int *out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
     expect([...result.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
   });
@@ -53,7 +53,7 @@ __global__ void nested_collective_after_return(uint *out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
   });
 
@@ -74,7 +74,7 @@ __global__ void initialized_after_return(const int *input, int *out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...result.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
   });
 
@@ -97,7 +97,7 @@ __global__ void loop_barrier_after_return(int *out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("for (");
     expect([...result.buffers.out as Int32Array]).toEqual([2, 4, 6, 0]);
   });
@@ -120,7 +120,7 @@ __global__ void guarded_barrier(int *out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("var bg_active_lane: bool");
     expect([...result.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
   });

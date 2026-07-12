@@ -298,12 +298,12 @@ function createRetirementReductionWebGpuPlan(
   const phasePlan = createSemanticRetirementReductionPlan(compiled.kernelIr, launch);
   if (!phasePlan.supported) return undefined;
   const phases = phasePlan.phases.filter((phase): phase is NonNullable<typeof phase> => phase !== undefined);
-  if (phases.some((phase) => !canEmitSemanticKernelIrWgsl(phase))) return undefined;
+  const legalizedPhases = phases.map((phase) => legalizeSemanticKernelIrForWgsl(
+    typeCheckSemanticKernelIr(validateSemanticKernelIr(phase)),
+  ));
+  if (legalizedPhases.some((phase) => !canEmitSemanticKernelIrWgsl(phase))) return undefined;
   const wgslInput = createWgslRunInput(compiled, input);
-  const steps = phases.map((phase, index): WgslKernelSequenceStep => {
-    const legalized = legalizeSemanticKernelIrForWgsl(
-      typeCheckSemanticKernelIr(validateSemanticKernelIr(phase)),
-    );
+  const steps = legalizedPhases.map((legalized, index): WgslKernelSequenceStep => {
     return {
     program: emitSemanticKernelIrWgsl(legalized, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
@@ -665,7 +665,7 @@ function emitProjectedHostRuntimeProgram(compiled: CompiledCudaLiteKernel): Wgsl
     ...(compiled.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: compiled.pointerBaseOffsets }),
     ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
   };
-  if (!canEmitSemanticKernelIrWgsl(projected.ir, options)) return undefined;
+  if (!canEmitSemanticKernelIrWgsl(projected, options)) return undefined;
   return emitSemanticKernelIrWgsl(projected, options).program;
 }
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeCudaLite,
+  canEmitSemanticKernelIrWgsl,
+  compileCudaLiteKernel,
   validateSemanticKernelIr,
   typeCheckSemanticKernelIr,
   legalizeSemanticKernelIrForWgsl,
@@ -64,6 +66,11 @@ describe("compiler phase contracts", () => {
     const emitted = emitSemanticKernelIrWgsl(legalized);
 
     expect(emitted.wgsl).toContain("browsergrad-semantic-wgsl");
+
+    const compiled = compileCudaLiteKernel(`__global__ void compiled_contract(float *out) { out[0] = 1.0f; }`);
+    expect(compiled.verifiedKernelIr.ir).toBe(compiled.kernelIr);
+    expect(compiled.typeCheckedKernelIr.verified).toBe(compiled.verifiedKernelIr);
+    expect(compiled.wgslLegalizedKernelIr.typeChecked).toBe(compiled.typeCheckedKernelIr);
   });
 
   it("rejects duplicate semantic declaration identities", () => {
@@ -87,6 +94,8 @@ describe("compiler phase contracts", () => {
       // @ts-expect-error raw IR has not passed mandatory verifier
       emitSemanticKernelIrWgsl({} as SemanticKernelIrModule);
       const raw = {} as SemanticKernelIrModule;
+      // @ts-expect-error WGSL readiness requires legalized IR proof
+      canEmitSemanticKernelIrWgsl(raw);
       // @ts-expect-error raw IR cannot enter semantic type checking
       typeCheckSemanticKernelIr(raw);
       const verified = validateSemanticKernelIr(raw);

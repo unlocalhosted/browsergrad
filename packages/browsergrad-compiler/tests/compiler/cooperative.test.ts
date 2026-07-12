@@ -336,7 +336,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<f32, 4>;");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
@@ -393,7 +393,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect([...result.buffers.C as Float32Array]).toEqual([19, 22, 43, 50]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect([...semanticResult.buffers.C as Float32Array]).toEqual([19, 22, 43, 50]);
       expect(compiled.wgsl).toContain("var<workgroup> As: array<f32, 4>;");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
@@ -419,7 +419,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.kernelIr.barrierUniformity.kernel.verified).toBe(true);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 0, 1]);
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
@@ -442,7 +442,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect(compiled.kernelIr.barrierUniformity.kernel.verified).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 5, 3, 4, 2, 3, 1, 2]);
@@ -492,7 +492,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_i32_32_masked(bg_uniforms.value, bg_uniforms.mask, local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([7]);
     });
@@ -511,7 +511,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("(mask_arg & (1u << lane)) != 0u");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });
@@ -605,7 +605,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("subgroupAny");
       expect(compiled.wgsl).not.toContain("subgroupAll");
@@ -649,7 +649,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("subgroupAny");
       expect(compiled.wgsl).not.toContain("subgroupAll");
@@ -695,7 +695,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_4");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_4");
@@ -741,7 +741,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_4");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_uint_4");
@@ -785,7 +785,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_min_u32_32_masked");
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_max_u32_32_masked");
@@ -820,7 +820,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_semantic_reduce_and_uint_32");
       expect(compiled.wgsl).toContain("bg_semantic_reduce_or_uint_32");
@@ -896,7 +896,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("out[0u] = 1u");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
@@ -915,7 +915,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     }
   }`, { features: { subgroups: true }, subgroupMode: "scalar", workgroupSize: [1, 1, 1] });
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("select(0u, 1u");
       expect(compiled.wgsl).toContain("bg_uniforms.warp_size");
       expect(compiled.wgsl).not.toContain("bg_semantic_ballot_32");
@@ -1001,7 +1001,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("let bg_collective_");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_float_32(val, u32(offset), 32u, local_id)");
       expect([...result.buffers.output as Float32Array]).toEqual([32]);
@@ -1066,7 +1066,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     if (threadIdx.x == 0) out[0] = tile[0];
   }`, { f16Mode: "f32", workgroupSize: [2, 1, 1] });
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<vec2<f32>, 2>;");
       expect(compiled.wgsl).toContain("ptr<workgroup, array<vec2<f32>, 2>>");
     });
@@ -1098,7 +1098,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.kernelIr.functions.find((fn) => fn.name === "fold")?.params[0]).toMatchObject({
         addressSpace: "shared",
         dimensions: [4],
@@ -1122,7 +1122,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("sync_tile__bg_guarded_barrier");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 1]);
     });
@@ -1263,14 +1263,14 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(false);
       expect(phases).toMatchObject({ supported: true });
       if (phases.supported) {
         expect(phases.phases).toHaveLength(2);
-        expect(canEmitSemanticKernelIrWgsl(phases.phases[0]!)).toBe(true);
         const legalized = legalizeSemanticKernelIrForWgsl(
           typeCheckSemanticKernelIr(validateSemanticKernelIr(phases.phases[0]!)),
         );
+        expect(canEmitSemanticKernelIrWgsl(legalized)).toBe(true);
         const phaseWgsl = emitSemanticKernelIrWgsl(legalized).wgsl;
         expect(phaseWgsl).toContain("fn reduceBlock");
         expect(phaseWgsl).not.toContain("i32(local_id.x) == 0.0");
@@ -1665,7 +1665,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.kernelIr.requiredFeatures).not.toContain("subgroups");
       expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
       expect([...result.buffers.sums as Int32Array]).toEqual([4, 6]);
@@ -1686,7 +1686,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("atomicAdd(&out[0u], 4)");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });
@@ -1898,7 +1898,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("warp_reduce_max");
       expect([...result.buffers.out as Float32Array]).toEqual([7, 7, 7, 7]);
     });
@@ -1941,7 +1941,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("/ 32u");
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
@@ -1972,7 +1972,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("cp.async inline asm fence omitted");
       expect([...result.buffers.out as Float32Array]).toEqual([3, 5]);
     });
@@ -1993,7 +1993,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("storageBarrier();");
       expect([...result.buffers.out as Float32Array]).toEqual([7, 9]);
     });
@@ -2014,7 +2014,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect([...result.buffers.out as Float32Array]).toEqual([11, 13]);
     });
@@ -2144,7 +2144,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var bg_active_lane: bool");
       expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
@@ -2164,7 +2164,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool");
       expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
       expect(compiled.wgsl).not.toContain("if ((tid < bg_uniforms.N)) {\n    x[u32(tid)] = (x[u32(tid)] + 1.0);\n    workgroupBarrier();");
@@ -2183,7 +2183,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool");
       expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
       expect(compiled.wgsl).not.toContain("if ((tid < bg_uniforms.N)) {\n    x[u32(tid)] = (x[u32(tid)] + 1.0);\n    workgroupBarrier();");
@@ -2209,7 +2209,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     __syncthreads();
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("helper_with_barrier__bg_guarded_barrier");
       expect(compiled.wgsl).toContain("bg_call_active: bool");
@@ -2235,7 +2235,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<f32, 4>;");
       expect(compiled.wgsl).toContain("sharedBarrierHelper(0u, 0u, local_id, workgroup_id, num_workgroups);");
@@ -2267,7 +2267,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.kernelIr.functions.find((fn) => fn.name === "readSharedOffset")?.params[0]).toMatchObject({
         addressSpace: "shared",
         name: "data__bg_shared_ptr",
@@ -2306,7 +2306,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect([...runCompiledKernelSemanticReference(compiled, input, launch).buffers.out as Uint32Array]).toEqual([30, 32, 34, 36]);
       expect(compiled.wgsl).toContain("fn mergeShared(dstKey__bg_shared_ptr: ptr<workgroup, array<u32, 4>>");
       expect(compiled.wgsl).toContain("mergeShared(&keys, 0u, &values, 0u, 0u, 0u, 2u, 2u");
@@ -2344,7 +2344,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.kernelIr.operations.filter((operation) => operation.kind === "call").map((operation) => operation.result?.name)).toEqual(["result", "result"]);
       expect([...runCompiledKernelSemanticReference(compiled, input, launch).buffers.out as Int32Array]).toEqual([6, 1, 1]);
       expect(compiled.wgsl).toContain("group__bg_group_rank: i32, group__bg_group_size: i32");
@@ -2371,7 +2371,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
       expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
@@ -2403,7 +2403,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("readTile(");
       expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 0]);
@@ -2429,8 +2429,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     out[tid] += result;
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
-      expect(semanticKernelIrWgslPreflightBlocker(compiled.kernelIr)).toBe("semantic WGSL does not support shared-memory barrier shape");
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(false);
+      expect(semanticKernelIrWgslPreflightBlocker(compiled.wgslLegalizedKernelIr)).toBe("semantic WGSL does not support shared-memory barrier shape");
       expect(compiled.kernelIr.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane")).toBe(false);
     });
 
@@ -2454,7 +2454,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("fn helperEarlyReturnBarrier");
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).not.toContain("if ((u32(tid) >= u32(N))) {\n    return;");
@@ -2485,7 +2485,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 1, 1]);
     });
 
@@ -2510,7 +2510,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("for (var k");
       expect(compiled.wgsl!.match(/workgroupBarrier\(\);/g)).toHaveLength(2);
@@ -2560,7 +2560,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
       expect(compiled.wgsl).toContain("scratch[u32(tid)] = x[u32(tid)];");
@@ -2706,7 +2706,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("scratch[u32(tid)] =");
       expect(compiled.wgsl).toContain("100u");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
@@ -2726,7 +2726,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
 
       expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("for (var row");
       expect(compiled.wgsl).toContain("bg_uniforms.N");
@@ -2748,7 +2748,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
       expect(compiled.analysis.barrierUniformity.kernel.unverifiedControlStatementStarts).toEqual([]);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     });
 
   it("keeps nested predicated barriers uniform after active-lane early returns", () => {
@@ -2772,7 +2772,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("for (var k");
       expect(compiled.wgsl).toContain("(u32((k + 1)) < 2u)");
@@ -2801,7 +2801,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl!.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
@@ -2828,7 +2828,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("} else {");
       expect(compiled.wgsl!.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
@@ -3067,7 +3067,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       });
       expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("enable subgroups;");
       expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Any|All)/u);
@@ -3093,7 +3093,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect([...result.buffers.x as Float32Array]).toEqual([1, 2, 3, 4]);
     });
@@ -3286,7 +3286,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_uint_32");
       expect(compiled.wgsl).toContain("warp == 0u");
     });
@@ -3315,7 +3315,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.kernelIr.operations.map((operation) => operation.kind)).toEqual([
         "declare",
         "barrier",
@@ -3491,7 +3491,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       const semantic = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("bitcast<f32>(bitcast<u32>(vec2<f16>(backing[");
       expect([...semantic.buffers.out as Float32Array]).toEqual([...input.buffers.input]);
     });

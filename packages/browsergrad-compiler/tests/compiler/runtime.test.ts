@@ -330,12 +330,12 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(canEmitSemanticKernelIrWgsl(unused.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(unused.wgslLegalizedKernelIr)).toBe(true);
       expect(canRunCompiledKernelSemanticReference(unused)).toBe(true);
       expect(unused.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(unused.wgsl).not.toContain("pool_pool");
       expect([...result.buffers.out as Uint32Array]).toEqual([7]);
-      expect(canEmitSemanticKernelIrWgsl(used.kernelIr)).toBe(false);
+      expect(canEmitSemanticKernelIrWgsl(used.wgslLegalizedKernelIr)).toBe(false);
     });
 
   it("allocates from a DevicePool and writes through casted pool pointers", () => {
@@ -761,8 +761,8 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       expect([...result.buffers.dst as Float32Array]).toEqual([2.5, 3.5, 2.5, 2.5]);
       expect(compiled.wgsl).toBeUndefined();
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
-      expect(canEmitSemanticKernelIrWgsl(gpuIr.ir)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(false);
+      expect(canEmitSemanticKernelIrWgsl(gpuIr)).toBe(true);
       expect(emitSemanticKernelIrWgsl(gpuIr).wgsl).not.toContain("cudaMemcpy");
       expect(runtimePlan.operations.map((operation) => operation.kind)).toEqual([
         "runtime-copy",
@@ -2157,7 +2157,7 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         pointerBaseOffsets: plan.launches[0]!.pointerBaseOffsets,
         workgroupSize: [1, 1, 1],
       });
-      expect(canEmitSemanticKernelIrWgsl(child.kernelIr, { pointerBaseOffsets: plan.launches[0]!.pointerBaseOffsets })).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(child.wgslLegalizedKernelIr, { pointerBaseOffsets: plan.launches[0]!.pointerBaseOffsets })).toBe(true);
       expect(child.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(child.wgsl).toContain("bg_base_out");
       expect(child.wgsl).toContain("var out__bg_ptr_offset: i32 = i32(bg_uniforms.bg_base_out);");
@@ -2692,7 +2692,7 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         code: "cuda-graph-conditional-host-orchestration",
         severity: "warning",
       }));
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("let bg_noop_arg_");
       expect([...result.buffers.out as Int32Array]).toEqual([1]);

@@ -334,7 +334,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       const referenceResult = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("for (var j: i32 = 0; (u32(j) < 3u); j += 1)");
       expect([...semanticResult.buffers.y as Float32Array]).toEqual([111, 222, 333, 444]);
       expect([...referenceResult.buffers.y as Float32Array]).toEqual([111, 222, 333, 444]);
@@ -358,7 +358,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       const referenceResult = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("continue;");
       expect(compiled.wgsl).toContain("break;");
       expect([...semanticResult.buffers.out as Int32Array]).toEqual([8]);
@@ -384,7 +384,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       const referenceResult = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("continuing {");
       expect(compiled.wgsl).toContain("break if !(");
       expect(compiled.wgsl).toContain("break if !((u32(i) < 4u));");
@@ -414,7 +414,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       expect(loop?.kind === "loop" ? loop.condition : undefined).toBeUndefined();
       expect(loop?.kind === "loop" ? loop.continuing?.length : undefined).toBeGreaterThan(0);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("continuing {");
       expect([...enabled.buffers.state as Uint32Array]).toEqual([16]);
       expect([...enabled.buffers.out as Uint32Array]).toEqual([3]);
@@ -439,7 +439,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       const result = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("return;");
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 2, 0, 0]);
@@ -638,7 +638,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
       expect(compiled.wgsl).toContain("total += conditional_helper_with_pointer_side_effect");
@@ -699,7 +699,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var total: u32;");
       expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
@@ -721,7 +721,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var total: u32;");
       expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
@@ -798,7 +798,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toMatch(/var bg__bg_condition_value_\d+_\d+: u32;/u);
       expect(compiled.wgsl).toContain("if ((u32(enabled) != 0u))");
@@ -829,7 +829,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
       expect(compiled.wgsl).toMatch(/nested_arg_sink\(\(3u \+ bg__bg_condition_value_\d+_\d+\)/u);
@@ -859,7 +859,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
       expect(compiled.wgsl).toContain("nested_condition_conditional_helper_with_pointer_side_effect");
@@ -880,7 +880,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toMatch(/var bg__bg_short_circuit_\d+_\d+: bool;/u);
       expect(compiled.wgsl).toContain("u32(bg_uniforms.enabled) != 0u");
@@ -915,7 +915,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
 
       expect(sequenceCompiled.wgsl).toMatch(/loop \{/u);
       expect(canRunCompiledKernelSemanticReference(sequenceCompiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(sequenceCompiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(sequenceCompiled.wgslLegalizedKernelIr)).toBe(true);
       expect(sequenceCompiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(sequenceCompiled.wgsl).toContain("nested_sequence_loop_condition_helper_with_pointer_side_effect");
       expect(sequenceCompiled.wgsl).not.toContain("select(0u, nested_sequence_loop_condition_helper_with_pointer_side_effect");
@@ -1023,7 +1023,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sequence-expression");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("local += 2;");
       expect(compiled.wgsl).toContain("return (local * 3);");
@@ -1048,7 +1048,7 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
       const result = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("flags: array<u32>");
       expect(compiled.wgsl).toContain("flags[1u] = select(0u, 1u, !(before));");
       expect([...result.buffers.flags as Uint32Array]).toEqual([0, 1, 1]);

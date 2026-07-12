@@ -329,7 +329,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("counter: array<atomic<u32>>");
       expect(compiled.wgsl).toContain("_ = atomicAdd(&counter[0u], 2u);");
@@ -366,7 +366,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       const result = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("atomicSub(&x[0u], 3)");
       expect(compiled.wgsl).toContain("atomicMin(&x[1u], 5)");
@@ -401,7 +401,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       const result = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("counter: array<atomic<u32>>");
       expect(compiled.wgsl).toContain("out[0u] = atomicAdd(&counter[0u], 2u);");
@@ -610,7 +610,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect([...result.buffers.counter as Uint32Array]).toEqual([3]);
       expect([...result.buffers.out as Float32Array]).toEqual([5, 3]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_ptr_atomicSub_u32(counter_buffer");
       expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer, u32((i32(out_base) + 0)), f32(");
@@ -637,7 +637,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
       expect([...semanticResult.buffers.counter as Uint32Array]).toEqual([4]);
@@ -724,7 +724,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_atomicMax_f32");
       expect([...result.buffers.result as Float32Array]).toEqual([9]);
@@ -819,7 +819,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("add_dynamic_shared_scalar(&scratch, u32((1 * 3)), tid");
       expect(compiled.wgsl).toContain("bg_atomicAdd_f32_workgroup(&(*lanes__bg_shared_ptr)[(lanes__bg_shared_ptr_base + u32(lane))], value)");
       expect([...result.buffers.out as Float32Array]).toEqual([2.5, 12.5]);
@@ -840,7 +840,7 @@ describe("CUDA-lite compiler: Atomics", () => {
     }
   }`, { workgroupSize: [4, 1, 1] });
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("divergent-break-before-barrier");
       expect(compiled.wgsl).toContain("workgroupBarrier();\n    if ((atomicLoad(&done) == 1u)) {\n      break;\n    }\n    workgroupBarrier();");
     });
@@ -931,7 +931,7 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("textureLoad(texArg");
       expect(compiled.wgsl).toContain("atomicAdd");
       expect(compiled.wgsl).toContain("atomicStore(&out[((u32(tid) * 4u) + 0u)]");
@@ -1031,7 +1031,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<workgroup> counter: array<atomic<u32>, 1>;");
       expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 2u)");
@@ -1090,7 +1090,7 @@ describe("CUDA-lite compiler: Atomics", () => {
         },
       });
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl!.match(/fn readDescriptorAtomic__bg_tex_/gu)).toHaveLength(2);
       expect(compiled.wgsl).toContain("atomicAdd(");
       expect(compiled.wgsl).toContain("textureDimensions(bg_texture)");
@@ -1111,7 +1111,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(compiled.wgsl).not.toContain("*&current");
       expect(compiled.wgsl).not.toContain("&vec2<f32>");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bitcast<u32>(f32((current).x)) >> 16u");
 
@@ -1189,7 +1189,7 @@ describe("CUDA-lite compiler: Atomics", () => {
 
       expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32");
       expect([...result.buffers.result as Float32Array]).toEqual([3]);
@@ -1288,7 +1288,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-atomic-f32");
       expect(compiled.wgsl).toContain("atomicCompareExchangeWeak");
       expect(compiled.wgsl).toContain("bitcast<u32>(2.5)");
@@ -1322,7 +1322,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("bg_ptr_atomicCompareExchange_f32");
       expect(compiled.wgsl).toContain("bitcast<f32>(atomicCompareExchangeWeak(&x[index], bitcast<u32>(compare), bitcast<u32>(value)).old_value)");
       expect([...semanticResult.buffers.x as Float32Array]).toEqual([7.5]);
@@ -1369,7 +1369,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("atomicExchange(&x[0u], bitcast<u32>(7.5));");
       expect(compiled.wgsl).not.toContain("bitcast<f32>(atomicExchange(&x[0u], bitcast<u32>(7.5)));");
@@ -1486,7 +1486,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("ptr<workgroup, array<atomic<u32>, 2>>");
       expect(compiled.wgsl).toContain("atomicAdd(&(*target__bg_shared_ptr)[(target__bg_shared_ptr_base + 0u)], value)");
@@ -1516,7 +1516,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("scratch: array<atomic<u32>>");
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
       expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&scratch[(index >> 2u)], value); }");
@@ -1556,7 +1556,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("case 0u: { return bitcast<i32>(atomicAdd(&scratch[(index >> 2u)], bitcast<u32>(value))); }");
       expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMin_storage_u32_as_i32(&scratch[(index >> 2u)], value); }");
       expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMax_storage_u32_as_i32(&scratch[(index >> 2u)], value); }");
@@ -1636,7 +1636,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32");
       expect(compiled.wgsl).toContain("vec4<f32>(bitcast<f32>(atomicLoad(&scratch");
@@ -1718,7 +1718,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       const result = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("ptr<workgroup, array<atomic<i32>, 1>>");
       expect(compiled.wgsl).toContain("atomicSub(&(*xi__bg_shared_ptr)[(xi__bg_shared_ptr_base + 0u)], 2)");
@@ -1746,7 +1746,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       const result = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("ptr<workgroup, atomic<u32>>");
       expect(compiled.wgsl).toContain("atomicExchange(&*target__bg_shared_ptr, value)");
@@ -1774,7 +1774,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("ptr<workgroup, atomic<u32>>");
       expect(compiled.wgsl).toContain("atomicExchange(&*flag__bg_shared_ptr, value)");
@@ -1906,7 +1906,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect([...semanticResult.buffers.x as Int32Array]).toEqual([3, 13, 1, 11]);
       expect([...semanticResult.buffers.out as Int32Array]).toEqual([4, 6, 5, 5, 7, 6, 14, 1, 2, 9, 12]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("out[0u] = atomicAdd(&x[0u], 2);");
       expect(compiled.wgsl).toContain("out[1u] = atomicSub(&x[0u], 1);");
@@ -1990,7 +1990,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect([...result.buffers.out as Uint32Array]).toEqual([1, 0]);
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 0]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<workgroup> counter: array<atomic<u32>, 1>;");
       expect(compiled.wgsl).toContain("out[0u] = bg_atomicInc_workgroup_u32(&counter[0u], 1u);");
@@ -2030,7 +2030,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect([...semanticResult.buffers.data as Uint32Array]).toEqual([1]);
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 2, 1]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("out[0u] = bg_atomicInc_storage_u32(&data[0u], 2u);");
       expect(compiled.wgsl).toContain("out[1u] = bg_atomicDec_storage_u32(&data[0u], 2u);");

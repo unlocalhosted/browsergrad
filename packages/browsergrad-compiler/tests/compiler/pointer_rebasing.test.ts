@@ -30,7 +30,7 @@ describe("CUDA-lite compiler: Pointer rebasing", () => {
 
       expect([...result.buffers.out as Uint32Array]).toEqual([30, 20, 30]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var x__bg_ptr_offset: i32 = 0;");
       expect(compiled.wgsl).toContain("x__bg_ptr_offset = (x__bg_ptr_offset + bg_uniforms.offset);");
@@ -82,7 +82,7 @@ describe("CUDA-lite compiler: Pointer rebasing", () => {
       );
       expect([...nullGuardResult.buffers.out as Uint32Array]).toEqual([42, 0, 42]);
       expect([...zeroPointeeResult.buffers.out as Uint32Array]).toEqual([0, 0, 0]);
-      expect(canEmitSemanticKernelIrWgsl(nullGuard.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(nullGuard.wgslLegalizedKernelIr)).toBe(true);
       expect(nullGuard.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(nullGuard.wgsl).not.toContain("x[0u] != 0u");
 
@@ -97,7 +97,7 @@ describe("CUDA-lite compiler: Pointer rebasing", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
       expect([...pointerIdentityResult.buffers.out as Uint32Array]).toEqual([1, 2]);
-      expect(canEmitSemanticKernelIrWgsl(pointerIdentity.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(pointerIdentity.wgslLegalizedKernelIr)).toBe(true);
       expect(pointerIdentity.wgsl).toContain("!((0u) == (1u) && (0u) == (0u))");
       expect(pointerIdentity.wgsl).toContain("out[1u] = 2u;");
 
@@ -114,7 +114,7 @@ describe("CUDA-lite compiler: Pointer rebasing", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
       expect(canRunCompiledKernelSemanticReference(helperPointerIdentity)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(helperPointerIdentity.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(helperPointerIdentity.wgslLegalizedKernelIr)).toBe(true);
       expect([...helperPointerIdentityResult.buffers.out as Int32Array]).toEqual([1, 0, 0]);
       expect(helperPointerIdentity.wgsl).toContain("left_buffer");
       expect(helperPointerIdentity.wgsl).toContain("left_base");

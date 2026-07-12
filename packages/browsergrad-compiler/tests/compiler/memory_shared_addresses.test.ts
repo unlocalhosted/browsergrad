@@ -20,7 +20,7 @@ __global__ void shared_2d_address(uint *out) {
     );
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("* 4u)");
     expect([...result.buffers.out as Uint32Array]).toEqual([24]);
   });
@@ -42,7 +42,7 @@ __global__ void async_copy_2d(const float *input, float *output) {
     );
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(JSON.stringify(compiled.kernelIr.operations)).toContain('"kind":"copy"');
     expect([...result.buffers.output as Float32Array]).toEqual([3]);
   });

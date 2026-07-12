@@ -108,6 +108,7 @@ import {
   semanticAtomicUsesF32Storage,
 } from "./semantic_atomic_intrinsics.js";
 import type { WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
+import type { WgslLegalizedIrArtifact } from "./compiler_phases.js";
 import {
   createTypedWgslExpression,
   convertTypedWgslExpression,
@@ -342,19 +343,25 @@ const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 
 export function canEmitSemanticKernelIrWgsl(
-  ir: SemanticKernelIrModule,
+  legalized: WgslLegalizedIrArtifact<SemanticKernelIrModule>,
   _options: EmitSemanticKernelIrWgslOptions = {},
 ): boolean {
-  return semanticKernelIrWgslPreflightFailure(ir) === undefined;
+  return semanticKernelIrWgslPreflightFailureForIr(legalized.ir) === undefined;
 }
 
 export function semanticKernelIrWgslPreflightBlocker(
-  ir: SemanticKernelIrModule,
+  legalized: WgslLegalizedIrArtifact<SemanticKernelIrModule>,
 ): string | undefined {
-  return semanticKernelIrWgslPreflightFailure(ir)?.message;
+  return semanticKernelIrWgslPreflightFailureForIr(legalized.ir)?.message;
 }
 
 export function semanticKernelIrWgslPreflightFailure(
+  legalized: WgslLegalizedIrArtifact<SemanticKernelIrModule>,
+): SemanticKernelIrWgslPreflightFailure | undefined {
+  return semanticKernelIrWgslPreflightFailureForIr(legalized.ir);
+}
+
+function semanticKernelIrWgslPreflightFailureForIr(
   ir: SemanticKernelIrModule,
 ): SemanticKernelIrWgslPreflightFailure | undefined {
   const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
@@ -396,7 +403,7 @@ export function emitSemanticKernelIrWgsl(
   options: EmitSemanticKernelIrWgslOptions = {},
 ): SemanticKernelIrWgslOutput {
   const ir = legalized.ir;
-  const failure = semanticKernelIrWgslPreflightFailure(ir);
+  const failure = semanticKernelIrWgslPreflightFailureForIr(ir);
   if (failure) throw semanticWgslError(failure.message, failure.span);
 
   const textureSpecializations = collectSemanticTextureDescriptorSpecializations(ir, options);

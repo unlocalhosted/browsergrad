@@ -31,7 +31,7 @@ __global__ void constexpr_branch(int *out) {
       expect.objectContaining({ name: "count", constant: true }),
     ]);
     expect(JSON.stringify(compiled.kernelIr.operations)).not.toContain('"kind":"branch"');
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...result.buffers.out as Int32Array]).toEqual([7]);
   });
 

@@ -325,7 +325,7 @@ __global__ void mutableScalarParams(float alpha, float beta, float *out) {
     );
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toMatch(/var bg_param_local_beta_\d+: f32 = bg_uniforms\.beta;/u);
     expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
@@ -425,7 +425,7 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-member");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var lo: vec2<f32> = value.xy;");
       expect(compiled.wgsl).toContain("var mix: vec3<f32> = value.zyx;");
       expect(compiled.wgsl).toContain("var color: vec4<f32> = value.xyzw;");
@@ -470,7 +470,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("invalid-assignment-target");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-assignment");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("value.xy = next;");
       expect(compiled.wgsl).toContain("value.yx = value.zw;");
       expect(compiled.wgsl).toContain("value.xy = value.xy + vec2<f32>(f32(1.0), f32(2.0));");
@@ -524,7 +524,7 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-assignment");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("values[0u].xy = vec2<f32>(f32(9.0), f32(8.0));");
       expect([...result.buffers.out as Float32Array]).toEqual([9, 8, 4, 6]);
       expect([...result.buffers.ui as Uint32Array]).toEqual([14, 14, 11, 8]);
@@ -578,7 +578,7 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-array-init");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var vals: array<vec4<f32>, 2>;");
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 2, 3, 4, 2, 2, 3, 4]);
@@ -1017,7 +1017,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("exp2(value)");
       expect(compiled.wgsl).toContain("pow(10.0, value)");
@@ -1074,7 +1074,7 @@ __global__ void shared_helper_result(int *out, int n) {
       });
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("asin(unit)");
       expect(compiled.wgsl).toContain("acos(unit)");
@@ -1111,7 +1111,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expected = [...input].map((value) => roundAway(value) + roundAway(value + 0.25));
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("select(floor(abs(value) + 0.5), -floor(abs(value) + 0.5), (value < 0.0))");
       expect(compiled.wgsl).toContain("select(floor(abs((value + 0.25)) + 0.5), -floor(abs((value + 0.25)) + 0.5), ((value + 0.25) < 0.0))");
@@ -1140,7 +1140,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expected = [...input].map((value) => roundEven(value) + roundEven(value) + roundEven(value + 1) + roundEven(value + 1));
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_semantic_round_even_f32");
       expect(compiled.wgsl).toContain("bg_semantic_round_even_f32(value)");
@@ -1187,7 +1187,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("(value * exp2(f32(2)))");
       expect(compiled.wgsl).toContain("(value - trunc(value / 2.0) * 2.0)");
@@ -1247,7 +1247,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("i32(bg_semantic_round_even_f32(a))");
       expect(compiled.wgsl).toContain("i32(select(floor(abs(a) + 0.5)");
@@ -1352,7 +1352,7 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_semantic_erf_f32(");
       expect(compiled.wgsl).toContain("fn bg_semantic_tgamma_f32(");
@@ -1413,7 +1413,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("sqrt(f32(bg_uniforms.n))");
       expect(compiled.wgsl).toContain("exp(f32((bg_uniforms.n - 2)))");
@@ -1442,7 +1442,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
       expect(compiled.wgsl).toContain("((((bg_uniforms.n + 1) + 4) - 1) / 4)");
@@ -1472,7 +1472,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("inverseSqrt((bg_uniforms.x + 4.0))");
       expect(compiled.wgsl).toContain("atan2(bg_uniforms.x, 2.0)");
@@ -1568,7 +1568,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sincos-output");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg__bg_sincos_angle");
       expect(compiled.wgsl).toContain("sin(bg__bg_sincos_angle");
@@ -1614,7 +1614,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
       expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
@@ -1699,7 +1699,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("countLeadingZeros");
       expect(compiled.wgsl).toContain("countTrailingZeros");
@@ -1758,7 +1758,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bitcast<u32>(value)");
       expect(compiled.wgsl).toContain("bitcast<i32>(value)");
@@ -1794,7 +1794,7 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("fn bg_semantic_vadd2_u32(");
       expect(compiled.wgsl).toContain("fn bg_semantic_vsub2_u32(");
       expect(compiled.wgsl).toContain("fn bg_semantic_vabsdiffu2_u32(");
@@ -1900,7 +1900,7 @@ __global__ void shared_helper_result(int *out, int n) {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_semantic_erfinv_f32(");
       expect(compiled.wgsl).toContain("fn bg_semantic_normcdfinv_f32(");
@@ -1956,7 +1956,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
       const out = [...result.buffers.out as Float32Array];
 
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect([...semanticResult.buffers.kinds as Uint32Array]).toEqual([4, 64]);
       expect(Number.isNaN((semanticResult.buffers.out as Float32Array)[3])).toBe(true);
       expect(compiled.wgsl).toContain("fn bg_f32_inf() -> f32");
@@ -2069,7 +2069,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.kernelIr.operations.filter((operation) => operation.kind === "copy")).toHaveLength(2);
       expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3, 4, 3, 4, 5, 6, 7, 8]);
     });
@@ -2113,7 +2113,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("vec3<f32>(f32((value).x), f32((value).y), f32((value).z))");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3]);
@@ -2154,7 +2154,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("vec4<f32>(f32((xyz).x), f32((xyz).y), f32((xyz).z), f32(7.0))");
       expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 5, 7]);
@@ -2208,7 +2208,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fma(vec3<f32>(f32(0.25)");
       expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
@@ -2317,7 +2317,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("max(");
       expect(compiled.wgsl).toContain("fma(");
@@ -2342,7 +2342,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticResult = runCompiledKernelSemanticReference(compiled, { buffers: { out: createWgslFloat16Array(2) } }, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("value = ((left * right) + value);");
       expect(compiled.wgsl).toContain("value += vec2<f32>(");
       expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([10, 18]);
@@ -2367,8 +2367,8 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticResult = runCompiledKernelSemanticReference(compiled, { buffers: { out: new Float32Array(4) } }, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(semanticKernelIrWgslPreflightFailure(compiled.kernelIr)).toBeUndefined();
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(semanticKernelIrWgslPreflightFailure(compiled.wgslLegalizedKernelIr)).toBeUndefined();
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("value /= vec4<f32>(f32(4.0)");
       expect(compiled.wgsl).toContain("value *= vec4<f32>(f32(2.0)");
       expect(Array.from(result.buffers.out as Float32Array)).toEqual([6, 12, 18, 24]);
@@ -2403,7 +2403,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.wgsl).toContain("select(clamp");
       expect(Array.from(result.buffers.out as Iterable<number>)).toEqual([1, 0, 1, 0.625]);
@@ -2438,7 +2438,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expected = [1.5, 1.25, -1, 2, -2, 1, 1.5, -1.25, 0.25, 0.0625, 0.5, 0.25, 2, 4, -1, 1];
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("sqrt(vec2<f32>");
@@ -2508,7 +2508,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expectedFlags = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1];
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(Array.from(result.buffers.vec as Iterable<number>)).toEqual(expectedVec);
@@ -2548,7 +2548,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticOut = Array.from(semanticResult.buffers.out as Iterable<number>);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(out.slice(0, 4)).toEqual([1, 2, 3, 4]);
       expect(Number.isNaN(out[4])).toBe(true);
@@ -2594,7 +2594,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expectedOut = [2, 1, 1, 1, 1, 1, 2, 2, 1, 3, 2, 4, 2, 1];
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(Array.from(result.buffers.scalar as Iterable<number>)).toEqual([1, 2]);
       expect(Array.from(result.buffers.out as Iterable<number>)).toEqual(expectedOut);
@@ -2798,7 +2798,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn ComplexMul");
       expect(compiled.wgsl).toContain("a[((u32(i) * 2u) + 0u)]");
@@ -2827,7 +2827,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("dst[((u32(i) * 2u) + 0u)]");
       expect(compiled.wgsl).toContain("dst[((u32(i) * 2u) + 1u)]");
@@ -3380,7 +3380,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("const metric: vec3<f32> = vec3<f32>(1.0, 2.0, 3.0)");
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([6]);
@@ -3406,7 +3406,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("min(");
       expect(compiled.wgsl).toContain("max(");
@@ -3434,7 +3434,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const result = runCompiledKernelReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect([...semanticResult.buffers.x as Float32Array]).toEqual([2, 3, 5, 7]);
       expect([...semanticResult.buffers.y as Float32Array]).toEqual([2, 3, 5, 7]);
@@ -3485,7 +3485,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("enable f16;");
       expect(compiled.wgsl).toContain("f32(input[u32(idx)])");
@@ -3546,7 +3546,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("enable f16;");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -3606,7 +3606,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -3696,7 +3696,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
@@ -3725,7 +3725,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect([...result.buffers.out as Int32Array]).toEqual([-4]);
       expect([...semanticResult.buffers.out as Int32Array]).toEqual([-4]);
@@ -3785,7 +3785,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("enable f16;");
       expect(compiled.wgsl).toContain("fma(");
@@ -3836,7 +3836,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticOutput = Array.from(semanticResult.buffers.output as Iterable<number>);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(Number.isNaN(output[0])).toBe(true);
       expect(Number.isNaN(output[1])).toBe(true);
@@ -3880,7 +3880,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect([...result.buffers.out as Int32Array]).toEqual([2, 1, 2, 1, -2, -1, -1, -2, -16384]);
       expect([...result.buffers.uout as Uint32Array]).toEqual([2, 1, 2, 1]);
@@ -3917,7 +3917,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expected = [2048, 2048, 2050, 2048, -2048, -2048, -2048, -2050, 2048, 2050, -2050, 2050, 32752, -32768, 2050, -1];
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(Array.from(result.buffers.out as Iterable<number>)).toEqual(expected);
       expect(Array.from(semanticResult.buffers.out as Iterable<number>)).toEqual(expected);
@@ -3994,7 +3994,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expected = [256, 256, 258, 256, -256, -256, -256, -258, 258, -258, 258, -1, -258, 258, 256, 2, 256, -258, 258, 256];
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
       expect([...result.buffers.out as Float32Array]).toEqual(expected);
@@ -4079,7 +4079,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expected = [256, -256, 256, -256, 256, -256, 256, 256, -256, -256, 256, 256, -256, -256, -256, 256, 1.5, 1.5, 256, 256];
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
@@ -4178,7 +4178,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const expected = [4, 1.75, 1, 6.25, 3.75, -9, 2, 3, -1.5, 2.25, 1.5, 2.25, 4.75, -10, 0.5, 1, 4.75, 0, 0, 16, 2, -1, 1, -2, 0.25, 0.0625, 0.5, 0.25, 2, 4, 1, -1, 1, 2.71875, 2, 8, 1, 10, 0, 1.3828125, 0, 2, 0, 1, 0, 0.83984375, 1, 0.5390625, 0, 0.76171875, 0, 0.76171875, 2, -2];
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
@@ -4257,7 +4257,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 2, 1, 3, 1, 1, 1, 1]);
@@ -4299,7 +4299,7 @@ __global__ void shared_helper_result(int *out, int n) {
       const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("sqrt(f32(");
@@ -4397,7 +4397,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect([...result.buffers.out as Float32Array]).toEqual([1, 1, 1, 1]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 1, 1, 1]);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");

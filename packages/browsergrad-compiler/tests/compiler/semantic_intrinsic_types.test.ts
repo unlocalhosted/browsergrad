@@ -25,7 +25,7 @@ __global__ void local_half2_to_float2(float *out) {
     );
 
     expect(declaration).toMatchObject({ kind: "declare", init: { kind: "call", valueType: "float2" } });
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
   });
 });

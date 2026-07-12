@@ -12,11 +12,10 @@ import {
   semanticMemoryIdFromSymbol,
 } from "./semantic_ids.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type SourceSpan } from "./types.js";
+import { completeIrVerification, type VerifiedIrArtifact } from "./compiler_phases.js";
 const verifiedSemanticKernelIrArtifact: unique symbol = Symbol("verified-semantic-kernel-ir");
 
-export interface VerifiedSemanticKernelIr<T extends SemanticKernelIrModule = SemanticKernelIrModule> {
-  readonly kind: "verified-semantic-kernel-ir";
-  readonly ir: T;
+export interface VerifiedSemanticKernelIr<T extends SemanticKernelIrModule = SemanticKernelIrModule> extends VerifiedIrArtifact<T> {
   readonly [verifiedSemanticKernelIrArtifact]: true;
 }
 
@@ -70,11 +69,11 @@ export function validateSemanticKernelIr<T extends SemanticKernelIrModule>(
 ): VerifiedSemanticKernelIr<T> {
   const issues = verifySemanticKernelIr(ir);
   if (issues.length === 0) {
-    return Object.freeze({
+    return completeIrVerification(Object.freeze({
       kind: "verified-semantic-kernel-ir",
       ir,
       [verifiedSemanticKernelIrArtifact]: true as const,
-    });
+    }));
   }
   const diagnostics: readonly CudaLiteDiagnostic[] = issues.map((issue) => ({
     code: issue.code,

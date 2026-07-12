@@ -26,7 +26,7 @@ __global__ void semantic_wmma(float *A, float *B, float *C) {
     );
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.kernelIr.operations.map((operation) => operation.kind)).toEqual([
       "declare", "declare", "declare", "matrix-fill", "matrix-load", "matrix-load", "matrix-mma", "matrix-store",
     ]);
@@ -47,7 +47,7 @@ __global__ void semantic_wmma_array(float *A, float *C) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...result.buffers.C as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 });

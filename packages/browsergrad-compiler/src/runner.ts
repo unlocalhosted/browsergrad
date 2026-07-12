@@ -102,7 +102,7 @@ export function compileCudaLiteKernel(
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
     ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
   };
-  const emitted = canEmitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
+  const emitted = canEmitSemanticKernelIrWgsl(wgslLegalizedKernelIr, semanticWgslOptions)
     ? emitSemanticKernelIrWgsl(wgslLegalizedKernelIr, semanticWgslOptions)
     : undefined;
   const loweringPlan = createCudaLoweringPlan(diagnostics);
@@ -110,6 +110,9 @@ export function compileCudaLiteKernel(
     ast,
     semantic,
     kernelIr,
+    verifiedKernelIr,
+    typeCheckedKernelIr,
+    wgslLegalizedKernelIr,
     analysis,
     ...(emitted === undefined ? {} : { wgsl: emitted.wgsl, wgslProgram: emitted.program }),
     diagnostics,

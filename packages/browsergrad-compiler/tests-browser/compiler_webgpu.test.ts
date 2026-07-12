@@ -387,7 +387,7 @@ __global__ void helperLocalArray(const float *input, float *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([20]);
   });
@@ -445,7 +445,7 @@ __global__ void laneId(uint *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual(Array.from({ length: 32 }, (_, index) => index));
   });
@@ -468,7 +468,7 @@ __global__ void warpAndLaneMask(uint *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array].slice(0, 64)).toEqual([
       ...new Array(32).fill(0),
@@ -496,7 +496,7 @@ __global__ void sharedScalarVectorView(float *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([4, 14]);
   });
@@ -518,7 +518,7 @@ __global__ void sharedScalarAtomic(int *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
     expect([...actual.buffers.out as Int32Array]).toEqual([9]);
   });
@@ -543,7 +543,7 @@ __global__ void chainedVectorStore(float4 *x, float4 *y, float *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.x as Float32Array]).toEqual([2, 3, 5, 7]);
     expect([...actual.buffers.y as Float32Array]).toEqual([2, 3, 5, 7]);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
@@ -563,7 +563,7 @@ __global__ void storageRebase(uint *data, uint *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([10, 11, 20, 21]);
   });
@@ -582,7 +582,7 @@ __global__ void offsetPointerDeref(uint *data, uint *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([10, 20, 11, 21]);
   });
@@ -604,7 +604,7 @@ __global__ void pitchedFloat(uchar* bytes, int pitch) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([...expected.buffers.bytes as Uint32Array]);
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([0, 0, 0, 64, 0, 0, 64, 64]);
   });
@@ -630,7 +630,7 @@ __global__ void localOut(float *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([3, 5, 1]);
   });
@@ -690,7 +690,7 @@ __global__ void constantLocalOut(float *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([6, 1]);
   });
 
@@ -807,7 +807,7 @@ __global__ void asyncCopy(const float* input, float* output) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.output as Float32Array]).toEqual([...expected.buffers.output as Float32Array]);
     expect([...actual.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
   });
@@ -836,7 +836,7 @@ __global__ void asyncCopyBytes(const float* input, float* output) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.output as Float32Array]).toEqual([...expected.buffers.output as Float32Array]);
     expect([...actual.buffers.output as Float32Array]).toEqual([3, 7]);
   });
@@ -1185,7 +1185,7 @@ __global__ void parent(float *x, int n) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
   });
 
@@ -1209,7 +1209,7 @@ __global__ void cgShared(float *out) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
@@ -1231,7 +1231,7 @@ __global__ void sharedBarrierCaller(float *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...semantic.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
     expect([...actual.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
@@ -1280,7 +1280,7 @@ __global__ void matrixMulCUDA_block16(float *C, float *A, float *B, int wA, int 
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...semantic.buffers.C as Float32Array]).toEqual([...b]);
     expect([...actual.buffers.C as Float32Array]).toEqual([...b]);
@@ -1409,7 +1409,7 @@ __global__ void earlyReturnBarrierHelper(const float *input, float *out, int N) 
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Float32Array]).toEqual([3, 5, 7, 0]);
     expect([...actual.buffers.out as Float32Array]).toEqual([3, 5, 7, 0]);
   });
@@ -1433,7 +1433,7 @@ __global__ void callEarlyReturnBarrierHelper(float *out, int N) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Float32Array]).toEqual([2, 3, 4, 4]);
     expect([...actual.buffers.out as Float32Array]).toEqual([2, 3, 4, 4]);
   });
@@ -1461,7 +1461,7 @@ __global__ void sharedUniformBreak(uint *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Uint32Array]).toEqual([1, 1, 1, 1]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([1, 1, 1, 1]);
   });
@@ -1489,7 +1489,7 @@ __global__ void predicatedBarrierHelper(uint *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Uint32Array]).toEqual([7, 8, 9, 10, 9, 9, 9, 9]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([7, 8, 9, 10, 9, 9, 9, 9]);
   });
@@ -1622,7 +1622,7 @@ __global__ void warpMax(const float* x, float* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
@@ -2631,7 +2631,7 @@ __global__ void local_uchar(uint *out) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([3, 255]);
   });
@@ -2672,7 +2672,7 @@ __global__ void storage_byte_helper(uchar *bytes, uint *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([...expected.buffers.bytes as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([8]);
@@ -2690,7 +2690,7 @@ __global__ void packed_byte_vector(uchar *bytes) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([...expected.buffers.bytes as Uint32Array]);
     expect([...actual.buffers.bytes as Uint32Array]).toEqual([0, 44, 255, 0]);
   });
@@ -2716,7 +2716,7 @@ __global__ void raw_byte_word(const uchar *bytes, uint *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([1, 2, 254, 255]);
   });
@@ -2739,7 +2739,7 @@ __global__ void sad4_two(uint *out, uint *a, uint *b) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([11, 256]);
   });
@@ -2769,7 +2769,7 @@ __global__ void local_pointer_array(float *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([12, 15, 18]);
@@ -2788,7 +2788,7 @@ __global__ void mutable_scalar_params(float alpha, float beta, float *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([2, 3]);
@@ -3231,7 +3231,7 @@ __global__ void nested_loop_pointer(float* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
@@ -3511,7 +3511,7 @@ __global__ void complex_helper(cufftComplex* a, cufftComplex* b, float scale) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.a as Float32Array]).toEqual([...expected.buffers.a as Float32Array]);
     expect([...actual.buffers.a as Float32Array]).toEqual([-3.5, 8, -5.5, 26]);
@@ -3537,7 +3537,7 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
     expect([...actual.buffers.dst as Float32Array]).toEqual([-1, 2, -3, 4]);
@@ -3557,7 +3557,7 @@ __global__ void complex_lanes(cufftComplex* src, cufftComplex* dst, float scale)
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
@@ -3581,7 +3581,7 @@ __global__ void ptx_f32_binary(float *out, float *input) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([6, 3, -8, 2, -1, -4, 6, -1.5]);
   });
@@ -3605,7 +3605,7 @@ __global__ void bfindKernel(uint *out, uint *input) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([0xffffffff, 0, 4, 31]);
   });
@@ -3641,7 +3641,7 @@ __global__ void write1d(cudaSurfaceObject_t outputSurf) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([10, 11]);
   });
@@ -3708,7 +3708,7 @@ __global__ void indexedSurface(cudaSurfaceObject_t *surfaces, uint *out, uint la
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.surfaces as Float32Array]).toEqual([0, 0, 0, 23]);
     expect([...actual.buffers.surfaces as Float32Array]).toEqual([0, 0, 0, 23]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([23]);
@@ -3737,7 +3737,7 @@ __global__ void bindlessRead(float4 *out, cudaTextureObject_t atlas) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Float32Array]).toEqual([10, 20, 30, 40]);
     expect([...actual.buffers.out as Float32Array]).toEqual([10, 20, 30, 40]);
   });
@@ -3788,7 +3788,7 @@ __global__ void generatedRandom(float* floats, int* ints) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.floats as Float32Array]).toEqual([...expected.buffers.floats as Float32Array]);
     expect([...actual.buffers.ints as Int32Array]).toEqual([...expected.buffers.ints as Int32Array]);
     expect([...actual.buffers.ints as Int32Array]).toEqual([3, -1906155575]);
@@ -4124,7 +4124,7 @@ __global__ void localVectorIdentity(const float4* input, float4* output) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.output as Float32Array]).toEqual([...expected.buffers.output as Float32Array]);
   });
 
@@ -5081,7 +5081,7 @@ __global__ void early_return_barrier(float *x, int limit) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
     expect([...actual.buffers.x as Float32Array]).toEqual([2, 3, 4, 4]);
   });
@@ -5101,7 +5101,7 @@ __global__ void graphCondition(int *input, int *out, cudaGraphConditionalHandle 
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
     expect([...actual.buffers.out as Int32Array]).toEqual([1]);
   });
@@ -5132,7 +5132,7 @@ __global__ void qsort_shape(uint *indata, uint *outdata, uint offset, uint len, 
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.wgsl).not.toContain("stack_pool");
     expect([...actual.buffers.outdata as Uint32Array]).toEqual([...expected.buffers.outdata as Uint32Array]);
     expect([...actual.buffers.outdata as Uint32Array]).toEqual([1, 2, 3, 4]);
@@ -5163,7 +5163,7 @@ __global__ void predicatedDeclarationScan(uint *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [64, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([
       1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66, 78, 91, 105, 120, 136,
       153, 171, 190, 210, 231, 253, 276, 300, 325, 351, 378, 406, 435, 465, 496, 528,
@@ -5183,7 +5183,7 @@ __global__ void topologyAtomic(int *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Int32Array]).toEqual([4]);
   });
 
@@ -5214,7 +5214,7 @@ __global__ void partitionSums(const int *input, int *sums, int *counts) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(compiled.kernelIr.requiredFeatures).not.toContain("subgroups");
     expect([...actual.buffers.sums as Int32Array]).toEqual([...expected.buffers.sums as Int32Array]);
     expect([...actual.buffers.counts as Int32Array]).toEqual([...expected.buffers.counts as Int32Array]);
@@ -5236,7 +5236,7 @@ __global__ void helper_pointer_identity(uint* x, uint* y, int* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
     expect([...actual.buffers.out as Int32Array]).toEqual([1, 0, 0]);
   });
@@ -5266,7 +5266,7 @@ __global__ void nestedDynamicShared(const float *input, float *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([10]);
   });
 
@@ -5285,7 +5285,7 @@ __global__ void dynamic_shared_alias(uint* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([8, 7]);
   });
@@ -5302,7 +5302,7 @@ __global__ void shared_2d_address(uint* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Uint32Array]).toEqual([24]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([24]);
   });
@@ -5323,7 +5323,7 @@ __global__ void async_copy_2d(const float* input, float* output) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.output as Float32Array]).toEqual([3]);
     expect([...actual.buffers.output as Float32Array]).toEqual([3]);
   });
@@ -5349,7 +5349,7 @@ __global__ void localHalfOverlay(uint* out, float* sum) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
     expect([...actual.buffers.sum as Float32Array]).toEqual([10]);
   });
@@ -5470,7 +5470,7 @@ __global__ void half_pack_reinterpret(const half* input, half* output) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(device, compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(Array.from(actual.buffers.output as Iterable<number>)).toEqual(Array.from(expected.buffers.output as Iterable<number>));
     expect(Array.from(actual.buffers.output as Iterable<number>)).toEqual([3, 4, 3, 4, 5, 6, 7, 8]);
   });
@@ -5495,7 +5495,7 @@ __global__ void uint_to_half_pack(half* output) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(device, compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect(Array.from(expected.buffers.output as Iterable<number>)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(Array.from(actual.buffers.output as Iterable<number>)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
@@ -5516,7 +5516,7 @@ __global__ void local_scalar_bit_view(float* out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Float32Array]).toEqual([5.5]);
     expect([...actual.buffers.out as Float32Array]).toEqual([5.5]);
   });
@@ -5541,7 +5541,7 @@ __global__ void local_vector_scalar_bits(float* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
     expect([...actual.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
   });
@@ -5564,7 +5564,7 @@ __global__ void semantic_wmma(float *A, float *B, float *C) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.C as Float32Array]).toEqual([20, 23, 44, 51]);
     expect([...actual.buffers.C as Float32Array]).toEqual([20, 23, 44, 51]);
   });
@@ -5585,7 +5585,7 @@ __global__ void local_half2_to_float2(float *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Float32Array]).toEqual([1, 2]);
     expect([...actual.buffers.out as Float32Array]).toEqual([1, 2]);
   });
@@ -5613,7 +5613,7 @@ __global__ void nested_collective_after_return(uint *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([1, 1, 1, 0]);
   });
@@ -5635,7 +5635,7 @@ __global__ void initialized_after_return(const int *input, int *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
     expect([...actual.buffers.out as Int32Array]).toEqual([10, 20, 30, 0]);
   });
@@ -5657,7 +5657,7 @@ __global__ void guarded_barrier(int *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
     expect([...actual.buffers.out as Int32Array]).toEqual([1, 2, 3, 0]);
   });
@@ -5684,7 +5684,7 @@ __global__ void integer_ptx_edges(uint *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Uint32Array]).toEqual([0x70b88d78, 0xffffffff, 0xffffffff, 0x80000000]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([0x70b88d78, 0xffffffff, 0xffffffff, 0x80000000]);
   });
@@ -5704,7 +5704,7 @@ __global__ void boolStorage(bool *flags, uint *out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.flags as Uint32Array]).toEqual([0, 1, 1]);
     expect([...actual.buffers.flags as Uint32Array]).toEqual([0, 1, 1]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([7, 11]);
@@ -5726,7 +5726,7 @@ __global__ void lazyDoWhile(uint* state, uint* out, int enabled) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.state as Uint32Array]).toEqual([16]);
     expect([...actual.buffers.state as Uint32Array]).toEqual([16]);
     expect([...actual.buffers.out as Uint32Array]).toEqual([3]);
@@ -5746,7 +5746,7 @@ __global__ void packedSharedCopy(const int* input, int* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
     expect([...actual.buffers.out as Int32Array]).toEqual([...input.buffers.input]);
   });
@@ -5773,7 +5773,7 @@ __global__ void selectedPackedCopy(const uchar* left, const uchar* right, int* o
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
     expect([...actual.buffers.out as Int32Array]).toEqual([0x0d0e0f10, 0x090a0b0c, 0x05060708, 0x01020304]);
   });
@@ -5794,7 +5794,7 @@ __global__ void sharedFloatTile(const float* input, float* out) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([...input.buffers.input]);
   });
@@ -5826,7 +5826,7 @@ __global__ void sharedVectorScalarAtomics(uint* uintOut, float* floatOut) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.uintOut as Uint32Array]).toEqual([7, 8]);
     expect([...expected.buffers.floatOut as Float32Array]).toEqual([7, 8]);
     expect([...actual.buffers.uintOut as Uint32Array]).toEqual([7, 8]);
@@ -5853,7 +5853,7 @@ __global__ void dynamicPointerArray(uint* storage) {
     const expected = runCompiledKernelSemanticReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
     expect([...actual.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
   });
