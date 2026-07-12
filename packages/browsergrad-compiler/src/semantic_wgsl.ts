@@ -303,6 +303,7 @@ export interface SemanticKernelIrWgslPreflightFailure {
 export interface EmitSemanticKernelIrWgslOptions extends SemanticTextureDescriptorOptions {
   readonly activeCollectivePredicate?: string;
   readonly activeFunction?: string;
+  readonly workgroupUniformExpression?: boolean;
 }
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
@@ -2182,8 +2183,11 @@ function emitSemanticOperation(
       if (operation.expression.kind === "sequence") return emitSemanticSequenceStatement(operation.expression, ir, names, indentLevel, options, textureSpecializations);
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options, textureSpecializations)};`];
     case "branch": {
+      const conditionOptions = operation.conditionUniformity === "workgroup"
+        ? { ...options, workgroupUniformExpression: true }
+        : options;
       if (semanticOperationsContainWorkgroupCollective(operation.consequent) || semanticOperationsContainWorkgroupCollective(operation.alternate)) {
-        const condition = emitTruthiness(operation.condition, ir, names, options);
+        const condition = emitTruthiness(operation.condition, ir, names, conditionOptions);
         return [
           `${prefix}{`,
           ...emitSemanticPredicatedOperations(operation.consequent, condition, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations),
@@ -2193,7 +2197,7 @@ function emitSemanticOperation(
           `${prefix}}`,
         ];
       }
-      const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names, options)}) {`];
+      const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names, conditionOptions)}) {`];
       lines.push(...emitSemanticOperations(operation.consequent, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
       if (operation.alternate.length > 0) {
         lines.push(`${prefix}} else {`);
@@ -3986,6 +3990,12 @@ function emitSemanticExpression(
         const ref = `${nameFor(expression.name, names)}[0u]`;
         return semanticAtomicDeviceGlobalNames(ir.operations).has(expression.name) ? `atomicLoad(&${ref})` : ref;
       }
+      if (
+        options.workgroupUniformExpression &&
+        expression.addressSpace === "shared" &&
+        ir.memory.some((symbol) => symbol.name === expression.name && symbol.addressSpace === "shared" && symbol.dimensions.length === 0) &&
+        !semanticAtomicSharedNames(ir.operations, ir.functions).has(expression.name)
+      ) return `workgroupUniformLoad(&${nameFor(expression.name, names)})`;
       if (expression.addressSpace === "shared" && (semanticAtomicSharedNames(ir.operations, ir.functions).has(expression.name) || semanticWgslFunctionSharedPointerAtomicParam(ir, expression.name))) {
         return `atomicLoad(&${nameFor(expression.name, names)})`;
       }

@@ -1438,6 +1438,34 @@ __global__ void callEarlyReturnBarrierHelper(float *out, int N) {
     expect([...actual.buffers.out as Float32Array]).toEqual([2, 3, 4, 4]);
   });
 
+  it("runs synchronized shared-scalar loop exits", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedUniformBreak(uint *out) {
+  __shared__ uint values[4];
+  __shared__ uint stop;
+  uint tid = threadIdx.x;
+  values[tid] = tid + 1u;
+  __syncthreads();
+  if (tid == 0u) stop = values[tid];
+  __syncthreads();
+  while (true) {
+    __syncthreads();
+    if (stop > 0u) break;
+  }
+  __syncthreads();
+  out[tid] = stop;
+}`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Uint32Array]).toEqual([1, 1, 1, 1]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([1, 1, 1, 1]);
+  });
+
   it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
     if (!deviceCheck.available) return;
     const source = `

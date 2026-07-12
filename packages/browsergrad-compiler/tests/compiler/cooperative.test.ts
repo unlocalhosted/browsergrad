@@ -2448,6 +2448,34 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 4]);
     });
 
+  it("proves synchronized shared-scalar loop exits workgroup-uniform", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void sharedUniformBreak(uint *out) {
+    __shared__ uint values[4];
+    __shared__ uint stop;
+    uint tid = threadIdx.x;
+    values[tid] = tid + 1u;
+    __syncthreads();
+    if (tid == 0u) stop = values[tid];
+    __syncthreads();
+    while (true) {
+      __syncthreads();
+      if (stop > 0u) break;
+    }
+    __syncthreads();
+    out[tid] = stop;
+  }`, { workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 1, 1]);
+    });
+
   it("keeps barriers uniform inside tiled loops after active-lane early returns", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void earlyReturnLoopBarrier(float *x, int N) {

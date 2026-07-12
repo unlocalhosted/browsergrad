@@ -4913,8 +4913,11 @@ function validateDivergentReturnsBeforeBarriers(
   uniformScalarFunctionNames: ReadonlySet<string>,
 ): CudaLiteBarrierUniformityFact {
   const uniformity = collectBarrierUniformity(statements, params, workgroupSize, uniformScalarFunctionNames);
+  const atomicSharedScalars = collectBarrierAtomicTargetNames(statements);
+  const sharedScalars = new Set([...collectBarrierSharedScalarNames(statements)].filter((name) => !atomicSharedScalars.has(name)));
   const barrierStatementStarts: number[] = [];
   const unverifiedControlStatementStarts: number[] = [];
+  const workgroupUniformControlStatementStarts: number[] = [];
   let verified = true;
   const visitBlock = (
     body: readonly CudaLiteStatement[],
@@ -4928,7 +4931,8 @@ function validateDivergentReturnsBeforeBarriers(
     let containsBarrier = false;
     for (let index = body.length - 1; index >= 0; index--) {
       const statement = body[index]!;
-      const info = visitStatement(statement, divergentDepth, barrierLater, continueBarrierLater || localBarrierLater);
+      const barrierDominated = index > 0 && statementProvidesBarrierDominance(body[index - 1]!, barrierFunctionNames);
+      const info = visitStatement(statement, divergentDepth, barrierLater, continueBarrierLater || localBarrierLater, barrierDominated);
       containsBarrier = info.containsBarrier || containsBarrier;
       barrierLater = barrierLater || info.containsBarrier;
       localBarrierLater = localBarrierLater || info.containsBarrier;
@@ -4941,6 +4945,7 @@ function validateDivergentReturnsBeforeBarriers(
     divergentDepth: number,
     barrierLater: boolean,
     continueBarrierLater: boolean,
+    barrierDominated: boolean,
   ): { readonly containsBarrier: boolean } => {
     switch (statement.kind) {
       case "block":
@@ -4994,7 +4999,10 @@ function validateDivergentReturnsBeforeBarriers(
         }
         return { containsBarrier: false };
       case "if": {
-        const conditionNonUniform = expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity);
+        const synchronizedSharedUniform = barrierDominated &&
+          expressionIsSynchronizedSharedScalarUniform(statement.condition, uniformity, sharedScalars);
+        if (synchronizedSharedUniform) workgroupUniformControlStatementStarts.push(statement.span.start);
+        const conditionNonUniform = expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) && !synchronizedSharedUniform;
         const nestedDivergentDepth = divergentDepth + (conditionNonUniform ? 1 : 0);
         const consequentHasBarrier = visitBlock(statement.consequent, nestedDivergentDepth, barrierLater, continueBarrierLater);
         const alternateHasBarrier = statement.alternate ? visitBlock(statement.alternate, nestedDivergentDepth, barrierLater, continueBarrierLater) : false;
@@ -5032,7 +5040,60 @@ function validateDivergentReturnsBeforeBarriers(
     verified,
     barrierStatementStarts: barrierStatementStarts.sort((left, right) => left - right),
     unverifiedControlStatementStarts: [...new Set(unverifiedControlStatementStarts)].sort((left, right) => left - right),
+    workgroupUniformControlStatementStarts: [...new Set(workgroupUniformControlStatementStarts)].sort((left, right) => left - right),
   };
+}
+
+function collectBarrierSharedScalarNames(
+  statements: readonly CudaLiteStatement[],
+): ReadonlySet<string> {
+  const names = new Set<string>();
+  const visit = (items: readonly CudaLiteStatement[]): void => {
+    for (const statement of items) {
+      if (statement.kind === "var" && statement.storage === "shared" && statement.dimensions.length === 0) names.add(statement.name);
+      if (statement.kind === "if") {
+        visit(statement.consequent);
+        if (statement.alternate) visit(statement.alternate);
+      } else if (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while" || statement.kind === "block") {
+        visit(statement.body);
+      }
+    }
+  };
+  visit(statements);
+  return names;
+}
+
+function collectBarrierAtomicTargetNames(
+  statements: readonly CudaLiteStatement[],
+): ReadonlySet<string> {
+  const names = new Set<string>();
+  walkCudaLiteExpressions(statements, (expression) => {
+    if (expression.kind !== "call") return;
+    const callee = expressionName(expression.callee);
+    if (callee === undefined || !isSemanticAtomicCallName(callee)) return;
+    const target = atomicTargetExpression(expression.args[0]);
+    const root = target === undefined ? undefined : rootIdentifier(target);
+    if (root !== undefined) names.add(root);
+  });
+  return names;
+}
+
+function statementProvidesBarrierDominance(
+  statement: CudaLiteStatement,
+  barrierFunctionNames: ReadonlySet<string>,
+): boolean {
+  return statement.kind === "expr" && isUniformityBarrierCall(statement.expression, barrierFunctionNames) ||
+    statement.kind === "asm" && isInlineAsmBarrier(statement);
+}
+
+function expressionIsSynchronizedSharedScalarUniform(
+  expression: CudaLiteExpression,
+  context: BarrierUniformityContext,
+  sharedScalars: ReadonlySet<string>,
+): boolean {
+  const locals = new Map(context.locals);
+  for (const name of sharedScalars) locals.set(name, false);
+  return !expressionMayBeNonUniformBeforeBarrier(expression, { ...context, locals });
 }
 
 function cudaBarrierFunctionNames(functions: readonly CudaLiteDeviceFunction[]): ReadonlySet<string> {

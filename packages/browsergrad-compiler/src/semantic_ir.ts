@@ -356,7 +356,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly result?: Extract<SemanticExpression, { readonly kind: "symbol" }>; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
+  | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly conditionUniformity?: "workgroup"; readonly span: SourceSpan }
   | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly continuing?: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "barrier"; readonly callee: string; readonly scope: "subgroup" | "workgroup" | "grid"; readonly groupName?: string; readonly span: SourceSpan }
   | { readonly kind: "fence"; readonly callee: string; readonly span: SourceSpan }
@@ -705,9 +705,10 @@ export function lowerSemanticModelToKernelIr(
     if (proof === undefined || !sourceBarrierFunctions.has(fn.name)) return fn;
     const promoted = promoteSemanticBarrierResultCalls(fn.body, sourceBarrierFunctions);
     const loweredBranches = lowerSemanticDivergentBarrierBranches(promoted, semantic.functions, fn.span, proof);
+    const body = lowerSemanticEarlyReturnsBeforeDirectBarriers(loweredBranches, semantic.functions, fn.span, proof);
     return {
       ...fn,
-      body: lowerSemanticEarlyReturnsBeforeDirectBarriers(loweredBranches, semantic.functions, fn.span, proof),
+      body: markSemanticWorkgroupUniformControl(body, proof.workgroupUniformControlStatementStarts),
     };
   });
   const rawOperations = [
@@ -726,11 +727,15 @@ export function lowerSemanticModelToKernelIr(
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
   );
-  const loweredOperations = lowerSemanticEarlyReturnsBeforeDirectBarriers(
+  const activeLaneOperations = lowerSemanticEarlyReturnsBeforeDirectBarriers(
     barrierBranchOperations,
     loweredSourceFunctions,
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
+  );
+  const loweredOperations = markSemanticWorkgroupUniformControl(
+    activeLaneOperations,
+    analysis.barrierUniformity.kernel.workgroupUniformControlStatementStarts,
   );
   const localMemory = collectDeclaredMemory(loweredOperations);
   const reachable = collectReachableAnalysisNames(analysis);
@@ -790,6 +795,34 @@ export function lowerSemanticModelToKernelIr(
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
   };
+}
+
+function markSemanticWorkgroupUniformControl(
+  operations: readonly SemanticKernelIrOperation[],
+  statementStarts: readonly number[],
+): readonly SemanticKernelIrOperation[] {
+  if (statementStarts.length === 0) return operations;
+  const starts = new Set(statementStarts);
+  return operations.map((operation): SemanticKernelIrOperation => {
+    if (operation.kind === "branch") {
+      return {
+        ...operation,
+        ...(starts.has(operation.span.start) ? { conditionUniformity: "workgroup" as const } : {}),
+        consequent: markSemanticWorkgroupUniformControl(operation.consequent, statementStarts),
+        alternate: markSemanticWorkgroupUniformControl(operation.alternate, statementStarts),
+      };
+    }
+    if (operation.kind === "loop" || operation.kind === "block") {
+      return {
+        ...operation,
+        body: markSemanticWorkgroupUniformControl(operation.body, statementStarts),
+        ...(operation.kind === "loop" && operation.continuing !== undefined
+          ? { continuing: markSemanticWorkgroupUniformControl(operation.continuing, statementStarts) }
+          : {}),
+      };
+    }
+    return operation;
+  });
 }
 
 function lowerSemanticDivergentBarrierBranches(

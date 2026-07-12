@@ -321,7 +321,7 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
     report.summary.webGpuDirectCompiledOk,
     "semantic direct, semantic host, and AST fallback coverage partition",
   );
-  assertEqual(report.summary.semanticIrHostPlanOk, 1, "semantic host-plan count");
+  assertEqual(report.summary.semanticIrHostPlanOk, 0, "semantic host-plan count");
   assertEqual(
     report.summary.semanticIrWebGpuOk,
     report.summary.semanticIrDirectWgslOk + report.summary.semanticIrHostPlanOk,
