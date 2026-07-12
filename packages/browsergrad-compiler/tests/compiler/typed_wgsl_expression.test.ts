@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   convertTypedWgslExpression,
-  createTypedWgslExpression,
+  createTypedWgslIdentifier,
   createTypedWgslLocalAssignmentStatement,
   createTypedWgslReturnStatement,
   createTypedWgslVariableStatement,
@@ -17,18 +17,18 @@ describe("typed WGSL expressions", () => {
   it("preserves operator result types", () => {
     const result = emitTypedWgslBinary(
       "==",
-      createTypedWgslExpression("i32(a)", "i32", span),
-      createTypedWgslExpression("i32(0)", "i32", span),
+      createTypedWgslIdentifier("left", "i32", span),
+      createTypedWgslIdentifier("right", "i32", span),
       span,
     );
-    expect(result).toMatchObject({ code: "(i32(a) == i32(0))", type: "bool", span });
+    expect(result).toMatchObject({ code: "(left == right)", type: "bool", span });
   });
 
   it("rejects operand mismatches before WGSL emission", () => {
     expect(() => emitTypedWgslBinary(
       "==",
-      createTypedWgslExpression("a", "i32", span),
-      createTypedWgslExpression("0.0", "f32", span),
+      createTypedWgslIdentifier("a", "i32", span),
+      createTypedWgslIdentifier("float_value", "f32", span),
       span,
     )).toThrow("requires matching operand types");
   });
@@ -36,15 +36,15 @@ describe("typed WGSL expressions", () => {
   it("rejects float bitwise operations before WGSL emission", () => {
     expect(() => emitTypedWgslBinary(
       "&",
-      createTypedWgslExpression("a", "f32", span),
-      createTypedWgslExpression("b", "f32", span),
+      createTypedWgslIdentifier("a", "f32", span),
+      createTypedWgslIdentifier("b", "f32", span),
       span,
     )).toThrow("requires integer operands");
   });
 
   it("rejects vector-to-scalar conversion without explicit legalization", () => {
     expect(() => convertTypedWgslExpression(
-      createTypedWgslExpression("value", "vec2<f32>", span),
+      createTypedWgslIdentifier("value", "vec2<f32>", span),
       "f32",
       "f32(value)",
     )).toThrow("requires explicit legalization");
@@ -52,16 +52,16 @@ describe("typed WGSL expressions", () => {
 
   it("legalizes bool carriers through select instead of invalid WGSL casts", () => {
     expect(legalizeTypedWgslBoolToNumeric(
-      createTypedWgslExpression("predicate", "bool", span),
+      createTypedWgslIdentifier("predicate", "bool", span),
       "u32",
     )).toMatchObject({ code: "select(0u, 1u, predicate)", type: "u32" });
   });
 
   it("rejects mismatched conditional arms before string emission", () => {
     expect(() => emitTypedWgslSelect(
-      createTypedWgslExpression("integer_value", "i32", span),
-      createTypedWgslExpression("float_value", "f32", span),
-      createTypedWgslExpression("condition", "bool", span),
+      createTypedWgslIdentifier("integer_value", "i32", span),
+      createTypedWgslIdentifier("float_value", "f32", span),
+      createTypedWgslIdentifier("condition", "bool", span),
       span,
     )).toThrow("requires matching result types");
   });
@@ -69,7 +69,7 @@ describe("typed WGSL expressions", () => {
   it("rejects invalid unary operand types before string emission", () => {
     expect(() => emitTypedWgslUnary(
       "~",
-      createTypedWgslExpression("float_value", "f32", span),
+      createTypedWgslIdentifier("float_value", "f32", span),
       span,
     )).toThrow("requires an integer operand");
   });
@@ -77,13 +77,13 @@ describe("typed WGSL expressions", () => {
   it("rejects return type mismatches before WGSL string emission", () => {
     expect(() => createTypedWgslReturnStatement(
       "i32",
-      createTypedWgslExpression("value", "f32", span),
+      createTypedWgslIdentifier("value", "f32", span),
       span,
     )).toThrow("WGSL return type mismatch: returned 'f32', expected 'i32'");
 
     expect(createTypedWgslReturnStatement(
       "i32",
-      createTypedWgslExpression("value", "i32", span),
+      createTypedWgslIdentifier("value", "i32", span),
       span,
     )).toMatchObject({ code: "return value;", span });
   });
@@ -93,7 +93,7 @@ describe("typed WGSL expressions", () => {
       "var",
       "count",
       "i32",
-      createTypedWgslExpression("1.0", "f32", span),
+      createTypedWgslIdentifier("float_value", "f32", span),
       span,
     )).toThrow("WGSL declaration type mismatch for 'count': initialized 'f32', declared 'i32'");
 
@@ -101,9 +101,9 @@ describe("typed WGSL expressions", () => {
       "var",
       "count",
       "i32",
-      createTypedWgslExpression("1", "i32", span),
+      createTypedWgslIdentifier("one", "i32", span),
       span,
-    )).toMatchObject({ code: "var count: i32 = 1;", span });
+    )).toMatchObject({ code: "var count: i32 = one;", span });
   });
 
   it("accepts WGSL vector-scalar multiply assignments", () => {
@@ -111,8 +111,8 @@ describe("typed WGSL expressions", () => {
       "value",
       "vec4<f32>",
       "*=",
-      createTypedWgslExpression("2.0", "f32", span),
+      createTypedWgslIdentifier("scale", "f32", span),
       span,
-    )).toMatchObject({ code: "value *= 2.0;", span });
+    )).toMatchObject({ code: "value *= scale;", span });
   });
 });

@@ -46,12 +46,23 @@ const comparisonOperators = new Set<WgslBinaryOperator>(["<", "<=", ">", ">=", "
 const logicalOperators = new Set<WgslBinaryOperator>(["&&", "||"]);
 const bitwiseOperators = new Set<WgslBinaryOperator>(["&", "|", "^", "<<", ">>"]);
 
-export function createTypedWgslExpression(
+export function createTrustedWgslExpression(
   code: string,
   type: WgslExpressionType,
   span: SourceSpan,
 ): TypedWgslExpression {
   return new TypedWgslExpressionValue({ kind: "leaf", code }, type, span);
+}
+
+export function createTypedWgslIdentifier(
+  name: string,
+  type: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new TypeError(`invalid WGSL identifier '${name}'`);
+  }
+  return new TypedWgslExpressionValue({ kind: "leaf", code: name }, type, span);
 }
 
 export function convertTypedWgslExpression(
@@ -64,7 +75,7 @@ export function convertTypedWgslExpression(
   }
   return code === `${targetType}(${source.code})`
     ? new TypedWgslExpressionValue({ kind: "conversion", targetType, source: expressionValue(source) }, targetType, source.span)
-    : createTypedWgslExpression(code, targetType, source.span);
+    : createTrustedWgslExpression(code, targetType, source.span);
 }
 
 export function legalizeTypedWgslBoolToNumeric(

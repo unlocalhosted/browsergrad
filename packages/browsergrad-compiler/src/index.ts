@@ -101,7 +101,7 @@ export {
   type WgslLegalizedSemanticKernelIr,
 } from "./wgsl_legalization.js";
 export {
-  createTypedWgslExpression,
+  createTypedWgslIdentifier,
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
   emitTypedWgslBinary,

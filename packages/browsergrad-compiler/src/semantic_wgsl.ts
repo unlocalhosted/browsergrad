@@ -110,7 +110,7 @@ import {
 import type { WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
 import type { WgslLegalizedIrArtifact } from "./compiler_phases.js";
 import {
-  createTypedWgslExpression,
+  createTrustedWgslExpression,
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
   emitTypedWgslBinary,
@@ -2478,7 +2478,7 @@ function emitSemanticOperation(
       const init = operation.init
         ? emitSemanticInitExpression(operation.init, operation.target.valueType, ir, names, options, textureSpecializations)
         : isSemanticFloatVectorType(operation.target.valueType)
-        ? createTypedWgslExpression(zeroForType(type), type, operation.span)
+        ? createTrustedWgslExpression(zeroForType(type), type, operation.span)
         : undefined;
       const statement = createTypedWgslVariableStatement("var", nameFor(operation.target.name, names), type, init, operation.span);
       return [`${prefix}${statement.code}`];
@@ -3235,7 +3235,7 @@ function emitSemanticReturnValue(
   if (expression.kind === "assignment") {
     const lines = emitSemanticExpressionStatement(expression, ir, names, indentLevel, options, textureSpecializations);
     const returnType = semanticActiveFunctionReturnType(ir, options, expression.span);
-    const value = createTypedWgslExpression(
+    const value = createTrustedWgslExpression(
       emitSemanticAssignmentResult(expression, ir, names, options),
       semanticExpressionWgslType(expression, ir),
       expression.span,
@@ -3835,7 +3835,7 @@ function emitSemanticAssignmentStatement(
   const target = nameFor(expression.target.name, names);
   const targetType = expression.target.valueType;
   const value = targetType !== undefined && isSemanticFloatVectorType(targetType)
-    ? createTypedWgslExpression(
+    ? createTrustedWgslExpression(
         emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations),
         wgslValueType(targetType),
         expression.value.span,
@@ -4408,7 +4408,7 @@ function emitSemanticExpression(
   }
   if (expression.kind === "unary") {
     if (semanticWgslBf162LocalBitsCastSupported(expression, ir)) {
-      return createTypedWgslExpression(
+      return createTrustedWgslExpression(
         emitSemanticBf162LocalBitsCast(expression, ir, names, options, textureSpecializations),
         semanticExpressionWgslType(expression, ir),
         expression.span,
@@ -4419,7 +4419,7 @@ function emitSemanticExpression(
   if (expression.kind === "conditional") {
     return emitSemanticConditional(expression, ir, names, options, textureSpecializations);
   }
-  return createTypedWgslExpression(
+  return createTrustedWgslExpression(
     renderSemanticExpression(expression, ir, names, options, textureSpecializations),
     semanticExpressionWgslType(expression, ir),
     expression.span,
@@ -4449,7 +4449,7 @@ function emitSemanticConditional(
     }
     return emitSemanticExpression(arm, ir, names, options, textureSpecializations);
   };
-  const condition = createTypedWgslExpression(
+  const condition = createTrustedWgslExpression(
     emitTruthiness(expression.condition, ir, names, options),
     "bool",
     expression.condition.span,
@@ -5946,8 +5946,8 @@ function emitSemanticInitExpression(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): TypedWgslExpression {
-  if (valueType === "bool") return createTypedWgslExpression(emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations), "bool", expression.span);
-  if (valueType === "uchar") return createTypedWgslExpression(emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations), "u32", expression.span);
+  if (valueType === "bool") return createTrustedWgslExpression(emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations), "bool", expression.span);
+  if (valueType === "uchar") return createTrustedWgslExpression(emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations), "u32", expression.span);
   if (isSemanticFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
@@ -7013,7 +7013,7 @@ function emitSemanticUnary(
       throw semanticWgslError("semantic WGSL pointer dereference requires modeled local storage pointer", expression.span);
     }
     const valueType = declaration.target.valueType ?? "float";
-    return createTypedWgslExpression(
+    return createTrustedWgslExpression(
       `${semanticPointerReadHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(expression.argument.name), names)}, ${nameFor(semanticPointerBaseParamName(expression.argument.name), names)})`,
       resultType,
       expression.span,
@@ -7022,7 +7022,7 @@ function emitSemanticUnary(
   if (expression.operator === "!") {
     return emitTypedWgslUnary(
       "!",
-      createTypedWgslExpression(emitTruthiness(expression.argument, ir, names, options), "bool", expression.argument.span),
+      createTrustedWgslExpression(emitTruthiness(expression.argument, ir, names, options), "bool", expression.argument.span),
       expression.span,
     );
   }
@@ -7055,25 +7055,25 @@ function emitSemanticBinary(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): TypedWgslExpression {
   if (isSemanticStoragePointerNullComparison(expression)) {
-    return createTypedWgslExpression(expression.operator === "!=" ? "true" : "false", "bool", expression.span);
+    return createTrustedWgslExpression(expression.operator === "!=" ? "true" : "false", "bool", expression.span);
   }
   if (isSemanticStoragePointerIdentityComparison(expression, ir)) {
     const left = emitSemanticStoragePointerIdentity(expression.left, ir, names, options);
     const right = emitSemanticStoragePointerIdentity(expression.right, ir, names, options);
     const equal = `((${left.buffer}) == (${right.buffer}) && (${left.base}) == (${right.base}))`;
-    return createTypedWgslExpression(expression.operator === "==" ? equal : `!${equal}`, "bool", expression.span);
+    return createTrustedWgslExpression(expression.operator === "==" ? equal : `!${equal}`, "bool", expression.span);
   }
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return emitTypedWgslBinary(
       expression.operator as "&&" | "||",
-      createTypedWgslExpression(emitTruthiness(expression.left, ir, names, options), "bool", expression.left.span),
-      createTypedWgslExpression(emitTruthiness(expression.right, ir, names, options), "bool", expression.right.span),
+      createTrustedWgslExpression(emitTruthiness(expression.left, ir, names, options), "bool", expression.left.span),
+      createTrustedWgslExpression(emitTruthiness(expression.right, ir, names, options), "bool", expression.right.span),
       expression.span,
     );
   }
   if (isSemanticFloatVectorType(expression.valueType) && semanticWgslVectorBinaryOperatorSupported(expression.operator)) {
     const valueType = expression.valueType as CudaLiteScalarType;
-    return createTypedWgslExpression(
+    return createTrustedWgslExpression(
       `(${emitSemanticVectorOperand(expression.left, valueType, ir, names, options, textureSpecializations)} ${expression.operator} ${emitSemanticVectorOperand(expression.right, valueType, ir, names, options, textureSpecializations)})`,
       wgslValueType(valueType),
       expression.span,
@@ -7231,7 +7231,7 @@ function emitTruthiness(
   return emitTypedWgslBinary(
     "!=",
     emitSemanticExpressionAs(expression, ir, names, scalar, options),
-    createTypedWgslExpression(zero, scalar, expression.span),
+    createTrustedWgslExpression(zero, scalar, expression.span),
     expression.span,
   ).code;
 }

@@ -2,7 +2,7 @@ import type { WgslValueType } from "@unlocalhosted/browsergrad-kernels";
 import { walkSemanticOperations, type SemanticExpression, type SemanticKernelIrModule } from "./semantic_ir.js";
 import type { TypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type CudaLiteScalarType, type SourceSpan } from "./types.js";
-import { createTypedWgslExpression, emitTypedWgslBinary, type WgslBinaryOperator } from "./typed_wgsl_expression.js";
+import { createTypedWgslIdentifier, emitTypedWgslBinary, type WgslBinaryOperator } from "./typed_wgsl_expression.js";
 import { completeWgslLegalization, type WgslLegalizedIrArtifact } from "./compiler_phases.js";
 
 const wgslLegalizedSemanticKernelIrArtifact: unique symbol = Symbol("wgsl-legalized-semantic-kernel-ir");
@@ -39,8 +39,8 @@ export function checkSemanticKernelIrWgslLegalization(
       const rightType = operator === "<<" || operator === ">>" ? "u32" : leftType;
       const result = emitTypedWgslBinary(
         operator,
-        createTypedWgslExpression("left", leftType, expression.left.span),
-        createTypedWgslExpression("right", rightType, expression.right.span),
+        createTypedWgslIdentifier("left", leftType, expression.left.span),
+        createTypedWgslIdentifier("right", rightType, expression.right.span),
         expression.span,
       );
       const expected = comparisonOperators.has(operator) || logicalOperators.has(operator)
