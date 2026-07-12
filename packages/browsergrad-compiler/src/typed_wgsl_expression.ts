@@ -18,6 +18,8 @@ export type WgslBinaryOperator =
   | "<" | "<=" | ">" | ">=" | "==" | "!="
   | "&&" | "||";
 
+export type WgslUnaryOperator = "+" | "-" | "!" | "~";
+
 const comparisonOperators = new Set<WgslBinaryOperator>(["<", "<=", ">", ">=", "==", "!="]);
 const logicalOperators = new Set<WgslBinaryOperator>(["&&", "||"]);
 const bitwiseOperators = new Set<WgslBinaryOperator>(["&", "|", "^", "<<", ">>"]);
@@ -85,6 +87,48 @@ export function emitTypedWgslBinary(
   return createTypedWgslExpression(`(${left.code} ${operator} ${right.code})`, resultType, span);
 }
 
+export function emitTypedWgslUnary(
+  operator: WgslUnaryOperator,
+  operand: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (operator === "!") {
+    if (operand.type !== "bool") throw new TypeError(`WGSL '!' requires bool, received ${operand.type}`);
+    return createTypedWgslExpression(`!(${operand.code})`, "bool", span);
+  }
+  if (operator === "~") {
+    if (!isInteger(operand.type)) throw new TypeError(`WGSL '~' requires an integer operand, received ${operand.type}`);
+    return createTypedWgslExpression(`~(${operand.code})`, operand.type, span);
+  }
+  if (!isNumeric(operand.type)) {
+    throw new TypeError(`WGSL '${operator}' requires a numeric operand, received ${operand.type}`);
+  }
+  return createTypedWgslExpression(
+    operator === "+" ? operand.code : `-(${operand.code})`,
+    operand.type,
+    span,
+  );
+}
+
+export function emitTypedWgslSelect(
+  alternate: TypedWgslExpression,
+  consequent: TypedWgslExpression,
+  condition: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (condition.type !== "bool") {
+    throw new TypeError(`WGSL select condition requires bool, received ${condition.type}`);
+  }
+  if (alternate.type !== consequent.type) {
+    throw new TypeError(`WGSL select requires matching result types, received ${alternate.type} and ${consequent.type}`);
+  }
+  return createTypedWgslExpression(
+    `select(${alternate.code}, ${consequent.code}, ${condition.code})`,
+    alternate.type,
+    span,
+  );
+}
+
 function requireTypes(
   operator: WgslBinaryOperator,
   left: TypedWgslExpression,
@@ -103,4 +147,8 @@ function isInteger(type: WgslExpressionType): type is "i32" | "u32" {
 
 function isNumericScalar(type: WgslExpressionType): type is "f16" | "f32" | "i32" | "u32" {
   return type === "f16" || type === "f32" || type === "i32" || type === "u32";
+}
+
+function isNumeric(type: WgslExpressionType): boolean {
+  return type !== "bool";
 }

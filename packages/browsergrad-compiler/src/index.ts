@@ -105,8 +105,11 @@ export {
   convertTypedWgslExpression,
   legalizeTypedWgslBoolToNumeric,
   emitTypedWgslBinary,
+  emitTypedWgslSelect,
+  emitTypedWgslUnary,
   type TypedWgslExpression,
   type WgslBinaryOperator,
+  type WgslUnaryOperator,
   type WgslExpressionType,
 } from "./typed_wgsl_expression.js";
 export { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";

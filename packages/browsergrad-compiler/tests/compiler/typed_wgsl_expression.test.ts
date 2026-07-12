@@ -3,6 +3,8 @@ import {
   convertTypedWgslExpression,
   createTypedWgslExpression,
   emitTypedWgslBinary,
+  emitTypedWgslSelect,
+  emitTypedWgslUnary,
   legalizeTypedWgslBoolToNumeric,
 } from "../../src/index.js";
 
@@ -50,5 +52,22 @@ describe("typed WGSL expressions", () => {
       createTypedWgslExpression("predicate", "bool", span),
       "u32",
     )).toMatchObject({ code: "select(0u, 1u, predicate)", type: "u32" });
+  });
+
+  it("rejects mismatched conditional arms before string emission", () => {
+    expect(() => emitTypedWgslSelect(
+      createTypedWgslExpression("integer_value", "i32", span),
+      createTypedWgslExpression("float_value", "f32", span),
+      createTypedWgslExpression("condition", "bool", span),
+      span,
+    )).toThrow("requires matching result types");
+  });
+
+  it("rejects invalid unary operand types before string emission", () => {
+    expect(() => emitTypedWgslUnary(
+      "~",
+      createTypedWgslExpression("float_value", "f32", span),
+      span,
+    )).toThrow("requires an integer operand");
   });
 });

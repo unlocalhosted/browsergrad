@@ -828,7 +828,7 @@ __global__ void shared_reinterpret(int *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("2u, select(4294967295u, 0,");
+      expect(compiled.wgsl).toContain("2u, select(4294967295u, 0u,");
       expect([...result.buffers.out as Float32Array]).toEqual([7]);
     });
 
@@ -5653,7 +5653,7 @@ __global__ void localOut(float *out) {
       expect([...disabled.buffers.target as Float32Array]).toEqual([0]);
       expect([...disabled.buffers.fallback as Float32Array]).toEqual([4]);
       expect(compiled.wgsl).toContain("4294967295u");
-      expect(compiled.wgsl).toContain("select(4294967295u, 0, (bg_uniforms.enabled != 0))");
+      expect(compiled.wgsl).toContain("select(4294967295u, 0u, (bg_uniforms.enabled != 0))");
     });
 
   it("packs uchar shared-memory pointer helpers into u32 carriers", () => {
