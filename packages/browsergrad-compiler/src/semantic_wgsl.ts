@@ -91,6 +91,7 @@ import {
   semanticAtomicSupportsFloat,
   semanticAtomicUsesF32Storage,
 } from "./semantic_atomic_intrinsics.js";
+import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
@@ -350,6 +351,7 @@ export function emitSemanticKernelIrWgsl(
   ir: SemanticKernelIrModule,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): SemanticKernelIrWgslOutput {
+  assertValidSemanticKernelIr(ir);
   const failure = semanticKernelIrWgslPreflightFailure(ir);
   if (failure) throw semanticWgslError(failure.message, failure.span);
 

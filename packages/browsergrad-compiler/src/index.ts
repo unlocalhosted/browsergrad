@@ -63,6 +63,11 @@ export {
   type SemanticKernelIrOperation,
   type SemanticMemoryRef,
 } from "./semantic_ir.js";
+export {
+  assertValidSemanticKernelIr,
+  verifySemanticKernelIr,
+  type SemanticIrVerificationIssue,
+} from "./semantic_ir_verifier.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
 export {
   classifyCudaCompatibilityFamily,

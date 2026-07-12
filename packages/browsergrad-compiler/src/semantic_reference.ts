@@ -137,6 +137,7 @@ import {
   semanticAtomicScalarArgumentIndices,
   type SemanticAtomicOp,
 } from "./semantic_atomic_intrinsics.js";
+import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import {
   referenceCurandAdvance as curandAdvance,
   referenceCurandNext as curandNext,
@@ -246,6 +247,7 @@ export function runCompiledKernelSemanticReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
+  assertValidSemanticKernelIr(compiled.kernelIr);
   const unsupported = unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled);
   if (unsupported) throw semanticReferenceError(`semantic reference does not support ${unsupported.kind}`, unsupported.span);
   if (!semanticReferenceSharedShapeSupported(compiled)) {
