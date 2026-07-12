@@ -27,6 +27,7 @@ export function semanticExpressionChildren(expression: SemanticExpression): read
   switch (expression.kind) {
     case "literal":
     case "symbol":
+    case "pointer-valid":
       return [];
     case "member":
       return [expression.object];

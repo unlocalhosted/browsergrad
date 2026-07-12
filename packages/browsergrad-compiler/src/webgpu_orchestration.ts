@@ -489,6 +489,7 @@ function expressionNeedsParentDispatch(expression: SemanticExpression): boolean 
   switch (expression.kind) {
     case "literal":
     case "symbol":
+    case "pointer-valid":
       return false;
     case "initializer":
       return expression.elements.some(expressionNeedsParentDispatch);

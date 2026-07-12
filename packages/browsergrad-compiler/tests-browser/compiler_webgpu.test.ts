@@ -3296,6 +3296,32 @@ __global__ void conditional_pointer_atomic(uint* left, uint* right, uint* out, i
     expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
   });
 
+  it("runs nullable storage pointer helper arguments through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ void maybe_store(float* target, float* fallback, float value) {
+  if (target != NULL) target[0] = value;
+  else fallback[0] = value + 1.0f;
+}
+__global__ void nullable_pointer_helper(float* target, float* fallback, int enabled) {
+  maybe_store(enabled ? target : NULL, fallback, 3.0f);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        target: new Float32Array(1),
+        fallback: new Float32Array(1),
+      },
+      scalars: { enabled: 0 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.target as Float32Array]).toEqual([...expected.buffers.target as Float32Array]);
+    expect([...actual.buffers.fallback as Float32Array]).toEqual([...expected.buffers.fallback as Float32Array]);
+  });
+
   it("runs chained-assignment local pointer atomics through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

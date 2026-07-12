@@ -236,6 +236,8 @@ function isReplayableSemanticExpression(
       return expression.elements.every((element) => isReplayableSemanticExpression(element, globals, replayableLocals));
     case "symbol":
       return globals.has(expression.name) || replayableLocals.has(expression.name);
+    case "pointer-valid":
+      return replayableLocals.has(expression.pointer);
     case "member":
       return isReplayableSemanticExpression(expression.object, globals, replayableLocals);
     case "cast":

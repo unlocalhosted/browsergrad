@@ -246,7 +246,8 @@ function replaceGridDimensions(expression: SemanticExpression, gridDim: KernelLa
   if (isGridDimension(expression, "z")) return gridDimensionLiteral(gridDim[2], expression.span);
   switch (expression.kind) {
     case "literal":
-    case "symbol": return expression;
+    case "symbol":
+    case "pointer-valid": return expression;
     case "member": return { ...expression, object: replaceGridDimensions(expression.object, gridDim) };
     case "index": return { ...expression, target: replaceGridDimensions(expression.target, gridDim), index: replaceGridDimensions(expression.index, gridDim) };
     case "call": return { ...expression, callee: replaceGridDimensions(expression.callee, gridDim), args: expression.args.map((arg) => replaceGridDimensions(arg, gridDim)) };

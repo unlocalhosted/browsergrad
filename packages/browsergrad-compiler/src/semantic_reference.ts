@@ -1194,6 +1194,8 @@ function semanticReferenceExpressionSupported(
         expression.addressSpace === "device-global" ||
         expression.addressSpace === "shared" ||
         isBuiltinVectorSymbol(expression.name);
+    case "pointer-valid":
+      return true;
     case "member":
       if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return isBuiltinVectorMember(expression) || semanticReferenceVectorMemberSupported(expression, compiled);
@@ -1366,6 +1368,7 @@ function semanticReferenceExpressionChildren(expression: SemanticExpression): re
   switch (expression.kind) {
     case "literal":
     case "symbol":
+    case "pointer-valid":
       return [];
     case "member":
       return [expression.object];
@@ -2648,6 +2651,8 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       return typeof expression.value === "number" ? expression.value : 0;
     case "symbol":
       return symbolValue(expression.name, context, expression.span);
+    case "pointer-valid":
+      return (context.storageOffsets.get(expression.pointer) ?? 0) !== 0xffffffff ? 1 : 0;
     case "member":
       return memberValue(evalSemanticExpression(expression.object, context), semanticExpressionValueType(expression.object), expression.property, expression.span);
     case "index":

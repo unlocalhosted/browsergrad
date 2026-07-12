@@ -2049,6 +2049,9 @@ function semanticWgslExpressionSupported(
         expression.addressSpace === "device-global" ||
         expression.addressSpace === "shared" ||
         isCudaBuiltinVectorSymbolName(expression.name);
+    case "pointer-valid":
+      return ir?.functions.some((fn) => fn.params.some((param) =>
+        param.name === expression.pointer && param.pointer && param.addressSpace === "storage")) ?? false;
     case "member":
       if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
       return expression.object.kind === "symbol" &&
@@ -4074,6 +4077,8 @@ function emitSemanticExpression(
         return `atomicLoad(&${nameFor(expression.name, names)})`;
       }
       return nameFor(expression.name, names);
+    case "pointer-valid":
+      return `(${nameFor(semanticPointerBaseParamName(expression.pointer), names)} != 4294967295u)`;
     case "member":
       return emitSemanticMember(expression, ir, names, options);
     case "index": {
@@ -5486,6 +5491,7 @@ function emitSemanticBoolExpression(
 }
 
 function semanticNativeBoolExpression(expression: SemanticExpression): boolean {
+  if (expression.kind === "pointer-valid") return true;
   if (expression.kind === "call" && expression.callee.kind === "symbol" && isSemanticHalf2BooleanComparisonCall(expression.callee.name)) return true;
   if (semanticExpressionValueType(expression) !== "bool") return false;
   if (expression.kind === "binary" && (COMPARISON_OPERATORS.has(expression.operator) || LOGICAL_OPERATORS.has(expression.operator))) return true;

@@ -123,6 +123,7 @@ export interface CudaLiteSemanticSymbol {
     | "builtin";
   readonly valueType?: CudaLiteScalarType;
   readonly pointer?: boolean;
+  readonly pointerMayBeNull?: boolean;
   readonly pointerRoot?: string;
   readonly pointerAliasOf?: string;
   readonly pointerAddressSpace?: SemanticAddressSpace;
@@ -233,6 +234,12 @@ export type SemanticExpression =
       readonly name: string;
       readonly valueType?: CudaLiteScalarType;
       readonly addressSpace: SemanticAddressSpace;
+      readonly span: SourceSpan;
+    }
+  | {
+      readonly kind: "pointer-valid";
+      readonly pointer: string;
+      readonly valueType: "bool";
       readonly span: SourceSpan;
     }
   | {
@@ -1671,6 +1678,7 @@ function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<str
 
 function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, string>, addressSpace: "shared" | "constant" | "local"): SemanticExpression {
   switch (expression.kind) {
+    case "pointer-valid": return expression;
     case "symbol": return names.has(expression.name) && expression.addressSpace === "storage" ? { ...expression, name: names.get(expression.name)!, addressSpace } : expression;
     case "member": return { ...expression, object: rewriteSemanticExpressionAddressSpace(expression.object, names, addressSpace) };
     case "index": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names, addressSpace), index: rewriteSemanticExpressionAddressSpace(expression.index, names, addressSpace), ...(expression.addressSpace === "storage" && expression.target.kind === "symbol" && names.has(expression.target.name) ? { addressSpace } : {}) };
@@ -3190,9 +3198,10 @@ function lowerExpression(
         : undefined;
       const preservePointerArgs = expression.callee.kind === "identifier" &&
         (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(expression.callee.name) || SEMANTIC_CURAND_CALLS.has(expression.callee.name) || generatedRandom !== undefined);
+      const encodeNullablePointerArgs = expression.callee.kind === "identifier" && scope.get(expression.callee.name)?.kind === "function";
       const args = expression.args.map((arg) => preservePointerArgs
         ? lowerExpression(arg, scope)
-        : pointerAliasValueExpression(arg, scope, arg.span) ?? lowerExpression(arg, scope));
+        : pointerAliasValueExpression(arg, scope, arg.span, encodeNullablePointerArgs) ?? lowerExpression(arg, scope));
       if (generatedRandom !== undefined && expression.callee.kind === "identifier") {
         return {
           kind: "call",
@@ -4297,6 +4306,7 @@ function semanticExpressionSideEffectFree(expression: SemanticExpression): boole
       return false;
     case "literal":
     case "symbol":
+    case "pointer-valid":
       return true;
     case "member":
       return semanticExpressionSideEffectFree(expression.object);
@@ -4356,6 +4366,7 @@ function pointerAliasValueExpression(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   span: SourceSpan,
+  encodeNull = false,
 ): SemanticExpression | undefined {
   if (expression.kind === "identifier") {
     const symbol = scope.get(expression.name);
@@ -4370,7 +4381,16 @@ function pointerAliasValueExpression(
   return {
     kind: "index",
     target: semanticSymbolExpression(root, span),
-    index: alias.pointerBaseIndices[0]!,
+    index: !encodeNull || alias.pointerValid === undefined
+      ? alias.pointerBaseIndices[0]!
+      : {
+          kind: "conditional",
+          condition: alias.pointerValid,
+          consequent: alias.pointerBaseIndices[0]!,
+          alternate: { kind: "literal", literalKind: "number", value: 0xffffffff, valueType: "uint", span },
+          valueType: "uint",
+          span,
+        },
     ...optionalValueType(aliasValueType),
     addressSpace: root.addressSpace,
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
@@ -4680,7 +4700,7 @@ function symbolForFunctionParam(param: CudaLiteParam, functionName: string, coll
   if (symbol.pointer && symbol.addressSpace === "storage" && symbol.valueType === "uchar" && collidesWithGlobal) {
     return { ...symbol, name: `__bg_param_${functionName}_${param.name}_${param.span.start}` };
   }
-  if (symbol.pointer) return symbol;
+  if (symbol.pointer) return { ...symbol, pointerMayBeNull: true };
   return { ...symbol, addressSpace: "local" };
 }
 
@@ -4827,6 +4847,7 @@ function localPointerAliasForInitializer(
           : subtractIndexExpressions(left.pointerBaseIndices[0]!, offset, expression.span)],
         ...(left.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
         ...(left.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: left.pointerBaseUnitBytes }),
+        ...(left.pointerValid === undefined ? {} : { pointerValid: left.pointerValid }),
       };
     }
     if (expression.operator === "+") {
@@ -4840,6 +4861,7 @@ function localPointerAliasForInitializer(
           pointerBaseIndices: [addIndexExpressions(right.pointerBaseIndices[0]!, offset, expression.span)],
           ...(right.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
           ...(right.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: right.pointerBaseUnitBytes }),
+          ...(right.pointerValid === undefined ? {} : { pointerValid: right.pointerValid }),
         };
       }
     }
@@ -4854,6 +4876,7 @@ function localPointerAliasForInitializer(
         pointerBaseIndices: root.pointerBaseIndices,
         ...(root.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
         ...(root.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: root.pointerBaseUnitBytes }),
+        ...(root.pointerValid === undefined ? {} : { pointerValid: root.pointerValid }),
       };
     }
     if (root?.kind === "param" && root.pointer && root.addressSpace === "storage") {
@@ -4861,6 +4884,9 @@ function localPointerAliasForInitializer(
         pointerRoot: root.name,
         pointerAddressSpace: root.addressSpace,
         pointerBaseIndices: [zeroExpression(expression.span)],
+        ...(root.pointerMayBeNull === true
+          ? { pointerValid: { kind: "pointer-valid" as const, pointer: root.name, valueType: "bool" as const, span: expression.span } }
+          : {}),
       };
     }
     if ((root?.kind === "device-global" || root?.kind === "constant") && root.dimensions.length > 0) {

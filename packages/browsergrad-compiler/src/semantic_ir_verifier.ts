@@ -192,6 +192,7 @@ function operationMemoryRefs(operation: SemanticKernelIrOperation): readonly Sem
 function expressionChildren(expression: SemanticExpression): readonly SemanticExpression[] {
   switch (expression.kind) {
     case "member": return [expression.object];
+    case "pointer-valid": return [];
     case "index": return [expression.target, expression.index];
     case "call": return [expression.callee, ...expression.args];
     case "texture-read": return [expression.texture, expression.x, expression.y, ...(expression.z ? [expression.z] : [])];
