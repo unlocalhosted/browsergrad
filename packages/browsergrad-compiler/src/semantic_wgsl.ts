@@ -3313,11 +3313,7 @@ function emitSemanticTruthinessExpression(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): TypedWgslExpression {
-  return createTrustedWgslExpression(
-    emitTruthiness(expression, ir, names, options),
-    "bool",
-    expression.span,
-  );
+  return emitSemanticBoolExpressionValue(expression, ir, names, options);
 }
 
 function semanticWgslSurfaceReadTarget(expression: SemanticExpression): { readonly name: string; readonly valueType?: CudaLiteScalarType } | undefined {
