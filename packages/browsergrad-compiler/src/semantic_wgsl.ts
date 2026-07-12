@@ -120,6 +120,7 @@ import {
   createTypedWgslQualifiedAccess,
   createTypedWgslIndexAccess,
   createTypedWgslMemoryRead,
+  createTypedWgslScalarMemoryRead,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   isWgslVectorType,
@@ -4478,6 +4479,10 @@ function emitSemanticExpression(
   if (expression.kind === "symbol" && semanticWgslSymbolHasTypedEmission(expression, ir)) {
     return emitSemanticSymbolExpression(expression, ir, names);
   }
+  if (expression.kind === "symbol") {
+    const scalarMemory = emitSemanticScalarMemorySymbolExpression(expression, ir, names, options);
+    if (scalarMemory) return scalarMemory;
+  }
   if (expression.kind === "pointer-valid") {
     const pointer = semanticWgslPointerValidityOwner(expression, ir);
     if (!pointer) throw semanticWgslError(`unresolved pointer validity identity for '${expression.pointer}'`, expression.span);
@@ -4553,6 +4558,46 @@ function emitSemanticExpression(
   );
 }
 
+function emitSemanticScalarMemorySymbolExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "symbol" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): TypedWgslExpression | undefined {
+  if (!semanticWgslScalarTypeSupported(expression.valueType)) return undefined;
+  const symbol = ir.memory.find((item) => semanticIdsEqual(item.id, expression.id));
+  if (!symbol || symbol.dimensions.length !== 0 || isCudaVectorType(symbol.valueType)) return undefined;
+  if (expression.addressSpace === "device-global") {
+    const atomic = semanticAtomicDeviceGlobalNames(ir.operations, ir.functions).has(expression.name);
+    const storageType = atomic ? wgslAtomicScalar(symbol.valueType) : wgslBindingType(symbol.valueType);
+    const read = createTypedWgslMemoryRead(
+      nameFor(expression.name, names),
+      createTypedWgslZero("u32", expression.span),
+      storageType,
+      atomic,
+      expression.span,
+    );
+    return legalizeSemanticMemoryReadValue(read, wgslValueType(symbol.valueType), expression.span);
+  }
+  if (expression.addressSpace !== "shared") return undefined;
+  const atomic = semanticAtomicSharedNames(ir.operations, ir.functions).has(expression.name);
+  const storageType = atomic ? wgslAtomicScalar(symbol.valueType) : wgslValueType(symbol.valueType);
+  const mode = atomic ? "atomic" : options.workgroupUniformExpression ? "workgroup-uniform" : "plain";
+  const read = createTypedWgslScalarMemoryRead(nameFor(expression.name, names), storageType, mode, expression.span);
+  return legalizeSemanticMemoryReadValue(read, wgslValueType(symbol.valueType), expression.span);
+}
+
+function legalizeSemanticMemoryReadValue(
+  read: TypedWgslExpression,
+  semanticType: TypedWgslExpression["type"],
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (read.type === semanticType) return read;
+  if (semanticType === "bool") return emitTypedWgslBinary("!=", read, createTypedWgslZero(read.type, span), span);
+  if (semanticType === "f32" && read.type === "u32") return createTypedWgslBitcast("f32", read, span);
+  throw semanticWgslError(`memory read cannot convert '${read.type}' to '${semanticType}'`, span);
+}
+
 function emitSemanticDirectMemoryReadExpression(
   expression: Extract<SemanticExpression, { readonly kind: "index" }>,
   ir: SemanticKernelIrModule,
@@ -4589,14 +4634,7 @@ function emitSemanticDirectMemoryReadExpression(
     atomic,
     expression.span,
   );
-  if (storageType === semanticType) return read;
-  if (semanticType === "bool") {
-    return emitTypedWgslBinary("!=", read, createTypedWgslZero(storageType, expression.span), expression.span);
-  }
-  if (semanticType === "f32" && storageType === "u32") {
-    return createTypedWgslBitcast("f32", read, expression.span);
-  }
-  throw semanticWgslError(`direct memory read cannot convert '${storageType}' to '${semanticType}'`, expression.span);
+  return legalizeSemanticMemoryReadValue(read, semanticType, expression.span);
 }
 
 function semanticTypedNativeMathCallee(

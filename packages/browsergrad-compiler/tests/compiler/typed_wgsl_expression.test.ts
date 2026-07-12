@@ -7,6 +7,7 @@ import {
   createTypedWgslQualifiedAccess,
   createTypedWgslIndexAccess,
   createTypedWgslMemoryRead,
+  createTypedWgslScalarMemoryRead,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   createTypedWgslZero,
@@ -209,5 +210,11 @@ describe("typed WGSL expressions", () => {
       false,
       span,
     )).toThrow("WGSL memory index requires u32");
+    expect(createTypedWgslScalarMemoryRead("shared_value", "u32", "atomic", span)).toMatchObject({
+      code: "atomicLoad(&shared_value)", type: "u32", span,
+    });
+    expect(createTypedWgslScalarMemoryRead("shared_value", "f32", "workgroup-uniform", span)).toMatchObject({
+      code: "workgroupUniformLoad(&shared_value)", type: "f32", span,
+    });
   });
 });

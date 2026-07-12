@@ -109,6 +109,7 @@ export {
   createTypedWgslQualifiedAccess,
   createTypedWgslIndexAccess,
   createTypedWgslMemoryRead,
+  createTypedWgslScalarMemoryRead,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   isWgslVectorType,

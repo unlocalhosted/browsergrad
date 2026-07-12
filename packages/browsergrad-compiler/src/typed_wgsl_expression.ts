@@ -24,7 +24,7 @@ type TypedWgslExpressionNode =
   | { readonly kind: "member"; readonly object: TypedWgslExpressionValue; readonly property: string }
   | { readonly kind: "qualified"; readonly object: string; readonly property: string }
   | { readonly kind: "index"; readonly target: TypedWgslExpressionValue; readonly index: TypedWgslExpressionValue }
-  | { readonly kind: "memory-read"; readonly binding: string; readonly index: TypedWgslExpressionValue; readonly atomic: boolean }
+  | { readonly kind: "memory-read"; readonly binding: string; readonly index?: TypedWgslExpressionValue; readonly mode: "plain" | "atomic" | "workgroup-uniform" }
   | { readonly kind: "bitcast"; readonly targetType: WgslExpressionType; readonly source: TypedWgslExpressionValue }
   | { readonly kind: "constructor"; readonly targetType: WgslVectorType; readonly args: readonly TypedWgslExpressionValue[] };
 
@@ -165,10 +165,20 @@ export function createTypedWgslMemoryRead(
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding)) throw new TypeError(`invalid WGSL memory binding '${binding}'`);
   if (index.type !== "u32") throw new TypeError(`WGSL memory index requires u32, received '${index.type}'`);
   return new TypedWgslExpressionValue(
-    { kind: "memory-read", binding, index: expressionValue(index), atomic },
+    { kind: "memory-read", binding, index: expressionValue(index), mode: atomic ? "atomic" : "plain" },
     resultType,
     span,
   );
+}
+
+export function createTypedWgslScalarMemoryRead(
+  binding: string,
+  resultType: WgslExpressionType,
+  mode: "plain" | "atomic" | "workgroup-uniform",
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding)) throw new TypeError(`invalid WGSL memory binding '${binding}'`);
+  return new TypedWgslExpressionValue({ kind: "memory-read", binding, mode }, resultType, span);
 }
 
 export function createTypedWgslBitcast(
@@ -378,8 +388,10 @@ function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
     case "qualified": return `${node.object}.${node.property}`;
     case "index": return `${node.target.code}[${node.index.code}]`;
     case "memory-read": {
-      const access = `${node.binding}[${node.index.code}]`;
-      return node.atomic ? `atomicLoad(&${access})` : access;
+      const access = node.index === undefined ? node.binding : `${node.binding}[${node.index.code}]`;
+      if (node.mode === "atomic") return `atomicLoad(&${access})`;
+      if (node.mode === "workgroup-uniform") return `workgroupUniformLoad(&${access})`;
+      return access;
     }
     case "bitcast": return `bitcast<${node.targetType}>(${node.source.code})`;
     case "constructor": return `${node.targetType}(${node.args.map((arg) => arg.code).join(", ")})`;
