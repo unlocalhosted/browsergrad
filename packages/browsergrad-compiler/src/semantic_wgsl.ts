@@ -5984,8 +5984,8 @@ function emitSemanticInitExpression(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): TypedWgslExpression {
-  if (valueType === "bool") return createTrustedWgslExpression(emitSemanticBoolExpression(expression, ir, names, options, textureSpecializations), "bool", expression.span);
-  if (valueType === "uchar") return createTrustedWgslExpression(emitSemanticUcharExpression(expression, ir, names, options, textureSpecializations), "u32", expression.span);
+  if (valueType === "bool") return emitSemanticBoolExpressionValue(expression, ir, names, options, textureSpecializations);
+  if (valueType === "uchar") return emitSemanticUcharExpressionValue(expression, ir, names, options, textureSpecializations);
   if (isSemanticFloatVectorType(valueType)) return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   return emitSemanticExpressionAs(expression, ir, names, wgslValueScalar(valueType), options, textureSpecializations);
 }
@@ -6010,10 +6010,23 @@ function emitSemanticUcharExpression(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  return emitSemanticUcharExpressionValue(expression, ir, names, options, textureSpecializations).code;
+}
+
+function emitSemanticUcharExpressionValue(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): TypedWgslExpression {
   if (expression.kind === "cast" && expression.valueType === "uchar") {
-    return emitSemanticExpression(expression, ir, names, options, textureSpecializations).code;
+    return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   }
-  return emitSemanticUcharValue(emitSemanticExpressionAs(expression, ir, names, "i32", options, textureSpecializations).code);
+  const value = emitSemanticExpressionAs(expression, ir, names, "i32", options, textureSpecializations);
+  const normalized = convertTypedWgslExpression(value, "i32", `i32(${value.code})`);
+  const unsigned = convertTypedWgslExpression(normalized, "u32", `u32(${normalized.code})`);
+  return emitTypedWgslBinary("&", unsigned, createTypedWgslLiteral("0xffu", "u32", expression.span), expression.span);
 }
 
 function emitSemanticUcharValue(value: string): string {
@@ -6027,13 +6040,31 @@ function emitSemanticBoolExpression(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
-  if (expression.kind === "literal" && typeof expression.value === "number") return expression.value === 0 ? "false" : "true";
-  const emitted = emitSemanticExpression(expression, ir, names, options, textureSpecializations).code;
-  if (semanticNativeBoolExpression(expression)) return emitted;
+  return emitSemanticBoolExpressionValue(expression, ir, names, options, textureSpecializations).code;
+}
+
+function emitSemanticBoolExpressionValue(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): TypedWgslExpression {
+  if (expression.kind === "literal" && typeof expression.value === "number") {
+    return createTypedWgslLiteral(expression.value === 0 ? "false" : "true", "bool", expression.span);
+  }
+  const emitted = emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  if (semanticNativeBoolExpression(expression)) {
+    if (emitted.type !== "bool") {
+      throw semanticWgslError(`native bool expression produced '${emitted.type}'`, expression.span);
+    }
+    return emitted;
+  }
   const sourceType = semanticExpressionWgslScalar(expression);
-  if (sourceType === "u32") return `(${emitted} != 0u)`;
-  if (sourceType === "i32") return `(${emitted} != 0)`;
-  return `(${emitted} != 0.0)`;
+  const source = emitted.type === sourceType
+    ? emitted
+    : emitSemanticExpressionAs(expression, ir, names, sourceType, options, textureSpecializations);
+  return emitTypedWgslBinary("!=", source, createTypedWgslZero(sourceType, expression.span), expression.span);
 }
 
 function semanticNativeBoolExpression(expression: SemanticExpression): boolean {
