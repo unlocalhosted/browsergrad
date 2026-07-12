@@ -4217,7 +4217,7 @@ __global__ void sharedHelperScoped(float *out) {
       );
 
       expect(compiled.wgsl).toContain("var<workgroup> bg_params: array<i32, 4>;");
-      expect(compiled.wgsl).toContain("bg_params[(index + 0u)] = bitcast<i32>(value.x)");
+      expect(compiled.wgsl).toContain("] = bitcast<i32>((vec4<f32>");
       expect(compiled.wgsl).toContain("vec4<f32>(bitcast<f32>");
       expect([...result.buffers.out as Float32Array]).toEqual([10]);
     });

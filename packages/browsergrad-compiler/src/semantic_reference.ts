@@ -266,8 +266,7 @@ export function runCompiledKernelSemanticReference(
   validateSemanticKernelIr(compiled.kernelIr);
   const unsupported = unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled);
   if (unsupported) {
-    const owner = unsupported.kind === "declare" ? ` '${unsupported.target.name}'` : "";
-    throw semanticReferenceError(`semantic reference does not support ${unsupported.kind}${owner}`, unsupported.span);
+    throw semanticReferenceError(unsupported.reason, unsupported.span);
   }
   if (!semanticReferenceSharedShapeSupported(compiled)) {
     throw semanticReferenceError("semantic reference does not support complex shared-memory barrier shape", compiled.kernelIr.span);
@@ -359,11 +358,22 @@ export function runCompiledKernelSemanticReference(
   };
 }
 
+interface UnsupportedSemanticReferenceOperation {
+  readonly operation: SemanticKernelIrOperation;
+  readonly reason: string;
+  readonly span: SourceSpan;
+}
+
 function unsupportedSemanticReferenceOperation(
   operations: readonly SemanticKernelIrOperation[],
   compiled: CompiledCudaLiteKernel,
   allowReturnValue = false,
-): SemanticKernelIrOperation | undefined {
+): UnsupportedSemanticReferenceOperation | undefined {
+  const reject = (
+    operation: SemanticKernelIrOperation,
+    reason: string,
+    span: SourceSpan = operation.span,
+  ): UnsupportedSemanticReferenceOperation => ({ operation, reason, span });
   for (const operation of operations) {
     switch (operation.kind) {
       case "dim3-declare":
@@ -371,85 +381,95 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") {
-          if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticReferenceValueTypeSupported(operation.target.valueType)) return operation;
+          if (operation.target.pointer) return reject(operation, `semantic reference does not support shared pointer declaration '${operation.target.name}'`);
+          if (operation.target.valueType !== "uchar" && !semanticReferenceValueTypeSupported(operation.target.valueType)) {
+            return reject(operation, `semantic reference does not support shared declaration type '${operation.target.valueType ?? "unknown"}' for '${operation.target.name}'`);
+          }
           break;
         }
-        if (operation.target.addressSpace !== "local") return operation;
+        if (operation.target.addressSpace !== "local") return reject(operation, `semantic reference does not support ${operation.target.addressSpace} declaration '${operation.target.name}'`);
         if (operation.target.pointer) {
           break;
         }
-        if (!semanticReferenceLocalValueTypeSupported(operation.target.valueType)) return operation;
-        if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init, operation.target.valueType, compiled)) return operation;
+        if (!semanticReferenceLocalValueTypeSupported(operation.target.valueType)) return reject(operation, `semantic reference does not support local declaration type '${operation.target.valueType ?? "unknown"}' for '${operation.target.name}'`);
+        if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init, operation.target.valueType, compiled)) {
+          return reject(operation, `semantic reference does not support array initializer for '${operation.target.name}'`, operation.init.span);
+        }
         if (operation.target.dimensions.length === 0) {
           const vectorTarget = isSemanticFloatVectorType(operation.target.valueType);
-          if (operation.init && !semanticReferenceExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", compiled)) return operation;
+          if (operation.init && !semanticReferenceExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", compiled)) {
+            return reject(operation, `semantic reference does not support initializer for '${operation.target.name}'`, operation.init.span);
+          }
         }
         break;
       case "store":
-        if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
-        if (isSemanticFloatVectorType(operation.target.valueType) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return operation;
-        if (semanticReferenceVectorFieldMemoryRefSupported(operation.target) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return operation;
-        if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) return operation;
+        if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return reject(operation, `semantic reference does not support store operator '${operation.operator}'`);
+        if (isSemanticFloatVectorType(operation.target.valueType) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return reject(operation, `semantic reference does not support vector store operator '${operation.operator}'`);
+        if (semanticReferenceVectorFieldMemoryRefSupported(operation.target) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return reject(operation, `semantic reference does not support vector-field store operator '${operation.operator}'`);
+        if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) {
+          return reject(operation, `semantic reference does not support ${operation.target.addressSpace} memory target '${operation.target.base}'`, operation.target.span);
+        }
         if (
           operation.target.addressSpace === "storage" &&
           !semanticReferenceStorageBaseSupported(operation.target.base, compiled)
-        ) return operation;
-        if (!semanticReferenceValueExpressionSupported(operation.value, compiled)) return operation;
+        ) return reject(operation, `semantic reference cannot resolve storage root '${operation.target.base}'`, operation.target.span);
+        if (!semanticReferenceValueExpressionSupported(operation.value, compiled)) return reject(operation, "semantic reference does not support store value expression", operation.value.span);
         break;
       case "copy":
-        if (!semanticReferenceCopySupported(operation, compiled)) return operation;
+        if (!semanticReferenceCopySupported(operation, compiled)) return reject(operation, "semantic reference does not support copy memory contract");
         break;
       case "copy-fence":
-        if (!isCudaCpAsyncFenceCall(operation.callee)) return operation;
+        if (!isCudaCpAsyncFenceCall(operation.callee)) return reject(operation, `semantic reference does not support copy fence '${operation.callee}'`);
         break;
       case "matrix-fill":
-        if (!semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceExpressionSupported(operation.value, "scalar", compiled)) return operation;
+        if (!semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceExpressionSupported(operation.value, "scalar", compiled)) return reject(operation, "semantic reference does not support matrix fill contract");
         break;
       case "matrix-load":
-        if (!semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceTypedMemoryRefSupported(operation.source, compiled) || !semanticReferenceExpressionSupported(operation.stride, "scalar", compiled)) return operation;
+        if (!semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceTypedMemoryRefSupported(operation.source, compiled) || !semanticReferenceExpressionSupported(operation.stride, "scalar", compiled)) return reject(operation, "semantic reference does not support matrix load contract");
         break;
       case "matrix-mma":
-        if (![operation.destination, operation.a, operation.b, operation.accumulator].every((ref) => semanticReferenceMatrixRefSupported(ref, compiled))) return operation;
+        if (![operation.destination, operation.a, operation.b, operation.accumulator].every((ref) => semanticReferenceMatrixRefSupported(ref, compiled))) return reject(operation, "semantic reference does not support matrix MMA contract");
         break;
       case "matrix-store":
-        if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) || !semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceExpressionSupported(operation.stride, "scalar", compiled)) return operation;
+        if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) || !semanticReferenceMatrixRefSupported(operation.fragment, compiled) || !semanticReferenceExpressionSupported(operation.stride, "scalar", compiled)) return reject(operation, "semantic reference does not support matrix store contract");
         break;
       case "surface-write":
-        if (!semanticReferenceSurfaceWriteSupported(operation, compiled)) return operation;
+        if (!semanticReferenceSurfaceWriteSupported(operation, compiled)) return reject(operation, "semantic reference does not support surface write contract");
         break;
       case "surface-read-store":
-        if (!semanticReferenceSurfaceReadStoreSupported(operation, compiled)) return operation;
+        if (!semanticReferenceSurfaceReadStoreSupported(operation, compiled)) return reject(operation, "semantic reference does not support surface read-store contract");
         break;
       case "atomic":
-        if (!semanticReferenceAtomicSupported(operation, compiled)) return operation;
+        if (!semanticReferenceAtomicSupported(operation, compiled)) return reject(operation, `semantic reference does not support atomic '${operation.callee}'`);
         break;
       case "call":
-        if (!semanticReferenceCallSupported(operation, compiled)) return operation;
+        if (!semanticReferenceCallSupported(operation, compiled)) return reject(operation, `semantic reference does not support call '${operation.callee}'`);
         break;
       case "runtime-copy":
-        if (!semanticReferenceRuntimeCopySupported(operation)) return operation;
+        if (!semanticReferenceRuntimeCopySupported(operation)) return reject(operation, `semantic reference does not support runtime copy '${operation.callee}'`);
         break;
       case "expression":
-        if (!semanticReferenceExpressionSupported(operation.expression, "scalar", compiled)) return operation;
+        if (!semanticReferenceExpressionSupported(operation.expression, "scalar", compiled)) return reject(operation, "semantic reference does not support expression", operation.expression.span);
         break;
       case "branch":
-        if (!semanticReferenceConditionSupported(operation.condition, compiled)) return operation;
+        if (!semanticReferenceConditionSupported(operation.condition, compiled)) return reject(operation, "semantic reference does not support branch condition", operation.condition.span);
         break;
       case "block":
         break;
       case "loop":
-        if (operation.init && !semanticReferenceLoopInitSupported(operation.init, compiled)) return operation;
-        if (operation.condition && !semanticReferenceConditionSupported(operation.condition, compiled)) return operation;
-        if (operation.update && !semanticReferenceExpressionSupported(operation.update, "scalar", compiled)) return operation;
+        if (operation.init && !semanticReferenceLoopInitSupported(operation.init, compiled)) return reject(operation, "semantic reference does not support loop initializer", operation.init.span);
+        if (operation.condition && !semanticReferenceConditionSupported(operation.condition, compiled)) return reject(operation, "semantic reference does not support loop condition", operation.condition.span);
+        if (operation.update && !semanticReferenceExpressionSupported(operation.update, "scalar", compiled)) return reject(operation, "semantic reference does not support loop update", operation.update.span);
         break;
       case "return":
-        if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "any", compiled))) return operation;
+        if (operation.value && !allowReturnValue) return reject(operation, "semantic reference does not support kernel return value", operation.value.span);
+        if (operation.value && !semanticReferenceExpressionSupported(operation.value, "any", compiled)) return reject(operation, "semantic reference does not support return expression", operation.value.span);
         break;
       case "barrier":
-        if (!isCudaBarrierCallName(operation.callee) && !isCudaCooperativeBarrierCallName(operation.callee)) return operation;
+        if (!isCudaBarrierCallName(operation.callee) && !isCudaCooperativeBarrierCallName(operation.callee)) return reject(operation, `semantic reference does not support barrier '${operation.callee}'`);
         break;
       case "fence":
-        if (!isCudaFenceCallName(operation.callee)) return operation;
+        if (!isCudaFenceCallName(operation.callee)) return reject(operation, `semantic reference does not support fence '${operation.callee}'`);
         break;
       case "inline-asm":
         {
@@ -458,24 +478,24 @@ function unsupportedSemanticReferenceOperation(
           if (ldmatrix?.every((expression) => semanticReferenceExpressionSupported(expression, "scalar", compiled))) break;
           if (semanticReferenceInlineMmaSupported(operation, compiled)) break;
           if (asm?.kind === "cp-async-fence") {
-            if (operation.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || operation.outputs.length !== 0) return operation;
+            if (operation.inputs.length > (asm.fence === "wait_group" ? 1 : 0) || operation.outputs.length !== 0) return reject(operation, "semantic reference does not support cp.async fence operands");
             break;
           }
           if (asm?.kind === "membar") {
-            if (operation.inputs.length !== 0 || operation.outputs.length !== 0) return operation;
+            if (operation.inputs.length !== 0 || operation.outputs.length !== 0) return reject(operation, "semantic reference does not support membar operands");
             break;
           }
           if (asm?.kind === "bar-sync") {
-            if (operation.inputs.length !== (asm.operand === "input0" ? 1 : 0) || operation.outputs.length !== 0) return operation;
+            if (operation.inputs.length !== (asm.operand === "input0" ? 1 : 0) || operation.outputs.length !== 0) return reject(operation, "semantic reference does not support bar.sync operands");
             break;
           }
-          return operation;
+          return reject(operation, "semantic reference does not support inline assembly contract");
         }
       case "break":
       case "continue":
         break;
       default:
-        return operation;
+        return reject(operation, `semantic reference does not support ${operation.kind}`);
     }
     if (operation.kind === "branch") {
       return unsupportedSemanticReferenceOperation(operation.consequent, compiled, allowReturnValue) ??
@@ -624,6 +644,8 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (semanticReferenceLocalPackedHalfView(ref, compiled)) return true;
   if (semanticReferenceLocalPackedHalf2View(ref, compiled)) return true;
   if (semanticReferenceLocalScalarBitViewRootType(ref, compiled) !== undefined) return true;
+  if (semanticReferenceSharedScalarBitViewRootType(ref, compiled) !== undefined) return true;
+  if (semanticReferenceSharedVectorBitViewRootType(ref, compiled) !== undefined) return true;
   if (semanticReferenceLocalVectorBitViewRootType(ref, compiled) !== undefined) return true;
   if (semanticReferenceLocalPackedByteRawView(ref, compiled)) return true;
   if (semanticReferencePackedSharedByteRoot(ref, compiled)) return semanticPackedSharedByteViewSupported(ref.valueType);
@@ -646,6 +668,34 @@ function semanticReferenceLocalScalarBitViewRootType(
   const root = compiled.kernelIr.memory.find((symbol) => symbol.kind === "local" && symbol.name === ref.base && symbol.dimensions.length > 0);
   if (root?.valueType !== "float" && root?.valueType !== "uint" && root?.valueType !== "int") return undefined;
   return root.valueType === ref.valueType ? undefined : root.valueType;
+}
+
+function semanticReferenceSharedScalarBitViewRootType(
+  ref: SemanticMemoryRef,
+  compiled: CompiledCudaLiteKernel,
+): CudaLiteScalarType | undefined {
+  if (ref.addressSpace !== "shared" || ref.fields.length > 0 || ref.indices.length !== 1) return undefined;
+  if (ref.valueType !== "float" && ref.valueType !== "uint" && ref.valueType !== "int") return undefined;
+  const root = compiled.kernelIr.memory.find((symbol) =>
+    symbol.kind === "shared" && symbol.name === ref.base && symbol.dimensions.length > 0,
+  );
+  if (root?.valueType !== "float" && root?.valueType !== "uint" && root?.valueType !== "int") return undefined;
+  return root.valueType === ref.valueType ? undefined : root.valueType;
+}
+
+function semanticReferenceSharedVectorBitViewRootType(
+  ref: SemanticMemoryRef,
+  compiled: CompiledCudaLiteKernel,
+): CudaLiteScalarType | undefined {
+  if (ref.addressSpace !== "shared" || ref.fields.length > 0 || ref.indices.length !== 1 || !isCudaVectorType(ref.valueType)) return undefined;
+  const valueScalar = cudaVectorScalarType(ref.valueType);
+  const root = compiled.kernelIr.memory.find((symbol) =>
+    symbol.kind === "shared" && symbol.name === ref.base && symbol.dimensions.length > 0,
+  );
+  if (!valueScalar || !root?.valueType || isCudaVectorType(root.valueType)) return undefined;
+  return root.valueType !== valueScalar && sizeofCudaType(root.valueType) === sizeofCudaType(valueScalar)
+    ? root.valueType
+    : undefined;
 }
 
 function semanticReferenceLocalPackedHalfView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -5230,7 +5280,16 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     }
     const index = flatIndex(ref, context);
     const ok = index >= 0 && index < buffer.length;
-    const value = ok ? Number(buffer[index]) : 0;
+    const raw = ok ? Number(buffer[index]) : 0;
+    const bitRootType = semanticReferenceSharedScalarBitViewRootType(ref, context.compiled);
+    const bits = bitRootType === "float" ? float32ToUintBits(raw) : raw >>> 0;
+    const value = bitRootType === undefined
+      ? raw
+      : ref.valueType === "float"
+      ? uintBitsToFloat32(bits)
+      : ref.valueType === "int"
+      ? bits | 0
+      : bits;
     context.trace.sharedReads.push({ name: ref.base, index, value, ok });
     return value;
   }
@@ -5319,7 +5378,14 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     }
     const index = flatIndex(ref, context);
     const ok = index >= 0 && index < buffer.length;
-    if (ok) buffer[index] = value;
+    if (ok) {
+      const bitRootType = semanticReferenceSharedScalarBitViewRootType(ref, context.compiled);
+      if (bitRootType === undefined) buffer[index] = value;
+      else {
+        const bits = ref.valueType === "float" ? float32ToUintBits(value) : value >>> 0;
+        buffer[index] = bitRootType === "float" ? uintBitsToFloat32(bits) : bitRootType === "int" ? bits | 0 : bits;
+      }
+    }
     context.trace.sharedWrites.push({ name: ref.base, index, value, ok });
     return;
   }
@@ -5451,10 +5517,20 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
     const base = semanticReferenceSharedVectorBase(ref, context, laneCount);
+    const bitRootType = semanticReferenceSharedVectorBitViewRootType(ref, context.compiled);
+    const valueScalar = cudaVectorScalarType(valueType);
     return Array.from({ length: laneCount }, (_, lane) => {
       const index = base + lane;
       const ok = index >= 0 && index < buffer.length;
-      const value = ok ? Number(buffer[index]) : 0;
+      const raw = ok ? Number(buffer[index]) : 0;
+      const bits = bitRootType === "float" ? float32ToUintBits(raw) : raw >>> 0;
+      const value = bitRootType === undefined
+        ? raw
+        : valueScalar === "float"
+        ? uintBitsToFloat32(bits)
+        : valueScalar === "int"
+        ? bits | 0
+        : bits;
       context.trace.sharedReads.push({ name: ref.base, index, value, ok });
       return value;
     });
@@ -5525,11 +5601,21 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
     const base = semanticReferenceSharedVectorBase(ref, context, laneCount);
+    const bitRootType = semanticReferenceSharedVectorBitViewRootType(ref, context.compiled);
+    const valueScalar = cudaVectorScalarType(vectorType);
     for (let lane = 0; lane < laneCount; lane++) {
       const index = base + lane;
       const laneValue = value[lane] ?? 0;
+      const bits = valueScalar === "float" ? float32ToUintBits(laneValue) : laneValue >>> 0;
+      const stored = bitRootType === undefined
+        ? laneValue
+        : bitRootType === "float"
+        ? uintBitsToFloat32(bits)
+        : bitRootType === "int"
+        ? bits | 0
+        : bits;
       const ok = index >= 0 && index < buffer.length;
-      if (ok) buffer[index] = laneValue;
+      if (ok) buffer[index] = stored;
       context.trace.sharedWrites.push({ name: ref.base, index, value: laneValue, ok });
     }
     return;
