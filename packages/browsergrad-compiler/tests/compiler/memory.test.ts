@@ -4876,9 +4876,9 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + u32(0)) + (u32(1) * 3u));");
-      expect(compiled.wgsl).toContain("ptrs_base[u32(2)] = ((0u + u32(0)) + (u32(2) * 3u));");
-      expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + u32(0)) + u32(1));");
+      expect(compiled.wgsl).toContain("sum_dynamic_shared3(&scratch, u32((0 * 3)), u32((1 * 3)), u32((2 * 3))");
+      expect(compiled.wgsl).toContain("vec3<f32>(scratch[u32((0 * 3))], scratch[(u32((0 * 3)) + 1u)]");
+      expect(compiled.wgsl).not.toContain("scratch[(u32((0 * 3)) * 3u)]");
       expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 1, 33, 41, 53, 0]);
     });
 
@@ -4912,9 +4912,9 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("ptrs_base[u32(0)] = ((0u + u32((0 + ((0 + 1) * 3)))) + (u32(0) * 3u));");
-      expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + u32((0 + ((0 + 1) * 3)))) + (u32(1) * 3u));");
-      expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + u32((0 + ((0 + 1) * 3)))) + u32(1));");
+      expect(compiled.wgsl).toContain("sum_dynamic_shared_chain3(&scratch, u32(((1 * 3) + (0 * 3))), u32(((1 * 3) + (1 * 3))), u32((3 * 3))");
+      expect(compiled.wgsl).toContain("vec3<f32>(scratch[u32(((1 * 3) + (1 * 3)))], scratch[(u32(((1 * 3) + (1 * 3))) + 1u)]");
+      expect(compiled.wgsl).not.toContain("scratch[(u32(((1 * 3) + (1 * 3))) * 3u)]");
       expect([...result.buffers.out as Float32Array]).toEqual([17, 19, 23, 1, 53, 61, 73, 0]);
     });
 

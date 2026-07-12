@@ -1097,6 +1097,7 @@ function semanticReferenceFunctionArgSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number] | undefined,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
+  if (param?.pointer && param.addressSpace === "storage" && semanticPointerArgMemoryRef(arg)?.addressSpace === "shared") return true;
   if (param?.pointer && param.addressSpace === "storage" && param.valueType === "uchar") {
     const ref = semanticPointerArgMemoryRef(arg);
     return ref?.addressSpace === "storage" && semanticDirectByteStorageParamSupported(compiled.kernelIr, ref.base);
@@ -5364,8 +5365,12 @@ function createSemanticFunctionContext(
     if (param.pointer && param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined) continue;
     if (param.pointer && param.addressSpace === "storage") {
       const ref = semanticPointerArgMemoryRef(arg);
-      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global") throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled storage`, arg.span);
-      const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
+      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared") throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled storage or shared memory`, arg.span);
+      const buffer = ref.addressSpace === "device-global"
+        ? context.deviceGlobals.get(ref.base)
+        : ref.addressSpace === "shared"
+          ? context.sharedMemory.get(ref.base)
+          : context.buffers.get(ref.base);
       if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, arg.span);
       buffers.set(param.name, buffer);
       storageOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, context));

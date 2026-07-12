@@ -7631,7 +7631,11 @@ function emitSemanticDirectSharedVectorReadExpression(
   }
   const laneType = wgslVectorScalar(valueType);
   const laneCount = cudaVectorLaneCount(valueType);
-  const scalarBase = emitTypedWgslBinary("*", sourceIndex, createTypedWgslLiteral(`${laneCount}u`, "u32", ref.span), ref.span);
+  const scalarLaneBase = ref.pointerBaseIsScalarLane === true ||
+    sharedPointer === undefined && root !== undefined && !isCudaVectorType(root.valueType) && cudaVectorScalarType(valueType) === root.valueType;
+  const scalarBase = scalarLaneBase
+    ? sourceIndex
+    : emitTypedWgslBinary("*", sourceIndex, createTypedWgslLiteral(`${laneCount}u`, "u32", ref.span), ref.span);
   const sourceScalar = sharedPointer?.pointerCarrierValueType ?? sharedPointer?.valueType ?? root?.valueType;
   const sourceLaneType = atomic ? wgslAtomicScalar(sourceScalar) : wgslValueScalar(sourceScalar);
   const lanes = Array.from({ length: laneCount }, (_, lane): TypedWgslExpression => {

@@ -1971,7 +1971,8 @@ function specializeSharedPointerFunctionsOnce(
         valueType !== undefined && (
           valueType === param.valueType ||
           sizeofCudaType(valueType) === sizeofCudaType(param.valueType!) ||
-          refs[argIndex]?.pointerBaseIsScalarLane === true && cudaVectorScalarType(valueType) === param.valueType
+          refs[argIndex]?.pointerBaseIsScalarLane === true && cudaVectorScalarType(valueType) === param.valueType ||
+          isCudaVectorType(param.valueType) && cudaVectorScalarType(param.valueType) === valueType
         ),
       );
       const effectiveDimensions = dimensions.map((item, argIndex) => {
@@ -5388,7 +5389,12 @@ function localPointerAliasForInitializer(
     if (alias && targetBytes !== undefined && rootBytes !== undefined && targetBytes >= rootBytes && targetBytes % rootBytes === 0) {
       const { pointerBaseUnitBytes: _pointerBaseUnitBytes, ...rest } = alias;
       const scale = targetBytes / rootBytes;
-      return { ...rest, ...(scale === 1 ? {} : { pointerBaseUnitBytes: scale }) };
+      const scalarLane = isCudaVectorType(expression.valueType) && cudaVectorScalarType(expression.valueType) === rootType;
+      return {
+        ...rest,
+        ...(scale === 1 ? {} : { pointerBaseUnitBytes: scale }),
+        ...(scalarLane ? { pointerBaseIsScalarLane: true } : {}),
+      };
     }
     if (alias && sourceType === "uchar" && targetBytes !== undefined && targetBytes > 1) {
       return { ...alias, pointerBaseUnitBytes: targetBytes };
