@@ -23,6 +23,14 @@ export interface SemanticCooperativeReduceHelper {
   readonly operation: "add" | "min" | "max";
 }
 
+export interface SemanticCooperativeScanHelper {
+  readonly name: string;
+  readonly scratchName: string;
+  readonly valueType: "float" | "double" | "half" | "int" | "uint";
+  readonly tileSize: number;
+  readonly inclusive: boolean;
+}
+
 export function semanticWgslCooperativeGroupCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
@@ -45,6 +53,16 @@ export function semanticWgslCooperativeReduceCallSupported(
 ): boolean {
   const helper = semanticCooperativeReduceHelperFor(ir, expression);
   const value = semanticCooperativeReduceValue(expression);
+  return helper !== undefined && value !== undefined && valueSupported(value);
+}
+
+export function semanticWgslCooperativeScanCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  valueSupported: (value: SemanticExpression) => boolean,
+): boolean {
+  const helper = semanticCooperativeScanHelperFor(ir, expression);
+  const value = expression.args[1];
   return helper !== undefined && value !== undefined && valueSupported(value);
 }
 
@@ -191,6 +209,75 @@ export function semanticCooperativeReduceHelpers(
     if (helper) helpers.set(helper.name, helper);
   }
   return [...helpers.values()];
+}
+
+export function semanticCooperativeScanHelperFor(
+  ir: SemanticKernelIrModule,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+): SemanticCooperativeScanHelper | undefined {
+  if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function") return undefined;
+  const inclusive = expression.callee.name === "cg::inclusive_scan" || expression.callee.name === "cooperative_groups::inclusive_scan";
+  const exclusive = expression.callee.name === "cg::exclusive_scan" || expression.callee.name === "cooperative_groups::exclusive_scan";
+  if (!inclusive && !exclusive) return undefined;
+  const [groupArg, valueArg, operationArg] = expression.args;
+  if (groupArg?.kind !== "symbol" || !valueArg || operationArg !== undefined && !isPlusOperation(operationArg)) return undefined;
+  const group = semanticCooperativeGroupInfo(ir, groupArg.name);
+  if (!group || group.kind === "grid" || group.kind === "coalesced" || group.partitioned) return undefined;
+  const valueType = semanticExpressionValueType(valueArg);
+  if (valueType !== "float" && valueType !== "double" && valueType !== "half" && valueType !== "int" && valueType !== "uint") return undefined;
+  const tileSize = Math.min(group.tileSize ?? semanticCooperativeWorkgroupSize(ir), semanticCooperativeWorkgroupSize(ir));
+  const typeName = wgslValueScalar(valueType).replace(/[^A-Za-z0-9_]/gu, "_");
+  const name = `bg_semantic_cg_${inclusive ? "inclusive" : "exclusive"}_scan_sum_${typeName}_${tileSize}`;
+  return { name, scratchName: `${name}_scratch`, valueType, tileSize, inclusive };
+}
+
+export function semanticCooperativeScanHelpers(
+  ir: SemanticKernelIrModule,
+): readonly SemanticCooperativeScanHelper[] {
+  const helpers = new Map<string, SemanticCooperativeScanHelper>();
+  for (const expression of semanticModuleExpressions(ir)) {
+    if (expression.kind !== "call") continue;
+    const helper = semanticCooperativeScanHelperFor(ir, expression);
+    if (helper) helpers.set(helper.name, helper);
+  }
+  return [...helpers.values()];
+}
+
+export function emitSemanticCooperativeScanHelper(
+  helper: SemanticCooperativeScanHelper,
+  ir: SemanticKernelIrModule,
+): readonly string[] {
+  const type = wgslValueScalar(helper.valueType);
+  const workgroupSize = semanticCooperativeWorkgroupSize(ir);
+  const zero = type === "u32" ? "0u" : type === "i32" ? "0" : type === "f16" ? "f16(0.0)" : "0.0";
+  return [
+    `fn ${helper.name}(value_arg: ${type}, local_id: vec3<u32>) -> ${type} {`,
+    `  let rank: u32 = ${semanticCooperativeLocalLinearRank(ir)};`,
+    `  let width: u32 = min(${helper.tileSize}u, ${workgroupSize}u);`,
+    "  let lane: u32 = rank % width;",
+    `  ${helper.scratchName}[rank] = value_arg;`,
+    "  workgroupBarrier();",
+    "  var stride: u32 = 1u;",
+    "  while (stride < width) {",
+    `    var addend: ${type} = ${zero};`,
+    "    if (lane >= stride) {",
+    `      addend = ${helper.scratchName}[rank - stride];`,
+    "    }",
+    "    workgroupBarrier();",
+    "    if (lane >= stride) {",
+    `      ${helper.scratchName}[rank] = ${helper.scratchName}[rank] + addend;`,
+    "    }",
+    "    workgroupBarrier();",
+    "    stride = stride * 2u;",
+    "  }",
+    `  var result: ${type} = ${zero};`,
+    ...(helper.inclusive
+      ? [`  result = ${helper.scratchName}[rank];`]
+      : ["  if (lane > 0u) {", `    result = ${helper.scratchName}[rank - 1u];`, "  }"]),
+    "  workgroupBarrier();",
+    "  return result;",
+    "}",
+  ];
 }
 
 export function emitSemanticCooperativeReduceHelper(

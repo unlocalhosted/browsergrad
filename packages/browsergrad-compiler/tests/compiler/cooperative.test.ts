@@ -1593,8 +1593,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn bg_cg_inclusive_scan_sum_int_4");
-      expect(compiled.wgsl).toContain("fn bg_cg_exclusive_scan_sum_int_4");
+      expect(compiled.wgsl).toContain("fn bg_semantic_cg_inclusive_scan_sum_i32_4");
+      expect(compiled.wgsl).toContain("fn bg_semantic_cg_exclusive_scan_sum_i32_4");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect([...result.buffers.output as Int32Array]).toEqual([1, 0, 3, 2, 6, 5, 10, 9, 1, 3, 6, 10]);
     });
