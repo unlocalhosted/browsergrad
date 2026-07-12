@@ -20,7 +20,7 @@ export function semanticFunctionParamContractSupported(
     param.addressSpace === "storage" ||
     param.addressSpace === "shared" ||
     param.addressSpace === "local" && param.dimensions.every((dimension) => dimension > 0) ||
-    param.addressSpace === "constant" && param.pointerAliasOf !== undefined
+    param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined
   ) && valueTypeSupported(param.valueType);
   return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";
 }
@@ -41,8 +41,8 @@ export function semanticFunctionArgAddressContractSupported(
   if (param.cooperativeGroupKind !== undefined) return arg.kind === "symbol";
   if (param.pointer) {
     const ref = pointerRef(arg);
-    if (param.addressSpace === "constant" && param.pointerAliasOf !== undefined) {
-      return ref?.addressSpace === "constant" && ref.base === param.pointerAliasOf;
+    if (param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined) {
+      return ref?.addressSpace === "constant" && ref.baseId === param.pointerMemoryAlias;
     }
     if (param.addressSpace === "storage") return ref?.addressSpace === "storage" || ref?.addressSpace === "device-global";
     return (param.addressSpace === "shared" || param.addressSpace === "local") && ref?.addressSpace === param.addressSpace;
@@ -94,8 +94,11 @@ export function semanticFunctionBodyShapeSupported(
     if (operation.kind === "cooperative-group-declare" || operation.kind === "dim3-declare") return true;
     if (operation.kind === "declare") {
       if (options.allowSharedMemory && operation.target.addressSpace === "shared") return !operation.target.pointer && operation.init === undefined;
-      return operation.target.addressSpace === "local" && !operation.target.pointer &&
-        (operation.target.dimensions.length === 0 || options.allowLocalArrays === true);
+      return operation.target.addressSpace === "local" && (
+        operation.target.pointer ||
+        operation.target.dimensions.length === 0 ||
+        options.allowLocalArrays === true
+      );
     }
     if (operation.kind === "store") return operation.target.addressSpace === "local" || operation.target.addressSpace === "storage" || operation.target.addressSpace === "shared" || operation.target.addressSpace === "device-global";
     if (operation.kind === "atomic") return options.allowAtomic === true;
@@ -172,13 +175,12 @@ function semanticPointerFunctionOperationSupported(
 ): boolean {
   if (options.allowCooperativeOps && operation.kind === "cooperative-group-declare") return true;
   if (options.allowCooperativeOps && (operation.kind === "barrier" || operation.kind === "fence")) return true;
-  if (options.allowCooperativeOps && operation.kind === "declare") {
+  if (operation.kind === "declare") {
     if (options.allowSharedMemory && operation.target.addressSpace === "shared") {
       return !operation.target.pointer && operation.init === undefined;
     }
     return operation.target.addressSpace === "local" &&
-      !operation.target.pointer &&
-      (operation.target.dimensions.length === 0 || options.allowLocalArrays === true) &&
+      (operation.target.pointer || operation.target.dimensions.length === 0 || options.allowLocalArrays === true) &&
       (operation.init === undefined || semanticPointerFunctionExpressionAccessesSupported(operation.init, pointerParams, memoryRefFromIndex, atomicCallTarget, options));
   }
   if (operation.kind === "atomic") return operation.target !== undefined && (pointerParams.has(operation.target.base) || options.allowDeviceGlobals === true && operation.target.addressSpace === "device-global");

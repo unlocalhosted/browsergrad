@@ -10,7 +10,11 @@ import type {
   SemanticMatrixTileRef,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import { semanticInlineAsmLdmatrixAssignments, walkSemanticOperations } from "./semantic_ir.js";
+import {
+  semanticInlineAsmLdmatrixAssignments,
+  semanticPointerSymbolNeedsRuntimeState,
+  walkSemanticOperations,
+} from "./semantic_ir.js";
 import {
   createBuiltinSemanticSymbolId,
   createGeneratedSemanticSymbolId,
@@ -1190,7 +1194,7 @@ function collectSemanticLocalPointerDeclarations(
 ): readonly Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] {
   const declarations: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] = [];
   for (const operation of operations) {
-    if (operation.kind === "declare" && operation.target.pointer) declarations.push(operation);
+    if (operation.kind === "declare" && semanticPointerSymbolNeedsRuntimeState(operation.target)) declarations.push(operation);
     if (operation.kind === "block") declarations.push(...collectSemanticLocalPointerDeclarations(operation.body));
     if (operation.kind === "branch") {
       declarations.push(...collectSemanticLocalPointerDeclarations(operation.consequent));
@@ -1214,13 +1218,21 @@ function semanticLocalPointerStorageRef(
   return ref?.addressSpace === "storage" || ref?.addressSpace === "device-global" ? ref : undefined;
 }
 
+function semanticPointerDeclarationNeedsRuntimeState(
+  declaration: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
+): boolean {
+  return semanticPointerSymbolNeedsRuntimeState(declaration.target);
+}
+
 function semanticLocalStoragePointerDeclaration(
   ir: SemanticKernelIrModule,
   expression: SemanticExpression,
 ): Extract<SemanticKernelIrOperation, { readonly kind: "declare" }> | undefined {
   if (expression.kind !== "symbol" || expression.addressSpace !== "local") return undefined;
   return semanticLocalPointerDeclarations(ir).find((operation) =>
-    operation.target.id === expression.id && semanticLocalPointerStorageRef(operation) !== undefined
+    operation.target.id === expression.id &&
+    semanticPointerDeclarationNeedsRuntimeState(operation) &&
+    semanticLocalPointerStorageRef(operation) !== undefined
   );
 }
 
@@ -2367,6 +2379,7 @@ function emitSemanticLocalPointerDeclaration(
   indentLevel: number,
   options: EmitSemanticKernelIrWgslOptions,
 ): readonly string[] {
+  if (!semanticPointerDeclarationNeedsRuntimeState(operation)) return [];
   const prefix = "  ".repeat(indentLevel);
   const ref = semanticLocalPointerStorageRef(operation);
   const buffer = nameFor(semanticPointerBufferParamName(operation.target.name), names);
@@ -3668,7 +3681,7 @@ function emitSemanticFunctionParams(
   atomicSharedPointer = false,
   mutableValueParam = false,
 ): readonly string[] {
-  if (param.pointer && param.addressSpace === "constant" && param.pointerAliasOf !== undefined) return [];
+  if (param.pointer && param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined) return [];
   if (param.cooperativeGroupKind !== undefined) {
     return [
       `${semanticCooperativeGroupRankParamName(param.name)}: i32`,
@@ -3682,7 +3695,7 @@ function emitSemanticFunctionParams(
     ];
   }
   if (param.pointer && param.addressSpace === "shared") {
-    if (param.pointerAliasOf !== undefined) {
+    if (param.pointerParamAlias !== undefined) {
       return [`${nameFor(semanticPointerBaseParamName(param.name), names)}: u32`];
     }
     return [
@@ -3691,6 +3704,25 @@ function emitSemanticFunctionParams(
     ];
   }
   return [`${mutableValueParam ? semanticFunctionParamIncomingName(param, names) : nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param, atomicSharedPointer)}`];
+}
+
+function semanticFunctionParamAliasName(
+  fn: SemanticKernelIrModule["functions"][number],
+  param: SemanticKernelIrModule["functions"][number]["params"][number],
+): string | undefined {
+  const aliasId = param.pointerParamAlias;
+  return aliasId === undefined ? undefined : fn.params.find((candidate) => candidate.id === aliasId)?.name;
+}
+
+function semanticParamAliasName(
+  ir: SemanticKernelIrModule,
+  param: SemanticKernelIrModule["functions"][number]["params"][number],
+): string | undefined {
+  for (const fn of ir.functions) {
+    const name = semanticFunctionParamAliasName(fn, param);
+    if (name !== undefined) return name;
+  }
+  return undefined;
 }
 
 function emitSemanticAssignmentStatement(
@@ -5260,7 +5292,7 @@ function emitSemanticFunctionArgs(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
-  if (param?.pointer && param.addressSpace === "constant" && param.pointerAliasOf !== undefined) return [];
+  if (param?.pointer && param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined) return [];
   if (param?.cooperativeGroupKind !== undefined) {
     if (arg.kind !== "symbol") throw semanticWgslError("semantic WGSL cooperative-group argument must be a symbol", arg.span);
     const groupCall = (property: "thread_rank" | "size"): Extract<SemanticExpression, { readonly kind: "call" }> => ({
@@ -5282,8 +5314,8 @@ function emitSemanticFunctionArgs(
     const sourceParam = semanticWgslFunctionSharedPointerParam(ir, ref.base);
     const pointer = sourceParam === undefined
       ? `&${nameFor(ref.base, names)}`
-      : nameFor(sourceParam.pointerAliasOf ?? sourceParam.name, names);
-    return param.pointerAliasOf === undefined ? [pointer, base] : [base];
+      : nameFor(semanticParamAliasName(ir, sourceParam) ?? sourceParam.name, names);
+    return param.pointerParamAlias === undefined ? [pointer, base] : [base];
   }
   if (param?.pointer && param.addressSpace === "local") {
     const ref = semanticPointerArgMemoryRef(arg);
@@ -5649,7 +5681,7 @@ function emitSemanticSharedPointerMemoryRef(
 ): string {
   const param = semanticWgslFunctionSharedPointerParam(ir, ref.base);
   if (!param) throw semanticWgslError(`unknown shared pointer '${ref.base}'`, ref.span);
-  const pointerName = param.pointerAliasOf ?? ref.base;
+  const pointerName = semanticParamAliasName(ir, param) ?? ref.base;
   if (param.dimensions.length === 0) {
     if (ref.indices.length > 1 || ref.indices[0] && !semanticExpressionIsZero(ref.indices[0])) {
       throw semanticWgslError(`shared scalar pointer '${ref.base}' cannot be indexed`, ref.span);
@@ -7788,7 +7820,8 @@ function semanticFunctionSharedPointerAtomicParams(
   for (const name of semanticAtomicSharedNames(fn.body)) {
     if (!pointerParams.has(name)) continue;
     names.add(name);
-    const alias = fn.params.find((param) => param.name === name)?.pointerAliasOf;
+    const param = fn.params.find((candidate) => candidate.name === name);
+    const alias = param === undefined ? undefined : semanticFunctionParamAliasName(fn, param);
     if (alias !== undefined) names.add(alias);
   }
   return names;

@@ -48,4 +48,28 @@ __global__ void empty_kernel() {}
       });
     }
   });
+
+  it("rejects dangling memory identities even when display names look valid", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void identity_kernel(float *out) { out[0] = 1.0f; }
+`);
+    const store = compiled.kernelIr.operations.find((operation) => operation.kind === "store");
+    if (store?.kind !== "store") throw new Error("expected store operation");
+    const invalid = {
+      ...compiled.kernelIr,
+      operations: [{
+        ...store,
+        target: {
+          ...store.target,
+          baseId: "memory:forged:out" as typeof store.target.baseId,
+        },
+      }],
+    } as SemanticKernelIrModule;
+
+    expect(verifySemanticKernelIr(invalid)).toContainEqual(expect.objectContaining({
+      code: "internal-lowering-invariant",
+      message: "IR store has dangling memory identity 'memory:forged:out'",
+      span: store.target.span,
+    }));
+  });
 });

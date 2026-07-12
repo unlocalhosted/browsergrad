@@ -101,10 +101,12 @@ import {
 import type { AnalyzedCudaLiteModule } from "./analyzer.js";
 import {
   createBuiltinSemanticSymbolId,
+  createGeneratedSemanticSymbolId,
   createUnresolvedSemanticSymbolId,
   createSemanticFunctionId,
   createSemanticSymbolId,
   semanticMemoryIdFromSymbol,
+  semanticSymbolIdFromMemory,
   type SemanticFunctionId,
   type SemanticMemoryId,
   type SemanticSymbolId,
@@ -150,8 +152,9 @@ export interface CudaLiteSemanticSymbol {
   readonly valueType?: CudaLiteScalarType;
   readonly pointer?: boolean;
   readonly pointerMayBeNull?: boolean;
-  readonly pointerRoot?: string;
-  readonly pointerAliasOf?: string;
+  readonly pointerRoot?: SemanticMemoryId;
+  readonly pointerMemoryAlias?: SemanticMemoryId;
+  readonly pointerParamAlias?: SemanticSymbolId;
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly pointerBaseIsScalarLane?: boolean;
@@ -174,8 +177,15 @@ export interface CudaLiteSemanticSymbol {
   readonly span: SourceSpan;
 }
 
+export function semanticPointerSymbolNeedsRuntimeState(symbol: CudaLiteSemanticSymbol): boolean {
+  return Boolean(symbol.pointer) &&
+    symbol.pointerRoot === undefined &&
+    symbol.pointerSelection === undefined &&
+    symbol.pointerArrayAliases === undefined;
+}
+
 interface SemanticPointerAlias {
-  readonly pointerRoot?: string;
+  readonly pointerRoot?: SemanticMemoryId;
   readonly pointerAddressSpace?: SemanticAddressSpace;
   readonly pointerBaseIndices?: readonly SemanticExpression[];
   readonly pointerBaseIsScalarLane?: boolean;
@@ -201,6 +211,7 @@ export interface CudaLiteSemanticFunction {
 
 export interface SemanticCooperativeGroupDeclaration {
   readonly kind: "cooperative-group";
+  readonly id: SemanticSymbolId;
   readonly groupKind: "thread" | "block" | "grid" | "tile" | "coalesced" | "binary";
   readonly name: string;
   readonly tileSize?: number;
@@ -452,6 +463,7 @@ export interface SemanticKernelIrModule {
   readonly kind: "semantic-kernel-ir";
   readonly name: string;
   readonly span: SourceSpan;
+  readonly symbols: readonly CudaLiteSemanticSymbol[];
   readonly params: readonly CudaLiteSemanticSymbol[];
   readonly memory: readonly CudaLiteSemanticSymbol[];
   readonly functions: readonly CudaLiteSemanticFunction[];
@@ -874,6 +886,11 @@ export function lowerSemanticModelToKernelIr(
     kind: "semantic-kernel-ir",
     name: analysis.kernel.name,
     span: analysis.kernel.span,
+    symbols: [
+      ...semantic.symbols,
+      ...functionSymbols,
+      ...functions.map(symbolForSemanticFunctionDeclaration),
+    ],
     params: semantic.params,
     memory: [
       ...semantic.symbols.filter((symbol) =>
@@ -1014,6 +1031,7 @@ function lowerSemanticLoopActiveOperations(
       return [semanticActiveLaneBranch(activeExpression, [rewritten], operation.span)];
     }
     if (operation.kind === "declare") {
+      if (operation.target.pointer && !semanticPointerSymbolNeedsRuntimeState(operation.target)) return [rewritten];
       if (operation.target.addressSpace === "shared" || operation.init === undefined || operation.target.dimensions.length > 0) return [rewritten];
       const { init: _init, ...declaration } = operation;
       return [declaration, semanticActiveLaneBranch(activeExpression, [{
@@ -1547,6 +1565,7 @@ function semanticActiveLaneTransformUnsafe(
       (operation.continuing?.some((item) => semanticActiveLaneTransformUnsafe(item, pointerFunctions, pointerWrites, barrierFunctions)) ?? false);
   }
   if (operation.kind === "declare") {
+    if (operation.target.pointer && !semanticPointerSymbolNeedsRuntimeState(operation.target)) return false;
     if (operation.target.addressSpace === "shared") return operation.target.pointer || operation.init !== undefined;
     return operation.target.addressSpace !== "local" || operation.target.pointer ||
       operation.target.dimensions.length > 0 && operation.init !== undefined && (
@@ -1718,7 +1737,9 @@ function specializeLocalPointerFunctionsOnce(
       }),
       body: rewriteSemanticPointerAddressSpace(
         fn.body,
-        new Map([...localPointers.keys()].map((name) => [name, name])),
+        new Map(fn.params
+          .filter((param) => localPointers.has(param.name))
+          .map((param) => [param.name, { name: param.name, id: semanticMemoryIdFromSymbol(param.id) }] as const)),
         "local",
       ),
     };
@@ -1771,17 +1792,17 @@ function specializeConstantPointerFunctions(
   ];
   return functions.map((fn) => {
     const fnCalls = calls.filter((call) => call.callee === fn.name);
-    const roots = new Map<string, string>();
+    const roots = new Map<string, SemanticPointerRewriteTarget>();
     for (const [index, param] of fn.params.entries()) {
       if (!param.pointer || !param.constant || param.addressSpace !== "storage") continue;
       const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
-      const root = refs[0]?.base;
+      const root = refs[0];
       if (root && refs.length > 0 && refs.every((ref) =>
         ref?.addressSpace === "constant" &&
-        ref.base === root &&
+        ref.baseId === root.baseId &&
         (ref.indices.length === 0 || ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]))
       )) {
-        roots.set(param.name, root);
+        roots.set(param.name, { name: root.base, id: root.baseId });
       }
     }
     if (roots.size === 0) return fn;
@@ -1790,7 +1811,7 @@ function specializeConstantPointerFunctions(
       params: fn.params.map((param) => roots.has(param.name) ? {
         ...param,
         addressSpace: "constant" as const,
-        pointerAliasOf: roots.get(param.name)!,
+        pointerMemoryAlias: roots.get(param.name)!.id,
       } : param),
       body: rewriteSemanticPointerAddressSpace(fn.body, roots, "constant"),
     };
@@ -1824,6 +1845,7 @@ function mutableKernelParamShadows(
       param,
       symbol: {
         ...param,
+        id: createGeneratedSemanticSymbolId(`bg_param_local_${sourceName}_${param.span.start}`, param.span),
         name: `bg_param_local_${sourceName}_${param.span.start}`,
         kind: "local" as const,
         addressSpace: "local" as const,
@@ -1901,14 +1923,14 @@ function specializeSharedPointerFunctionsOnce(
       }
     }
     if (sharedPointerNames.size === 0) return fn;
-    const sharedPointerAliases = new Map<string, string>();
+    const sharedPointerAliases = new Map<string, SemanticSymbolId>();
     const specializedParams = fn.params.filter((param) => sharedPointerNames.has(param.name));
     for (const [index, param] of specializedParams.entries()) {
       const roots = sharedPointerRoots.get(param.name)!;
       const canonical = specializedParams.slice(0, index).find((candidate) =>
         sameSemanticPointerRoots(roots, sharedPointerRoots.get(candidate.name)!),
       );
-      if (canonical) sharedPointerAliases.set(param.name, sharedPointerNames.get(canonical.name)!);
+      if (canonical) sharedPointerAliases.set(param.name, canonical.id);
     }
     return {
       ...fn,
@@ -1920,9 +1942,17 @@ function specializeSharedPointerFunctionsOnce(
         ...optionalPointerCarrierValueType(
           sharedMemoryValueTypes.get(sharedPointerRoots.get(param.name)![0]!) ?? param.valueType,
         ),
-        ...(sharedPointerAliases.has(param.name) ? { pointerAliasOf: sharedPointerAliases.get(param.name)! } : {}),
+        ...(sharedPointerAliases.has(param.name) ? { pointerParamAlias: sharedPointerAliases.get(param.name)! } : {}),
       } : param),
-      body: rewriteSemanticPointerAddressSpace(fn.body, sharedPointerNames),
+      body: rewriteSemanticPointerAddressSpace(
+        fn.body,
+        new Map(fn.params
+          .filter((param) => sharedPointerNames.has(param.name))
+          .map((param) => [param.name, {
+            name: sharedPointerNames.get(param.name)!,
+            id: semanticMemoryIdFromSymbol(param.id),
+          }] as const)),
+      ),
     };
   });
 }
@@ -2012,9 +2042,14 @@ function sameSemanticDimensions(dimensions: readonly (readonly number[])[]): boo
   return dimensions.every((item) => item.length === dimensions[0]!.length && item.every((value, index) => value === dimensions[0]![index]));
 }
 
+interface SemanticPointerRewriteTarget {
+  readonly name: string;
+  readonly id: SemanticMemoryId;
+}
+
 function rewriteSemanticPointerAddressSpace(
   operations: readonly SemanticKernelIrOperation[],
-  names: ReadonlyMap<string, string>,
+  names: ReadonlyMap<string, SemanticPointerRewriteTarget>,
   addressSpace: "shared" | "constant" | "local" = "shared",
 ): readonly SemanticKernelIrOperation[] {
   return operations.map((operation) => {
@@ -2032,18 +2067,24 @@ function rewriteSemanticPointerAddressSpace(
   });
 }
 
-function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<string, string>, addressSpace: "shared" | "constant" | "local"): SemanticMemoryRef {
+function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<string, SemanticPointerRewriteTarget>, addressSpace: "shared" | "constant" | "local"): SemanticMemoryRef {
+  const target = names.get(ref.base);
   return {
     ...ref,
-    ...(names.has(ref.base) && ref.addressSpace === "storage" ? { base: names.get(ref.base)!, addressSpace } : {}),
+    ...(target !== undefined && ref.addressSpace === "storage" ? { baseId: target.id, base: target.name, addressSpace } : {}),
     indices: ref.indices.map((index) => rewriteSemanticExpressionAddressSpace(index, names, addressSpace)),
   };
 }
 
-function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, string>, addressSpace: "shared" | "constant" | "local"): SemanticExpression {
+function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, SemanticPointerRewriteTarget>, addressSpace: "shared" | "constant" | "local"): SemanticExpression {
   switch (expression.kind) {
     case "pointer-valid": return expression;
-    case "symbol": return names.has(expression.name) && expression.addressSpace === "storage" ? { ...expression, name: names.get(expression.name)!, addressSpace } : expression;
+    case "symbol": {
+      const target = names.get(expression.name);
+      return target !== undefined && expression.addressSpace === "storage"
+        ? { ...expression, id: semanticSymbolIdFromMemory(target.id), name: target.name, addressSpace }
+        : expression;
+    }
     case "member": return { ...expression, object: rewriteSemanticExpressionAddressSpace(expression.object, names, addressSpace) };
     case "index": return { ...expression, target: rewriteSemanticExpressionAddressSpace(expression.target, names, addressSpace), index: rewriteSemanticExpressionAddressSpace(expression.index, names, addressSpace), ...(expression.addressSpace === "storage" && expression.target.kind === "symbol" && names.has(expression.target.name) ? { addressSpace } : {}) };
     case "call": return { ...expression, callee: rewriteSemanticExpressionAddressSpace(expression.callee, names, addressSpace), args: expression.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names, addressSpace)) };
@@ -2134,7 +2175,7 @@ function lowerStatementsWithScope(
     if (isLocalPointerAliasPlaceholder(statement) && hasLaterLocalPointerAliasAssignment(statement.name, statements.slice(index + 1), scope)) {
       const target = symbolForVar(statement, scope);
       scope.set(target.name, target);
-      out.push({ kind: "expression", expression: zeroExpression(statement.span), span: statement.span });
+      out.push({ kind: "declare", target, span: statement.span });
       continue;
     }
     out.push(...lowerStatementOperations(statement, scope));
@@ -2143,7 +2184,7 @@ function lowerStatementsWithScope(
     if (operation.kind !== "declare" || !operation.target.pointer || operation.target.dimensions.length !== 1) return operation;
     const target = scope.get(operation.target.name);
     if (!semanticPointerArrayAliasesComplete(target)) return operation;
-    return { kind: "expression", expression: zeroExpression(operation.span), span: operation.span };
+    return { ...operation, target: target! };
   });
 }
 
@@ -2676,9 +2717,6 @@ function lowerStatement(
     case "var": {
       const target = symbolForVar(statement, scope);
       scope.set(target.name, target);
-      if (target.pointerSelection || target.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices) {
-        return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
-      }
       return {
         kind: "declare",
         target,
@@ -2691,12 +2729,14 @@ function lowerStatement(
       scope.set(target.name, target);
       return { kind: "dim3-declare", target, args: statement.args.map((arg) => lowerExpression(arg, scope)), span: statement.span };
     }
-    case "cooperative-group":
-      scope.set(statement.name, semanticSymbolForCooperativeGroup(statement));
+    case "cooperative-group": {
+      const target = semanticSymbolForCooperativeGroup(statement);
+      scope.set(statement.name, target);
       return {
         kind: "cooperative-group-declare",
         declaration: {
           kind: "cooperative-group",
+          id: target.id,
           groupKind: statement.groupKind,
           name: statement.name,
           ...(statement.tileSize === undefined ? {} : { tileSize: statement.tileSize }),
@@ -2706,6 +2746,7 @@ function lowerStatement(
         },
         span: statement.span,
       };
+    }
     case "kernel-launch":
       return { kind: "device-launch", launch: lowerDeviceLaunch(statement, scope), span: statement.span };
     case "asm": {
@@ -3960,7 +4001,11 @@ function semanticCallName(callee: SemanticExpression): string | undefined {
 function collectDeclaredMemory(operations: readonly SemanticKernelIrOperation[]): readonly CudaLiteSemanticSymbol[] {
   const out: CudaLiteSemanticSymbol[] = [];
   for (const operation of operations) {
-    if (operation.kind === "declare" && (operation.target.pointer || operation.target.dimensions.length > 0 || operation.target.addressSpace === "shared")) out.push(operation.target);
+    if (operation.kind === "declare" && (
+      semanticPointerSymbolNeedsRuntimeState(operation.target) ||
+      !operation.target.pointer && operation.target.dimensions.length > 0 ||
+      operation.target.addressSpace === "shared"
+    )) out.push(operation.target);
     if (operation.kind === "block") out.push(...collectDeclaredMemory(operation.body));
     else if (operation.kind === "branch") out.push(...collectDeclaredMemory(operation.consequent), ...collectDeclaredMemory(operation.alternate));
     else if (operation.kind === "loop") out.push(...collectDeclaredMemory(operation.body));
@@ -4829,7 +4874,7 @@ function pointerAliasValueExpression(
   const alias = localPointerAliasForInitializer(expression, scope);
   const scalar = semanticPointerAliasScalarIndex(alias, span);
   if (!scalar) return undefined;
-  const root = scope.get(scalar.root);
+  const root = semanticSymbolForMemoryId(scope, scalar.root);
   if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;
   const aliasValueType = pointerAliasTargetValueType(expression, scope) ?? root.valueType;
   return {
@@ -5230,7 +5275,7 @@ function localPointerAliasForInitializer(
     const alias = localPointerAliasForInitializer(expression.expression, scope);
     const sourceType = pointerAliasTargetValueType(expression.expression, scope);
     const targetBytes = expression.pointerElementBytes ?? sizeofCudaType(expression.valueType);
-    const rootType = alias?.pointerRoot === undefined ? undefined : scope.get(alias.pointerRoot)?.valueType;
+    const rootType = alias?.pointerRoot === undefined ? undefined : semanticSymbolForMemoryId(scope, alias.pointerRoot)?.valueType;
     const rootBytes = rootType === undefined ? undefined : sizeofCudaType(rootType);
     if (alias && targetBytes !== undefined && rootBytes !== undefined && targetBytes >= rootBytes && targetBytes % rootBytes === 0) {
       const { pointerBaseUnitBytes: _pointerBaseUnitBytes, ...rest } = alias;
@@ -5375,7 +5420,7 @@ function localPointerAliasForInitializer(
     }
     if (root?.kind === "param" && root.pointer && root.addressSpace === "storage") {
       return {
-        pointerRoot: root.name,
+        pointerRoot: semanticMemoryIdFromSymbol(root.id),
         pointerAddressSpace: root.addressSpace,
         pointerBaseIndices: [zeroExpression(expression.span)],
         ...(root.pointerMayBeNull === true
@@ -5385,7 +5430,7 @@ function localPointerAliasForInitializer(
     }
     if ((root?.kind === "device-global" || root?.kind === "constant") && root.dimensions.length > 0) {
       return {
-        pointerRoot: root.name,
+        pointerRoot: semanticMemoryIdFromSymbol(root.id),
         pointerAddressSpace: root.addressSpace,
         pointerBaseIndices: [zeroExpression(expression.span)],
       };
@@ -5394,7 +5439,7 @@ function localPointerAliasForInitializer(
       root.kind === "local" && root.dimensions.length !== 1 ||
       root.kind === "shared" && root.dimensions.length !== 1 && root.dynamicShared !== true) return undefined;
     return {
-      pointerRoot: root.name,
+      pointerRoot: semanticMemoryIdFromSymbol(root.id),
       pointerAddressSpace: root.addressSpace,
       pointerBaseIndices: [zeroExpression(expression.span)],
     };
@@ -5435,7 +5480,7 @@ function localPointerAliasForInitializer(
   const ref = localPointerAliasRoot(expression.argument, scope);
   if (!ref || !semanticPointerAliasAddressSpaceSupported(ref.root.addressSpace)) return undefined;
   return {
-    pointerRoot: ref.root.name,
+    pointerRoot: semanticMemoryIdFromSymbol(ref.root.id),
     pointerAddressSpace: ref.root.addressSpace,
     pointerBaseIndices: ref.indices,
   };
@@ -5670,6 +5715,16 @@ function sameSymbolDeclaration(left: CudaLiteSemanticSymbol, right: CudaLiteSema
     left.span.end === right.span.end;
 }
 
+function semanticSymbolForMemoryId(
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  memoryId: SemanticMemoryId,
+): CudaLiteSemanticSymbol | undefined {
+  for (const symbol of scope.values()) {
+    if (semanticMemoryIdFromSymbol(symbol.id) === memoryId) return symbol;
+  }
+  return undefined;
+}
+
 function localPointerAliasRoot(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
@@ -5688,7 +5743,7 @@ function localPointerAliasRoot(
     };
   }
   if (target?.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices?.length === 1) {
-    const root = scope.get(target.pointerRoot);
+    const root = semanticSymbolForMemoryId(scope, target.pointerRoot);
     if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;
     return {
       root,
@@ -5732,7 +5787,7 @@ function localPointerAliasIndexExpression(
     );
   }
   if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || !alias.pointerBaseIndices || alias.pointerBaseIndices.length !== 1) return undefined;
-  const root = scope.get(alias.pointerRoot);
+  const root = semanticSymbolForMemoryId(scope, alias.pointerRoot);
   if (!root) return undefined;
   const aliasValueType = pointerAliasTargetValueType(expression.target, scope) ?? root.valueType;
   const target = semanticSymbolExpression(root, expression.target.span);
@@ -5806,7 +5861,7 @@ function localPointerAliasDerefExpression(
     : undefined;
   const alias = directPackedLocal?.kind === "local" && directPackedLocal.dimensions.length === 0 && directPackedLocal.packedByteLanes !== undefined
     ? {
-        pointerRoot: directPackedLocal.name,
+        pointerRoot: semanticMemoryIdFromSymbol(directPackedLocal.id),
         pointerAddressSpace: directPackedLocal.addressSpace,
         pointerBaseIndices: [zeroExpression(expression.span)],
       }
@@ -5819,7 +5874,7 @@ function localPointerAliasDerefExpression(
     );
   }
   if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || !alias.pointerBaseIndices || alias.pointerBaseIndices.length !== 1) return undefined;
-  const root = scope.get(alias.pointerRoot);
+  const root = semanticSymbolForMemoryId(scope, alias.pointerRoot);
   if (!root) return undefined;
   return {
     kind: "index",
@@ -5864,7 +5919,7 @@ function semanticPointerAliasIndexedValue(
   span: SourceSpan,
 ): SemanticExpression | undefined {
   if (!alias.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
-  const root = scope.get(alias.pointerRoot);
+  const root = semanticSymbolForMemoryId(scope, alias.pointerRoot);
   if (!root) return undefined;
   const aliasValueType = pointerAliasTargetValueType(source, scope) ?? root.valueType;
   return {
@@ -5975,14 +6030,14 @@ function localPointerAliasComparisonExpression(
 function localPointerAliasScalarIndex(
   expression: CudaLiteExpression,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
-): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number } | undefined {
+): { readonly root: SemanticMemoryId; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number } | undefined {
   return semanticPointerAliasScalarIndex(localPointerAliasForInitializer(expression, scope), expression.span);
 }
 
 function semanticPointerAliasScalarIndex(
   alias: SemanticPointerAlias | undefined,
   span: SourceSpan,
-): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number; readonly scalarLane?: boolean } | undefined {
+): { readonly root: SemanticMemoryId; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number; readonly scalarLane?: boolean } | undefined {
   if (alias?.pointerRoot && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) && alias.pointerBaseIndices?.length === 1) {
     return {
       root: alias.pointerRoot,

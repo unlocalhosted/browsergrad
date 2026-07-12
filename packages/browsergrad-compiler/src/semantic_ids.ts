@@ -45,6 +45,14 @@ export function semanticMemoryIdFromSymbol(id: SemanticSymbolId): SemanticMemory
   return id as string as SemanticMemoryId;
 }
 
+export function semanticSymbolIdFromMemory(id: SemanticMemoryId): SemanticSymbolId {
+  return id as string as SemanticSymbolId;
+}
+
+export function semanticSymbolIdFromFunction(id: SemanticFunctionId): SemanticSymbolId {
+  return id as string as SemanticSymbolId;
+}
+
 export function createUnresolvedSemanticMemoryId(
   name: string,
   span: SourceSpan,

@@ -46,6 +46,7 @@ import {
 } from "../../src/webgpu_inputs";
 import { deviceLaunchTreeIsExternallySilent } from "../../src/runtime_elision";
 import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
+import { semanticMemoryIdFromSymbol } from "../../src/semantic_ids";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -5291,9 +5292,10 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
       const helper = compiled.kernelIr.functions.find((fn) => fn.name === "add_row");
+      const matrix = compiled.kernelIr.memory.find((symbol) => symbol.name === "matrix");
 
       expect(helper?.params[0]?.addressSpace).toBe("constant");
-      expect(helper?.params[0]?.pointerAliasOf).toBe("matrix");
+      expect(helper?.params[0]?.pointerMemoryAlias).toBe(semanticMemoryIdFromSymbol(matrix!.id));
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("fn add_row(");

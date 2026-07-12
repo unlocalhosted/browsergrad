@@ -5,6 +5,11 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
+import {
+  createSemanticFunctionId,
+  semanticSymbolIdFromFunction,
+  type SemanticFunctionId,
+} from "./semantic_ids.js";
 
 export interface ResolvedSemanticFunctions {
   readonly operations: readonly SemanticKernelIrOperation[];
@@ -29,19 +34,25 @@ export function resolveSemanticFunctionOverloads(
   const resolve = (name: string, args: readonly SemanticExpression[]): ResolvedOverload => {
     const candidates = overloads.get(name);
     if (!candidates || candidates.length === 0) return { name };
-    if (candidates.length === 1) return { name, returnType: candidates[0]!.returnType };
+    if (candidates.length === 1) return { name, id: candidates[0]!.id, returnType: candidates[0]!.returnType };
     const matchingArity = candidates.filter((fn) => fn.params.length === args.length);
     const ranked = (matchingArity.length > 0 ? matchingArity : candidates)
       .map((fn) => ({ fn, score: semanticOverloadScore(fn, args) }))
       .filter((candidate) => candidate.score !== undefined)
       .sort((left, right) => right.score! - left.score!);
     const selected = ranked[0]?.fn ?? matchingArity[0] ?? candidates[0]!;
-    return { name: linkNames.get(selected) ?? selected.name, returnType: selected.returnType };
+    const linkName = linkNames.get(selected) ?? selected.name;
+    return {
+      name: linkName,
+      id: createSemanticFunctionId(linkName, selected.span),
+      returnType: selected.returnType,
+    };
   };
   return {
     operations: operations.map((operation) => resolveOperation(operation, resolve)),
     functions: functions.map((fn) => ({
       ...fn,
+      id: createSemanticFunctionId(linkNames.get(fn) ?? fn.name, fn.span),
       name: linkNames.get(fn) ?? fn.name,
       body: fn.body.map((operation) => resolveOperation(operation, resolve)),
     })),
@@ -76,6 +87,7 @@ function semanticOverloadScore(
 
 interface ResolvedOverload {
   readonly name: string;
+  readonly id?: SemanticFunctionId;
   readonly returnType?: CudaLiteSemanticFunction["returnType"];
 }
 
@@ -177,7 +189,12 @@ function resolveExpression(expression: SemanticExpression, resolve: OverloadReso
       const selected = resolve(callee.name, args);
       return {
         ...expression,
-        callee: { ...callee, name: selected.name, ...(selected.returnType === undefined ? {} : { valueType: selected.returnType }) },
+        callee: {
+          ...callee,
+          ...(selected.id === undefined ? {} : { id: semanticSymbolIdFromFunction(selected.id) }),
+          name: selected.name,
+          ...(selected.returnType === undefined ? {} : { valueType: selected.returnType }),
+        },
         args,
         ...(selected.returnType === undefined ? {} : { valueType: selected.returnType }),
       };

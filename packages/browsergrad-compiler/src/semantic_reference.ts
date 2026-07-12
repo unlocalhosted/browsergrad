@@ -4995,7 +4995,7 @@ function createSemanticFunctionContext(
       surfaces[param.name] = surface;
       continue;
     }
-    if (param.pointer && param.addressSpace === "constant" && param.pointerAliasOf !== undefined) continue;
+    if (param.pointer && param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined) continue;
     if (param.pointer && param.addressSpace === "storage") {
       const ref = semanticPointerArgMemoryRef(arg);
       if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global") throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled storage`, arg.span);
