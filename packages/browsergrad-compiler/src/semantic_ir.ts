@@ -1526,17 +1526,27 @@ function specializeSharedPointerFunctionsOnce(
     const sharedPointerRoots = new Map<string, readonly (string | undefined)[]>();
     for (const [index, param] of fn.params.entries()) {
       if (!param.pointer || param.addressSpace !== "storage") continue;
-      const args = fnCalls
-        .map((call) => call.args[index])
-        .flatMap((arg) => arg === undefined ? [] : [sharedPointerRoot(arg)]);
+      const callArgs = fnCalls.map((call) => call.args[index]).filter((arg): arg is SemanticExpression => arg !== undefined);
+      const refs = callArgs.map(semanticIrPointerArgumentMemoryRef);
+      const args = callArgs.map(sharedPointerRoot);
       const dimensions = args.map((root) => root === undefined ? undefined : sharedMemoryDimensions.get(root));
       const carrierTypes = args.map((root) => root === undefined ? undefined : sharedMemoryValueTypes.get(root));
-      const matchingValueTypes = param.valueType !== undefined && carrierTypes.every((valueType) =>
-        valueType !== undefined && (valueType === param.valueType || sizeofCudaType(valueType) === sizeofCudaType(param.valueType!)),
+      const matchingValueTypes = param.valueType !== undefined && carrierTypes.every((valueType, argIndex) =>
+        valueType !== undefined && (
+          valueType === param.valueType ||
+          sizeofCudaType(valueType) === sizeofCudaType(param.valueType!) ||
+          refs[argIndex]?.pointerBaseIsScalarLane === true && cudaVectorScalarType(valueType) === param.valueType
+        ),
       );
-      if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && dimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(dimensions as readonly (readonly number[])[])) {
+      const effectiveDimensions = dimensions.map((item, argIndex) => {
+        const carrierType = carrierTypes[argIndex];
+        return item !== undefined && item.length === 1 && refs[argIndex]?.pointerBaseIsScalarLane === true && isCudaVectorType(carrierType)
+          ? [item[0]! * cudaVectorLaneCount(carrierType)]
+          : item;
+      });
+      if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && effectiveDimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(effectiveDimensions as readonly (readonly number[])[])) {
         sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
-        sharedPointerDimensions.set(param.name, dimensions[0]!);
+        sharedPointerDimensions.set(param.name, effectiveDimensions[0]!);
         sharedPointerRoots.set(param.name, args);
       }
     }

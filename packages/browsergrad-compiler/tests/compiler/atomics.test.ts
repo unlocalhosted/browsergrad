@@ -547,9 +547,15 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [2, 1, 1] });
 
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<atomic<u32>, 8>;");
-      expect(compiled.wgsl).toContain("add_shared_scalar(1u, (0u + u32(((0 + 1) * 4))), idx");
-      expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&tile[index], value); }");
-      expect(compiled.wgsl).toContain("atomicLoad(&tile[(u32(((0 + 1) * 4)) + u32(idx))])");
+      expect(compiled.wgsl).toContain("add_shared_scalar(&tile, u32((1 * 4)), idx");
+      expect(compiled.wgsl).toContain("atomicAdd(&(*out__bg_shared_ptr)[(out__bg_shared_ptr_base + u32(idx))], value)");
+      expect(compiled.wgsl).toContain("atomicLoad(&tile[u32(((1 * 4) + idx))])");
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+      expect([...result.buffers.out as Uint32Array]).toEqual([7, 8]);
     });
 
   it("emits shared float vector scalar atomic helpers for flat lanes", () => {
@@ -568,9 +574,15 @@ describe("CUDA-lite compiler: Atomics", () => {
 
       expect(compiled.wgsl).toContain("var<workgroup> tile: array<atomic<u32>, 6>;");
       expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32_workgroup");
-      expect(compiled.wgsl).toContain("add_shared_float3_scalar(1u, (0u + u32(((0 + 1) * 3))), idx");
-      expect(compiled.wgsl).toContain("case 1u: { return bg_atomicAdd_f32_workgroup(&tile[index], value); }");
-      expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&tile[(u32(((0 + 1) * 3)) + u32(idx))]))");
+      expect(compiled.wgsl).toContain("add_shared_float3_scalar(&tile, u32((1 * 3)), idx");
+      expect(compiled.wgsl).toContain("bg_atomicAdd_f32_workgroup(&(*out__bg_shared_ptr)[(out__bg_shared_ptr_base + u32(idx))], value)");
+      expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&tile[u32(((1 * 3) + idx))]))");
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(2) } },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+      expect([...result.buffers.out as Float32Array]).toEqual([7, 8]);
     });
 
   it("lowers device helper pointer-param writes fed by atomic return values", () => {

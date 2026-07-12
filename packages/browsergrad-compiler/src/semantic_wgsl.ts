@@ -1345,6 +1345,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
   if (semanticWgslLocalScalarVectorView(ref, ir)) return true;
   if (semanticWgslSharedScalarVectorView(ref, ir)) return true;
+  if (semanticWgslSharedVectorScalarView(ref, ir)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = ir.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace) ??
     (ref.addressSpace === "local" ? semanticFunctionLocalArraySymbol(ir, ref.base) : undefined);
@@ -5164,6 +5165,11 @@ function emitSemanticMemoryRead(
     const word = `bitcast<u32>(vec2<f16>(${low}, ${high}))`;
     return ref.valueType === "float" ? `bitcast<f32>(${word})` : ref.valueType === "int" ? `bitcast<i32>(${word})` : word;
   }
+  if (semanticWgslSharedVectorScalarView(ref, ir)) {
+    const target = emitSemanticMemoryRef(ref, ir, names, options);
+    if (!semanticAtomicSharedNames(ir.operations, ir.functions).has(ref.base)) return target;
+    return emitSemanticAtomicLoad(ref, target);
+  }
   if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const valueType = ref.valueType ?? "float";
     const index = isCudaVectorType(valueType) ? emitFlatStorageVectorBaseIndex(ref, ir, names, options) : emitFlatStorageIndex(ref, ir, names, options);
@@ -5242,6 +5248,12 @@ function emitSemanticMemoryWrite(
   }
   if (semanticWgslPackedSharedByteRoot(ref, ir)) {
     return emitSemanticPackedSharedByteWrite(ref, value, ir, names, options);
+  }
+  if (semanticWgslSharedVectorScalarView(ref, ir)) {
+    const target = emitSemanticMemoryRef(ref, ir, names, options);
+    if (!semanticAtomicSharedNames(ir.operations, ir.functions).has(ref.base)) return `${target} = ${value}`;
+    const stored = ref.valueType === "float" || ref.valueType === "bf16" ? `bitcast<u32>(${value})` : value;
+    return `atomicStore(&${target}, ${stored})`;
   }
   if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const valueType = ref.valueType ?? "float";
@@ -6721,6 +6733,14 @@ function semanticWgslSharedScalarVectorView(ref: SemanticMemoryRef, ir: Semantic
   );
 }
 
+function semanticWgslSharedVectorScalarView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
+  if (ref.addressSpace !== "shared" || ref.pointerBaseIsScalarLane !== true || ref.fields.length > 0 || ref.indices.length !== 1) return false;
+  const scalar = ref.valueType;
+  return scalar !== undefined && sharedMemorySymbols(ir).some((symbol) =>
+    symbol.name === ref.base && isCudaVectorType(symbol.valueType) && cudaVectorScalarType(symbol.valueType) === scalar,
+  );
+}
+
 function semanticCurandStateAddressSpace(expression: SemanticExpression | undefined): "function" | "storage" | "workgroup" | undefined {
   if (!expression || expression.kind !== "unary" || expression.operator !== "&") return undefined;
   const target = expression.argument;
@@ -6913,6 +6933,11 @@ function emitSharedType(symbol: SemanticKernelIrModule["memory"][number], atomic
   if (symbol.valueType === "uchar") {
     const bytes = symbol.dimensions.length === 0 ? 1 : totalElements(symbol.dimensions);
     return symbol.dimensions.length === 0 ? "atomic<u32>" : `array<atomic<u32>, ${Math.ceil(bytes / 4)}>`;
+  }
+  if (atomic && isCudaVectorType(symbol.valueType)) {
+    const lanes = cudaVectorLaneCount(symbol.valueType);
+    const elements = symbol.dimensions.length === 0 ? lanes : totalElements(symbol.dimensions) * lanes;
+    return `array<atomic<${wgslAtomicScalar(symbol.valueType)}>, ${elements}>`;
   }
   const element = atomic ? `atomic<${wgslAtomicScalar(symbol.valueType)}>` : wgslValueType(symbol.valueType);
   if (symbol.dimensions.length === 0) return element;

@@ -5772,4 +5772,38 @@ __global__ void sharedFloatTile(const float* input, float* out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
     expect([...actual.buffers.out as Float32Array]).toEqual([...input.buffers.input]);
   });
+
+  it("runs shared vector scalar atomic aliases on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_uint(uint* target, int index, uint value) {
+  atomicAdd(&target[index], value);
+}
+
+__device__ void add_float(float* target, int index, float value) {
+  atomicAdd(&target[index], value);
+}
+
+__global__ void sharedVectorScalarAtomics(uint* uintOut, float* floatOut) {
+  __shared__ uint4 uintTile[2];
+  __shared__ float3 floatTile[2];
+  int index = threadIdx.x;
+  uint* uintView = reinterpret_cast<uint*>(uintTile + 1);
+  float* floatView = reinterpret_cast<float*>(floatTile + 1);
+  add_uint(uintView, index, 7u + (uint)index);
+  add_float(floatView, index, 7.0f + (float)index);
+  uintOut[index] = uintView[index];
+  floatOut[index] = floatView[index];
+}`, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { uintOut: new Uint32Array(2), floatOut: new Float32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.uintOut as Uint32Array]).toEqual([7, 8]);
+    expect([...expected.buffers.floatOut as Float32Array]).toEqual([7, 8]);
+    expect([...actual.buffers.uintOut as Uint32Array]).toEqual([7, 8]);
+    expect([...actual.buffers.floatOut as Float32Array]).toEqual([7, 8]);
+  });
 });

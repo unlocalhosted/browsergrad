@@ -604,6 +604,7 @@ function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compil
   if (semanticReferenceVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticReferenceLocalScalarVectorView(ref, compiled)) return true;
   if (semanticReferenceSharedScalarVectorView(ref, compiled)) return true;
+  if (semanticReferenceSharedVectorScalarView(ref, compiled)) return true;
   if (ref.addressSpace !== "local" && ref.addressSpace !== "shared") return true;
   const symbol = compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
   return symbol === undefined || symbol.valueType === ref.valueType;
@@ -655,6 +656,14 @@ function semanticReferenceSharedScalarVectorView(ref: SemanticMemoryRef, compile
   const scalar = cudaVectorScalarType(valueType);
   return scalar !== undefined && compiled.kernelIr.memory.some((symbol) =>
     symbol.name === ref.base && symbol.kind === "shared" && symbol.valueType === scalar,
+  );
+}
+
+function semanticReferenceSharedVectorScalarView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  if (ref.addressSpace !== "shared" || ref.pointerBaseIsScalarLane !== true || ref.fields.length > 0 || ref.indices.length !== 1) return false;
+  const scalar = ref.valueType;
+  return scalar !== undefined && compiled.kernelIr.memory.some((symbol) =>
+    symbol.name === ref.base && symbol.kind === "shared" && isCudaVectorType(symbol.valueType) && cudaVectorScalarType(symbol.valueType) === scalar,
   );
 }
 
