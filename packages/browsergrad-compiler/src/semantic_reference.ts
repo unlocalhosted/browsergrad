@@ -23,6 +23,11 @@ import {
   cudaLiteTruthy as truthy,
 } from "./cuda_lite_values.js";
 import { cudaVibMinMaxInfo } from "./cuda_math_calls.js";
+import {
+  isCudaComplexCallName,
+  isCudaComplexConstructorCallName,
+  isCudaComplexScalarCallName,
+} from "./cuda_complex_intrinsics.js";
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
 import {
   isCudaBarrierCallName,
@@ -413,7 +418,7 @@ function unsupportedSemanticReferenceOperation(
           return reject(operation, `semantic reference does not support array initializer for '${operation.target.name}'`, operation.init.span);
         }
         if (operation.target.dimensions.length === 0) {
-          const vectorTarget = isSemanticFloatVectorType(operation.target.valueType);
+          const vectorTarget = semanticStorageVectorType(operation.target.valueType) !== undefined;
           if (operation.init && !semanticReferenceExpressionSupported(operation.init, vectorTarget ? "any" : "scalar", compiled)) {
             return reject(operation, `semantic reference does not support initializer for '${operation.target.name}'`, operation.init.span);
           }
@@ -421,7 +426,7 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "store":
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return reject(operation, `semantic reference does not support store operator '${operation.operator}'`);
-        if (isSemanticFloatVectorType(operation.target.valueType) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return reject(operation, `semantic reference does not support vector store operator '${operation.operator}'`);
+        if (semanticStorageVectorType(operation.target.valueType) !== undefined && !semanticVectorAssignmentOperatorSupported(operation.operator)) return reject(operation, `semantic reference does not support vector store operator '${operation.operator}'`);
         if (semanticReferenceVectorFieldMemoryRefSupported(operation.target) && !semanticVectorAssignmentOperatorSupported(operation.operator)) return reject(operation, `semantic reference does not support vector-field store operator '${operation.operator}'`);
         if (!semanticReferenceTypedMemoryRefSupported(operation.target, compiled) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) {
           return reject(operation, `semantic reference does not support ${operation.target.addressSpace} memory target '${operation.target.base}'`, operation.target.span);
@@ -637,7 +642,7 @@ function semanticReferenceValueTypeSupported(valueType: CudaLiteScalarType | und
 }
 
 function semanticReferenceLocalValueTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return semanticLocalValueTypeSupported(valueType);
+  return semanticLocalValueTypeSupported(valueType) || semanticStorageVectorType(valueType) !== undefined;
 }
 
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
@@ -799,6 +804,18 @@ function semanticReferenceDeclaredLocalVectorType(
   return undefined;
 }
 
+function semanticReferenceLocalVectorRootType(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+): CudaLiteScalarType | undefined {
+  if (ref.addressSpace !== "local" || context.localDimensions.has(ref.base)) return undefined;
+  return semanticStorageVectorType(ref.containerValueType) ??
+    semanticStorageVectorType(semanticReferenceDeclaredLocalVectorType(context.compiled.kernelIr.operations, ref.base)) ??
+    context.compiled.kernelIr.functions
+      .map((fn) => semanticStorageVectorType(semanticReferenceDeclaredLocalVectorType(fn.body, ref.base)))
+      .find((value) => value !== undefined);
+}
+
 function semanticReferenceCopySupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "copy" }>,
   compiled: CompiledCudaLiteKernel,
@@ -856,8 +873,8 @@ function semanticReferenceAtomicSupported(
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar", compiled) ||
-    semanticReferenceExpressionSupported(expression, "any", compiled) && isSemanticFloatVectorType(semanticExpressionValueType(expression)) ||
-    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceGeneratedRandomCallSupported(expression) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceMathCallSupported(expression, "any", compiled) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled) || semanticReferenceVectorMathCallSupported(expression)) ||
+    semanticReferenceExpressionSupported(expression, "any", compiled) && semanticStorageVectorType(semanticExpressionValueType(expression)) !== undefined ||
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceGeneratedRandomCallSupported(expression) || semanticReferenceSubgroupCallSupported(expression) || semanticReferenceAddressPredicateCallSupported(expression) || semanticReferenceComplexCallSupported(expression, "any", compiled) || semanticReferenceMathCallSupported(expression, "any", compiled) || semanticReferenceHalf2CallSupported(expression, compiled) || semanticReferenceBf162CallSupported(expression, compiled) || semanticReferenceVectorConstructorSupported(expression, "any", compiled) || semanticReferenceVectorAtCallSupported(expression, compiled) || semanticReferenceVectorLerpCallSupported(expression, compiled) || semanticReferenceVectorMathCallSupported(expression)) ||
     expression.kind === "texture-read" && semanticReferenceTextureReadSupported(expression, compiled) ||
     expression.kind === "surface-read" && semanticReferenceSurfaceReadSupported(expression, compiled);
 }
@@ -884,6 +901,29 @@ function semanticReferenceMathCallSupported(
     expression.args,
     (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled),
   );
+}
+
+function semanticReferenceComplexCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  expected: "scalar" | "any",
+  compiled?: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.callee.kind !== "symbol" || !isCudaComplexCallName(expression.callee.name)) return false;
+  if (isCudaComplexConstructorCallName(expression.callee.name)) {
+    return expected === "any" && expression.args.length === 2 &&
+      expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
+  }
+  if (isCudaComplexScalarCallName(expression.callee.name)) {
+    return expected === "scalar" && expression.args.length === 1 &&
+      semanticReferenceExpressionSupported(expression.args[0]!, "any", compiled);
+  }
+  const arity = expression.callee.name === "cuConjf" || expression.callee.name === "cuConj"
+    ? 1
+    : expression.callee.name === "cuCfmaf" || expression.callee.name === "cuCfma"
+      ? 3
+      : 2;
+  return expected === "any" && expression.args.length === arity &&
+    expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "any", compiled));
 }
 
 function semanticReferenceVectorMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1299,7 +1339,7 @@ function semanticReferenceExpressionSupported(
     case "literal":
       return typeof expression.value === "number";
     case "symbol":
-      if (expected === "scalar" && isCudaVectorType(expression.valueType)) return false;
+      if (expected === "scalar" && semanticStorageVectorType(expression.valueType) !== undefined) return false;
       return expression.addressSpace === "uniform" ||
         expression.addressSpace === "local" ||
         expression.addressSpace === "constant" ||
@@ -1316,7 +1356,7 @@ function semanticReferenceExpressionSupported(
       {
         const ref = memoryRefFromIndexExpression(expression) ?? unsupportedMemoryRef(expression.span);
         const supported = compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled);
-        return supported && (expected === "any" || !isSemanticFloatVectorType(expression.valueType));
+        return supported && (expected === "any" || semanticStorageVectorType(expression.valueType) === undefined);
       }
     case "cast":
       return !expression.pointer && semanticReferenceExpressionSupported(expression.expression, "scalar", compiled);
@@ -1327,7 +1367,7 @@ function semanticReferenceExpressionSupported(
     case "binary":
       if (isStoragePointerNullComparison(expression)) return true;
       if (compiled !== undefined && isStoragePointerIdentityComparison(expression, compiled)) return true;
-      if (expected === "any" && isSemanticFloatVectorType(expression.valueType) && semanticReferenceVectorBinaryOperatorSupported(expression.operator)) {
+      if (expected === "any" && semanticStorageVectorType(expression.valueType) !== undefined && semanticReferenceVectorBinaryOperatorSupported(expression.operator)) {
         return semanticReferenceExpressionSupported(expression.left, "any", compiled) &&
           semanticReferenceExpressionSupported(expression.right, "any", compiled);
       }
@@ -1339,7 +1379,7 @@ function semanticReferenceExpressionSupported(
         semanticReferenceExpressionSupported(expression.alternate, expected, compiled);
     case "assignment":
       {
-        const vectorTarget = isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
+        const vectorTarget = semanticStorageVectorType(semanticExpressionValueType(expression.target)) !== undefined;
         return semanticReferenceAssignmentOperatorSupported(expression.operator) &&
         (!vectorTarget || semanticVectorAssignmentOperatorSupported(expression.operator)) &&
         (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
@@ -1363,6 +1403,7 @@ function semanticReferenceExpressionSupported(
         compiled !== undefined && semanticReferenceCooperativeReduceCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceFunctionCallSupported(expression, compiled) ||
         compiled !== undefined && semanticReferenceAtomicCallSupported(expression, compiled) ||
+        semanticReferenceComplexCallSupported(expression, expected, compiled) ||
         (semanticReferenceCurandCallSupported(expression, compiled) || semanticReferenceGeneratedRandomCallSupported(expression)) &&
           (expected === "any" || !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression))) ||
         semanticReferenceSubgroupCallSupported(expression) ||
@@ -1587,6 +1628,9 @@ function semanticReferenceVectorMemberSupported(
 ): boolean {
   if (compiled && semanticDirectByteVectorMemberRef(expression, compiled.kernelIr)) return true;
   const valueType = semanticExpressionValueType(expression.object);
+  if (expression.property === "size" && semanticStorageVectorType(valueType) !== undefined) {
+    return semanticReferenceExpressionSupported(expression.object, "any", compiled);
+  }
   return semanticReferenceExpressionSupported(expression.object, "any", compiled) &&
     semanticStorageVectorFieldIndices(valueType, expression.property) !== undefined;
 }
@@ -2095,7 +2139,7 @@ function storeValueExpression(
   context: SemanticReferenceContext,
 ): SemanticValue {
   if (semanticReferenceVectorFieldMemoryRefSupported(operation.target)) {
-    const right = isSemanticFloatVectorType(operation.target.valueType)
+    const right = semanticStorageVectorType(operation.target.valueType) !== undefined
       ? evalSemanticExpression(operation.value, context)
       : evalNumber(operation.value, context);
     if (operation.operator === "=") return right;
@@ -2127,8 +2171,9 @@ function semanticDeclareValue(
   context: SemanticReferenceContext,
 ): SemanticValue {
   if (operation.target.dimensions.length > 0) {
-    const vectorTarget = isSemanticFloatVectorType(operation.target.valueType);
-    const zeroValue = vectorTarget && operation.target.valueType !== undefined ? zeroSemanticVector(operation.target.valueType) : 0;
+    const vectorType = semanticStorageVectorType(operation.target.valueType);
+    const vectorTarget = vectorType !== undefined;
+    const zeroValue = vectorType === undefined ? 0 : zeroSemanticVector(vectorType);
     const values: SemanticValue[] = Array.from({ length: totalElements(operation.target.dimensions) }, () =>
       Array.isArray(zeroValue) ? [...zeroValue] : zeroValue
     );
@@ -2147,8 +2192,9 @@ function semanticDeclareValue(
     const value = evalSemanticExpression(operation.init, context);
     return typeof value === "number" ? coerceSemanticScalarValue(value, operation.target.valueType) : value;
   }
-  if (isSemanticFloatVectorType(operation.target.valueType)) {
-    return Array.from({ length: cudaVectorLaneCount(operation.target.valueType) }, () => 0);
+  const vectorType = semanticStorageVectorType(operation.target.valueType);
+  if (vectorType !== undefined) {
+    return Array.from({ length: cudaVectorLaneCount(vectorType) }, () => 0);
   }
   return 0;
 }
@@ -3046,7 +3092,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
         : evalSemanticExpression(expression.alternate, context);
     case "assignment":
       {
-        const vectorTarget = isSemanticFloatVectorType(semanticExpressionValueType(expression.target));
+        const vectorTarget = semanticStorageVectorType(semanticExpressionValueType(expression.target)) !== undefined;
         if (!semanticReferenceAssignmentOperatorSupported(expression.operator) ||
         (vectorTarget && !semanticVectorAssignmentOperatorSupported(expression.operator)) ||
         (expression.target.kind !== "symbol" &&
@@ -3092,6 +3138,9 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       if (semanticReferenceGeneratedRandomCallSupported(expression)) return evalSemanticGeneratedRandomCall(expression, context);
       if (semanticReferenceSubgroupCallSupported(expression)) return evalSemanticSubgroupCall(expression, context);
       if (semanticReferenceAddressPredicateCallSupported(expression)) return evalSemanticAddressPredicateCall(expression);
+      if (semanticReferenceComplexCallSupported(expression, "any", context.compiled) || semanticReferenceComplexCallSupported(expression, "scalar", context.compiled)) {
+        return evalSemanticComplexCall(expression, context);
+      }
       if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);
       if (semanticReferenceVectorAtCallSupported(expression, context.compiled)) return evalSemanticVectorAtCall(expression, context);
       if (semanticReferenceVectorLerpCallSupported(expression, context.compiled)) return evalSemanticVectorLerpCall(expression, context);
@@ -3128,6 +3177,45 @@ function evalSemanticPtxIntegerCall(
   if (info?.family === "select") return (args[2] ?? 0) !== 0 ? args[0] ?? 0 : args[1] ?? 0;
   if (info?.family === "compare") return Number(evalInlineAsmCompare(info.op, args[0] ?? 0, args[1] ?? 0, info.signed));
   throw semanticReferenceError(`unknown semantic PTX integer call '${expression.callee.name}'`, expression.span);
+}
+
+function evalSemanticComplexCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): SemanticValue {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic complex call requires symbol callee", expression.span);
+  const name = expression.callee.name;
+  if (isCudaComplexConstructorCallName(name)) {
+    return [evalNumber(expression.args[0]!, context), evalNumber(expression.args[1]!, context)];
+  }
+  const complex = (index: number): readonly [number, number] => {
+    const value = evalSemanticExpression(expression.args[index]!, context);
+    if (!Array.isArray(value) || value.length < 2) throw semanticReferenceError(`${name} expects complex operand`, expression.args[index]!.span);
+    return [Number(value[0] ?? 0), Number(value[1] ?? 0)];
+  };
+  const [ar, ai] = complex(0);
+  if (name === "cuCrealf" || name === "cuCreal") return ar;
+  if (name === "cuCimagf" || name === "cuCimag") return ai;
+  if (name === "cuCabsf" || name === "cuCabs") return Math.hypot(ar, ai);
+  if (name === "cuConjf" || name === "cuConj") return [ar, -ai];
+  const [br, bi] = complex(1);
+  if (name === "cuCaddf" || name === "cuCadd") return [ar + br, ai + bi];
+  if (name === "cuCsubf" || name === "cuCsub") return [ar - br, ai - bi];
+  const product: readonly [number, number] = [ar * br - ai * bi, ar * bi + ai * br];
+  if (name === "cuCmulf" || name === "cuCmul") return [...product];
+  if (name === "cuCfmaf" || name === "cuCfma") {
+    const [cr, ci] = complex(2);
+    return [product[0] + cr, product[1] + ci];
+  }
+  if (name === "cuCdivf" || name === "cuCdiv") {
+    const scale = Math.max(Math.abs(br), Math.abs(bi));
+    if (scale === 0) return [(ar * br + ai * bi) / 0, (ai * br - ar * bi) / 0];
+    const real = br / scale;
+    const imag = bi / scale;
+    const denominator = real * real + imag * imag;
+    return [((ar * real + ai * imag) / denominator) / scale, ((ai * real - ar * imag) / denominator) / scale];
+  }
+  throw semanticReferenceError(`unsupported semantic complex call '${name}'`, expression.span);
 }
 
 function semanticReferenceSharedAddressCallSupported(
@@ -5049,7 +5137,7 @@ function assignLocalVectorMember(
   const current = context.locals.get(expression.target.object.name);
   if (!Array.isArray(current)) throw semanticReferenceError(`missing local vector '${expression.target.object.name}'`, expression.target.span);
   const valueType = semanticExpressionValueType(expression.target.object);
-  const lanes = cudaVectorSwizzleIndices(valueType, expression.target.property);
+  const lanes = cudaVectorSwizzleIndices(semanticStorageVectorType(valueType), expression.target.property);
   if (lanes !== undefined && lanes.length > 1) {
     const right = evalSemanticExpression(expression.value, context);
     const assigned = expression.operator === "="
@@ -5063,7 +5151,8 @@ function assignLocalVectorMember(
     context.locals.set(expression.target.object.name, next);
     return assigned;
   }
-  const lane = lanes?.[0] ?? (valueType === undefined ? undefined : cudaVectorFieldIndex(valueType, expression.target.property));
+  const storageVectorType = semanticStorageVectorType(valueType);
+  const lane = lanes?.[0] ?? (storageVectorType === undefined ? undefined : cudaVectorFieldIndex(storageVectorType, expression.target.property));
   if (lane === undefined) throw semanticReferenceError("semantic reference vector assignment requires modeled lane", expression.target.span);
   const right = evalNumber(expression.value, context);
   const left = Number(current[lane] ?? 0);
@@ -5327,6 +5416,10 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
       if (ref.indices.length === 0 && typeof buffer === "number") return buffer;
       throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     }
+    if (semanticReferenceLocalVectorRootType(ref, context) !== undefined && ref.indices.length === 1) {
+      const lane = Math.trunc(evalNumber(ref.indices[0]!, context));
+      return lane >= 0 && lane < buffer.length ? Number(buffer[lane] ?? 0) : 0;
+    }
     if (semanticReferenceLocalPackedHalfView(ref, context.compiled)) {
       const halfIndex = flatIndex(ref, context);
       const word = Number(buffer[Math.trunc(halfIndex / 2)] ?? 0) >>> 0;
@@ -5422,6 +5515,11 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
         return;
       }
       throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    }
+    if (semanticReferenceLocalVectorRootType(ref, context) !== undefined && ref.indices.length === 1) {
+      const lane = Math.trunc(evalNumber(ref.indices[0]!, context));
+      if (lane >= 0 && lane < buffer.length) buffer[lane] = value;
+      return;
     }
     if (semanticReferenceLocalPackedHalfView(ref, context.compiled)) {
       const halfIndex = flatIndex(ref, context);
@@ -6002,6 +6100,7 @@ function memberValue(
   span: SourceSpan,
 ): SemanticValue {
   if (Array.isArray(value)) {
+    if (property === "size") return value.length;
     const indices = cudaVectorSwizzleIndices(valueType, property);
     if (indices && indices.length > 1) return indices.map((index) => value[index] ?? 0);
     const index = indices?.[0] ?? vectorFieldIndex(property);

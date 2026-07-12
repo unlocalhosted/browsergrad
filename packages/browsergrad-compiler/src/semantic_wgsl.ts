@@ -44,7 +44,7 @@ import { sizeofCudaType } from "./type_layout.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
-import { emitBfloatConversionHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers } from "./wgsl_support_helpers.js";
+import { emitBfloatConversionHelpers, emitCuComplexRobustMathHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers } from "./wgsl_support_helpers.js";
 import {
   semanticBf162CallArgumentsSupported,
   isSemanticHalf2BooleanComparisonCall,
@@ -131,6 +131,11 @@ import {
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
+import {
+  isCudaComplexCallName,
+  isCudaComplexConstructorCallName,
+  isCudaComplexScalarCallName,
+} from "./cuda_complex_intrinsics.js";
 import {
   isMatrixTileByteValueType,
   matrixTileElementCount,
@@ -221,6 +226,7 @@ import {
   semanticSurfaceSymbols as surfaceSymbols,
   semanticTextureSymbols as textureSymbols,
   semanticUsesBfloatHelper,
+  semanticUsesCuComplexRobustMath,
   semanticUsesCurand,
   semanticUsesFp8,
   semanticUsesGenericSurfaceRead,
@@ -681,6 +687,9 @@ function emitSemanticKernelIrWgslFromIr(
   }
   if (semanticUsesCurand(ir)) {
     lines.push("", ...emitCurandHelpers());
+  }
+  if (semanticUsesCuComplexRobustMath(ir)) {
+    lines.push("", ...emitCuComplexRobustMathHelpers());
   }
   for (const helper of emitSemanticStoragePointerHelpers(ir, names)) {
     lines.push("", ...helper);
@@ -4179,6 +4188,8 @@ function emitSemanticExpression(
     if (customMath) return customMath;
     const minMax = emitSemanticTypedMinMaxCall(expression, ir, names, options, textureSpecializations);
     if (minMax) return minMax;
+    const complex = emitSemanticTypedComplexCall(expression, ir, names, options, textureSpecializations);
+    if (complex) return complex;
     const vectorMath = emitSemanticTypedVectorMathCall(expression, ir, names, options, textureSpecializations);
     if (vectorMath) return vectorMath;
     const nativeMath = semanticTypedNativeMathCallee(expression, ir);
@@ -7238,6 +7249,54 @@ function emitSemanticTypedMinMaxCall(
     scalar,
     expression.span,
   );
+}
+
+function emitSemanticTypedComplexCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): TypedWgslExpression | undefined {
+  if (expression.callee.kind !== "symbol" || !isCudaComplexCallName(expression.callee.name)) return undefined;
+  const name = expression.callee.name;
+  const operand = (index: number): TypedWgslExpression => {
+    const arg = expression.args[index];
+    if (!arg) throw semanticWgslError(`${name} expects complex operand ${index + 1}`, expression.span);
+    const value = emitSemanticExpression(arg, ir, names, options, textureSpecializations);
+    if (value.type !== "vec2<f32>") throw semanticWgslError(`${name} expects complex64 operand`, arg.span);
+    return value;
+  };
+  const lane = (value: TypedWgslExpression, field: "x" | "y"): TypedWgslExpression =>
+    createTypedWgslMemberAccess(value, field, "f32", expression.span);
+  if (isCudaComplexConstructorCallName(name)) {
+    if (expression.args.length !== 2) throw semanticWgslError(`${name} expects two scalar operands`, expression.span);
+    return createTypedWgslConstructor("vec2<f32>", expression.args.map((arg) =>
+      emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations)
+    ), expression.span);
+  }
+  const left = operand(0);
+  if (isCudaComplexScalarCallName(name)) {
+    if (name === "cuCrealf" || name === "cuCreal") return lane(left, "x");
+    if (name === "cuCimagf" || name === "cuCimag") return lane(left, "y");
+    return createTypedWgslCall("bg_cuCabsf", [left], "f32", expression.span);
+  }
+  if (name === "cuConjf" || name === "cuConj") {
+    return createTypedWgslConstructor("vec2<f32>", [lane(left, "x"), emitTypedWgslUnary("-", lane(left, "y"), expression.span)], expression.span);
+  }
+  const right = operand(1);
+  if (name === "cuCaddf" || name === "cuCadd" || name === "cuCsubf" || name === "cuCsub") {
+    return emitTypedWgslBinary(name.includes("add") ? "+" : "-", left, right, expression.span);
+  }
+  if (name === "cuCdivf" || name === "cuCdiv") {
+    return createTypedWgslCall("bg_cuCdivf", [left, right], "vec2<f32>", expression.span);
+  }
+  const product = createTypedWgslConstructor("vec2<f32>", [
+    emitTypedWgslBinary("-", emitTypedWgslBinary("*", lane(left, "x"), lane(right, "x"), expression.span), emitTypedWgslBinary("*", lane(left, "y"), lane(right, "y"), expression.span), expression.span),
+    emitTypedWgslBinary("+", emitTypedWgslBinary("*", lane(left, "x"), lane(right, "y"), expression.span), emitTypedWgslBinary("*", lane(left, "y"), lane(right, "x"), expression.span), expression.span),
+  ], expression.span);
+  if (name === "cuCfmaf" || name === "cuCfma") return emitTypedWgslBinary("+", product, operand(2), expression.span);
+  return product;
 }
 
 function emitSemanticTypedVectorMathCall(

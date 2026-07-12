@@ -79,6 +79,22 @@ export function semanticUsesCurand(ir: SemanticKernelIrModule): boolean {
   return semanticOperationsUseCurand(ir.operations) || ir.functions.some((fn) => semanticOperationsUseCurand(fn.body));
 }
 
+export function semanticUsesCuComplexRobustMath(ir: SemanticKernelIrModule): boolean {
+  const calls = new Set(["cuCabsf", "cuCdivf", "cuCabs", "cuCdiv"]);
+  const uses = (operations: readonly SemanticKernelIrOperation[]): boolean => operations.some((operation) =>
+    semanticOperationExpressions(operation).some((expression) => semanticExpressionUsesCall(expression, calls)) ||
+    operation.kind === "branch" && (uses(operation.consequent) || uses(operation.alternate)) ||
+    operation.kind === "loop" && (uses(operation.body) || uses(operation.continuing ?? [])) ||
+    operation.kind === "block" && uses(operation.body)
+  );
+  return uses(ir.operations) || ir.functions.some((fn) => uses(fn.body));
+}
+
+function semanticExpressionUsesCall(expression: SemanticExpression, calls: ReadonlySet<string>): boolean {
+  return expression.kind === "call" && expression.callee.kind === "symbol" && calls.has(expression.callee.name) ||
+    semanticExpressionChildren(expression).some((child) => semanticExpressionUsesCall(child, calls));
+}
+
 function semanticOperationsUseCurand(operations: readonly SemanticKernelIrOperation[]): boolean {
   for (const operation of operations) {
     if (operation.kind === "call" && SEMANTIC_CURAND_CALLS.has(operation.callee)) return true;

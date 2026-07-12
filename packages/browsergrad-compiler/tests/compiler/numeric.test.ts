@@ -2769,7 +2769,8 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(compiled.wgsl).toContain("var c: vec2<f32>");
-      expect(compiled.wgsl).toContain("A[u32(idx)] = c");
+      expect(compiled.wgsl).toMatch(/let bg_vector_store_value_A_\d+: vec2<f32> = c;/u);
+      expect(compiled.wgsl).toMatch(/A\[\(bg_vector_store_base_A_\d+ \+ 1u\)\] = \(bg_vector_store_value_A_\d+\)\.y;/u);
       expect([...result.buffers.A as Float32Array]).toEqual([-7, 16, -11, 52]);
     });
 
@@ -2858,7 +2859,7 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(compiled.wgsl).toContain("vec2<f32>(f32");
+      expect(compiled.wgsl).toContain("var x: vec2<f32>");
       expect(compiled.wgsl).toContain("fn bg_cuCabsf");
       expect(compiled.wgsl).toContain("fn bg_cuCdivf");
       expect([...result.buffers.a as Float32Array]).toEqual([-2, 6, -3, 23]);
@@ -2916,7 +2917,8 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(compiled.wgsl).toContain("d[u32(i)] = vec2<f32>");
+      expect(compiled.wgsl).toMatch(/let bg_vector_store_value_d_\d+: vec2<f32> =/u);
+      expect(compiled.wgsl).toMatch(/d\[\(bg_vector_store_base_d_\d+ \+ 1u\)\] = \(bg_vector_store_value_d_\d+\)\.y;/u);
       expect(compiled.wgsl).not.toContain("unsupported CUDA-lite call");
       expect([...result.buffers.d as Float32Array]).toEqual([2, 26, 0, 64]);
     });
@@ -2949,7 +2951,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(codes).not.toContain("unsupported-call");
       expect(codes).not.toContain("unsupported-cufft");
       expect(codes).toContain("f64-lowered-to-f32");
-      expect(compiled.wgsl).toContain("vec2<f32>(f32");
+      expect(compiled.wgsl).toContain("var x: vec2<f32>");
       expect(compiled.wgsl).toContain("fn bg_cuCabsf");
       expect(compiled.wgsl).toContain("fn bg_cuCdivf");
       expect([...result.buffers.a as Float32Array]).toEqual([-2, 6, -3, 23]);
