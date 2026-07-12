@@ -44,7 +44,8 @@ export function semanticFunctionArgAddressContractSupported(
     if (param.addressSpace === "constant" && param.pointerAliasOf !== undefined) {
       return ref?.addressSpace === "constant" && ref.base === param.pointerAliasOf;
     }
-    return (param.addressSpace === "storage" || param.addressSpace === "shared" || param.addressSpace === "local") && ref?.addressSpace === param.addressSpace;
+    if (param.addressSpace === "storage") return ref?.addressSpace === "storage" || ref?.addressSpace === "device-global";
+    return (param.addressSpace === "shared" || param.addressSpace === "local") && ref?.addressSpace === param.addressSpace;
   }
   if (param.addressSpace === "texture") return arg.kind === "symbol" && arg.addressSpace === "texture";
   if (param.addressSpace === "surface") return arg.kind === "symbol" && arg.addressSpace === "surface";

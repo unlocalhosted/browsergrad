@@ -47,7 +47,9 @@ export function semanticWgslFunctionSharedPointerParam(
 
 export function semanticStoragePointerBufferId(base: string, ir: SemanticKernelIrModule): number | undefined {
   const index = ir.params.findIndex((param) => param.name === base && param.addressSpace === "storage");
-  return index < 0 ? undefined : index;
+  if (index >= 0) return index;
+  const globalIndex = ir.memory.filter((symbol) => symbol.kind === "device-global").findIndex((symbol) => symbol.name === base);
+  return globalIndex < 0 ? undefined : ir.params.length + globalIndex;
 }
 
 export function semanticPointerStorageCompatible(pointerType: CudaLiteScalarType, storageType: CudaLiteScalarType | undefined): boolean {

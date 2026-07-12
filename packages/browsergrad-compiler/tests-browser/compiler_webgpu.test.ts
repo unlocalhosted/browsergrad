@@ -3039,6 +3039,34 @@ __global__ void device_global_atomic_rmw(float* out) {
     expect([...actual.buffers.g_f as Float32Array]).toEqual([...expected.buffers.g_f as Float32Array]);
   });
 
+  it("runs scalar pointer atomics over vector-backed device-global lanes", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ uint4 g_vec[2];
+
+__device__ void add_global_scalar(uint* out, int idx, uint value) {
+  atomicAdd(&out[idx], value);
+}
+
+__global__ void device_global_vector_to_scalar_atomic(uint* out) {
+  int idx = threadIdx.x;
+  uint* scalarView = reinterpret_cast<uint*>(g_vec + 1);
+  add_global_scalar(scalarView, idx, 5u + (uint)idx);
+  out[idx] = scalarView[idx];
+}`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(2) },
+      deviceGlobals: { g_vec: new Uint32Array(8) },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect([...expected.buffers.out as Uint32Array]).toEqual([5, 6]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([5, 6]);
+    expect([...actual.buffers.g_vec as Uint32Array]).toEqual([0, 0, 0, 0, 5, 6, 0, 0]);
+  });
+
   it("runs compiled atomic inc/dec through pointer aliases in WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

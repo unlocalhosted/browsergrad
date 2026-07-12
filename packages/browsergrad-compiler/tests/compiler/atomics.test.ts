@@ -519,8 +519,17 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [2, 1, 1] });
 
       expect(compiled.wgsl).toContain("var<storage, read_write> g_vec: array<atomic<u32>>;");
-      expect(compiled.wgsl).toContain("add_global_scalar(1u, (0u + u32(((0 + 1) * 4))), idx");
-      expect(compiled.wgsl).toContain("atomicLoad(&g_vec[(u32(((0 + 1) * 4)) + u32(idx))])");
+      expect(compiled.wgsl).toContain("add_global_scalar(1u, u32((1 * 4)), idx");
+      expect(compiled.wgsl).toContain("atomicLoad(&g_vec[u32(((1 * 4) + idx))])");
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: { out: new Uint32Array(2) },
+          deviceGlobals: { g_vec: new Uint32Array(8) },
+        },
+        { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+      );
+      expect([...result.buffers.out as Uint32Array]).toEqual([5, 6]);
     });
 
   it("flattens shared vector scalar atomics to scalar atomic lanes", () => {

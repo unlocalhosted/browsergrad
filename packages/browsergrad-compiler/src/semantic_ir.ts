@@ -86,6 +86,7 @@ import { semanticVectorMathReturnType } from "./semantic_vector_math.js";
 import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
 import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
 import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
+import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
 import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
@@ -652,7 +653,6 @@ const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "|
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, ...CUDA_COOPERATIVE_BARRIER_CALL_NAMES, "grid.sync"]);
 const FENCE_CALLS: ReadonlySet<string> = new Set(CUDA_FENCE_CALL_NAMES);
-const ATOMIC_CALL_PREFIX = "atomic";
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
   const constants = analysis.constants.map(symbolForConstant);
@@ -2373,7 +2373,7 @@ function lowerStatement(
           };
         }
         const target = atomicTargetFromCall(expression);
-        if (expression.callee.name.startsWith(ATOMIC_CALL_PREFIX)) {
+        if (semanticAtomicOperation(expression.callee.name) !== undefined) {
           return {
             kind: "atomic",
             callee: expression.callee.name,
@@ -4623,6 +4623,13 @@ function localPointerAliasForInitializer(
         pointerBaseIndices: [zeroExpression(expression.span)],
       };
     }
+    if ((root?.kind === "device-global" || root?.kind === "constant") && root.dimensions.length > 0) {
+      return {
+        pointerRoot: root.name,
+        pointerAddressSpace: root.addressSpace,
+        pointerBaseIndices: [zeroExpression(expression.span)],
+      };
+    }
     if (!root || (root.kind !== "local" && root.kind !== "shared") || root.pointer ||
       root.kind === "local" && root.dimensions.length !== 1 ||
       root.kind === "shared" && root.dimensions.length !== 1 && root.dynamicShared !== true) return undefined;
@@ -4669,8 +4676,8 @@ function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement
     (statement.init === undefined || isNullPointerLiteral(statement.init));
 }
 
-function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "shared" | "storage" | "constant" {
-  return addressSpace === "local" || addressSpace === "shared" || addressSpace === "storage" || addressSpace === "constant";
+function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "shared" | "storage" | "constant" | "device-global" {
+  return addressSpace === "local" || addressSpace === "shared" || addressSpace === "storage" || addressSpace === "constant" || addressSpace === "device-global";
 }
 
 function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
