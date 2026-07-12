@@ -118,6 +118,7 @@ import {
   emitTypedWgslUnary,
   type TypedWgslExpression,
 } from "./typed_wgsl_expression.js";
+import { createTypedWgslReturnStatement } from "./typed_wgsl_statement.js";
 import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
@@ -3228,19 +3229,39 @@ function emitSemanticReturnValue(
   }
   if (expression.kind === "assignment") {
     const lines = emitSemanticExpressionStatement(expression, ir, names, indentLevel, options, textureSpecializations);
-    return [...lines, `${prefix}return ${emitSemanticAssignmentResult(expression, ir, names, options)};`];
+    const returnType = semanticActiveFunctionReturnType(ir, options, expression.span);
+    const value = createTypedWgslExpression(
+      emitSemanticAssignmentResult(expression, ir, names, options),
+      semanticExpressionWgslType(expression, ir),
+      expression.span,
+    );
+    const statement = createTypedWgslReturnStatement(wgslValueType(returnType), value, expression.span);
+    return [...lines, `${prefix}${statement.code}`];
   }
-  const returnType = options.activeFunction === undefined
+  const returnType = semanticActiveFunctionReturnType(ir, options, expression.span);
+  const expectedType = wgslValueType(returnType);
+  const source = emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  const value = isSemanticFloatVectorType(returnType)
+    ? source
+    : source.type === "bool" && returnType !== "bool"
+      ? legalizeTypedWgslBoolToNumeric(source, expectedType as "f16" | "f32" | "i32" | "u32")
+      : emitSemanticExpressionAs(expression, ir, names, expectedType as WgslValueType, options, textureSpecializations);
+  const statement = createTypedWgslReturnStatement(expectedType, value, expression.span);
+  return [`${prefix}${statement.code}`];
+}
+
+function semanticActiveFunctionReturnType(
+  ir: SemanticKernelIrModule,
+  options: EmitSemanticKernelIrWgslOptions,
+  span: SourceSpan,
+): Exclude<CudaLiteScalarType, "void"> {
+  const fn = options.activeFunction === undefined
     ? undefined
-    : ir.functions.find((fn) => fn.name === options.activeFunction)?.returnType;
-  const value = returnType === undefined
-    ? emitSemanticExpression(expression, ir, names, options, textureSpecializations).code
-    : isSemanticFloatVectorType(returnType)
-      ? emitSemanticExpression(expression, ir, names, options, textureSpecializations).code
-    : semanticExpressionValueType(expression) === "bool" && returnType !== "bool"
-      ? `select(${emitNumberLiteral(0, returnType)}, ${emitNumberLiteral(1, returnType)}, ${emitTruthiness(expression, ir, names, options)})`
-      : emitSemanticLocalScalarExpressionAs(expression, returnType, ir, names, options, textureSpecializations);
-  return [`${prefix}return ${value};`];
+    : ir.functions.find((candidate) => candidate.name === options.activeFunction);
+  if (!fn || fn.returnType === "void") {
+    throw semanticWgslError("semantic WGSL value return requires active non-void function", span);
+  }
+  return fn.returnType;
 }
 
 function emitSemanticAssignmentResult(

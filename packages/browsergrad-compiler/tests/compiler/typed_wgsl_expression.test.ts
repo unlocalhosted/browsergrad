@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertTypedWgslExpression,
   createTypedWgslExpression,
+  createTypedWgslReturnStatement,
   emitTypedWgslBinary,
   emitTypedWgslSelect,
   emitTypedWgslUnary,
@@ -69,5 +70,19 @@ describe("typed WGSL expressions", () => {
       createTypedWgslExpression("float_value", "f32", span),
       span,
     )).toThrow("requires an integer operand");
+  });
+
+  it("rejects return type mismatches before WGSL string emission", () => {
+    expect(() => createTypedWgslReturnStatement(
+      "i32",
+      createTypedWgslExpression("value", "f32", span),
+      span,
+    )).toThrow("WGSL return type mismatch: returned 'f32', expected 'i32'");
+
+    expect(createTypedWgslReturnStatement(
+      "i32",
+      createTypedWgslExpression("value", "i32", span),
+      span,
+    )).toMatchObject({ code: "return value;", span });
   });
 });

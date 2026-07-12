@@ -112,6 +112,10 @@ export {
   type WgslUnaryOperator,
   type WgslExpressionType,
 } from "./typed_wgsl_expression.js";
+export {
+  createTypedWgslReturnStatement,
+  type TypedWgslStatement,
+} from "./typed_wgsl_statement.js";
 export { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 export {
   projectSemanticHostRuntimeToGpuIr,
