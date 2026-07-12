@@ -68,6 +68,7 @@ export {
   verifySemanticKernelIr,
   type SemanticIrVerificationIssue,
 } from "./semantic_ir_verifier.js";
+export { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
 export {
   classifyCudaCompatibilityFamily,

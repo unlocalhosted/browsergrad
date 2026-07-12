@@ -4755,21 +4755,21 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var attr: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var attr: i32 = 0;");
       expect(compiled.wgsl).toContain("var cacheStatus: i32 = 0;");
       expect(compiled.wgsl).toContain("var bankStatus: i32 = 0;");
-      expect(compiled.wgsl).toContain("var setCacheStatus: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var funcCacheStatus: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var profilerStart: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var profilerStop: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var setCacheStatus: i32 = 0;");
+      expect(compiled.wgsl).toContain("var funcCacheStatus: i32 = 0;");
+      expect(compiled.wgsl).toContain("var profilerStart: i32 = 0;");
+      expect(compiled.wgsl).toContain("var profilerStop: i32 = 0;");
       expect(compiled.wgsl).toContain("var exchangeMode: i32 = 0;");
       expect(compiled.wgsl).toContain("captureMode = 0;");
-      expect(compiled.wgsl).toContain("var streamReady: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var eventRecordWithFlags: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var eventReady: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var freed: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var freedAsync: i32 = i32(0);");
-      expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+      expect(compiled.wgsl).toContain("var streamReady: i32 = 0;");
+      expect(compiled.wgsl).toContain("var eventRecordWithFlags: i32 = 0;");
+      expect(compiled.wgsl).toContain("var eventReady: i32 = 0;");
+      expect(compiled.wgsl).toContain("var freed: i32 = 0;");
+      expect(compiled.wgsl).toContain("var freedAsync: i32 = 0;");
+      expect(createCudaRuntimePlan(compiled).operations).toEqual([]);
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { x: new Float32Array([0]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.x as Float32Array]).toEqual([9]);
     });
@@ -4795,11 +4795,11 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var cache: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var advise: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var prefetch: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var attach: i32 = i32(0);");
-      expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+      expect(compiled.wgsl).toContain("var cache: i32 = 0;");
+      expect(compiled.wgsl).toContain("var advise: i32 = 0;");
+      expect(compiled.wgsl).toContain("var prefetch: i32 = 0;");
+      expect(compiled.wgsl).toContain("var attach: i32 = 0;");
+      expect(createCudaRuntimePlan(compiled).operations).toEqual([]);
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { x: new Float32Array([0]) }, scalars: { n: 1 } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.x as Float32Array]).toEqual([7]);
     });
@@ -4857,10 +4857,10 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var bg_set: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var reset: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var last: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var peek: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var bg_set: i32 = 0;");
+      expect(compiled.wgsl).toContain("var reset: i32 = 0;");
+      expect(compiled.wgsl).toContain("var last: i32 = 0;");
+      expect(compiled.wgsl).toContain("var peek: i32 = 0;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array([5, 5]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Int32Array]).toEqual([0, 0]);
     });
@@ -4910,15 +4910,15 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(compiled.wgsl).toContain("var attrStatus: i32 = 0;");
       expect(compiled.wgsl).toContain("var runtimeStatus: i32 = 0;");
       expect(compiled.wgsl).toContain("var peerStatus: i32 = 0;");
-      expect(compiled.wgsl).toContain("var enablePeerStatus: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var enablePeerStatus: i32 = 0;");
       expect(compiled.wgsl).toContain("local = 0;");
       expect(compiled.wgsl).toContain("count = 1;");
       expect(compiled.wgsl).toContain("warp = 32;");
       expect(compiled.wgsl).toContain("blocks = 1024;");
       expect(compiled.wgsl).toContain("runtimeVersion = 12000;");
       expect(compiled.wgsl).toContain("driverVersion = 12000;");
-      expect(compiled.wgsl).toContain("out[2] = i32(0);");
-      expect(compiled.wgsl).toContain("out[3] = i32(1);");
+      expect(compiled.wgsl).toContain("out[2u] = 0;");
+      expect(compiled.wgsl).toContain("out[3u] = 1;");
       expect(compiled.wgsl).toContain("peer = 1;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(11).fill(-1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Int32Array]).toEqual([0, 0, 0, 1, 1, 0, 32, 1024, 12000, 12000, 1]);
@@ -4943,7 +4943,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
       expect(compiled.wgsl).toContain("var status: i32 = 0;");
-      expect(compiled.wgsl).toContain("var setStatus: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var setStatus: i32 = 0;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(2) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([1048576, 0]);
     });
@@ -4968,8 +4968,8 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
       expect(compiled.wgsl).toContain("var status: i32 = 0;");
-      expect(compiled.wgsl).toContain("freeBytes = 268435456;");
-      expect(compiled.wgsl).toContain("totalBytes = 268435456;");
+      expect(compiled.wgsl).toContain("freeBytes = 268435456u;");
+      expect(compiled.wgsl).toContain("totalBytes = 268435456u;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(4) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([268435456, 268435456, 268435456, 268435456]);
     });

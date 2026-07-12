@@ -759,8 +759,6 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       expect([...result.buffers.dst as Float32Array]).toEqual([2.5, 3.5, 2.5, 2.5]);
       expect(runtimePlan.operations.map((operation) => operation.kind)).toEqual([
-        "device-sync",
-        "device-sync",
         "runtime-copy",
         "runtime-copy",
         "runtime-copy",
@@ -768,11 +766,6 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         "runtime-copy",
         "runtime-copy",
         "runtime-copy",
-        "device-sync",
-        "device-sync",
-        "device-sync",
-        "device-sync",
-        "device-sync",
       ]);
       expect(plan.supported).toBe(true);
       expect(plan.copies.map((copy) => copy.kind === "copy"
@@ -1313,7 +1306,6 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       expect(plan.operations.map((operation) => operation.kind)).toEqual([
         "device-launch",
-        "device-sync",
         "runtime-copy",
         "grid-sync",
       ]);
@@ -2273,11 +2265,11 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
       expect(compiled.wgsl).toContain("var streamStatus: i32 = 0;");
-      expect(compiled.wgsl).toContain("stream = 0;");
+      expect(compiled.wgsl).toContain("stream = 0u;");
       expect(compiled.wgsl).toContain("var priorityStatus: i32 = 0;");
-      expect(compiled.wgsl).toContain("priorityStream = 0;");
+      expect(compiled.wgsl).toContain("priorityStream = 0u;");
       expect(compiled.wgsl).toContain("var eventStatus: i32 = 0;");
-      expect(compiled.wgsl).toContain("event = 0;");
+      expect(compiled.wgsl).toContain("event = 0u;");
       expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { handles: new Uint32Array(3), statusOut: new Int32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.handles as Uint32Array]).toEqual([0, 0, 0]);
@@ -2318,13 +2310,13 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
       expect(compiled.wgsl).toContain("device = 0;");
-      expect(compiled.wgsl).toContain("streamId = 0;");
+      expect(compiled.wgsl).toContain("streamId = 0u;");
       expect(compiled.wgsl).toContain("captureStatus = 0;");
       expect(compiled.wgsl).toContain("captureInfoStatus = 0;");
       expect(compiled.wgsl).toContain("captureInfoV2Status = 0;");
-      expect(compiled.wgsl).toContain("dependencyCount = 0;");
-      expect(compiled.wgsl).toContain("dependencyCountV2 = 0;");
-      expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+      expect(compiled.wgsl).toContain("dependencyCount = 0u;");
+      expect(compiled.wgsl).toContain("dependencyCountV2 = 0u;");
+      expect(createCudaRuntimePlan(compiled).operations).toEqual([]);
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Float32Array([-1]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Float32Array]).toEqual([0]);
     });
@@ -2352,12 +2344,12 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var begin: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var update: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var begin: i32 = 0;");
+      expect(compiled.wgsl).toContain("var update: i32 = 0;");
       expect(compiled.wgsl).toContain("var end: i32 = 0;");
-      expect(compiled.wgsl).toContain("graph = 0;");
-      expect(compiled.wgsl).toContain("var destroy: i32 = i32(0);");
-      expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+      expect(compiled.wgsl).toContain("graph = 0u;");
+      expect(compiled.wgsl).toContain("var destroy: i32 = 0;");
+      expect(createCudaRuntimePlan(compiled).operations).toEqual([]);
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { graphOut: new Uint32Array([99]), statusOut: new Int32Array([-1]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.graphOut as Uint32Array]).toEqual([0]);
       expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);
@@ -2391,14 +2383,14 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
       expect(compiled.wgsl).toContain("var create: i32 = 0;");
-      expect(compiled.wgsl).toContain("graph = 0;");
+      expect(compiled.wgsl).toContain("graph = 0u;");
       expect(compiled.wgsl).toContain("var instantiate: i32 = 0;");
-      expect(compiled.wgsl).toContain("exec = 0;");
-      expect(compiled.wgsl).toContain("errorNode = 0;");
+      expect(compiled.wgsl).toContain("exec = 0u;");
+      expect(compiled.wgsl).toContain("errorNode = 0u;");
       expect(compiled.wgsl).toContain("var instantiateFlags: i32 = 0;");
-      expect(compiled.wgsl).toContain("execWithFlags = 0;");
-      expect(compiled.wgsl).toContain("var destroyExec: i32 = i32(0);");
-      expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+      expect(compiled.wgsl).toContain("execWithFlags = 0u;");
+      expect(compiled.wgsl).toContain("var destroyExec: i32 = 0;");
+      expect(createCudaRuntimePlan(compiled).operations).toEqual([]);
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { handles: new Uint32Array(4), statusOut: new Int32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.handles as Uint32Array]).toEqual([0, 0, 0, 0]);
       expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);
@@ -2432,11 +2424,11 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var upload: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var upload: i32 = 0;");
       expect(compiled.wgsl).toContain("var update: i32 = 0;");
-      expect(compiled.wgsl).toContain("errorNode = 0;");
-      expect(compiled.wgsl).toContain("updateResult = 0;");
-      expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+      expect(compiled.wgsl).toContain("errorNode = 0u;");
+      expect(compiled.wgsl).toContain("updateResult = 0u;");
+      expect(createCudaRuntimePlan(compiled).operations).toEqual([]);
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { handles: new Uint32Array(4), statusOut: new Int32Array(1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.handles as Uint32Array]).toEqual([0, 0, 0, 0]);
       expect([...result.buffers.statusOut as Int32Array]).toEqual([0]);
@@ -2469,10 +2461,10 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var status: i32 = (-1);");
+      expect(compiled.wgsl).toContain("var status: i32 = -(1);");
       expect(compiled.wgsl).toContain("status = 0;");
       expect(compiled.wgsl).toContain("ms = 0.0;");
-      expect(compiled.wgsl).toContain("out[2] = f32(0.0);");
+      expect(compiled.wgsl).toContain("out[2u] = 0.0;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Float32Array(3) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Float32Array]).toEqual([0, 0, 0]);
     });
@@ -2500,8 +2492,8 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       expect(compiled.wgsl).toContain("var status: i32 = 0;");
       expect(compiled.wgsl).toContain("least = 0;");
       expect(compiled.wgsl).toContain("greatest = 0;");
-      expect(compiled.wgsl).toContain("out[3] = i32(0);");
-      expect(compiled.wgsl).toContain("out[4] = i32(0);");
+      expect(compiled.wgsl).toContain("out[3u] = 0;");
+      expect(compiled.wgsl).toContain("out[4u] = 0;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(5) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Int32Array]).toEqual([0, 0, 0, 0, 0]);
     });
@@ -2537,12 +2529,12 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
-      expect(compiled.wgsl).toContain("var flagStatus: i32 = (-1);");
+      expect(compiled.wgsl).toContain("var flagStatus: i32 = -(1);");
       expect(compiled.wgsl).toContain("flagStatus = 0;");
       expect(compiled.wgsl).toMatch(/\bflags = 0u?;/u);
       expect(compiled.wgsl).toContain("priority = 0;");
-      expect(compiled.wgsl).toContain("flagsOut[1] = 0u;");
-      expect(compiled.wgsl).toContain("priorityOut[2] = i32(0);");
+      expect(compiled.wgsl).toContain("flagsOut[1u] = 0u;");
+      expect(compiled.wgsl).toContain("priorityOut[2u] = 0;");
       expect(createCudaWebGpuExecutionPlan(
         compiled,
         { buffers: { flagsOut: new Uint32Array(2), priorityOut: new Int32Array(3) } },
@@ -2578,10 +2570,10 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
       expect(compiled.wgsl).toContain("var limitStatus: i32 = 0;");
       expect(compiled.wgsl).toContain("var cacheStatus: i32 = 0;");
-      expect(compiled.wgsl).toContain("var setLimitStatus: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var setCacheStatus: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var syncStatus: i32 = i32(0);");
-      expect(compiled.wgsl).toContain("var exitStatus: i32 = i32(0);");
+      expect(compiled.wgsl).toContain("var setLimitStatus: i32 = 0;");
+      expect(compiled.wgsl).toContain("var setCacheStatus: i32 = 0;");
+      expect(compiled.wgsl).toContain("var syncStatus: i32 = 0;");
+      expect(compiled.wgsl).toContain("var exitStatus: i32 = 0;");
       expect(createCudaWebGpuExecutionPlan(
         compiled,
         { buffers: { limits: new Uint32Array(1), status: new Int32Array(2) } },
@@ -2665,11 +2657,11 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       expect(compiled.wgsl).toContain("blockSize = 256;");
       expect(compiled.wgsl).toContain("minGridFlags = 1;");
       expect(compiled.wgsl).toContain("blockSizeFlags = 256;");
-      expect(compiled.wgsl).toContain("dynamicSmem = 49152;");
-      expect(compiled.wgsl).toContain("out[10] = i32(1);");
-      expect(compiled.wgsl).toContain("out[11] = i32(1);");
-      expect(compiled.wgsl).toContain("out[12] = i32(256);");
-      expect(compiled.wgsl).toContain("smemOut[1] = 49152u;");
+      expect(compiled.wgsl).toContain("dynamicSmem = 49152u;");
+      expect(compiled.wgsl).toContain("out[10u] = 1;");
+      expect(compiled.wgsl).toContain("out[11u] = 1;");
+      expect(compiled.wgsl).toContain("out[12u] = 256;");
+      expect(compiled.wgsl).toContain("smemOut[1u] = 49152u;");
       expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(14), smemOut: new Uint32Array(2) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
       expect([...result.buffers.out as Int32Array]).toEqual([1, 0, 1, 0, 1, 256, 0, 1, 256, 0, 1, 1, 256, 0]);
       expect([...result.buffers.smemOut as Uint32Array]).toEqual([49152, 49152]);

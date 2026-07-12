@@ -10,7 +10,7 @@ import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaLiteCompileCacheKey } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { parseCudaLite } from "./parser.js";
-import { runCompiledKernelReference } from "./reference.js";
+import { runCompiledKernelReference as runCompiledKernelAstReference } from "./reference.js";
 import {
   canRunCompiledKernelSemanticReference,
   runCompiledKernelSemanticReference,
@@ -19,6 +19,8 @@ import {
   createCudaLiteSemanticModel,
   lowerSemanticModelToKernelIr,
 } from "./semantic_ir.js";
+import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
+import { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 import {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
@@ -87,7 +89,8 @@ export function compileCudaLiteKernel(
   }
   validateBindlessTextureOptions(options, analysis);
   const semantic = createCudaLiteSemanticModel(analysis);
-  const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
+  const kernelIr = lowerSemanticCudaRuntime(lowerSemanticModelToKernelIr(analysis, semantic, options));
+  assertValidSemanticKernelIr(kernelIr);
   const diagnostics = reconcileSemanticRuntimeDiagnostics(analysis.diagnostics, kernelIr.operations);
   const semanticWgslOptions = {
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
@@ -198,9 +201,18 @@ export {
   canEmitSemanticKernelIrWgsl,
   canRunCompiledKernelSemanticReference,
   emitSemanticKernelIrWgsl,
-  runCompiledKernelReference,
   runCompiledKernelSemanticReference,
 };
+
+export function runCompiledKernelReference(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  launch: KernelLaunch,
+): ReferenceKernelResult {
+  return canRunCompiledKernelSemanticReference(compiled)
+    ? runCompiledKernelSemanticReference(compiled, input, launch)
+    : runCompiledKernelAstReference(compiled, input, launch);
+}
 
 function createCachedWebGpuChildCompiler(
   options: CompiledKernelWebGpuExecutionOptions,
