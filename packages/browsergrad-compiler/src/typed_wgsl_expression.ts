@@ -23,6 +23,7 @@ type TypedWgslExpressionNode =
   | { readonly kind: "call"; readonly callee: string; readonly args: readonly TypedWgslExpressionValue[] }
   | { readonly kind: "member"; readonly object: TypedWgslExpressionValue; readonly property: string }
   | { readonly kind: "qualified"; readonly object: string; readonly property: string }
+  | { readonly kind: "index"; readonly target: TypedWgslExpressionValue; readonly index: TypedWgslExpressionValue }
   | { readonly kind: "bitcast"; readonly targetType: WgslExpressionType; readonly source: TypedWgslExpressionValue }
   | { readonly kind: "constructor"; readonly targetType: WgslVectorType; readonly args: readonly TypedWgslExpressionValue[] };
 
@@ -135,6 +136,22 @@ export function createTypedWgslQualifiedAccess(
     throw new TypeError(`invalid WGSL qualified access '${object}.${property}'`);
   }
   return new TypedWgslExpressionValue({ kind: "qualified", object, property }, resultType, span);
+}
+
+export function createTypedWgslIndexAccess(
+  target: TypedWgslExpression,
+  index: TypedWgslExpression,
+  resultType: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (index.type !== "i32" && index.type !== "u32") {
+    throw new TypeError(`WGSL index requires i32 or u32, received '${index.type}'`);
+  }
+  return new TypedWgslExpressionValue(
+    { kind: "index", target: expressionValue(target), index: expressionValue(index) },
+    resultType,
+    span,
+  );
 }
 
 export function createTypedWgslBitcast(
@@ -342,6 +359,7 @@ function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
     case "call": return `${node.callee}(${node.args.map((arg) => arg.code).join(", ")})`;
     case "member": return `${node.object.code}.${node.property}`;
     case "qualified": return `${node.object}.${node.property}`;
+    case "index": return `${node.target.code}[${node.index.code}]`;
     case "bitcast": return `bitcast<${node.targetType}>(${node.source.code})`;
     case "constructor": return `${node.targetType}(${node.args.map((arg) => arg.code).join(", ")})`;
   }

@@ -5,6 +5,7 @@ import {
   createTypedWgslCall,
   createTypedWgslMemberAccess,
   createTypedWgslQualifiedAccess,
+  createTypedWgslIndexAccess,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   createTypedWgslZero,
@@ -176,5 +177,20 @@ describe("typed WGSL expressions", () => {
       span,
     });
     expect(() => createTypedWgslQualifiedAccess("bg_uniforms()", "count", "i32", span)).toThrow("invalid WGSL qualified access");
+  });
+
+  it("types vector indexing with integer indices", () => {
+    expect(createTypedWgslIndexAccess(
+      createTypedWgslIdentifier("value", "vec4<f32>", span),
+      createTypedWgslIdentifier("lane", "u32", span),
+      "f32",
+      span,
+    )).toMatchObject({ code: "value[lane]", type: "f32", span });
+    expect(() => createTypedWgslIndexAccess(
+      createTypedWgslIdentifier("value", "vec4<f32>", span),
+      createTypedWgslIdentifier("lane", "f32", span),
+      "f32",
+      span,
+    )).toThrow("WGSL index requires i32 or u32");
   });
 });

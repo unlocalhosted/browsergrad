@@ -117,6 +117,7 @@ import {
   createTypedWgslCall,
   createTypedWgslMemberAccess,
   createTypedWgslQualifiedAccess,
+  createTypedWgslIndexAccess,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   isWgslVectorType,
@@ -4446,6 +4447,23 @@ function emitSemanticExpression(
   }
   if (expression.kind === "cast" && !expression.pointer) {
     return emitSemanticCastExpression(expression, ir, names, options, textureSpecializations);
+  }
+  if (expression.kind === "index" && semanticWgslVectorIndexSupported(expression, ir)) {
+    return createTypedWgslIndexAccess(
+      emitSemanticExpression(expression.target, ir, names, options, textureSpecializations),
+      emitSemanticExpressionAs(expression.index, ir, names, "u32", options, textureSpecializations),
+      semanticExpressionWgslType(expression, ir),
+      expression.span,
+    );
+  }
+  if (expression.kind === "sequence") {
+    return emitSemanticExpression(
+      expression.expressions.at(-1) ?? zeroExpression(expression.span),
+      ir,
+      names,
+      options,
+      textureSpecializations,
+    );
   }
   if (expression.kind === "binary") {
     return emitSemanticBinary(expression, ir, names, options, textureSpecializations);
