@@ -3535,6 +3535,12 @@ function evalUpdate(
 }
 
 function readIndexExpression(expression: Extract<SemanticExpression, { kind: "index" }>, context: SemanticReferenceContext): SemanticValue {
+  const pointerRef = memoryRefFromIndexExpression(expression);
+  if (pointerRef?.addressSpace === "local" && context.localPointerTargets.has(pointerRef.base)) {
+    return semanticStorageVectorType(pointerRef.valueType) !== undefined
+      ? readVectorMemory(pointerRef, context)
+      : readMemory(pointerRef, context);
+  }
   if (semanticReferenceVectorIndexSupported(expression, context.compiled)) {
     const value = evalSemanticExpression(expression.target, context);
     if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector index target is not a vector", expression.target.span);
@@ -5395,13 +5401,9 @@ function createSemanticFunctionContext(
           localPointerTargets.set(param.name, forwarded);
           continue;
         }
-        if (context.localDimensions.has(ref.base)) {
-          localPointerTargets.set(param.name, { ref: { ...ref, indices: [] }, context });
-          continue;
-        }
       }
-      if (!ref || ref.addressSpace !== "local" || ref.indices.length !== 0) {
-        throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be a local scalar`, arg.span);
+      if (!ref || ref.addressSpace !== "local" || ref.indices.length > 1) {
+        throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled local memory`, arg.span);
       }
       localPointerTargets.set(param.name, { ref, context });
       continue;
@@ -5582,7 +5584,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   }
   if (ref.addressSpace === "local") {
     const target = context.localPointerTargets.get(ref.base);
-    if (target) return readMemory(localPointerTargetRef(target.ref, ref, target.context), target.context);
+    if (target) return readMemory(localPointerTargetRef(target.ref, ref), target.context);
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) {
       if (ref.indices.length === 0 && typeof buffer === "number") return buffer;
@@ -5677,7 +5679,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   if (ref.addressSpace === "local") {
     const target = context.localPointerTargets.get(ref.base);
     if (target) {
-      writeMemory(localPointerTargetRef(target.ref, ref, target.context), value, target.context);
+      writeMemory(localPointerTargetRef(target.ref, ref), value, target.context);
       return;
     }
     const buffer = context.locals.get(ref.base);
@@ -5779,13 +5781,25 @@ function semanticMemoryPoolView(
 function localPointerTargetRef(
   target: SemanticMemoryRef,
   access: SemanticMemoryRef,
-  targetContext: SemanticReferenceContext,
 ): SemanticMemoryRef {
-  const preserveZeroIndex = target.addressSpace === "local" && targetContext.localDimensions.has(target.base);
+  const targetIndex = target.indices[0];
+  const accessIndex = access.indices[0];
+  const combinedIndex = targetIndex === undefined
+    ? accessIndex === undefined || semanticReferenceZeroLiteral(accessIndex) ? undefined : accessIndex
+    : accessIndex === undefined || semanticReferenceZeroLiteral(accessIndex)
+    ? targetIndex
+    : {
+        kind: "binary" as const,
+        operator: "+",
+        left: targetIndex,
+        right: accessIndex,
+        valueType: "int" as const,
+        span: access.span,
+      };
   return {
     ...target,
     ...(access.valueType === undefined && target.valueType === undefined ? {} : { valueType: access.valueType ?? target.valueType! }),
-    indices: [...target.indices, ...access.indices.filter((index) => preserveZeroIndex || !(index.kind === "literal" && index.value === 0))],
+    indices: combinedIndex === undefined ? [] : [combinedIndex],
     fields: [...target.fields, ...access.fields],
     span: access.span,
   };
@@ -5869,6 +5883,8 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
   if (!valueType) throw semanticReferenceError("semantic reference vector read requires vector memory type", ref.span);
   const laneCount = cudaVectorLaneCount(valueType);
   if (ref.addressSpace === "local") {
+    const target = context.localPointerTargets.get(ref.base);
+    if (target) return readVectorMemory(localPointerTargetRef(target.ref, ref), target.context);
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     if (semanticReferenceLocalPackedHalf2View(ref, context.compiled)) {
@@ -5961,6 +5977,11 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
   if (!Array.isArray(value)) throw semanticReferenceError("semantic reference vector write received scalar value", ref.span);
   const laneCount = cudaVectorLaneCount(vectorType);
   if (ref.addressSpace === "local") {
+    const target = context.localPointerTargets.get(ref.base);
+    if (target) {
+      writeMemoryValue(localPointerTargetRef(target.ref, ref), value, target.context);
+      return;
+    }
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     const index = flatIndex(ref, context);

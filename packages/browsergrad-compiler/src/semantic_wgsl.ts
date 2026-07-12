@@ -1502,6 +1502,7 @@ function semanticWgslVectorIndexSupported(
   ir?: SemanticKernelIrModule,
 ): boolean {
   const ref = memoryRefFromIndexExpression(expression);
+  if (ref && ir && ref.addressSpace === "local" && semanticWgslFunctionLocalPointerParam(ir, ref.base)) return false;
   if (ref && ir && (semanticWgslLocalScalarVectorView(ref, ir) || semanticWgslLocalVectorBitViewRootType(ref, ir) !== undefined)) return false;
   if (ref && !(ref.addressSpace === "local" && isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.target, ir?.functions)))) return false;
   return isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.target, ir?.functions)) &&
@@ -3485,6 +3486,12 @@ function emitSemanticFunctionParams(
       `${nameFor(semanticPointerBaseParamName(param.name), names)}: u32`,
     ];
   }
+  if (param.pointer && param.addressSpace === "local" && param.dimensions.length > 0) {
+    return [
+      `${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)}`,
+      `${nameFor(semanticPointerBaseParamName(param.name), names)}: u32`,
+    ];
+  }
   return [`${mutableValueParam ? semanticFunctionParamIncomingName(param, names) : nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param, atomicSharedPointer)}`];
 }
 
@@ -4178,6 +4185,8 @@ function emitSemanticExpression(
     if (sharedVectorScalarRead) return sharedVectorScalarRead;
     const directSharedVectorRead = emitSemanticDirectSharedVectorReadExpression(expression, ir, names, options);
     if (directSharedVectorRead) return directSharedVectorRead;
+    const directLocalPointerVectorRead = emitSemanticDirectLocalPointerVectorReadExpression(expression, ir, names, options);
+    if (directLocalPointerVectorRead) return directLocalPointerVectorRead;
     const storageVectorScalarRead = emitSemanticStorageVectorScalarReadExpression(expression, ir, names, options);
     if (storageVectorScalarRead) return storageVectorScalarRead;
     const directVectorRead = emitSemanticDirectStorageVectorReadExpression(expression, ir, names, options);
@@ -5359,7 +5368,7 @@ function emitSemanticTypedLocalPointerFunctionCall(
   options: EmitSemanticKernelIrWgslOptions,
   textureSpecializations: SemanticTextureDescriptorSpecializations,
 ): TypedWgslExpression {
-  const args = expression.args.map((arg, index): TypedWgslExpression => {
+  const args = expression.args.flatMap((arg, index): readonly TypedWgslExpression[] => {
     const param = fn.params[index]!;
     if (param.pointer) {
       const ref = semanticPointerArgMemoryRef(arg);
@@ -5367,14 +5376,27 @@ function emitSemanticTypedLocalPointerFunctionCall(
       const owner = options.activeFunction === undefined ? undefined : ir.functions.find((candidate) => candidate.name === options.activeFunction);
       const forwarded = owner?.params.find((candidate) => candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "local");
       const pointerType = semanticTypedLocalPointerType(forwarded ?? param);
-      return forwarded
+      const pointer = forwarded
         ? createTypedWgslIdentifier(nameFor(forwarded.name, names), pointerType, ref.span)
         : createTypedWgslBindingAddress(nameFor(ref.base, names), pointerType, ref.span);
+      if (param.dimensions.length === 0) return [pointer];
+      const offset = ref.indices[0] === undefined
+        ? createTypedWgslLiteral("0u", "u32", ref.span)
+        : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options);
+      const base = forwarded?.dimensions.length
+        ? emitTypedWgslBinary(
+            "+",
+            createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(forwarded.name), names), "u32", ref.span),
+            offset,
+            ref.span,
+          )
+        : offset;
+      return [pointer, base];
     }
-    if (param.valueType === "bool") return emitSemanticBoolExpressionValue(arg, ir, names, options, textureSpecializations);
-    if (param.valueType === "uchar") return emitSemanticUcharExpressionValue(arg, ir, names, options, textureSpecializations);
-    if (isSemanticFloatVectorType(param.valueType)) return emitSemanticExpression(arg, ir, names, options, textureSpecializations);
-    return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param.valueType), options, textureSpecializations);
+    if (param.valueType === "bool") return [emitSemanticBoolExpressionValue(arg, ir, names, options, textureSpecializations)];
+    if (param.valueType === "uchar") return [emitSemanticUcharExpressionValue(arg, ir, names, options, textureSpecializations)];
+    if (isSemanticFloatVectorType(param.valueType)) return [emitSemanticExpression(arg, ir, names, options, textureSpecializations)];
+    return [emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param.valueType), options, textureSpecializations)];
   });
   args.push(
     createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
@@ -7662,6 +7684,29 @@ function emitSemanticDirectSharedVectorReadExpression(
   return createTypedWgslConstructor(targetType, lanes, expression.span);
 }
 
+function emitSemanticDirectLocalPointerVectorReadExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "index" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): TypedWgslExpression | undefined {
+  const ref = memoryRefFromIndexExpression(expression);
+  const valueType = ref === undefined ? undefined : semanticStorageVectorType(ref.valueType);
+  const pointer = ref === undefined
+    ? undefined
+    : semanticWgslFunctionLocalPointerParam(ir, ref.base, options.activeFunction ?? null);
+  if (!ref || !valueType || !pointer || pointer.dimensions.length === 0 || ref.indices.length !== 1) return undefined;
+  const targetType = wgslValueType(valueType);
+  if (!isWgslVectorType(targetType)) return undefined;
+  const index = emitTypedWgslBinary(
+    "+",
+    createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(ref.base), names), "u32", ref.span),
+    emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options),
+    ref.span,
+  );
+  return createTypedWgslPointerIndexRead(nameFor(ref.base, names), index, targetType, ref.span);
+}
+
 function emitSemanticSharedVectorScalarReadExpression(
   expression: Extract<SemanticExpression, { readonly kind: "index" }>,
   ir: SemanticKernelIrModule,
@@ -7829,7 +7874,12 @@ function emitSemanticDirectMemoryReadExpression(
         : undefined
       : createTypedWgslDereferencedIndexedPlace(
           nameFor(ref.base, names),
-          emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options),
+          emitTypedWgslBinary(
+            "+",
+            createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(ref.base), names), "u32", ref.span),
+            emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options),
+            ref.span,
+          ),
           carrierType,
           false,
           "function",
@@ -8397,12 +8447,22 @@ function emitSemanticFunctionArgs(
     const owner = options.activeFunction === undefined
       ? undefined
       : ir.functions.find((candidate) => candidate.name === options.activeFunction);
-    const forwarded = ref?.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]) &&
-      owner?.params.some((candidate) => candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "local");
-    if (ref && forwarded) return [nameFor(ref.base, names)];
+    const forwarded = owner?.params.find((candidate) =>
+      candidate.name === ref?.base && candidate.pointer && candidate.addressSpace === "local"
+    );
+    if (ref && forwarded) {
+      const pointer = nameFor(ref.base, names);
+      if (param.dimensions.length === 0) return [pointer];
+      const offset = ref.indices[0] === undefined ? "0u" : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options).code;
+      const base = forwarded.dimensions.length > 0
+        ? `(${nameFor(semanticPointerBaseParamName(forwarded.name), names)} + ${offset})`
+        : offset;
+      return [pointer, base];
+    }
     const localArray = ref?.addressSpace === "local" ? localArraySymbol(ir, ref.base) : undefined;
-    if (ref && localArray && ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]) && param.dimensions.length > 0) {
-      return [`&${nameFor(ref.base, names)}`];
+    if (ref && localArray && ref.indices.length <= 1 && param.dimensions.length > 0) {
+      const base = ref.indices[0] === undefined ? "0u" : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options).code;
+      return [`&${nameFor(ref.base, names)}`, base];
     }
     if (!ref || ref.addressSpace !== "local" || ref.indices.length !== 0) {
       throw semanticWgslError("semantic WGSL local pointer helper argument must be a local scalar", arg.span);
@@ -8427,10 +8487,6 @@ function emitSemanticFunctionArgs(
     return [`${bufferId}u`, emitSemanticPointerArgBaseIndex(ref, ir, names, options)];
   }
   return [emitSemanticFunctionArg(arg, param, ir, names, options, textureSpecializations)];
-}
-
-function isSemanticZeroLiteral(expression: SemanticExpression | undefined): boolean {
-  return expression?.kind === "literal" && expression.literalKind === "number" && expression.value === 0;
 }
 
 function emitSemanticSharedPointerArgBaseIndex(
@@ -9313,7 +9369,7 @@ function emitSemanticMemoryRef(
       if (pointerParam.dimensions.length > 0) {
         if (ref.indices.length !== 1) throw semanticWgslError(`local array pointer '${ref.base}' requires one flat index`, ref.span);
         const index = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32").code;
-        return `(*${nameFor(ref.base, names)})[${index}]`;
+        return `(*${nameFor(ref.base, names)})[${nameFor(semanticPointerBaseParamName(ref.base), names)} + ${index}]`;
       }
       if (ref.indices.length > 1 || ref.indices[0] && !semanticExpressionIsZero(ref.indices[0])) {
         throw semanticWgslError(`local scalar pointer '${ref.base}' cannot be indexed`, ref.span);

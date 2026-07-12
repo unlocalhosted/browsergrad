@@ -3310,7 +3310,9 @@ __global__ void sharedPointerAlias(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("calcNormal(&vertlist[v_base[u32(0)]]");
+      expect(compiled.wgsl).toContain("a: ptr<function, array<vec3<f32>, 3>>, a_base: u32");
+      expect(compiled.wgsl).toContain("(*a)[(a_base + 0u)]");
+      expect(compiled.wgsl).toContain("calcNormal(&vertlist, 0u, &vertlist, 1u, &vertlist, 2u");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 1, 12, 15, 18, 0]);
     });
 

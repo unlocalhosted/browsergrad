@@ -1783,8 +1783,8 @@ function specializeLocalPointerFunctionsOnce(
       const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
       if (refs.length > 0 && refs.every((ref, callIndex) =>
         ref?.addressSpace === "local" &&
-        (ref.indices.length === 0 ||
-          ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]) && fnCalls[callIndex]!.ownerLocalPointerNames.has(ref.base)))) {
+        ref.indices.length <= 1 &&
+        fnCalls[callIndex]!.ownerLocalPointerNames.has(ref.base))) {
         const dimensions = refs.map((ref) => ref === undefined ? undefined : localDimensions.get(ref.baseId));
         const first = dimensions[0] ?? [];
         if (dimensions.every((candidate) => candidate !== undefined && sameDimensions(candidate, first))) {
