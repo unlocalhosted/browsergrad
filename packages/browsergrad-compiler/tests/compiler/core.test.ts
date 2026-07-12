@@ -5469,7 +5469,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn choose_byte(left: u32, right: u32, add: bool,");
-      expect(compiled.wgsl).toContain("choose_byte((u32(i32(250)) & 0xffu), (u32(i32(10)) & 0xffu), (1 != 0)");
+      expect(compiled.wgsl).toContain("choose_byte((u32(i32(250)) & 0xffu), (u32(i32(10)) & 0xffu), true");
       expect([...semanticResult.buffers.out as Uint32Array]).toEqual([4, 10, 1, 8]);
     });
 

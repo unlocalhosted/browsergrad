@@ -24,6 +24,7 @@ import {
   createUnresolvedSemanticSymbolId,
   semanticIdsEqual,
   semanticMemoryIdFromSymbol,
+  semanticSymbolIdFromFunction,
 } from "./semantic_ids.js";
 import {
   isSemanticKernelIrOperation,
@@ -3298,6 +3299,46 @@ function emitSemanticAssignmentResultExpression(
   throw semanticWgslError("semantic WGSL cannot return assignment result", expression.span);
 }
 
+function semanticTypedValueFunctionForCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): SemanticKernelIrModule["functions"][number] | undefined {
+  if (expression.callee.kind !== "symbol" || expression.callee.addressSpace !== "function") return undefined;
+  const callee = expression.callee;
+  const fn = ir.functions.find((candidate) =>
+    semanticIdsEqual(callee.id, semanticSymbolIdFromFunction(candidate.id))
+  );
+  if (!fn || fn.returnType === "void") return undefined;
+  if (fn.params.some((param) => param.pointer || param.addressSpace === "texture" || param.addressSpace === "surface" || param.cooperativeGroupKind !== undefined)) {
+    return undefined;
+  }
+  return fn.params.length === expression.args.length ? fn : undefined;
+}
+
+function emitSemanticTypedValueFunctionCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  fn: SemanticKernelIrModule["functions"][number],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): TypedWgslExpression {
+  const args = expression.args.map((arg, index): TypedWgslExpression => {
+    const param = fn.params[index]!;
+    if (param.valueType === "bool") return emitSemanticBoolExpressionValue(arg, ir, names, options, textureSpecializations);
+    if (param.valueType === "uchar") return emitSemanticUcharExpressionValue(arg, ir, names, options, textureSpecializations);
+    if (isSemanticFloatVectorType(param.valueType)) return emitSemanticExpression(arg, ir, names, options, textureSpecializations);
+    return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param.valueType), options, textureSpecializations);
+  });
+  args.push(
+    createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
+    createTypedWgslIdentifier("workgroup_id", "vec3<u32>", expression.span),
+    createTypedWgslIdentifier("num_workgroups", "vec3<u32>", expression.span),
+  );
+  const calleeName = semanticFunctionCallName(fn.name, fn, expression.args, options, textureSpecializations);
+  return createTypedWgslCall(nameFor(calleeName, names), args, wgslValueType(fn.returnType), expression.span);
+}
+
 function emitSemanticTruthinessExpression(
   expression: SemanticExpression,
   ir: SemanticKernelIrModule,
@@ -4464,6 +4505,10 @@ function emitSemanticExpression(
       options,
       textureSpecializations,
     );
+  }
+  if (expression.kind === "call") {
+    const fn = semanticTypedValueFunctionForCall(expression, ir);
+    if (fn) return emitSemanticTypedValueFunctionCall(expression, fn, ir, names, options, textureSpecializations);
   }
   if (expression.kind === "binary") {
     return emitSemanticBinary(expression, ir, names, options, textureSpecializations);
