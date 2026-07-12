@@ -104,7 +104,7 @@ import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
 } from "./matrix_tiles.js";
-import { semanticAtomicMemoryRootNames, semanticOperationsReferenceRoot } from "./semantic_ir_walk.js";
+import { semanticAtomicMemoryRootNames } from "./semantic_ir_walk.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
@@ -224,6 +224,8 @@ interface SemanticReferenceContext {
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly deviceGlobals: Map<string, WgslTypedArray>;
+  readonly memoryPools: NonNullable<CompiledKernelInput["memoryPools"]>;
+  readonly poolOffsets: Map<string, number>;
   readonly textures: Readonly<Record<string, WgslTexture2DInput>>;
   readonly textureDescriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>;
   readonly surfaces: Readonly<Record<string, WgslTexture2DInput>>;
@@ -278,6 +280,11 @@ export function runCompiledKernelSemanticReference(
   const buffers = cloneReferenceBuffers(input.buffers);
   const constants = semanticReferenceConstants(compiled, input);
   const deviceGlobals = cloneReferenceBuffers(deviceGlobalBufferInputs(compiled, input));
+  const memoryPools = Object.fromEntries(Object.entries(input.memoryPools ?? {}).map(([name, pool]) => [name, {
+    data: new Uint32Array(pool.data),
+    ...(pool.offset === undefined ? {} : { offset: new Uint32Array(pool.offset) }),
+  }]));
+  const poolOffsets = new Map(Object.entries(memoryPools).map(([name, pool]) => [name, pool.offset?.[0] ?? 0]));
   const surfaces = cloneReferenceSurfaces(input.surfaces ?? {});
   const traces: MutableTrace[] = [];
   const blockDim = referenceVectorFromTuple(launch.blockDim);
@@ -307,12 +314,14 @@ export function runCompiledKernelSemanticReference(
                 buffers,
                 constants,
                 deviceGlobals,
+                memoryPools,
+                poolOffsets,
                 textures: input.textures ?? {},
                 textureDescriptors: compiled.textureDescriptors ?? {},
                 surfaces,
                 sharedMemory,
                 sharedOffsets: new Map(),
-                storageOffsets: new Map(),
+                storageOffsets: new Map(Object.entries(compiled.pointerBaseOffsets ?? {})),
                 localPointerTargets: new Map(),
                 scalars,
                 vectors,
@@ -347,10 +356,15 @@ export function runCompiledKernelSemanticReference(
       param.addressSpace === "surface"
     )
     .map((param) => param.name)
-    .concat(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "device-global").map((symbol) => symbol.name));
+    .concat(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "device-global").map((symbol) => symbol.name))
+    .concat(compiled.kernelIr.params.filter((param) => param.addressSpace === "pool").map((param) => param.name));
+  for (const [name, offset] of poolOffsets) {
+    const target = memoryPools[name]?.offset;
+    if (target) target[0] = offset >>> 0;
+  }
   return {
     buffers: Object.fromEntries(readback.map((name) => {
-      const buffer = buffers.get(name) ?? deviceGlobals.get(name) ?? surfaces[name]?.data;
+      const buffer = buffers.get(name) ?? deviceGlobals.get(name) ?? memoryPools[name]?.data ?? surfaces[name]?.data;
       if (!buffer) throw semanticReferenceError(`missing readback buffer '${name}'`, compiled.kernelIr.span);
       return [name, buffer];
     })),
@@ -525,7 +539,7 @@ function semanticReferenceParamSupported(
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType) || isCudaVectorType(param.valueType);
   if (param.addressSpace === "texture") return param.valueType === "texture2d";
   if (param.addressSpace === "surface") return param.valueType === "surface2d";
-  if (param.addressSpace === "pool") return !semanticOperationsReferenceRoot(compiled.kernelIr.operations, param.name);
+  if (param.addressSpace === "pool") return true;
   return false;
 }
 
@@ -1588,7 +1602,9 @@ function execSemanticOperations(
       case "declare":
         if (operation.target.addressSpace === "shared") break;
         if (operation.target.pointer) {
-          const ref = operation.init ? semanticPointerArgMemoryRef(operation.init) : undefined;
+          const ref = operation.init
+            ? semanticPointerArgMemoryRef(operation.init) ?? semanticDevicePoolAllocationRef(operation, context)
+            : undefined;
           if (ref) context.localPointerTargets.set(operation.target.name, { ref, context });
           break;
         }
@@ -2132,6 +2148,58 @@ function semanticDeclareValue(
     return Array.from({ length: cudaVectorLaneCount(operation.target.valueType) }, () => 0);
   }
   return 0;
+}
+
+function semanticDevicePoolAllocationRef(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
+  context: SemanticReferenceContext,
+): SemanticMemoryRef | undefined {
+  if (!operation.init || !operation.target.pointer || operation.target.valueType === undefined) return undefined;
+  const call = semanticDevicePoolAllocationCall(operation.init);
+  if (!call || call.args.length !== 2) return undefined;
+  const poolArg = call.args[0];
+  const poolSymbol = poolArg?.kind === "symbol"
+    ? poolArg
+    : poolArg?.kind === "unary" && poolArg.operator === "&" && poolArg.argument.kind === "symbol"
+    ? poolArg.argument
+    : undefined;
+  if (!poolSymbol) return undefined;
+  const pool = context.memoryPools[poolSymbol.name];
+  if (!pool) throw semanticReferenceError(`missing memory pool input '${poolSymbol.name}'`, poolSymbol.span);
+  const bytes = Math.max(0, Math.trunc(evalNumber(call.args[1]!, context)));
+  const oldOffset = context.poolOffsets.get(poolSymbol.name) ?? pool.offset?.[0] ?? 0;
+  const nextOffset = oldOffset + bytes;
+  context.poolOffsets.set(poolSymbol.name, nextOffset);
+  if (nextOffset > pool.data.byteLength) {
+    context.storageOffsets.set(operation.target.name, 0xffffffff);
+    return undefined;
+  }
+  const elementBytes = sizeofCudaType(operation.target.valueType) ?? 4;
+  context.storageOffsets.set(operation.target.name, 0);
+  return {
+    baseId: semanticMemoryIdFromSymbol(poolSymbol.id),
+    base: poolSymbol.name,
+    addressSpace: "storage",
+    valueType: requireSemanticValueType(operation.target.valueType, `pool allocation '${operation.target.name}'`, operation.span),
+    indices: [{
+      kind: "literal",
+      literalKind: "number",
+      value: Math.trunc(oldOffset / elementBytes),
+      valueType: "uint",
+      span: operation.span,
+    }],
+    fields: [],
+    span: operation.span,
+  };
+}
+
+function semanticDevicePoolAllocationCall(
+  expression: SemanticExpression,
+): Extract<SemanticExpression, { readonly kind: "call" }> | undefined {
+  if (expression.kind === "call" && expression.callee.kind === "symbol" &&
+      (expression.callee.name === "deviceAllocate" || expression.callee.name === "streamOrderedAllocate")) return expression;
+  if (expression.kind === "cast") return semanticDevicePoolAllocationCall(expression.expression);
+  return undefined;
 }
 
 function execSemanticMatrixFill(
@@ -5100,6 +5168,8 @@ function createSemanticFunctionContext(
     buffers,
     constants: context.constants,
     deviceGlobals: context.deviceGlobals,
+    memoryPools: context.memoryPools,
+    poolOffsets: context.poolOffsets,
     textures,
     textureDescriptors,
     surfaces,
@@ -5311,7 +5381,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     ? context.constants.get(ref.base)
     : ref.addressSpace === "device-global"
     ? context.deviceGlobals.get(ref.base)
-    : context.buffers.get(ref.base);
+    : context.buffers.get(ref.base) ?? semanticMemoryPoolView(ref, context);
   if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
   const ok = index >= 0 && index < buffer.length;
@@ -5407,12 +5477,27 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     }
     return;
   }
-  const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
+  const buffer = ref.addressSpace === "device-global"
+    ? context.deviceGlobals.get(ref.base)
+    : context.buffers.get(ref.base) ?? semanticMemoryPoolView(ref, context);
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
   const ok = index >= 0 && index < buffer.length;
   if (ok) buffer[index] = value;
   context.trace.writes.push({ name: ref.base, index, value, ok });
+}
+
+function semanticMemoryPoolView(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+): WgslTypedArray | undefined {
+  const pool = context.memoryPools[ref.base];
+  if (!pool) return undefined;
+  if (ref.valueType === "int") return new Int32Array(pool.data.buffer, pool.data.byteOffset, pool.data.byteLength / 4);
+  if (ref.valueType === "float" || ref.valueType === "double" || ref.valueType === "bf16") {
+    return new Float32Array(pool.data.buffer, pool.data.byteOffset, pool.data.byteLength / 4);
+  }
+  return pool.data;
 }
 
 function localPointerTargetRef(
@@ -5861,6 +5946,9 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   if (name === "blockIdx") return context.blockIdx;
   if (name === "blockDim") return context.blockDim;
   if (name === "gridDim") return context.gridDim;
+  if (context.localPointerTargets.has(name) || context.storageOffsets.has(name)) {
+    return (context.storageOffsets.get(name) ?? 0) === 0xffffffff ? 0 : 1;
+  }
   if (context.locals.has(name)) return context.locals.get(name)!;
   const scalar = context.scalars[name];
   if (scalar !== undefined) return scalar;
@@ -6041,8 +6129,8 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       if (!input.textures?.[param.name]) throw semanticReferenceError(`missing texture input '${param.name}'`, param.span);
     } else if (param.addressSpace === "surface") {
       if (!input.surfaces?.[param.name]) throw semanticReferenceError(`missing surface input '${param.name}'`, param.span);
-    } else if (param.addressSpace === "pool" && !semanticOperationsReferenceRoot(compiled.kernelIr.operations, param.name)) {
-      continue;
+    } else if (param.addressSpace === "pool") {
+      if (!input.memoryPools?.[param.name]) throw semanticReferenceError(`missing memory pool input '${param.name}'`, param.span);
     } else {
       throw semanticReferenceError(`semantic reference does not support ${param.addressSpace} parameter '${param.name}'`, param.span);
     }

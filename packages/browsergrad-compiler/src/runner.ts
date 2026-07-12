@@ -2,6 +2,7 @@ import {
   prepareWgslKernelProgramSequence,
   runWgslKernelProgramSequence,
   type KernelDevice,
+  type WgslTypedArray,
   type WgslPreparedKernelSequence,
   type WgslPreparedKernelSequenceRunOptions,
 } from "@unlocalhosted/browsergrad-kernels";
@@ -9,6 +10,8 @@ import { analyzeCudaLite } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaLiteCompileCacheKey } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
+import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
+import { cloneReferenceTypedArray } from "./reference_inputs.js";
 import { parseCudaLite } from "./parser.js";
 import {
   canRunCompiledKernelSemanticReference,
@@ -201,7 +204,98 @@ export function runCompiledKernelReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
+  if (semanticOperationsContainKind(compiled.kernelIr.operations, "device-launch")) {
+    return runCompiledKernelDynamicReference(compiled, input, launch, 0);
+  }
   return runCompiledKernelSemanticReference(compiled, input, launch);
+}
+
+function runCompiledKernelDynamicReference(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  launch: KernelLaunch,
+  depth: number,
+): ReferenceKernelResult {
+  if (depth >= 32) throw new CudaLiteCompilerError("semantic dynamic launch depth exceeded 32", [{
+    code: "semantic-reference-unsupported",
+    severity: "error",
+    message: "semantic dynamic launch depth exceeded 32",
+    span: compiled.kernelIr.span,
+  }]);
+  const working = cloneDynamicReferenceInput(input);
+  const plan = createCudaHostDynamicLaunchPlan(compiled, working, launch);
+  if (!plan.supported) throw new CudaLiteCompilerError(plan.reason ?? "semantic dynamic launch planning failed", [{
+    code: "semantic-reference-unsupported",
+    severity: "error",
+    message: plan.reason ?? "semantic dynamic launch planning failed",
+    span: compiled.kernelIr.span,
+  }]);
+  const traces: ReferenceKernelResult["trace"][number][] = [];
+  for (const item of plan.launches) {
+    const child = compileCudaLiteKernel(compiled.ast.source, {
+      kernelName: item.kernel.name,
+      referenceDynamicParallelism: true,
+      referenceGridSync: true,
+      referenceCudaRuntime: true,
+      workgroupSize: item.blockDim,
+      pointerBaseOffsets: item.pointerBaseOffsets,
+      ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
+      ...(compiled.subgroupMode === undefined ? {} : { subgroupMode: compiled.subgroupMode }),
+      ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
+    });
+    const childLaunch = { gridDim: item.gridDim, blockDim: item.blockDim };
+    const result = semanticOperationsContainKind(child.kernelIr.operations, "device-launch")
+      ? runCompiledKernelDynamicReference(child, item.input, childLaunch, depth + 1)
+      : runCompiledKernelSemanticReference(child, item.input, childLaunch);
+    traces.push(...result.trace);
+    copyDynamicReferenceReadback(item.input, result.buffers);
+  }
+  for (const [poolName, offset] of Object.entries(plan.poolOffsetUpdates ?? {})) {
+    const target = working.memoryPools?.[poolName]?.offset;
+    if (target) target[0] = offset >>> 0;
+  }
+  const readbackNames = working.readback ?? [
+    ...Object.keys(working.buffers),
+    ...Object.keys(working.memoryPools ?? {}),
+    ...Object.keys(working.deviceGlobals ?? {}),
+  ];
+  return {
+    buffers: Object.fromEntries(readbackNames.map((name) => {
+      const value = working.buffers[name] ?? working.memoryPools?.[name]?.data ?? working.deviceGlobals?.[name];
+      if (!value) throw new Error(`missing dynamic reference readback '${name}'`);
+      return [name, value];
+    })),
+    trace: traces,
+  };
+}
+
+function cloneDynamicReferenceInput(input: CompiledKernelInput): CompiledKernelInput {
+  return {
+    ...input,
+    buffers: Object.fromEntries(Object.entries(input.buffers).map(([name, value]) => [name, cloneReferenceTypedArray(value)])),
+    ...(input.deviceGlobals === undefined ? {} : {
+      deviceGlobals: Object.fromEntries(Object.entries(input.deviceGlobals).map(([name, value]) => [name, cloneReferenceTypedArray(value)])),
+    }),
+    ...(input.memoryPools === undefined ? {} : {
+      memoryPools: Object.fromEntries(Object.entries(input.memoryPools).map(([name, pool]) => [name, {
+        data: new Uint32Array(pool.data),
+        ...(pool.offset === undefined ? {} : { offset: new Uint32Array(pool.offset) }),
+      }])),
+    }),
+  };
+}
+
+function copyDynamicReferenceReadback(
+  input: CompiledKernelInput,
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+): void {
+  for (const [name, value] of Object.entries(buffers)) {
+    const target = input.buffers[name] ?? input.deviceGlobals?.[name] ?? input.memoryPools?.[name]?.data;
+    if (target) {
+      const length = Math.min(target.length, value.length);
+      for (let index = 0; index < length; index++) target[index] = value[index] ?? 0;
+    }
+  }
 }
 
 function createCachedWebGpuChildCompiler(
