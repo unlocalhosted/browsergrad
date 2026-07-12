@@ -386,6 +386,32 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...semanticResult.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
     });
 
+  it("lowers indexed surface arrays to native layered surface IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void indexedSurface(cudaSurfaceObject_t *surfaces, uint *out, uint layer) {
+    surf2Dwrite(23u, surfaces[layer], 1 * sizeof(uint), 0);
+    out[0] = surf2Dread<unsigned int>(surfaces[layer], 1 * sizeof(uint), 0);
+  }`, { workgroupSize: [1, 1, 1] });
+      const input = {
+        buffers: { out: new Uint32Array(1) },
+        surfaces: { surfaces: { width: 2, height: 1, data: new Float32Array(4) } },
+        scalars: { layer: 1 },
+      };
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        input,
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.operations.filter((operation) => operation.kind === "surface-write")).toMatchObject([{
+        surface: { kind: "symbol", name: "surfaces" },
+        z: { kind: "symbol", name: "layer" },
+      }]);
+      expect([...result.buffers.surfaces as Float32Array]).toEqual([0, 0, 0, 23]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([23]);
+    });
+
   it("lowers cudaSurfaceObject_t surf2DLayeredwrite to z-linearized layer storage", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void surfaceLayeredWrite(cudaSurfaceObject_t outputSurf) {

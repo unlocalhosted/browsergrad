@@ -2222,13 +2222,17 @@ function lowerStatement(
           isCudaSemanticSurfaceWriteCallName(expression.callee.name) &&
           expression.args.length >= (expression.callee.name === "surf1Dwrite" ? 3 : 4)
         ) {
+          const surface = semanticIndexedSurfaceLayer(
+            expression.args[1]!,
+            semanticSurfaceWriteUsesZ(expression.callee.name) ? expression.args[4] : undefined,
+          );
           return {
             kind: "surface-write",
             value: expression.args[0]!,
-            surface: expression.args[1]!,
+            surface: surface.surface,
             xBytes: expression.args[2]!,
             y: expression.callee.name === "surf1Dwrite" ? zeroExpression(expression.span) : expression.args[3]!,
-            ...(semanticSurfaceWriteUsesZ(expression.callee.name) && expression.args[4] !== undefined ? { z: expression.args[4]! } : {}),
+            ...(surface.z === undefined ? {} : { z: surface.z }),
             span: statement.span,
           };
         }
@@ -2237,13 +2241,14 @@ function lowerStatement(
           ((expression.callee.name === "surf2DLayeredread" || expression.callee.name === "surf3Dread") && expression.args.length === 5)
         ) {
           const target = expression.args[0]!;
+          const surface = semanticIndexedSurfaceLayer(expression.args[1]!, expression.args[4]);
           return {
             kind: "surface-read-store",
             target,
-            surface: expression.args[1]!,
+            surface: surface.surface,
             xBytes: expression.args[2]!,
             y: expression.args[3]!,
-            ...(expression.args[4] === undefined ? {} : { z: expression.args[4]! }),
+            ...(surface.z === undefined ? {} : { z: surface.z }),
             ...optionalValueType(target.kind === "unary" && target.operator === "&" ? expressionValueType(target.argument) : expressionValueType(target)),
             span: statement.span,
           };
@@ -2868,13 +2873,14 @@ function lowerExpression(
         (expression.callee.name === "surf2Dread" && args.length === 3 ||
           (expression.callee.name === "surf2DLayeredread" || expression.callee.name === "surf3Dread") && args.length === 4)
       ) {
+        const surface = semanticIndexedSurfaceLayer(args[0]!, args[3]);
         return {
           kind: "surface-read",
           callee: expression.callee.name as "surf2Dread" | "surf2DLayeredread" | "surf3Dread",
-          surface: args[0]!,
+          surface: surface.surface,
           xBytes: args[1]!,
           y: args[2]!,
-          ...(args[3] === undefined ? {} : { z: args[3]! }),
+          ...(surface.z === undefined ? {} : { z: surface.z }),
           valueType: expression.templateValueType ?? "float",
           span: expression.span,
         };
@@ -2975,6 +2981,21 @@ function lowerExpression(
       return { kind: "sequence", expressions, ...optionalValueType(expressionValueType(expressions.at(-1))), span: expression.span };
     }
   }
+}
+
+function semanticIndexedSurfaceLayer(
+  surface: SemanticExpression,
+  explicitZ: SemanticExpression | undefined,
+): { readonly surface: SemanticExpression; readonly z?: SemanticExpression } {
+  if (
+    explicitZ === undefined &&
+    surface.kind === "index" &&
+    surface.target.kind === "symbol" &&
+    surface.target.addressSpace === "surface"
+  ) {
+    return { surface: surface.target, z: surface.index };
+  }
+  return { surface, ...(explicitZ === undefined ? {} : { z: explicitZ }) };
 }
 
 function directLocalVectorPointerIndexExpression(

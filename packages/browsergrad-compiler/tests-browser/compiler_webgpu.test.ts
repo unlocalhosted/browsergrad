@@ -3638,6 +3638,28 @@ __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
   });
 
+  it("runs indexed surface arrays as native layered storage", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void indexedSurface(cudaSurfaceObject_t *surfaces, uint *out, uint layer) {
+  surf2Dwrite(23u, surfaces[layer], 1 * sizeof(uint), 0);
+  out[0] = surf2Dread<unsigned int>(surfaces[layer], 1 * sizeof(uint), 0);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(1) },
+      surfaces: { surfaces: { width: 2, height: 1, data: new Float32Array(4) } },
+      scalars: { layer: 1 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.surfaces as Float32Array]).toEqual([0, 0, 0, 23]);
+    expect([...actual.buffers.surfaces as Float32Array]).toEqual([0, 0, 0, 23]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([23]);
+  });
+
   it("runs CUDA driver surface aliases through WebGPU surfaces", async () => {
     if (!deviceCheck.available) return;
     const source = `
