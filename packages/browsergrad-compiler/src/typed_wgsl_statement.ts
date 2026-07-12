@@ -39,6 +39,21 @@ class TypedWgslVariableStatement implements TypedWgslStatement {
   }
 }
 
+class TypedWgslAssignmentStatement implements TypedWgslStatement {
+  readonly [typedWgslStatement] = true;
+
+  constructor(
+    readonly target: string,
+    readonly operator: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=",
+    readonly value: TypedWgslExpression,
+    readonly span: SourceSpan,
+  ) {}
+
+  get code(): string {
+    return `${this.target} ${this.operator} ${this.value.code};`;
+  }
+}
+
 export function createTypedWgslReturnStatement(
   expectedType: WgslExpressionType | "void",
   value: TypedWgslExpression | undefined,
@@ -71,4 +86,34 @@ export function createTypedWgslVariableStatement(
     throw new TypeError(`WGSL declaration type mismatch for '${name}': initialized '${initializer.type}', declared '${valueType}'`);
   }
   return new TypedWgslVariableStatement(mutability, name, valueType, initializer, span);
+}
+
+export function createTypedWgslLocalAssignmentStatement(
+  target: string,
+  targetType: WgslExpressionType,
+  operator: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=",
+  value: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslStatement {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(target)) {
+    throw new TypeError(`invalid WGSL assignment target '${target}'`);
+  }
+  const vectorScalarCompound = (operator === "*=" || operator === "/=") &&
+    wgslVectorScalarType(targetType) === value.type;
+  if (value.type !== targetType && !vectorScalarCompound) {
+    throw new TypeError(`WGSL assignment type mismatch for '${target}': assigned '${value.type}', target '${targetType}'`);
+  }
+  if ((operator === "&=" || operator === "|=" || operator === "^=" || operator === "<<=" || operator === ">>=") &&
+    targetType !== "i32" && targetType !== "u32") {
+    throw new TypeError(`WGSL '${operator}' requires integer target, received '${targetType}'`);
+  }
+  return new TypedWgslAssignmentStatement(target, operator, value, span);
+}
+
+function wgslVectorScalarType(type: WgslExpressionType): WgslExpressionType | undefined {
+  if (type === "vec2<f16>") return "f16";
+  if (type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>") return "f32";
+  if (type === "vec2<i32>" || type === "vec3<i32>" || type === "vec4<i32>") return "i32";
+  if (type === "vec2<u32>" || type === "vec3<u32>" || type === "vec4<u32>") return "u32";
+  return undefined;
 }

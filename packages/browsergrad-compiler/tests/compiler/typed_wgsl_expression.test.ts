@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertTypedWgslExpression,
   createTypedWgslExpression,
+  createTypedWgslLocalAssignmentStatement,
   createTypedWgslReturnStatement,
   createTypedWgslVariableStatement,
   emitTypedWgslBinary,
@@ -103,5 +104,15 @@ describe("typed WGSL expressions", () => {
       createTypedWgslExpression("1", "i32", span),
       span,
     )).toMatchObject({ code: "var count: i32 = 1;", span });
+  });
+
+  it("accepts WGSL vector-scalar multiply assignments", () => {
+    expect(createTypedWgslLocalAssignmentStatement(
+      "value",
+      "vec4<f32>",
+      "*=",
+      createTypedWgslExpression("2.0", "f32", span),
+      span,
+    )).toMatchObject({ code: "value *= 2.0;", span });
   });
 });

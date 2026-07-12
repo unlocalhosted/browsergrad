@@ -118,7 +118,11 @@ import {
   emitTypedWgslUnary,
   type TypedWgslExpression,
 } from "./typed_wgsl_expression.js";
-import { createTypedWgslReturnStatement, createTypedWgslVariableStatement } from "./typed_wgsl_statement.js";
+import {
+  createTypedWgslLocalAssignmentStatement,
+  createTypedWgslReturnStatement,
+  createTypedWgslVariableStatement,
+} from "./typed_wgsl_statement.js";
 import {
   cudaLiteFlatIndicesForDimensions as flatIndicesForDimensions,
   cudaLiteTotalElements as totalElements,
@@ -3831,8 +3835,12 @@ function emitSemanticAssignmentStatement(
   const target = nameFor(expression.target.name, names);
   const targetType = expression.target.valueType;
   const value = targetType !== undefined && isSemanticFloatVectorType(targetType)
-    ? emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations)
-    : emitSemanticLocalScalarExpressionAs(expression.value, targetType, ir, names, options, textureSpecializations);
+    ? createTypedWgslExpression(
+        emitSemanticVectorOperand(expression.value, targetType, ir, names, options, textureSpecializations),
+        wgslValueType(targetType),
+        expression.value.span,
+      )
+    : emitSemanticInitExpression(expression.value, targetType, ir, names, options, textureSpecializations);
   if (targetType === "uchar" && expression.operator !== "=") {
     const binaryOperator = expression.operator.slice(0, -1);
     const right = emitSemanticExpressionAs(expression.value, ir, names, "u32", options, textureSpecializations).code;
@@ -3848,8 +3856,14 @@ function emitSemanticAssignmentStatement(
     const right = emitSemanticExpressionAs(expression.value, ir, names, operationScalar, options, textureSpecializations).code;
     return `${target} = ${wgslValueScalar(targetType)}((${left} ${binaryOperator} ${right}))`;
   }
-  if (binaryOperator) return `${target} ${expression.operator} ${value}`;
-  return `${target} = ${value}`;
+  const operator = (binaryOperator ? expression.operator : "=") as Parameters<typeof createTypedWgslLocalAssignmentStatement>[2];
+  return createTypedWgslLocalAssignmentStatement(
+    target,
+    wgslValueType(targetType),
+    operator,
+    value,
+    expression.span,
+  ).code.slice(0, -1);
 }
 
 function emitLocalArrayInit(
