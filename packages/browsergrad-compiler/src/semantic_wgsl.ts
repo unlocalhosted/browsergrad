@@ -3274,21 +3274,6 @@ function semanticActiveFunctionReturnType(
   return fn.returnType;
 }
 
-function emitSemanticAssignmentResult(
-  expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions = {},
-): string {
-  if (expression.target.kind === "symbol") return nameFor(expression.target.name, names);
-  if (expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) {
-    return emitSemanticMember(expression.target, ir, names, options);
-  }
-  const ref = semanticWgslAssignmentMemoryRef(expression.target, ir);
-  if (ref) return emitSemanticMemoryRef(ref, ir, names, options);
-  throw semanticWgslError("semantic WGSL cannot return assignment result", expression.span);
-}
-
 function emitSemanticAssignmentResultExpression(
   expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
   ir: SemanticKernelIrModule,
@@ -3302,11 +3287,13 @@ function emitSemanticAssignmentResultExpression(
       expression.span,
     );
   }
-  return createTrustedWgslExpression(
-    emitSemanticAssignmentResult(expression, ir, names, options),
-    semanticExpressionWgslType(expression, ir),
-    expression.span,
-  );
+  if (
+    expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir) ||
+    semanticWgslAssignmentMemoryRef(expression.target, ir)
+  ) {
+    return emitSemanticExpression(expression.target, ir, names, options);
+  }
+  throw semanticWgslError("semantic WGSL cannot return assignment result", expression.span);
 }
 
 function emitSemanticTruthinessExpression(
