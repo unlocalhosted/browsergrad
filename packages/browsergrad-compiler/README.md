@@ -301,6 +301,26 @@ Pool pointers are byte offsets with `0` as null. Casted accesses such as
 base buffer for raw pointer pools. This is a teaching-grade CUDA allocator
 primitive, not a course-specific shim.
 
+## Bindless Texture Tables
+
+BrowserGrad lowers decoded CUDA texture handles to an explicit fixed WebGPU
+texture table. Table slots are native texture bindings, not CPU-simulated
+textures:
+
+```ts
+const compiled = compileCudaLiteKernel(source, {
+  bindlessTextures: ["image0", "image1"],
+});
+
+const input = {
+  textures: { atlas, image0, image1 },
+};
+```
+
+The low 32 bits returned by a CUDA-style texture-handle decoder select a table
+slot. Names must be unique CUDA identifiers and cannot collide with source
+symbols. Out-of-range slots read zero in both semantic reference and WGSL.
+
 ## Dynamic Parallelism
 
 Device-side launches parse into Kernel IR. By default they remain compile-time

@@ -485,6 +485,7 @@ export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
   readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
   readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
+  readonly bindlessTextures?: readonly string[];
 }
 
 export interface CompiledCudaLiteKernel {

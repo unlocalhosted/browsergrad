@@ -417,6 +417,7 @@ export interface SemanticKernelIrModule {
   readonly barrierUniformity: CudaLiteAnalysis["barrierUniformity"];
   readonly workgroupSize: KernelLaunch["blockDim"];
   readonly subgroupMode?: "native" | "scalar";
+  readonly bindlessTextures?: readonly string[];
 }
 
 export function walkSemanticOperations(
@@ -693,6 +694,7 @@ export function lowerSemanticModelToKernelIr(
     readonly workgroupSize?: readonly [number, number, number];
     readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
     readonly subgroupMode?: "native" | "scalar";
+    readonly bindlessTextures?: readonly string[];
   } = {},
 ): SemanticKernelIrModule {
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
@@ -749,9 +751,14 @@ export function lowerSemanticModelToKernelIr(
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
   );
-  const loweredOperations = markSemanticWorkgroupUniformControl(
+  const controlledOperations = markSemanticWorkgroupUniformControl(
     activeLaneOperations,
     analysis.barrierUniformity.kernel.workgroupUniformControlStatementStarts,
+  );
+  const loweredOperations = lowerSemanticBindlessTextureAliases(
+    controlledOperations,
+    loweredSourceFunctions,
+    options.bindlessTextures ?? [],
   );
   const localMemory = collectDeclaredMemory(loweredOperations);
   const reachable = collectReachableAnalysisNames(analysis);
@@ -804,6 +811,16 @@ export function lowerSemanticModelToKernelIr(
       ).map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
       ...localMemory.map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
       ...functionSharedMemory.map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory)),
+      ...(options.bindlessTextures ?? []).map((name): CudaLiteSemanticSymbol => ({
+        name,
+        kind: "texture",
+        valueType: "texture2d",
+        pointer: false,
+        constant: true,
+        dimensions: [],
+        addressSpace: "texture",
+        span: analysis.kernel.span,
+      })),
     ],
     functions,
     operations,
@@ -811,6 +828,7 @@ export function lowerSemanticModelToKernelIr(
     barrierUniformity: analysis.barrierUniformity,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
+    ...(options.bindlessTextures === undefined ? {} : { bindlessTextures: options.bindlessTextures }),
   };
 }
 
@@ -840,6 +858,107 @@ function markSemanticWorkgroupUniformControl(
     }
     return operation;
   });
+}
+
+function lowerSemanticBindlessTextureAliases(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+  bindlessTextures: readonly string[],
+  inherited: ReadonlyMap<string, SemanticExpression> = new Map(),
+): readonly SemanticKernelIrOperation[] {
+  if (bindlessTextures.length === 0) return operations;
+  const aliases = new Map(inherited);
+  const out: SemanticKernelIrOperation[] = [];
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.target.valueType === "texture2d" && operation.init?.kind === "call") {
+      const handle = semanticBindlessHandleFromCall(operation.init, functions);
+      if (handle !== undefined) {
+        aliases.set(operation.target.name, handle);
+        continue;
+      }
+    }
+    out.push(rewriteSemanticBindlessOperation(operation, aliases, functions, bindlessTextures));
+  }
+  return out;
+}
+
+function semanticBindlessHandleFromCall(
+  call: Extract<SemanticExpression, { readonly kind: "call" }>,
+  functions: readonly CudaLiteSemanticFunction[],
+): SemanticExpression | undefined {
+  if (call.callee.kind !== "symbol" || call.args.length !== 1) return undefined;
+  const calleeName = call.callee.name;
+  const fn = functions.find((candidate) => candidate.name === calleeName && candidate.returnType === "texture2d" && candidate.params.length === 1);
+  const param = fn?.params[0];
+  const arg = call.args[0];
+  if (!fn || !param || !arg || fn.body.length !== 1 || fn.body[0]?.kind !== "return" || fn.body[0].value === undefined) return undefined;
+  if (!semanticTextureHandleReturnUsesLowLane(fn.body[0].value, param.name)) return undefined;
+  if (param.valueType === "uint2") {
+    return { kind: "member", object: arg, property: "x", valueType: "uint", span: call.span };
+  }
+  return param.valueType === "uint" ? arg : undefined;
+}
+
+function semanticTextureHandleReturnUsesLowLane(expression: SemanticExpression, paramName: string): boolean {
+  if (expression.kind === "cast") return semanticTextureHandleReturnUsesLowLane(expression.expression, paramName);
+  if (expression.kind === "binary" && expression.operator === "|") return semanticTextureHandleReturnUsesLowLane(expression.left, paramName);
+  return expression.kind === "member" && expression.property === "x" && expression.object.kind === "symbol" && expression.object.name === paramName;
+}
+
+function rewriteSemanticBindlessOperation(
+  operation: SemanticKernelIrOperation,
+  aliases: ReadonlyMap<string, SemanticExpression>,
+  functions: readonly CudaLiteSemanticFunction[],
+  bindlessTextures: readonly string[],
+): SemanticKernelIrOperation {
+  const rewrite = (expression: SemanticExpression): SemanticExpression => rewriteSemanticBindlessExpression(expression, aliases);
+  if (operation.kind === "declare") return operation.init === undefined ? operation : { ...operation, init: rewrite(operation.init) };
+  if (operation.kind === "store") return { ...operation, value: rewrite(operation.value), reads: collectMemoryRefs(rewrite(operation.value)) };
+  if (operation.kind === "expression") return { ...operation, expression: rewrite(operation.expression) };
+  if (operation.kind === "call") return { ...operation, args: operation.args.map(rewrite) };
+  if (operation.kind === "atomic") return { ...operation, args: operation.args.map(rewrite) };
+  if (operation.kind === "branch") return {
+    ...operation,
+    condition: rewrite(operation.condition),
+    consequent: lowerSemanticBindlessTextureAliases(operation.consequent, functions, bindlessTextures, aliases),
+    alternate: lowerSemanticBindlessTextureAliases(operation.alternate, functions, bindlessTextures, aliases),
+  };
+  if (operation.kind === "loop") return {
+    ...operation,
+    ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSemanticBindlessOperation(operation.init, aliases, functions, bindlessTextures) : rewrite(operation.init) }),
+    ...(operation.condition === undefined ? {} : { condition: rewrite(operation.condition) }),
+    ...(operation.update === undefined ? {} : { update: rewrite(operation.update) }),
+    body: lowerSemanticBindlessTextureAliases(operation.body, functions, bindlessTextures, aliases),
+    ...(operation.continuing === undefined ? {} : { continuing: lowerSemanticBindlessTextureAliases(operation.continuing, functions, bindlessTextures, aliases) }),
+  };
+  if (operation.kind === "block") return { ...operation, body: lowerSemanticBindlessTextureAliases(operation.body, functions, bindlessTextures, aliases) };
+  if (operation.kind === "return" && operation.value !== undefined) return { ...operation, value: rewrite(operation.value) };
+  return operation;
+}
+
+function rewriteSemanticBindlessExpression(
+  expression: SemanticExpression,
+  aliases: ReadonlyMap<string, SemanticExpression>,
+): SemanticExpression {
+  switch (expression.kind) {
+    case "member": return { ...expression, object: rewriteSemanticBindlessExpression(expression.object, aliases) };
+    case "index": return { ...expression, target: rewriteSemanticBindlessExpression(expression.target, aliases), index: rewriteSemanticBindlessExpression(expression.index, aliases) };
+    case "call": return { ...expression, callee: rewriteSemanticBindlessExpression(expression.callee, aliases), args: expression.args.map((arg) => rewriteSemanticBindlessExpression(arg, aliases)) };
+    case "texture-read": {
+      const texture = expression.texture.kind === "symbol" ? aliases.get(expression.texture.name) ?? expression.texture : rewriteSemanticBindlessExpression(expression.texture, aliases);
+      return { ...expression, texture, x: rewriteSemanticBindlessExpression(expression.x, aliases), y: rewriteSemanticBindlessExpression(expression.y, aliases), ...(expression.z === undefined ? {} : { z: rewriteSemanticBindlessExpression(expression.z, aliases) }) };
+    }
+    case "surface-read": return { ...expression, surface: rewriteSemanticBindlessExpression(expression.surface, aliases), xBytes: rewriteSemanticBindlessExpression(expression.xBytes, aliases), y: rewriteSemanticBindlessExpression(expression.y, aliases), ...(expression.z === undefined ? {} : { z: rewriteSemanticBindlessExpression(expression.z, aliases) }) };
+    case "cast": return { ...expression, expression: rewriteSemanticBindlessExpression(expression.expression, aliases) };
+    case "unary": return { ...expression, argument: rewriteSemanticBindlessExpression(expression.argument, aliases) };
+    case "binary": return { ...expression, left: rewriteSemanticBindlessExpression(expression.left, aliases), right: rewriteSemanticBindlessExpression(expression.right, aliases) };
+    case "conditional": return { ...expression, condition: rewriteSemanticBindlessExpression(expression.condition, aliases), consequent: rewriteSemanticBindlessExpression(expression.consequent, aliases), alternate: rewriteSemanticBindlessExpression(expression.alternate, aliases) };
+    case "assignment": return { ...expression, target: rewriteSemanticBindlessExpression(expression.target, aliases), value: rewriteSemanticBindlessExpression(expression.value, aliases) };
+    case "update": return { ...expression, argument: rewriteSemanticBindlessExpression(expression.argument, aliases) };
+    case "initializer": return { ...expression, elements: expression.elements.map((item) => rewriteSemanticBindlessExpression(item, aliases)) };
+    case "sequence": return { ...expression, expressions: expression.expressions.map((item) => rewriteSemanticBindlessExpression(item, aliases)) };
+    default: return expression;
+  }
 }
 
 const SEMANTIC_GUARDED_BARRIER_FUNCTION_SUFFIX = "__bg_guarded_barrier";

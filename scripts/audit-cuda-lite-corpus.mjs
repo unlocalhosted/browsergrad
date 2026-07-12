@@ -282,6 +282,7 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
       f64Mode: "f32",
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
+      ...inferBindlessTextureOptions(source),
     });
     const hostOrchestratedDiagnostic = hostOrchestratedDiagnosticFor(compiled);
     if (hostOrchestratedDiagnostic) {
@@ -372,6 +373,7 @@ function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kerne
       f64Mode: "f32",
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
+      ...inferBindlessTextureOptions(source),
     });
     const hostOrchestratedDiagnostic = hostOrchestratedDiagnosticFor(compiled);
     if (hostOrchestratedDiagnostic) {
@@ -549,6 +551,7 @@ function classifyReferenceFallback(source, kernelName) {
       f64Mode: "f32",
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
+      ...inferBindlessTextureOptions(source),
     });
     const lift = webGpuLiftFor(compiled);
     return {
@@ -606,6 +609,7 @@ function webGpuLiftFor(compiled) {
         features: { "shader-f16": true, subgroups: true, ...options.features },
         f64Mode: options.f64Mode ?? "f32",
         dynamicSharedMemory: inferDynamicSharedMemory(childSource),
+        ...inferBindlessTextureOptions(childSource),
       }),
     },
   );
@@ -633,4 +637,9 @@ function webGpuLiftFor(compiled) {
   }
   if (executionPlan.kind === "single-dispatch") return { kind: undefined, blocker: "no runtime WebGPU lift required" };
   return { kind: executionPlan.kind, blocker: undefined };
+}
+
+function inferBindlessTextureOptions(source) {
+  if (!/\bdecodeTextureObject\s*\(/u.test(source)) return {};
+  return { bindlessTextures: Array.from({ length: 4 }, (_, index) => `bg_bindless_texture_${index}`) };
 }

@@ -493,6 +493,9 @@ export function emitSemanticKernelIrWgsl(
   for (const helper of semanticTextureDescriptorHelpers(options, textureSpecializations, names)) {
     lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
+  if ((ir.bindlessTextures?.length ?? 0) > 0) {
+    lines.push("", ...emitSemanticBindlessTextureReadHelper(ir, names, options));
+  }
   if (semanticUsesCubemapTextureRead(ir)) lines.push("", ...emitCubeTextureAtlasHelpers());
   lines.push("", ...emitSemanticNumericHelpers());
   if (semanticUsesSpecialFloatConstant(ir)) lines.push("", ...emitSpecialFloatConstantHelpers());
@@ -1678,8 +1681,9 @@ function semanticWgslTextureReadSupported(
 ): boolean {
   const texture = expression.texture;
   return semanticTextureSurfaceValueTypeSupported(expression.valueType) &&
-    texture.kind === "symbol" &&
-    texture.addressSpace === "texture" &&
+    (texture.kind === "symbol" && texture.addressSpace === "texture" ||
+      (ir.bindlessTextures?.length ?? 0) > 0 && expression.callee !== "texCubemap" && expression.z === undefined &&
+        semanticWgslExpressionSupported(texture, "scalar", ir)) &&
     semanticWgslExpressionSupported(expression.x, "scalar", ir) &&
     semanticWgslExpressionSupported(expression.y, "scalar", ir) &&
     semanticTextureReadCoordinateShapeSupported(expression.callee, expression.z !== undefined) &&
@@ -4309,27 +4313,52 @@ function emitSemanticTextureRead(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  if (!semanticWgslTextureReadSupported(expression, ir) || expression.texture.kind !== "symbol") {
-    throw semanticWgslError("semantic WGSL supports only direct texture reads", expression.span);
+  if (!semanticWgslTextureReadSupported(expression, ir)) {
+    throw semanticWgslError("semantic WGSL does not support texture read", expression.span);
   }
   const x = emitSemanticExpressionAs(expression.x, ir, names, "f32", options);
   const y = emitSemanticExpressionAs(expression.y, ir, names, "f32", options);
   const atlasY = expression.z === undefined || expression.callee === "texCubemap"
     ? y
     : `(${y} + ${emitSemanticExpressionAs(expression.z, ir, names, "f32", options)})`;
-  const texture = nameFor(expression.texture.name, names);
-  const descriptor = expression.callee === "texCubemap" ? undefined : options.textureDescriptors?.[expression.texture.name];
-  const read = expression.callee === "texCubemap"
-    ? emitSemanticCubemapTextureRead(texture, x, y, emitSemanticExpressionAs(expression.z!, ir, names, "f32", options))
-    : descriptor
-    ? `${semanticTextureDescriptorHelperName(expression.texture.name, names, descriptor)}(${texture}, ${x}, ${atlasY})`
-    : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${atlasY}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
+  const directTexture = expression.texture.kind === "symbol" && expression.texture.addressSpace === "texture"
+    ? expression.texture
+    : undefined;
+  const texture = directTexture === undefined ? undefined : nameFor(directTexture.name, names);
+  const descriptor = directTexture === undefined || expression.callee === "texCubemap" ? undefined : options.textureDescriptors?.[directTexture.name];
+  const read = directTexture === undefined
+    ? `${SEMANTIC_BINDLESS_TEXTURE_READ_HELPER}(u32(${emitSemanticExpression(expression.texture, ir, names, options)}), ${x}, ${y})`
+    : expression.callee === "texCubemap"
+      ? emitSemanticCubemapTextureRead(texture!, x, y, emitSemanticExpressionAs(expression.z!, ir, names, "f32", options))
+      : descriptor
+        ? `${semanticTextureDescriptorHelperName(directTexture.name, names, descriptor)}(${texture}, ${x}, ${atlasY})`
+        : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(${x})), i32(floor(${atlasY}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
   if (isSemanticFloatVectorType(expression.valueType)) return emitSemanticTextureVectorRead(read, expression.valueType);
   if (expression.valueType === "half") return `f16(${read}.r)`;
   if (expression.valueType === "bf16") return wgslRoundBfloat16(`${read}.r`);
   if (expression.valueType === "uint" || expression.valueType === "uchar") return `u32(${read}.r)`;
   if (expression.valueType === "int") return `i32(${read}.r)`;
   return `${read}.r`;
+}
+
+const SEMANTIC_BINDLESS_TEXTURE_READ_HELPER = "bg_semantic_bindless_texture_read";
+
+function emitSemanticBindlessTextureReadHelper(
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): readonly string[] {
+  const lines = [`fn ${SEMANTIC_BINDLESS_TEXTURE_READ_HELPER}(handle: u32, x: f32, y: f32) -> vec4<f32> {`, "  switch handle {"];
+  for (const [index, textureName] of (ir.bindlessTextures ?? []).entries()) {
+    const texture = nameFor(textureName, names);
+    const descriptor = options.textureDescriptors?.[textureName];
+    const read = descriptor
+      ? `${semanticTextureDescriptorHelperName(textureName, names, descriptor)}(${texture}, x, y)`
+      : `textureLoad(${texture}, clamp(vec2<i32>(i32(floor(x)), i32(floor(y))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1)), 0)`;
+    lines.push(`    case ${index}u: { return ${read}; }`);
+  }
+  lines.push("    default: { return vec4<f32>(0.0); }", "  }", "}");
+  return lines;
 }
 
 function emitSemanticCubemapTextureRead(texture: string, x: string, y: string, z: string): string {

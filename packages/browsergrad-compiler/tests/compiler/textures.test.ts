@@ -412,6 +412,49 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...result.buffers.out as Uint32Array]).toEqual([23]);
     });
 
+  it("lowers decoded bindless handles through an explicit native texture table", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ cudaTextureObject_t decodeTextureObject(uint2 obj) {
+    return ((cudaTextureObject_t)obj.x) | (((cudaTextureObject_t)obj.y) << 32);
+  }
+  __global__ void bindlessRead(float4 *out, cudaTextureObject_t atlas) {
+    uint2 coded = tex2D<uint2>(atlas, 0.0f, 0.0f);
+    cudaTextureObject_t selected = decodeTextureObject(coded);
+    out[0] = tex2D<float4>(selected, 0.0f, 0.0f);
+  }`, { workgroupSize: [1, 1, 1], bindlessTextures: ["image0", "image1"] });
+      const input = {
+        buffers: { out: new Float32Array(4) },
+        textures: {
+          atlas: { width: 1, height: 1, channels: 2 as const, data: new Float32Array([1, 0]) },
+          image0: { width: 1, height: 1, channels: 4 as const, data: new Float32Array([1, 2, 3, 4]) },
+          image1: { width: 1, height: 1, channels: 4 as const, data: new Float32Array([10, 20, 30, 40]) },
+        },
+      };
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        input,
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.kernelIr.bindlessTextures).toEqual(["image0", "image1"]);
+      expect(compiled.wgsl).toContain("fn bg_semantic_bindless_texture_read");
+      expect(compiled.wgsl).toContain("case 1u: { return textureLoad(image1");
+      expect([...result.buffers.out as Float32Array]).toEqual([10, 20, 30, 40]);
+      const invalid = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          ...input,
+          textures: {
+            ...input.textures,
+            atlas: { ...input.textures.atlas, data: new Float32Array([9, 0]) },
+          },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...invalid.buffers.out as Float32Array]).toEqual([0, 0, 0, 0]);
+    });
+
   it("lowers cudaSurfaceObject_t surf2DLayeredwrite to z-linearized layer storage", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void surfaceLayeredWrite(cudaSurfaceObject_t outputSurf) {

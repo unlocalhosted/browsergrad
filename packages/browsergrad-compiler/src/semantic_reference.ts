@@ -830,8 +830,9 @@ function semanticReferenceTextureReadSupported(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   return semanticTextureSurfaceValueTypeSupported(expression.valueType) &&
-    expression.texture.kind === "symbol" &&
-    expression.texture.addressSpace === "texture" &&
+    (expression.texture.kind === "symbol" && expression.texture.addressSpace === "texture" ||
+      (compiled.kernelIr.bindlessTextures?.length ?? 0) > 0 && expression.callee !== "texCubemap" && expression.z === undefined &&
+        semanticReferenceExpressionSupported(expression.texture, "scalar", compiled)) &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled) &&
     semanticTextureReadCoordinateShapeSupported(expression.callee, expression.z !== undefined) &&
@@ -2865,13 +2866,19 @@ function evalSemanticTextureRead(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   context: SemanticReferenceContext,
 ): SemanticValue {
-  if (!semanticReferenceTextureReadSupported(expression, context.compiled) || expression.texture.kind !== "symbol") {
-    throw semanticReferenceError("semantic reference supports only direct scalar/vector texture reads", expression.span);
+  if (!semanticReferenceTextureReadSupported(expression, context.compiled)) {
+    throw semanticReferenceError("semantic reference does not support texture read", expression.span);
   }
-  const texture = context.textures[expression.texture.name];
-  if (!texture) throw semanticReferenceError(`missing texture input '${expression.texture.name}'`, expression.texture.span);
+  const directTexture = expression.texture.kind === "symbol" && expression.texture.addressSpace === "texture"
+    ? expression.texture.name
+    : undefined;
+  const handle = directTexture === undefined ? Math.trunc(evalNumber(expression.texture, context)) : undefined;
+  const textureName = directTexture ?? context.compiled.kernelIr.bindlessTextures?.[handle ?? -1];
+  if (textureName === undefined) return evalSemanticTextureValue(expression.valueType, () => 0);
+  const texture = context.textures[textureName];
+  if (!texture) throw semanticReferenceError(`missing texture input '${textureName}'`, expression.texture.span);
   const channels = texture.channels ?? 1;
-  const descriptor = context.textureDescriptors[expression.texture.name] ?? {};
+  const descriptor = context.textureDescriptors[textureName] ?? {};
   const xValue = evalNumber(expression.x, context);
   const yValue = evalNumber(expression.y, context);
   if (expression.callee === "texCubemap") {

@@ -85,6 +85,7 @@ export function compileCudaLiteKernel(
       errors,
     );
   }
+  validateBindlessTextureOptions(options, analysis);
   const semantic = createCudaLiteSemanticModel(analysis);
   const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
   const diagnostics = reconcileSemanticRuntimeDiagnostics(analysis.diagnostics, kernelIr.operations);
@@ -152,6 +153,26 @@ function validateTextureDescriptorOptions(options: CompileCudaLiteOptions): void
     if (descriptor.filterMode !== undefined && descriptor.filterMode !== "point" && descriptor.filterMode !== "linear") {
       throw new RangeError(`texture descriptor '${name}' uses unsupported filterMode '${descriptor.filterMode}'`);
     }
+  }
+}
+
+function validateBindlessTextureOptions(
+  options: CompileCudaLiteOptions,
+  analysis: ReturnType<typeof analyzeCudaLite>,
+): void {
+  const names = options.bindlessTextures ?? [];
+  const occupied = new Set([
+    ...analysis.kernel.params.map((param) => param.name),
+    ...analysis.constants.map((constant) => constant.name),
+    ...analysis.deviceGlobals.map((global) => global.name),
+    ...analysis.textures.map((texture) => texture.name),
+  ]);
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) throw new RangeError(`bindless texture name '${name}' is not a CUDA identifier`);
+    if (seen.has(name)) throw new RangeError(`duplicate bindless texture name '${name}'`);
+    if (occupied.has(name)) throw new RangeError(`bindless texture name '${name}' collides with source symbol`);
+    seen.add(name);
   }
 }
 

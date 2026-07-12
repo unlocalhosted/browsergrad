@@ -3660,6 +3660,34 @@ __global__ void indexedSurface(cudaSurfaceObject_t *surfaces, uint *out, uint la
     expect([...actual.buffers.out as Uint32Array]).toEqual([23]);
   });
 
+  it("runs decoded bindless handles through explicit native texture bindings", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ cudaTextureObject_t decodeTextureObject(uint2 obj) {
+  return ((cudaTextureObject_t)obj.x) | (((cudaTextureObject_t)obj.y) << 32);
+}
+__global__ void bindlessRead(float4 *out, cudaTextureObject_t atlas) {
+  uint2 coded = tex2D<uint2>(atlas, 0.0f, 0.0f);
+  cudaTextureObject_t selected = decodeTextureObject(coded);
+  out[0] = tex2D<float4>(selected, 0.0f, 0.0f);
+}`, { workgroupSize: [1, 1, 1], bindlessTextures: ["image0", "image1"] });
+    const input = {
+      buffers: { out: new Float32Array(4) },
+      textures: {
+        atlas: { width: 1, height: 1, channels: 2 as const, data: new Float32Array([1, 0]) },
+        image0: { width: 1, height: 1, channels: 4 as const, data: new Float32Array([1, 2, 3, 4]) },
+        image1: { width: 1, height: 1, channels: 4 as const, data: new Float32Array([10, 20, 30, 40]) },
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect([...expected.buffers.out as Float32Array]).toEqual([10, 20, 30, 40]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([10, 20, 30, 40]);
+  });
+
   it("runs CUDA driver surface aliases through WebGPU surfaces", async () => {
     if (!deviceCheck.available) return;
     const source = `
