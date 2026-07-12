@@ -107,6 +107,9 @@ function checkOperations(
         operation.args.forEach((arg) => checkExpression(arg, arg.kind === "literal" && arg.literalKind === "string" ? "discard" : "value", ir, report));
         if (operation.result) checkExpression(operation.result, "value", ir, report);
         break;
+      case "runtime-copy":
+        operation.args.forEach((arg) => checkExpression(arg, "value", ir, report));
+        break;
       case "expression":
         checkExpression(operation.expression, "discard", ir, report);
         break;

@@ -1214,7 +1214,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var texRef: texture_2d<f32>;");
       expect(compiled.wgsl).toContain("textureLoad(texRef");
-      expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
+      expect(compiled.wgslProgram!.bindings).toContainEqual(expect.objectContaining({
         kind: "texture2d",
         name: "texRef",
       }));
@@ -1255,7 +1255,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var tex: texture_2d<f32>;");
       expect(compiled.wgsl).toContain("textureLoad(tex");
-      expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
+      expect(compiled.wgslProgram!.bindings).toContainEqual(expect.objectContaining({
         kind: "texture2d",
         name: "tex",
       }));
@@ -1799,8 +1799,8 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr, compiled.textureDescriptors ? { textureDescriptors: compiled.textureDescriptors } : {})).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect((compiled.wgsl.match(/fn sampleAt__bg_tex_/g) ?? []).length).toBe(2);
-      expect((compiled.wgsl.match(/fn bg_sem_tex2d_texSrc_/g) ?? []).length).toBe(2);
+      expect((compiled.wgsl!.match(/fn sampleAt__bg_tex_/g) ?? []).length).toBe(2);
+      expect((compiled.wgsl!.match(/fn bg_sem_tex2d_texSrc_/g) ?? []).length).toBe(2);
       expect([...result.buffers.out as Float32Array]).toEqual([
         4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5,
         11, 12, 13, 14, 15, 16, 17, 18,

@@ -7,6 +7,7 @@ import {
   isCudaIntegerRuntimeQueryCall,
 } from "./cuda_runtime_queries.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
+import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import type {
   SemanticExpression,
   SemanticKernelIrOperation,
@@ -53,6 +54,9 @@ function lowerRuntimeOperations(
 function lowerRuntimeOperation(
   operation: SemanticKernelIrOperation,
 ): readonly SemanticKernelIrOperation[] {
+  if (operation.kind === "call" && isCudaRuntimeCopyCall(operation.callee)) {
+    return [{ kind: "runtime-copy", callee: operation.callee, args: operation.args, span: operation.span }];
+  }
   if (operation.kind === "call" && isModeledRuntimeCall(operation.callee)) {
     const writes = runtimeCallWriteOperations(operation.callee, operation.args, operation.span);
     const result = operation.result === undefined ? [] : [assignmentOperation(operation.result, zeroLiteral("int", operation.span), operation.span)];

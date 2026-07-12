@@ -5,12 +5,11 @@ import {
   type WgslPreparedKernelSequence,
   type WgslPreparedKernelSequenceRunOptions,
 } from "@unlocalhosted/browsergrad-kernels";
-import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
+import { analyzeCudaLite } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaLiteCompileCacheKey } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { parseCudaLite } from "./parser.js";
-import { runCompiledKernelReference as runCompiledKernelAstReference } from "./reference.js";
 import {
   canRunCompiledKernelSemanticReference,
   runCompiledKernelSemanticReference,
@@ -27,7 +26,6 @@ import {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
 } from "./semantic_wgsl.js";
-import { emitKernelIrWgsl } from "./wgsl.js";
 import {
   type CudaWebGpuExecutionPlan,
   createCudaWebGpuExecutionPlan,
@@ -103,24 +101,14 @@ export function compileCudaLiteKernel(
   };
   const emitted = canEmitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
     ? emitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
-    : emitKernelIrWgsl(
-      lowerAnalyzedCudaLiteToKernelIr(analysis, options),
-      {
-        ...(options.features === undefined ? {} : { features: options.features }),
-        ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
-        ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
-        ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
-        ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
-      },
-    );
+    : undefined;
   const loweringPlan = createCudaLoweringPlan(diagnostics);
   return {
     ast,
     semantic,
     kernelIr,
     analysis,
-    wgsl: emitted.wgsl,
-    wgslProgram: emitted.program,
+    ...(emitted === undefined ? {} : { wgsl: emitted.wgsl, wgslProgram: emitted.program }),
     diagnostics,
     loweringPlan,
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
@@ -213,9 +201,7 @@ export function runCompiledKernelReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
-  return canRunCompiledKernelSemanticReference(compiled)
-    ? runCompiledKernelSemanticReference(compiled, input, launch)
-    : runCompiledKernelAstReference(compiled, input, launch);
+  return runCompiledKernelSemanticReference(compiled, input, launch);
 }
 
 function createCachedWebGpuChildCompiler(

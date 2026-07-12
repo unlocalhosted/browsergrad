@@ -368,7 +368,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
       expect(compiled.analysis.barrierUniformity.kernel.unverifiedControlStatementStarts).toEqual([expect.any(Number)]);
-      expect(compiled.wgsl.match(/\bactive_byte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bactive_byte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = active_byte_pointer_array_diff_index_helper\(/u);
       expect(compiled.wgsl).toMatch(/summary\[.+\] = i32\(\(summary\[.+\] \+ select\(0, select\(.+ \/ 4\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\)\);/u);
     });
@@ -1745,8 +1745,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("var<workgroup> bg_cg_reduce_merge_pair_float2_32_scratch");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect(compiled.wgsl).toContain("merge_pair(bg_cg_reduce_merge_pair_float2_32_scratch[bg_linear_rank]");
-      const mergeFnIndex = compiled.wgsl.indexOf("fn merge_pair(");
-      const reduceHelperIndex = compiled.wgsl.indexOf("fn bg_cg_reduce_merge_pair_float2_32");
+      const mergeFnIndex = compiled.wgsl!.indexOf("fn merge_pair(");
+      const reduceHelperIndex = compiled.wgsl!.indexOf("fn bg_cg_reduce_merge_pair_float2_32");
       expect(mergeFnIndex).toBeGreaterThanOrEqual(0);
       expect(mergeFnIndex).toBeLessThan(reduceHelperIndex);
       expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
@@ -2513,7 +2513,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("for (var k");
-      expect(compiled.wgsl.match(/workgroupBarrier\(\);/g)).toHaveLength(2);
+      expect(compiled.wgsl!.match(/workgroupBarrier\(\);/g)).toHaveLength(2);
       expect(compiled.wgsl).toContain("if (bg_active_lane)");
       expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n  for");
       expect([...result.buffers.x as Float32Array]).toEqual([3, 5, 7, 9]);
@@ -2776,7 +2776,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).toContain("for (var k");
       expect(compiled.wgsl).toContain("(u32((k + 1)) < 2u)");
-      expect(compiled.wgsl.match(/workgroupBarrier\(\);/g)).toHaveLength(2);
+      expect(compiled.wgsl!.match(/workgroupBarrier\(\);/g)).toHaveLength(2);
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
@@ -2803,7 +2803,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.analysis.barrierUniformity.kernel.verified).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
+      expect(compiled.wgsl!.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
@@ -2831,7 +2831,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("} else {");
-      expect(compiled.wgsl.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
+      expect(compiled.wgsl!.match(/workgroupBarrier\(\);/gu)).toHaveLength(2);
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 
@@ -3021,7 +3021,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [1, 1, 1],
       });
       expect(halfCompiled.wgsl).toContain("enable f16;");
-      expect(halfCompiled.wgslProgram.bindings[0]).toMatchObject({ valueType: "f16" });
+      expect(halfCompiled.wgslProgram!.bindings[0]).toMatchObject({ valueType: "f16" });
 
       const halfScalar = compileCudaLiteKernel(`
   __global__ void half_scale(half* x, half a) {
@@ -3389,9 +3389,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-      const firstBlock = compiled.wgsl.slice(
-        compiled.wgsl.indexOf("var first_sel"),
-        compiled.wgsl.indexOf("var second_sel"),
+      const firstBlock = compiled.wgsl!.slice(
+        compiled.wgsl!.indexOf("var first_sel"),
+        compiled.wgsl!.indexOf("var second_sel"),
       );
       expect(firstBlock).toContain("first_sel");
       expect(firstBlock).not.toContain("second_sel");

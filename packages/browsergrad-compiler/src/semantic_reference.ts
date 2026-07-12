@@ -31,6 +31,12 @@ import {
 } from "./cuda_sync_calls.js";
 import { isCudaCpAsyncFenceCall } from "./cuda_cp_async.js";
 import {
+  cudaRuntimeCopyShapeForCall,
+  isCudaRuntimeMemset2DCall,
+  isCudaRuntimeMemsetCall,
+  isCudaRuntimeSymbolMemsetCall,
+} from "./cuda_runtime_copies.js";
+import {
   cudaArithmeticReduceOpForCall,
   cudaBitwiseReduceOpForCall,
   cudaShuffleOpForCall,
@@ -412,6 +418,9 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "call":
         if (!semanticReferenceCallSupported(operation, compiled)) return operation;
+        break;
+      case "runtime-copy":
+        if (!semanticReferenceRuntimeCopySupported(operation)) return operation;
         break;
       case "expression":
         if (!semanticReferenceExpressionSupported(operation.expression, "scalar", compiled)) return operation;
@@ -1112,6 +1121,25 @@ function semanticReferenceCallSupported(
   );
 }
 
+function semanticReferenceRuntimeCopySupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "runtime-copy" }>,
+): boolean {
+  if (isCudaRuntimeMemsetCall(operation.callee) || isCudaRuntimeSymbolMemsetCall(operation.callee)) {
+    return operation.args.length >= 3 && semanticPointerArgMemoryRef(operation.args[0]!) !== undefined;
+  }
+  const shape = cudaRuntimeCopyShapeForCall(operation.callee, operation.args[3] !== undefined);
+  if (shape === undefined) return false;
+  if (shape.kind === "copy2d") {
+    return operation.args.length >= 6 &&
+      semanticPointerArgMemoryRef(operation.args[0]!) !== undefined &&
+      semanticPointerArgMemoryRef(operation.args[shape.srcIndex]!) !== undefined;
+  }
+  const pointer = shape.kind === "symbol" ? operation.args[shape.pointerIndex] : operation.args[0];
+  const other = shape.kind === "symbol" ? operation.args[shape.symbolIndex] : operation.args[shape.srcIndex];
+  return pointer !== undefined && other !== undefined &&
+    semanticPointerArgMemoryRef(pointer) !== undefined && semanticPointerArgMemoryRef(other) !== undefined;
+}
+
 function semanticReferenceVoidFunctionCallSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
@@ -1540,6 +1568,9 @@ function execSemanticOperations(
       case "call":
         execSemanticCall(operation, context);
         break;
+      case "runtime-copy":
+        execSemanticRuntimeCopy(operation, context);
+        break;
       case "expression":
         evalSemanticExpression(operation.expression, context);
         break;
@@ -1765,6 +1796,7 @@ function* execSemanticBarrierOperations(
       case "surface-write":
       case "surface-read-store":
       case "atomic":
+      case "runtime-copy":
       case "expression":
       case "fence":
         execSemanticOperations([operation], context);
@@ -2187,6 +2219,161 @@ function execSemanticCall(
     return;
   }
   throw semanticReferenceError(`semantic reference does not support call '${operation.callee}'`, operation.span);
+}
+
+interface SemanticRuntimeByteView {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+  readonly byteOffset: number;
+}
+
+function execSemanticRuntimeCopy(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "runtime-copy" }>,
+  context: SemanticReferenceContext,
+): void {
+  if (isCudaRuntimeSymbolMemsetCall(operation.callee)) {
+    execSemanticRuntimeMemset(operation, context, true);
+    return;
+  }
+  if (isCudaRuntimeMemsetCall(operation.callee)) {
+    execSemanticRuntimeMemset(operation, context, false);
+    return;
+  }
+  const shape = cudaRuntimeCopyShapeForCall(operation.callee, operation.args[3] !== undefined);
+  if (shape === undefined) throw semanticReferenceError(`unsupported runtime copy '${operation.callee}'`, operation.span);
+  if (shape.kind === "copy2d") {
+    execSemanticRuntimeCopy2d(operation, context, shape.srcIndex);
+    return;
+  }
+  const count = operation.args[shape.countIndex];
+  if (!count) throw semanticReferenceError(`runtime copy '${operation.callee}' requires byte count`, operation.span);
+  if (shape.kind === "symbol") {
+    const symbol = operation.args[shape.symbolIndex];
+    const pointer = operation.args[shape.pointerIndex];
+    if (!symbol || !pointer) throw semanticReferenceError(`runtime symbol copy '${operation.callee}' requires pointers`, operation.span);
+    const symbolView = semanticRuntimeByteView(symbol, context);
+    const pointerView = semanticRuntimeByteView(pointer, context);
+    const offset = shape.offsetIndex === undefined ? 0 : Math.max(0, Math.trunc(evalNumber(operation.args[shape.offsetIndex]!, context)));
+    const src = shape.direction === "to-symbol" ? pointerView : { ...symbolView, byteOffset: symbolView.byteOffset + offset };
+    const dst = shape.direction === "to-symbol" ? { ...symbolView, byteOffset: symbolView.byteOffset + offset } : pointerView;
+    copySemanticRuntimeBytes(src, dst, Math.max(0, Math.trunc(evalNumber(count, context))), context);
+    return;
+  }
+  const dst = operation.args[0];
+  const src = operation.args[shape.srcIndex];
+  if (!dst || !src) throw semanticReferenceError(`runtime copy '${operation.callee}' requires pointers`, operation.span);
+  copySemanticRuntimeBytes(
+    semanticRuntimeByteView(src, context),
+    semanticRuntimeByteView(dst, context),
+    Math.max(0, Math.trunc(evalNumber(count, context))),
+    context,
+  );
+}
+
+function execSemanticRuntimeCopy2d(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "runtime-copy" }>,
+  context: SemanticReferenceContext,
+  srcIndex: number,
+): void {
+  const [dst, dstPitch, , srcPitch, width, height] = operation.args;
+  const src = operation.args[srcIndex];
+  if (!dst || !dstPitch || !src || !srcPitch || !width || !height) {
+    throw semanticReferenceError(`runtime copy '${operation.callee}' requires 2D arguments`, operation.span);
+  }
+  const dstView = semanticRuntimeByteView(dst, context);
+  const srcView = semanticRuntimeByteView(src, context);
+  const dstStride = Math.trunc(evalNumber(dstPitch, context));
+  const srcStride = Math.trunc(evalNumber(srcPitch, context));
+  const rowBytes = Math.max(0, Math.trunc(evalNumber(width, context)));
+  const rows = Math.max(0, Math.trunc(evalNumber(height, context)));
+  if (dstStride < 0 || srcStride < 0) return;
+  for (let row = 0; row < rows; row++) {
+    copySemanticRuntimeBytes(
+      { ...srcView, byteOffset: srcView.byteOffset + row * srcStride },
+      { ...dstView, byteOffset: dstView.byteOffset + row * dstStride },
+      rowBytes,
+      context,
+    );
+  }
+}
+
+function execSemanticRuntimeMemset(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "runtime-copy" }>,
+  context: SemanticReferenceContext,
+  symbol: boolean,
+): void {
+  if (isCudaRuntimeMemset2DCall(operation.callee)) {
+    const [dst, pitch, value, width, height] = operation.args;
+    if (!dst || !pitch || !value || !width || !height) throw semanticReferenceError("runtime memset2D requires five arguments", operation.span);
+    const view = semanticRuntimeByteView(dst, context);
+    const stride = Math.trunc(evalNumber(pitch, context));
+    const byte = Math.trunc(evalNumber(value, context)) & 0xff;
+    const rowBytes = Math.max(0, Math.trunc(evalNumber(width, context)));
+    const rows = Math.max(0, Math.trunc(evalNumber(height, context)));
+    if (stride < 0) return;
+    for (let row = 0; row < rows; row++) fillSemanticRuntimeBytes({ ...view, byteOffset: view.byteOffset + row * stride }, byte, rowBytes, context);
+    return;
+  }
+  const [dst, value, count, offset] = operation.args;
+  if (!dst || !value || !count) throw semanticReferenceError("runtime memset requires pointer, value, and count", operation.span);
+  const view = semanticRuntimeByteView(dst, context);
+  const byteOffset = symbol && offset ? Math.max(0, Math.trunc(evalNumber(offset, context))) : 0;
+  fillSemanticRuntimeBytes(
+    { ...view, byteOffset: view.byteOffset + byteOffset },
+    Math.trunc(evalNumber(value, context)) & 0xff,
+    Math.max(0, Math.trunc(evalNumber(count, context))),
+    context,
+  );
+}
+
+function semanticRuntimeByteView(
+  expression: SemanticExpression,
+  context: SemanticReferenceContext,
+): SemanticRuntimeByteView {
+  const ref = semanticPointerArgMemoryRef(expression);
+  if (!ref) throw semanticReferenceError("runtime copy requires modeled pointer arguments", expression.span);
+  const value = ref.addressSpace === "constant"
+    ? context.constants.get(ref.base)
+    : ref.addressSpace === "device-global"
+      ? context.deviceGlobals.get(ref.base)
+      : ref.addressSpace === "shared"
+        ? context.sharedMemory.get(ref.base)
+        : context.buffers.get(ref.base);
+  if (!value || typeof value === "number") throw semanticReferenceError(`runtime copy missing '${ref.base}'`, ref.span);
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  const root = context.compiled.kernelIr.params.find((symbol) => symbol.name === ref.base) ??
+    context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
+  const rootType = isCudaVectorType(root?.valueType) ? cudaVectorScalarType(root?.valueType) : root?.valueType;
+  const elementBytes = sizeofCudaType(rootType ?? ref.valueType ?? "uchar") ?? value.BYTES_PER_ELEMENT;
+  return { name: ref.base, bytes, byteOffset: flatIndex(ref, context) * elementBytes };
+}
+
+function copySemanticRuntimeBytes(
+  src: SemanticRuntimeByteView,
+  dst: SemanticRuntimeByteView,
+  count: number,
+  context: SemanticReferenceContext,
+): void {
+  if (src.byteOffset < 0 || dst.byteOffset < 0) return;
+  const readable = Math.max(0, Math.min(count, src.bytes.byteLength - src.byteOffset));
+  const writable = Math.max(0, Math.min(readable, dst.bytes.byteLength - dst.byteOffset));
+  if (writable === 0) return;
+  dst.bytes.set(src.bytes.slice(src.byteOffset, src.byteOffset + writable), dst.byteOffset);
+  context.trace.reads.push({ name: src.name, index: src.byteOffset, value: writable, ok: writable === count });
+  context.trace.writes.push({ name: dst.name, index: dst.byteOffset, value: writable, ok: writable === count });
+}
+
+function fillSemanticRuntimeBytes(
+  dst: SemanticRuntimeByteView,
+  value: number,
+  count: number,
+  context: SemanticReferenceContext,
+): void {
+  if (dst.byteOffset < 0) return;
+  const writable = Math.max(0, Math.min(count, dst.bytes.byteLength - dst.byteOffset));
+  if (writable === 0) return;
+  dst.bytes.fill(value, dst.byteOffset, dst.byteOffset + writable);
+  context.trace.writes.push({ name: dst.name, index: dst.byteOffset, value: writable, ok: writable === count });
 }
 
 function assignSemanticCallResult(

@@ -494,8 +494,8 @@ export interface CompiledCudaLiteKernel {
   readonly semantic: CudaLiteSemanticModel & CompilerPhase<"typed-semantic">;
   readonly kernelIr: SemanticKernelIrModule & CompilerPhase<"canonical-ir"> & CompilerPhase<"runtime-lowered-ir"> & CompilerPhase<"verified-ir"> & CompilerPhase<"type-checked-ir"> & CompilerPhase<"wgsl-legalized-ir">;
   readonly analysis: CudaLiteAnalysis & CompilerPhase<"analyzed">;
-  readonly wgsl: string;
-  readonly wgslProgram: WgslKernelProgram;
+  readonly wgsl?: string;
+  readonly wgslProgram?: WgslKernelProgram;
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly loweringPlan: CudaLoweringPlan;
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;

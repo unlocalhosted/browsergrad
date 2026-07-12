@@ -1215,7 +1215,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     }
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgslProgram.bindings).toEqual([]);
+      expect(compiled.wgslProgram!.bindings).toEqual([]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -5323,7 +5323,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("const scaleFactor: f32 = 0.5;");
-      expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("scaleFactor");
+      expect(compiled.wgslProgram!.bindings.map((binding) => binding.name)).not.toContain("scaleFactor");
       expect([...semanticResult.buffers.y as Float32Array]).toEqual([1, 2, 3, 4]);
       expect([...result.buffers.y as Float32Array]).toEqual([1, 2, 3, 4]);
     });
@@ -5350,7 +5350,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("const coeffs: array<i32, 3> = array<i32, 3>(2, 3, 5);");
-      expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("coeffs");
+      expect(compiled.wgslProgram!.bindings.map((binding) => binding.name)).not.toContain("coeffs");
       expect([...semanticResult.buffers.out as Int32Array]).toEqual([2, 3, 5]);
       expect([...result.buffers.out as Int32Array]).toEqual([2, 3, 5]);
     });

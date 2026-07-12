@@ -44,6 +44,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("internal-lowering-invariant", "frontend", "Internal lowering invariant failed", "unsupported", false, false, "Compiler invariant failed after semantic analysis; this indicates a compiler bug, not an unsupported CUDA feature."),
   feature("internal-semantic-type-invariant", "frontend", "Internal semantic type invariant failed", "unsupported", false, false, "Compiler type invariant failed before backend lowering; this indicates a compiler bug, not an unsupported CUDA feature."),
   feature("internal-wgsl-legalization-invariant", "frontend", "Internal WGSL legalization invariant failed", "unsupported", false, false, "Target type legalization failed before WGSL emission; this indicates a compiler bug, not an unsupported CUDA feature."),
+  feature("direct-wgsl-unavailable", "frontend", "Direct WGSL unavailable", "unsupported", false, false, "Semantic IR compiled successfully but requires a lowering plan instead of one direct WGSL dispatch."),
   feature("duplicate-symbol", "frontend", "Duplicate CUDA-lite symbol", "unsupported", false, false, "Symbol table construction requires unique names in the active scope."),
   feature("reserved-symbol", "frontend", "Reserved CUDA-lite symbol", "unsupported", false, false, "User declarations may not shadow compiler-reserved binding names."),
   feature("missing-kernel", "frontend", "Missing CUDA-lite kernel", "unsupported", false, false, "Requested kernel was not found in the parsed module."),

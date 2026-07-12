@@ -113,6 +113,10 @@ export {
   type WgslExpressionType,
 } from "./typed_wgsl_expression.js";
 export { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
+export {
+  projectSemanticHostRuntimeToGpuIr,
+  type ProjectedSemanticGpuIr,
+} from "./semantic_gpu_projection.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
 export {
   classifyCudaCompatibilityFamily,

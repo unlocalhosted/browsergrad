@@ -1198,7 +1198,7 @@ __global__ void shared_reinterpret(int *out) {
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
       expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
       expect(compiled.wgsl).toContain("active_conditional_pointer_array_index_helper");
-      expect(compiled.wgsl.match(/\bactive_conditional_pointer_array_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bactive_conditional_pointer_array_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = active_conditional_pointer_array_index_helper\(/u);
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_pointer_array_index_helper");
     });
@@ -1217,7 +1217,7 @@ __global__ void shared_reinterpret(int *out) {
     ptrs[pointer_array_assignment_index_helper(storage, 1u)] = storage + 2;
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bpointer_array_assignment_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bpointer_array_assignment_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toMatch(/var bg__bg_pointer_array_index_\d+_\d+: u32 = pointer_array_assignment_index_helper\(/u);
       const result = runCompiledKernelSemanticReference(
         compiled,
@@ -1241,7 +1241,7 @@ __global__ void shared_reinterpret(int *out) {
     ptrs[nested_pointer_array_target_index_helper(storage, 1u)][0] = 5u;
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bnested_pointer_array_target_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bnested_pointer_array_target_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = nested_pointer_array_target_index_helper\(/u);
     });
 
@@ -1259,7 +1259,7 @@ __global__ void shared_reinterpret(int *out) {
     storage[3] = ptrs[pointer_array_compare_index_helper(storage, 1u)] == storage + 2 ? 7u : 9u;
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bpointer_array_compare_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bpointer_array_compare_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toContain("pointer_array_compare_index_helper(0u, 0u, 1u");
       const result = runCompiledKernelSemanticReference(
         compiled,
@@ -1284,7 +1284,7 @@ __global__ void shared_reinterpret(int *out) {
     storage[3] = value;
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bpointer_array_var_init_compare_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bpointer_array_var_init_compare_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toMatch(/var bg__bg_condition_test_\d+_\d+: bool = \(pointer_array_var_init_compare_index_helper\(/u);
       const result = runCompiledKernelSemanticReference(
         compiled,
@@ -1308,7 +1308,7 @@ __global__ void shared_reinterpret(int *out) {
     storage[3] = (uint)(ptrs[pointer_array_diff_index_helper(storage, 1u)] - (storage + 1));
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bpointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bpointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
       expect(compiled.wgsl).toContain("pointer_array_diff_index_helper(0u, 0u, 1u");
       const result = runCompiledKernelSemanticReference(
         compiled,
@@ -1344,7 +1344,7 @@ __global__ void shared_reinterpret(int *out) {
     summary[0] = ptrs[vector_pointer_array_diff_index_helper(counter, 1u)] - (out + 1);
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bvector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bvector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
       const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { out: new Uint32Array(16), counter: new Uint32Array(1), summary: new Int32Array(1) } },
@@ -1401,7 +1401,7 @@ __global__ void shared_reinterpret(int *out) {
     summary[0] = ptrs[byte_pointer_array_diff_index_helper(counter)] - reinterpret_cast<float*>(bytes + 4);
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bbyte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bbyte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
       const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { bytes: new Uint32Array(4), counter: new Uint32Array(1), summary: new Int32Array(1) } },
@@ -1425,7 +1425,7 @@ __global__ void shared_reinterpret(int *out) {
     summary[0] = ptrs[byte_vector_pointer_array_diff_index_helper(counter)] - reinterpret_cast<float4*>(bytes + 16);
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl.match(/\bbyte_vector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/\bbyte_vector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
       const result = runCompiledKernelSemanticReference(
         compiled,
         { buffers: { bytes: new Uint32Array(16), counter: new Uint32Array(1), summary: new Int32Array(1) } },
@@ -5144,7 +5144,7 @@ __global__ void sharedHelperScoped(float *out) {
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32>");
-      expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
+      expect(compiled.wgslProgram!.bindings).toContainEqual(expect.objectContaining({
         name: "coeffs",
         access: "read",
       }));
@@ -5403,7 +5403,7 @@ __global__ void localOut(float *out) {
       ]);
       expect(compiled.wgsl).toContain("const scale: f32 = 0.5;");
       expect(compiled.wgsl).toContain("const coeffs: array<i32, 3> = array<i32, 3>(2, 3, 5);");
-      expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("coeffs");
+      expect(compiled.wgslProgram!.bindings.map((binding) => binding.name)).not.toContain("coeffs");
       expect([...result.buffers.x as Float32Array]).toEqual([2, 4, 6]);
       expect([...result.buffers.out as Int32Array]).toEqual([2, 3, 5]);
     });
@@ -5417,7 +5417,7 @@ __global__ void localOut(float *out) {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.wgsl).toContain("const Q: array<i32, 4> = array<i32, 4>(32, 33, 34, 35);");
-      expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("Q");
+      expect(compiled.wgslProgram!.bindings.map((binding) => binding.name)).not.toContain("Q");
     });
 
   it("lowers half storage through f32 compatibility mode when shader-f16 is absent", () => {
@@ -5435,8 +5435,8 @@ __global__ void localOut(float *out) {
       expect(compiled.wgsl).not.toContain("enable f16;");
       expect(compiled.wgsl).not.toMatch(/\bf16\b/u);
       expect(compiled.wgsl).toContain("vec2<f32>");
-      expect(compiled.wgslProgram.bindings[0]).toMatchObject({ valueType: "f32" });
-      expect(compiled.wgslProgram.bindings[1]).toMatchObject({ valueType: "f32" });
+      expect(compiled.wgslProgram!.bindings[0]).toMatchObject({ valueType: "f32" });
+      expect(compiled.wgslProgram!.bindings[1]).toMatchObject({ valueType: "f32" });
 
       const uniforms = packCudaWebGpuUniformParams(compiled, {
         buffers: {

@@ -77,6 +77,10 @@ function collectSemanticRuntimeOperations(operations: readonly SemanticKernelIrO
       });
       return;
     }
+    if (operation.kind === "runtime-copy") {
+      runtime.push({ kind: "runtime-copy", span: operation.span, label: `${operation.callee}(...)` });
+      return;
+    }
     if (isSemanticGridSyncOperation(operation, cooperativeGroups)) {
       runtime.push({ kind: "grid-sync", span: operation.span, label: "grid.sync()" });
       return;

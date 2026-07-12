@@ -257,6 +257,13 @@ function deviceGlobalDeclarations(compiled: CompiledCudaLiteKernel): readonly Cu
 }
 
 function storageBindingNameSet(compiled: CompiledCudaLiteKernel): ReadonlySet<string> {
+  if (compiled.wgslProgram === undefined) {
+    return new Set(
+      [...compiled.kernelIr.params, ...compiled.kernelIr.memory]
+        .filter((symbol) => symbol.addressSpace === "storage" || symbol.addressSpace === "device-global" || symbol.addressSpace === "pool")
+        .map((symbol) => symbol.name),
+    );
+  }
   return new Set(
     compiled.wgslProgram.bindings
       .filter((binding) => binding.kind === "storage")

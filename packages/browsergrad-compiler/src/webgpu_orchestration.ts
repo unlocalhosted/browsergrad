@@ -38,6 +38,7 @@ import { canEmitSemanticKernelIrWgsl, emitSemanticKernelIrWgsl } from "./semanti
 import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { assertTypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
 import { assertWgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
+import { projectSemanticHostRuntimeToGpuIr } from "./semantic_gpu_projection.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -62,6 +63,7 @@ export type CudaWebGpuExecutionBlockerKind =
   | "grid-sync"
   | "device-launch"
   | "runtime-copy"
+  | "lowering"
   | "runtime";
 
 export interface CudaWebGpuExecutionBlocker {
@@ -329,11 +331,12 @@ function createHostLiftedPeerCopyWebGpuPlan(
 ): CudaWebGpuExecutionPlan | undefined {
   if (!plan.supported || plan.copies.length === 0) return undefined;
   const parentInput = createWgslRunInput(compiled, input);
-  const steps: WgslKernelSequenceStep[] = [{
-    program: compiled.wgslProgram,
-    launch: { dispatchCount: dispatchCountForLaunch(launch) },
-    ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
-  }];
+  const parentProgram = compiled.wgslProgram ?? emitProjectedHostRuntimeProgram(compiled);
+  const steps: WgslKernelSequenceStep[] = parentProgram === undefined ? [] : [{
+      program: parentProgram,
+      launch: { dispatchCount: dispatchCountForLaunch(launch) },
+      ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
+    }];
 
   appendPeerCopySteps(steps, plan.copies);
 
@@ -381,8 +384,10 @@ function createHostLiftedDynamicWebGpuPlan(
   if (!parentDispatchNeeded) applyHostDynamicPoolOffsetUpdates(buffers, poolOffsetUpdates);
   const steps: WgslKernelSequenceStep[] = [];
   if (parentDispatchNeeded) {
+    const parentProgram = compiled.wgslProgram ?? emitProjectedHostRuntimeProgram(compiled);
+    if (parentProgram === undefined) return undefined;
     steps.push({
-      program: compiled.wgslProgram,
+      program: parentProgram,
       launch: { dispatchCount: dispatchCountForLaunch(launch) },
       ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
     });
@@ -485,6 +490,8 @@ function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boo
       return true;
     case "call":
       return semanticCallNeedsParentDispatch(operation.callee, operation.args);
+    case "runtime-copy":
+      return false;
     case "expression":
       return expressionNeedsParentDispatch(operation.expression);
     case "branch":
@@ -632,17 +639,34 @@ function createSingleDispatchWebGpuPlanWithKind(
   launch: KernelLaunch,
   kind: "single-dispatch" | "runtime-elided-single-dispatch",
 ): CudaWebGpuExecutionPlan {
+  const program = compiled.wgslProgram ?? emitProjectedHostRuntimeProgram(compiled);
+  if (program === undefined) {
+    return unsupportedWebGpuPlan(compiled, [
+      webGpuBlocker("lowering", "direct-wgsl-unavailable", "semantic IR has no direct WGSL program"),
+    ]);
+  }
   const wgslInput = createWgslRunInput(compiled, input);
   return {
     supported: true,
     kind,
     steps: [{
-      program: compiled.wgslProgram,
+      program,
       launch: { dispatchCount: dispatchCountForLaunch(launch) },
       ...(wgslInput.uniforms === undefined ? {} : { uniforms: wgslInput.uniforms }),
     }],
     input: wgslInput,
   };
+}
+
+function emitProjectedHostRuntimeProgram(compiled: CompiledCudaLiteKernel): WgslKernelProgram | undefined {
+  const projected = projectSemanticHostRuntimeToGpuIr(compiled.kernelIr);
+  const options = {
+    ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
+    ...(compiled.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: compiled.pointerBaseOffsets }),
+    ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
+  };
+  if (!canEmitSemanticKernelIrWgsl(projected, options)) return undefined;
+  return emitSemanticKernelIrWgsl(projected, options).program;
 }
 
 function createReferenceOnlyRuntimePlan(

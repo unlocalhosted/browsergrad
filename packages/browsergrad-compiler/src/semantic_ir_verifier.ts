@@ -174,6 +174,7 @@ function operationExpressions(operation: SemanticKernelIrOperation): readonly Se
     case "surface-read-store": return [operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : [])];
     case "atomic": return operation.args;
     case "call": return [...operation.args, ...(operation.result ? [operation.result] : [])];
+    case "runtime-copy": return operation.args;
     case "expression": return [operation.expression];
     case "branch": return [operation.condition];
     case "loop": return [

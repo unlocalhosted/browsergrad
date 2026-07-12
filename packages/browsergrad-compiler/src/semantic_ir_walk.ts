@@ -12,6 +12,7 @@ export function semanticOperationExpressions(operation: SemanticKernelIrOperatio
   if (operation.kind === "surface-read-store") expressions.push(operation.target, operation.surface, operation.xBytes, operation.y, ...(operation.z ? [operation.z] : []));
   if (operation.kind === "atomic") expressions.push(...operation.args, ...(operation.target?.indices ?? []));
   if (operation.kind === "call") expressions.push(...operation.args);
+  if (operation.kind === "runtime-copy") expressions.push(...operation.args);
   if (operation.kind === "expression") expressions.push(operation.expression);
   if (operation.kind === "branch") expressions.push(operation.condition);
   if (operation.kind === "loop") {
