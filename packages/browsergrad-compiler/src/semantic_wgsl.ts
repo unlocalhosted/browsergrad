@@ -5013,13 +5013,13 @@ function emitSemanticTypedHalfCall(
     const value = expression.args[0];
     return value ? emitTypedWgslUnary("-", scalar(value), expression.span) : undefined;
   }
-  if (["__hceil", "__hfloor", "__htrunc", "__hsqrt", "__hrsqrt", "__hrcp", "hexp"].includes(name)) {
+  if (["__hceil", "__hfloor", "__htrunc", "__hsqrt", "__hrsqrt", "hrsqrt", "__hrcp", "hexp"].includes(name)) {
     const value = expression.args[0];
     if (!value) return undefined;
     const operand = scalar(value);
     if (name === "__hrcp") return emitTypedWgslBinary("/", createTypedWgslLiteral("f16(1.0)", "f16", expression.span), operand, expression.span);
     return createTypedWgslCall(
-      name === "__hceil" ? "ceil" : name === "__hfloor" ? "floor" : name === "__htrunc" ? "trunc" : name === "__hsqrt" ? "sqrt" : name === "__hrsqrt" ? "inverseSqrt" : "exp",
+      name === "__hceil" ? "ceil" : name === "__hfloor" ? "floor" : name === "__htrunc" ? "trunc" : name === "__hsqrt" ? "sqrt" : name === "__hrsqrt" || name === "hrsqrt" ? "inverseSqrt" : "exp",
       [operand],
       "f16",
       expression.span,
@@ -5133,6 +5133,15 @@ function emitSemanticTypedHalfCall(
     const [left, right] = expression.args;
     if (!left || !right) return undefined;
     return createTypedWgslConstructor("vec2<f16>", [scalar(left), scalar(right)], expression.span);
+  }
+  if (name === "__float22half2_rn") {
+    const value = expression.args[0];
+    if (!value) return undefined;
+    const pair = vector(value);
+    return createTypedWgslConstructor("vec2<f16>", [
+      convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "x", "f32", expression.span), "f16", true),
+      convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "y", "f32", expression.span), "f16", true),
+    ], expression.span);
   }
   if (name === "__float2half2_rn" || name === "__half2half2") {
     const value = expression.args[0];

@@ -14,7 +14,8 @@ export const CUDA_WARP_SUM_CALL_NAMES = [
   "warp_reduce_sum_i8_i32",
   "warp_reduce_sum_i32_i32",
 ] as const;
-export const CUDA_WARP_MAX_CALL_NAMES = ["warp_reduce_max", "warp_reduce_max_f32"] as const;
+export const CUDA_WARP_MIN_CALL_NAMES = ["warp_reduce_min"] as const;
+export const CUDA_WARP_MAX_CALL_NAMES = ["warpReduceMax", "warp_reduce_max", "warp_reduce_max_f32"] as const;
 export const CUDA_COMPAT_SUBGROUP_CALL_NAMES = ["bg_subgroup_add"] as const;
 export const CUDA_SUBGROUP_CALL_NAMES = [
   "__activemask",
@@ -23,6 +24,7 @@ export const CUDA_SUBGROUP_CALL_NAMES = [
   ...CUDA_ARITHMETIC_REDUCE_CALL_NAMES,
   ...CUDA_BITWISE_REDUCE_CALL_NAMES,
   ...CUDA_WARP_SUM_CALL_NAMES,
+  ...CUDA_WARP_MIN_CALL_NAMES,
   ...CUDA_WARP_MAX_CALL_NAMES,
   ...CUDA_COMPAT_SUBGROUP_CALL_NAMES,
   ...CUDA_LEGACY_SHUFFLE_CALL_NAMES,
@@ -76,7 +78,7 @@ export function cudaShuffleOpForCall(name: string | undefined): CudaShuffleOp | 
 
 export function cudaArithmeticReduceOpForCall(name: string | undefined): CudaArithmeticReduceOp | undefined {
   if (name === "__reduce_add_sync" || name === "bg_subgroup_add" || isCudaWarpSumCallName(name)) return "add";
-  if (name === "__reduce_min_sync") return "min";
+  if (name === "__reduce_min_sync" || isCudaWarpMinCallName(name)) return "min";
   if (name === "__reduce_max_sync" || isCudaWarpMaxCallName(name)) return "max";
   return undefined;
 }
@@ -89,8 +91,12 @@ export function isCudaWarpMaxCallName(name: string | undefined): boolean {
   return CUDA_WARP_MAX_CALL_NAMES.some((candidate) => candidate === name);
 }
 
+export function isCudaWarpMinCallName(name: string | undefined): boolean {
+  return CUDA_WARP_MIN_CALL_NAMES.some((candidate) => candidate === name);
+}
+
 export function isCudaWarpReduceCallName(name: string | undefined): boolean {
-  return isCudaWarpSumCallName(name) || isCudaWarpMaxCallName(name);
+  return isCudaWarpSumCallName(name) || isCudaWarpMinCallName(name) || isCudaWarpMaxCallName(name);
 }
 
 export function cudaBitwiseReduceOpForCall(name: string | undefined): CudaBitwiseReduceOp | undefined {

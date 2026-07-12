@@ -1879,9 +1879,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(backendIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
-      expect(compiled.wgsl).toContain("bg_warp_reduce_sum_float_32(x[i], 32u, local_id)");
-      expect(compiled.wgsl).toContain("bg_warp_reduce_max_float_32(sum, 32u, local_id)");
-      expect(compiled.wgsl).toContain("bg_warp_reduce_min_float_32(maxv, 32u, local_id)");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_f32_32(x[u32(i)], local_id)");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_max_f32_32(sum, local_id)");
+      expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_min_f32_32(maxv, local_id)");
       expect(compiled.wgsl).toContain("vec2<f16>");
       expect(Array.from(result.buffers.h as ArrayLike<number>)).toEqual([4, 5, 3, 3]);
       expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
