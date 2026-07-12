@@ -1,5 +1,5 @@
 import type { SourceSpan } from "./types.js";
-import type { TypedWgslExpression, WgslExpressionType } from "./typed_wgsl_expression.js";
+import type { TypedWgslExpression, TypedWgslPlace, WgslExpressionType } from "./typed_wgsl_expression.js";
 
 const typedWgslStatement: unique symbol = Symbol("typed-wgsl-statement");
 
@@ -51,6 +51,20 @@ class TypedWgslAssignmentStatement implements TypedWgslStatement {
 
   get code(): string {
     return `${this.target} ${this.operator} ${this.value.code};`;
+  }
+}
+
+class TypedWgslCallStatement implements TypedWgslStatement {
+  readonly [typedWgslStatement] = true;
+
+  constructor(
+    readonly callee: string,
+    readonly args: readonly TypedWgslExpression[],
+    readonly span: SourceSpan,
+  ) {}
+
+  get code(): string {
+    return `${this.callee}(${this.args.map((arg) => arg.code).join(", ")});`;
   }
 }
 
@@ -108,6 +122,26 @@ export function createTypedWgslLocalAssignmentStatement(
     throw new TypeError(`WGSL '${operator}' requires integer target, received '${targetType}'`);
   }
   return new TypedWgslAssignmentStatement(target, operator, value, span);
+}
+
+export function createTypedWgslPlaceAssignmentStatement(
+  target: TypedWgslPlace,
+  operator: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=",
+  value: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslStatement {
+  if (target.atomic) throw new TypeError("WGSL atomic places require atomic operations");
+  if (value.type !== target.type) throw new TypeError(`WGSL place assignment type mismatch: assigned '${value.type}', target '${target.type}'`);
+  return new TypedWgslAssignmentStatement(target.code, operator, value, span);
+}
+
+export function createTypedWgslCallStatement(
+  callee: string,
+  args: readonly TypedWgslExpression[],
+  span: SourceSpan,
+): TypedWgslStatement {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(callee)) throw new TypeError(`invalid WGSL statement callee '${callee}'`);
+  return new TypedWgslCallStatement(callee, args, span);
 }
 
 function wgslVectorScalarType(type: WgslExpressionType): WgslExpressionType | undefined {

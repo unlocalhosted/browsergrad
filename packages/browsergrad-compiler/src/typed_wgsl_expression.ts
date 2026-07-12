@@ -1,10 +1,15 @@
 import type { SemanticWgslValueType } from "./semantic_wgsl_types.js";
 import type { SourceSpan } from "./types.js";
 
-export type WgslExpressionType = SemanticWgslValueType;
+export type WgslAtomicType = "atomic<i32>" | "atomic<u32>";
+export type WgslArrayType = `array<${SemanticWgslValueType | WgslAtomicType},${number}>`;
+export type WgslPointerType = `ptr<${"function" | "workgroup" | "storage"},${SemanticWgslValueType | WgslAtomicType | WgslArrayType}>`;
+export type WgslResourceType = "texture_2d<f32>";
+export type WgslExpressionType = SemanticWgslValueType | WgslPointerType | WgslResourceType;
 export type WgslVectorType = Extract<WgslExpressionType, `vec${number}<${string}>`>;
 
 const typedWgslExpression: unique symbol = Symbol("typed-wgsl-expression");
+const typedWgslPlace: unique symbol = Symbol("typed-wgsl-place");
 
 export interface TypedWgslExpression {
   readonly code: string;
@@ -12,6 +17,20 @@ export interface TypedWgslExpression {
   readonly span: SourceSpan;
   readonly [typedWgslExpression]: true;
 }
+
+export interface TypedWgslPlace {
+  readonly code: string;
+  readonly type: "f16" | "f32" | "i32" | "u32";
+  readonly atomic: boolean;
+  readonly addressSpace: "function" | "workgroup" | "storage";
+  readonly span: SourceSpan;
+  readonly [typedWgslPlace]: true;
+}
+
+export type WgslAtomicBuiltin =
+  | "atomicAdd" | "atomicSub" | "atomicMin" | "atomicMax"
+  | "atomicAnd" | "atomicOr" | "atomicXor" | "atomicExchange"
+  | "atomicCompareExchangeWeak";
 
 type TypedWgslExpressionNode =
   | { readonly kind: "leaf"; readonly code: string }
@@ -25,7 +44,16 @@ type TypedWgslExpressionNode =
   | { readonly kind: "qualified"; readonly object: string; readonly property: string }
   | { readonly kind: "index"; readonly target: TypedWgslExpressionValue; readonly index: TypedWgslExpressionValue }
   | { readonly kind: "memory-read"; readonly binding: string; readonly index?: TypedWgslExpressionValue; readonly mode: "plain" | "atomic" | "workgroup-uniform" }
+  | { readonly kind: "memory-path-read"; readonly binding: string; readonly indices: readonly TypedWgslExpressionValue[] }
   | { readonly kind: "bitcast"; readonly targetType: WgslExpressionType; readonly source: TypedWgslExpressionValue }
+  | { readonly kind: "atomic-call"; readonly callee: WgslAtomicBuiltin; readonly place: TypedWgslPlaceValue; readonly args: readonly TypedWgslExpressionValue[]; readonly oldValue: boolean }
+  | { readonly kind: "address-of"; readonly place: TypedWgslPlaceValue }
+  | { readonly kind: "place-read"; readonly place: TypedWgslPlaceValue }
+  | { readonly kind: "pointer-index-read"; readonly pointer: string; readonly index: TypedWgslExpressionValue }
+  | { readonly kind: "binding-address"; readonly binding: string }
+  | { readonly kind: "texture-load"; readonly texture: string; readonly x: TypedWgslExpressionValue; readonly y: TypedWgslExpressionValue }
+  | { readonly kind: "texture-descriptor-read"; readonly helper: string; readonly texture: string; readonly x: TypedWgslExpressionValue; readonly y: TypedWgslExpressionValue }
+  | { readonly kind: "cubemap-texture-load"; readonly texture: string; readonly x: TypedWgslExpressionValue; readonly y: TypedWgslExpressionValue; readonly z: TypedWgslExpressionValue }
   | { readonly kind: "constructor"; readonly targetType: WgslVectorType; readonly args: readonly TypedWgslExpressionValue[] };
 
 class TypedWgslExpressionValue implements TypedWgslExpression {
@@ -42,6 +70,18 @@ class TypedWgslExpressionValue implements TypedWgslExpression {
   }
 }
 
+class TypedWgslPlaceValue implements TypedWgslPlace {
+  readonly [typedWgslPlace] = true;
+
+  constructor(
+    readonly code: string,
+    readonly type: "f16" | "f32" | "i32" | "u32",
+    readonly atomic: boolean,
+    readonly addressSpace: "function" | "workgroup" | "storage",
+    readonly span: SourceSpan,
+  ) {}
+}
+
 export type WgslBinaryOperator =
   | "+" | "-" | "*" | "/" | "%"
   | "&" | "|" | "^" | "<<" | ">>"
@@ -53,14 +93,6 @@ export type WgslUnaryOperator = "+" | "-" | "!" | "~";
 const comparisonOperators = new Set<WgslBinaryOperator>(["<", "<=", ">", ">=", "==", "!="]);
 const logicalOperators = new Set<WgslBinaryOperator>(["&&", "||"]);
 const bitwiseOperators = new Set<WgslBinaryOperator>(["&", "|", "^", "<<", ">>"]);
-
-export function createTrustedWgslExpression(
-  code: string,
-  type: WgslExpressionType,
-  span: SourceSpan,
-): TypedWgslExpression {
-  return new TypedWgslExpressionValue({ kind: "leaf", code }, type, span);
-}
 
 export function createTypedWgslIdentifier(
   name: string,
@@ -91,6 +123,7 @@ export function createTypedWgslZero(
   if (type === "f32") return createTypedWgslLiteral("0.0", "f32", span);
   if (type === "i32") return createTypedWgslLiteral("0", "i32", span);
   if (type === "u32") return createTypedWgslLiteral("0u", "u32", span);
+  if (!isWgslVectorType(type)) throw new TypeError(`WGSL pointer type '${type}' has no zero value`);
   const scalar = vectorScalarType(type);
   return createTypedWgslConstructor(type, [createTypedWgslZero(scalar, span)], span);
 }
@@ -181,6 +214,162 @@ export function createTypedWgslScalarMemoryRead(
   return new TypedWgslExpressionValue({ kind: "memory-read", binding, mode }, resultType, span);
 }
 
+export function createTypedWgslMemoryPathRead(
+  binding: string,
+  indices: readonly TypedWgslExpression[],
+  resultType: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding)) throw new TypeError(`invalid WGSL memory binding '${binding}'`);
+  if (indices.length === 0 || indices.some((index) => index.type !== "u32")) {
+    throw new TypeError("WGSL memory path requires at least one u32 index");
+  }
+  return new TypedWgslExpressionValue(
+    { kind: "memory-path-read", binding, indices: indices.map(expressionValue) },
+    resultType,
+    span,
+  );
+}
+
+export function createTypedWgslIndexedPlace(
+  binding: string,
+  index: TypedWgslExpression,
+  type: "f16" | "f32" | "i32" | "u32",
+  atomic: boolean,
+  span: SourceSpan,
+  addressSpace: "function" | "workgroup" | "storage" = "storage",
+): TypedWgslPlace {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding)) throw new TypeError(`invalid WGSL memory binding '${binding}'`);
+  if (index.type !== "u32") throw new TypeError(`WGSL place index requires u32, received '${index.type}'`);
+  return new TypedWgslPlaceValue(`${binding}[${index.code}]`, type, atomic, addressSpace, span);
+}
+
+export function createTypedWgslLocalPlace(
+  name: string,
+  type: "i32" | "u32",
+  span: SourceSpan,
+): TypedWgslPlace {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new TypeError(`invalid WGSL local place '${name}'`);
+  return new TypedWgslPlaceValue(name, type, false, "function", span);
+}
+
+export function createTypedWgslDereferencedIndexedPlace(
+  pointer: string,
+  index: TypedWgslExpression,
+  type: "f16" | "f32" | "i32" | "u32",
+  atomic: boolean,
+  addressSpace: "function" | "workgroup" | "storage",
+  span: SourceSpan,
+): TypedWgslPlace {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(pointer)) throw new TypeError(`invalid WGSL pointer place '${pointer}'`);
+  if (index.type !== "u32") throw new TypeError(`WGSL pointer place index requires u32, received '${index.type}'`);
+  return new TypedWgslPlaceValue(`(*${pointer})[${index.code}]`, type, atomic, addressSpace, span);
+}
+
+export function createTypedWgslDereferencedPlace(
+  pointer: string,
+  type: "f16" | "f32" | "i32" | "u32",
+  atomic: boolean,
+  addressSpace: "function" | "workgroup" | "storage",
+  span: SourceSpan,
+): TypedWgslPlace {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(pointer)) throw new TypeError(`invalid WGSL pointer place '${pointer}'`);
+  return new TypedWgslPlaceValue(`*${pointer}`, type, atomic, addressSpace, span);
+}
+
+export function createTypedWgslAddressOf(place: TypedWgslPlace): TypedWgslExpression {
+  const target = placeValue(place);
+  return new TypedWgslExpressionValue(
+    { kind: "address-of", place: target },
+    `ptr<${target.addressSpace},u32>`,
+    target.span,
+  );
+}
+
+export function createTypedWgslPlaceRead(place: TypedWgslPlace): TypedWgslExpression {
+  const target = placeValue(place);
+  return new TypedWgslExpressionValue({ kind: "place-read", place: target }, target.type, target.span);
+}
+
+export function createTypedWgslPointerIndexRead(
+  pointer: string,
+  index: TypedWgslExpression,
+  resultType: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(pointer)) throw new TypeError(`invalid WGSL pointer read '${pointer}'`);
+  if (index.type !== "u32") throw new TypeError(`WGSL pointer read index requires u32, received '${index.type}'`);
+  return new TypedWgslExpressionValue({ kind: "pointer-index-read", pointer, index: expressionValue(index) }, resultType, span);
+}
+
+export function createTypedWgslBindingAddress(
+  binding: string,
+  pointerType: WgslPointerType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding)) throw new TypeError(`invalid WGSL addressed binding '${binding}'`);
+  return new TypedWgslExpressionValue({ kind: "binding-address", binding }, pointerType, span);
+}
+
+export function createTypedWgslTextureLoad(
+  texture: string,
+  x: TypedWgslExpression,
+  y: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslExpression {
+  validateTextureRead(texture, x, y);
+  return new TypedWgslExpressionValue({ kind: "texture-load", texture, x: expressionValue(x), y: expressionValue(y) }, "vec4<f32>", span);
+}
+
+export function createTypedWgslTextureDescriptorRead(
+  helper: string,
+  texture: string,
+  x: TypedWgslExpression,
+  y: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(helper)) throw new TypeError(`invalid WGSL texture helper '${helper}'`);
+  validateTextureRead(texture, x, y);
+  return new TypedWgslExpressionValue({ kind: "texture-descriptor-read", helper, texture, x: expressionValue(x), y: expressionValue(y) }, "vec4<f32>", span);
+}
+
+export function createTypedWgslCubemapTextureLoad(
+  texture: string,
+  x: TypedWgslExpression,
+  y: TypedWgslExpression,
+  z: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslExpression {
+  validateTextureRead(texture, x, y);
+  if (z.type !== "f32") throw new TypeError(`WGSL cubemap coordinate requires f32, received '${z.type}'`);
+  return new TypedWgslExpressionValue({ kind: "cubemap-texture-load", texture, x: expressionValue(x), y: expressionValue(y), z: expressionValue(z) }, "vec4<f32>", span);
+}
+
+function validateTextureRead(texture: string, x: TypedWgslExpression, y: TypedWgslExpression): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(texture)) throw new TypeError(`invalid WGSL texture binding '${texture}'`);
+  if (x.type !== "f32" || y.type !== "f32") throw new TypeError(`WGSL texture coordinates require f32, received '${x.type}' and '${y.type}'`);
+}
+
+export function createTypedWgslAtomicCall(
+  callee: WgslAtomicBuiltin,
+  place: TypedWgslPlace,
+  args: readonly TypedWgslExpression[],
+  span: SourceSpan,
+): TypedWgslExpression {
+  const target = placeValue(place);
+  if (!target.atomic) throw new TypeError(`WGSL '${callee}' requires atomic place`);
+  if (target.type !== "i32" && target.type !== "u32") throw new TypeError(`WGSL '${callee}' requires i32 or u32 atomic place`);
+  const expectedArgs = callee === "atomicCompareExchangeWeak" ? 2 : 1;
+  if (args.length !== expectedArgs || args.some((arg) => arg.type !== target.type)) {
+    throw new TypeError(`WGSL '${callee}' requires ${expectedArgs} '${target.type}' operand(s)`);
+  }
+  return new TypedWgslExpressionValue(
+    { kind: "atomic-call", callee, place: target, args: args.map(expressionValue), oldValue: callee === "atomicCompareExchangeWeak" },
+    target.type,
+    span,
+  );
+}
+
 export function createTypedWgslBitcast(
   targetType: WgslExpressionType,
   source: TypedWgslExpression,
@@ -217,7 +406,8 @@ export function createTypedWgslConstructor(
 }
 
 export function isWgslVectorType(type: WgslExpressionType): type is WgslVectorType {
-  return type === "vec2<f16>"
+  return type === "vec2<bool>" || type === "vec3<bool>" || type === "vec4<bool>"
+    || type === "vec2<f16>"
     || type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>"
     || type === "vec2<i32>" || type === "vec3<i32>" || type === "vec4<i32>"
     || type === "vec2<u32>" || type === "vec3<u32>" || type === "vec4<u32>";
@@ -289,11 +479,13 @@ export function emitTypedWgslBinary(
   if (left.type === "bool" && operator !== "==" && operator !== "!=") {
     throw new TypeError(`WGSL '${operator}' does not accept bool operands`);
   }
-  if (bitwiseOperators.has(operator) && !isInteger(left.type)) {
+  if (bitwiseOperators.has(operator) && !isInteger(left.type) && !(isBooleanVector(left.type) && (operator === "&" || operator === "|"))) {
     throw new TypeError(`WGSL '${operator}' requires integer operands, received ${left.type}`);
   }
 
-  const resultType = comparisonOperators.has(operator) ? "bool" : left.type;
+  const resultType = comparisonOperators.has(operator) && isWgslVectorType(left.type)
+    ? booleanVectorType(left.type)
+    : comparisonOperators.has(operator) ? "bool" : left.type;
   return binaryExpression(operator, left, right, resultType, span);
 }
 
@@ -303,8 +495,8 @@ export function emitTypedWgslUnary(
   span: SourceSpan,
 ): TypedWgslExpression {
   if (operator === "!") {
-    if (operand.type !== "bool") throw new TypeError(`WGSL '!' requires bool, received ${operand.type}`);
-    return unaryExpression(operator, operand, "bool", span);
+    if (operand.type !== "bool" && !isBooleanVector(operand.type)) throw new TypeError(`WGSL '!' requires bool, received ${operand.type}`);
+    return unaryExpression(operator, operand, operand.type, span);
   }
   if (operator === "~") {
     if (!isInteger(operand.type)) throw new TypeError(`WGSL '~' requires an integer operand, received ${operand.type}`);
@@ -322,7 +514,8 @@ export function emitTypedWgslSelect(
   condition: TypedWgslExpression,
   span: SourceSpan,
 ): TypedWgslExpression {
-  if (condition.type !== "bool") {
+  const vectorCondition = isBooleanVector(condition.type) && isWgslVectorType(alternate.type) && vectorLaneCount(condition.type) === vectorLaneCount(alternate.type);
+  if (condition.type !== "bool" && !vectorCondition) {
     throw new TypeError(`WGSL select condition requires bool, received ${condition.type}`);
   }
   if (alternate.type !== consequent.type) {
@@ -371,6 +564,13 @@ function expressionValue(expression: TypedWgslExpression): TypedWgslExpressionVa
   return expression;
 }
 
+function placeValue(place: TypedWgslPlace): TypedWgslPlaceValue {
+  if (!(place instanceof TypedWgslPlaceValue)) {
+    throw new TypeError("typed WGSL places must be created by typed WGSL constructors");
+  }
+  return place;
+}
+
 function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
   switch (node.kind) {
     case "leaf": return node.code;
@@ -393,7 +593,24 @@ function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
       if (node.mode === "workgroup-uniform") return `workgroupUniformLoad(&${access})`;
       return access;
     }
+    case "memory-path-read": return `${node.binding}${node.indices.map((index) => `[${index.code}]`).join("")}`;
     case "bitcast": return `bitcast<${node.targetType}>(${node.source.code})`;
+    case "atomic-call": {
+      const call = `${node.callee}(&${node.place.code}, ${node.args.map((arg) => arg.code).join(", ")})`;
+      return node.oldValue ? `${call}.old_value` : call;
+    }
+    case "address-of": return `&${node.place.code}`;
+    case "place-read": return node.place.atomic ? `atomicLoad(&${node.place.code})` : node.place.code;
+    case "pointer-index-read": return `(*${node.pointer})[${node.index.code}]`;
+    case "binding-address": return `&${node.binding}`;
+    case "texture-load": return `textureLoad(${node.texture}, clamp(vec2<i32>(i32(floor(${node.x.code})), i32(floor(${node.y.code}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${node.texture})) - vec2<i32>(1, 1)), 0)`;
+    case "texture-descriptor-read": return `${node.helper}(${node.texture}, ${node.x.code}, ${node.y.code})`;
+    case "cubemap-texture-load": {
+      const width = `f32(textureDimensions(${node.texture}).x)`;
+      const cubeX = `((bg_cube_u(${node.x.code}, ${node.y.code}, ${node.z.code}) + 1.0) * 0.5 * (${width} - 1.0))`;
+      const cubeY = `((bg_cube_v(${node.x.code}, ${node.y.code}, ${node.z.code}) + 1.0) * 0.5 * (${width} - 1.0) + bg_cube_face(${node.x.code}, ${node.y.code}, ${node.z.code}) * ${width})`;
+      return `textureLoad(${node.texture}, clamp(vec2<i32>(i32(floor(${cubeX})), i32(floor(${cubeY}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${node.texture})) - vec2<i32>(1, 1)), 0)`;
+    }
     case "constructor": return `${node.targetType}(${node.args.map((arg) => arg.code).join(", ")})`;
   }
 }
@@ -414,7 +631,8 @@ function isInteger(type: WgslExpressionType): type is "i32" | "u32" {
   return type === "i32" || type === "u32";
 }
 
-function vectorScalarType(type: WgslVectorType): "f16" | "f32" | "i32" | "u32" {
+function vectorScalarType(type: WgslVectorType): "bool" | "f16" | "f32" | "i32" | "u32" {
+  if (isBooleanVector(type)) return "bool";
   if (type === "vec2<f16>") return "f16";
   if (type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>") return "f32";
   if (type === "vec2<i32>" || type === "vec3<i32>" || type === "vec4<i32>") return "i32";
@@ -432,7 +650,17 @@ function isNumericScalar(type: WgslExpressionType): type is "f16" | "f32" | "i32
 }
 
 function isNumeric(type: WgslExpressionType): boolean {
-  return type !== "bool";
+  return type !== "bool" && !isBooleanVector(type);
+}
+
+function isBooleanVector(type: WgslExpressionType): type is "vec2<bool>" | "vec3<bool>" | "vec4<bool>" {
+  return type === "vec2<bool>" || type === "vec3<bool>" || type === "vec4<bool>";
+}
+
+function booleanVectorType(type: WgslVectorType): "vec2<bool>" | "vec3<bool>" | "vec4<bool>" {
+  if (type.startsWith("vec2")) return "vec2<bool>";
+  if (type.startsWith("vec3")) return "vec3<bool>";
+  return "vec4<bool>";
 }
 
 function sameBitWidth(left: WgslExpressionType, right: WgslExpressionType): boolean {

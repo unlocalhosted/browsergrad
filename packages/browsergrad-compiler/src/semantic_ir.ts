@@ -444,7 +444,7 @@ export type SemanticKernelIrOperation =
 
 export function semanticInlineAsmLdmatrixAssignments(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
-): readonly SemanticExpression[] | undefined {
+): readonly Extract<SemanticExpression, { readonly kind: "assignment" }>[] | undefined {
   const op = operation.op;
   if (op?.kind !== "ldmatrix" || operation.inputs.length !== 1 || operation.outputs.length !== op.matrices) return undefined;
   const base = operation.inputs[0]!;

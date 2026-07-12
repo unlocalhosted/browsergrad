@@ -8,6 +8,9 @@ import {
 export type SemanticWgslValueType =
   | WgslValueType
   | "bool"
+  | "vec2<bool>"
+  | "vec3<bool>"
+  | "vec4<bool>"
   | "vec2<f32>"
   | "vec3<f32>"
   | "vec4<f32>"
@@ -77,6 +80,9 @@ export function zeroForType(valueType: SemanticWgslValueType): string {
   if (valueType === "u32") return "0u";
   if (valueType === "i32") return "0";
   if (valueType === "bool") return "false";
+  if (valueType === "vec2<bool>") return "vec2<bool>(false)";
+  if (valueType === "vec3<bool>") return "vec3<bool>(false)";
+  if (valueType === "vec4<bool>") return "vec4<bool>(false)";
   if (valueType === "f16") return "f16(0.0)";
   if (valueType === "vec2<f16>") return "vec2<f16>(f16(0.0))";
   if (valueType === "vec2<f32>") return "vec2<f32>(0.0)";

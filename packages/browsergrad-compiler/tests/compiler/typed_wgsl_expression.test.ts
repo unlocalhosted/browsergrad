@@ -8,10 +8,23 @@ import {
   createTypedWgslIndexAccess,
   createTypedWgslMemoryRead,
   createTypedWgslScalarMemoryRead,
+  createTypedWgslMemoryPathRead,
+  createTypedWgslIndexedPlace,
+  createTypedWgslLocalPlace,
+  createTypedWgslDereferencedIndexedPlace,
+  createTypedWgslDereferencedPlace,
+  createTypedWgslPointerIndexRead,
+  createTypedWgslBindingAddress,
+  createTypedWgslAddressOf,
+  createTypedWgslPlaceRead,
+  createTypedWgslTextureLoad,
+  createTypedWgslAtomicCall,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   createTypedWgslZero,
   createTypedWgslLocalAssignmentStatement,
+  createTypedWgslPlaceAssignmentStatement,
+  createTypedWgslCallStatement,
   createTypedWgslReturnStatement,
   createTypedWgslVariableStatement,
   emitTypedWgslBinary,
@@ -31,6 +44,16 @@ describe("typed WGSL expressions", () => {
       span,
     );
     expect(result).toMatchObject({ code: "(left == right)", type: "bool", span });
+  });
+
+  it("preserves vector comparison result types", () => {
+    const result = emitTypedWgslBinary(
+      "==",
+      createTypedWgslIdentifier("left", "vec2<f16>", span),
+      createTypedWgslIdentifier("right", "vec2<f16>", span),
+      span,
+    );
+    expect(result).toMatchObject({ code: "(left == right)", type: "vec2<bool>", span });
   });
 
   it("rejects operand mismatches before WGSL emission", () => {
@@ -216,5 +239,112 @@ describe("typed WGSL expressions", () => {
     expect(createTypedWgslScalarMemoryRead("shared_value", "f32", "workgroup-uniform", span)).toMatchObject({
       code: "workgroupUniformLoad(&shared_value)", type: "f32", span,
     });
+    expect(createTypedWgslMemoryPathRead(
+      "tiles",
+      [createTypedWgslIdentifier("row", "u32", span), createTypedWgslIdentifier("column", "u32", span)],
+      "f32",
+      span,
+    )).toMatchObject({ code: "tiles[row][column]", type: "f32", span });
+  });
+
+  it("types atomic operations over atomic places", () => {
+    const index = createTypedWgslIdentifier("index", "u32", span);
+    const place = createTypedWgslIndexedPlace("values", index, "u32", true, span);
+    expect(createTypedWgslAtomicCall(
+      "atomicAdd",
+      place,
+      [createTypedWgslIdentifier("value", "u32", span)],
+      span,
+    )).toMatchObject({ code: "atomicAdd(&values[index], value)", type: "u32", span });
+    expect(createTypedWgslAtomicCall(
+      "atomicCompareExchangeWeak",
+      place,
+      [createTypedWgslIdentifier("compare", "u32", span), createTypedWgslIdentifier("value", "u32", span)],
+      span,
+    )).toMatchObject({ code: "atomicCompareExchangeWeak(&values[index], compare, value).old_value", type: "u32", span });
+    expect(() => createTypedWgslAtomicCall(
+      "atomicAdd",
+      createTypedWgslIndexedPlace("values", index, "u32", false, span),
+      [createTypedWgslIdentifier("value", "u32", span)],
+      span,
+    )).toThrow("requires atomic place");
+  });
+
+  it("types local pointer arguments from branded places", () => {
+    const pointer = createTypedWgslAddressOf(createTypedWgslLocalPlace("state", "u32", span));
+    expect(pointer).toMatchObject({ code: "&state", type: "ptr<function,u32>", span });
+  });
+
+  it("types indexed places behind WGSL pointers", () => {
+    const place = createTypedWgslDereferencedIndexedPlace(
+      "shared_values",
+      createTypedWgslIdentifier("index", "u32", span),
+      "u32",
+      true,
+      "workgroup",
+      span,
+    );
+    expect(createTypedWgslAddressOf(place)).toMatchObject({
+      code: "&(*shared_values)[index]",
+      type: "ptr<workgroup,u32>",
+      span,
+    });
+    expect(createTypedWgslPlaceRead(place)).toMatchObject({
+      code: "atomicLoad(&(*shared_values)[index])",
+      type: "u32",
+      span,
+    });
+  });
+
+  it("types scalar places behind WGSL pointers", () => {
+    expect(createTypedWgslPlaceRead(createTypedWgslDereferencedPlace("value", "f32", false, "workgroup", span))).toMatchObject({
+      code: "*value",
+      type: "f32",
+      span,
+    });
+  });
+
+  it("types array element reads behind WGSL pointers", () => {
+    expect(createTypedWgslPointerIndexRead("values", createTypedWgslIdentifier("index", "u32", span), "vec4<f32>", span)).toMatchObject({
+      code: "(*values)[index]",
+      type: "vec4<f32>",
+      span,
+    });
+  });
+
+  it("types addresses of fixed memory bindings", () => {
+    expect(createTypedWgslBindingAddress("values", "ptr<workgroup,array<vec4<f32>,2>>", span)).toMatchObject({
+      code: "&values",
+      type: "ptr<workgroup,array<vec4<f32>,2>>",
+      span,
+    });
+  });
+
+  it("types assignments to memory places", () => {
+    const place = createTypedWgslIndexedPlace("values", createTypedWgslIdentifier("index", "u32", span), "f32", false, span);
+    expect(createTypedWgslPlaceAssignmentStatement(place, "+=", createTypedWgslIdentifier("delta", "f32", span), span)).toMatchObject({
+      code: "values[index] += delta;",
+      span,
+    });
+  });
+
+  it("types procedure call statements without inventing void expressions", () => {
+    expect(createTypedWgslCallStatement(
+      "write_value",
+      [createTypedWgslIdentifier("index", "u32", span), createTypedWgslIdentifier("value", "f32", span)],
+      span,
+    )).toMatchObject({ code: "write_value(index, value);", span });
+  });
+
+  it("types texture resources separately from value expressions", () => {
+    const read = createTypedWgslTextureLoad(
+      "image",
+      createTypedWgslIdentifier("x", "f32", span),
+      createTypedWgslIdentifier("y", "f32", span),
+      span,
+    );
+    expect(read.type).toBe("vec4<f32>");
+    expect(read.code).toContain("textureLoad(image");
+    expect(read.code).toContain("textureDimensions(image)");
   });
 });
