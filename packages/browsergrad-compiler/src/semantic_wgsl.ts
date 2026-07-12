@@ -6992,7 +6992,7 @@ function emitSemanticMemoryRef(
   if (ref.addressSpace === "constant") {
     const symbol = constantMemorySymbols(ir).find((item) => item.name === ref.base);
     if (!symbol) throw semanticWgslError(`unknown constant memory '${ref.base}'`, ref.span);
-    return `${nameFor(ref.base, names)}[${emitFlatConstantIndex(symbol, ref.indices, ir, names, ref.span)}]`;
+    return `${nameFor(ref.base, names)}[${emitFlatConstantIndex(symbol, ref.indices, ir, names, ref.span, options)}]`;
   }
   if (ref.addressSpace === "device-global") {
     const symbol = deviceGlobalMemorySymbols(ir).find((item) => item.name === ref.base);
@@ -7457,13 +7457,14 @@ function emitFlatConstantIndex(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   span: SourceSpan,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (symbol.dimensions.length === 0) {
     if (indices.length !== 1) throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
-    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32").code;
+    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32", options).code;
   }
   if (indices.length === 1 && symbol.dimensions.length > 1) {
-    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32").code;
+    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32", options).code;
   }
   if (indices.length !== symbol.dimensions.length) {
     throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
@@ -7474,7 +7475,7 @@ function emitFlatConstantIndex(
     symbol.dimensions,
     indices,
     span,
-    (index) => emitSemanticExpressionAs(index, ir, names, "u32").code,
+    (index) => emitSemanticExpressionAs(index, ir, names, "u32", options).code,
   );
 }
 

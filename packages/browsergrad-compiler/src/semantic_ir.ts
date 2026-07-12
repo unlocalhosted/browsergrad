@@ -1732,8 +1732,7 @@ function semanticLocalAddressDimensions(
   const dimensions = new Map<SemanticMemoryId, readonly number[]>();
   const collect = (items: readonly SemanticKernelIrOperation[]): void => {
     for (const operation of items) {
-      if (operation.kind === "declare" && operation.target.addressSpace === "local" &&
-        (operation.target.pointer || operation.target.dimensions.length > 0)) {
+      if (operation.kind === "declare" && operation.target.addressSpace === "local") {
         dimensions.set(semanticMemoryIdFromSymbol(operation.target.id), operation.target.dimensions);
       }
       if (operation.kind === "block") collect(operation.body);
@@ -1968,8 +1967,7 @@ function collectSemanticLocalAddressNames(
   names: Set<string>,
 ): void {
   for (const operation of operations) {
-    if (operation.kind === "declare" && operation.target.addressSpace === "local" &&
-      (operation.target.pointer || operation.target.dimensions.length > 0)) names.add(operation.target.name);
+    if (operation.kind === "declare" && operation.target.addressSpace === "local") names.add(operation.target.name);
     if (operation.kind === "block") collectSemanticLocalAddressNames(operation.body, names);
     if (operation.kind === "branch") {
       collectSemanticLocalAddressNames(operation.consequent, names);
