@@ -35,9 +35,9 @@ import {
 import { semanticUniformLayout } from "./semantic_uniform_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import { canEmitSemanticKernelIrWgsl, emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
-import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
-import { assertTypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
-import { assertWgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
+import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
+import { typeCheckSemanticKernelIr } from "./semantic_type_check.js";
+import { legalizeSemanticKernelIrForWgsl } from "./wgsl_legalization.js";
 import { projectSemanticHostRuntimeToGpuIr } from "./semantic_gpu_projection.js";
 import {
   CudaLiteCompilerError,
@@ -270,11 +270,11 @@ function createGridSyncWebGpuPlan(
   const wgslInput = createWgslRunInput(compiled, input);
   const dispatchCount = dispatchCountForLaunch(launch);
   const steps = gridSyncPhasePlan.phases.map((phase): WgslKernelSequenceStep => {
-    assertValidSemanticKernelIr(phase);
-    assertTypeCheckedSemanticKernelIr(phase);
-    assertWgslLegalizedSemanticKernelIr(phase);
+    const legalized = legalizeSemanticKernelIrForWgsl(
+      typeCheckSemanticKernelIr(validateSemanticKernelIr(phase)),
+    );
     return {
-    program: emitSemanticKernelIrWgsl(phase, {
+    program: emitSemanticKernelIrWgsl(legalized, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
       ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
     }).program,
@@ -301,11 +301,11 @@ function createRetirementReductionWebGpuPlan(
   if (phases.some((phase) => !canEmitSemanticKernelIrWgsl(phase))) return undefined;
   const wgslInput = createWgslRunInput(compiled, input);
   const steps = phases.map((phase, index): WgslKernelSequenceStep => {
-    assertValidSemanticKernelIr(phase);
-    assertTypeCheckedSemanticKernelIr(phase);
-    assertWgslLegalizedSemanticKernelIr(phase);
+    const legalized = legalizeSemanticKernelIrForWgsl(
+      typeCheckSemanticKernelIr(validateSemanticKernelIr(phase)),
+    );
     return {
-    program: emitSemanticKernelIrWgsl(phase, {
+    program: emitSemanticKernelIrWgsl(legalized, {
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
       ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
     }).program,
@@ -665,7 +665,7 @@ function emitProjectedHostRuntimeProgram(compiled: CompiledCudaLiteKernel): Wgsl
     ...(compiled.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: compiled.pointerBaseOffsets }),
     ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
   };
-  if (!canEmitSemanticKernelIrWgsl(projected, options)) return undefined;
+  if (!canEmitSemanticKernelIrWgsl(projected.ir, options)) return undefined;
   return emitSemanticKernelIrWgsl(projected, options).program;
 }
 

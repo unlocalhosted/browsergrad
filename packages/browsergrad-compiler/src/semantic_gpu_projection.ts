@@ -1,14 +1,12 @@
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import type { SemanticExpression, SemanticKernelIrOperation } from "./semantic_ir.js";
-import { assertValidSemanticKernelIr, type VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
-import { assertTypeCheckedSemanticKernelIr, type TypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
-import { assertWgslLegalizedSemanticKernelIr, type WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
+import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
+import { typeCheckSemanticKernelIr } from "./semantic_type_check.js";
+import { legalizeSemanticKernelIrForWgsl, type WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
 import type { CompiledCudaLiteKernel } from "./types.js";
 
-export type ProjectedSemanticGpuIr = WgslLegalizedSemanticKernelIr<
-  TypeCheckedSemanticKernelIr<VerifiedSemanticKernelIr>
->;
+export type ProjectedSemanticGpuIr = WgslLegalizedSemanticKernelIr;
 
 export function projectSemanticHostRuntimeToGpuIr(
   ir: CompiledCudaLiteKernel["kernelIr"],
@@ -18,10 +16,9 @@ export function projectSemanticHostRuntimeToGpuIr(
     operations: projectOperations(ir.operations),
     functions: ir.functions.map((fn) => ({ ...fn, body: projectOperations(fn.body) })),
   };
-  assertValidSemanticKernelIr(projected);
-  assertTypeCheckedSemanticKernelIr(projected);
-  assertWgslLegalizedSemanticKernelIr(projected);
-  return projected;
+  return legalizeSemanticKernelIrForWgsl(
+    typeCheckSemanticKernelIr(validateSemanticKernelIr(projected)),
+  );
 }
 
 function projectOperations(

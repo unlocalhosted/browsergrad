@@ -18,9 +18,9 @@ import {
   createCudaLiteSemanticModel,
   lowerSemanticModelToKernelIr,
 } from "./semantic_ir.js";
-import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
-import { assertTypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
-import { assertWgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
+import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
+import { typeCheckSemanticKernelIr } from "./semantic_type_check.js";
+import { legalizeSemanticKernelIrForWgsl } from "./wgsl_legalization.js";
 import { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 import {
   canEmitSemanticKernelIrWgsl,
@@ -90,9 +90,9 @@ export function compileCudaLiteKernel(
   validateBindlessTextureOptions(options, analysis);
   const semantic = createCudaLiteSemanticModel(analysis);
   const kernelIr = lowerSemanticCudaRuntime(lowerSemanticModelToKernelIr(analysis, semantic, options));
-  assertValidSemanticKernelIr(kernelIr);
-  assertTypeCheckedSemanticKernelIr(kernelIr);
-  assertWgslLegalizedSemanticKernelIr(kernelIr);
+  const verifiedKernelIr = validateSemanticKernelIr(kernelIr);
+  const typeCheckedKernelIr = typeCheckSemanticKernelIr(verifiedKernelIr);
+  const wgslLegalizedKernelIr = legalizeSemanticKernelIrForWgsl(typeCheckedKernelIr);
   const diagnostics = reconcileSemanticRuntimeDiagnostics(analysis.diagnostics, kernelIr.operations);
   const semanticWgslOptions = {
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
@@ -100,7 +100,7 @@ export function compileCudaLiteKernel(
     ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
   };
   const emitted = canEmitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
-    ? emitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
+    ? emitSemanticKernelIrWgsl(wgslLegalizedKernelIr, semanticWgslOptions)
     : undefined;
   const loweringPlan = createCudaLoweringPlan(diagnostics);
   return {

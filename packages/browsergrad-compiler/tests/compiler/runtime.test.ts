@@ -762,7 +762,7 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       expect([...result.buffers.dst as Float32Array]).toEqual([2.5, 3.5, 2.5, 2.5]);
       expect(compiled.wgsl).toBeUndefined();
       expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(false);
-      expect(canEmitSemanticKernelIrWgsl(gpuIr)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(gpuIr.ir)).toBe(true);
       expect(emitSemanticKernelIrWgsl(gpuIr).wgsl).not.toContain("cudaMemcpy");
       expect(runtimePlan.operations.map((operation) => operation.kind)).toEqual([
         "runtime-copy",

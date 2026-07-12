@@ -7,7 +7,9 @@ import {
   type CompiledCudaLiteKernel,
   CudaLiteCompilerError,
   analyzeCudaLite,
-  assertValidSemanticKernelIr,
+  validateSemanticKernelIr,
+  typeCheckSemanticKernelIr,
+  legalizeSemanticKernelIrForWgsl,
   compileCudaLiteOptionsFromKernelFeatures,
   createCudaLiteCompileCacheKey,
   createCudaLiteCompilerCache,
@@ -3387,8 +3389,10 @@ __global__ void sharedPointerAlias(float *out) {
         dimensions: [4],
   });
 
-      assertValidSemanticKernelIr(compiled.kernelIr);
-      const semanticWgsl = emitSemanticKernelIrWgsl(compiled.kernelIr).wgsl;
+      const legalized = legalizeSemanticKernelIrForWgsl(
+        typeCheckSemanticKernelIr(validateSemanticKernelIr(compiled.kernelIr)),
+      );
+      const semanticWgsl = emitSemanticKernelIrWgsl(legalized).wgsl;
       expect(semanticWgsl).toContain("fn writeShared(values__bg_shared_ptr: ptr<workgroup, array<f32, 4>>");
       expect(semanticWgsl).toContain("writeShared(&sdata");
       expect(semanticWgsl).not.toContain("(*sdata)[");

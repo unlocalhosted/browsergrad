@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeCudaLite,
-  assertValidSemanticKernelIr,
-  assertTypeCheckedSemanticKernelIr,
-  assertWgslLegalizedSemanticKernelIr,
+  validateSemanticKernelIr,
+  typeCheckSemanticKernelIr,
+  legalizeSemanticKernelIrForWgsl,
   createCudaLiteSemanticModel,
   createSemanticEnvironment,
   emitSemanticKernelIrWgsl,
@@ -14,7 +14,6 @@ import {
   type SemanticKernelIrModule,
   type SemanticExpression,
   type SemanticMemoryRef,
-  type VerifiedSemanticKernelIr,
 } from "../../src/index.js";
 import { semanticIdKey, semanticMemoryIdFromSymbol } from "../../src/semantic_ids.js";
 import {
@@ -37,9 +36,9 @@ describe("compiler phase contracts", () => {
     }
     const canonical = lowerSemanticModelToKernelIr(analysis, semantic, { workgroupSize: [1, 1, 1] });
     const runtimeLowered = lowerSemanticCudaRuntime(canonical);
-    assertValidSemanticKernelIr(runtimeLowered);
-    assertTypeCheckedSemanticKernelIr(runtimeLowered);
-    assertWgslLegalizedSemanticKernelIr(runtimeLowered);
+    const verified = validateSemanticKernelIr(runtimeLowered);
+    const typeChecked = typeCheckSemanticKernelIr(verified);
+    const legalized = legalizeSemanticKernelIrForWgsl(typeChecked);
     const store = runtimeLowered.operations.find((operation) => operation.kind === "store");
     expect(store?.kind === "store" ? store.target.baseId : undefined).toBe(out.id);
     if (false) {
@@ -62,7 +61,7 @@ describe("compiler phase contracts", () => {
         span: out.span,
       };
     }
-    const emitted = emitSemanticKernelIrWgsl(runtimeLowered);
+    const emitted = emitSemanticKernelIrWgsl(legalized);
 
     expect(emitted.wgsl).toContain("browsergrad-semantic-wgsl");
   });
@@ -88,13 +87,16 @@ describe("compiler phase contracts", () => {
       // @ts-expect-error raw IR has not passed mandatory verifier
       emitSemanticKernelIrWgsl({} as SemanticKernelIrModule);
       const raw = {} as SemanticKernelIrModule;
-      assertValidSemanticKernelIr(raw);
-      const verified = raw as VerifiedSemanticKernelIr;
+      // @ts-expect-error raw IR cannot enter semantic type checking
+      typeCheckSemanticKernelIr(raw);
+      const verified = validateSemanticKernelIr(raw);
       // @ts-expect-error verified IR has not passed mandatory semantic type checking
       emitSemanticKernelIrWgsl(verified);
-      assertTypeCheckedSemanticKernelIr(verified);
+      // @ts-expect-error verified IR cannot enter WGSL legalization
+      legalizeSemanticKernelIrForWgsl(verified);
+      const typeChecked = typeCheckSemanticKernelIr(verified);
       // @ts-expect-error type-checked IR has not passed mandatory WGSL legalization
-      emitSemanticKernelIrWgsl(verified);
+      emitSemanticKernelIrWgsl(typeChecked);
     }
     expect(true).toBe(true);
   });

@@ -9,9 +9,6 @@ export type Analyzed<T> = T & CompilerPhase<"analyzed">;
 export type TypedSemantic<T> = T & CompilerPhase<"typed-semantic">;
 export type CanonicalIr<T> = T & CompilerPhase<"canonical-ir">;
 export type RuntimeLoweredIr<T> = T & CompilerPhase<"runtime-lowered-ir">;
-export type VerifiedIr<T> = T & CompilerPhase<"verified-ir">;
-export type TypeCheckedIr<T> = T & CompilerPhase<"type-checked-ir">;
-export type WgslLegalizedIr<T> = T & CompilerPhase<"wgsl-legalized-ir">;
 
 function completePhase<T, Name extends string>(value: T): T & CompilerPhase<Name> {
   return value as T & CompilerPhase<Name>;

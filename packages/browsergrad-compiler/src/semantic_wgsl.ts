@@ -106,9 +106,6 @@ import {
   semanticAtomicSupportsFloat,
   semanticAtomicUsesF32Storage,
 } from "./semantic_atomic_intrinsics.js";
-import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
-import type { VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
-import type { TypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
 import type { WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";
 import {
   createTypedWgslExpression,
@@ -392,10 +389,10 @@ function semanticWgslOperationFailureDetail(
 }
 
 export function emitSemanticKernelIrWgsl(
-  ir: WgslLegalizedSemanticKernelIr<TypeCheckedSemanticKernelIr<VerifiedSemanticKernelIr>>,
+  legalized: WgslLegalizedSemanticKernelIr,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): SemanticKernelIrWgslOutput {
-  assertValidSemanticKernelIr(ir);
+  const ir = legalized.ir;
   const failure = semanticKernelIrWgslPreflightFailure(ir);
   if (failure) throw semanticWgslError(failure.message, failure.span);
 

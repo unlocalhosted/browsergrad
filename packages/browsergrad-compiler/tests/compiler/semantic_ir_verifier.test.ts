@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CudaLiteCompilerError,
-  assertValidSemanticKernelIr,
+  validateSemanticKernelIr,
   compileCudaLiteKernel,
   verifySemanticKernelIr,
   type SemanticKernelIrModule,
@@ -16,7 +16,7 @@ __global__ void copy_value(const float* input, float* output) {
 }`, { workgroupSize: [2, 1, 1] });
 
     expect(verifySemanticKernelIr(compiled.kernelIr)).toEqual([]);
-    expect(() => assertValidSemanticKernelIr(compiled.kernelIr)).not.toThrow();
+    expect(() => validateSemanticKernelIr(compiled.kernelIr)).not.toThrow();
   });
 
   it("rejects malformed operations with source-spanned internal diagnostics", () => {
@@ -37,9 +37,9 @@ __global__ void empty_kernel() {}
       message: "IR break must be nested in a loop",
       span: compiled.kernelIr.span,
     })]);
-    expect(() => assertValidSemanticKernelIr(invalid)).toThrowError(CudaLiteCompilerError);
+    expect(() => validateSemanticKernelIr(invalid)).toThrowError(CudaLiteCompilerError);
     try {
-      assertValidSemanticKernelIr(invalid);
+      validateSemanticKernelIr(invalid);
     } catch (error) {
       expect(error).toBeInstanceOf(CudaLiteCompilerError);
       expect((error as CudaLiteCompilerError).diagnostics[0]).toMatchObject({

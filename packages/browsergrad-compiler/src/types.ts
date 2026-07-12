@@ -7,9 +7,9 @@ import type {
 import type { CudaLoweringPlan } from "./compatibility.js";
 import type {
   CudaLiteSemanticModel,
-  SemanticKernelIrModule,
 } from "./semantic_ir.js";
 import type { CompilerPhase } from "./compiler_phases.js";
+import type { RuntimeLoweredSemanticKernelIr } from "./semantic_runtime_lowering.js";
 
 export interface SourceSpan {
   readonly start: number;
@@ -492,7 +492,7 @@ export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
 export interface CompiledCudaLiteKernel {
   readonly ast: CudaLiteModule & CompilerPhase<"parsed">;
   readonly semantic: CudaLiteSemanticModel & CompilerPhase<"typed-semantic">;
-  readonly kernelIr: SemanticKernelIrModule & CompilerPhase<"canonical-ir"> & CompilerPhase<"runtime-lowered-ir"> & CompilerPhase<"verified-ir"> & CompilerPhase<"type-checked-ir"> & CompilerPhase<"wgsl-legalized-ir">;
+  readonly kernelIr: RuntimeLoweredSemanticKernelIr;
   readonly analysis: CudaLiteAnalysis & CompilerPhase<"analyzed">;
   readonly wgsl?: string;
   readonly wgslProgram?: WgslKernelProgram;

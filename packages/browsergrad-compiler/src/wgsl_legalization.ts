@@ -1,11 +1,17 @@
 import type { WgslValueType } from "@unlocalhosted/browsergrad-kernels";
-import type { WgslLegalizedIr } from "./compiler_phases.js";
-import { walkSemanticOperations, type SemanticExpression } from "./semantic_ir.js";
+import { walkSemanticOperations, type SemanticExpression, type SemanticKernelIrModule } from "./semantic_ir.js";
 import type { TypeCheckedSemanticKernelIr } from "./semantic_type_check.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type CudaLiteScalarType, type SourceSpan } from "./types.js";
 import { createTypedWgslExpression, emitTypedWgslBinary, type WgslBinaryOperator } from "./typed_wgsl_expression.js";
 
-export type WgslLegalizedSemanticKernelIr<T extends TypeCheckedSemanticKernelIr = TypeCheckedSemanticKernelIr> = WgslLegalizedIr<T>;
+const wgslLegalizedSemanticKernelIrArtifact: unique symbol = Symbol("wgsl-legalized-semantic-kernel-ir");
+
+export interface WgslLegalizedSemanticKernelIr<T extends SemanticKernelIrModule = SemanticKernelIrModule> {
+  readonly kind: "wgsl-legalized-semantic-kernel-ir";
+  readonly ir: T;
+  readonly typeChecked: TypeCheckedSemanticKernelIr<T>;
+  readonly [wgslLegalizedSemanticKernelIrArtifact]: true;
+}
 
 export interface WgslLegalizationIssue {
   readonly code: "internal-wgsl-legalization-invariant";
@@ -21,8 +27,9 @@ const logicalOperators = new Set(["&&", "||"]);
 const comparisonOperators = new Set(["<", "<=", ">", ">=", "==", "!="]);
 
 export function checkSemanticKernelIrWgslLegalization(
-  ir: TypeCheckedSemanticKernelIr,
+  typeChecked: TypeCheckedSemanticKernelIr,
 ): readonly WgslLegalizationIssue[] {
+  const ir = typeChecked.ir;
   const issues: WgslLegalizationIssue[] = [];
   const visit = (expression: SemanticExpression): void => {
     if (expression.kind !== "binary" || !binaryOperators.has(expression.operator)) return;
@@ -61,11 +68,18 @@ export function checkSemanticKernelIrWgslLegalization(
   return issues;
 }
 
-export function assertWgslLegalizedSemanticKernelIr<T extends TypeCheckedSemanticKernelIr>(
-  ir: T,
-): asserts ir is WgslLegalizedSemanticKernelIr<T> {
-  const issues = checkSemanticKernelIrWgslLegalization(ir);
-  if (issues.length === 0) return;
+export function legalizeSemanticKernelIrForWgsl<T extends SemanticKernelIrModule>(
+  typeChecked: TypeCheckedSemanticKernelIr<T>,
+): WgslLegalizedSemanticKernelIr<T> {
+  const issues = checkSemanticKernelIrWgslLegalization(typeChecked);
+  if (issues.length === 0) {
+    return Object.freeze({
+      kind: "wgsl-legalized-semantic-kernel-ir",
+      ir: typeChecked.ir,
+      typeChecked,
+      [wgslLegalizedSemanticKernelIrArtifact]: true as const,
+    });
+  }
   const diagnostics: readonly CudaLiteDiagnostic[] = issues.map((issue) => ({
     code: issue.code,
     severity: "error",

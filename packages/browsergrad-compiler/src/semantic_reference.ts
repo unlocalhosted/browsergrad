@@ -150,7 +150,7 @@ import {
   semanticAtomicScalarArgumentIndices,
   type SemanticAtomicOp,
 } from "./semantic_atomic_intrinsics.js";
-import { assertValidSemanticKernelIr } from "./semantic_ir_verifier.js";
+import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
 import {
   referenceCurandAdvance as curandAdvance,
   referenceCurandNext as curandNext,
@@ -263,7 +263,7 @@ export function runCompiledKernelSemanticReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
-  assertValidSemanticKernelIr(compiled.kernelIr);
+  validateSemanticKernelIr(compiled.kernelIr);
   const unsupported = unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled);
   if (unsupported) {
     const owner = unsupported.kind === "declare" ? ` '${unsupported.target.name}'` : "";

@@ -58,9 +58,6 @@ export type {
   TypedSemantic,
   CanonicalIr,
   RuntimeLoweredIr,
-  VerifiedIr,
-  TypeCheckedIr,
-  WgslLegalizedIr,
 } from "./compiler_phases.js";
 export type {
   SemanticFunctionId,
@@ -86,19 +83,19 @@ export {
   type SemanticMemoryRef,
 } from "./semantic_ir.js";
 export {
-  assertValidSemanticKernelIr,
+  validateSemanticKernelIr,
   verifySemanticKernelIr,
   type SemanticIrVerificationIssue,
   type VerifiedSemanticKernelIr,
 } from "./semantic_ir_verifier.js";
 export {
-  assertTypeCheckedSemanticKernelIr,
+  typeCheckSemanticKernelIr,
   checkSemanticKernelIrTypes,
   type SemanticTypeIssue,
   type TypeCheckedSemanticKernelIr,
 } from "./semantic_type_check.js";
 export {
-  assertWgslLegalizedSemanticKernelIr,
+  legalizeSemanticKernelIrForWgsl,
   checkSemanticKernelIrWgslLegalization,
   type WgslLegalizationIssue,
   type WgslLegalizedSemanticKernelIr,
