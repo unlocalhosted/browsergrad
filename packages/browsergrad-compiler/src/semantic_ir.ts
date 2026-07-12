@@ -1684,6 +1684,7 @@ function specializeLocalPointerFunctionsOnce(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
 ): readonly CudaLiteSemanticFunction[] {
+  const localDimensions = semanticLocalAddressDimensions(operations, functions);
   const calls = [
     ...collectSemanticFunctionCalls(operations),
     ...functions.flatMap((fn) => collectSemanticFunctionCalls(
@@ -1693,7 +1694,7 @@ function specializeLocalPointerFunctionsOnce(
   ];
   return functions.map((fn) => {
     const fnCalls = calls.filter((call) => call.callee === fn.name);
-    const localPointers = new Map<string, string>();
+    const localPointers = new Map<string, readonly number[]>();
     for (const [index, param] of fn.params.entries()) {
       if (!param.pointer || param.addressSpace !== "storage" || param.dimensions.length !== 0) continue;
       const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
@@ -1701,16 +1702,64 @@ function specializeLocalPointerFunctionsOnce(
         ref?.addressSpace === "local" &&
         (ref.indices.length === 0 ||
           ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]) && fnCalls[callIndex]!.ownerLocalPointerNames.has(ref.base)))) {
-        localPointers.set(param.name, param.name);
+        const dimensions = refs.map((ref) => ref === undefined ? undefined : localDimensions.get(ref.baseId));
+        const first = dimensions[0] ?? [];
+        if (dimensions.every((candidate) => candidate !== undefined && sameDimensions(candidate, first))) {
+          localPointers.set(param.name, first);
+        }
       }
     }
     if (localPointers.size === 0) return fn;
     return {
       ...fn,
-      params: fn.params.map((param) => localPointers.has(param.name) ? { ...param, addressSpace: "local" as const } : param),
-      body: rewriteSemanticPointerAddressSpace(fn.body, localPointers, "local"),
+      params: fn.params.map((param) => {
+        const dimensions = localPointers.get(param.name);
+        return dimensions === undefined ? param : { ...param, addressSpace: "local" as const, dimensions };
+      }),
+      body: rewriteSemanticPointerAddressSpace(
+        fn.body,
+        new Map([...localPointers.keys()].map((name) => [name, name])),
+        "local",
+      ),
     };
   });
+}
+
+function semanticLocalAddressDimensions(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+): ReadonlyMap<SemanticMemoryId, readonly number[]> {
+  const dimensions = new Map<SemanticMemoryId, readonly number[]>();
+  const collect = (items: readonly SemanticKernelIrOperation[]): void => {
+    for (const operation of items) {
+      if (operation.kind === "declare" && operation.target.addressSpace === "local" &&
+        (operation.target.pointer || operation.target.dimensions.length > 0)) {
+        dimensions.set(semanticMemoryIdFromSymbol(operation.target.id), operation.target.dimensions);
+      }
+      if (operation.kind === "block") collect(operation.body);
+      if (operation.kind === "branch") {
+        collect(operation.consequent);
+        collect(operation.alternate);
+      }
+      if (operation.kind === "loop") {
+        if (operation.init && isSemanticKernelIrOperation(operation.init)) collect([operation.init]);
+        collect(operation.body);
+        if (operation.continuing) collect(operation.continuing);
+      }
+    }
+  };
+  collect(operations);
+  for (const fn of functions) {
+    for (const param of fn.params) {
+      if (param.pointer && param.addressSpace === "local") dimensions.set(semanticMemoryIdFromSymbol(param.id), param.dimensions);
+    }
+    collect(fn.body);
+  }
+  return dimensions;
+}
+
+function sameDimensions(left: readonly number[], right: readonly number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function specializeConstantPointerFunctions(
@@ -1902,14 +1951,36 @@ function collectSemanticFunctionCalls(
   operations: readonly SemanticKernelIrOperation[],
   ownerLocalPointerNames: ReadonlySet<string> = new Set(),
 ): readonly SemanticFunctionCallSite[] {
+  const localAddressNames = new Set(ownerLocalPointerNames);
+  collectSemanticLocalAddressNames(operations, localAddressNames);
   const out: SemanticFunctionCallSite[] = [];
-  collectSemanticOperationFunctionCalls(operations, out, ownerLocalPointerNames);
+  collectSemanticOperationFunctionCalls(operations, out, localAddressNames);
   walkSemanticOperations(operations, (expression) => {
     if (expression.kind === "call" && expression.callee.kind === "symbol") {
-      out.push({ callee: expression.callee.name, args: expression.args, ownerLocalPointerNames });
+      out.push({ callee: expression.callee.name, args: expression.args, ownerLocalPointerNames: localAddressNames });
     }
   });
   return out;
+}
+
+function collectSemanticLocalAddressNames(
+  operations: readonly SemanticKernelIrOperation[],
+  names: Set<string>,
+): void {
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.target.addressSpace === "local" &&
+      (operation.target.pointer || operation.target.dimensions.length > 0)) names.add(operation.target.name);
+    if (operation.kind === "block") collectSemanticLocalAddressNames(operation.body, names);
+    if (operation.kind === "branch") {
+      collectSemanticLocalAddressNames(operation.consequent, names);
+      collectSemanticLocalAddressNames(operation.alternate, names);
+    }
+    if (operation.kind === "loop") {
+      if (operation.init && isSemanticKernelIrOperation(operation.init)) collectSemanticLocalAddressNames([operation.init], names);
+      collectSemanticLocalAddressNames(operation.body, names);
+      if (operation.continuing) collectSemanticLocalAddressNames(operation.continuing, names);
+    }
+  }
 }
 
 function collectSemanticOperationFunctionCalls(

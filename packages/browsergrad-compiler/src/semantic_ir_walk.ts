@@ -1,7 +1,10 @@
 import type {
   SemanticExpression,
+  SemanticKernelIrModule,
   SemanticKernelIrOperation,
 } from "./semantic_ir.js";
+import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
+import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 
 export function semanticOperationExpressions(operation: SemanticKernelIrOperation): readonly SemanticExpression[] {
   const expressions: SemanticExpression[] = [];
@@ -82,6 +85,87 @@ export function semanticOperationsReferenceRoot(
     if (operation.kind === "device-launch") return true;
     return false;
   });
+}
+
+export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): ReadonlySet<string> {
+  const roots = new Set<string>();
+  const atomicParamIndexes = new Map<string, Set<number>>();
+  const functionParams = new Map(ir.functions.map((fn) => [fn.name, fn.params]));
+  const calls: { readonly owner?: string; readonly callee: string; readonly args: readonly SemanticExpression[] }[] = [];
+
+  const recordAtomicRef = (owner: string | undefined, base: string): void => {
+    const params = owner === undefined ? undefined : functionParams.get(owner);
+    const index = params?.findIndex((param) => param.name === base && param.pointer) ?? -1;
+    if (owner !== undefined && index >= 0) {
+      const indexes = atomicParamIndexes.get(owner) ?? new Set<number>();
+      indexes.add(index);
+      atomicParamIndexes.set(owner, indexes);
+    } else {
+      roots.add(base);
+    }
+  };
+
+  const scanExpression = (expression: SemanticExpression, owner?: string): void => {
+    if (expression.kind === "call" && expression.callee.kind === "symbol") {
+      const callee = expression.callee.name;
+      if (semanticAtomicOperation(callee) !== undefined) {
+        const ref = expression.args[0] ? semanticPointerArgumentMemoryRef(expression.args[0]) : undefined;
+        if (ref) recordAtomicRef(owner, ref.base);
+      } else {
+        calls.push({ ...(owner === undefined ? {} : { owner }), callee, args: expression.args });
+      }
+    }
+    for (const child of semanticExpressionChildren(expression)) scanExpression(child, owner);
+  };
+
+  const scanOperations = (operations: readonly SemanticKernelIrOperation[], owner?: string): void => {
+    for (const operation of operations) {
+      if (operation.kind === "atomic" && operation.target) recordAtomicRef(owner, operation.target.base);
+      if (operation.kind === "call") calls.push({ ...(owner === undefined ? {} : { owner }), callee: operation.callee, args: operation.args });
+      for (const expression of semanticOperationExpressions(operation)) scanExpression(expression, owner);
+      if (operation.kind === "block") scanOperations(operation.body, owner);
+      if (operation.kind === "branch") {
+        scanOperations(operation.consequent, owner);
+        scanOperations(operation.alternate, owner);
+      }
+      if (operation.kind === "loop") {
+        if (operation.init && isSemanticKernelIrOperation(operation.init)) scanOperations([operation.init], owner);
+        scanOperations(operation.body, owner);
+        if (operation.continuing) scanOperations(operation.continuing, owner);
+      }
+    }
+  };
+
+  scanOperations(ir.operations);
+  for (const fn of ir.functions) scanOperations(fn.body, fn.name);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const call of calls) {
+      const indexes = atomicParamIndexes.get(call.callee);
+      if (!indexes) continue;
+      for (const index of indexes) {
+        const arg = call.args[index];
+        const ref = arg ? semanticPointerArgumentMemoryRef(arg) : undefined;
+        if (!ref) continue;
+        const ownerParams = call.owner === undefined ? undefined : functionParams.get(call.owner);
+        const ownerIndex = ownerParams?.findIndex((param) => param.name === ref.base && param.pointer) ?? -1;
+        if (call.owner !== undefined && ownerIndex >= 0) {
+          const ownerIndexes = atomicParamIndexes.get(call.owner) ?? new Set<number>();
+          if (!ownerIndexes.has(ownerIndex)) {
+            ownerIndexes.add(ownerIndex);
+            atomicParamIndexes.set(call.owner, ownerIndexes);
+            changed = true;
+          }
+        } else if (!roots.has(ref.base)) {
+          roots.add(ref.base);
+          changed = true;
+        }
+      }
+    }
+  }
+  return roots;
 }
 
 export function isSemanticKernelIrOperation(

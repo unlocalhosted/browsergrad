@@ -19,7 +19,7 @@ export function semanticFunctionParamContractSupported(
   if (param.pointer) return (
     param.addressSpace === "storage" ||
     param.addressSpace === "shared" ||
-    param.addressSpace === "local" && param.dimensions.length === 0 ||
+    param.addressSpace === "local" && param.dimensions.every((dimension) => dimension > 0) ||
     param.addressSpace === "constant" && param.pointerAliasOf !== undefined
   ) && valueTypeSupported(param.valueType);
   return param.addressSpace === "local" || param.addressSpace === "texture" || param.addressSpace === "surface";

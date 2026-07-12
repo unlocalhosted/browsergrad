@@ -2146,8 +2146,9 @@ __global__ void shared_reinterpret(int *out) {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toMatch(/var p_\d+_buffer: u32 = 4294967295u;/u);
-      expect(compiled.wgsl).toMatch(/var p_\d+_base: u32 = 0u;/u);
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).not.toContain("p_buffer");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 0]);
     });
 
@@ -2272,8 +2273,9 @@ __global__ void shared_reinterpret(int *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("fn sum_local(values: ptr<function, f32>");
-      expect(compiled.wgsl).toContain("sum_local(&values[0]");
+      expect(compiled.wgsl).toContain("fn sum_local(values: ptr<function, array<f32, 2>>");
+      expect(compiled.wgsl).toContain("sum_local(&values,");
+      expect(compiled.wgsl).toContain("values[0u] = 2.0;");
       expect([...result.buffers.out as Float32Array]).toEqual([7]);
     });
 
@@ -3002,9 +3004,10 @@ __global__ void sharedPointerAlias(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("var p_buffer: array<u32, 3>;");
-      expect(compiled.wgsl).toContain("p_buffer[u32(0)] =");
-      expect(compiled.wgsl).toContain("read_x(p_buffer[u32(0)], p_base[u32(0)]");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).not.toContain("p_buffer");
+      expect(compiled.wgsl).toContain("read_x(&values, 0u");
+      expect(compiled.wgsl).toContain("out[1u] = values[0u].z;");
       expect([...result.buffers.out as Float32Array]).toEqual([2, 6]);
     });
 
@@ -3051,7 +3054,16 @@ __global__ void sharedPointerAlias(float *out) {
       out[0] = (*lane_ptr).x;
     }
   }`, { workgroupSize: [1, 1, 1] });
-      expect(storageCompiled.wgsl).toMatch(/var lane_ptr_\d+_buffer: u32/u);
+      const storageResult = runCompiledKernelSemanticReference(
+        storageCompiled,
+        { buffers: { input: new Uint32Array([0, 0, 0, 0, 1, 2, 3, 4]), out: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(canRunCompiledKernelSemanticReference(storageCompiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(storageCompiled.kernelIr)).toBe(true);
+      expect(storageCompiled.wgsl).not.toContain("lane_ptr");
+      expect(storageCompiled.wgsl).toContain("bitcast<i32>");
+      expect([...storageResult.buffers.out as Int32Array]).toEqual([0x04030201]);
     });
 
   it("preserves packed byte-vector cast width over direct byte storage", () => {

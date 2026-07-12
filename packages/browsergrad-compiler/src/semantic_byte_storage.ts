@@ -6,8 +6,14 @@ import type {
 } from "./semantic_ir.js";
 import { walkSemanticOperations } from "./semantic_ir.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
-import { cudaVectorLaneCount } from "./vector_types.js";
+import {
+  cudaVectorLaneCount,
+  cudaVectorScalarType,
+  cudaVectorSwizzleIndices,
+  isCudaVectorType,
+} from "./vector_types.js";
 import { sizeofCudaType } from "./type_layout.js";
+import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 
 export function semanticDirectByteStorageParamSupported(
   ir: SemanticKernelIrModule,
@@ -20,6 +26,45 @@ export function semanticDirectByteStorageParamSupported(
     supported = semanticByteStorageCallSupported(ir, expression.callee.name, expression.args, paramName);
   });
   return supported;
+}
+
+export function semanticDirectByteVectorMemberRef(
+  expression: Extract<SemanticExpression, { readonly kind: "member" }>,
+  ir: SemanticKernelIrModule,
+): SemanticMemoryRef | undefined {
+  const vectorType = semanticExpressionValueType(expression.object);
+  if (!isCudaVectorType(vectorType)) return undefined;
+  const lanes = cudaVectorSwizzleIndices(vectorType, expression.property);
+  if (lanes?.length !== 1) return undefined;
+  const ref = semanticPointerArgumentMemoryRef(expression.object);
+  if (!ref || ref.addressSpace !== "storage" ||
+    !ir.params.some((param) => param.name === ref.base && param.valueType === "uchar")) return undefined;
+  const scalarType = cudaVectorScalarType(vectorType);
+  if (scalarType === undefined) return undefined;
+  const scalarBytes = sizeofCudaType(scalarType);
+  if (scalarBytes !== 4) return undefined;
+  const byteOffset = lanes[0]! * scalarBytes;
+  const indices = byteOffset === 0 ? ref.indices : offsetLastIndex(ref.indices, byteOffset, expression.span);
+  return {
+    ...ref,
+    valueType: scalarType,
+    containerValueType: vectorType,
+    packedByteLanes: scalarBytes,
+    indices,
+    fields: [],
+    span: expression.span,
+  };
+}
+
+function offsetLastIndex(
+  indices: readonly SemanticExpression[],
+  byteOffset: number,
+  span: SemanticExpression["span"],
+): readonly SemanticExpression[] {
+  const offset: SemanticExpression = { kind: "literal", literalKind: "number", value: byteOffset, valueType: "uint", span };
+  if (indices.length === 0) return [offset];
+  const last = indices.at(-1)!;
+  return [...indices.slice(0, -1), { kind: "binary", operator: "+", left: last, right: offset, valueType: "uint", span }];
 }
 
 function semanticByteStorageOperationsSupported(
@@ -43,6 +88,9 @@ function semanticByteStorageOperationsSupported(
 
 function semanticByteStorageRefSupported(ref: SemanticMemoryRef): boolean {
   return ref.valueType === "uchar" ||
+    ref.fields.length === 1 && isCudaVectorType(ref.containerValueType) &&
+      cudaVectorSwizzleIndices(ref.containerValueType, ref.fields[0]!)?.length === 1 &&
+      sizeofCudaType(ref.valueType ?? "void") === 4 ||
     ref.packedByteLanes !== undefined && (
       cudaVectorLaneCount(ref.valueType) === ref.packedByteLanes ||
       sizeofCudaType(ref.valueType ?? "void") === ref.packedByteLanes

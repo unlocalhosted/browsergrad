@@ -103,7 +103,7 @@ import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
 } from "./matrix_tiles.js";
-import { semanticOperationsReferenceRoot } from "./semantic_ir_walk.js";
+import { semanticAtomicMemoryRootNames, semanticOperationsReferenceRoot } from "./semantic_ir_walk.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
@@ -190,7 +190,10 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
-import { semanticDirectByteStorageParamSupported } from "./semantic_byte_storage.js";
+import {
+  semanticDirectByteStorageParamSupported,
+  semanticDirectByteVectorMemberRef,
+} from "./semantic_byte_storage.js";
 import { semanticVectorMathCallSupported } from "./semantic_vector_math.js";
 import {
   semanticLocalScalarValueTypeSupported,
@@ -370,7 +373,10 @@ function unsupportedSemanticReferenceOperation(
           if (operation.target.pointer || operation.target.valueType !== "uchar" && !semanticReferenceValueTypeSupported(operation.target.valueType)) return operation;
           break;
         }
-        if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
+        if (operation.target.addressSpace !== "local") return operation;
+        if (operation.target.pointer) {
+          break;
+        }
         if (!semanticReferenceLocalValueTypeSupported(operation.target.valueType)) return operation;
         if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init, operation.target.valueType, compiled)) return operation;
         if (operation.target.dimensions.length === 0) {
@@ -1247,7 +1253,8 @@ function semanticReferenceExpressionSupported(
       return !expression.pointer && semanticReferenceExpressionSupported(expression.expression, "scalar", compiled);
     case "unary":
       if (expected === "scalar" && semanticReferenceBf162LocalBitsCastSupported(expression, compiled)) return true;
-      return expression.operator !== "*" && expression.operator !== "&" && semanticReferenceExpressionSupported(expression.argument, "scalar", compiled);
+      if (expression.operator === "*") return semanticPointerArgMemoryRef(expression.argument)?.addressSpace === "local";
+      return expression.operator !== "&" && semanticReferenceExpressionSupported(expression.argument, "scalar", compiled);
     case "binary":
       if (isStoragePointerNullComparison(expression)) return true;
       if (compiled !== undefined && isStoragePointerIdentityComparison(expression, compiled)) return true;
@@ -1509,6 +1516,7 @@ function semanticReferenceVectorMemberSupported(
   expression: Extract<SemanticExpression, { kind: "member" }>,
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
+  if (compiled && semanticDirectByteVectorMemberRef(expression, compiled.kernelIr)) return true;
   const valueType = semanticExpressionValueType(expression.object);
   return semanticReferenceExpressionSupported(expression.object, "any", compiled) &&
     semanticStorageVectorFieldIndices(valueType, expression.property) !== undefined;
@@ -1527,6 +1535,11 @@ function execSemanticOperations(
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") break;
+        if (operation.target.pointer) {
+          const ref = operation.init ? semanticPointerArgMemoryRef(operation.init) : undefined;
+          if (ref) context.localPointerTargets.set(operation.target.name, { ref, context });
+          break;
+        }
         if (operation.target.dimensions.length > 0) context.localDimensions.set(operation.target.name, operation.target.dimensions);
         context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         break;
@@ -1782,6 +1795,11 @@ function* execSemanticBarrierOperations(
         break;
       case "declare":
         if (operation.target.addressSpace !== "shared") {
+          if (operation.target.pointer) {
+            const ref = operation.init ? semanticPointerArgMemoryRef(operation.init) : undefined;
+            if (ref) context.localPointerTargets.set(operation.target.name, { ref, context });
+            break;
+          }
           if (operation.target.dimensions.length > 0) context.localDimensions.set(operation.target.name, operation.target.dimensions);
           context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         }
@@ -2858,6 +2876,10 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "pointer-valid":
       return (context.storageOffsets.get(expression.pointer) ?? 0) !== 0xffffffff ? 1 : 0;
     case "member":
+      {
+        const byteVectorMember = semanticDirectByteVectorMemberRef(expression, context.compiled.kernelIr);
+        if (byteVectorMember) return readMemory(byteVectorMember, context);
+      }
       return memberValue(evalSemanticExpression(expression.object, context), semanticExpressionValueType(expression.object), expression.property, expression.span);
     case "index":
       return readIndexExpression(expression, context);
@@ -2865,6 +2887,11 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       return castNumber(evalNumber(expression.expression, context), expression.valueType);
     case "unary":
       if (semanticReferenceBf162LocalBitsCastSupported(expression, context.compiled)) return evalSemanticBf162LocalBitsCast(expression, context);
+      if (expression.operator === "*") {
+        const ref = semanticPointerArgMemoryRef(expression.argument);
+        if (!ref || ref.addressSpace !== "local") throw semanticReferenceError("semantic pointer dereference requires modeled local pointer", expression.span);
+        return readMemory(ref, context);
+      }
       return evalUnary(expression.operator, evalNumber(expression.argument, context));
     case "binary": {
       if (isStoragePointerIdentityComparison(expression, context.compiled)) {
@@ -3213,6 +3240,16 @@ function evalUpdate(
   }
   if (expression.argument.kind !== "symbol") {
     throw semanticReferenceError("semantic reference supports only local scalar or modeled memory updates", expression.span);
+  }
+  const pointerTarget = context.localPointerTargets.get(expression.argument.name);
+  if (pointerTarget) {
+    const previous = context.storageOffsets.get(expression.argument.name) ?? 0;
+    context.localPointerTargets.set(expression.argument.name, {
+      ref: semanticMemoryRefOffset(pointerTarget.ref, delta),
+      context: pointerTarget.context,
+    });
+    context.storageOffsets.set(expression.argument.name, previous + delta);
+    return expression.prefix ? previous + delta : previous;
   }
   const oldValue = evalNumber(expression.argument, context);
   const next = oldValue + delta;
@@ -4987,6 +5024,10 @@ function createSemanticFunctionContext(
           localPointerTargets.set(param.name, forwarded);
           continue;
         }
+        if (context.localDimensions.has(ref.base)) {
+          localPointerTargets.set(param.name, { ref: { ...ref, indices: [] }, context });
+          continue;
+        }
       }
       if (!ref || ref.addressSpace !== "local" || ref.indices.length !== 0) {
         throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be a local scalar`, arg.span);
@@ -5145,7 +5186,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   }
   if (ref.addressSpace === "local") {
     const target = context.localPointerTargets.get(ref.base);
-    if (target) return readMemory(localPointerTargetRef(target.ref, ref), target.context);
+    if (target) return readMemory(localPointerTargetRef(target.ref, ref, target.context), target.context);
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) {
       if (ref.indices.length === 0 && typeof buffer === "number") return buffer;
@@ -5188,7 +5229,9 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
     const buffer = context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
-    const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    const bytes = semanticAtomicMemoryRootNames(context.compiled.kernelIr).has(ref.base)
+      ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+      : buffer;
     const base = flatIndex(ref, context);
     let word = 0;
     for (let byte = 0; byte < 4; byte++) word |= (Number(bytes[base + byte] ?? 0) & 0xff) << (byte * 8);
@@ -5225,7 +5268,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   if (ref.addressSpace === "local") {
     const target = context.localPointerTargets.get(ref.base);
     if (target) {
-      writeMemory(localPointerTargetRef(target.ref, ref), value, target.context);
+      writeMemory(localPointerTargetRef(target.ref, ref, target.context), value, target.context);
       return;
     }
     const buffer = context.locals.get(ref.base);
@@ -5275,7 +5318,9 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
     const buffer = context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
-    const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    const bytes = semanticAtomicMemoryRootNames(context.compiled.kernelIr).has(ref.base)
+      ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+      : buffer;
     const base = flatIndex(ref, context);
     const word = ref.valueType === "float" ? float32ToUintBits(value) : Math.trunc(value) >>> 0;
     for (let byte = 0; byte < 4; byte++) {
@@ -5295,11 +5340,16 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   context.trace.writes.push({ name: ref.base, index, value, ok });
 }
 
-function localPointerTargetRef(target: SemanticMemoryRef, access: SemanticMemoryRef): SemanticMemoryRef {
+function localPointerTargetRef(
+  target: SemanticMemoryRef,
+  access: SemanticMemoryRef,
+  targetContext: SemanticReferenceContext,
+): SemanticMemoryRef {
+  const preserveZeroIndex = target.addressSpace === "local" && targetContext.localDimensions.has(target.base);
   return {
     ...target,
     ...(access.valueType === undefined && target.valueType === undefined ? {} : { valueType: access.valueType ?? target.valueType! }),
-    indices: [...target.indices, ...access.indices.filter((index) => !(index.kind === "literal" && index.value === 0))],
+    indices: [...target.indices, ...access.indices.filter((index) => preserveZeroIndex || !(index.kind === "literal" && index.value === 0))],
     fields: [...target.fields, ...access.fields],
     span: access.span,
   };
