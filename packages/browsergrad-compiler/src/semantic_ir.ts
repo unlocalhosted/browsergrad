@@ -2575,12 +2575,24 @@ function lowerExpression(
       const aliased = localPointerAliasIndexExpression(expression, scope);
       if (aliased) return aliased;
       const target = lowerExpression(expression.target, scope);
-      return {
+      const lowered: SemanticExpression = {
         kind: "index",
         target,
         index: lowerExpression(expression.index, scope),
         ...optionalValueType(indexedExpressionValueType(expression, target, scope)),
         addressSpace: expressionAddressSpace(target),
+        span: expression.span,
+      };
+      const matrixLane = semanticMatrixLaneMemoryRef(lowered, scope);
+      if (!matrixLane || matrixLane.indices.length !== 1) return lowered;
+      const root = scope.get(matrixLane.base);
+      if (!root) return lowered;
+      return {
+        kind: "index",
+        target: semanticSymbolExpression(root, expression.target.span),
+        index: matrixLane.indices[0]!,
+        ...optionalValueType(matrixLane.valueType),
+        addressSpace: "local",
         span: expression.span,
       };
     }
@@ -3043,28 +3055,23 @@ function semanticMatrixLaneMemoryRef(
   if (!tile || !dimensions || ref.indices.length !== dimensions.length + 1) return undefined;
   const arrayIndices = ref.indices.slice(0, -1);
   const lane = ref.indices.at(-1)!;
-  let flat = arrayIndices[0] ?? intNumberExpression(0, expression.span);
+  if (arrayIndices.length === 0) {
+    return { ...ref, valueType: tile.valueType, containerValueType: tile.valueType, indices: [lane], fields: [] };
+  }
+  let flat = arrayIndices[0]!;
   for (let axis = 1; axis < arrayIndices.length; axis++) {
-    flat = semanticIndexAdd(
-      semanticIndexMultiply(flat, dimensions[axis]!, expression.span),
+    flat = addIndexExpressions(
+      multiplyIndexExpression(flat, dimensions[axis]!, expression.span),
       arrayIndices[axis]!,
       expression.span,
     );
   }
-  flat = semanticIndexAdd(
-    semanticIndexMultiply(flat, matrixTileElementCount(tile), expression.span),
+  flat = addIndexExpressions(
+    multiplyIndexExpression(flat, matrixTileElementCount(tile), expression.span),
     lane,
     expression.span,
   );
   return { ...ref, valueType: tile.valueType, containerValueType: tile.valueType, indices: [flat], fields: [] };
-}
-
-function semanticIndexMultiply(left: SemanticExpression, right: number, span: SourceSpan): SemanticExpression {
-  return { kind: "binary", operator: "*", left, right: intNumberExpression(right, span), valueType: "int", span };
-}
-
-function semanticIndexAdd(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
-  return { kind: "binary", operator: "+", left, right, valueType: "int", span };
 }
 
 function semanticMatrixLayout(expression: CudaLiteExpression | undefined): MatrixTileLayout | undefined {

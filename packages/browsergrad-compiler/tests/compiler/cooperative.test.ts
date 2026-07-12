@@ -3232,7 +3232,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.C as Float32Array]).toEqual([20, 23, 44, 51]);
       expect(compiled.wgsl).toContain("var a: array<f32, 4>;");
       expect(compiled.wgsl).toContain("var bg_wmma_sum_");
-      expect(compiled.wgsl).toContain("write_f32");
+      expect(compiled.wgsl).toContain("C[(0u + ((bg_wmma_row_");
     });
 
   it("resolves same-named local pointer aliases by source scope for WMMA loads", () => {
@@ -3310,8 +3310,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect([...result.buffers.C as Float32Array]).toEqual([2, 3, 4, 5]);
-      expect(compiled.wgsl).toContain("a[u32(t)]");
-      expect(compiled.wgsl).toContain("f32(a[u32(t)])");
+      expect(compiled.wgsl).toContain("a[u32(t)] = (a[u32(t)] + 1.0);");
     });
 
   it("supports WMMA integer matrix operands with int accumulators", () => {
