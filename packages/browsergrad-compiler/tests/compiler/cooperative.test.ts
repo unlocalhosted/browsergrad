@@ -847,7 +847,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(compiled.wgsl).toContain("bg_warp_reduce_sum_uint_4");
+      expect(compiled.wgsl).toContain("bg_semantic_syncthreads_count");
+      expect(compiled.wgsl).toContain("bg_semantic_syncthreads_and");
+      expect(compiled.wgsl).toContain("bg_semantic_syncthreads_or");
       expect(compiled.wgsl).toContain("workgroupBarrier()");
       expect([...result.buffers.out as Int32Array]).toEqual([
         3, 1, 1,
