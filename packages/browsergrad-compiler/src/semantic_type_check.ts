@@ -10,6 +10,7 @@ import { CudaLiteCompilerError, type CudaLiteDiagnostic, type CudaLiteScalarType
 import { semanticBinaryResultType } from "./semantic_type_rules.js";
 import { isSemanticValueType } from "./semantic_value_type.js";
 import { completeIrTypeChecking, type TypeCheckedIrArtifact } from "./compiler_phases.js";
+import { semanticFunctionIdFromSymbol, semanticIdsEqual } from "./semantic_ids.js";
 
 const typeCheckedSemanticKernelIrArtifact: unique symbol = Symbol("type-checked-semantic-kernel-ir");
 
@@ -203,6 +204,7 @@ function checkExpression(
     case "call":
       checkExpression(expression.callee, "callee", ir, report);
       expression.args.forEach((arg) => checkExpression(arg, arg.kind === "literal" && arg.literalKind === "string" ? "discard" : "value", ir, report));
+      checkResolvedFunctionCall(expression, ir, report);
       return;
     case "texture-read":
       [expression.texture, expression.x, expression.y, ...(expression.z ? [expression.z] : [])]
@@ -242,6 +244,27 @@ function checkExpression(
       return;
     case "sequence":
       expression.expressions.forEach((item, index) => checkExpression(item, index === expression.expressions.length - 1 ? use : "discard", ir, report));
+  }
+}
+
+function checkResolvedFunctionCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  report: (message: string, span: SourceSpan) => void,
+): void {
+  if (expression.callee.kind !== "symbol" || expression.callee.addressSpace !== "function") return;
+  const calleeId = semanticFunctionIdFromSymbol(expression.callee.id);
+  const fn = ir.functions.find((candidate) => semanticIdsEqual(candidate.id, calleeId));
+  if (fn === undefined) return;
+  if (expression.args.length !== fn.params.length) {
+    report(`call '${fn.name}' expects ${fn.params.length} arguments but received ${expression.args.length}`, expression.span);
+    return;
+  }
+  checkAssignable(fn.returnType, expression.valueType, `return type of call '${fn.name}'`, expression.span, report);
+  for (const [index, param] of fn.params.entries()) {
+    if (param.pointer || param.cooperativeGroupKind !== undefined) continue;
+    const arg = expression.args[index]!;
+    checkAssignable(param.valueType, expressionValueType(arg), `argument ${index + 1} of call '${fn.name}'`, arg.span, report);
   }
 }
 

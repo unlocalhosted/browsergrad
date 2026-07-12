@@ -6,10 +6,12 @@ import type {
 } from "./semantic_ir.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import {
+  createBuiltinSemanticSymbolId,
   createSemanticFunctionId,
   semanticSymbolIdFromFunction,
   type SemanticFunctionId,
 } from "./semantic_ids.js";
+import { isCudaVectorType } from "./vector_types.js";
 
 export interface ResolvedSemanticFunctions {
   readonly operations: readonly SemanticKernelIrOperation[];
@@ -34,7 +36,10 @@ export function resolveSemanticFunctionOverloads(
   const resolve = (name: string, args: readonly SemanticExpression[]): ResolvedOverload => {
     const candidates = overloads.get(name);
     if (!candidates || candidates.length === 0) return { name };
-    if (candidates.length === 1) return { name, id: candidates[0]!.id, returnType: candidates[0]!.returnType };
+    if (candidates.length === 1) {
+      const selected = candidates[0]!;
+      return { name, id: selected.id, returnType: selected.returnType, params: selected.params };
+    }
     const matchingArity = candidates.filter((fn) => fn.params.length === args.length);
     const ranked = (matchingArity.length > 0 ? matchingArity : candidates)
       .map((fn) => ({ fn, score: semanticOverloadScore(fn, args) }))
@@ -46,6 +51,7 @@ export function resolveSemanticFunctionOverloads(
       name: linkName,
       id: createSemanticFunctionId(linkName, selected.span),
       returnType: selected.returnType,
+      params: selected.params,
     };
   };
   return {
@@ -89,6 +95,7 @@ interface ResolvedOverload {
   readonly name: string;
   readonly id?: SemanticFunctionId;
   readonly returnType?: CudaLiteSemanticFunction["returnType"];
+  readonly params?: CudaLiteSemanticFunction["params"];
 }
 
 type OverloadResolver = (name: string, args: readonly SemanticExpression[]) => ResolvedOverload;
@@ -190,10 +197,11 @@ function resolveExpression(expression: SemanticExpression, resolve: OverloadReso
     case "index":
       return { ...expression, target: resolveExpression(expression.target, resolve), index: resolveExpression(expression.index, resolve) };
     case "call": {
-      const args = expression.args.map((arg) => resolveExpression(arg, resolve));
+      const unresolvedArgs = expression.args.map((arg) => resolveExpression(arg, resolve));
       const callee = resolveExpression(expression.callee, resolve);
-      if (callee.kind !== "symbol" || callee.addressSpace !== "function") return { ...expression, callee, args };
-      const selected = resolve(callee.name, args);
+      if (callee.kind !== "symbol" || callee.addressSpace !== "function") return { ...expression, callee, args: unresolvedArgs };
+      const selected = resolve(callee.name, unresolvedArgs);
+      const args = contextualizeCallInitializers(unresolvedArgs, selected.params);
       return {
         ...expression,
         callee: {
@@ -229,4 +237,42 @@ function resolveExpression(expression: SemanticExpression, resolve: OverloadReso
     default:
       return expression;
   }
+}
+
+function contextualizeCallInitializers(
+  args: readonly SemanticExpression[],
+  params: CudaLiteSemanticFunction["params"] | undefined,
+): readonly SemanticExpression[] {
+  if (params === undefined) return args;
+  return args.map((arg, index) => contextualizeCallInitializer(arg, params[index]));
+}
+
+function contextualizeCallInitializer(
+  expression: SemanticExpression,
+  param: CudaLiteSemanticFunction["params"][number] | undefined,
+): SemanticExpression {
+  if (expression.kind !== "initializer" || param === undefined || param.pointer || param.valueType === undefined) return expression;
+  const elements = flattenInitializerElements(expression);
+  if (!isCudaVectorType(param.valueType)) return elements.length === 1 ? elements[0]! : expression;
+  const constructor = `make_${param.valueType}`;
+  return {
+    kind: "call",
+    callee: {
+      kind: "symbol",
+      id: createBuiltinSemanticSymbolId(constructor),
+      name: constructor,
+      valueType: param.valueType,
+      addressSpace: "builtin",
+      span: expression.span,
+    },
+    args: elements,
+    valueType: param.valueType,
+    span: expression.span,
+  };
+}
+
+function flattenInitializerElements(expression: Extract<SemanticExpression, { readonly kind: "initializer" }>): readonly SemanticExpression[] {
+  return expression.elements.flatMap((element) =>
+    element.kind === "initializer" ? flattenInitializerElements(element) : [element]
+  );
 }

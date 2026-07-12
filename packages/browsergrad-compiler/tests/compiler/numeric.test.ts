@@ -642,7 +642,7 @@ __global__ void shared_helper_result(int *out, int n) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("pick_max(v, vec2<f32>(x[0], 4.0)");
+      expect(compiled.wgsl).toContain("pick_max(v, vec2<f32>(f32(x[0u]), f32(4.0))");
       expect([...result.buffers.out as Float32Array]).toEqual([7]);
     });
 
