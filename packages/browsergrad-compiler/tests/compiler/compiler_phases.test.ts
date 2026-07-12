@@ -24,6 +24,8 @@ describe("compiler phase contracts", () => {
     const canonical = lowerSemanticModelToKernelIr(analysis, semantic, { workgroupSize: [1, 1, 1] });
     const runtimeLowered = lowerSemanticCudaRuntime(canonical);
     assertValidSemanticKernelIr(runtimeLowered);
+    const store = runtimeLowered.operations.find((operation) => operation.kind === "store");
+    expect(store?.kind === "store" ? store.target.baseId : undefined).toBe(out.id);
     const emitted = emitSemanticKernelIrWgsl(runtimeLowered);
 
     expect(emitted.wgsl).toContain("browsergrad-semantic-wgsl");

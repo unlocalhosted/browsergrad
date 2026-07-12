@@ -118,7 +118,13 @@ function verifyExpression(
   report: (message: string, span: SourceSpan) => void,
 ): void {
   verifySpan(expression.span, `expression '${expression.kind}'`, report);
-  if (expression.kind === "symbol" && !expression.name) report("IR symbol expression name must not be empty", expression.span);
+  if (expression.kind === "symbol") {
+    if (!expression.name) report("IR symbol expression name must not be empty", expression.span);
+    if (!expression.id) report("IR symbol expression identity must not be empty", expression.span);
+    if (expression.addressSpace === "unknown" || expression.id.startsWith("unresolved:")) {
+      report(`IR symbol expression '${expression.name}' is unresolved`, expression.span);
+    }
+  }
   for (const child of expressionChildren(expression)) verifyExpression(child, report);
 }
 
@@ -129,6 +135,9 @@ function verifyMemoryRef(
 ): void {
   verifySpan(ref.span, `memory reference '${ref.base}'`, report);
   if (!ref.base) report(`IR ${operation.kind} has an empty memory root`, ref.span);
+  if (!ref.baseId || ref.baseId.startsWith("unresolved-memory:")) {
+    report(`IR ${operation.kind} has an unresolved memory root '${ref.base}'`, ref.span);
+  }
   if (ref.addressSpace === "unknown" || ref.addressSpace === "builtin" || ref.addressSpace === "function" || ref.addressSpace === "uniform") {
     report(`IR ${operation.kind} uses invalid memory address space '${ref.addressSpace}'`, ref.span);
   }

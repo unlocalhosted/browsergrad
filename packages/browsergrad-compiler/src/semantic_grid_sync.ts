@@ -267,7 +267,7 @@ function semanticLocalsDeclaredBy(operations: readonly SemanticKernelIrOperation
   const locals = new Set<string>();
   visitSemanticOperations(operations, (operation) => {
     if (operation.kind === "declare" && operation.target.addressSpace === "local") locals.add(operation.target.name);
-    if (operation.kind === "dim3-declare") locals.add(operation.name);
+    if (operation.kind === "dim3-declare") locals.add(operation.target.name);
   });
   return locals;
 }

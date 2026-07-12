@@ -87,6 +87,8 @@ import { semanticStorageVectorFieldIndices } from "./semantic_value_types.js";
 import { semanticHalf2VectorReturnType } from "./semantic_vector_intrinsics.js";
 import { isSemanticMathCallName } from "./semantic_math_intrinsics.js";
 import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
+import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
+import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import {
   markCompilerPhase,
   type CanonicalIr,
@@ -94,9 +96,13 @@ import {
 } from "./compiler_phases.js";
 import type { AnalyzedCudaLiteModule } from "./analyzer.js";
 import {
+  createBuiltinSemanticSymbolId,
+  createUnresolvedSemanticSymbolId,
   createSemanticFunctionId,
   createSemanticSymbolId,
+  semanticMemoryIdFromSymbol,
   type SemanticFunctionId,
+  type SemanticMemoryId,
   type SemanticSymbolId,
 } from "./semantic_ids.js";
 import { createSemanticEnvironment, type SemanticEnvironment } from "./semantic_environment.js";
@@ -132,6 +138,7 @@ export interface CudaLiteSemanticSymbol {
     | "shared"
     | "constant"
     | "device-global"
+    | "external-pool"
     | "texture"
     | "function"
     | "builtin";
@@ -220,6 +227,7 @@ export interface CudaLiteSemanticModel {
 export type TypedCudaLiteSemanticModel = TypedSemantic<CudaLiteSemanticModel>;
 
 export interface SemanticMemoryRef {
+  readonly baseId: SemanticMemoryId;
   readonly base: string;
   readonly addressSpace: SemanticAddressSpace;
   readonly valueType?: CudaLiteScalarType;
@@ -233,6 +241,7 @@ export interface SemanticMemoryRef {
 }
 
 export interface SemanticMatrixTileRef {
+  readonly baseId: SemanticMemoryId;
   readonly base: string;
   readonly spec: MatrixTileResolvedSpec;
   readonly arrayDimensions: readonly number[];
@@ -250,6 +259,7 @@ export type SemanticExpression =
     }
   | {
       readonly kind: "symbol";
+      readonly id: SemanticSymbolId;
       readonly name: string;
       readonly valueType?: CudaLiteScalarType;
       readonly addressSpace: SemanticAddressSpace;
@@ -368,7 +378,7 @@ export type SemanticExpression =
 
 export type SemanticKernelIrOperation =
   | { readonly kind: "declare"; readonly target: CudaLiteSemanticSymbol; readonly init?: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "dim3-declare"; readonly name: string; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
+  | { readonly kind: "dim3-declare"; readonly target: CudaLiteSemanticSymbol; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "cooperative-group-declare"; readonly declaration: SemanticCooperativeGroupDeclaration; readonly span: SourceSpan }
   | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
@@ -686,9 +696,15 @@ export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): T
   const constants = analysis.constants.map(symbolForConstant);
   const deviceGlobals = analysis.deviceGlobals.map(symbolForDeviceGlobal);
   const textures = analysis.textures.map(symbolForTexture);
-  const functionSymbols = analysis.functions.map(symbolForFunctionDeclaration);
-  const globalScope = new Map([...params, ...constants, ...deviceGlobals, ...textures, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
-  const functions = analysis.functions.map((fn) => symbolForFunction(fn, globalScope));
+  const helperFunctions = analysis.functions.filter((fn) => fn.span.start !== analysis.kernel.span.start);
+  const externalPoolNames = new Set([
+    ...collectExternalDevicePoolNames(analysis.kernel.body),
+    ...helperFunctions.flatMap((fn) => collectExternalDevicePoolNames(fn.body)),
+  ]);
+  const externalPools = [...externalPoolNames].map((name) => symbolForExternalPool(name, analysis.kernel.span));
+  const functionSymbols = helperFunctions.map(symbolForFunctionDeclaration);
+  const globalScope = new Map([...params, ...constants, ...deviceGlobals, ...textures, ...externalPools, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
+  const functions = helperFunctions.map((fn) => symbolForFunction(fn, globalScope));
   const launchableEntries: CudaLiteSemanticLaunchableEntry[] = [
     ...analysis.kernels.map((kernel) => ({
       id: createSemanticFunctionId(kernel.name, kernel.span),
@@ -705,7 +721,7 @@ export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): T
       span: fn.span,
     })),
   ];
-  const symbols = [...params, ...constants, ...deviceGlobals, ...textures];
+  const symbols = [...params, ...constants, ...deviceGlobals, ...textures, ...externalPools];
   const environment = createSemanticEnvironment(
     [...symbols, ...functionSymbols, ...functions.flatMap((fn) => fn.params)],
     functions,
@@ -2306,6 +2322,7 @@ function semanticSpecialRegisterExpression(register: PtxSpecialU32Register, span
     kind: "member",
     object: {
       kind: "symbol",
+      id: createBuiltinSemanticSymbolId(objectName),
       name: objectName,
       valueType: "uint",
       addressSpace: "builtin",
@@ -2341,8 +2358,11 @@ function lowerStatement(
         span: statement.span,
       };
     }
-    case "dim3":
-      return { kind: "dim3-declare", name: statement.name, args: statement.args.map((arg) => lowerExpression(arg, scope)), span: statement.span };
+    case "dim3": {
+      const target = semanticSymbolForDim3(statement.name, statement.span);
+      scope.set(target.name, target);
+      return { kind: "dim3-declare", target, args: statement.args.map((arg) => lowerExpression(arg, scope)), span: statement.span };
+    }
     case "cooperative-group":
       scope.set(statement.name, semanticSymbolForCooperativeGroup(statement));
       return {
@@ -3163,8 +3183,27 @@ function lowerExpression(
       if (symbol === undefined && expression.name === "nullptr") {
         return { kind: "literal", literalKind: "number", value: 0, valueType: "voidptr", span: expression.span };
       }
+      if (symbol === undefined && isCudaBuiltinVectorSymbolName(expression.name)) {
+        return {
+          kind: "symbol",
+          id: createBuiltinSemanticSymbolId(expression.name),
+          name: expression.name,
+          addressSpace: "builtin",
+          span: expression.span,
+        };
+      }
+      if (symbol === undefined && expression.name === "cg::plus") {
+        return {
+          kind: "symbol",
+          id: createBuiltinSemanticSymbolId(expression.name),
+          name: expression.name,
+          addressSpace: "builtin",
+          span: expression.span,
+        };
+      }
       return {
         kind: "symbol",
+        id: symbol?.id ?? createUnresolvedSemanticSymbolId(expression.name, expression.span),
         name: symbol?.name ?? expression.name,
         ...(symbol?.valueType === undefined ? {} : { valueType: symbol.valueType }),
         addressSpace: symbol?.addressSpace ?? "unknown",
@@ -3240,7 +3279,7 @@ function lowerExpression(
       if (generatedRandom !== undefined && expression.callee.kind === "identifier") {
         return {
           kind: "call",
-          callee: { kind: "symbol", name: expression.callee.name, valueType: generatedRandom, addressSpace: "builtin", span: expression.callee.span },
+          callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(expression.callee.name), name: expression.callee.name, valueType: generatedRandom, addressSpace: "builtin", span: expression.callee.span },
           args,
           valueType: generatedRandom,
           span: expression.span,
@@ -3288,7 +3327,15 @@ function lowerExpression(
           span: expression.span,
         };
       }
-      const callee = lowerExpression(expression.callee, scope);
+      const callee = expression.callee.kind === "identifier" && !scope.has(expression.callee.name)
+        ? {
+            kind: "symbol" as const,
+            id: createBuiltinSemanticSymbolId(expression.callee.name),
+            name: expression.callee.name,
+            addressSpace: "builtin" as const,
+            span: expression.callee.span,
+          }
+        : lowerExpression(expression.callee, scope);
       const cooperativeGroupValueType = semanticCooperativeGroupCallValueType(expression);
       return {
         kind: "call",
@@ -3492,6 +3539,7 @@ function semanticCooperativeShuffleCall(
     kind: "call",
     callee: {
       kind: "symbol",
+      id: createBuiltinSemanticSymbolId(`__${op}`),
       name: `__${op}`,
       addressSpace: "builtin",
       span: expression.callee.span,
@@ -3699,6 +3747,7 @@ function semanticMatrixTileRef(
   const symbol = scope.get(cursor.name);
   if (!symbol?.matrixTile || indices.length !== (symbol.matrixTileArrayDimensions?.length ?? 0)) return undefined;
   return {
+    baseId: semanticMemoryIdFromSymbol(symbol.id),
     base: symbol.name,
     spec: symbol.matrixTile,
     arrayDimensions: symbol.matrixTileArrayDimensions ?? [],
@@ -4172,7 +4221,7 @@ function semanticSincosStores(
 function mathCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
   return {
     kind: "call",
-    callee: { kind: "symbol", name, valueType: "float", addressSpace: "builtin", span },
+    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "float", addressSpace: "builtin", span },
     args: [value],
     valueType: "float",
     span,
@@ -4182,7 +4231,7 @@ function mathCallExpression(name: string, value: SemanticExpression, span: Sourc
 function semanticCallExpression(name: string, args: readonly SemanticExpression[], valueType: Exclude<CudaLiteScalarType, "void">, span: SourceSpan): SemanticExpression {
   return {
     kind: "call",
-    callee: { kind: "symbol", name, valueType, addressSpace: "builtin", span },
+    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType, addressSpace: "builtin", span },
     args,
     valueType,
     span,
@@ -4229,7 +4278,7 @@ function unaryFloatCallExpression(name: string, value: SemanticExpression, span:
 function unaryIntCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
   return {
     kind: "call",
-    callee: { kind: "symbol", name, valueType: "int", addressSpace: "builtin", span },
+    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "int", addressSpace: "builtin", span },
     args: [value],
     valueType: "int",
     span,
@@ -4239,7 +4288,7 @@ function unaryIntCallExpression(name: string, value: SemanticExpression, span: S
 function binaryFloatCallExpression(name: string, left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
   return {
     kind: "call",
-    callee: { kind: "symbol", name, valueType: "float", addressSpace: "builtin", span },
+    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "float", addressSpace: "builtin", span },
     args: [left, right],
     valueType: "float",
     span,
@@ -4249,7 +4298,7 @@ function binaryFloatCallExpression(name: string, left: SemanticExpression, right
 function binaryIntCallExpression(name: string, left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
   return {
     kind: "call",
-    callee: { kind: "symbol", name, valueType: "int", addressSpace: "builtin", span },
+    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "int", addressSpace: "builtin", span },
     args: [left, right],
     valueType: "int",
     span,
@@ -4598,6 +4647,7 @@ function memoryRefFromExpression(expression: SemanticExpression): SemanticMemory
   if (!parts || !isMemoryAddressSpace(parts.base.addressSpace, parts.indices.length)) return undefined;
   const valueType = expressionValueType(expression);
   return {
+    baseId: semanticMemoryIdFromSymbol(parts.base.id),
     base: parts.base.name,
     addressSpace: parts.base.addressSpace,
     ...(valueType === undefined ? {} : { valueType }),
@@ -4654,7 +4704,7 @@ function dedupeMemoryRefs(refs: readonly SemanticMemoryRef[]): readonly Semantic
   const seen = new Set<string>();
   const out: SemanticMemoryRef[] = [];
   for (const ref of refs) {
-    const key = `${ref.base}:${ref.addressSpace}:${ref.span.start}:${ref.span.end}`;
+    const key = `${ref.baseId}:${ref.addressSpace}:${ref.span.start}:${ref.span.end}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(ref);
@@ -4721,6 +4771,34 @@ function symbolForTexture(texture: CudaLiteTexture2D): CudaLiteSemanticSymbol {
     dimensions: [],
     addressSpace: "texture",
     span: texture.span,
+  };
+}
+
+function symbolForExternalPool(name: string, span: SourceSpan): CudaLiteSemanticSymbol {
+  return {
+    id: createSemanticSymbolId("external-pool", name, span),
+    name,
+    kind: "external-pool",
+    valueType: "devicepool",
+    pointer: true,
+    constant: false,
+    dimensions: [],
+    addressSpace: "pool",
+    span,
+  };
+}
+
+function semanticSymbolForDim3(name: string, span: SourceSpan): CudaLiteSemanticSymbol {
+  return {
+    id: createSemanticSymbolId("dim3", name, span),
+    name,
+    kind: "local",
+    valueType: "uint3",
+    pointer: false,
+    constant: false,
+    dimensions: [],
+    addressSpace: "local",
+    span,
   };
 }
 
@@ -5565,6 +5643,7 @@ function semanticPointerAliasScalarIndex(
 function semanticSymbolExpression(symbol: CudaLiteSemanticSymbol, span: SourceSpan): Extract<SemanticExpression, { readonly kind: "symbol" }> {
   return {
     kind: "symbol",
+    id: symbol.id,
     name: symbol.name,
     ...(symbol.valueType === undefined ? {} : { valueType: symbol.valueType }),
     addressSpace: symbol.addressSpace,

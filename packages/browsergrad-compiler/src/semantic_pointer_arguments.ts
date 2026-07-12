@@ -1,9 +1,11 @@
 import type { SemanticExpression, SemanticMemoryRef } from "./semantic_ir.js";
+import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 
 export function semanticPointerArgumentMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {
   if (expression.kind === "symbol") {
     if (expression.addressSpace !== "storage" && expression.addressSpace !== "device-global" && expression.addressSpace !== "shared" && expression.addressSpace !== "constant" && expression.addressSpace !== "local") return undefined;
     return {
+      baseId: semanticMemoryIdFromSymbol(expression.id),
       base: expression.name,
       addressSpace: expression.addressSpace,
       ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),

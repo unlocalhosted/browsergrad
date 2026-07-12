@@ -86,6 +86,12 @@ import type {
 } from "./semantic_ir.js";
 import { semanticInlineAsmLdmatrixAssignments } from "./semantic_ir.js";
 import {
+  createBuiltinSemanticSymbolId,
+  createSemanticSymbolId,
+  createUnresolvedSemanticMemoryId,
+  semanticMemoryIdFromSymbol,
+} from "./semantic_ids.js";
+import {
   isMatrixTileByteValueType,
   matrixTileElementCount,
   type MatrixTileLayout,
@@ -1066,7 +1072,7 @@ function semanticReferenceCallSupported(
     return fn !== undefined &&
       fn.returnType !== "void" &&
       fn.returnType === operation.result.valueType &&
-      semanticReferenceFunctionCallSupported(semanticCallOperationExpression(operation, fn.returnType), compiled);
+      semanticReferenceFunctionCallSupported(semanticCallOperationExpression(operation, fn), compiled);
   }
   if (operation.callee === "assert") return semanticAssertCallSupported(operation.args, (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
   if (operation.callee === "printf") return semanticPrintfCallSupported(operation.args, (arg) => semanticReferenceExpressionSupported(arg, "scalar", compiled));
@@ -1076,7 +1082,7 @@ function semanticReferenceCallSupported(
   if (operation.callee === "curand_init") {
     return semanticReferenceCurandCallSupported({
       kind: "call",
-      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(operation.callee), name: operation.callee, addressSpace: "builtin", span: operation.span },
       args: operation.args,
       valueType: "uint",
       span: operation.span,
@@ -1085,7 +1091,7 @@ function semanticReferenceCallSupported(
   if (operation.callee === "skipahead") {
     return semanticReferenceCurandCallSupported({
       kind: "call",
-      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(operation.callee), name: operation.callee, addressSpace: "builtin", span: operation.span },
       args: operation.args,
       valueType: "uint",
       span: operation.span,
@@ -1274,7 +1280,7 @@ function semanticReferenceExpressionSupported(
 }
 
 function unsupportedMemoryRef(span: SourceSpan): SemanticMemoryRef {
-  return { base: "", addressSpace: "unknown", indices: [], fields: [], span };
+  return { baseId: createUnresolvedSemanticMemoryId("", span), base: "", addressSpace: "unknown", indices: [], fields: [], span };
 }
 
 function semanticReferenceOperationsContainUnsupportedCalls(
@@ -2155,7 +2161,7 @@ function execSemanticCall(
   if (operation.callee === "skipahead") {
     evalSemanticExpression({
       kind: "call",
-      callee: { kind: "symbol", name: operation.callee, addressSpace: "builtin", span: operation.span },
+      callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(operation.callee), name: operation.callee, addressSpace: "builtin", span: operation.span },
       args: operation.args,
       valueType: "uint",
       span: operation.span,
@@ -2197,13 +2203,13 @@ function assignSemanticCallResult(
 
 function semanticCallOperationExpression(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
-  valueType: CudaLiteScalarType,
+  fn: CompiledCudaLiteKernel["kernelIr"]["functions"][number],
 ): Extract<SemanticExpression, { readonly kind: "call" }> {
   return {
     kind: "call",
-    callee: { kind: "symbol", name: operation.callee, addressSpace: "function", valueType, span: operation.span },
+    callee: { kind: "symbol", id: createSemanticSymbolId("function", fn.name, fn.span), name: operation.callee, addressSpace: "function", valueType: fn.returnType, span: operation.span },
     args: operation.args,
-    valueType,
+    valueType: fn.returnType,
     span: operation.span,
   };
 }
@@ -2793,6 +2799,7 @@ function evalSemanticSharedAddressCall(
 function semanticReferenceSharedAddressMemoryRef(arg: SemanticExpression): SemanticMemoryRef | undefined {
   const target = arg.kind === "unary" && arg.operator === "&" ? arg.argument : arg;
   return memoryRefFromIndexExpression(target) ?? (target.kind === "symbol" && target.addressSpace === "shared" ? {
+    baseId: semanticMemoryIdFromSymbol(target.id),
     base: target.name,
     addressSpace: target.addressSpace,
     ...(target.valueType === undefined ? {} : { valueType: target.valueType }),
@@ -4869,6 +4876,7 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
     (firstArg.argument.addressSpace === "device-global" || firstArg.argument.addressSpace === "shared")
   ) {
     return {
+      baseId: semanticMemoryIdFromSymbol(firstArg.argument.id),
       base: firstArg.argument.name,
       addressSpace: firstArg.argument.addressSpace,
       ...(firstArg.argument.valueType === undefined ? {} : { valueType: firstArg.argument.valueType }),
@@ -4880,6 +4888,7 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
   if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
   if (firstArg.kind === "symbol" && (firstArg.addressSpace === "storage" || firstArg.addressSpace === "shared")) {
     return {
+      baseId: semanticMemoryIdFromSymbol(firstArg.id),
       base: firstArg.name,
       addressSpace: firstArg.addressSpace,
       ...(firstArg.valueType === undefined ? {} : { valueType: firstArg.valueType }),
@@ -4894,6 +4903,7 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
 function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticMemoryRef | undefined {
   if (expression.kind === "symbol" && expression.addressSpace === "device-global") {
     return {
+      baseId: semanticMemoryIdFromSymbol(expression.id),
       base: expression.name,
       addressSpace: expression.addressSpace,
       ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
@@ -4912,6 +4922,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
   if (target.kind === "cast" && target.pointer) target = target.expression;
   if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant" && target.addressSpace !== "device-global" && target.addressSpace !== "local" && target.addressSpace !== "shared")) return undefined;
   return {
+    baseId: semanticMemoryIdFromSymbol(target.id),
     base: target.name,
     addressSpace: target.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
@@ -5484,6 +5495,7 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   const constantSymbol = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "constant");
   if (constantSymbol && isSemanticFloatVectorType(constantSymbol.valueType)) {
     return readVectorMemory({
+      baseId: semanticMemoryIdFromSymbol(constantSymbol.id),
       base: name,
       addressSpace: "constant",
       valueType: constantSymbol.valueType as CudaLiteScalarType,
@@ -5493,9 +5505,9 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
     }, context);
   }
   const global = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "device-global");
-  if (global && global.dimensions.length === 0) return readMemory({ base: name, addressSpace: "device-global", indices: [], fields: [], span }, context);
+  if (global && global.dimensions.length === 0) return readMemory({ baseId: semanticMemoryIdFromSymbol(global.id), base: name, addressSpace: "device-global", indices: [], fields: [], span }, context);
   const shared = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "shared");
-  if (shared && shared.dimensions.length === 0) return readMemory({ base: name, addressSpace: "shared", indices: [], fields: [], span }, context);
+  if (shared && shared.dimensions.length === 0) return readMemory({ baseId: semanticMemoryIdFromSymbol(shared.id), base: name, addressSpace: "shared", indices: [], fields: [], span }, context);
   const storageParam = context.compiled.kernelIr.params.find((param) => param.name === name && param.addressSpace === "storage");
   if (storageParam) return context.buffers.has(name) ? 1 : 0;
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);

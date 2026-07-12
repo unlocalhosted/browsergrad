@@ -23,6 +23,31 @@ export function createSemanticFunctionId(
   return `function:${span.start}:${name}` as SemanticFunctionId;
 }
 
+export function createBuiltinSemanticSymbolId(name: string): SemanticSymbolId {
+  return `builtin:${name}` as SemanticSymbolId;
+}
+
+export function createGeneratedSemanticSymbolId(
+  name: string,
+  span: SourceSpan,
+): SemanticSymbolId {
+  return `generated:${span.start}:${name}` as SemanticSymbolId;
+}
+
+export function createUnresolvedSemanticSymbolId(
+  name: string,
+  span: SourceSpan,
+): SemanticSymbolId {
+  return `unresolved:${span.start}:${name}` as SemanticSymbolId;
+}
+
 export function semanticMemoryIdFromSymbol(id: SemanticSymbolId): SemanticMemoryId {
   return id as string as SemanticMemoryId;
+}
+
+export function createUnresolvedSemanticMemoryId(
+  name: string,
+  span: SourceSpan,
+): SemanticMemoryId {
+  return `unresolved-memory:${span.start}:${name}` as SemanticMemoryId;
 }

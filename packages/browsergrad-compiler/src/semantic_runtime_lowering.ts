@@ -12,6 +12,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
+import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 import type { CudaLiteScalarType, SourceSpan } from "./types.js";
 import { markCompilerPhase, type RuntimeLoweredIr } from "./compiler_phases.js";
 import type { CanonicalSemanticKernelIr } from "./semantic_ir.js";
@@ -258,6 +259,7 @@ function semanticRuntimeMemoryRef(expression: SemanticExpression): SemanticMemor
   if (target.kind !== "symbol" || target.addressSpace === "local" && indices.length === 0) return undefined;
   const valueType = semanticRuntimeExpressionValueType(expression);
   return {
+    baseId: semanticMemoryIdFromSymbol(target.id),
     base: target.name,
     addressSpace: target.addressSpace,
     ...(valueType === undefined ? {} : { valueType }),
