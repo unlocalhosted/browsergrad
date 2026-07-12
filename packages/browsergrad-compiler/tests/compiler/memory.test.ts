@@ -4446,7 +4446,8 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("bg_ptr_read_f16x2");
+      expect(compiled.wgsl).toContain("bg_semantic_packed_shared_u8_store");
+      expect(compiled.wgsl).toContain("unpack2x16float");
       expect(compiled.wgsl).toContain("pack2x16float");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
     });
@@ -4469,7 +4470,8 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("bg_ptr_read_f32x2");
+      expect(compiled.wgsl).toContain("bg_semantic_packed_shared_u8_store");
+      expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>");
       expect(compiled.wgsl).toContain("<< 16u");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
     });

@@ -724,7 +724,8 @@ function semanticReferenceSharedHalfBitView(ref: SemanticMemoryRef, compiled: Co
 }
 
 function semanticPackedSharedByteViewSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "uchar" || valueType === "uint" || valueType === "int" || valueType === "float";
+  return valueType === "uchar" || valueType === "uint" || valueType === "int" || valueType === "float" ||
+    valueType === "half" || valueType === "bf16" || valueType === "half2" || valueType === "bf162";
 }
 
 function semanticReferenceSharedScalarVectorView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -5456,6 +5457,8 @@ function readPackedSemanticSharedByteView(
     context.trace.sharedReads.push({ name: ref.base, index, value, ok });
     bits = (bits | value << lane * 8) >>> 0;
   }
+  if (ref.valueType === "half") return float16BitsToFloat32(bits & 0xffff);
+  if (ref.valueType === "bf16") return bfloat16BitsToFloat32(bits & 0xffff);
   if (ref.valueType === "float") return uintBitsToFloat32(bits);
   if (ref.valueType === "int") return bits | 0;
   return ref.valueType === "uchar" ? bits & 0xff : bits >>> 0;
@@ -5469,7 +5472,13 @@ function writePackedSemanticSharedByteView(
 ): void {
   const byteIndex = packedSemanticSharedByteIndex(ref, context);
   const byteCount = sizeofCudaType(ref.valueType ?? "uchar") ?? 1;
-  const bits = ref.valueType === "float" ? float32ToUintBits(value) : value >>> 0;
+  const bits = ref.valueType === "half"
+    ? float32ToFloat16Bits(value)
+    : ref.valueType === "bf16"
+    ? roundFloat32ToBfloat16Bits(value, "rn")
+    : ref.valueType === "float"
+    ? float32ToUintBits(value)
+    : value >>> 0;
   for (let lane = 0; lane < byteCount; lane++) {
     const index = byteIndex + lane;
     const byte = bits >>> lane * 8 & 0xff;
@@ -5516,6 +5525,14 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
   if (ref.addressSpace === "shared") {
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    if (semanticReferencePackedSharedByteRoot(ref, context.compiled) && (valueType === "half2" || valueType === "bf162")) {
+      const laneType = valueType === "half2" ? "half" : "bf16";
+      return [0, 1].map((lane) => readPackedSemanticSharedByteView(
+        semanticCopyMemoryRefAt({ ...ref, valueType: laneType, pointerBaseUnitBytes: 1 }, lane * 2),
+        buffer,
+        context,
+      ));
+    }
     const base = semanticReferenceSharedVectorBase(ref, context, laneCount);
     const bitRootType = semanticReferenceSharedVectorBitViewRootType(ref, context.compiled);
     const valueScalar = cudaVectorScalarType(valueType);
@@ -5600,6 +5617,18 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
   if (ref.addressSpace === "shared") {
     const buffer = context.sharedMemory.get(ref.base);
     if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    if (semanticReferencePackedSharedByteRoot(ref, context.compiled) && (vectorType === "half2" || vectorType === "bf162")) {
+      const laneType = vectorType === "half2" ? "half" : "bf16";
+      for (let lane = 0; lane < 2; lane++) {
+        writePackedSemanticSharedByteView(
+          semanticCopyMemoryRefAt({ ...ref, valueType: laneType, pointerBaseUnitBytes: 1 }, lane * 2),
+          Number(value[lane] ?? 0),
+          buffer,
+          context,
+        );
+      }
+      return;
+    }
     const base = semanticReferenceSharedVectorBase(ref, context, laneCount);
     const bitRootType = semanticReferenceSharedVectorBitViewRootType(ref, context.compiled);
     const valueScalar = cudaVectorScalarType(vectorType);

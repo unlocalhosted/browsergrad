@@ -1615,7 +1615,8 @@ function semanticWgslPackedSharedByteRoot(ref: SemanticMemoryRef, ir: SemanticKe
 }
 
 function semanticPackedSharedByteViewSupported(valueType: CudaLiteScalarType | undefined): boolean {
-  return valueType === "uchar" || valueType === "uint" || valueType === "int" || valueType === "float";
+  return valueType === "uchar" || valueType === "uint" || valueType === "int" || valueType === "float" ||
+    valueType === "half" || valueType === "bf16" || valueType === "half2" || valueType === "bf162";
 }
 
 function semanticWgslCopySupported(
@@ -3338,7 +3339,9 @@ function emitSemanticStore(
     semanticWgslLocalVectorBitViewRootType(operation.target, ir) !== undefined ||
     semanticWgslSharedScalarBitViewRootType(operation.target, ir) !== undefined
   ) {
-    const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
+    const value = isCudaVectorType(operation.target.valueType)
+      ? emitSemanticExpression(operation.value, ir, names, options, textureSpecializations).code
+      : emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
     if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
     const binaryOperator = semanticAssignmentBinaryOperator(operation.operator);
     if (binaryOperator === undefined) throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
@@ -5743,6 +5746,25 @@ function emitSemanticPackedSharedByteRead(
   if (ref.valueType === "uint") return loaded;
   if (ref.valueType === "int") return `bitcast<i32>(${loaded})`;
   if (ref.valueType === "float") return `bitcast<f32>(${loaded})`;
+  if (ref.valueType === "half" || ref.valueType === "bf16" || ref.valueType === "half2" || ref.valueType === "bf162") {
+    const byteCount = ref.valueType === "half" || ref.valueType === "bf16" ? 2 : 4;
+    const bytes = Array.from({ length: byteCount }, (_, offset) => {
+      const address = `(${byteIndex} + ${offset}u)`;
+      const source = `atomicLoad(&${nameFor(ref.base, names)}[(${address} >> 2u)])`;
+      return `((${source} >> ((${address} & 3u) * 8u)) & 255u)`;
+    });
+    const bits = `(${bytes.map((byte, offset) => offset === 0 ? byte : `(${byte} << ${offset * 8}u)`).join(" | ")})`;
+    if (ref.valueType === "half") {
+      const value = `unpack2x16float(${bits}).x`;
+      return effectiveSemanticF16Mode(ir, options) === "native" ? `f16(${value})` : value;
+    }
+    if (ref.valueType === "bf16") return `bitcast<f32>((${bits} & 0xffffu) << 16u)`;
+    if (ref.valueType === "half2") {
+      const value = `unpack2x16float(${bits})`;
+      return effectiveSemanticF16Mode(ir, options) === "native" ? `vec2<f16>(${value})` : value;
+    }
+    return `vec2<f32>(bitcast<f32>((${bits} & 0xffffu) << 16u), bitcast<f32>(${bits} & 0xffff0000u))`;
+  }
   const shift = `((${byteIndex} & 3u) * 8u)`;
   return `((${loaded} >> ${shift}) & 255u)`;
 }
@@ -5758,6 +5780,22 @@ function emitSemanticPackedSharedByteWrite(
   const word = `${nameFor(ref.base, names)}[(${byteIndex} >> 2u)]`;
   if (ref.valueType === "uint") return `atomicStore(&${word}, ${value})`;
   if (ref.valueType === "int" || ref.valueType === "float") return `atomicStore(&${word}, bitcast<u32>(${value}))`;
+  if (ref.valueType === "half" || ref.valueType === "bf16" || ref.valueType === "half2" || ref.valueType === "bf162") {
+    const bits = ref.valueType === "half"
+      ? `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`
+      : ref.valueType === "bf16"
+      ? `(bitcast<u32>(f32(${value})) >> 16u)`
+      : ref.valueType === "half2"
+      ? `pack2x16float(vec2<f32>(${value}))`
+      : `((bitcast<u32>(f32((${value}).x)) >> 16u) | (bitcast<u32>(f32((${value}).y)) & 0xffff0000u))`;
+    const byteCount = ref.valueType === "half" || ref.valueType === "bf16" ? 2 : 4;
+    const temporary = nameFor(`bg_packed_shared_bits_${ref.span.start}`, names);
+    const writes = Array.from({ length: byteCount }, (_, offset) => {
+      const address = `(${byteIndex} + ${offset}u)`;
+      return `${PACKED_SHARED_U8_STORE}(&${nameFor(ref.base, names)}[(${address} >> 2u)], ((${address} & 3u) * 8u), (${temporary} >> ${offset * 8}u))`;
+    });
+    return `{ let ${temporary}: u32 = ${bits}; ${writes.join("; ")}; }`;
+  }
   const shift = `((${byteIndex} & 3u) * 8u)`;
   return `${PACKED_SHARED_U8_STORE}(&${word}, ${shift}, u32(${value}))`;
 }
