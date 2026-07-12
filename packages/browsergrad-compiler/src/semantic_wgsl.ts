@@ -115,6 +115,8 @@ import {
   createTypedWgslLiteral,
   createTypedWgslZero,
   createTypedWgslCall,
+  createTypedWgslMemberAccess,
+  createTypedWgslBitcast,
   createTypedWgslConstructor,
   isWgslVectorType,
   isTypedWgslLiteralCode,
@@ -4446,11 +4448,7 @@ function emitSemanticExpression(
   }
   if (expression.kind === "unary") {
     if (semanticWgslBf162LocalBitsCastSupported(expression, ir)) {
-      return createTrustedWgslExpression(
-        emitSemanticBf162LocalBitsCast(expression, ir, names, options, textureSpecializations),
-        semanticExpressionWgslType(expression, ir),
-        expression.span,
-      );
+      return emitSemanticBf162LocalBitsCast(expression, ir, names, options, textureSpecializations);
     }
     return emitSemanticUnary(expression, ir, names, options, textureSpecializations);
   }
@@ -4593,7 +4591,7 @@ function renderSemanticExpression(
     case "cast":
       return emitSemanticCast(expression, ir, names, options, textureSpecializations);
     case "unary":
-      if (semanticWgslBf162LocalBitsCastSupported(expression, ir)) return emitSemanticBf162LocalBitsCast(expression, ir, names, options, textureSpecializations);
+      if (semanticWgslBf162LocalBitsCastSupported(expression, ir)) return emitSemanticBf162LocalBitsCast(expression, ir, names, options, textureSpecializations).code;
       return emitSemanticUnary(expression, ir, names, options, textureSpecializations).code;
     case "binary":
       return emitSemanticBinary(expression, ir, names, options, textureSpecializations).code;
@@ -5420,13 +5418,20 @@ function emitSemanticBf162LocalBitsCast(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
-): string {
+): TypedWgslExpression {
   const cast = expression.argument;
   if (cast.kind !== "cast" || cast.expression.kind !== "unary" || cast.expression.argument.kind !== "symbol") {
     throw semanticWgslError("semantic WGSL bf162 bitcast requires local bf162 symbol", expression.span);
   }
-  const value = emitSemanticExpression(cast.expression.argument, ir, names, options, textureSpecializations).code;
-  return `((bitcast<u32>(f32((${value}).x)) >> 16u) | (bitcast<u32>(f32((${value}).y)) & 0xffff0000u))`;
+  const value = emitSemanticExpression(cast.expression.argument, ir, names, options, textureSpecializations);
+  const lane = (property: "x" | "y"): TypedWgslExpression => {
+    const member = createTypedWgslMemberAccess(value, property, "f32", expression.span);
+    const scalar = convertTypedWgslExpression(member, "f32", `f32(${member.code})`);
+    return createTypedWgslBitcast("u32", scalar, expression.span);
+  };
+  const low = emitTypedWgslBinary(">>", lane("x"), createTypedWgslLiteral("16u", "u32", expression.span), expression.span);
+  const high = emitTypedWgslBinary("&", lane("y"), createTypedWgslLiteral("0xffff0000u", "u32", expression.span), expression.span);
+  return emitTypedWgslBinary("|", low, high, expression.span);
 }
 
 function emitSemanticCast(

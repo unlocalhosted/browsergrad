@@ -3,6 +3,8 @@ import {
   convertTypedWgslExpression,
   createTypedWgslIdentifier,
   createTypedWgslCall,
+  createTypedWgslMemberAccess,
+  createTypedWgslBitcast,
   createTypedWgslConstructor,
   createTypedWgslZero,
   createTypedWgslLocalAssignmentStatement,
@@ -152,5 +154,17 @@ describe("typed WGSL expressions", () => {
     expect(createTypedWgslZero("u32", span)).toMatchObject({ code: "0u", type: "u32", span });
     expect(createTypedWgslZero("vec3<i32>", span)).toMatchObject({ code: "vec3<i32>(0)", type: "vec3<i32>", span });
     expect(createTypedWgslZero("vec2<f16>", span)).toMatchObject({ code: "vec2<f16>(f16(0.0))", type: "vec2<f16>", span });
+  });
+
+  it("types member access and equal-width bitcasts", () => {
+    const vector = createTypedWgslIdentifier("pair", "vec2<f32>", span);
+    const lane = createTypedWgslMemberAccess(vector, "x", "f32", span);
+    expect(createTypedWgslBitcast("u32", lane, span)).toMatchObject({
+      code: "bitcast<u32>((pair).x)",
+      type: "u32",
+      span,
+    });
+    expect(() => createTypedWgslBitcast("f16", lane, span)).toThrow("requires equal bit widths");
+    expect(() => createTypedWgslMemberAccess(vector, "x()", "f32", span)).toThrow("invalid WGSL member");
   });
 });

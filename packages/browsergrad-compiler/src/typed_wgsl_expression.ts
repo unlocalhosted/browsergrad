@@ -21,6 +21,8 @@ type TypedWgslExpressionNode =
   | { readonly kind: "unary"; readonly operator: WgslUnaryOperator; readonly operand: TypedWgslExpressionValue }
   | { readonly kind: "select"; readonly alternate: TypedWgslExpressionValue; readonly consequent: TypedWgslExpressionValue; readonly condition: TypedWgslExpressionValue }
   | { readonly kind: "call"; readonly callee: string; readonly args: readonly TypedWgslExpressionValue[] }
+  | { readonly kind: "member"; readonly object: TypedWgslExpressionValue; readonly property: string }
+  | { readonly kind: "bitcast"; readonly targetType: WgslExpressionType; readonly source: TypedWgslExpressionValue }
   | { readonly kind: "constructor"; readonly targetType: WgslVectorType; readonly args: readonly TypedWgslExpressionValue[] };
 
 class TypedWgslExpressionValue implements TypedWgslExpression {
@@ -102,6 +104,37 @@ export function createTypedWgslCall(
   return new TypedWgslExpressionValue(
     { kind: "call", callee, args: args.map(expressionValue) },
     resultType,
+    span,
+  );
+}
+
+export function createTypedWgslMemberAccess(
+  object: TypedWgslExpression,
+  property: string,
+  resultType: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(property)) {
+    throw new TypeError(`invalid WGSL member '${property}'`);
+  }
+  return new TypedWgslExpressionValue(
+    { kind: "member", object: expressionValue(object), property },
+    resultType,
+    span,
+  );
+}
+
+export function createTypedWgslBitcast(
+  targetType: WgslExpressionType,
+  source: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!sameBitWidth(targetType, source.type)) {
+    throw new TypeError(`WGSL bitcast requires equal bit widths, received '${source.type}' and '${targetType}'`);
+  }
+  return new TypedWgslExpressionValue(
+    { kind: "bitcast", targetType, source: expressionValue(source) },
+    targetType,
     span,
   );
 }
@@ -294,6 +327,8 @@ function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
     case "unary": return node.operator === "+" ? node.operand.code : `${node.operator}(${node.operand.code})`;
     case "select": return `select(${node.alternate.code}, ${node.consequent.code}, ${node.condition.code})`;
     case "call": return `${node.callee}(${node.args.map((arg) => arg.code).join(", ")})`;
+    case "member": return `(${node.object.code}).${node.property}`;
+    case "bitcast": return `bitcast<${node.targetType}>(${node.source.code})`;
     case "constructor": return `${node.targetType}(${node.args.map((arg) => arg.code).join(", ")})`;
   }
 }
@@ -333,4 +368,17 @@ function isNumericScalar(type: WgslExpressionType): type is "f16" | "f32" | "i32
 
 function isNumeric(type: WgslExpressionType): boolean {
   return type !== "bool";
+}
+
+function sameBitWidth(left: WgslExpressionType, right: WgslExpressionType): boolean {
+  return wgslBitWidth(left) !== undefined && wgslBitWidth(left) === wgslBitWidth(right);
+}
+
+function wgslBitWidth(type: WgslExpressionType): number | undefined {
+  if (type === "i32" || type === "u32" || type === "f32") return 32;
+  if (type === "f16") return 16;
+  if (type.startsWith("vec2<")) return type === "vec2<f16>" ? 32 : 64;
+  if (type.startsWith("vec3<")) return 96;
+  if (type.startsWith("vec4<")) return 128;
+  return undefined;
 }

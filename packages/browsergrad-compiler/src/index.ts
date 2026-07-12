@@ -105,6 +105,8 @@ export {
   createTypedWgslLiteral,
   createTypedWgslZero,
   createTypedWgslCall,
+  createTypedWgslMemberAccess,
+  createTypedWgslBitcast,
   createTypedWgslConstructor,
   isWgslVectorType,
   convertTypedWgslExpression,
