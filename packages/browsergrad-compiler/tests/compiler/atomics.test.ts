@@ -931,7 +931,8 @@ describe("CUDA-lite compiler: Atomics", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("bg_tex2d_uint_tex");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("textureLoad(texArg");
       expect(compiled.wgsl).toContain("atomicAdd");
       expect(compiled.wgsl).toContain("atomicStore(&out[((u32(tid) * 4u) + 0u)]");
       expect(compiled.wgsl).toContain("bg_active_lane = false;");
@@ -1089,10 +1090,10 @@ describe("CUDA-lite compiler: Atomics", () => {
         },
       });
 
-      expect(compiled.wgsl).toContain("fn readDescriptorAtomic__bg_tex_0");
-      expect(compiled.wgsl).toContain("fn readDescriptorAtomic__bg_tex_1");
+      expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+      expect(compiled.wgsl!.match(/fn readDescriptorAtomic__bg_tex_/gu)).toHaveLength(2);
       expect(compiled.wgsl).toContain("atomicAdd(");
-      expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
+      expect(compiled.wgsl).toContain("textureDimensions(bg_texture)");
     });
 
   it("packs bf16x2 local reinterpret bits for atomic CAS operands", () => {

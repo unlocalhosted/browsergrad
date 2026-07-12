@@ -4754,26 +4754,29 @@ function pointerAliasValueExpression(
   }
   if (isDirectSharedPointerAddress(expression, scope)) return undefined;
   const alias = localPointerAliasForInitializer(expression, scope);
-  if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
-  const root = scope.get(alias.pointerRoot);
+  const scalar = semanticPointerAliasScalarIndex(alias, span);
+  if (!scalar) return undefined;
+  const root = scope.get(scalar.root);
   if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;
   const aliasValueType = pointerAliasTargetValueType(expression, scope) ?? root.valueType;
   return {
     kind: "index",
     target: semanticSymbolExpression(root, span),
-    index: !encodeNull || alias.pointerValid === undefined
-      ? alias.pointerBaseIndices[0]!
+    index: !encodeNull || scalar.valid === undefined
+      ? scalar.index
       : {
           kind: "conditional",
-          condition: alias.pointerValid,
-          consequent: alias.pointerBaseIndices[0]!,
+          condition: scalar.valid,
+          consequent: scalar.index,
           alternate: { kind: "literal", literalKind: "number", value: 0xffffffff, valueType: "uint", span },
           valueType: "uint",
           span,
         },
     ...optionalValueType(aliasValueType),
     addressSpace: root.addressSpace,
-    ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(scalar.scalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(scalar.unitBytes === undefined ? {} : { pointerBaseUnitBytes: scalar.unitBytes }),
+    ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression, root, scope)),
     span,
   };
 }
@@ -5906,19 +5909,21 @@ function localPointerAliasScalarIndex(
 function semanticPointerAliasScalarIndex(
   alias: SemanticPointerAlias | undefined,
   span: SourceSpan,
-): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number } | undefined {
+): { readonly root: string; readonly index: SemanticExpression; readonly valid?: SemanticExpression; readonly unitBytes?: number; readonly scalarLane?: boolean } | undefined {
   if (alias?.pointerRoot && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) && alias.pointerBaseIndices?.length === 1) {
     return {
       root: alias.pointerRoot,
       index: alias.pointerBaseIndices[0]!,
       ...(alias.pointerValid === undefined ? {} : { valid: alias.pointerValid }),
       ...(alias.pointerBaseUnitBytes === undefined ? {} : { unitBytes: alias.pointerBaseUnitBytes }),
+      ...(alias.pointerBaseIsScalarLane === true ? { scalarLane: true } : {}),
     };
   }
   if (!alias?.pointerSelection) return undefined;
   const consequent = semanticPointerAliasScalarIndex(alias.pointerSelection.consequent, span);
   const alternate = semanticPointerAliasScalarIndex(alias.pointerSelection.alternate, span);
-  if (!consequent || !alternate || consequent.root !== alternate.root || consequent.valid || alternate.valid || consequent.unitBytes !== alternate.unitBytes) return undefined;
+  if (!consequent || !alternate || consequent.root !== alternate.root || consequent.valid || alternate.valid ||
+    consequent.unitBytes !== alternate.unitBytes || consequent.scalarLane !== alternate.scalarLane) return undefined;
   return {
     root: consequent.root,
     index: {
@@ -5930,6 +5935,7 @@ function semanticPointerAliasScalarIndex(
       span,
     },
     ...(consequent.unitBytes === undefined ? {} : { unitBytes: consequent.unitBytes }),
+    ...(consequent.scalarLane === true ? { scalarLane: true } : {}),
   };
 }
 
