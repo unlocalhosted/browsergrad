@@ -54,7 +54,6 @@ describe("typed WGSL expressions", () => {
     expect(() => convertTypedWgslExpression(
       createTypedWgslIdentifier("value", "vec2<f32>", span),
       "f32",
-      "f32(value)",
     )).toThrow("requires explicit legalization");
   });
 

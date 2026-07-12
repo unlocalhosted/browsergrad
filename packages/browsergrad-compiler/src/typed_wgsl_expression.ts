@@ -231,14 +231,14 @@ export function isTypedWgslLiteralCode(
 export function convertTypedWgslExpression(
   source: TypedWgslExpression,
   targetType: WgslExpressionType,
-  code: string,
+  explicit = false,
 ): TypedWgslExpression {
   if (source.type !== targetType && (!isNumericScalar(source.type) || !isNumericScalar(targetType))) {
     throw new TypeError(`WGSL conversion from '${source.type}' to '${targetType}' requires explicit legalization`);
   }
-  return code === `${targetType}(${source.code})`
-    ? new TypedWgslExpressionValue({ kind: "conversion", targetType, source: expressionValue(source) }, targetType, source.span)
-    : createTrustedWgslExpression(code, targetType, source.span);
+  return source.type === targetType && !explicit
+    ? source
+    : new TypedWgslExpressionValue({ kind: "conversion", targetType, source: expressionValue(source) }, targetType, source.span);
 }
 
 export function legalizeTypedWgslBoolToNumeric(

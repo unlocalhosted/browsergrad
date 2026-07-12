@@ -5147,7 +5147,7 @@ function emitSemanticVectorConstructorExpression(
   if (expression.args.length === 1 && !isSemanticFloatVectorType(semanticExpressionVectorValueType(expression.args[0]!, ir?.functions))) {
     const scalar = emitSemanticExpressionAs(expression.args[0]!, ir, names, targetScalar, options, textureSpecializations);
     const lanes = Array.from({ length: targetLanes }, () =>
-      convertTypedWgslExpression(scalar, targetScalar, `${targetScalar}(${scalar.code})`)
+      convertTypedWgslExpression(scalar, targetScalar, true)
     );
     return createTypedWgslConstructor(targetType, lanes, expression.span);
   }
@@ -5157,11 +5157,11 @@ function emitSemanticVectorConstructorExpression(
       const value = emitSemanticExpression(arg, ir, names, options, textureSpecializations);
       return Array.from({ length: cudaVectorLaneCount(argType) }, (_, lane) => {
         const member = createTypedWgslMemberAccess(value, fields[lane]!, wgslVectorScalar(argType), arg.span);
-        return convertTypedWgslExpression(member, targetScalar, `${targetScalar}(${member.code})`);
+        return convertTypedWgslExpression(member, targetScalar, true);
       });
     }
     const scalar = emitSemanticExpressionAs(arg, ir, names, targetScalar, options, textureSpecializations);
-    return [convertTypedWgslExpression(scalar, targetScalar, `${targetScalar}(${scalar.code})`)];
+    return [convertTypedWgslExpression(scalar, targetScalar, true)];
   });
   while (lanes.length < targetLanes) lanes.push(createTypedWgslZero(targetScalar, expression.span));
   return createTypedWgslConstructor(targetType, lanes.slice(0, targetLanes), expression.span);
@@ -5633,7 +5633,7 @@ function emitSemanticBf162LocalBitsCast(
   const value = emitSemanticExpression(cast.expression.argument, ir, names, options, textureSpecializations);
   const lane = (property: "x" | "y"): TypedWgslExpression => {
     const member = createTypedWgslMemberAccess(value, property, "f32", expression.span);
-    const scalar = convertTypedWgslExpression(member, "f32", `f32(${member.code})`);
+    const scalar = convertTypedWgslExpression(member, "f32", true);
     return createTypedWgslBitcast("u32", scalar, expression.span);
   };
   const low = emitTypedWgslBinary(">>", lane("x"), createTypedWgslLiteral("16u", "u32", expression.span), expression.span);
@@ -5671,7 +5671,7 @@ function emitSemanticCastExpression(
   if (expression.valueType === "uint" && sourceType === "int") return createTypedWgslBitcast("u32", value, expression.span);
   const targetType = wgslScalar(expression.valueType);
   if (value.type === "bool" && targetType !== "bool") return legalizeTypedWgslBoolToNumeric(value, targetType);
-  return convertTypedWgslExpression(value, targetType, `${targetType}(${value.code})`);
+  return convertTypedWgslExpression(value, targetType, true);
 }
 
 function emitSemanticFunctionArg(
@@ -6161,43 +6161,18 @@ function emitSemanticExpressionAs(
 ): TypedWgslExpression {
   const source = emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   if (source.type === "bool") return legalizeTypedWgslBoolToNumeric(source, targetType);
-  return convertTypedWgslExpression(
-    source,
-    targetType,
-    renderSemanticExpressionAs(expression, ir, names, targetType, options, textureSpecializations, source),
-  );
-}
-
-function renderSemanticExpressionAs(
-  expression: SemanticExpression,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  targetType: WgslValueType,
-  options: EmitSemanticKernelIrWgslOptions = {},
-  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
-  source?: TypedWgslExpression,
-): string {
   if (expression.kind === "literal" && expression.literalKind === "number") {
-    return emitNumberLiteral(expression.value, expression.valueType, targetType);
+    if (targetType === "i32" && expression.value > 2147483647) {
+      return createTypedWgslBitcast(
+        "i32",
+        createTypedWgslLiteral(`${Math.trunc(expression.value) >>> 0}u`, "u32", expression.span),
+        expression.span,
+      );
+    }
+    const literal = emitNumberLiteral(expression.value, expression.valueType, targetType);
+    if (isTypedWgslLiteralCode(literal, targetType)) return createTypedWgslLiteral(literal, targetType, expression.span);
   }
-  if (expression.kind === "unary" && expression.operator === "~" && (targetType === "u32" || targetType === "i32")) {
-    return `~(${emitSemanticExpressionAs(expression.argument, ir, names, targetType, options, textureSpecializations).code})`;
-  }
-  const emitted = source?.code ?? emitSemanticExpression(expression, ir, names, options, textureSpecializations).code;
-  const atomicValueType = semanticAtomicCallValueType(expression);
-  if (atomicValueType) {
-    const sourceType = wgslAtomicScalar(atomicValueType);
-    if (sourceType === targetType) return emitted;
-    return `${targetType}(${emitted})`;
-  }
-  if (expression.kind === "call" && semanticWgslMathCallSupported(expression)) {
-    const sourceType = semanticExpressionWgslScalar(expression);
-    if (sourceType === targetType) return emitted;
-    return `${targetType}(${emitted})`;
-  }
-  const sourceType = semanticExpressionWgslScalar(expression);
-  if (sourceType === targetType) return emitted;
-  return `${targetType}(${emitted})`;
+  return convertTypedWgslExpression(source, targetType);
 }
 
 function emitSemanticInitExpression(
@@ -6248,8 +6223,8 @@ function emitSemanticUcharExpressionValue(
     return emitSemanticExpression(expression, ir, names, options, textureSpecializations);
   }
   const value = emitSemanticExpressionAs(expression, ir, names, "i32", options, textureSpecializations);
-  const normalized = convertTypedWgslExpression(value, "i32", `i32(${value.code})`);
-  const unsigned = convertTypedWgslExpression(normalized, "u32", `u32(${normalized.code})`);
+  const normalized = convertTypedWgslExpression(value, "i32", true);
+  const unsigned = convertTypedWgslExpression(normalized, "u32", true);
   return emitTypedWgslBinary("&", unsigned, createTypedWgslLiteral("0xffu", "u32", expression.span), expression.span);
 }
 
@@ -7488,7 +7463,6 @@ function emitSemanticRootStoragePointerIdentityBase(
     ? convertTypedWgslExpression(
         createTypedWgslIdentifier(nameFor(storageOffsetSymbol(root.name), names), "i32", span),
         "u32",
-        `u32(${nameFor(storageOffsetSymbol(root.name), names)})`,
       )
     : createTypedWgslZero("u32", span);
   if (!isCudaVectorType(root.valueType)) return base;
@@ -7524,7 +7498,7 @@ function emitSemanticVectorOperandExpression(
   const vectorScalar = wgslVectorScalar(valueType);
   const scalar = emitSemanticExpressionAs(expression, ir, names, vectorScalar, options, textureSpecializations);
   const lanes = Array.from({ length: laneCount }, () =>
-    convertTypedWgslExpression(scalar, vectorScalar, `${vectorScalar}(${scalar.code})`)
+    convertTypedWgslExpression(scalar, vectorScalar, true)
   );
   const vectorType = wgslValueType(valueType);
   if (!isWgslVectorType(vectorType)) {
