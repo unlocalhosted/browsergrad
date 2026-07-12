@@ -36,7 +36,7 @@ import {
 } from "./types.js";
 import { CUDA_VECTOR_TYPES, cudaVectorTypeAlias, isCudaVectorType } from "./vector_types.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
-import { markCompilerPhase, type Parsed } from "./compiler_phases.js";
+import { completeParsing, type Parsed } from "./compiler_phases.js";
 
 export type ParsedCudaLiteModule = Parsed<CudaLiteModule>;
 
@@ -178,7 +178,7 @@ const BINARY_PRECEDENCE = new Map<string, number>([
 ]);
 
 export function parseCudaLite(source: string): ParsedCudaLiteModule {
-  return markCompilerPhase(new Parser(source).parseModule(), "parsed");
+  return completeParsing(new Parser(source).parseModule());
 }
 
 class Parser {

@@ -94,7 +94,8 @@ import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import {
-  markCompilerPhase,
+  completeCanonicalLowering,
+  completeSemanticTyping,
   type CanonicalIr,
   type TypedSemantic,
 } from "./compiler_phases.js";
@@ -748,7 +749,7 @@ export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): T
     [...symbols, ...functionSymbols, ...functions.flatMap((fn) => fn.params)],
     functions,
   );
-  return markCompilerPhase({
+  return completeSemanticTyping({
     kind: "cuda-lite-semantic-model",
     kernelName: analysis.kernel.name,
     span: analysis.kernel.span,
@@ -758,7 +759,7 @@ export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): T
     launchableEntries,
     requiredFeatures: analysis.requiredFeatures,
     environment,
-  }, "typed-semantic");
+  }, analysis);
 }
 
 export function lowerSemanticModelToKernelIr(
@@ -884,7 +885,7 @@ export function lowerSemanticModelToKernelIr(
   const functionSharedMemory = functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body).filter((symbol) => symbol.addressSpace === "shared")
   );
-  return markCompilerPhase({
+  return completeCanonicalLowering({
     kind: "semantic-kernel-ir",
     name: analysis.kernel.name,
     span: analysis.kernel.span,
@@ -921,7 +922,7 @@ export function lowerSemanticModelToKernelIr(
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
     ...(options.bindlessTextures === undefined ? {} : { bindlessTextures: options.bindlessTextures }),
-  }, "canonical-ir");
+  }, semantic);
 }
 
 function lowerSemanticDivergentBreaksBeforeBarriers(

@@ -15,6 +15,10 @@ import {
   type VerifiedSemanticKernelIr,
 } from "../../src/index.js";
 import { semanticIdKey } from "../../src/semantic_ids.js";
+import {
+  completeAnalysis,
+  completeRuntimeLowering,
+} from "../../src/compiler_phases.js";
 
 describe("compiler phase contracts", () => {
   it("requires ordered, verified compiler stages", () => {
@@ -55,6 +59,10 @@ describe("compiler phase contracts", () => {
     if (false) {
       // @ts-expect-error raw AST has not passed parser phase
       analyzeCudaLite({} as CudaLiteModule);
+      // @ts-expect-error analysis transition requires parsed source proof
+      completeAnalysis({}, {} as CudaLiteModule);
+      // @ts-expect-error runtime lowering transition requires canonical IR proof
+      completeRuntimeLowering({} as SemanticKernelIrModule);
       // @ts-expect-error raw IR has not passed mandatory verifier
       emitSemanticKernelIrWgsl({} as SemanticKernelIrModule);
       const raw = {} as SemanticKernelIrModule;

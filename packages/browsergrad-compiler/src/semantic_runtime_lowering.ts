@@ -15,7 +15,7 @@ import type {
 } from "./semantic_ir.js";
 import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 import type { CudaLiteScalarType, SourceSpan } from "./types.js";
-import { markCompilerPhase, type RuntimeLoweredIr } from "./compiler_phases.js";
+import { completeRuntimeLowering, type RuntimeLoweredIr } from "./compiler_phases.js";
 import type { CanonicalSemanticKernelIr } from "./semantic_ir.js";
 
 export type RuntimeLoweredSemanticKernelIr = RuntimeLoweredIr<CanonicalSemanticKernelIr>;
@@ -36,7 +36,7 @@ export function lowerSemanticCudaRuntime(
   const lowered = operations === ir.operations && functions.every((fn, index) => fn === ir.functions[index])
     ? ir
     : { ...ir, operations, functions };
-  return markCompilerPhase(lowered, "runtime-lowered-ir");
+  return completeRuntimeLowering(lowered);
 }
 
 function lowerRuntimeOperations(

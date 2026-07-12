@@ -140,7 +140,7 @@ import {
   isSemanticCurandVectorCallName,
   semanticCurandReturnType,
 } from "./semantic_curand_intrinsics.js";
-import { markCompilerPhase, type Analyzed } from "./compiler_phases.js";
+import { completeAnalysis, type Analyzed } from "./compiler_phases.js";
 import type { ParsedCudaLiteModule } from "./parser.js";
 
 export type AnalyzedCudaLiteModule = Analyzed<CudaLiteAnalysis>;
@@ -835,7 +835,7 @@ export function analyzeCudaLite(
     diagnostics.push(error("compatibility-mode-subgroups", "subgroups are disabled in WebGPU compatibility mode", kernel.span));
   }
 
-  return markCompilerPhase({
+  return completeAnalysis({
     kernel,
     kernels: ast.kernels,
     constants: ast.constants,
@@ -848,7 +848,7 @@ export function analyzeCudaLite(
     atomicShared: [...atomicShared].sort(),
     atomicDeviceGlobals: [...atomicDeviceGlobals].sort(),
     barrierUniformity: { kernel: kernelBarrierUniformity, functions: functionBarrierUniformity },
-  }, "analyzed");
+  }, ast);
 }
 
 export function lowerCudaLiteToKernelIr(
