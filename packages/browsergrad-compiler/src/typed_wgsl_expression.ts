@@ -22,6 +22,7 @@ type TypedWgslExpressionNode =
   | { readonly kind: "select"; readonly alternate: TypedWgslExpressionValue; readonly consequent: TypedWgslExpressionValue; readonly condition: TypedWgslExpressionValue }
   | { readonly kind: "call"; readonly callee: string; readonly args: readonly TypedWgslExpressionValue[] }
   | { readonly kind: "member"; readonly object: TypedWgslExpressionValue; readonly property: string }
+  | { readonly kind: "qualified"; readonly object: string; readonly property: string }
   | { readonly kind: "bitcast"; readonly targetType: WgslExpressionType; readonly source: TypedWgslExpressionValue }
   | { readonly kind: "constructor"; readonly targetType: WgslVectorType; readonly args: readonly TypedWgslExpressionValue[] };
 
@@ -122,6 +123,18 @@ export function createTypedWgslMemberAccess(
     resultType,
     span,
   );
+}
+
+export function createTypedWgslQualifiedAccess(
+  object: string,
+  property: string,
+  resultType: WgslExpressionType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(object) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(property)) {
+    throw new TypeError(`invalid WGSL qualified access '${object}.${property}'`);
+  }
+  return new TypedWgslExpressionValue({ kind: "qualified", object, property }, resultType, span);
 }
 
 export function createTypedWgslBitcast(
@@ -327,7 +340,8 @@ function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
     case "unary": return node.operator === "+" ? node.operand.code : `${node.operator}(${node.operand.code})`;
     case "select": return `select(${node.alternate.code}, ${node.consequent.code}, ${node.condition.code})`;
     case "call": return `${node.callee}(${node.args.map((arg) => arg.code).join(", ")})`;
-    case "member": return `(${node.object.code}).${node.property}`;
+    case "member": return `${node.object.code}.${node.property}`;
+    case "qualified": return `${node.object}.${node.property}`;
     case "bitcast": return `bitcast<${node.targetType}>(${node.source.code})`;
     case "constructor": return `${node.targetType}(${node.args.map((arg) => arg.code).join(", ")})`;
   }

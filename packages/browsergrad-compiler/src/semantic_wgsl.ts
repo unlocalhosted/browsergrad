@@ -116,6 +116,7 @@ import {
   createTypedWgslZero,
   createTypedWgslCall,
   createTypedWgslMemberAccess,
+  createTypedWgslQualifiedAccess,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   isWgslVectorType,
@@ -4427,8 +4428,24 @@ function emitSemanticExpression(
       if (isTypedWgslLiteralCode(code, type)) return createTypedWgslLiteral(code, type, expression.span);
     }
   }
-  if (expression.kind === "symbol" && expression.addressSpace === "local") {
-    return createTypedWgslIdentifier(nameFor(expression.name, names), semanticExpressionWgslType(expression, ir), expression.span);
+  if (expression.kind === "symbol" && semanticWgslSymbolHasTypedEmission(expression, ir)) {
+    return emitSemanticSymbolExpression(expression, ir, names);
+  }
+  if (expression.kind === "pointer-valid") {
+    const pointer = semanticWgslPointerValidityOwner(expression, ir);
+    if (!pointer) throw semanticWgslError(`unresolved pointer validity identity for '${expression.pointer}'`, expression.span);
+    return emitTypedWgslBinary(
+      "!=",
+      createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(pointer.name), names), "u32", expression.span),
+      createTypedWgslLiteral("4294967295u", "u32", expression.span),
+      expression.span,
+    );
+  }
+  if (expression.kind === "member" && semanticDirectByteVectorMemberRef(expression, ir) === undefined) {
+    return emitSemanticMemberExpression(expression, ir, names, options);
+  }
+  if (expression.kind === "cast" && !expression.pointer) {
+    return emitSemanticCastExpression(expression, ir, names, options, textureSpecializations);
   }
   if (expression.kind === "binary") {
     return emitSemanticBinary(expression, ir, names, options, textureSpecializations);
@@ -4447,6 +4464,34 @@ function emitSemanticExpression(
     semanticExpressionWgslType(expression, ir),
     expression.span,
   );
+}
+
+function semanticWgslSymbolHasTypedEmission(
+  expression: Extract<SemanticExpression, { readonly kind: "symbol" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (expression.addressSpace === "local" || expression.addressSpace === "uniform") return true;
+  if (expression.addressSpace !== "constant") return false;
+  const constant = constantMemorySymbols(ir).find((symbol) => symbol.name === expression.name);
+  return constant?.initialized === true || !isSemanticFloatVectorType(expression.valueType);
+}
+
+function emitSemanticSymbolExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "symbol" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): TypedWgslExpression {
+  const type = semanticExpressionWgslType(expression, ir);
+  if (expression.addressSpace === "uniform") {
+    return createTypedWgslQualifiedAccess(UNIFORM_PARAMS_NAME, nameFor(expression.name, names), type, expression.span);
+  }
+  if (expression.addressSpace === "constant") {
+    const constant = constantMemorySymbols(ir).find((symbol) => symbol.name === expression.name);
+    if (!constant?.initialized) {
+      return createTypedWgslQualifiedAccess(UNIFORM_PARAMS_NAME, nameFor(expression.name, names), type, expression.span);
+    }
+  }
+  return createTypedWgslIdentifier(nameFor(expression.name, names), type, expression.span);
 }
 
 function semanticExpressionWgslType(
@@ -5428,14 +5473,30 @@ function emitSemanticCast(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  return emitSemanticCastExpression(expression, ir, names, options, textureSpecializations).code;
+}
+
+function emitSemanticCastExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "cast" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+  textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
+): TypedWgslExpression {
+  if (expression.pointer) throw semanticWgslError("typed WGSL scalar cast cannot lower pointer cast", expression.span);
   if (expression.valueType === "uchar") {
-    return emitSemanticUcharExpression(expression.expression, ir, names, options, textureSpecializations);
+    return emitSemanticUcharExpressionValue(expression.expression, ir, names, options, textureSpecializations);
   }
-  const value = emitSemanticExpression(expression.expression, ir, names, options, textureSpecializations).code;
+  if (expression.valueType === "bool") {
+    return emitSemanticBoolExpressionValue(expression.expression, ir, names, options, textureSpecializations);
+  }
+  const value = emitSemanticExpression(expression.expression, ir, names, options, textureSpecializations);
   const sourceType = "valueType" in expression.expression ? expression.expression.valueType : undefined;
-  if (expression.valueType === "int" && sourceType === "uint") return `bitcast<i32>(${value})`;
-  if (expression.valueType === "uint" && sourceType === "int") return `bitcast<u32>(${value})`;
-  return `${wgslScalar(expression.valueType)}(${value})`;
+  if (expression.valueType === "int" && sourceType === "uint") return createTypedWgslBitcast("i32", value, expression.span);
+  if (expression.valueType === "uint" && sourceType === "int") return createTypedWgslBitcast("u32", value, expression.span);
+  const targetType = wgslScalar(expression.valueType);
+  if (value.type === "bool" && targetType !== "bool") return legalizeTypedWgslBoolToNumeric(value, targetType);
+  return convertTypedWgslExpression(value, targetType, `${targetType}(${value.code})`);
 }
 
 function emitSemanticFunctionArg(
@@ -7031,23 +7092,39 @@ function emitSemanticMember(
 ): string {
   const byteVectorMember = semanticDirectByteVectorMemberRef(expression, ir);
   if (byteVectorMember) return emitSemanticMemoryRead(byteVectorMember, ir, names, options);
+  return emitSemanticMemberExpression(expression, ir, names, options).code;
+}
+
+function emitSemanticMemberExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "member" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): TypedWgslExpression {
   const axisIndex = expression.property === "x" ? 0 : expression.property === "y" ? 1 : 2;
   if (expression.object.kind === "symbol") {
     switch (expression.object.name) {
       case "threadIdx":
-        return ir.workgroupSize[axisIndex] === 1 ? "0u" : `local_id.${expression.property}`;
+        return ir.workgroupSize[axisIndex] === 1
+          ? createTypedWgslZero("u32", expression.span)
+          : createTypedWgslQualifiedAccess("local_id", expression.property, "u32", expression.span);
       case "blockIdx":
-        return `workgroup_id.${expression.property}`;
+        return createTypedWgslQualifiedAccess("workgroup_id", expression.property, "u32", expression.span);
       case "blockDim":
-        return `${ir.workgroupSize[axisIndex]}u`;
+        return createTypedWgslLiteral(`${ir.workgroupSize[axisIndex]}u`, "u32", expression.span);
       case "gridDim":
-        return `num_workgroups.${expression.property}`;
+        return createTypedWgslQualifiedAccess("num_workgroups", expression.property, "u32", expression.span);
     }
   }
   if (semanticStorageVectorType(semanticExpressionVectorValueType(expression.object, ir?.functions)) === undefined) {
     throw semanticWgslError("semantic WGSL supports builtin vector members only", expression.span);
   }
-  return `${emitSemanticExpression(expression.object, ir, names, options).code}.${semanticVectorFieldName(expression)}`;
+  return createTypedWgslMemberAccess(
+    emitSemanticExpression(expression.object, ir, names, options),
+    semanticVectorFieldName(expression),
+    semanticExpressionWgslType(expression, ir),
+    expression.span,
+  );
 }
 
 function semanticVectorFieldName(expression: Extract<SemanticExpression, { readonly kind: "member" }>): string {

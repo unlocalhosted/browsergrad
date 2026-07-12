@@ -4,6 +4,7 @@ import {
   createTypedWgslIdentifier,
   createTypedWgslCall,
   createTypedWgslMemberAccess,
+  createTypedWgslQualifiedAccess,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   createTypedWgslZero,
@@ -160,11 +161,20 @@ describe("typed WGSL expressions", () => {
     const vector = createTypedWgslIdentifier("pair", "vec2<f32>", span);
     const lane = createTypedWgslMemberAccess(vector, "x", "f32", span);
     expect(createTypedWgslBitcast("u32", lane, span)).toMatchObject({
-      code: "bitcast<u32>((pair).x)",
+      code: "bitcast<u32>(pair.x)",
       type: "u32",
       span,
     });
     expect(() => createTypedWgslBitcast("f16", lane, span)).toThrow("requires equal bit widths");
     expect(() => createTypedWgslMemberAccess(vector, "x()", "f32", span)).toThrow("invalid WGSL member");
+  });
+
+  it("types qualified parameter access without raw source", () => {
+    expect(createTypedWgslQualifiedAccess("bg_uniforms", "count", "i32", span)).toMatchObject({
+      code: "bg_uniforms.count",
+      type: "i32",
+      span,
+    });
+    expect(() => createTypedWgslQualifiedAccess("bg_uniforms()", "count", "i32", span)).toThrow("invalid WGSL qualified access");
   });
 });
