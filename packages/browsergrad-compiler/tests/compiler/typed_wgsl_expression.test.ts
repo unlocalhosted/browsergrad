@@ -6,6 +6,7 @@ import {
   createTypedWgslMemberAccess,
   createTypedWgslQualifiedAccess,
   createTypedWgslIndexAccess,
+  createTypedWgslMemoryRead,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   createTypedWgslZero,
@@ -192,5 +193,22 @@ describe("typed WGSL expressions", () => {
       "f32",
       span,
     )).toThrow("WGSL index requires i32 or u32");
+  });
+
+  it("types direct and atomic memory reads", () => {
+    const index = createTypedWgslIdentifier("index", "u32", span);
+    expect(createTypedWgslMemoryRead("values", index, "f32", false, span)).toMatchObject({
+      code: "values[index]", type: "f32", span,
+    });
+    expect(createTypedWgslMemoryRead("values", index, "u32", true, span)).toMatchObject({
+      code: "atomicLoad(&values[index])", type: "u32", span,
+    });
+    expect(() => createTypedWgslMemoryRead(
+      "values",
+      createTypedWgslIdentifier("index", "i32", span),
+      "f32",
+      false,
+      span,
+    )).toThrow("WGSL memory index requires u32");
   });
 });

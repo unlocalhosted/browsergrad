@@ -119,6 +119,7 @@ import {
   createTypedWgslMemberAccess,
   createTypedWgslQualifiedAccess,
   createTypedWgslIndexAccess,
+  createTypedWgslMemoryRead,
   createTypedWgslBitcast,
   createTypedWgslConstructor,
   isWgslVectorType,
@@ -4501,6 +4502,10 @@ function emitSemanticExpression(
       expression.span,
     );
   }
+  if (expression.kind === "index") {
+    const directMemoryRead = emitSemanticDirectMemoryReadExpression(expression, ir, names, options);
+    if (directMemoryRead) return directMemoryRead;
+  }
   if (expression.kind === "sequence") {
     return emitSemanticExpression(
       expression.expressions.at(-1) ?? zeroExpression(expression.span),
@@ -4546,6 +4551,52 @@ function emitSemanticExpression(
     semanticExpressionWgslType(expression, ir),
     expression.span,
   );
+}
+
+function emitSemanticDirectMemoryReadExpression(
+  expression: Extract<SemanticExpression, { readonly kind: "index" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): TypedWgslExpression | undefined {
+  const ref = memoryRefFromIndexExpression(expression);
+  if (!ref || ref.fields.length !== 0 || ref.indices.length !== 1 || !semanticWgslScalarTypeSupported(ref.valueType)) return undefined;
+  if (ref.packedByteLanes !== undefined || semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(ref.base)) return undefined;
+  if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null) || semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)) return undefined;
+  if (
+    semanticWgslLocalPackedHalf2View(ref, ir) || semanticWgslLocalPackedHalfView(ref, ir) ||
+    semanticWgslLocalScalarBitViewRootType(ref, ir) !== undefined || semanticWgslSharedScalarBitViewRootType(ref, ir) !== undefined ||
+    semanticWgslLocalVectorBitViewRootType(ref, ir) !== undefined || semanticWgslDirectByteRawView(ref, ir) ||
+    semanticWgslPackedSharedByteRoot(ref, ir) || semanticWgslSharedHalfBitView(ref, ir) || semanticWgslSharedVectorScalarView(ref, ir)
+  ) return undefined;
+  const root = ir.params.find((item) => item.name === ref.base) ?? ir.memory.find((item) => item.name === ref.base);
+  if (!root || isCudaVectorType(root.valueType) || root.dimensions.length > 1) return undefined;
+  const atomic = ref.addressSpace === "storage"
+    ? semanticAtomicStorageNames(ir.operations, ir.functions).has(ref.base)
+    : ref.addressSpace === "device-global"
+      ? semanticAtomicDeviceGlobalNames(ir.operations, ir.functions).has(ref.base)
+      : ref.addressSpace === "shared" && semanticAtomicSharedNames(ir.operations, ir.functions).has(ref.base);
+  const semanticType = wgslValueType(ref.valueType);
+  const storageType = atomic
+    ? wgslAtomicScalar(ref.valueType)
+    : ref.addressSpace === "storage" || ref.addressSpace === "constant" || ref.addressSpace === "device-global"
+      ? wgslBindingType(ref.valueType)
+      : semanticType;
+  const read = createTypedWgslMemoryRead(
+    nameFor(ref.base, names),
+    emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options),
+    storageType,
+    atomic,
+    expression.span,
+  );
+  if (storageType === semanticType) return read;
+  if (semanticType === "bool") {
+    return emitTypedWgslBinary("!=", read, createTypedWgslZero(storageType, expression.span), expression.span);
+  }
+  if (semanticType === "f32" && storageType === "u32") {
+    return createTypedWgslBitcast("f32", read, expression.span);
+  }
+  throw semanticWgslError(`direct memory read cannot convert '${storageType}' to '${semanticType}'`, expression.span);
 }
 
 function semanticTypedNativeMathCallee(
@@ -6227,11 +6278,9 @@ function emitSemanticBoolExpressionValue(
     return createTypedWgslLiteral(expression.value === 0 ? "false" : "true", "bool", expression.span);
   }
   const emitted = emitSemanticExpression(expression, ir, names, options, textureSpecializations);
+  if (emitted.type === "bool") return emitted;
   if (semanticNativeBoolExpression(expression)) {
-    if (emitted.type !== "bool") {
-      throw semanticWgslError(`native bool expression produced '${emitted.type}'`, expression.span);
-    }
-    return emitted;
+    throw semanticWgslError(`native bool expression produced '${emitted.type}'`, expression.span);
   }
   const sourceType = semanticExpressionWgslScalar(expression);
   const source = emitted.type === sourceType
