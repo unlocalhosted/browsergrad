@@ -4787,7 +4787,9 @@ function emitSemanticTypedBf16Call(
 ): TypedWgslExpression | undefined {
   if (expression.callee.kind !== "symbol") return undefined;
   const name = expression.callee.name;
-  const isPair = semanticExpressionVectorValueType(expression.args[0]!, ir.functions) === "bf162";
+  const firstArg = expression.args[0];
+  if (firstArg === undefined) return undefined;
+  const isPair = semanticExpressionVectorValueType(firstArg, ir.functions) === "bf162";
   const scalar = (arg: SemanticExpression): TypedWgslExpression => emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations);
   const vector = (arg: SemanticExpression): TypedWgslExpression => emitSemanticExpression(arg, ir, names, options, textureSpecializations);
   const roundPair = (value: TypedWgslExpression): TypedWgslExpression => createTypedWgslConstructor(

@@ -1937,11 +1937,11 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("((nan_value) != (nan_value) || (1.0) != (1.0))");
-      expect(compiled.wgsl).toContain("!((nan_value) != (nan_value) || (1.0) != (1.0))");
+      expect(compiled.wgsl).toContain("((nan_value != nan_value) || (1.0 != 1.0))");
+      expect(compiled.wgsl).toContain("((nan_value == nan_value) && (1.0 == 1.0))");
       expect(compiled.wgsl).toContain("((bitcast<u32>(-(0.0)) & 0x80000000u) != 0u)");
       expect(compiled.wgsl).toContain("bitcast<f32>(2143289344u)");
-      expect(compiled.wgsl).toContain("(abs(bitcast<f32>(0x7f800000u)) > 3.4028234663852886e38)");
+      expect(compiled.wgsl).toContain("(abs(bg_f32_inf()) > 3.4028234663852886e38)");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 0, 1, 1, 1, 1, 1, 1, 1, 0]);
     });
 
@@ -2025,7 +2025,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bitcast<f32>(bits[0u])");
       expect(compiled.wgsl).toContain("bitcast<f32>(signedBits[0u])");
-      expect(compiled.wgsl).toContain("bitcast<f32>(0x7f800000u)");
+      expect(compiled.wgsl).toContain("bg_f32_inf()");
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, -1, Infinity, Infinity]);
       expect([...result.buffers.out as Float32Array]).toEqual([1, -1, Infinity, Infinity]);
     });
@@ -5073,7 +5073,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("bitcast<f32>(0x7f800000u)");
+      expect(compiled.wgsl).toContain("bg_f32_inf()");
       expect([...result.buffers.out as Float32Array]).toEqual([-Infinity]);
     });
 
