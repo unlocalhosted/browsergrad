@@ -109,7 +109,7 @@ function collectSemanticIrIdentities(
   };
   const collectOperations = (operations: readonly SemanticKernelIrOperation[]): void => {
     for (const operation of operations) {
-      if (operation.kind === "declare" || operation.kind === "dim3-declare") register(operation.target);
+      if (operation.kind === "declare" || operation.kind === "dim3-declare" || operation.kind === "pointer-rebind") register(operation.target);
       if (operation.kind === "cooperative-group-declare") {
         symbolNamesById.set(semanticIdKey(operation.declaration.id), operation.declaration.name);
       }
@@ -197,7 +197,7 @@ function verifyOperations(
 ): void {
   for (const operation of operations) {
     verifySpan(operation.span, `operation '${operation.kind}'`, report);
-    if (operation.kind === "declare" || operation.kind === "dim3-declare") {
+    if (operation.kind === "declare" || operation.kind === "dim3-declare" || operation.kind === "pointer-rebind") {
       verifySymbol(operation.target, fn, identityContext, report);
     }
     for (const expression of operationExpressions(operation)) verifyExpression(expression, identityContext, report);
@@ -343,6 +343,7 @@ function operationExpressions(operation: SemanticKernelIrOperation): readonly Se
     case "atomic": return operation.args;
     case "call": return [...operation.args, ...(operation.result ? [operation.result] : [])];
     case "runtime-copy": return operation.args;
+    case "pointer-rebind": return [];
     case "expression": return [operation.expression];
     case "branch": return [operation.condition];
     case "loop": return [
@@ -366,6 +367,7 @@ function operationMemoryRefs(operation: SemanticKernelIrOperation): readonly Sem
     case "matrix-store": return [operation.target];
     case "atomic": return operation.target ? [operation.target] : [];
     case "call": return operation.reads;
+    case "pointer-rebind": return [operation.source];
     default: return [];
   }
 }

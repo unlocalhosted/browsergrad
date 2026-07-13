@@ -5799,8 +5799,8 @@ __global__ void localOut(float *out) {
   __global__ void loop_update_pointer_atomic(uint* left, uint* right, uint* out) {
     uint* ptr = left;
     if (threadIdx.x == 0) {
-      for (int i = 0; i < 1; i++, ptr = right) {
-        out[0] = atomicAdd(ptr, 1u);
+      for (int i = 0; i < 2; i++, ptr = right + 1) {
+        out[i] = atomicAdd(ptr, 1u);
       }
     }
   }`, { workgroupSize: [1, 1, 1] });
@@ -5809,19 +5809,22 @@ __global__ void localOut(float *out) {
         {
           buffers: {
             left: new Uint32Array([4]),
-            right: new Uint32Array([8]),
-            out: new Uint32Array(1),
+            right: new Uint32Array([8, 10]),
+            out: new Uint32Array(2),
           },
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
       expect([...result.buffers.left as Uint32Array]).toEqual([5]);
-      expect([...result.buffers.right as Uint32Array]).toEqual([8]);
-      expect([...result.buffers.out as Uint32Array]).toEqual([4]);
+      expect([...result.buffers.right as Uint32Array]).toEqual([8, 11]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([4, 10]);
       expect(compiled.wgsl).toContain("var<storage, read_write> left: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> right: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(ptr_buffer, u32(i32(ptr_base)), 1u)");
+      expect(compiled.wgsl).toContain("ptr_buffer = 1u;");
+      expect(compiled.wgsl).toContain("ptr_base = 1u;");
     });
 });
 export {

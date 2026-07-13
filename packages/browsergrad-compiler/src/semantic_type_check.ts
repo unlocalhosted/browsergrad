@@ -125,6 +125,16 @@ function checkOperations(
       case "runtime-copy":
         operation.args.forEach((arg) => checkExpression(arg, "value", ir, report));
         break;
+      case "pointer-rebind":
+        checkMemoryRef(operation.source, ir, report);
+        if (!operation.target.pointer || operation.target.addressSpace !== "local") {
+          report(`pointer rebind target '${operation.target.name}' must be a local pointer`, operation.span);
+        }
+        if (operation.source.addressSpace !== "storage") {
+          report(`pointer rebind source '${operation.source.base}' must use storage memory`, operation.source.span);
+        }
+        checkAssignable(operation.target.valueType, operation.source.valueType, `pointer rebind '${operation.target.name}'`, operation.span, report);
+        break;
       case "expression":
         checkExpression(operation.expression, "discard", ir, report);
         break;

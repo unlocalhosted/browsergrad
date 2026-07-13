@@ -218,6 +218,7 @@ function replaceGridDimensionsInOperations(
       case "atomic": return { ...operation, ...(operation.target === undefined ? {} : { target: replaceGridDimensionsInMemoryRef(operation.target, gridDim) }), args: operation.args.map((arg) => replaceGridDimensions(arg, gridDim)) };
       case "call": return { ...operation, args: operation.args.map((arg) => replaceGridDimensions(arg, gridDim)), reads: operation.reads.map((ref) => replaceGridDimensionsInMemoryRef(ref, gridDim)) };
       case "runtime-copy": return { ...operation, args: operation.args.map((arg) => replaceGridDimensions(arg, gridDim)) };
+      case "pointer-rebind": return { ...operation, source: replaceGridDimensionsInMemoryRef(operation.source, gridDim) };
       case "expression": return { ...operation, expression: replaceGridDimensions(operation.expression, gridDim) };
       case "branch": return { ...operation, condition: replaceGridDimensions(operation.condition, gridDim), consequent: replaceGridDimensionsInOperations(operation.consequent, gridDim), alternate: replaceGridDimensionsInOperations(operation.alternate, gridDim) };
       case "block": return { ...operation, body: replaceGridDimensionsInOperations(operation.body, gridDim) };

@@ -2,8 +2,10 @@ import type {
   SemanticExpression,
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
+  SemanticMemoryRef,
 } from "./semantic_ir.js";
 import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
+import { semanticIdKey } from "./semantic_ids.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 
 export function semanticOperationExpressions(operation: SemanticKernelIrOperation): readonly SemanticExpression[] {
@@ -89,19 +91,25 @@ export function semanticOperationsReferenceRoot(
 
 export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): ReadonlySet<string> {
   const roots = new Set<string>();
+  const runtimePointerSources = new Map<string, Set<string>>();
+  const atomicRuntimePointers = new Set<string>();
   const atomicParamIndexes = new Map<string, Set<number>>();
   const functionParams = new Map(ir.functions.map((fn) => [fn.name, fn.params]));
   const calls: { readonly owner?: string; readonly callee: string; readonly args: readonly SemanticExpression[] }[] = [];
 
-  const recordAtomicRef = (owner: string | undefined, base: string): void => {
+  const recordAtomicRef = (owner: string | undefined, ref: SemanticMemoryRef): void => {
+    if (ref.addressSpace === "local") {
+      atomicRuntimePointers.add(semanticIdKey(ref.baseId));
+      return;
+    }
     const params = owner === undefined ? undefined : functionParams.get(owner);
-    const index = params?.findIndex((param) => param.name === base && param.pointer) ?? -1;
+    const index = params?.findIndex((param) => param.name === ref.base && param.pointer) ?? -1;
     if (owner !== undefined && index >= 0) {
       const indexes = atomicParamIndexes.get(owner) ?? new Set<number>();
       indexes.add(index);
       atomicParamIndexes.set(owner, indexes);
     } else {
-      roots.add(base);
+      roots.add(ref.base);
     }
   };
 
@@ -110,7 +118,7 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
       const callee = expression.callee.name;
       if (semanticAtomicOperation(callee) !== undefined) {
         const ref = expression.args[0] ? semanticPointerArgumentMemoryRef(expression.args[0]) : undefined;
-        if (ref) recordAtomicRef(owner, ref.base);
+        if (ref) recordAtomicRef(owner, ref);
       } else {
         calls.push({ ...(owner === undefined ? {} : { owner }), callee, args: expression.args });
       }
@@ -120,7 +128,17 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
 
   const scanOperations = (operations: readonly SemanticKernelIrOperation[], owner?: string): void => {
     for (const operation of operations) {
-      if (operation.kind === "atomic" && operation.target) recordAtomicRef(owner, operation.target.base);
+      if (operation.kind === "declare" && operation.target.pointerRuntimeState === true && operation.init) {
+        const ref = semanticPointerArgumentMemoryRef(operation.init);
+        if (ref) runtimePointerSources.set(semanticIdKey(operation.target.id), new Set([ref.base]));
+      }
+      if (operation.kind === "pointer-rebind") {
+        const pointerId = semanticIdKey(operation.target.id);
+        const sources = runtimePointerSources.get(pointerId) ?? new Set<string>();
+        sources.add(operation.source.base);
+        runtimePointerSources.set(pointerId, sources);
+      }
+      if (operation.kind === "atomic" && operation.target) recordAtomicRef(owner, operation.target);
       if (operation.kind === "call") calls.push({ ...(owner === undefined ? {} : { owner }), callee: operation.callee, args: operation.args });
       for (const expression of semanticOperationExpressions(operation)) scanExpression(expression, owner);
       if (operation.kind === "block") scanOperations(operation.body, owner);
@@ -165,6 +183,10 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
       }
     }
   }
+  for (const [pointerId, sources] of runtimePointerSources) {
+    if (!atomicRuntimePointers.has(pointerId)) continue;
+    for (const source of sources) roots.add(source);
+  }
   return roots;
 }
 
@@ -177,6 +199,7 @@ export function isSemanticKernelIrOperation(
     case "cooperative-group-declare":
     case "load":
     case "store":
+    case "pointer-rebind":
     case "copy":
     case "copy-fence":
     case "surface-write":

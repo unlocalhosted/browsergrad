@@ -471,6 +471,13 @@ function unsupportedSemanticReferenceOperation(
       case "runtime-copy":
         if (!semanticReferenceRuntimeCopySupported(operation)) return reject(operation, `semantic reference does not support runtime copy '${operation.callee}'`);
         break;
+      case "pointer-rebind":
+        if (!operation.target.pointer || operation.target.addressSpace !== "local" ||
+          operation.source.addressSpace !== "storage" ||
+          !semanticReferenceTypedMemoryRefSupported(operation.source, compiled)) {
+          return reject(operation, `semantic reference does not support pointer rebind '${operation.target.name}'`);
+        }
+        break;
       case "expression":
         if (!semanticReferenceExpressionSupported(operation.expression, "scalar", compiled)) return reject(operation, "semantic reference does not support expression", operation.expression.span);
         break;
@@ -1360,6 +1367,10 @@ function semanticReferenceSurfaceReadStoreSupported(
 }
 
 function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  if (ref.addressSpace === "local") {
+    return compiled.kernelIr.memory.some((symbol) =>
+      symbol.name === ref.base && symbol.pointer && symbol.pointerRuntimeState === true);
+  }
   if (ref.addressSpace === "storage") {
     return compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant) ||
       compiled.kernelIr.functions.some((fn) =>
@@ -1755,6 +1766,9 @@ function execSemanticOperations(
       case "runtime-copy":
         execSemanticRuntimeCopy(operation, context);
         break;
+      case "pointer-rebind":
+        context.localPointerTargets.set(operation.target.name, { ref: operation.source, context });
+        break;
       case "expression":
         evalSemanticExpression(operation.expression, context);
         break;
@@ -1990,6 +2004,7 @@ function* execSemanticBarrierOperations(
       case "surface-read-store":
       case "atomic":
       case "runtime-copy":
+      case "pointer-rebind":
       case "expression":
       case "fence":
         execSemanticOperations([operation], context);
@@ -2929,6 +2944,11 @@ function execSemanticLoop(
       const control = execSemanticScopedOperations(operation.body, context);
       if (control === "return") return control;
       if (control === "break") return "fallthrough";
+      if (operation.continuing) {
+        const continuingControl = execSemanticScopedOperations(operation.continuing, context);
+        if (continuingControl === "return") return continuingControl;
+        if (continuingControl === "break") return "fallthrough";
+      }
       if (operation.update) evalNumber(operation.update, context);
     }
     return "fallthrough";
@@ -5524,7 +5544,7 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
     };
   }
   if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
-  if (firstArg.kind === "symbol" && (firstArg.addressSpace === "storage" || firstArg.addressSpace === "shared")) {
+  if (firstArg.kind === "symbol" && (firstArg.addressSpace === "storage" || firstArg.addressSpace === "shared" || firstArg.addressSpace === "local")) {
     const valueType = requireSemanticValueType(firstArg.valueType, `atomic target '${firstArg.name}'`, firstArg.span);
     return {
       baseId: semanticMemoryIdFromSymbol(firstArg.id),
@@ -6814,6 +6834,7 @@ function isSemanticKernelIrOperation(
     case "cooperative-group-declare":
     case "load":
     case "store":
+    case "pointer-rebind":
     case "surface-write":
     case "surface-read-store":
     case "atomic":

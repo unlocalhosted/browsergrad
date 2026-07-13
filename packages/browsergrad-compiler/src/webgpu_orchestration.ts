@@ -492,6 +492,8 @@ function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boo
       return semanticCallNeedsParentDispatch(operation.callee, operation.args);
     case "runtime-copy":
       return false;
+    case "pointer-rebind":
+      return true;
     case "expression":
       return expressionNeedsParentDispatch(operation.expression);
     case "branch":
