@@ -525,6 +525,23 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...helperSemanticResult.buffers.out as Float32Array]).toEqual([8]);
     });
 
+  it("lowers scalar and vector surf1Dread through semantic surface IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void read_surface_1d(cudaSurfaceObject_t surf, float *out) {
+  float scalar = surf1Dread<float>(surf, sizeof(float));
+  float4 vector;
+  surf1Dread(&vector, surf, 0);
+  out[0] = scalar;
+  out[1] = vector.x + vector.y + vector.z + vector.w;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("bg_sem_surf2dread_surf");
+    expect(compiled.wgsl).not.toContain("surf1Dread");
+    expect(compiled.kernelIr.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "surface-read-store" }),
+    ]));
+  });
+
   it("lowers cudaSurfaceObject_t surf3Dread to z-linearized layer storage", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ float read_z(cudaSurfaceObject_t surfaceArg, int row, int z) {

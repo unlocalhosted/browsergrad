@@ -359,7 +359,7 @@ export type SemanticExpression =
     }
   | {
       readonly kind: "surface-read";
-      readonly callee: "surf2Dread" | "surf2DLayeredread" | "surf3Dread";
+      readonly callee: "surf1Dread" | "surf2Dread" | "surf2DLayeredread" | "surf3Dread";
       readonly surface: SemanticExpression;
       readonly xBytes: SemanticExpression;
       readonly y: SemanticExpression;
@@ -3379,6 +3379,7 @@ function lowerStatement(
           };
         }
         if (
+          (expression.callee.name === "surf1Dread" && expression.args.length === 3) ||
           (expression.callee.name === "surf2Dread" && expression.args.length === 4) ||
           ((expression.callee.name === "surf2DLayeredread" || expression.callee.name === "surf3Dread") && expression.args.length === 5)
         ) {
@@ -3389,7 +3390,7 @@ function lowerStatement(
             target,
             surface: surface.surface,
             xBytes: expression.args[2]!,
-            y: expression.args[3]!,
+            y: expression.callee.name === "surf1Dread" ? zeroExpression(expression.span) : expression.args[3]!,
             ...(surface.z === undefined ? {} : { z: surface.z }),
             ...optionalValueType(target.kind === "unary" && target.operator === "&" ? expressionValueType(target.argument) : expressionValueType(target)),
             span: statement.span,
@@ -4409,16 +4410,17 @@ function lowerExpression(
       }
       if (
         expression.callee.kind === "identifier" &&
-        (expression.callee.name === "surf2Dread" && args.length === 3 ||
+        (expression.callee.name === "surf1Dread" && args.length === 2 ||
+          expression.callee.name === "surf2Dread" && args.length === 3 ||
           (expression.callee.name === "surf2DLayeredread" || expression.callee.name === "surf3Dread") && args.length === 4)
       ) {
         const surface = semanticIndexedSurfaceLayer(args[0]!, args[3]);
         return {
           kind: "surface-read",
-          callee: expression.callee.name as "surf2Dread" | "surf2DLayeredread" | "surf3Dread",
+          callee: expression.callee.name as "surf1Dread" | "surf2Dread" | "surf2DLayeredread" | "surf3Dread",
           surface: surface.surface,
           xBytes: args[1]!,
-          y: args[2]!,
+          y: expression.callee.name === "surf1Dread" ? numberExpression(0, expression.span) : args[2]!,
           ...(surface.z === undefined ? {} : { z: surface.z }),
           valueType: expression.templateValueType ?? "float",
           span: expression.span,
