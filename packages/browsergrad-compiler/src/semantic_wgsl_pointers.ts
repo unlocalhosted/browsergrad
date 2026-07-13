@@ -27,11 +27,13 @@ import { sizeofCudaType } from "./type_layout.js";
 import { poolDataName } from "./pool_bindings.js";
 import {
   floatAtomicHelperName,
+  intViewAtomicHelperForCudaAtomic,
   integerAtomicLoopHelperName,
   wgslAtomicCalleeForCudaAtomic,
   wgslIntegerLoopAtomicKindForCudaAtomic,
 } from "./wgsl_atomic_helpers.js";
 import {
+  wgslAtomicScalar,
   wgslValueScalar,
   wgslValueType,
   wgslVectorScalar,
@@ -376,7 +378,7 @@ function emitSemanticStoragePointerReadHelper(
         return [`    case ${binding.id}u: { return ${emitSemanticLogicalByteStorageReadValue(valueType, nameFor(binding.name, names), "index")}; }`];
       }
       return semanticPointerStorageCompatible(valueType, binding.valueType)
-        ? [`    case ${binding.id}u: { return ${emitSemanticStoragePointerReadValue(valueType, nameFor(binding.name, names), "index", atomicStorage.has(binding.name))}; }`]
+        ? [`    case ${binding.id}u: { return ${emitSemanticStoragePointerReadValue(valueType, binding.valueType, nameFor(binding.name, names), "index", atomicStorage.has(binding.name))}; }`]
         : [];
     }),
     "    default: { return " + zeroForType(wgslType) + "; }",
@@ -406,7 +408,7 @@ function emitSemanticStoragePointerWriteHelper(
         return [`    case ${binding.id}u: { ${emitSemanticLogicalByteStorageWriteValue(valueType, nameFor(binding.name, names), "index", "value")} return; }`];
       }
       return !binding.constant && semanticPointerStorageCompatible(valueType, binding.valueType)
-        ? [`    case ${binding.id}u: { ${emitSemanticStoragePointerWriteValue(valueType, nameFor(binding.name, names), "index", "value", atomicStorage.has(binding.name))} return; }`]
+        ? [`    case ${binding.id}u: { ${emitSemanticStoragePointerWriteValue(valueType, binding.valueType, nameFor(binding.name, names), "index", "value", atomicStorage.has(binding.name))} return; }`]
         : [];
     }),
     "    default: { return; }",
@@ -434,7 +436,7 @@ function emitSemanticStoragePointerAtomicHelper(
         return [`    case ${binding.id}u: { return ${emitSemanticAtomicByteStorageAtomicValue(callee, valueType, nameFor(binding.name, names), "index", "compare", "value")}; }`];
       }
       return !binding.constant && atomicStorage.has(binding.name) && semanticPointerStorageCompatible(valueType, binding.valueType)
-        ? [`    case ${binding.id}u: { return ${emitSemanticStoragePointerAtomicValue(callee, valueType, nameFor(binding.name, names), "index", "compare", "value")}; }`]
+        ? [`    case ${binding.id}u: { return ${emitSemanticStoragePointerAtomicValue(callee, valueType, binding.valueType, nameFor(binding.name, names), "index", "compare", "value")}; }`]
         : [];
     }),
     "    default: { return " + zeroForType(wgslType) + "; }",
@@ -592,9 +594,9 @@ function emitSemanticAtomicByteStorageAtomicValue(
   value: string,
 ): string {
   const access = `${storage}[(${byteIndex} >> 2u)]`;
-  if (valueType === "uint") return emitSemanticStoragePointerAtomicValue(callee, valueType, storage, `(${byteIndex} >> 2u)`, compare, value);
+  if (valueType === "uint") return emitSemanticStoragePointerAtomicValue(callee, valueType, "uint", storage, `(${byteIndex} >> 2u)`, compare, value);
   if (valueType === "float" || valueType === "double") {
-    return emitSemanticStoragePointerAtomicValue(callee, valueType, storage, `(${byteIndex} >> 2u)`, compare, value);
+    return emitSemanticStoragePointerAtomicValue(callee, valueType, "uint", storage, `(${byteIndex} >> 2u)`, compare, value);
   }
   const op = semanticAtomicOperation(callee);
   if (op === "min" || op === "max") return `bg_atomic${op === "min" ? "Min" : "Max"}_storage_u32_as_i32(&${access}, ${value})`;
@@ -631,43 +633,54 @@ function semanticWgslPointerAtomicCallSupported(callee: string, valueType: CudaL
   return false;
 }
 
-function emitSemanticStoragePointerReadValue(valueType: CudaLiteScalarType, storage: string, index: string, atomic: boolean): string {
-  if (!isCudaVectorType(valueType)) return emitSemanticStoragePointerReadScalarValue(valueType, `${storage}[${index}]`, atomic);
+function emitSemanticStoragePointerReadValue(valueType: CudaLiteScalarType, storageValueType: CudaLiteScalarType | undefined, storage: string, index: string, atomic: boolean): string {
+  if (!isCudaVectorType(valueType)) return emitSemanticStoragePointerReadScalarValue(valueType, storageValueType, `${storage}[${index}]`, atomic);
   const laneCount = cudaVectorLaneCount(valueType);
   const scalar = wgslVectorScalar(valueType);
   return `${wgslValueType(valueType)}(${Array.from({ length: laneCount }, (_, lane) =>
-    `${scalar}(${emitSemanticStoragePointerReadScalarValue(cudaVectorScalarType(valueType) ?? valueType, `${storage}[(${index} + ${lane}u)]`, atomic)})`
+    `${scalar}(${emitSemanticStoragePointerReadScalarValue(cudaVectorScalarType(valueType) ?? valueType, storageValueType, `${storage}[(${index} + ${lane}u)]`, atomic)})`
   ).join(", ")})`;
 }
 
-function emitSemanticStoragePointerReadScalarValue(valueType: CudaLiteScalarType, access: string, atomic: boolean): string {
+function emitSemanticStoragePointerReadScalarValue(valueType: CudaLiteScalarType, storageValueType: CudaLiteScalarType | undefined, access: string, atomic: boolean): string {
   if (!atomic) return access;
   const loaded = `atomicLoad(&${access})`;
+  if (valueType === "int" && wgslAtomicScalar(storageValueType) === "u32") return `bitcast<i32>(${loaded})`;
   return semanticAtomicUsesF32Storage(valueType) ? `bitcast<f32>(${loaded})` : loaded;
 }
 
-function emitSemanticStoragePointerWriteValue(valueType: CudaLiteScalarType, storage: string, index: string, value: string, atomic: boolean): string {
-  if (!isCudaVectorType(valueType)) return emitSemanticStoragePointerWriteScalarValue(valueType, `${storage}[${index}]`, value, atomic);
+function emitSemanticStoragePointerWriteValue(valueType: CudaLiteScalarType, storageValueType: CudaLiteScalarType | undefined, storage: string, index: string, value: string, atomic: boolean): string {
+  if (!isCudaVectorType(valueType)) return emitSemanticStoragePointerWriteScalarValue(valueType, storageValueType, `${storage}[${index}]`, value, atomic);
   return Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
-    emitSemanticStoragePointerWriteScalarValue(cudaVectorScalarType(valueType) ?? valueType, `${storage}[(${index} + ${lane}u)]`, `(${value}).${["x", "y", "z", "w"][lane]}`, atomic)
+    emitSemanticStoragePointerWriteScalarValue(cudaVectorScalarType(valueType) ?? valueType, storageValueType, `${storage}[(${index} + ${lane}u)]`, `(${value}).${["x", "y", "z", "w"][lane]}`, atomic)
   ).join(" ");
 }
 
-function emitSemanticStoragePointerWriteScalarValue(valueType: CudaLiteScalarType, access: string, value: string, atomic: boolean): string {
+function emitSemanticStoragePointerWriteScalarValue(valueType: CudaLiteScalarType, storageValueType: CudaLiteScalarType | undefined, access: string, value: string, atomic: boolean): string {
   if (!atomic) return `${access} = ${value};`;
-  const stored = semanticAtomicUsesF32Storage(valueType) ? `bitcast<u32>(${value})` : value;
+  const stored = semanticAtomicUsesF32Storage(valueType) || valueType === "int" && wgslAtomicScalar(storageValueType) === "u32"
+    ? `bitcast<u32>(${value})`
+    : value;
   return `atomicStore(&${access}, ${stored});`;
 }
 
 function emitSemanticStoragePointerAtomicValue(
   callee: string,
   valueType: CudaLiteScalarType,
+  storageValueType: CudaLiteScalarType | undefined,
   storage: string,
   index: string,
   compare: string,
   value: string,
 ): string {
   const op = semanticAtomicOperation(callee);
+  if (valueType === "int" && wgslAtomicScalar(storageValueType) === "u32") {
+    const helper = intViewAtomicHelperForCudaAtomic(callee, "storage");
+    if (!helper) return "0";
+    return op === "cas"
+      ? `${helper}(&${storage}[${index}], ${compare}, ${value})`
+      : `${helper}(&${storage}[${index}], ${value})`;
+  }
   if (valueType === "float" || valueType === "double") {
     if (op === "exchange") return `bitcast<f32>(atomicExchange(&${storage}[${index}], bitcast<u32>(${value})))`;
     if (op === "cas") return `bitcast<f32>(atomicCompareExchangeWeak(&${storage}[${index}], bitcast<u32>(${compare}), bitcast<u32>(${value})).old_value)`;

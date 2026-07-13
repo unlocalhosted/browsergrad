@@ -445,6 +445,36 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&out[index], value); }");
     });
 
+  it("bridges signed scalar pointer views over unsigned vector atomic carriers", () => {
+      const storage = compileCudaLiteKernelForWebGpu(`
+  __device__ void sub_int_lane(int* values, int idx) {
+    values[idx] = 20 + idx;
+    atomicSub(&values[idx], 3 + idx);
+  }
+  __global__ void signed_storage_vector_atomic(int4* values) {
+    sub_int_lane(reinterpret_cast<int*>(values + 1), threadIdx.x);
+  }`, { workgroupSize: [2, 1, 1] });
+      const shared = compileCudaLiteKernelForWebGpu(`
+  __device__ void sub_shared_int_lane(int* values, int idx) {
+    atomicSub(&values[idx], 3 + idx);
+  }
+  __global__ void signed_shared_vector_atomic(int* out) {
+    __shared__ int3 tile[2];
+    int idx = threadIdx.x;
+    int* values = reinterpret_cast<int*>(tile + 1);
+    values[idx] = 20 + idx;
+    sub_shared_int_lane(values, idx);
+    out[idx] = values[idx];
+  }`, { workgroupSize: [2, 1, 1] });
+
+      expect(storage.wgsl).toContain("return bg_atomicSub_storage_u32_as_i32(&values[index], value)");
+      expect(storage.wgsl).toContain("return bitcast<i32>(atomicLoad(&values[index]))");
+      expect(storage.wgsl).toContain("atomicStore(&values[index], bitcast<u32>(value))");
+      expect(shared.wgsl).toContain("bg_atomicSub_workgroup_u32_as_i32");
+      expect(shared.wgsl).toMatch(/atomicStore\(&tile\[[^\n]+bitcast<u32>/u);
+      expect(shared.wgsl).toMatch(/bitcast<i32>\(atomicLoad\(&tile\[/u);
+    });
+
   it("keeps casted vector pointer arithmetic atomics on pointer helpers", () => {
       const compiled = compileCudaLiteKernelForWebGpu(`
   __device__ void add_uint_vector_slot(uint4* slot, uint value) {
@@ -2419,6 +2449,19 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(compiled.wgsl).toContain("var<storage, read_write> values: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("atomicStore(&values[");
       expect(compiled.wgsl).not.toMatch(/values\[[^\n]+\]\s*=/u);
+    });
+
+  it("uses atomic stores for resolved vector-member assignment targets", () => {
+      const compiled = compileCudaLiteKernelForWebGpu(`
+  __global__ void vector_member_atomic(uint4* values, int pick) {
+    atomicAdd(reinterpret_cast<uint*>(values), 1u);
+    values[pick ? 1 : 0].y = 9u;
+  }`, { workgroupSize: [1, 1, 1] });
+
+      expect(semanticAtomicMemoryRootNames(compiled.kernelIr)).toContain("values");
+      expect(compiled.wgsl).toContain("var<storage, read_write> values: array<atomic<u32>>;");
+      expect(compiled.wgsl).toContain("atomicStore(&values[");
+      expect(compiled.wgsl).not.toMatch(/values\[[^\n]+\]\s*=\s*9u/u);
     });
 
   it("marks storage atomic through local pointer-array elements", () => {

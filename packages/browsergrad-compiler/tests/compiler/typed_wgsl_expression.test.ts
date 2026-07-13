@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertTypedWgslExpression,
   createTypedWgslIdentifier,
+  createTypedWgslLiteral,
   createTypedWgslCall,
   createTypedWgslMemberAccess,
   createTypedWgslQualifiedAccess,
@@ -245,6 +246,19 @@ describe("typed WGSL expressions", () => {
       "f32",
       span,
     )).toMatchObject({ code: "tiles[row][column]", type: "f32", span });
+  });
+
+  it("concretizes integer signedness before cross-signed conversions", () => {
+    expect(convertTypedWgslExpression(
+      createTypedWgslLiteral("-3", "i32", span),
+      "u32",
+      true,
+    )).toMatchObject({ code: "u32(i32(-3))", type: "u32", span });
+    expect(convertTypedWgslExpression(
+      createTypedWgslIdentifier("value", "i32", span),
+      "u32",
+      true,
+    )).toMatchObject({ code: "u32(value)", type: "u32", span });
   });
 
   it("types atomic operations over atomic places", () => {

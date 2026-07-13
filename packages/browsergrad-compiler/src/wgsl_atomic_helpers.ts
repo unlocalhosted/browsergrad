@@ -46,6 +46,24 @@ export function intViewAtomicCasHelperName(addressSpace: WgslAtomicAddressSpace)
   return `bg_atomicCompareExchange_${addressSpace}_u32_as_i32`;
 }
 
+export function intViewAtomicHelperForCudaAtomic(
+  name: string | undefined,
+  addressSpace: WgslAtomicAddressSpace,
+): string | undefined {
+  switch (semanticAtomicOperation(name)) {
+    case "add": return intViewAtomicHelperName("Add", addressSpace);
+    case "sub": return intViewAtomicHelperName("Sub", addressSpace);
+    case "min": return intViewAtomicHelperName("Min", addressSpace);
+    case "max": return intViewAtomicHelperName("Max", addressSpace);
+    case "and": return intViewAtomicHelperName("And", addressSpace);
+    case "or": return intViewAtomicHelperName("Or", addressSpace);
+    case "xor": return intViewAtomicHelperName("Xor", addressSpace);
+    case "exchange": return intViewAtomicHelperName("Exchange", addressSpace);
+    case "cas": return intViewAtomicCasHelperName(addressSpace);
+    default: return undefined;
+  }
+}
+
 export function isAtomicCasCallName(name: string | undefined): boolean {
   return semanticAtomicOperation(name) === "cas";
 }

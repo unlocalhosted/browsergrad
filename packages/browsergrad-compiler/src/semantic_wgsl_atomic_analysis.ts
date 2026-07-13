@@ -1,11 +1,43 @@
 import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir.js";
 import type { CudaLiteScalarType, SourceSpan } from "./types.js";
 import { createSemanticSymbolId, createUnresolvedSemanticSymbolId, semanticMemoryIdFromSymbol } from "./semantic_ids.js";
-import { isSemanticKernelIrOperation, semanticExpressionChildren } from "./semantic_ir_walk.js";
+import { isSemanticKernelIrOperation, semanticAtomicMemoryRootNames, semanticExpressionChildren } from "./semantic_ir_walk.js";
 import { isSemanticAtomicCallName } from "./semantic_atomic_intrinsics.js";
 import { semanticFunctionForCall } from "./semantic_function_calls.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
+import { semanticMemoryRefStorageValueType } from "./semantic_memory_refs.js";
 import { requireSemanticValueType } from "./semantic_value_type.js";
+import { wgslAtomicScalar, wgslVectorScalar } from "./semantic_wgsl_types.js";
+import { integerAtomicLoopHelperName, type WgslAtomicAddressSpace, type WgslIntegerLoopAtomicKind } from "./wgsl_atomic_helpers.js";
+import { isCudaVectorType } from "./vector_types.js";
+
+export function semanticIntViewAtomicAddressSpaces(ir: SemanticKernelIrModule): ReadonlySet<WgslAtomicAddressSpace> {
+  const roots = semanticAtomicMemoryRootNames(ir);
+  const addressSpaces = new Set<WgslAtomicAddressSpace>();
+  for (const param of ir.params) {
+    if (param.addressSpace === "storage" && roots.has(param.name) && isCudaVectorType(param.valueType) && wgslVectorScalar(param.valueType) === "i32") addressSpaces.add("storage");
+  }
+  for (const memory of ir.memory) {
+    if (!roots.has(memory.name) || !isCudaVectorType(memory.valueType) || wgslVectorScalar(memory.valueType) !== "i32") continue;
+    if (memory.kind === "shared") addressSpaces.add("workgroup");
+    if (memory.kind === "device-global") addressSpaces.add("storage");
+  }
+  return addressSpaces;
+}
+
+export function semanticIntegerLoopAtomicHelperName(
+  kind: WgslIntegerLoopAtomicKind,
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+): string {
+  const storageValueType = semanticMemoryRefStorageValueType(ref, ir) ?? ref.valueType ?? "uint";
+  return integerAtomicLoopHelperName(kind, {
+    valueType: ref.valueType ?? "uint",
+    storageValueType,
+    storageScalar: wgslAtomicScalar(storageValueType),
+    addressSpace: ref.addressSpace === "shared" ? "workgroup" : "storage",
+  });
+}
 
 export interface SemanticWgslAtomicAnalysisHost {
   readonly memoryRefFromIndexExpression: (expression: SemanticExpression) => SemanticMemoryRef | undefined;

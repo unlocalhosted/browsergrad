@@ -68,6 +68,23 @@ class TypedWgslExpressionValue implements TypedWgslExpression {
   get code(): string {
     return printTypedWgslExpressionNode(this.node);
   }
+
+  isPossiblyNegativeAbstractIntegerExpression(): boolean {
+    if (this.type !== "i32") return false;
+    switch (this.node.kind) {
+      case "leaf": return /^-[0-9]+$/.test(this.node.code);
+      case "binary": return this.node.operator === "-" ||
+        this.node.left.isPossiblyNegativeAbstractIntegerExpression() ||
+        this.node.right.isPossiblyNegativeAbstractIntegerExpression();
+      case "unary": return this.node.operator === "-" || this.node.operator === "~" ||
+        this.node.operand.isPossiblyNegativeAbstractIntegerExpression();
+      case "select": return this.node.alternate.isPossiblyNegativeAbstractIntegerExpression() ||
+        this.node.consequent.isPossiblyNegativeAbstractIntegerExpression();
+      case "call": return ABSTRACT_INTEGER_BUILTINS.has(this.node.callee) &&
+        this.node.args.some((arg) => arg.isPossiblyNegativeAbstractIntegerExpression());
+      default: return false;
+    }
+  }
 }
 
 class TypedWgslPlaceValue implements TypedWgslPlace {
@@ -93,6 +110,7 @@ export type WgslUnaryOperator = "+" | "-" | "!" | "~";
 const comparisonOperators = new Set<WgslBinaryOperator>(["<", "<=", ">", ">=", "==", "!="]);
 const logicalOperators = new Set<WgslBinaryOperator>(["&&", "||"]);
 const bitwiseOperators = new Set<WgslBinaryOperator>(["&", "|", "^", "<<", ">>"]);
+const ABSTRACT_INTEGER_BUILTINS = new Set(["abs", "clamp", "max", "min"]);
 
 export function createTypedWgslIdentifier(
   name: string,
@@ -574,7 +592,12 @@ function placeValue(place: TypedWgslPlace): TypedWgslPlaceValue {
 function printTypedWgslExpressionNode(node: TypedWgslExpressionNode): string {
   switch (node.kind) {
     case "leaf": return node.code;
-    case "conversion": return `${node.targetType}(${node.source.code})`;
+    case "conversion": {
+      const source = node.targetType === "u32" && node.source.isPossiblyNegativeAbstractIntegerExpression()
+        ? `i32(${node.source.code})`
+        : node.source.code;
+      return `${node.targetType}(${source})`;
+    }
     case "bool-to-numeric": {
       const zero = node.targetType === "u32" ? "0u" : node.targetType === "i32" ? "0" : node.targetType === "f16" ? "f16(0.0)" : "0.0";
       const one = node.targetType === "u32" ? "1u" : node.targetType === "i32" ? "1" : node.targetType === "f16" ? "f16(1.0)" : "1.0";
