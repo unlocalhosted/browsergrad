@@ -465,10 +465,9 @@ export function selectDeviceFunctionOverloadsForSource(source, name, overloads, 
   const selected = [];
   for (const arity of arityList) {
     const matches = overloads.filter((fn) => deviceFunctionParamCount(fn.source) === arity);
-    const chosen = matches[matches.length - 1];
-    if (chosen !== undefined) selected.push(chosen);
+    selected.push(...matches);
   }
-  return selected.length > 0 ? selected : overloads.slice(-1);
+  return selected.length > 0 ? selected : overloads;
 }
 
 function deviceFunctionParamCount(source) {

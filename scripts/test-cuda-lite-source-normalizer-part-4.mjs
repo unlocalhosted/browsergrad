@@ -743,3 +743,19 @@ __global__ void random_kernel(unsigned long long seed, float *uniform_out, int *
   assert.match(source, /poisson_out\[threadIdx\.x\] = bg_random_poisson4\(&rng\);/u);
   assert.doesNotMatch(source, /cuda::std::uniform_real_distribution/u);
 }
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void overloaded_helper(float3 *out, float4 *matrix) {
+  out[0] = mul(matrix, make_float3(1.0f, 2.0f, 3.0f));
+  out[1] = make_float3(mul(matrix, make_float4(1.0f)));
+}`,
+    deviceFunctions: [
+      { name: "mul", source: "__device__ float3 mul(float4 *matrix, float3 value) { return value; }" },
+      { name: "mul", source: "__device__ float4 mul(float4 *matrix, float4 value) { return value; }" },
+    ],
+  });
+  assert.match(source, /__device__ float3 mul\(float4 \*matrix, float3 value\)/u);
+  assert.match(source, /__device__ float4 mul\(float4 \*matrix, float4 value\)/u);
+}

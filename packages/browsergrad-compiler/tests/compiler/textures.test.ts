@@ -1640,6 +1640,28 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 6, 9]);
     });
 
+  it("passes texture handles through helpers that also accept storage pointers", () => {
+    const compiled = compileCudaLiteKernel(`
+  __device__ float sampleVolume(cudaTextureObject_t texSrc, uchar *data, int index) {
+    return tex1Dfetch<float>(texSrc, index) + (float)data[index] * 0.0f;
+  }
+  __global__ void sample(float *out, uchar *data, cudaTextureObject_t tex) {
+    int index = threadIdx.x;
+    out[index] = sampleVolume(tex, data, index);
+  }`, { workgroupSize: [3, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(3), data: new Uint32Array([0x00030201]) },
+      textures: { tex: { width: 3, height: 1, data: new Float32Array([4, 8, 12]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [3, 1, 1] as const };
+    const result = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("fn sampleVolume(texSrc: texture_2d<f32>");
+    expect([...result.buffers.out as Float32Array]).toEqual([4, 8, 12]);
+  });
+
   it("lowers nested CUDA texture helper params through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ float sampleInner(cudaTextureObject_t texInner, float x) {

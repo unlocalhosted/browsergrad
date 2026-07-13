@@ -5437,6 +5437,18 @@ function emitSemanticTypedStoragePointerFunctionCall(
   const args: TypedWgslExpression[] = [];
   expression.args.forEach((arg, index) => {
     const param = fn.params[index]!;
+    if (param.addressSpace === "texture") {
+      if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticWgslError(`texture argument '${param.name}' is not a texture symbol`, arg.span);
+      args.push(createTypedWgslIdentifier(nameFor(arg.name, names), "texture_2d<f32>", arg.span));
+      return;
+    }
+    if (param.addressSpace === "surface") {
+      if (arg.kind !== "symbol" || arg.addressSpace !== "surface") throw semanticWgslError(`surface argument '${param.name}' is not a surface symbol`, arg.span);
+      const handle = surfaceHandleForName(arg.name, ir);
+      if (handle === undefined) throw semanticWgslError(`unknown surface '${arg.name}'`, arg.span);
+      args.push(createTypedWgslLiteral(`${handle}u`, "u32", arg.span));
+      return;
+    }
     if (param.pointer) {
       const ref = semanticPointerArgMemoryRef(arg);
       const localRuntimePointer = ref?.addressSpace === "local"
