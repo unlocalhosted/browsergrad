@@ -3,17 +3,29 @@ import type {
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
 } from "./semantic_ir.js";
-import type { CudaLiteScalarType } from "./types.js";
+import type { CudaLiteScalarType, SourceSpan } from "./types.js";
 import { semanticIdsEqual } from "./semantic_ids.js";
 import { semanticExpressionChildren, semanticOperationExpressions } from "./semantic_ir_walk.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 import { wgslValueScalar, wgslValueType } from "./semantic_wgsl_types.js";
 import { cudaArithmeticReduceOpForCall, isCudaWarpReduceCallName, isCudaWarpSumCallName } from "./cuda_subgroup_calls.js";
+import { semanticBallotHelper } from "./semantic_wgsl_subgroups.js";
 import {
   semanticCooperativeGroupInfo,
   semanticCooperativeGroupRankParamName,
   semanticCooperativeGroupSizeParamName,
 } from "./semantic_cooperative_groups.js";
+import {
+  convertTypedWgslExpression,
+  createTypedWgslCall,
+  createTypedWgslIdentifier,
+  createTypedWgslLiteral,
+  createTypedWgslMemberAccess,
+  emitTypedWgslBinary,
+  emitTypedWgslSelect,
+  emitTypedWgslUnary,
+  type TypedWgslExpression,
+} from "./typed_wgsl_expression.js";
 
 export interface SemanticCooperativeReduceHelper {
   readonly name: string;
@@ -39,6 +51,117 @@ export interface SemanticCooperativeVectorReduceHelper {
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly tileSize: number;
   readonly reducerName: string;
+}
+
+export interface SemanticCooperativePartitionMaskDeclaration {
+  readonly trueMaskName: string;
+  readonly trueMaskValue: TypedWgslExpression;
+  readonly name: string;
+  readonly value: TypedWgslExpression;
+}
+
+export function semanticCooperativePartitionDeclarations(
+  ir: SemanticKernelIrModule,
+): readonly Extract<SemanticKernelIrOperation, { readonly kind: "cooperative-group-declare" }>[] {
+  return [...ir.operations, ...ir.functions.flatMap((fn) => fn.body)]
+    .flatMap(semanticOperationsDeep)
+    .filter((operation): operation is Extract<SemanticKernelIrOperation, { readonly kind: "cooperative-group-declare" }> =>
+      operation.kind === "cooperative-group-declare" && operation.declaration.partitionPredicate !== undefined,
+    );
+}
+
+export function semanticCooperativePartitionMaskName(groupName: string): string {
+  return `${groupName}__bg_partition_mask`;
+}
+
+export function emitSemanticTypedCooperativePartitionMaskDeclaration(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "cooperative-group-declare" }>,
+  ir: SemanticKernelIrModule,
+  predicate: TypedWgslExpression,
+  resolveName: (name: string) => string = (name) => name,
+): SemanticCooperativePartitionMaskDeclaration | undefined {
+  const group = semanticCooperativeGroupInfo(ir, operation.declaration.name);
+  if (!group?.partitioned || !group.partitionPredicate) return undefined;
+  const trueMaskName = resolveName(`${operation.declaration.name}__bg_partition_true_mask`);
+  const trueMaskValue = emitSemanticTypedCooperativePartitionBallotMask(group, ir, predicate, operation.span);
+  const trueMask = createTypedWgslIdentifier(trueMaskName, "u32", operation.span);
+  const tileMask = semanticTypedCooperativePartitionLowMask(group, ir, operation.span);
+  return {
+    trueMaskName,
+    trueMaskValue,
+    name: resolveName(semanticCooperativePartitionMaskName(operation.declaration.name)),
+    value: emitTypedWgslSelect(
+      emitTypedWgslBinary("&", emitTypedWgslUnary("~", trueMask, operation.span), tileMask, operation.span),
+      trueMask,
+      predicate,
+      operation.span,
+    ),
+  };
+}
+
+export function emitSemanticTypedCooperativePartitionBallotMask(
+  group: NonNullable<ReturnType<typeof semanticCooperativeGroupInfo>>,
+  ir: SemanticKernelIrModule,
+  predicate: TypedWgslExpression,
+  span: SourceSpan,
+): TypedWgslExpression {
+  const localRank = semanticTypedCooperativeLocalLinearRank(ir, span);
+  const tileSize = semanticCooperativePartitionTileSize(group, ir);
+  const tileLane = emitTypedWgslBinary("%", localRank, semanticTypedU32(tileSize, span), span);
+  const warpLane = emitTypedWgslBinary("%", localRank, semanticTypedU32(32, span), span);
+  const tileBase = emitTypedWgslBinary("-", warpLane, tileLane, span);
+  const tileMask = semanticTypedCooperativePartitionLowMask(group, ir, span);
+  const activeMask = emitTypedWgslBinary("<<", tileMask, tileBase, span);
+  const ballot = createTypedWgslCall(
+    semanticBallotHelper().name,
+    [predicate, activeMask, createTypedWgslIdentifier("local_id", "vec3<u32>", span)],
+    "u32",
+    span,
+  );
+  return emitTypedWgslBinary(">>", ballot, tileBase, span);
+}
+
+export function emitSemanticTypedCooperativeGroupCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  activeFunction?: string,
+): TypedWgslExpression | undefined {
+  if (!semanticWgslCooperativeGroupCallSupported(expression, ir) || expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return undefined;
+  const span = expression.span;
+  const groupName = expression.callee.object.name;
+  const group = semanticCooperativeGroupInfo(ir, groupName)!;
+  const resultType = expression.valueType === "uint" ? "u32" : "i32";
+  const groupParam = activeFunction === undefined ? undefined : ir.functions.find((fn) => fn.name === activeFunction)?.params
+    .find((param) => param.name === groupName && param.cooperativeGroupKind !== undefined);
+  if (groupParam && (expression.callee.property === "thread_rank" || expression.callee.property === "size")) {
+    const suffix = expression.callee.property === "thread_rank" ? semanticCooperativeGroupRankParamName(groupParam.name) : semanticCooperativeGroupSizeParamName(groupParam.name);
+    return convertTypedWgslExpression(createTypedWgslIdentifier(suffix, "i32", span), resultType);
+  }
+  const localRank = semanticTypedCooperativeLocalLinearRank(ir, span);
+  const asResult = (value: TypedWgslExpression): TypedWgslExpression => convertTypedWgslExpression(value, resultType);
+  if (group.partitioned && (expression.callee.property === "thread_rank" || expression.callee.property === "size")) {
+    const mask = createTypedWgslIdentifier(semanticCooperativePartitionMaskName(groupName), "u32", span);
+    if (expression.callee.property === "size") return asResult(createTypedWgslCall("countOneBits", [mask], "u32", span));
+    const lane = emitTypedWgslBinary("%", localRank, semanticTypedU32(semanticCooperativePartitionTileSize(group, ir), span), span);
+    const lower = emitTypedWgslBinary("-", emitTypedWgslBinary("<<", semanticTypedU32(1, span), lane, span), semanticTypedU32(1, span), span);
+    return asResult(createTypedWgslCall("countOneBits", [emitTypedWgslBinary("&", mask, lower, span)], "u32", span));
+  }
+  if (expression.callee.property === "thread_rank") {
+    if (group.kind === "grid") return asResult(semanticTypedCooperativeGlobalLinearRank(ir, span));
+    if (group.kind === "tile") return asResult(emitTypedWgslBinary("%", localRank, semanticTypedU32(group.tileSize ?? 32, span), span));
+    return asResult(localRank);
+  }
+  if (expression.callee.property === "size") {
+    if (group.kind === "grid") return asResult(semanticTypedCooperativeGridThreadCount(ir, span));
+    return asResult(semanticTypedU32(group.kind === "tile" ? group.tileSize ?? 32 : semanticCooperativeWorkgroupSize(ir), span));
+  }
+  if (expression.callee.property === "meta_group_rank") {
+    return asResult(group.kind === "tile" ? emitTypedWgslBinary("/", localRank, semanticTypedU32(group.tileSize ?? 32, span), span) : semanticTypedU32(0, span));
+  }
+  if (expression.callee.property === "meta_group_size") {
+    return asResult(semanticTypedU32(group.kind === "tile" ? Math.ceil(semanticCooperativeWorkgroupSize(ir) / (group.tileSize ?? 32)) : 1, span));
+  }
+  return undefined;
 }
 
 export function semanticWgslCooperativeGroupCallSupported(
@@ -447,4 +570,59 @@ function semanticCooperativeGlobalLinearRank(ir: SemanticKernelIrModule): string
 
 function semanticCooperativeGridThreadCount(ir: SemanticKernelIrModule): string {
   return `i32(${semanticCooperativeWorkgroupSize(ir)}u * num_workgroups.x * num_workgroups.y * num_workgroups.z)`;
+}
+
+function semanticOperationsDeep(operation: SemanticKernelIrOperation): readonly SemanticKernelIrOperation[] {
+  if (operation.kind === "branch") return [operation, ...operation.consequent.flatMap(semanticOperationsDeep), ...operation.alternate.flatMap(semanticOperationsDeep)];
+  if (operation.kind === "loop" || operation.kind === "block") return [operation, ...operation.body.flatMap(semanticOperationsDeep)];
+  return [operation];
+}
+
+function semanticCooperativePartitionTileSize(
+  group: NonNullable<ReturnType<typeof semanticCooperativeGroupInfo>>,
+  ir: SemanticKernelIrModule,
+): number {
+  const parent = group.partitionParent ? semanticCooperativeGroupInfo(ir, group.partitionParent) : undefined;
+  return Math.max(1, Math.min(32, group.tileSize ?? parent?.tileSize ?? semanticCooperativeWorkgroupSize(ir)));
+}
+
+function semanticTypedCooperativePartitionLowMask(
+  group: NonNullable<ReturnType<typeof semanticCooperativeGroupInfo>>,
+  ir: SemanticKernelIrModule,
+  span: SourceSpan,
+): TypedWgslExpression {
+  const tileSize = semanticCooperativePartitionTileSize(group, ir);
+  return createTypedWgslLiteral(tileSize === 32 ? "0xffffffffu" : `${2 ** tileSize - 1}u`, "u32", span);
+}
+
+function semanticTypedU32(value: number, span: SourceSpan): TypedWgslExpression {
+  return createTypedWgslLiteral(`${value}u`, "u32", span);
+}
+
+function semanticTypedCooperativeLocalLinearRank(ir: SemanticKernelIrModule, span: SourceSpan): TypedWgslExpression {
+  const [x, y, z] = ir.workgroupSize;
+  const localId = createTypedWgslIdentifier("local_id", "vec3<u32>", span);
+  const lane = (field: "x" | "y" | "z"): TypedWgslExpression => createTypedWgslMemberAccess(localId, field, "u32", span);
+  let rank = lane("x");
+  if (y !== 1 || z !== 1) rank = emitTypedWgslBinary("+", rank, emitTypedWgslBinary("*", lane("y"), semanticTypedU32(x, span), span), span);
+  if (z !== 1) rank = emitTypedWgslBinary("+", rank, emitTypedWgslBinary("*", lane("z"), semanticTypedU32(x * y, span), span), span);
+  return rank;
+}
+
+function semanticTypedCooperativeGlobalLinearRank(ir: SemanticKernelIrModule, span: SourceSpan): TypedWgslExpression {
+  const workgroupId = createTypedWgslIdentifier("workgroup_id", "vec3<u32>", span);
+  const numWorkgroups = createTypedWgslIdentifier("num_workgroups", "vec3<u32>", span);
+  const member = (object: TypedWgslExpression, field: "x" | "y" | "z"): TypedWgslExpression => createTypedWgslMemberAccess(object, field, "u32", span);
+  const product = (left: TypedWgslExpression, right: TypedWgslExpression): TypedWgslExpression => emitTypedWgslBinary("*", left, right, span);
+  const sum = (left: TypedWgslExpression, right: TypedWgslExpression): TypedWgslExpression => emitTypedWgslBinary("+", left, right, span);
+  const flatWorkgroup = sum(member(workgroupId, "x"), sum(product(member(workgroupId, "y"), member(numWorkgroups, "x")), product(member(workgroupId, "z"), product(member(numWorkgroups, "x"), member(numWorkgroups, "y")))));
+  return sum(semanticTypedCooperativeLocalLinearRank(ir, span), product(semanticTypedU32(semanticCooperativeWorkgroupSize(ir), span), flatWorkgroup));
+}
+
+function semanticTypedCooperativeGridThreadCount(ir: SemanticKernelIrModule, span: SourceSpan): TypedWgslExpression {
+  const numWorkgroups = createTypedWgslIdentifier("num_workgroups", "vec3<u32>", span);
+  return (["x", "y", "z"] as const).reduce<TypedWgslExpression>(
+    (value, field) => emitTypedWgslBinary("*", value, createTypedWgslMemberAccess(numWorkgroups, field, "u32", span), span),
+    semanticTypedU32(semanticCooperativeWorkgroupSize(ir), span),
+  );
 }

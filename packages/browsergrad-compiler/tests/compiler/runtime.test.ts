@@ -312,7 +312,7 @@ function compilerExampleText(file: string): string {
 }
 
 describe("CUDA-lite compiler: Runtime orchestration", () => {
-  it("omits unreachable DevicePool parameters from semantic execution", () => {
+  it("omits unreachable DevicePool parameters and lowers used pools through semantic execution", () => {
       const unused = compileCudaLiteKernel(`
   __global__ void unusedPool(DevicePool *pool, uint *out) {
     if (threadIdx.x < 1) out[0] = 7u;
@@ -336,7 +336,9 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       expect(unused.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(unused.wgsl).not.toContain("pool_pool");
       expect([...result.buffers.out as Uint32Array]).toEqual([7]);
-      expect(canEmitSemanticKernelIrWgsl(used.wgslLegalizedKernelIr)).toBe(false);
+      expect(canEmitSemanticKernelIrWgsl(used.wgslLegalizedKernelIr)).toBe(true);
+      expect(used.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(used.wgsl).toContain("pool_pool");
     });
 
   it("allocates from a DevicePool and writes through casted pool pointers", () => {

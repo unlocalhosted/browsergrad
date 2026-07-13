@@ -16,7 +16,7 @@ import {
 } from "./typed_wgsl_expression.js";
 
 export interface SemanticBfloatScalarOptions extends SemanticTextureDescriptorOptions {
-  readonly activeCollectivePredicate?: string;
+  readonly activeCollectivePredicate?: SemanticExpression;
   readonly activeFunction?: string;
   readonly workgroupUniformExpression?: boolean;
 }

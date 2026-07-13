@@ -1689,7 +1689,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
-      expect(compiled.wgsl).toContain("atomicAdd(&out[0u], 4)");
+      expect(compiled.wgsl).toContain("atomicAdd(&out[0u], i32(4u))");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });
 
@@ -1715,7 +1715,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("reduce_n(value, i32((local_id.x % 4u)), 4");
+      expect(compiled.wgsl).toContain("reduce_n(value, i32((local_id.x % 4u)), i32(4u)");
       expect(compiled.wgsl).toContain("if ((u32(i32((local_id.x % 4u))) == 0u))");
       expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_i32_4(value, local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);

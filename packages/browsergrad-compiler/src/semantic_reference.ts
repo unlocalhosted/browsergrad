@@ -4953,17 +4953,26 @@ function semanticReferenceCooperativeContexts(
   const tileSize = group.tileSize ?? parent?.tileSize ?? 32;
   const rank = semanticLocalLinearRank(context);
   const base = Math.floor(rank / tileSize) * tileSize;
-  const peers = (context.activeCollectiveContexts ?? context.blockContexts).filter((peer) => {
+  const peers = (group.partitioned ? context.blockContexts : context.activeCollectiveContexts ?? context.blockContexts).filter((peer) => {
     const peerRank = semanticLocalLinearRank(peer);
     return peerRank >= base && peerRank < base + tileSize;
   });
   if (!group.partitioned || !group.partitionPredicate) return peers;
+  const selected = semanticReferencePartitionMembership(name, group.partitionPredicate, context);
+  return peers.filter((peer) => semanticReferencePartitionMembership(name, group.partitionPredicate!, peer) === selected);
+}
+
+function semanticReferencePartitionMembership(
+  name: string,
+  predicate: SemanticExpression,
+  context: SemanticReferenceContext,
+): number {
   const membershipName = semanticPartitionMembershipName(name);
-  const selected = context.locals.get(membershipName);
-  if (typeof selected !== "number") {
-    throw semanticReferenceError(`partition membership for '${name}' was not initialized`, context.compiled.kernelIr.span);
-  }
-  return peers.filter((peer) => peer.locals.get(membershipName) === selected);
+  const existing = context.locals.get(membershipName);
+  if (typeof existing === "number") return existing;
+  const membership = truthy(evalNumber(predicate, context)) ? 1 : 0;
+  context.locals.set(membershipName, membership);
+  return membership;
 }
 
 function recordSemanticPartitionMembership(
