@@ -179,6 +179,11 @@ export interface SemanticRuntimePointerWgslHost {
   readonly semanticWgslFloatAtomicCallKind: (callee: string) => "Add" | "Sub" | "Min" | "Max" | "Exchange" | "CompareExchange" | undefined;
 }
 
+const SEMANTIC_POINTER_ATOMIC_CALLS = [
+  "atomicAdd", "atomicSub", "atomicMin", "atomicMax", "atomicAnd", "atomicOr", "atomicXor", "atomicExch", "atomicCAS",
+  "atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system",
+] as const;
+
 export function createSemanticRuntimePointerWgsl(host: SemanticRuntimePointerWgslHost) {
   const { memoryRefFromIndexExpression, nameFor, semanticWgslFloatAtomicCallKind } = host;
 
@@ -187,14 +192,46 @@ function emitSemanticStoragePointerHelpers(
   names: ReadonlyMap<string, string>,
 ): readonly (readonly string[])[] {
   const types = semanticStoragePointerValueTypes(ir);
+  const atomicCalls = semanticStoragePointerAtomicCalls(ir);
   return [...types].flatMap((type) => [
     emitSemanticStoragePointerReadHelper(type, ir, names),
     emitSemanticStoragePointerWriteHelper(type, ir, names),
-    ...SEMANTIC_POINTER_ATOMIC_CALLS.flatMap((callee) => {
+    ...[...(atomicCalls.get(type) ?? [])].flatMap((callee) => {
       const helper = emitSemanticStoragePointerAtomicHelper(callee, type, ir, names);
       return helper.length === 0 ? [] : [helper];
     }),
   ]);
+}
+
+function semanticStoragePointerAtomicCalls(
+  ir: SemanticKernelIrModule,
+): ReadonlyMap<CudaLiteScalarType, ReadonlySet<typeof SEMANTIC_POINTER_ATOMIC_CALLS[number]>> {
+  const calls = new Map<CudaLiteScalarType, Set<typeof SEMANTIC_POINTER_ATOMIC_CALLS[number]>>();
+  const add = (
+    calleeName: string,
+    valueType: CudaLiteScalarType | undefined,
+  ): void => {
+    const callee = SEMANTIC_POINTER_ATOMIC_CALLS.find((name) => name === calleeName);
+    if (!callee || valueType === undefined || valueType === "voidptr") return;
+    const existing = calls.get(valueType) ?? new Set<typeof SEMANTIC_POINTER_ATOMIC_CALLS[number]>();
+    existing.add(callee);
+    calls.set(valueType, existing);
+  };
+  const collect = (operations: readonly SemanticKernelIrOperation[]): void => {
+    for (const operation of operations) {
+      if (operation.kind === "atomic") add(operation.callee, operation.target?.valueType);
+      if (operation.kind === "branch") collect([...operation.consequent, ...operation.alternate]);
+      if (operation.kind === "loop") collect(operation.body);
+    }
+    walkSemanticOperations(operations, (expression) => {
+      if (expression.kind !== "call" || expression.callee.kind !== "symbol") return;
+      const target = expression.args[0] ? semanticPointerArgMemoryRef(expression.args[0]) : undefined;
+      add(expression.callee.name, target?.valueType ?? expression.valueType);
+    });
+  };
+  collect(ir.operations);
+  for (const fn of ir.functions) collect(fn.body);
+  return calls;
 }
 
 function semanticStoragePointerValueTypes(ir: SemanticKernelIrModule): ReadonlySet<CudaLiteScalarType> {
@@ -317,11 +354,6 @@ function collectSemanticStoragePointerOperationRefs(
     }
   }
 }
-
-const SEMANTIC_POINTER_ATOMIC_CALLS = [
-  "atomicAdd", "atomicSub", "atomicMin", "atomicMax", "atomicAnd", "atomicOr", "atomicXor", "atomicExch", "atomicCAS",
-  "atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system",
-] as const;
 
 function emitSemanticStoragePointerReadHelper(
   valueType: CudaLiteScalarType,
