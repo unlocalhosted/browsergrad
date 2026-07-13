@@ -1821,7 +1821,14 @@ describe("CUDA-lite compiler: Atomics", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicCompareExchange_u32");
+      expect(compiled.wgsl).toContain("fn cas_u32__bg_overload_0(target_buffer: u32, target_base: u32");
+      expect(compiled.wgsl).toContain("fn cas_u32__bg_overload_1(target__bg_shared_ptr: ptr<workgroup, atomic<u32>>");
+      expect(compiled.wgsl).toContain("return bg_ptr_atomicCompareExchange_u32(target_buffer");
+      expect(compiled.wgsl).toContain("return atomicCompareExchangeWeak(&(*target__bg_shared_ptr)");
       expect([...result.buffers.out as Uint32Array]).toEqual([2, 9, 3, 11]);
     });
 

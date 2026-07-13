@@ -874,10 +874,22 @@ export function lowerSemanticModelToKernelIr(
   const sharedMemorySymbols = [...semantic.symbols, ...localMemory]
     .filter((symbol) => symbol.addressSpace === "shared")
     .map((symbol) => semanticMemorySymbolWithDynamicSharedExtent(symbol, options.dynamicSharedMemory));
-  const resolved = resolveSemanticFunctionOverloads(
-    loweredOperations,
-    loweredSourceFunctions.filter((fn) => reachableSemanticFunctions.has(fn.id.key) && !isSemanticGeneratedRandomCall(fn.name)),
+  const reachableSourceFunctions = loweredSourceFunctions.filter((fn) =>
+    reachableSemanticFunctions.has(fn.id.key) && !isSemanticGeneratedRandomCall(fn.name)
   );
+  const sourceSharedMemoryDimensions = new Map(
+    sharedMemorySymbols.map((symbol) => [symbol.name, symbol.dimensions] as const),
+  );
+  const sourceSharedMemoryValueTypes = new Map(
+    sharedMemorySymbols.map((symbol) => [symbol.name, symbol.valueType] as const),
+  );
+  const addressSpaceOverloads = cloneMixedSharedPointerFunctionOverloads(
+    loweredOperations,
+    reachableSourceFunctions,
+    sourceSharedMemoryDimensions,
+    sourceSharedMemoryValueTypes,
+  );
+  const resolved = resolveSemanticFunctionOverloads(loweredOperations, addressSpaceOverloads);
   const resolvedFunctionSharedMemory = resolved.functions.flatMap((fn) =>
     collectDeclaredMemory(fn.body)
       .filter((symbol) => symbol.addressSpace === "shared")
@@ -1926,6 +1938,71 @@ function mutatedParamRootName(expression: CudaLiteExpression): string | undefine
   if (expression.kind === "identifier") return expression.name;
   if (expression.kind === "member") return mutatedParamRootName(expression.object);
   return undefined;
+}
+
+function cloneMixedSharedPointerFunctionOverloads(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+  sharedMemoryDimensions: ReadonlyMap<string, readonly number[]>,
+  sharedMemoryValueTypes: ReadonlyMap<string, CudaLiteScalarType | undefined>,
+): readonly CudaLiteSemanticFunction[] {
+  const calls = [
+    ...collectSemanticFunctionCalls(operations),
+    ...functions.flatMap((fn) => collectSemanticFunctionCalls(fn.body)),
+  ];
+  return functions.flatMap((fn) => {
+    const pointerIndexes = fn.params.flatMap((param, index) =>
+      param.pointer && param.addressSpace === "storage" ? [index] : []
+    );
+    if (pointerIndexes.length === 0) return [fn];
+    const signatures = new Map<string, SemanticFunctionCallSite[]>();
+    for (const call of calls.filter((candidate) => candidate.callee === fn.name)) {
+      const refs = pointerIndexes.map((index) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
+      if (refs.some((ref) => ref === undefined || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared")) continue;
+      const signature = refs.map((ref) => ref!.addressSpace === "shared" ? "shared" : "storage").join(",");
+      const group = signatures.get(signature) ?? [];
+      group.push(call);
+      signatures.set(signature, group);
+    }
+    if (signatures.size <= 1 || ![...signatures].some(([signature]) => signature.includes("shared"))) return [fn];
+    return [...signatures].flatMap(([signature, signatureCalls]) => {
+      const addressSpaces = signature.split(",");
+      if (!addressSpaces.includes("shared")) return [fn];
+      const rewrites = new Map<string, SemanticPointerRewriteTarget>();
+      const params = [...fn.params];
+      for (const [pointerPosition, paramIndex] of pointerIndexes.entries()) {
+        if (addressSpaces[pointerPosition] !== "shared") continue;
+        const param = fn.params[paramIndex]!;
+        const refs = signatureCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[paramIndex]!)!);
+        const roots = refs.map((ref) => ref.base);
+        const dimensions = roots.map((root) => sharedMemoryDimensions.get(root));
+        const carriers = roots.map((root) => sharedMemoryValueTypes.get(root));
+        const compatible = dimensions.every((value) => value !== undefined && value.length <= 1) &&
+          sameSemanticDimensions(dimensions as readonly (readonly number[])[]) &&
+          carriers.every((value) => value !== undefined && param.valueType !== undefined && sizeofCudaType(value) === sizeofCudaType(param.valueType));
+        if (!compatible) return [];
+        const name = `${param.name}__bg_shared_ptr`;
+        const id = createGeneratedSemanticSymbolId(
+          `bg_shared_overload_${fn.name}_${signature}_${param.name}_${param.span.start}`,
+          param.span,
+        );
+        params[paramIndex] = {
+          ...param,
+          id,
+          name,
+          addressSpace: "shared",
+          dimensions: dimensions[0]!,
+          ...optionalPointerCarrierValueType(carriers[0]),
+        };
+        rewrites.set(param.name, { name, id: semanticMemoryIdFromSymbol(id) });
+      }
+      return [{
+        ...fn,
+        params,
+        body: rewriteSemanticPointerAddressSpace(fn.body, rewrites),
+      }];
+    });
+  });
 }
 
 function specializeSharedPointerFunctions(
