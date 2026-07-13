@@ -2314,6 +2314,36 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("mergeShared(&keys, 0u, &values, 0u, 0u, 0u, 2u, 2u");
     });
 
+  it("preserves pointer validity identities in specialized shared helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+  __device__ uint searchShared(uint *data, uint length) {
+    if (length == 0u) return 0u;
+    return data[length - 1u];
+  }
+  __device__ void mergeShared(uint *dst, uint *srcA, uint *srcB, uint length) {
+    uint tid = threadIdx.x;
+    uint value = tid < length ? searchShared(srcA, length) : searchShared(srcB, length);
+    __syncthreads();
+    dst[tid] = value;
+  }
+  __global__ void sharedPointerValidity(uint *out) {
+    __shared__ uint values[4];
+    uint tid = threadIdx.x;
+    values[tid] = tid + 1u;
+    __syncthreads();
+    mergeShared(values, values, values + 2u, 2u);
+    out[tid] = values[tid];
+  }`, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect([...runCompiledKernelSemanticReference(compiled, input, launch).buffers.out as Uint32Array]).toEqual([2, 2, 4, 4]);
+    expect(compiled.wgsl).toContain("fn searchShared(data__bg_shared_ptr: ptr<workgroup, array<u32, 4>>");
+    expect(compiled.wgsl).toContain("fn mergeShared(dst__bg_shared_ptr: ptr<workgroup, array<u32, 4>>");
+  });
+
   it("returns values from generic cooperative-group barrier helpers", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ int sumReduction(thread_group group, int *workspace, int value) {

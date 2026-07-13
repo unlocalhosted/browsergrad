@@ -1614,6 +1614,22 @@ __global__ void shared_helper_result(int *out, int n) {
       expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44, 40, 0xe6a2c480, 30, 12, 0xfffffffe, 304062474, 0x66772233, 0xfffffffe, 2147483648, 2147483649, 0xfffffffd, 0x22334455, 0x55667788, 0x88112233, 0x55667788, 59, 5, 8, 0x0f000000, 0xfffffffe, 304062474]);
     });
 
+  it("preserves signed result types for shifts with unsigned counts", () => {
+    const compiled = compileCudaLiteKernel(`
+  __global__ void signedShifts(int *out, int value, uint amount) {
+    out[0] = value << amount;
+    out[1] = value >> amount;
+  }`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Int32Array(2) }, scalars: { value: -8, amount: 1 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect([...runCompiledKernelSemanticReference(compiled, input, launch).buffers.out as Int32Array]).toEqual([-16, -4]);
+    expect(compiled.wgsl).toContain(" << ");
+    expect(compiled.wgsl).toContain(" >> ");
+  });
+
   it("lowers CUDA float/integer bitcast intrinsics", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void bitcast_intrinsics(float *x, uint *bits, int *signed_bits, float *roundtrip) {

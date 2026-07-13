@@ -35,8 +35,13 @@ export function checkSemanticKernelIrWgslLegalization(
     if (isVectorType(expression.valueType) || isPointerComparison(expression)) return;
     try {
       const operator = expression.operator as WgslBinaryOperator;
-      const leftType = logicalOperators.has(operator) ? "bool" : binaryOperandType(expression);
-      const rightType = operator === "<<" || operator === ">>" ? "u32" : leftType;
+      const shift = operator === "<<" || operator === ">>";
+      const leftType = logicalOperators.has(operator)
+        ? "bool"
+        : shift
+          ? wgslScalar(expressionValueType(expression.left))
+          : binaryOperandType(expression);
+      const rightType = shift ? "u32" : leftType;
       const result = emitTypedWgslBinary(
         operator,
         createTypedWgslIdentifier("left", leftType, expression.left.span),

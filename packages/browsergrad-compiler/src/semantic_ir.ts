@@ -2354,7 +2354,12 @@ function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<str
 
 function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, SemanticPointerRewriteTarget>, addressSpace: "shared" | "constant" | "local"): SemanticExpression {
   switch (expression.kind) {
-    case "pointer-valid": return expression;
+    case "pointer-valid": {
+      const target = names.get(expression.pointer);
+      return target === undefined
+        ? expression
+        : { ...expression, pointerId: semanticSymbolIdFromMemory(target.id), pointer: target.name };
+    }
     case "symbol": {
       const target = names.get(expression.name);
       return target !== undefined && expression.addressSpace === "storage"

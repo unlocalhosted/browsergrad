@@ -1652,7 +1652,7 @@ function semanticWgslPointerValidityOwner(
     .concat(semanticLocalPointerDeclarations(ir).map((operation) => operation.target))
     .find((symbol) => semanticIdsEqual(symbol.id, expression.pointerId));
   return owner?.name === expression.pointer && owner.pointer &&
-    (owner.addressSpace === "storage" || owner.kind === "local" && owner.pointerRuntimeState === true)
+    (owner.addressSpace === "storage" || owner.addressSpace === "shared" || owner.kind === "local" && owner.pointerRuntimeState === true)
     ? owner
     : undefined;
 }
