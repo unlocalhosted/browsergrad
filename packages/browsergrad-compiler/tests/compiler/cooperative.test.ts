@@ -369,8 +369,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
       expect(compiled.analysis.barrierUniformity.kernel.unverifiedControlStatementStarts).toEqual([expect.any(Number)]);
       expect(compiled.wgsl!.match(/\bactive_byte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = active_byte_pointer_array_diff_index_helper\(/u);
-      expect(compiled.wgsl).toMatch(/summary\[.+\] = i32\(\(summary\[.+\] \+ select\(0, select\(.+ \/ 4\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\)\);/u);
+      expect(compiled.wgsl).toContain("active_byte_pointer_array_diff_index_helper(1u, u32(tid)");
+      expect(compiled.wgsl).toMatch(/summary\[u32\(tid\)\] = .*select\(\(\(tid \+ 3\) \* 4\), \(\(tid \+ 1\) \* 4\), .+ == 0u\).+ \/ 4\)\);/u);
     });
 
   it("runs a shared-memory tiled matmul reference and emits barriers", () => {
@@ -974,7 +974,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.wgsl).toContain("enable subgroups;");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_float_16(val, u32(offset), 16u, local_id)");
-      expect(compiled.wgsl).toContain("i32((local_id.x) % 16u)");
+      expect(compiled.wgsl).toContain("i32((local_id.x % 16u))");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect([...result.buffers.output as Float32Array]).toEqual([16]);
     });
@@ -1534,7 +1534,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_up_float_8(val, 1u, 8u, local_id)");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_xor_float_8(val, 2u, 8u, local_id)");
-      expect(compiled.wgsl).toContain("i32((local_id.x + local_id.y * 8u) % 8u)");
+      expect(compiled.wgsl).toContain("i32(((local_id.x + (local_id.y * 8u)) % 8u))");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
     });
 
@@ -1640,7 +1640,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       });
       expect(compiled.wgsl).toContain("workgroupBarrier");
       expect(compiled.wgsl).toContain("countOneBits");
-      expect(compiled.wgsl).toContain("bg_warp_partition_reduce_sum_int_1(value");
+      expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_i32_32(value, part__bg_partition_mask, local_id)");
       expect(compiled.wgsl).not.toContain("!= 0) != 0");
       expect([...result.buffers.out as Int32Array]).toEqual([4]);
     });
@@ -1847,8 +1847,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_32(0u, 0u, 32u, local_id)");
       expect(compiled.wgsl).toContain("workgroupBarrier()");
       expect(compiled.wgsl).toContain("storageBarrier()");
-      expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32((value).x), f32((value).y)))");
-      expect(compiled.wgsl).toContain("vec2<f16>(unpack2x16float(");
+      expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32(value.x), f32(value.y)))");
+      expect(compiled.wgsl).toContain("vec2<f16>(f16(unpack2x16float(");
       expect([...result.buffers.f as Float32Array]).toEqual([1, 4]);
       expect(Array.from(result.buffers.h as Iterable<number>)).toEqual([1, 4, 1, 2]);
       expect([...result.buffers.bits as Uint32Array]).toEqual([0x44003c00]);
@@ -2638,7 +2638,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("x[tid] = f32(((-10.0) - f32(tid)));");
+      expect(compiled.wgsl).toContain("x[u32(tid)] = (-(10.0) - f32(tid));");
       expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
       expect(compiled.wgsl).not.toContain("return;");
     });
@@ -2661,7 +2661,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("-10.0");
+      expect(compiled.wgsl).toContain("out[((u32(tid) * 4u) + 3u)] = (-(10.0) - f32(tid));");
       expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
       expect(compiled.wgsl).not.toContain("return;");
     });
@@ -2687,8 +2687,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("-20.0");
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+      expect(compiled.wgsl).toContain("x[u32(tid)] = (-(20.0) - f32(tid));");
       expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
     });
 

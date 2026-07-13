@@ -40,6 +40,13 @@ interface SemanticSubgroupControlDependencies<
     options: Options,
     textureSpecializations: TextureSpecializations,
   ) => TypedWgslExpression;
+  readonly emitBoolExpression: (
+    expression: SemanticExpression,
+    ir: SemanticKernelIrModule,
+    names: ReadonlyMap<string, string>,
+    options: Options,
+    textureSpecializations: TextureSpecializations,
+  ) => TypedWgslExpression;
   readonly emitLoopInit: (
     init: SemanticKernelIrOperation | SemanticExpression,
     ir: SemanticKernelIrModule,
@@ -90,6 +97,7 @@ export function createSemanticSubgroupControlEmitter<
 ): SemanticSubgroupControlEmitter<Options, TextureSpecializations> {
   const {
     createGeneratedSymbolId,
+    emitBoolExpression,
     emitExpressionAs,
     emitLoopInit,
     emitOperation,
@@ -124,7 +132,6 @@ export function createSemanticSubgroupControlEmitter<
 
   const emitBranchlessLocalMutation = (
     expression: SemanticLocalMutation,
-    predicate: string,
     predicateExpression: SemanticExpression,
     ir: SemanticKernelIrModule,
     names: ReadonlyMap<string, string>,
@@ -168,7 +175,7 @@ export function createSemanticSubgroupControlEmitter<
       ? { ...options, activeCollectivePredicate: predicateExpression }
       : options;
     const next = emitExpressionAs(nextExpression, ir, names, targetType, collectiveOptions, textureSpecializations);
-    const condition = createTypedWgslIdentifier(predicate, "bool", expression.span);
+    const condition = emitBoolExpression(predicateExpression, ir, names, options, textureSpecializations);
     const selected = emitTypedWgslSelect(current, next, condition, expression.span);
     return createTypedWgslLocalAssignmentStatement(
       nameFor(target.name, names),
@@ -181,7 +188,6 @@ export function createSemanticSubgroupControlEmitter<
 
   const emitBranchlessOperations = (
     operations: readonly SemanticKernelIrOperation[],
-    predicate: string,
     predicateExpression: SemanticExpression,
     ir: SemanticKernelIrModule,
     names: ReadonlyMap<string, string>,
@@ -195,17 +201,16 @@ export function createSemanticSubgroupControlEmitter<
     for (const operation of operations) {
       if (operation.kind === "block") {
         lines.push(`${prefix}{`);
-        lines.push(...emitBranchlessOperations(operation.body, predicate, predicateExpression, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+        lines.push(...emitBranchlessOperations(operation.body, predicateExpression, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
         lines.push(`${prefix}}`);
         continue;
       }
       if (operation.kind === "branch") {
-        const condition = emitTruthiness(operation.condition, ir, names, options);
         lines.push(`${prefix}{`);
-        lines.push(...emitBranchlessOperations(operation.consequent, `(${predicate}) && (${condition})`, collectiveAnd(predicateExpression, operation.condition), ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+        lines.push(...emitBranchlessOperations(operation.consequent, collectiveAnd(predicateExpression, operation.condition), ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
         lines.push(`${prefix}}`);
         lines.push(`${prefix}{`);
-        lines.push(...emitBranchlessOperations(operation.alternate, `(${predicate}) && !(${condition})`, collectiveAnd(predicateExpression, collectiveNot(operation.condition)), ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+        lines.push(...emitBranchlessOperations(operation.alternate, collectiveAnd(predicateExpression, collectiveNot(operation.condition)), ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
         lines.push(`${prefix}}`);
         continue;
       }
@@ -226,7 +231,7 @@ export function createSemanticSubgroupControlEmitter<
       }
       if (operation.kind === "expression" &&
         (operation.expression.kind === "assignment" || operation.expression.kind === "update")) {
-        lines.push(`${prefix}${emitBranchlessLocalMutation(operation.expression, predicate, predicateExpression, ir, names, options, textureSpecializations)};`);
+        lines.push(`${prefix}${emitBranchlessLocalMutation(operation.expression, predicateExpression, ir, names, options, textureSpecializations)};`);
         continue;
       }
       throw semanticError("native subgroup loops require branchless local-state operations", operation.span);
@@ -269,9 +274,9 @@ export function createSemanticSubgroupControlEmitter<
       ...(init === "" ? [] : [`${bodyPrefix}${init};`]),
       `${bodyPrefix}var ${activeName}: bool = ${condition};`,
       `${bodyPrefix}for (var ${iterationName}: u32 = 0u; ${iterationName} < ${iterationBudget}; ${iterationName} += 1u) {`,
-      ...emitBranchlessOperations(operation.body, activeName, activeExpression, ir, names, indentLevel + 2, allowReturnValue, options, textureSpecializations),
+      ...emitBranchlessOperations(operation.body, activeExpression, ir, names, indentLevel + 2, allowReturnValue, options, textureSpecializations),
       ...(update === undefined ? [] : [
-        `${loopPrefix}${emitBranchlessLocalMutation(update, activeName, activeExpression, ir, names, options, textureSpecializations)};`,
+        `${loopPrefix}${emitBranchlessLocalMutation(update, activeExpression, ir, names, options, textureSpecializations)};`,
       ]),
       `${loopPrefix}${activeName} = ${activeName} && (${condition});`,
       `${bodyPrefix}}`,
@@ -294,20 +299,34 @@ function emitUniformIterationBudget<
   dependencies: SemanticSubgroupControlDependencies<Options, TextureSpecializations>,
 ): string {
   if (operation.init?.kind !== "declare" || operation.init.target.addressSpace !== "local" ||
-    operation.condition?.kind !== "binary" || (operation.condition.operator !== "<" && operation.condition.operator !== "<=") ||
+    operation.condition?.kind !== "binary" || !["<", "<=", ">", ">="].includes(operation.condition.operator) ||
     operation.condition.left.kind !== "symbol" || !semanticIdsEqual(operation.condition.left.id, operation.init.target.id)) {
-    throw dependencies.semanticError("native subgroup loops require a canonical increasing integer bound", operation.span);
+    throw dependencies.semanticError("native subgroup loops require a canonical directional integer bound", operation.span);
   }
   const update = operation.update;
-  const progresses = update?.kind === "update"
+  const additiveProgress = update?.kind === "update"
     ? update.operator === "++" && update.argument.kind === "symbol" && semanticIdsEqual(update.argument.id, operation.init.target.id)
     : update?.kind === "assignment" && update.operator === "+=" && update.target.kind === "symbol" &&
       semanticIdsEqual(update.target.id, operation.init.target.id) && update.value.kind === "literal" &&
       update.value.literalKind === "number" && update.value.value > 0;
-  if (!progresses) {
+  const shift = update?.kind === "assignment" && (update.operator === "<<=" || update.operator === ">>=") &&
+    update.target.kind === "symbol" && semanticIdsEqual(update.target.id, operation.init.target.id) &&
+    update.value.kind === "literal" && update.value.literalKind === "number" &&
+    Number.isInteger(update.value.value) && update.value.value > 0 && update.value.value < 32
+    ? { operator: update.operator, amount: update.value.value }
+    : undefined;
+  const conditionIncreases = operation.condition.operator === "<" || operation.condition.operator === "<=";
+  const shiftIncreases = shift?.operator === "<<=";
+  if (!additiveProgress && (shift === undefined || shiftIncreases !== conditionIncreases)) {
     throw dependencies.semanticError("native subgroup loops require a compile-time positive counter step", update?.span ?? operation.span);
   }
   const initialRange = operation.init.init ? staticIntegerRange(operation.init.init, ir) : { min: 0, max: 0 };
+  if (shift !== undefined) {
+    if (shift.operator === "<<=" && (!initialRange || initialRange.min <= 0)) {
+      throw dependencies.semanticError("native subgroup left-shift loops require a provably positive initializer", operation.init.span);
+    }
+    return `${Math.ceil(32 / shift.amount)}u`;
+  }
   if (!initialRange) throw dependencies.semanticError("native subgroup loop initializer has no provable integer range", operation.init.span);
   const inclusive = operation.condition.operator === "<=" ? 1 : 0;
   const bound = operation.condition.right;

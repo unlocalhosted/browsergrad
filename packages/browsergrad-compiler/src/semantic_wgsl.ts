@@ -421,6 +421,7 @@ const {
   operationsContainNativeCollective: semanticOperationsContainNativeSubgroupCollective,
 } = createSemanticSubgroupControlEmitter({
   createGeneratedSymbolId: createGeneratedSemanticSymbolId,
+  emitBoolExpression: emitSemanticBoolExpressionValue,
   emitExpressionAs: emitSemanticExpressionAs,
   emitLoopInit: emitSemanticLoopInit,
   emitOperation: emitSemanticOperation,
