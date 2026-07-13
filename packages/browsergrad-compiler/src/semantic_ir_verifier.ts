@@ -343,6 +343,10 @@ function operationExpressions(operation: SemanticKernelIrOperation): readonly Se
     case "atomic": return operation.args;
     case "call": return [...operation.args, ...(operation.result ? [operation.result] : [])];
     case "runtime-copy": return operation.args;
+    case "pool-allocate": return [
+      operation.sizeBytes,
+      ...(operation.pool.kind === "raw-pool" ? [operation.pool.capacityBytes] : []),
+    ];
     case "pointer-rebind": return [];
     case "expression": return [operation.expression];
     case "branch": return [operation.condition];
@@ -368,6 +372,7 @@ function operationMemoryRefs(operation: SemanticKernelIrOperation): readonly Sem
     case "atomic": return operation.target ? [operation.target] : [];
     case "call": return operation.reads;
     case "pointer-rebind": return [operation.source];
+    case "pool-allocate": return operation.pool.kind === "raw-pool" ? [operation.pool.data, operation.pool.offset] : [];
     default: return [];
   }
 }

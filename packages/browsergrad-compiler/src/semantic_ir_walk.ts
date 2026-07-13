@@ -18,6 +18,10 @@ export function semanticOperationExpressions(operation: SemanticKernelIrOperatio
   if (operation.kind === "atomic") expressions.push(...operation.args, ...(operation.target?.indices ?? []));
   if (operation.kind === "call") expressions.push(...operation.args);
   if (operation.kind === "runtime-copy") expressions.push(...operation.args);
+  if (operation.kind === "pool-allocate") {
+    expressions.push(operation.sizeBytes);
+    if (operation.pool.kind === "raw-pool") expressions.push(operation.pool.capacityBytes);
+  }
   if (operation.kind === "expression") expressions.push(operation.expression);
   if (operation.kind === "branch") expressions.push(operation.condition);
   if (operation.kind === "loop") {
@@ -78,6 +82,11 @@ export function semanticOperationsReferenceRoot(
     if (operation.kind === "load") return memoryRefReferencesRoot(operation.source);
     if (operation.kind === "store") return memoryRefReferencesRoot(operation.target) || operation.reads.some(memoryRefReferencesRoot);
     if (operation.kind === "copy") return memoryRefReferencesRoot(operation.source) || memoryRefReferencesRoot(operation.target);
+    if (operation.kind === "pool-allocate") {
+      return operation.pool.kind === "device-pool"
+        ? operation.pool.name === root
+        : memoryRefReferencesRoot(operation.pool.data) || memoryRefReferencesRoot(operation.pool.offset);
+    }
     if (operation.kind === "atomic" && operation.target) return memoryRefReferencesRoot(operation.target);
     if (operation.kind === "branch") return semanticOperationsReferenceRoot(operation.consequent, root) || semanticOperationsReferenceRoot(operation.alternate, root);
     if (operation.kind === "loop") return semanticOperationsReferenceRoot(operation.body, root) ||
@@ -137,6 +146,9 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
         const sources = runtimePointerSources.get(pointerId) ?? new Set<string>();
         sources.add(operation.source.base);
         runtimePointerSources.set(pointerId, sources);
+      }
+      if (operation.kind === "pool-allocate" && operation.pool.kind === "raw-pool") {
+        roots.add(operation.pool.offset.base);
       }
       if (operation.kind === "atomic" && operation.target) recordAtomicRef(owner, operation.target);
       if (operation.kind === "call") calls.push({ ...(owner === undefined ? {} : { owner }), callee: operation.callee, args: operation.args });

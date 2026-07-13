@@ -125,6 +125,17 @@ function checkOperations(
       case "runtime-copy":
         operation.args.forEach((arg) => checkExpression(arg, "value", ir, report));
         break;
+      case "pool-allocate":
+        checkExpression(operation.sizeBytes, "value", ir, report);
+        if (!operation.target.pointer || operation.target.addressSpace !== "local") {
+          report(`pool allocation target '${operation.target.name}' must be a local pointer`, operation.span);
+        }
+        if (operation.pool.kind === "raw-pool") {
+          checkMemoryRef(operation.pool.data, ir, report);
+          checkMemoryRef(operation.pool.offset, ir, report);
+          checkExpression(operation.pool.capacityBytes, "value", ir, report);
+        }
+        break;
       case "pointer-rebind":
         checkMemoryRef(operation.source, ir, report);
         if (!operation.target.pointer || operation.target.addressSpace !== "local") {

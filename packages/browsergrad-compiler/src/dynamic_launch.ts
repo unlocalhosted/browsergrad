@@ -202,6 +202,28 @@ function collectHostLiftedLaunches(
         if (pointer) current.set(item.target.name, pointer);
         continue;
       }
+      if (item.kind === "pool-allocate") {
+        if (item.pool.kind !== "device-pool") {
+          markUnsafe("child-arguments-not-host-evaluable", "raw pool allocation cannot be host-lifted for dynamic launch planning");
+          continue;
+        }
+        const pool = input.memoryPools?.[item.pool.name];
+        const sizeBytes = evaluateSemanticHostNumber(item.sizeBytes, current, input);
+        if (!pool || sizeBytes === undefined) {
+          markUnsafe("child-arguments-not-host-evaluable", "DevicePool allocation size and input must be host-evaluable");
+          continue;
+        }
+        const bytes = Math.max(0, Math.trunc(sizeBytes));
+        const oldOffset = poolOffsets.get(item.pool.name) ?? pool.offset?.[0] ?? 0;
+        poolOffsets.set(item.pool.name, oldOffset + bytes);
+        if (hasExpandedParent) expandedPoolAllocation = true;
+        current.set(item.target.name, {
+          kind: "pool-pointer",
+          poolName: item.pool.name,
+          byteOffset: oldOffset + bytes > pool.data.byteLength ? -1 : oldOffset,
+        });
+        continue;
+      }
       if (item.kind === "branch") {
         const before = out.length;
         const condition = evaluateSemanticHostNumber(item.condition, current, input);

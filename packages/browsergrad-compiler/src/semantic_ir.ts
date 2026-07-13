@@ -267,6 +267,21 @@ export interface SemanticMemoryRef {
   readonly span: SourceSpan;
 }
 
+export type SemanticPoolRef =
+  | {
+      readonly kind: "device-pool";
+      readonly id: SemanticMemoryId;
+      readonly name: string;
+      readonly span: SourceSpan;
+    }
+  | {
+      readonly kind: "raw-pool";
+      readonly data: SemanticMemoryRef;
+      readonly offset: SemanticMemoryRef;
+      readonly capacityBytes: SemanticExpression;
+      readonly span: SourceSpan;
+    };
+
 export interface SemanticMatrixTileRef {
   readonly baseId: SemanticMemoryId;
   readonly base: string;
@@ -427,6 +442,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "call"; readonly calleeId: SemanticSymbolId; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly result?: Extract<SemanticExpression, { readonly kind: "symbol" }>; readonly span: SourceSpan }
   | { readonly kind: "runtime-copy"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
+  | { readonly kind: "pool-allocate"; readonly allocator: "deviceAllocate" | "streamOrderedAllocate"; readonly target: CudaLiteSemanticSymbol; readonly pool: SemanticPoolRef; readonly sizeBytes: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "pointer-rebind"; readonly target: CudaLiteSemanticSymbol; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly conditionUniformity?: "workgroup"; readonly span: SourceSpan }
@@ -505,6 +521,22 @@ export function walkSemanticOperations(
   for (const operation of operations) walkSemanticOperation(operation, visitExpression);
 }
 
+export function collectSemanticPoolAllocations(
+  operations: readonly SemanticKernelIrOperation[],
+): readonly Extract<SemanticKernelIrOperation, { readonly kind: "pool-allocate" }>[] {
+  const out: Extract<SemanticKernelIrOperation, { readonly kind: "pool-allocate" }>[] = [];
+  const visit = (items: readonly SemanticKernelIrOperation[]): void => {
+    for (const operation of items) {
+      if (operation.kind === "pool-allocate") out.push(operation);
+      if (operation.kind === "branch") visit([...operation.consequent, ...operation.alternate]);
+      if (operation.kind === "loop") visit([...(operation.init && isSemanticKernelIrOperation(operation.init) ? [operation.init] : []), ...operation.body, ...(operation.continuing ?? [])]);
+      if (operation.kind === "block") visit(operation.body);
+    }
+  };
+  visit(operations);
+  return out;
+}
+
 export function walkSemanticOperation(
   operation: SemanticKernelIrOperation,
   visitExpression: (expression: SemanticExpression) => void,
@@ -577,6 +609,14 @@ export function walkSemanticOperation(
       return;
     case "runtime-copy":
       for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "pool-allocate":
+      walkSemanticExpression(operation.sizeBytes, visitExpression);
+      if (operation.pool.kind === "raw-pool") {
+        walkSemanticMemoryRef(operation.pool.data, visitExpression);
+        walkSemanticMemoryRef(operation.pool.offset, visitExpression);
+        walkSemanticExpression(operation.pool.capacityBytes, visitExpression);
+      }
       return;
     case "expression":
       walkSemanticExpression(operation.expression, visitExpression);
@@ -706,9 +746,16 @@ export function isSemanticKernelIrOperation(
     case "store":
     case "copy":
     case "copy-fence":
+    case "pool-allocate":
+    case "matrix-fill":
+    case "matrix-load":
+    case "matrix-mma":
+    case "matrix-store":
     case "surface-write":
     case "surface-read-store":
     case "atomic":
+    case "runtime-copy":
+    case "pointer-rebind":
     case "expression":
     case "branch":
     case "loop":
@@ -2371,6 +2418,10 @@ function lowerStatementOperations(
   scope: Map<string, CudaLiteSemanticSymbol>,
   followingStatements: readonly CudaLiteStatement[],
 ): readonly SemanticKernelIrOperation[] {
+  const poolAllocation = semanticPoolAllocationVarInitOperation(statement, scope);
+  if (poolAllocation) return poolAllocation;
+  const pointerSideEffectInit = semanticPointerSideEffectVarInitOperations(statement, scope);
+  if (pointerSideEffectInit) return pointerSideEffectInit;
   const pointerAssignmentChain = semanticLocalPointerAssignmentChainOperations(statement, scope);
   if (pointerAssignmentChain) return pointerAssignmentChain;
   const dynamicPointerArrayAssignment = semanticDynamicPointerArrayAliasAssignmentOperations(statement, scope);
@@ -2395,6 +2446,127 @@ function lowerStatementOperations(
   const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
   const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
+}
+
+function semanticPoolAllocationVarInitOperation(
+  statement: CudaLiteStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "var" || statement.storage !== "local" || !statement.pointer || statement.dimensions.length !== 0 || !statement.init) {
+    return undefined;
+  }
+  const call = cudaPoolAllocationCall(statement.init);
+  if (!call || call.callee.kind !== "identifier" || (call.callee.name !== "deviceAllocate" && call.callee.name !== "streamOrderedAllocate")) {
+    return undefined;
+  }
+  const sizeArg = call.args.at(-1);
+  if (!sizeArg) return undefined;
+  const pool = semanticPoolRefForAllocation(call, scope);
+  if (!pool) return undefined;
+  const original = symbolForVar(statement, scope);
+  const { init: _init, ...withoutInit } = semanticSymbolWithoutPointerAlias(original);
+  const target: CudaLiteSemanticSymbol = {
+    ...withoutInit,
+    pointerRuntimeState: true,
+  };
+  scope.set(target.name, target);
+  return [
+    { kind: "declare", target, span: statement.span },
+    {
+      kind: "pool-allocate",
+      allocator: call.callee.name,
+      target,
+      pool,
+      sizeBytes: lowerExpression(sizeArg, scope),
+      span: statement.span,
+    },
+  ];
+}
+
+function cudaPoolAllocationCall(expression: CudaLiteExpression): CudaLiteCallExpression | undefined {
+  if (expression.kind === "call") return expression;
+  if (expression.kind === "cast" && expression.pointer) return cudaPoolAllocationCall(expression.expression);
+  return undefined;
+}
+
+function semanticPoolRefForAllocation(
+  call: CudaLiteCallExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticPoolRef | undefined {
+  if (call.args.length === 2) {
+    const expression = call.args[0];
+    const poolName = expression?.kind === "identifier"
+      ? expression.name
+      : expression?.kind === "unary" && expression.operator === "&" && expression.argument.kind === "identifier"
+        ? expression.argument.name
+        : undefined;
+    const pool = poolName === undefined ? undefined : scope.get(poolName);
+    if (!pool || pool.addressSpace !== "pool") return undefined;
+    return {
+      kind: "device-pool",
+      id: semanticMemoryIdFromSymbol(pool.id),
+      name: pool.name,
+      span: expression!.span,
+    };
+  }
+  if (call.args.length !== 4) return undefined;
+  const dataArg = call.args[0];
+  const offsetArg = call.args[1];
+  const capacityArg = call.args[2];
+  if (!dataArg || !offsetArg || !capacityArg) return undefined;
+  const data = semanticPointerArgumentMemoryRef(dataArg, scope);
+  const offset = semanticPointerArgumentMemoryRef(offsetArg, scope);
+  if (!data || !offset) return undefined;
+  return {
+    kind: "raw-pool",
+    data,
+    offset,
+    capacityBytes: lowerExpression(capacityArg, scope),
+    span: call.span,
+  };
+}
+
+function semanticPointerSideEffectVarInitOperations(
+  statement: CudaLiteStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (
+    statement.kind !== "var" ||
+    statement.storage !== "local" ||
+    !statement.pointer ||
+    statement.dimensions.length !== 0 ||
+    (statement.init?.kind !== "assignment" && statement.init?.kind !== "sequence")
+  ) return undefined;
+  const alias = applyUnconditionalPointerAliasInitializer(statement.init, scope);
+  if (!alias || !semanticPointerAliasComplete(alias)) return undefined;
+  const original = symbolForVar(statement, scope);
+  const { init: _init, ...withoutInit } = semanticSymbolWithoutPointerAlias(original);
+  const target: CudaLiteSemanticSymbol = { ...withoutInit, ...alias };
+  scope.set(target.name, target);
+  return [{ kind: "declare", target, span: statement.span }];
+}
+
+function applyUnconditionalPointerAliasInitializer(
+  expression: CudaLiteExpression,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): SemanticPointerAlias | undefined {
+  if (expression.kind === "sequence") {
+    let alias: SemanticPointerAlias | undefined;
+    for (const item of expression.expressions) {
+      alias = applyUnconditionalPointerAliasInitializer(item, scope);
+      if (!alias) return undefined;
+    }
+    return alias;
+  }
+  if (expression.kind === "assignment" && expression.operator === "=" && expression.left.kind === "identifier") {
+    const target = scope.get(expression.left.name);
+    if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length !== 0) return undefined;
+    const alias = applyUnconditionalPointerAliasInitializer(expression.right, scope);
+    if (!alias || !semanticPointerAliasComplete(alias)) return undefined;
+    scope.set(target.name, { ...semanticSymbolWithoutPointerAlias(target), ...alias });
+    return alias;
+  }
+  return localPointerAliasForInitializer(expression, scope);
 }
 
 function semanticLocalPointerAssignmentChainOperations(
@@ -6550,6 +6722,14 @@ function localPointerAliasComparisonExpression(
 ): SemanticExpression | undefined {
   if (!POINTER_ORDER_OPERATORS.has(expression.operator)) return undefined;
   if (expression.operator === "==" || expression.operator === "!=") {
+    const leftRuntime = localRuntimePointerSymbol(expression.left, scope);
+    const rightRuntime = localRuntimePointerSymbol(expression.right, scope);
+    if (leftRuntime && isNullPointerLiteral(expression.right)) {
+      return runtimePointerNullComparisonExpression(leftRuntime, expression.operator, expression.span);
+    }
+    if (rightRuntime && isNullPointerLiteral(expression.left)) {
+      return runtimePointerNullComparisonExpression(rightRuntime, expression.operator, expression.span);
+    }
     const leftAlias = localPointerAliasScalarIndex(expression.left, scope);
     const rightAlias = localPointerAliasScalarIndex(expression.right, scope);
     if (leftAlias && isNullPointerLiteral(expression.right)) return pointerNullComparisonExpression(leftAlias.valid, expression.operator, expression.span);
@@ -6570,6 +6750,31 @@ function localPointerAliasComparisonExpression(
   if (!left.valid && !right.valid) return indexComparison;
   if (expression.operator !== "==" && expression.operator !== "!=") return undefined;
   return nullablePointerAliasEqualityExpression(left, right, indexComparison, expression.operator, expression.span);
+}
+
+function localRuntimePointerSymbol(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): CudaLiteSemanticSymbol | undefined {
+  if (expression.kind === "cast" && expression.pointer) return localRuntimePointerSymbol(expression.expression, scope);
+  if (expression.kind !== "identifier") return undefined;
+  const symbol = scope.get(expression.name);
+  return symbol?.kind === "local" && symbol.pointerRuntimeState === true ? symbol : undefined;
+}
+
+function runtimePointerNullComparisonExpression(
+  pointer: CudaLiteSemanticSymbol,
+  operator: "==" | "!=",
+  span: SourceSpan,
+): SemanticExpression {
+  const valid: SemanticExpression = {
+    kind: "pointer-valid",
+    pointerId: pointer.id,
+    pointer: pointer.name,
+    valueType: "bool",
+    span,
+  };
+  return operator === "!=" ? valid : negateExpression(valid, span);
 }
 
 function localPointerAliasScalarIndex(
@@ -6764,6 +6969,7 @@ function expressionAddressSpace(expression: SemanticExpression): SemanticAddress
   if (expression.kind === "symbol") return expression.addressSpace;
   if (expression.kind === "index") return expression.addressSpace;
   if (expression.kind === "member") return expressionAddressSpace(expression.object);
+  if (expression.kind === "cast" && expression.pointer) return expressionAddressSpace(expression.expression);
   return "unknown";
 }
 

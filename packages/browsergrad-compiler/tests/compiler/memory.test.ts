@@ -49,6 +49,7 @@ import {
 import { deviceLaunchTreeIsExternallySilent } from "../../src/runtime_elision";
 import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
 import { semanticMemoryIdFromSymbol } from "../../src/semantic_ids";
+import { collectSemanticPoolAllocations } from "../../src/semantic_ir";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -2092,6 +2093,14 @@ __global__ void shared_reinterpret(int *out) {
 
   it("allocates from a raw pointer pool with a size_t offset counter", () => {
       const compiled = compileCudaLiteKernel(RAW_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+      const repeated = compileCudaLiteKernel(`
+__global__ void repeatedRawPool(float* poolBase, size_t* offset, size_t poolSize, float* out) {
+  float* first = (float*)deviceAllocate(poolBase, offset, poolSize, sizeof(float));
+  float* second = (float*)deviceAllocate(poolBase, offset, poolSize, sizeof(float));
+  out[0] = 1.0f;
+}
+`, { workgroupSize: [1, 1, 1] });
+      const allocations = collectSemanticPoolAllocations(compiled.kernelIr.operations);
       const result = runCompiledKernelReference(
         compiled,
         {
@@ -2104,7 +2113,21 @@ __global__ void shared_reinterpret(int *out) {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
+      expect(allocations).toMatchObject([{
+        kind: "pool-allocate",
+        target: { name: "ptr", pointerRuntimeState: true },
+        pool: {
+          kind: "raw-pool",
+          data: { base: "poolBase" },
+          offset: { base: "offset" },
+        },
+      }]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("fn bg_raw_pool_alloc_poolBase_offset(pool_size_bytes: u32, size_bytes: u32) -> u32");
+      expect(collectSemanticPoolAllocations(repeated.kernelIr.operations)).toHaveLength(2);
+      expect(canEmitSemanticKernelIrWgsl(repeated.wgslLegalizedKernelIr)).toBe(true);
+      expect(repeated.wgsl?.match(/fn bg_raw_pool_alloc_poolBase_offset\(/g)).toHaveLength(1);
       expect(compiled.wgsl).toContain("var<storage, read_write> offset: array<atomic<u32>>;");
       expect([...result.buffers.poolBase as Float32Array]).toEqual([4.5, 4.5]);
       expect([...result.buffers.offset as Uint32Array]).toEqual([8]);

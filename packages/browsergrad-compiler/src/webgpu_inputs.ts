@@ -8,11 +8,8 @@ import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
-import type {
-  SemanticExpression,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
-import { walkSemanticOperations } from "./semantic_ir.js";
+import type { SemanticKernelIrOperation } from "./semantic_ir.js";
+import { collectSemanticPoolAllocations } from "./semantic_ir.js";
 import { isCudaVectorType } from "./vector_types.js";
 import {
   CudaLiteCompilerError,
@@ -275,19 +272,12 @@ function collectExternalDevicePoolDescriptors(
   operations: readonly SemanticKernelIrOperation[],
 ): readonly { readonly name: string; readonly span: SourceSpan }[] {
   const out = new Map<string, SourceSpan>();
-  walkSemanticOperations(operations, (expression) => {
-    if (expression.kind !== "call") return;
-    const callName = semanticExpressionName(expression.callee);
-    if (callName !== "deviceAllocate" && callName !== "streamOrderedAllocate") return;
-    const pool = expression.args[0];
-    if (pool?.kind !== "unary" || pool.operator !== "&" || pool.argument.kind !== "symbol") return;
-    if (!out.has(pool.argument.name)) out.set(pool.argument.name, pool.argument.span);
-  });
+  for (const operation of collectSemanticPoolAllocations(operations)) {
+    if (operation.pool.kind === "device-pool" && !out.has(operation.pool.name)) {
+      out.set(operation.pool.name, operation.pool.span);
+    }
+  }
   return [...out].map(([name, span]) => ({ name, span }));
-}
-
-function semanticExpressionName(expression: SemanticExpression): string | undefined {
-  return expression.kind === "symbol" ? expression.name : undefined;
 }
 
 function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {

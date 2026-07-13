@@ -46,6 +46,7 @@ import {
 } from "../../src/webgpu_inputs";
 import { deviceLaunchTreeIsExternallySilent } from "../../src/runtime_elision";
 import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
+import { collectSemanticPoolAllocations } from "../../src/semantic_ir";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -340,6 +341,7 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
   it("allocates from a DevicePool and writes through casted pool pointers", () => {
       const compiled = compileCudaLiteKernel(DEVICE_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+      const allocations = collectSemanticPoolAllocations(compiled.kernelIr.operations);
       const result = runCompiledKernelReference(
         compiled,
         {
@@ -350,6 +352,13 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
+      expect(allocations).toMatchObject([{
+        kind: "pool-allocate",
+        target: { name: "ptr", pointerRuntimeState: true },
+        pool: { kind: "device-pool", name: "dp" },
+      }]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var<storage, read_write> dp_pool: array<u32>;");
       expect(compiled.wgsl).toContain("fn bg_pool_alloc_dp(size_bytes: u32) -> u32");
       expect([...result.buffers.out as Float32Array]).toEqual([3.25, 3.25]);
@@ -358,6 +367,7 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
   it("allocates from an external DevicePool reference", () => {
       const compiled = compileCudaLiteKernel(EXTERNAL_POOL_ALLOC, { workgroupSize: [1, 1, 1] });
+      const allocations = collectSemanticPoolAllocations(compiled.kernelIr.operations);
       const result = runCompiledKernelReference(
         compiled,
         {
@@ -367,6 +377,12 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
+      expect(allocations).toMatchObject([{
+        kind: "pool-allocate",
+        pool: { kind: "device-pool", name: "g_pool" },
+      }]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var<storage, read_write> g_pool_pool: array<u32>;");
       expect(compiled.wgsl).toContain("fn bg_pool_alloc_g_pool(size_bytes: u32) -> u32");
       expect([...result.buffers.out as Float32Array]).toEqual([5.5]);
@@ -1443,6 +1459,9 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         supported: true,
         kind: "host-dynamic-launch",
       });
+      if (executionPlan.supported) {
+        expect(executionPlan.steps.every((step) => step.program.wgsl.includes("browsergrad-semantic-wgsl"))).toBe(true);
+      }
       expect(executionPlan.supported && executionPlan.steps).toHaveLength(3);
     });
 
@@ -1572,6 +1591,9 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         supported: true,
         kind: "host-dynamic-launch",
       });
+      if (executionPlan.supported) {
+        expect(executionPlan.steps.every((step) => step.program.wgsl.includes("browsergrad-semantic-wgsl"))).toBe(true);
+      }
       expect(executionPlan.supported && executionPlan.steps).toHaveLength(2);
 
       const capped = createCudaWebGpuExecutionPlan(compiled, input, launch, {

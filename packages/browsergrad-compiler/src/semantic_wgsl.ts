@@ -11,10 +11,7 @@ import type {
   SemanticMatrixTileRef,
   SemanticMemoryRef,
 } from "./semantic_ir.js";
-import {
-  semanticInlineAsmLdmatrixAssignments,
-  walkSemanticOperations,
-} from "./semantic_ir.js";
+import { semanticInlineAsmLdmatrixAssignments, walkSemanticOperations } from "./semantic_ir.js";
 import {
   createBuiltinSemanticSymbolId,
   createGeneratedSemanticSymbolId,
@@ -42,7 +39,8 @@ import { sizeofCudaType } from "./type_layout.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
-import { emitBfloatConversionHelpers, emitCuComplexRobustMathHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers } from "./wgsl_support_helpers.js";
+import { emitBfloatConversionHelpers, emitCuComplexRobustMathHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers, rawPoolHelperName } from "./wgsl_support_helpers.js";
+import { collectSemanticWgslPoolResources, emitSemanticWgslPoolDeclarations, emitSemanticWgslPoolHelpers, semanticWgslPoolBindingNames, semanticWgslPoolBindings } from "./semantic_wgsl_pools.js";
 import {
   semanticBf162CallArgumentsSupported,
   isSemanticHalf2BooleanComparisonCall,
@@ -159,6 +157,7 @@ import {
   semanticWgslFunctionStoragePointerParam,
   semanticWgslFunctionSharedPointerParam,
 } from "./semantic_wgsl_pointers.js";
+import { semanticRuntimePointerDeclarationForRef } from "./semantic_runtime_pointers.js";
 import {
   wgslAtomicScalar,
   wgslBindingType,
@@ -572,6 +571,9 @@ function emitSemanticKernelIrWgslFromIr(
   const rawNames = new Set(ir.params.map((param) => param.name));
   for (const base of storageOffsetBases) rawNames.add(storageOffsetSymbol(base));
   for (const operation of ir.operations) collectOperationNames(operation, rawNames);
+  const poolResources = collectSemanticWgslPoolResources(ir);
+  const { devicePoolNames } = poolResources;
+  for (const bindingName of semanticWgslPoolBindingNames(devicePoolNames)) rawNames.add(bindingName);
   for (const fn of ir.functions) {
     rawNames.add(fn.name);
     for (const signature of textureSpecializations.get(fn.name)?.values() ?? []) {
@@ -676,6 +678,7 @@ function emitSemanticKernelIrWgslFromIr(
       binding: bindings.length,
     });
   }
+  bindings.push(...semanticWgslPoolBindings(devicePoolNames, bindings.length));
   if (uniformParams.length > 0) {
     bindings.push({
       kind: "uniform",
@@ -710,6 +713,7 @@ function emitSemanticKernelIrWgslFromIr(
   for (const texture of textures) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
   }
+  lines.push(...emitSemanticWgslPoolDeclarations(devicePoolNames, (name) => bindingIndexFor(bindings, name), (name) => nameFor(name, names)));
   for (const helper of semanticTextureDescriptorHelpers(options, textureSpecializations, names)) {
     lines.push("", ...emitSemanticTextureDescriptorHelper(helper.textureName, helper.descriptor, names));
   }
@@ -751,6 +755,7 @@ function emitSemanticKernelIrWgslFromIr(
   for (const helper of emitSemanticStoragePointerHelpers(ir, names)) {
     lines.push("", ...helper);
   }
+  lines.push(...emitSemanticWgslPoolHelpers(poolResources, (name) => nameFor(name, names)));
   for (const constant of initializedScalarConstants) {
     lines.push(emitInitializedScalarConstant(constant, ir, names, options));
   }
@@ -1610,8 +1615,10 @@ function semanticWgslPointerValidityOwner(
   ir: SemanticKernelIrModule,
 ): CudaLiteSemanticSymbol | undefined {
   const owner = [...ir.params, ...ir.functions.flatMap((fn) => fn.params)]
+    .concat(semanticLocalPointerDeclarations(ir).map((operation) => operation.target))
     .find((symbol) => semanticIdsEqual(symbol.id, expression.pointerId));
-  return owner?.name === expression.pointer && owner.pointer && owner.addressSpace === "storage"
+  return owner?.name === expression.pointer && owner.pointer &&
+    (owner.addressSpace === "storage" || owner.kind === "local" && owner.pointerRuntimeState === true)
     ? owner
     : undefined;
 }
@@ -1738,6 +1745,8 @@ function emitSemanticOperation(
       return [`${prefix}${emitSemanticAtomic(operation, ir, names, options, textureSpecializations)};`];
     case "call":
       return emitSemanticCall(operation, ir, names, indentLevel, options, textureSpecializations);
+    case "pool-allocate":
+      return emitSemanticPoolAllocation(operation, ir, names, indentLevel, options);
     case "pointer-rebind":
       return emitSemanticPointerRebind(operation, ir, names, indentLevel, options);
     case "expression":
@@ -1829,6 +1838,32 @@ function emitSemanticPointerRebind(
   return [
     `${prefix}${buffer} = ${bufferId}u;`,
     `${prefix}${base} = ${emitSemanticPointerArgBaseIndex(operation.source, ir, names, options)};`,
+  ];
+}
+
+function emitSemanticPoolAllocation(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "pool-allocate" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  const allocation = nameFor(`${operation.target.name}__bg_pool_allocation`, names);
+  const buffer = nameFor(semanticPointerBufferParamName(operation.target.name), names);
+  const base = nameFor(semanticPointerBaseParamName(operation.target.name), names);
+  const root = operation.pool.kind === "device-pool" ? operation.pool.name : operation.pool.data.base;
+  const bufferId = semanticStoragePointerBufferId(root, ir);
+  if (bufferId === undefined) throw semanticWgslError(`unknown pool storage root '${root}'`, operation.span);
+  const size = emitSemanticExpressionAs(operation.sizeBytes, ir, names, "u32", options).code;
+  const call = operation.pool.kind === "device-pool"
+    ? `bg_pool_alloc_${operation.pool.name}(${size})`
+    : `${rawPoolHelperName(nameFor(operation.pool.data.base, names), nameFor(operation.pool.offset.base, names))}(${emitSemanticExpressionAs(operation.pool.capacityBytes, ir, names, "u32", options).code}, ${size})`;
+  const elementBytes = sizeofCudaType(operation.target.valueType ?? "voidptr") ?? 4;
+  return [
+    `${prefix}let ${allocation}: u32 = ${call};`,
+    `${prefix}${buffer} = select(0xffffffffu, ${bufferId}u, ${allocation} != 0u);`,
+    `${prefix}${base} = select(0u, (${allocation} - 1u) / ${elementBytes}u, ${allocation} != 0u);`,
   ];
 }
 
@@ -3217,10 +3252,12 @@ function emitSemanticAssignmentStatement(
   {
     const ref = semanticWgslAssignmentMemoryRef(expression.target, ir);
     if (ref) {
-      const target = emitSemanticMemoryRef(ref, ir, names, options);
       const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(ref.valueType), options, textureSpecializations).code;
-      if (semanticAssignmentBinaryOperator(expression.operator)) return `${target} ${expression.operator} ${value}`;
-      return `${target} = ${value}`;
+      if (expression.operator === "=") return emitSemanticMemoryWrite(ref, value, ir, names, options);
+      const binaryOperator = semanticAssignmentBinaryOperator(expression.operator);
+      if (binaryOperator === undefined) throw semanticWgslError(`semantic WGSL does not support assignment '${expression.operator}'`, expression.span);
+      const current = emitSemanticMemoryRead(ref, ir, names, options);
+      return emitSemanticMemoryWrite(ref, `(${current} ${binaryOperator} ${value})`, ir, names, options);
     }
   }
   if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local assignment targets only", expression.target.span);
@@ -3832,9 +3869,12 @@ function emitSemanticExpression(
   if (expression.kind === "pointer-valid") {
     const pointer = semanticWgslPointerValidityOwner(expression, ir);
     if (!pointer) throw semanticWgslError(`unresolved pointer validity identity for '${expression.pointer}'`, expression.span);
+    const stateName = pointer.kind === "local" && pointer.pointerRuntimeState === true
+      ? semanticPointerBufferParamName(pointer.name)
+      : semanticPointerBaseParamName(pointer.name);
     return emitTypedWgslBinary(
       "!=",
-      createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(pointer.name), names), "u32", expression.span),
+      createTypedWgslIdentifier(nameFor(stateName, names), "u32", expression.span),
       createTypedWgslLiteral("4294967295u", "u32", expression.span),
       expression.span,
     );
@@ -6242,22 +6282,22 @@ function emitSemanticDirectMemoryReadExpression(
   const sharedPointerParam = semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null);
   const localPointerParam = semanticWgslFunctionLocalPointerParam(ir, ref.base, options.activeFunction ?? null);
   const semanticType = wgslValueType(ref.valueType);
-  const runtimeLocalPointer = semanticLocalStoragePointerDeclaration(ir, expression.target);
+  const runtimeLocalPointer = semanticRuntimePointerDeclarationForRef(ir, ref);
   if (runtimeLocalPointer) {
-    if (ref.indices.length !== 1 || expression.target.kind !== "symbol") return undefined;
+    if (ref.indices.length !== 1) return undefined;
     const base = createTypedWgslIdentifier(
-      nameFor(semanticPointerBaseParamName(expression.target.name), names),
+      nameFor(semanticPointerBaseParamName(ref.base), names),
       "u32",
-      expression.target.span,
+      ref.span,
     );
     const offset = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
     return createTypedWgslCall(
       semanticPointerReadHelperName(ref.valueType ?? "float"),
       [
         createTypedWgslIdentifier(
-          nameFor(semanticPointerBufferParamName(expression.target.name), names),
+          nameFor(semanticPointerBufferParamName(ref.base), names),
           "u32",
-          expression.target.span,
+          ref.span,
         ),
         emitTypedWgslBinary("+", base, offset, expression.span),
       ],
@@ -6995,6 +7035,12 @@ function emitSemanticMemoryRead(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  const runtimePointer = semanticRuntimePointerDeclarationForRef(ir, ref);
+  if (runtimePointer) {
+    const valueType = ref.valueType ?? "float";
+    const index = emitTypedFlatStorageIndex(ref, ir, names, options).code;
+    return `${semanticPointerReadHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index})`;
+  }
   if (semanticWgslLocalPackedHalf2View(ref, ir)) {
     const index = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
     const root = localArraySymbol(ir, ref.base)!;
@@ -7086,6 +7132,12 @@ function emitSemanticMemoryWrite(
   names: ReadonlyMap<string, string>,
   options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
+  const runtimePointer = semanticRuntimePointerDeclarationForRef(ir, ref);
+  if (runtimePointer) {
+    const valueType = ref.valueType ?? "float";
+    const index = emitTypedFlatStorageIndex(ref, ir, names, options).code;
+    return `${semanticPointerWriteHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index}, ${value})`;
+  }
   if (semanticWgslLocalPackedHalf2View(ref, ir)) {
     const index = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
     const root = localArraySymbol(ir, ref.base)!;
@@ -8266,11 +8318,20 @@ function collectOperationNames(
     names.add(semanticPointerBufferParamName(operation.target.name));
     names.add(semanticPointerBaseParamName(operation.target.name));
   }
+  if (operation.kind === "pool-allocate") {
+    names.add(operation.target.name);
+    names.add(`${operation.target.name}__bg_pool_allocation`);
+    names.add(semanticPointerBufferParamName(operation.target.name));
+    names.add(semanticPointerBaseParamName(operation.target.name));
+  }
   if (operation.kind === "branch") {
     for (const child of [...operation.consequent, ...operation.alternate]) collectOperationNames(child, names);
   }
   if (operation.kind === "loop") {
     if (operation.init && isSemanticKernelIrOperation(operation.init)) collectOperationNames(operation.init, names);
+    for (const child of operation.body) collectOperationNames(child, names);
+  }
+  if (operation.kind === "block") {
     for (const child of operation.body) collectOperationNames(child, names);
   }
 }

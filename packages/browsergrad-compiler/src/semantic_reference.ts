@@ -200,7 +200,8 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
-import { semanticRuntimePointerDeclarationForRef } from "./semantic_runtime_pointers.js";
+import { semanticRuntimePointerDeclarationForRef, semanticRuntimePointerDeclarations } from "./semantic_runtime_pointers.js";
+import { collectReferenceExternalDevicePoolNames } from "./reference_input_validation.js";
 import {
   semanticDirectByteStorageParamSupported,
   semanticDirectByteVectorMemberRef,
@@ -367,7 +368,8 @@ export function runCompiledKernelSemanticReference(
     )
     .map((param) => param.name)
     .concat(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "device-global").map((symbol) => symbol.name))
-    .concat(compiled.kernelIr.params.filter((param) => param.addressSpace === "pool").map((param) => param.name));
+    .concat(compiled.kernelIr.params.filter((param) => param.addressSpace === "pool").map((param) => param.name))
+    .concat(collectReferenceExternalDevicePoolNames(compiled.kernelIr.operations));
   for (const [name, offset] of poolOffsets) {
     const target = memoryPools[name]?.offset;
     if (target) target[0] = offset >>> 0;
@@ -471,6 +473,17 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "runtime-copy":
         if (!semanticReferenceRuntimeCopySupported(operation)) return reject(operation, `semantic reference does not support runtime copy '${operation.callee}'`);
+        break;
+      case "pool-allocate":
+        if (!operation.target.pointer || operation.target.valueType === undefined ||
+          !semanticReferenceExpressionSupported(operation.sizeBytes, "scalar", compiled) ||
+          operation.pool.kind === "raw-pool" && (
+            !semanticReferenceTypedMemoryRefSupported(operation.pool.data, compiled) ||
+            !semanticReferenceTypedMemoryRefSupported(operation.pool.offset, compiled) ||
+            !semanticReferenceExpressionSupported(operation.pool.capacityBytes, "scalar", compiled)
+          )) {
+          return reject(operation, `semantic reference does not support pool allocation '${operation.target.name}'`);
+        }
         break;
       case "pointer-rebind":
         if (!operation.target.pointer || operation.target.addressSpace !== "local" ||
@@ -586,6 +599,9 @@ function semanticReferenceOperationsContainUnsupportedCallableSignatures(
 
 function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): boolean {
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
+  if (symbol.kind === "external-pool") {
+    return symbol.addressSpace === "pool" && symbol.valueType === "devicepool" && symbol.pointer === true;
+  }
   if (symbol.kind === "constant") {
     if (!semanticReferenceValueTypeSupported(symbol.valueType)) return false;
     return !symbol.initialized ||
@@ -672,6 +688,7 @@ function semanticReferenceStorageBaseSupported(base: string, compiled: CompiledC
 
 function semanticReferenceTypedMemoryRefSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (!semanticReferenceMemoryRefSupported(ref)) return false;
+  if (semanticRuntimePointerDeclarationForRef(compiled.kernelIr, ref)) return true;
   if (semanticReferenceLocalPackedHalfView(ref, compiled)) return true;
   if (semanticReferenceLocalPackedHalf2View(ref, compiled)) return true;
   if (semanticReferenceLocalScalarBitViewRootType(ref, compiled) !== undefined) return true;
@@ -1720,7 +1737,7 @@ function execSemanticOperations(
         if (operation.target.addressSpace === "shared") break;
         if (operation.target.pointer) {
           const ref = operation.init
-            ? semanticPointerArgMemoryRef(operation.init) ?? semanticDevicePoolAllocationRef(operation, context)
+            ? semanticPointerArgMemoryRef(operation.init)
             : undefined;
           if (ref) context.localPointerTargets.set(operation.target.name, { ref, context });
           break;
@@ -1768,6 +1785,9 @@ function execSemanticOperations(
         break;
       case "runtime-copy":
         execSemanticRuntimeCopy(operation, context);
+        break;
+      case "pool-allocate":
+        execSemanticPoolAllocation(operation, context);
         break;
       case "pointer-rebind":
         context.localPointerTargets.set(operation.target.name, { ref: operation.source, context });
@@ -2007,6 +2027,7 @@ function* execSemanticBarrierOperations(
       case "surface-read-store":
       case "atomic":
       case "runtime-copy":
+      case "pool-allocate":
       case "pointer-rebind":
       case "expression":
       case "fence":
@@ -2273,56 +2294,55 @@ function semanticDeclareValue(
   return 0;
 }
 
-function semanticDevicePoolAllocationRef(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
+function execSemanticPoolAllocation(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "pool-allocate" }>,
   context: SemanticReferenceContext,
-): SemanticMemoryRef | undefined {
-  if (!operation.init || !operation.target.pointer || operation.target.valueType === undefined) return undefined;
-  const call = semanticDevicePoolAllocationCall(operation.init);
-  if (!call || call.args.length !== 2) return undefined;
-  const poolArg = call.args[0];
-  const poolSymbol = poolArg?.kind === "symbol"
-    ? poolArg
-    : poolArg?.kind === "unary" && poolArg.operator === "&" && poolArg.argument.kind === "symbol"
-    ? poolArg.argument
-    : undefined;
-  if (!poolSymbol) return undefined;
-  const pool = context.memoryPools[poolSymbol.name];
-  if (!pool) throw semanticReferenceError(`missing memory pool input '${poolSymbol.name}'`, poolSymbol.span);
-  const bytes = Math.max(0, Math.trunc(evalNumber(call.args[1]!, context)));
-  const oldOffset = context.poolOffsets.get(poolSymbol.name) ?? pool.offset?.[0] ?? 0;
-  const nextOffset = oldOffset + bytes;
-  context.poolOffsets.set(poolSymbol.name, nextOffset);
-  if (nextOffset > pool.data.byteLength) {
-    context.storageOffsets.set(operation.target.name, 0xffffffff);
-    return undefined;
-  }
-  const elementBytes = sizeofCudaType(operation.target.valueType) ?? 4;
-  context.storageOffsets.set(operation.target.name, 0);
-  return {
-    baseId: semanticMemoryIdFromSymbol(poolSymbol.id),
-    base: poolSymbol.name,
-    addressSpace: "storage",
-    valueType: requireSemanticValueType(operation.target.valueType, `pool allocation '${operation.target.name}'`, operation.span),
-    indices: [{
-      kind: "literal",
-      literalKind: "number",
-      value: Math.trunc(oldOffset / elementBytes),
-      valueType: "uint",
-      span: operation.span,
-    }],
-    fields: [],
-    span: operation.span,
-  };
-}
+): void {
+  const sizeBytes = Math.max(0, Math.trunc(evalNumber(operation.sizeBytes, context)));
+  const elementBytes = sizeofCudaType(operation.target.valueType ?? "voidptr") ?? 4;
+  let oldOffset: number;
+  let capacityBytes: number;
+  let baseId: SemanticMemoryRef["baseId"];
+  let base: string;
 
-function semanticDevicePoolAllocationCall(
-  expression: SemanticExpression,
-): Extract<SemanticExpression, { readonly kind: "call" }> | undefined {
-  if (expression.kind === "call" && expression.callee.kind === "symbol" &&
-      (expression.callee.name === "deviceAllocate" || expression.callee.name === "streamOrderedAllocate")) return expression;
-  if (expression.kind === "cast") return semanticDevicePoolAllocationCall(expression.expression);
-  return undefined;
+  if (operation.pool.kind === "device-pool") {
+    const pool = context.memoryPools[operation.pool.name];
+    if (!pool) throw semanticReferenceError(`missing memory pool input '${operation.pool.name}'`, operation.pool.span);
+    oldOffset = context.poolOffsets.get(operation.pool.name) ?? pool.offset?.[0] ?? 0;
+    capacityBytes = pool.data.byteLength;
+    context.poolOffsets.set(operation.pool.name, oldOffset + sizeBytes);
+    baseId = operation.pool.id;
+    base = operation.pool.name;
+  } else {
+    const offsetValue = readMemoryValue(operation.pool.offset, context);
+    if (typeof offsetValue !== "number") throw semanticReferenceError("raw pool offset must be scalar", operation.pool.offset.span);
+    oldOffset = Math.max(0, Math.trunc(offsetValue));
+    capacityBytes = Math.max(0, Math.trunc(evalNumber(operation.pool.capacityBytes, context)));
+    writeMemoryValue(operation.pool.offset, oldOffset + sizeBytes, context);
+    baseId = operation.pool.data.baseId;
+    base = operation.pool.data.base;
+  }
+
+  context.localPointerTargets.delete(operation.target.name);
+  if (oldOffset + sizeBytes > capacityBytes) return;
+  context.localPointerTargets.set(operation.target.name, {
+    ref: {
+      baseId,
+      base,
+      addressSpace: "storage",
+      valueType: requireSemanticValueType(operation.target.valueType, `pool allocation '${operation.target.name}'`, operation.span),
+      indices: [{
+        kind: "literal",
+        literalKind: "number",
+        value: Math.trunc(oldOffset / elementBytes),
+        valueType: "uint",
+        span: operation.span,
+      }],
+      fields: [],
+      span: operation.span,
+    },
+    context,
+  });
 }
 
 function execSemanticMatrixFill(
@@ -3128,6 +3148,9 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     case "pointer-valid":
       {
         const pointer = semanticPointerValidityOwner(expression, context.compiled.kernelIr);
+        if (pointer.kind === "local" && pointer.pointerRuntimeState === true) {
+          return context.localPointerTargets.has(pointer.name) ? 1 : 0;
+        }
         return (context.storageOffsets.get(pointer.name) ?? 0) !== 0xffffffff ? 1 : 0;
       }
     case "member":
@@ -6324,6 +6347,7 @@ function semanticPointerValidityOwner(
   ir: CompiledCudaLiteKernel["kernelIr"],
 ): CudaLiteSemanticSymbol {
   const owner = [...ir.params, ...ir.functions.flatMap((fn) => fn.params)]
+    .concat(semanticRuntimePointerDeclarations(ir).map((operation) => operation.target))
     .find((symbol) => semanticIdsEqual(symbol.id, expression.pointerId));
   if (!owner || owner.name !== expression.pointer) {
     throw semanticReferenceError(`unresolved pointer validity identity for '${expression.pointer}'`, expression.span);

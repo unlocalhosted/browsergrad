@@ -5,11 +5,10 @@ import {
 import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import {
   type CudaLiteSemanticSymbol,
-  type SemanticExpression,
   type SemanticKernelIrModule,
   type SemanticKernelIrOperation,
 } from "./semantic_ir.js";
-import { walkSemanticOperations } from "./semantic_ir.js";
+import { collectSemanticPoolAllocations } from "./semantic_ir.js";
 import {
   CudaLiteCompilerError,
   type CompiledKernelInput,
@@ -98,25 +97,9 @@ function semanticSymbolValueType(symbol: CudaLiteSemanticSymbol): Exclude<CudaLi
 }
 
 export function collectReferenceExternalDevicePoolNames(operations: readonly SemanticKernelIrOperation[]): readonly string[] {
-  const out = new Set<string>();
-  walkSemanticOperations(operations, (expression) => {
-    if (expression.kind !== "call") return;
-    const callName = expressionNameForSemantic(expression.callee);
-    if (callName !== "deviceAllocate" && callName !== "streamOrderedAllocate") return;
-    const pool = expression.args[0];
-    if (pool?.kind !== "unary" || pool.operator !== "&" || pool.argument.kind !== "symbol") return;
-    out.add(pool.argument.name);
-  });
-  return [...out];
-}
-
-function expressionNameForSemantic(expression: SemanticExpression): string | undefined {
-  if (expression.kind === "symbol") return expression.name;
-  if (expression.kind === "member") {
-    const objectName = expressionNameForSemantic(expression.object);
-    return objectName ? `${objectName}.${expression.property}` : expression.property;
-  }
-  return undefined;
+  return [...new Set(collectSemanticPoolAllocations(operations).flatMap((operation) =>
+    operation.pool.kind === "device-pool" ? [operation.pool.name] : []
+  ))];
 }
 
 function validateBufferInput(name: string, valueType: Exclude<CudaLiteScalarType, "void">, buffer: WgslTypedArray): void {

@@ -69,6 +69,7 @@ export {
   type SemanticEnvironment,
 } from "./semantic_environment.js";
 export {
+  collectSemanticPoolAllocations,
   createCudaLiteSemanticModel,
   lowerSemanticModelToKernelIr,
   type CudaLiteSemanticFunction,
@@ -81,6 +82,7 @@ export {
   type SemanticKernelIrModule,
   type SemanticKernelIrOperation,
   type SemanticMemoryRef,
+  type SemanticPoolRef,
 } from "./semantic_ir.js";
 export {
   validateSemanticKernelIr,

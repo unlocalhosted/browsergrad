@@ -5,6 +5,7 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import {
+  collectSemanticPoolAllocations,
   walkSemanticOperations,
 } from "./semantic_ir.js";
 import { semanticIdsEqual } from "./semantic_ids.js";
@@ -23,6 +24,7 @@ import {
   semanticAtomicUsesF32Storage,
 } from "./semantic_atomic_intrinsics.js";
 import { sizeofCudaType } from "./type_layout.js";
+import { poolDataName } from "./pool_bindings.js";
 import {
   floatAtomicHelperName,
   integerAtomicLoopHelperName,
@@ -78,10 +80,16 @@ export function semanticWgslFunctionSharedPointerParam(
 }
 
 export function semanticStoragePointerBufferId(base: string, ir: SemanticKernelIrModule): number | undefined {
-  const index = ir.params.findIndex((param) => param.name === base && param.addressSpace === "storage");
-  if (index >= 0) return index;
-  const globalIndex = ir.memory.filter((symbol) => symbol.kind === "device-global").findIndex((symbol) => symbol.name === base);
-  return globalIndex < 0 ? undefined : ir.params.length + globalIndex;
+  const storageIndex = ir.params.findIndex((param) => param.name === base && param.addressSpace === "storage");
+  if (storageIndex >= 0) return storageIndex;
+  const globals = ir.memory.filter((symbol) => symbol.kind === "device-global");
+  const globalIndex = globals.findIndex((symbol) => symbol.name === base);
+  if (globalIndex >= 0) return ir.params.length + globalIndex;
+  const poolNames = [...new Set(collectSemanticPoolAllocations(ir.operations).flatMap((operation) =>
+    operation.pool.kind === "device-pool" ? [operation.pool.name] : []
+  ))];
+  const poolIndex = poolNames.indexOf(base);
+  return poolIndex < 0 ? undefined : ir.params.length + globals.length + poolIndex;
 }
 
 export function semanticPointerStorageCompatible(pointerType: CudaLiteScalarType, storageType: CudaLiteScalarType | undefined): boolean {
@@ -191,12 +199,25 @@ function emitSemanticStoragePointerHelpers(
 
 function semanticStoragePointerValueTypes(ir: SemanticKernelIrModule): ReadonlySet<CudaLiteScalarType> {
   const types = new Set<CudaLiteScalarType>();
-  for (const declaration of semanticLocalPointerDeclarations(ir)) {
+  const runtimeDeclarations = semanticLocalPointerDeclarations(ir);
+  for (const declaration of runtimeDeclarations) {
     if (declaration.target.dimensions.length === 0 && declaration.target.valueType !== undefined &&
+      declaration.target.valueType !== "voidptr" &&
       (semanticLocalPointerStorageRef(declaration) !== undefined || declaration.target.pointerRuntimeState === true)) {
       types.add(declaration.target.valueType);
     }
   }
+  const addRuntimeRef = (ref: SemanticMemoryRef): void => {
+    if (ref.valueType === undefined || ref.valueType === "voidptr" || ref.addressSpace !== "local") return;
+    if (runtimeDeclarations.some((declaration) => semanticIdsEqual(declaration.target.id, ref.baseId))) {
+      types.add(ref.valueType);
+    }
+  };
+  walkSemanticOperations(ir.operations, (expression) => {
+    const ref = memoryRefFromIndexExpression(expression);
+    if (ref) addRuntimeRef(ref);
+  });
+  collectSemanticStoragePointerOperationRefs(ir.operations, addRuntimeRef);
   for (const fn of ir.functions) {
     const pointerNames = new Set(fn.params
       .filter((param) => param.pointer && param.addressSpace === "storage")
@@ -263,6 +284,8 @@ function collectSemanticStoragePointerOperationRefs(
       case "pointer-rebind":
         add(operation.source);
         break;
+      case "pool-allocate":
+        break;
       case "branch":
         collectSemanticStoragePointerOperationRefs(operation.consequent, add);
         collectSemanticStoragePointerOperationRefs(operation.alternate, add);
@@ -311,6 +334,9 @@ function emitSemanticStoragePointerReadHelper(
     `fn ${semanticPointerReadHelperName(valueType)}(buffer: u32, index: u32) -> ${wgslType} {`,
     "  switch buffer {",
     ...semanticStoragePointerBindings(ir).flatMap((binding) => {
+      if (semanticRawWordPointerBindingCompatible(valueType, binding)) {
+        return [`    case ${binding.id}u: { return ${emitSemanticRawWordPointerReadValue(valueType, nameFor(binding.name, names), "index")}; }`];
+      }
       if (semanticAtomicBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
         return [`    case ${binding.id}u: { return ${emitSemanticAtomicByteStorageReadValue(valueType, nameFor(binding.name, names), "index")}; }`];
       }
@@ -335,6 +361,9 @@ function emitSemanticStoragePointerWriteHelper(
     `fn ${semanticPointerWriteHelperName(valueType)}(buffer: u32, index: u32, value: ${wgslType}) {`,
     "  switch buffer {",
     ...semanticStoragePointerBindings(ir).flatMap((binding) => {
+      if (!binding.constant && semanticRawWordPointerBindingCompatible(valueType, binding)) {
+        return [`    case ${binding.id}u: { ${emitSemanticRawWordPointerWriteValue(valueType, nameFor(binding.name, names), "index", "value")} return; }`];
+      }
       if (!binding.constant && semanticAtomicBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
         return [`    case ${binding.id}u: { ${emitSemanticAtomicByteStorageWriteValue(valueType, nameFor(binding.name, names), "index", "value")} return; }`];
       }
@@ -379,20 +408,39 @@ function emitSemanticStoragePointerAtomicHelper(
 function semanticStoragePointerBindings(ir: SemanticKernelIrModule): readonly {
   readonly id: number;
   readonly name: string;
+  readonly root: string;
   readonly valueType?: CudaLiteScalarType;
   readonly constant: boolean;
+  readonly rawWords?: boolean;
 }[] {
+  const globals = ir.memory.filter((symbol) => symbol.kind === "device-global");
+  const pools = semanticDevicePoolAllocationNames(ir.operations);
   return [
     ...ir.params.flatMap((param, index) => param.addressSpace === "storage"
-      ? [{ id: index, name: param.name, ...(param.valueType === undefined ? {} : { valueType: param.valueType }), constant: param.constant ?? false }]
+      ? [{ id: index, name: param.name, root: param.name, ...(param.valueType === undefined ? {} : { valueType: param.valueType }), constant: param.constant ?? false }]
       : []),
-    ...ir.memory.filter((symbol) => symbol.kind === "device-global").map((symbol, index) => ({
+    ...globals.map((symbol, index) => ({
       id: ir.params.length + index,
       name: symbol.name,
+      root: symbol.name,
       ...(symbol.valueType === undefined ? {} : { valueType: symbol.valueType }),
       constant: false,
     })),
+    ...pools.map((name, index) => ({
+      id: ir.params.length + globals.length + index,
+      name: poolDataName(name),
+      root: name,
+      valueType: "uint" as const,
+      constant: false,
+      rawWords: true,
+    })),
   ];
+}
+
+function semanticDevicePoolAllocationNames(operations: readonly SemanticKernelIrOperation[]): readonly string[] {
+  return [...new Set(collectSemanticPoolAllocations(operations).flatMap((operation) =>
+    operation.pool.kind === "device-pool" ? [operation.pool.name] : []
+  ))];
 }
 
 function semanticHasAtomicByteStorage(ir: SemanticKernelIrModule): boolean {
@@ -409,6 +457,36 @@ function semanticAtomicBytePointerBindingCompatible(
 ): boolean {
   return binding.valueType === "uchar" && atomicStorage.has(binding.name) &&
     !isCudaVectorType(valueType) && sizeofCudaType(valueType) === 4;
+}
+
+function semanticRawWordPointerBindingCompatible(
+  valueType: CudaLiteScalarType,
+  binding: { readonly rawWords?: boolean },
+): boolean {
+  return binding.rawWords === true && !isCudaVectorType(valueType) && sizeofCudaType(valueType) === 4;
+}
+
+function emitSemanticRawWordPointerReadValue(
+  valueType: CudaLiteScalarType,
+  storage: string,
+  index: string,
+): string {
+  const word = `${storage}[${index}]`;
+  if (valueType === "float" || valueType === "double") return `bitcast<f32>(${word})`;
+  if (valueType === "int") return `bitcast<i32>(${word})`;
+  return word;
+}
+
+function emitSemanticRawWordPointerWriteValue(
+  valueType: CudaLiteScalarType,
+  storage: string,
+  index: string,
+  value: string,
+): string {
+  const word = valueType === "float" || valueType === "double" || valueType === "int"
+    ? `bitcast<u32>(${value})`
+    : value;
+  return `${storage}[${index}] = ${word};`;
 }
 
 function emitSemanticAtomicByteStorageReadValue(
