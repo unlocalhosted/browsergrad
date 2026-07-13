@@ -1142,10 +1142,26 @@ __global__ void shared_reinterpret(int *out) {
     add_uint_vector_slot(slots[tid], 5u);
   }`, { workgroupSize: [4, 1, 1] });
 
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: { out: new Uint32Array(12), shadow: new Uint32Array(12) },
+          scalars: { n: 2 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
       expect(compiled.wgsl).toContain("if (bg_active_lane) {");
-      expect(compiled.wgsl).toContain("slots_buffer[u32(0)] = 0u; slots_base[u32(0)] = (0u + (u32(1) * 4u));");
-      expect(compiled.wgsl).toContain("slots_buffer[u32(1)] = 1u; slots_base[u32(1)] = (0u + (u32(1) * 4u));");
+      expect(compiled.wgsl).toContain("var slots_buffer: array<u32, 2>;");
+      expect(compiled.wgsl).toContain("slots_buffer[0u] = 0u;");
+      expect(compiled.wgsl).toContain("slots_base[0u] = (1u * 4u);");
+      expect(compiled.wgsl).toContain("slots_buffer[1u] = 1u;");
+      expect(compiled.wgsl).toContain("slots_base[1u] = (1u * 4u);");
+      expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&out[index], value); }");
+      expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&shadow[index], value); }");
       expect(compiled.wgsl).not.toContain("select(slots[");
+      expect([...result.buffers.out as Uint32Array]).toEqual([0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0]);
+      expect([...result.buffers.shadow as Uint32Array]).toEqual([0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0]);
     });
 
   it("keeps active-lane pointer-array helper args behind the active guard", () => {
@@ -1247,7 +1263,13 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [1, 1, 1] });
 
       expect(compiled.wgsl!.match(/\bnested_pointer_array_target_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = nested_pointer_array_target_index_helper\(/u);
+      expect(compiled.wgsl).toMatch(/let bg_pointer_array_target_condition_\d+: bool = \(nested_pointer_array_target_index_helper\(/u);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { storage: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.storage as Uint32Array]).toEqual([1, 0, 5, 0]);
     });
 
   it("evaluates side-effecting pointer-array comparison indices once", () => {
@@ -1481,9 +1503,18 @@ __global__ void shared_reinterpret(int *out) {
     out[1] = make_float4(total, 0.0f);
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(compiled.wgsl).toContain("ptrs_base[u32(2)] = (u32(2) * 3u);");
-      expect(compiled.wgsl).toContain("sum_global_ptrs(ptrs_buffer[u32(0)], ptrs_base[u32(0)], ptrs_buffer[u32(1)], ptrs_base[u32(1)], ptrs_buffer[u32(2)], ptrs_base[u32(2)]");
-      expect(compiled.wgsl).not.toContain("ptrs_base[u32(2)] = u32(2);");
+      expect(compiled.wgsl).toContain("ptrs_base[2u] = (2u * 3u);");
+      expect(compiled.wgsl).toContain("sum_global_ptrs(1u, (0u * 3u), 1u, (1u * 3u), 1u, (2u * 3u)");
+      expect(compiled.wgsl).not.toContain("ptrs_base[2u] = 2u;");
+      const globals = deviceGlobalBufferInputs(compiled, { buffers: { out: new Float32Array(8) } });
+      expect(globals.g_ptr_values).toBeInstanceOf(Float32Array);
+      expect(globals.g_ptr_values).toHaveLength(9);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(8) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect([...result.buffers.out as Float32Array]).toEqual([17, 19, 23, 1, 26, 33, 41, 0]);
     });
 
   it("reads shared vector pointer helpers through scalar lanes", () => {
@@ -1797,8 +1828,10 @@ __global__ void shared_reinterpret(int *out) {
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
       expect(result.buffers.gScratch).toBeInstanceOf(Uint32Array);
       expect(compiled.wgsl).toContain("var<storage, read_write> gScratch: array<u32>;");
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32");
-      expect(compiled.wgsl).toContain(">> 2u");
+      expect(compiled.wgsl).toMatch(/let bg_raw_word_\d+ = bitcast<u32>\(1\.0\)/u);
+      expect(compiled.wgsl).toContain("gScratch[(u32((1 * 4)) + 3u)]");
+      expect(compiled.wgsl).toContain(">> 24u");
+      expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
     });
 
   it("lowers multi-dimensional shared memory through helper pointer params", () => {
@@ -1828,8 +1861,11 @@ __global__ void shared_reinterpret(int *out) {
         { gridDim: [1, 1, 1], blockDim: [6, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("return tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)];");
-      expect(compiled.wgsl).toContain("tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)] = value;");
+      expect(compiled.wgsl).toContain("fn readTile(ptr__bg_shared_ptr: ptr<workgroup, array<f32, 6>>, ptr__bg_shared_ptr_base: u32");
+      expect(compiled.wgsl).toContain("fn writeTile(ptr__bg_shared_ptr: ptr<workgroup, array<f32, 6>>, ptr__bg_shared_ptr_base: u32");
+      expect(compiled.wgsl).toContain("(*ptr__bg_shared_ptr)[(ptr__bg_shared_ptr_base + u32(i))] = value;");
+      expect(compiled.wgsl).toContain("writeTile(&tile, ((0u * 3u) + 0u), tid, 3.0");
+      expect(compiled.wgsl).toContain("readTile(&tile, ((0u * 3u) + 0u), tid");
       expect([...result.buffers.out as Float32Array]).toEqual([3, 3, 3, 3, 3, 3]);
     });
 
@@ -1877,10 +1913,11 @@ __global__ void shared_reinterpret(int *out) {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-device-pointer-param");
-      expect(compiled.wgsl).toContain("fn writeMaybeLocal(ptr_buffer_arg: u32, ptr_base_arg: u32");
-      expect(compiled.wgsl).toContain("fn writeMaybeLocal__bg_localptr_ptr(ptr: ptr<function, f32>");
-      expect(compiled.wgsl).toContain("writeMaybeLocal(0u, 0u");
-      expect(compiled.wgsl).toContain("writeMaybeLocal__bg_localptr_ptr(&scratch[ptrs_base[u32(0)]]");
+      expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("semantic-wgsl-unsupported");
+      expect(compiled.wgsl).toContain("fn writeMaybeLocal__bg_overload_0(ptr_buffer: u32, ptr_base: u32");
+      expect(compiled.wgsl).toContain("fn writeMaybeLocal__bg_overload_1(ptr__bg_local_ptr: ptr<function, array<f32, 1>>, ptr__bg_local_ptr_base: u32");
+      expect(compiled.wgsl).toContain("writeMaybeLocal__bg_overload_0(0u, 0u, 2.0");
+      expect(compiled.wgsl).toContain("writeMaybeLocal__bg_overload_1(&scratch, 0u, 1.0");
       expect([...localResult.buffers.out as Float32Array]).toEqual([0, 1]);
       expect([...storageResult.buffers.out as Float32Array]).toEqual([2, 0]);
     });
@@ -3276,15 +3313,17 @@ __global__ void sharedPointerAlias(float *out) {
         compiled,
         {
           buffers: {
-            scratch: new Uint32Array(2),
+            scratch: new Uint32Array(8),
             out: new Float32Array(2),
           },
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("select(u32(1), (u32(1) * 4u), (value_buffer == 0u))");
+      expect(compiled.wgsl).toContain("select(1, (1 * 4), (value_buffer == 0u))");
+      expect(compiled.wgsl).toContain("case 0u: { scratch[index] = ((bitcast<u32>(value) >> 0u) & 255u)");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+      expect([...result.buffers.scratch as Uint32Array]).toEqual([0, 0, 128, 63, 0, 0, 0, 64]);
     });
 
   it("bitcasts float views over packed shared byte storage", () => {
@@ -4444,12 +4483,12 @@ __global__ void sharedHelperScoped(float *out) {
   }`, { workgroupSize: [1, 1, 1] });
       const result = runCompiledKernelReference(
         compiled,
-        { buffers: { scratch: new Uint32Array(3), out: new Float32Array(2) } },
+        { buffers: { scratch: new Uint32Array(9), out: new Float32Array(2) } },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
       expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
-      expect([...result.buffers.scratch as Uint32Array]).toEqual([0x80000000, 0x0000003f, 0x00000040]);
+      expect([...result.buffers.scratch as Uint32Array]).toEqual([0, 0, 0, 128, 63, 0, 0, 0, 64]);
       expect(compiled.wgsl).toContain("& 255u");
       expect(compiled.wgsl).toContain(">> 24u");
     });
@@ -4868,9 +4907,11 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(compiled.wgsl).toContain("scratch[(index + 0u)] = value.x");
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(1u, ((0u + u32(0)) + (u32(tid) * 3u))");
-      expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(tile_buffer, (tile_base + (u32(index) * 3u))");
+      expect(compiled.wgsl).toContain("fn adjust(tile__bg_shared_ptr: ptr<workgroup, array<f32, 6>>, tile__bg_shared_ptr_base: u32");
+      expect(compiled.wgsl).toContain("(*tile__bg_shared_ptr)[(tile__bg_shared_ptr_base + (u32(index) * 3u))]");
+      expect(compiled.wgsl).toContain("(*tile__bg_shared_ptr)[((tile__bg_shared_ptr_base + (u32(index) * 3u)) + 2u)]");
+      expect(compiled.wgsl).toContain("adjust(&scratch, 0u, tid");
+      expect(compiled.wgsl).not.toContain("bg_ptr_write_f32x3");
       expect([...result.buffers.out as Float32Array]).toEqual([1.5, 11, 101.5, 3.5, 14, 105.5]);
     });
 
@@ -5606,8 +5647,8 @@ __global__ void localOut(float *out) {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("vec2<f32>");
-      expect(compiled.wgsl).toContain("((bitcast<u32>(f32(output[1u])) >> 16u) & 0xffffu)");
-      expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>((1073758144u & 0x0000ffffu) << 16u), bitcast<f32>(1073758144u & 0xffff0000u))");
+      expect(compiled.wgsl).toContain("((bitcast<u32>(output[1u]) >> 16u) & 0xffffu)");
+      expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>(((1073758144u & 0xffffu) << 16u)), bitcast<f32>((1073758144u & 0xffff0000u)))");
       expect([...result.buffers.output as Float32Array][0]).toBeCloseTo(1.6015625);
       expect([...result.buffers.output as Float32Array][1]).toBeCloseTo(1.5);
       expect([...result.buffers.output as Float32Array][2]).toBeCloseTo(1.5);

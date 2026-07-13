@@ -120,3 +120,42 @@ export function safeWgslIdentifier(name: string): string {
   const prefixed = /^[A-Za-z_]/u.test(cleaned) ? cleaned : `bg_${cleaned}`;
   return prefixed.startsWith("__") ? `bg${prefixed}` : prefixed;
 }
+
+export function collectSemanticWgslOperationNames(
+  operation: SemanticKernelIrOperation,
+  names: Set<string>,
+): void {
+  if (operation.kind === "declare") {
+    names.add(operation.target.name);
+    if (operation.target.pointer) {
+      names.add(semanticPointerBufferParamName(operation.target.name));
+      names.add(semanticPointerBaseParamName(operation.target.name));
+    }
+  }
+  if (operation.kind === "pointer-rebind") {
+    names.add(semanticPointerBufferParamName(operation.target.name));
+    names.add(semanticPointerBaseParamName(operation.target.name));
+  }
+  if (operation.kind === "pool-allocate") {
+    names.add(operation.target.name);
+    names.add(`${operation.target.name}__bg_pool_allocation`);
+    names.add(semanticPointerBufferParamName(operation.target.name));
+    names.add(semanticPointerBaseParamName(operation.target.name));
+  }
+  if (operation.kind === "branch") {
+    for (const child of [...operation.consequent, ...operation.alternate]) collectSemanticWgslOperationNames(child, names);
+  }
+  if (operation.kind === "loop") {
+    if (operation.init && isSemanticKernelIrOperation(operation.init)) collectSemanticWgslOperationNames(operation.init, names);
+    for (const child of operation.body) collectSemanticWgslOperationNames(child, names);
+  }
+  if (operation.kind === "block") {
+    for (const child of operation.body) collectSemanticWgslOperationNames(child, names);
+  }
+}
+import type { SemanticKernelIrOperation } from "./semantic_ir.js";
+import { isSemanticKernelIrOperation } from "./semantic_ir_walk.js";
+import {
+  semanticPointerBaseParamName,
+  semanticPointerBufferParamName,
+} from "./semantic_wgsl_pointers.js";

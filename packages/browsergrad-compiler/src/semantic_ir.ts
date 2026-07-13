@@ -930,9 +930,13 @@ export function lowerSemanticModelToKernelIr(
   const sourceSharedMemoryValueTypes = new Map(
     sharedMemorySymbols.map((symbol) => [symbol.name, symbol.valueType] as const),
   );
-  const addressSpaceOverloads = cloneMixedSharedPointerFunctionOverloads(
+  const localAddressSpaceOverloads = cloneMixedLocalPointerFunctionOverloads(
     loweredOperations,
     reachableSourceFunctions,
+  );
+  const addressSpaceOverloads = cloneMixedSharedPointerFunctionOverloads(
+    loweredOperations,
+    localAddressSpaceOverloads,
     sourceSharedMemoryDimensions,
     sourceSharedMemoryValueTypes,
   );
@@ -1962,6 +1966,59 @@ function specializeConstantPointerFunctions(
   });
 }
 
+function cloneMixedLocalPointerFunctionOverloads(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+): readonly CudaLiteSemanticFunction[] {
+  const localDimensions = semanticLocalAddressDimensions(operations, functions);
+  const calls = [
+    ...collectSemanticFunctionCalls(operations),
+    ...functions.flatMap((fn) => collectSemanticFunctionCalls(
+      fn.body,
+      new Set(fn.params.filter((param) => param.pointer && param.addressSpace === "local").map((param) => param.name)),
+    )),
+  ];
+  return functions.flatMap((fn) => {
+    const pointerIndexes = fn.params.flatMap((param, index) =>
+      param.pointer && param.addressSpace === "storage" ? [index] : []
+    );
+    if (pointerIndexes.length === 0) return [fn];
+    const signatures = new Map<string, SemanticFunctionCallSite[]>();
+    for (const call of calls.filter((candidate) => candidate.callee === fn.name)) {
+      const refs = pointerIndexes.map((index) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
+      if (refs.some((ref) => ref === undefined ||
+        ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local")) continue;
+      const signature = refs.map((ref) => ref!.addressSpace === "local" ? "local" : "storage").join(",");
+      const group = signatures.get(signature) ?? [];
+      group.push(call);
+      signatures.set(signature, group);
+    }
+    if (signatures.size <= 1 || ![...signatures].some(([signature]) => signature.includes("local"))) return [fn];
+    return [...signatures].flatMap(([signature, signatureCalls]) => {
+      const addressSpaces = signature.split(",");
+      if (!addressSpaces.includes("local")) return [fn];
+      const rewrites = new Map<string, SemanticPointerRewriteTarget>();
+      const params = [...fn.params];
+      for (const [pointerPosition, paramIndex] of pointerIndexes.entries()) {
+        if (addressSpaces[pointerPosition] !== "local") continue;
+        const param = fn.params[paramIndex]!;
+        const refs = signatureCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[paramIndex]!)!);
+        const dimensions = refs.map((ref) => localDimensions.get(ref.baseId));
+        if (!dimensions.every((value) => value !== undefined && value.length <= 1) ||
+          !sameSemanticDimensions(dimensions as readonly (readonly number[])[])) return [];
+        const name = `${param.name}__bg_local_ptr`;
+        const id = createGeneratedSemanticSymbolId(
+          `bg_local_overload_${fn.name}_${signature}_${param.name}_${param.span.start}`,
+          param.span,
+        );
+        params[paramIndex] = { ...param, id, name, addressSpace: "local", dimensions: dimensions[0]! };
+        rewrites.set(param.name, { name, id: semanticMemoryIdFromSymbol(id) });
+      }
+      return [{ ...fn, params, body: rewriteSemanticPointerAddressSpace(fn.body, rewrites, "local") }];
+    });
+  });
+}
+
 function mutableKernelParamShadows(
   analysis: CudaLiteAnalysis,
   params: readonly CudaLiteSemanticSymbol[],
@@ -2122,11 +2179,13 @@ function specializeSharedPointerFunctionsOnce(
       );
       const effectiveDimensions = dimensions.map((item, argIndex) => {
         const carrierType = carrierTypes[argIndex];
-        return item !== undefined && item.length === 1 && refs[argIndex]?.pointerBaseIsScalarLane === true && isCudaVectorType(carrierType)
-          ? [item[0]! * cudaVectorLaneCount(carrierType)]
-          : item;
+        if (item === undefined) return undefined;
+        const flatExtent = totalElements(item);
+        return refs[argIndex]?.pointerBaseIsScalarLane === true && isCudaVectorType(carrierType)
+          ? [flatExtent * cudaVectorLaneCount(carrierType)]
+          : [flatExtent];
       });
-      if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && effectiveDimensions.every((item) => item !== undefined && item.length <= 1 && (item.length === 0 || item[0] !== undefined)) && sameSemanticDimensions(effectiveDimensions as readonly (readonly number[])[])) {
+      if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && effectiveDimensions.every((item) => item !== undefined && item[0] !== undefined) && sameSemanticDimensions(effectiveDimensions as readonly (readonly number[])[])) {
         sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
         sharedPointerDimensions.set(param.name, effectiveDimensions[0]!);
         sharedPointerRoots.set(param.name, args);
@@ -6457,7 +6516,7 @@ function semanticSymbolForMemoryId(
   memoryId: SemanticMemoryId,
 ): CudaLiteSemanticSymbol | undefined {
   for (const symbol of scope.values()) {
-    if (semanticMemoryIdFromSymbol(symbol.id) === memoryId) return symbol;
+    if (semanticIdsEqual(semanticMemoryIdFromSymbol(symbol.id), memoryId)) return symbol;
   }
   return undefined;
 }
@@ -6502,7 +6561,8 @@ function localArrayRefFromExpression(
   if (expression.kind !== "index") return undefined;
   if (expression.target.kind === "identifier") {
     const root = scope.get(expression.target.name);
-    if (!root || (root.kind !== "local" && (!allowShared || root.kind !== "shared" && root.kind !== "constant")) || root.dimensions.length === 0 || root.pointer) return undefined;
+    if (!root || (root.kind !== "local" && (!allowShared || root.kind !== "shared" && root.kind !== "constant" && root.kind !== "device-global")) ||
+      root.dimensions.length === 0 || root.pointer && root.kind !== "device-global") return undefined;
     return { root, indices: [lowerExpression(expression.index, scope)] };
   }
   const target = localArrayRefFromExpression(expression.target, scope, allowShared);

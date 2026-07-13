@@ -10,7 +10,7 @@ import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import type { SemanticKernelIrOperation } from "./semantic_ir.js";
 import { collectSemanticPoolAllocations } from "./semantic_ir.js";
-import { isCudaVectorType } from "./vector_types.js";
+import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -281,16 +281,18 @@ function collectExternalDevicePoolDescriptors(
 }
 
 function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {
-  const total = totalElements(global.dimensions);
+  const vectorType = isCudaVectorType(global.valueType) ? global.valueType : undefined;
+  const total = totalElements(global.dimensions) * (vectorType === undefined ? 1 : cudaVectorLaneCount(vectorType));
+  const storageType = vectorType === undefined ? global.valueType : cudaVectorScalarType(vectorType);
   const values = global.init === undefined
     ? []
     : flattenInitializer(global.init).map(evaluateInitializerNumber);
   const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
-  if (global.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
-  if (global.valueType === "uint" || global.valueType === "uchar" || global.valueType === "bool" || global.valueType === "voidptr") {
+  if (storageType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
+  if (storageType === "uint" || storageType === "uchar" || storageType === "bool" || storageType === "voidptr") {
     return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
   }
-  if (global.valueType === "half") return createWgslFloat16Array(padded);
+  if (storageType === "half") return createWgslFloat16Array(padded);
   return Float32Array.from(padded);
 }
 

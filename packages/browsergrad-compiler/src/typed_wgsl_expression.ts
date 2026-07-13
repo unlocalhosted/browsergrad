@@ -5,7 +5,7 @@ export type WgslAtomicType = "atomic<i32>" | "atomic<u32>";
 export type WgslArrayType = `array<${SemanticWgslValueType | WgslAtomicType},${number}>`;
 export type WgslPointerType = `ptr<${"function" | "workgroup" | "storage"},${SemanticWgslValueType | WgslAtomicType | WgslArrayType}>`;
 export type WgslResourceType = "texture_2d<f32>";
-export type WgslExpressionType = SemanticWgslValueType | WgslPointerType | WgslResourceType;
+export type WgslExpressionType = SemanticWgslValueType | WgslArrayType | WgslPointerType | WgslResourceType;
 export type WgslVectorType = Extract<WgslExpressionType, `vec${number}<${string}>`>;
 
 const typedWgslExpression: unique symbol = Symbol("typed-wgsl-expression");

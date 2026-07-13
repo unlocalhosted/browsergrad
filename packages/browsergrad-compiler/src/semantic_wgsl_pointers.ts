@@ -372,6 +372,9 @@ function emitSemanticStoragePointerReadHelper(
       if (semanticAtomicBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
         return [`    case ${binding.id}u: { return ${emitSemanticAtomicByteStorageReadValue(valueType, nameFor(binding.name, names), "index")}; }`];
       }
+      if (semanticLogicalBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
+        return [`    case ${binding.id}u: { return ${emitSemanticLogicalByteStorageReadValue(valueType, nameFor(binding.name, names), "index")}; }`];
+      }
       return semanticPointerStorageCompatible(valueType, binding.valueType)
         ? [`    case ${binding.id}u: { return ${emitSemanticStoragePointerReadValue(valueType, nameFor(binding.name, names), "index", atomicStorage.has(binding.name))}; }`]
         : [];
@@ -398,6 +401,9 @@ function emitSemanticStoragePointerWriteHelper(
       }
       if (!binding.constant && semanticAtomicBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
         return [`    case ${binding.id}u: { ${emitSemanticAtomicByteStorageWriteValue(valueType, nameFor(binding.name, names), "index", "value")} return; }`];
+      }
+      if (!binding.constant && semanticLogicalBytePointerBindingCompatible(valueType, binding, atomicStorage)) {
+        return [`    case ${binding.id}u: { ${emitSemanticLogicalByteStorageWriteValue(valueType, nameFor(binding.name, names), "index", "value")} return; }`];
       }
       return !binding.constant && semanticPointerStorageCompatible(valueType, binding.valueType)
         ? [`    case ${binding.id}u: { ${emitSemanticStoragePointerWriteValue(valueType, nameFor(binding.name, names), "index", "value", atomicStorage.has(binding.name))} return; }`]
@@ -489,6 +495,41 @@ function semanticAtomicBytePointerBindingCompatible(
 ): boolean {
   return binding.valueType === "uchar" && atomicStorage.has(binding.name) &&
     !isCudaVectorType(valueType) && sizeofCudaType(valueType) === 4;
+}
+
+function semanticLogicalBytePointerBindingCompatible(
+  valueType: CudaLiteScalarType,
+  binding: { readonly name: string; readonly valueType?: CudaLiteScalarType },
+  atomicStorage: ReadonlySet<string>,
+): boolean {
+  return binding.valueType === "uchar" && !atomicStorage.has(binding.name) &&
+    !isCudaVectorType(valueType) && sizeofCudaType(valueType) === 4;
+}
+
+function emitSemanticLogicalByteStorageReadValue(
+  valueType: CudaLiteScalarType,
+  storage: string,
+  byteIndex: string,
+): string {
+  const bits = `(${storage}[${byteIndex}] | (${storage}[(${byteIndex} + 1u)] << 8u) | (${storage}[(${byteIndex} + 2u)] << 16u) | (${storage}[(${byteIndex} + 3u)] << 24u))`;
+  if (valueType === "float" || valueType === "double") return `bitcast<f32>(${bits})`;
+  if (valueType === "int") return `bitcast<i32>(${bits})`;
+  return bits;
+}
+
+function emitSemanticLogicalByteStorageWriteValue(
+  valueType: CudaLiteScalarType,
+  storage: string,
+  byteIndex: string,
+  value: string,
+): string {
+  const bits = valueType === "float" || valueType === "double" || valueType === "int"
+    ? `bitcast<u32>(${value})`
+    : value;
+  return [0, 1, 2, 3].map((offset) => {
+    const index = offset === 0 ? byteIndex : `(${byteIndex} + ${offset}u)`;
+    return `${storage}[${index}] = ((${bits} >> ${offset * 8}u) & 255u);`;
+  }).join(" ");
 }
 
 function semanticRawWordPointerBindingCompatible(

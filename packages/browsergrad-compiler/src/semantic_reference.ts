@@ -248,6 +248,7 @@ interface SemanticReferenceContext {
   readonly sharedMemory: Map<string, WgslTypedArray>;
   readonly sharedOffsets: Map<string, number>;
   readonly storageOffsets: Map<string, number>;
+  readonly storagePointerViews: Map<string, SemanticStoragePointerView>;
   readonly localPointerTargets: Map<string, { readonly ref: SemanticMemoryRef; readonly context: SemanticReferenceContext }>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly vectors: Readonly<Record<string, WgslTypedArray>>;
@@ -262,6 +263,12 @@ interface SemanticReferenceContext {
   activeCollectiveContexts?: readonly SemanticReferenceContext[];
   stagedSubgroupCallValues?: ReadonlyMap<SemanticExpression, number>;
   returnValue?: SemanticValue;
+}
+
+interface SemanticStoragePointerView {
+  readonly containerValueType?: CudaLiteScalarType;
+  readonly packedByteLanes?: 2 | 3 | 4;
+  readonly pointerBaseUnitBytes?: number;
 }
 
 type MutableTrace = MutableReferenceTrace;
@@ -339,6 +346,7 @@ export function runCompiledKernelSemanticReference(
                 sharedMemory,
                 sharedOffsets: new Map(),
                 storageOffsets: new Map(Object.entries(compiled.pointerBaseOffsets ?? {})),
+                storagePointerViews: new Map(),
                 localPointerTargets: new Map(),
                 scalars,
                 vectors,
@@ -1308,6 +1316,10 @@ function semanticReferenceCallSupported(
     }, compiled);
   }
   if (semanticReferenceVoidFunctionCallSupported(operation, compiled)) return true;
+  const ignoredResultFunction = semanticFunctionForCall(operation, compiled.kernelIr.functions);
+  if (ignoredResultFunction && ignoredResultFunction.returnType !== "void") {
+    return semanticReferenceFunctionCallSupported(semanticCallOperationExpression(operation, ignoredResultFunction), compiled);
+  }
   return semanticLocalArrayFillCallSupported(
     operation,
     (name) => compiled.kernelIr.memory.find((item) =>
@@ -1526,7 +1538,9 @@ function semanticReferenceOperationsContainUnsupportedCalls(
   compiled: CompiledCudaLiteKernel,
 ): boolean {
   return operations.some((operation) => {
-    if (operation.kind === "declare" && operation.init) return semanticReferenceExpressionContainsUnsupportedCall(operation.init, compiled);
+    if (operation.kind === "declare" && operation.init && !operation.target.pointer) {
+      return semanticReferenceExpressionContainsUnsupportedCall(operation.init, compiled);
+    }
     if (operation.kind === "store") {
       return operation.target.indices.some((index) => semanticReferenceExpressionContainsUnsupportedCall(index, compiled)) ||
         semanticReferenceExpressionContainsUnsupportedCall(operation.value, compiled);
@@ -1651,6 +1665,11 @@ function semanticReferenceAssignmentMemoryRefSupported(
   expression: SemanticExpression,
   compiled?: CompiledCudaLiteKernel,
 ): boolean {
+  if (expression.kind === "conditional") {
+    return semanticReferenceConditionSupported(expression.condition, compiled) &&
+      semanticReferenceAssignmentMemoryRefSupported(expression.consequent, compiled) &&
+      semanticReferenceAssignmentMemoryRefSupported(expression.alternate, compiled);
+  }
   const ref = semanticReferenceAssignmentMemoryRef(expression, compiled);
   return ref !== undefined &&
     (compiled === undefined ? semanticReferenceMemoryRefSupported(ref) : semanticReferenceTypedMemoryRefSupported(ref, compiled)) &&
@@ -2503,7 +2522,7 @@ function execSemanticCall(
     return;
   }
   const fn = semanticFunctionForCall(operation, context.compiled.kernelIr.functions);
-  if (fn?.returnType === "void" && operation.args.length === fn.params.length) {
+  if (fn && operation.args.length === fn.params.length) {
     runSemanticFunction(fn, operation.args, context, operation.span);
     return;
   }
@@ -3214,7 +3233,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
         }
       if (expression.target.kind === "member" && semanticReferenceVectorMemberSupported(expression.target, context.compiled)) return assignLocalVectorMember(expression, context);
       {
-        const ref = semanticReferenceAssignmentMemoryRef(expression.target, context.compiled);
+        const ref = semanticReferenceAssignmentMemoryRefForEvaluation(expression.target, context);
         if (ref) return assignMemoryRef(expression, ref, context);
       }
       if (expression.target.kind !== "symbol") throw semanticReferenceError("semantic reference assignment requires local symbol target", expression.target.span);
@@ -5388,9 +5407,26 @@ function assignMemoryRef(
   context: SemanticReferenceContext,
 ): number {
   const right = evalNumber(expression.value, context);
-  const value = applySemanticScalarAssignment(expression.operator, readMemory(ref, context), right, expression.span);
-  writeMemory(ref, value, context);
+  const resolved = semanticReferenceResolvePointerArg(ref, context);
+  const value = applySemanticScalarAssignment(
+    expression.operator,
+    readMemory(resolved.ref, resolved.context),
+    right,
+    expression.span,
+  );
+  writeMemory(resolved.ref, value, resolved.context);
   return value;
+}
+
+function semanticReferenceAssignmentMemoryRefForEvaluation(
+  expression: SemanticExpression,
+  context: SemanticReferenceContext,
+): SemanticMemoryRef | undefined {
+  if (expression.kind !== "conditional") return semanticReferenceAssignmentMemoryRef(expression, context.compiled);
+  return semanticReferenceAssignmentMemoryRefForEvaluation(
+    truthy(evalNumber(expression.condition, context)) ? expression.consequent : expression.alternate,
+    context,
+  );
 }
 
 function createSemanticFunctionContext(
@@ -5407,6 +5443,7 @@ function createSemanticFunctionContext(
   const sharedMemory = new Map(context.sharedMemory);
   const sharedOffsets = new Map(context.sharedOffsets);
   const storageOffsets = new Map(context.storageOffsets);
+  const storagePointerViews = new Map(context.storagePointerViews);
   const localPointerTargets = new Map(context.localPointerTargets);
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
@@ -5454,6 +5491,8 @@ function createSemanticFunctionContext(
       if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, arg.span);
       buffers.set(param.name, buffer);
       storageOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, resolved.context));
+      const sourceView = semanticReferenceStoragePointerView(ref, resolved.context);
+      if (sourceView !== undefined) storagePointerViews.set(param.name, sourceView);
       continue;
     }
     if (param.pointer && param.addressSpace === "shared") {
@@ -5499,6 +5538,7 @@ function createSemanticFunctionContext(
     sharedMemory,
     sharedOffsets,
     storageOffsets,
+    storagePointerViews,
     localPointerTargets,
     scalars: context.scalars,
     vectors: context.vectors,
@@ -5555,11 +5595,34 @@ function runSemanticFunction(
 function semanticReferencePointerArgBaseIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
   const root = context.compiled.kernelIr.params.find((param) => param.name === ref.base) ??
     context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
-  const index = flatIndex(ref, context);
+  const byteCarrierIndex = ref.addressSpace === "storage" && root?.valueType === "uchar"
+    ? (context.storageOffsets.get(ref.base) ?? 0) +
+      ref.indices.reduce((sum, item) => sum + Math.trunc(evalNumber(item, context)), 0)
+    : undefined;
+  const index = byteCarrierIndex ?? flatIndex(ref, context);
   const valueType = root?.valueType;
   return ref.pointerBaseIsScalarLane !== true && isSemanticFloatVectorType(valueType) && isSemanticFloatVectorType(ref.valueType)
     ? index * cudaVectorLaneCount(valueType)
     : index;
+}
+
+function semanticReferenceStoragePointerView(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+): SemanticStoragePointerView | undefined {
+  const inherited = context.storagePointerViews.get(ref.base);
+  const root = context.compiled.kernelIr.params.find((param) => param.name === ref.base) ??
+    context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
+  const containerValueType = inherited?.containerValueType ?? root?.valueType ?? ref.containerValueType;
+  const packedByteLanes = ref.packedByteLanes ?? inherited?.packedByteLanes;
+  const pointerBaseUnitBytes = ref.pointerBaseUnitBytes ?? inherited?.pointerBaseUnitBytes;
+  return containerValueType === undefined && packedByteLanes === undefined && pointerBaseUnitBytes === undefined
+    ? undefined
+    : {
+        ...(containerValueType === undefined ? {} : { containerValueType }),
+        ...(packedByteLanes === undefined ? {} : { packedByteLanes }),
+        ...(pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes }),
+      };
 }
 
 function semanticReferenceResolvePointerArg(
@@ -5570,9 +5633,71 @@ function semanticReferenceResolvePointerArg(
   if (ref.addressSpace !== "local") return { ref, context };
   if (visited.has(ref.base)) throw semanticReferenceError(`cyclic local pointer '${ref.base}'`, ref.span);
   const target = context.localPointerTargets.get(ref.base);
-  if (!target) return { ref, context };
+  if (!target) {
+    const alias = semanticReferencePointerArrayAlias(ref, context);
+    return alias === undefined ? { ref, context } : semanticReferenceResolvePointerArg(alias, context, visited);
+  }
   visited.add(ref.base);
   return semanticReferenceResolvePointerArg(localPointerTargetRef(target.ref, ref), target.context, visited);
+}
+
+function semanticReferencePointerArrayAlias(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+): SemanticMemoryRef | undefined {
+  if (ref.addressSpace !== "local" || ref.indices.length !== 1) return undefined;
+  const declaration = semanticReferenceLocalDeclarations(context.compiled.kernelIr.operations).find((operation) =>
+    semanticIdsEqual(operation.target.id, ref.baseId) && operation.target.pointerArrayAliases !== undefined,
+  );
+  const slot = Math.trunc(evalNumber(ref.indices[0]!, context));
+  const alias = declaration?.target.pointerArrayAliases?.[slot];
+  return alias === undefined ? undefined : semanticReferenceMemoryRefFromPointerAlias(alias, ref.valueType, ref.span, context);
+}
+
+function semanticReferenceMemoryRefFromPointerAlias(
+  alias: Exclude<NonNullable<CudaLiteSemanticSymbol["pointerArrayAliases"]>[number], undefined>,
+  valueType: SemanticMemoryRef["valueType"],
+  span: SourceSpan,
+  context: SemanticReferenceContext,
+): SemanticMemoryRef | undefined {
+  if (alias.pointerSelection) {
+    return semanticReferenceMemoryRefFromPointerAlias(
+      truthy(evalNumber(alias.pointerSelection.condition, context))
+        ? alias.pointerSelection.consequent
+        : alias.pointerSelection.alternate,
+      valueType,
+      span,
+      context,
+    );
+  }
+  if (!alias.pointerRoot || !alias.pointerAddressSpace || !alias.pointerBaseIndices) return undefined;
+  const root = [...context.compiled.kernelIr.params, ...context.compiled.kernelIr.memory].find((symbol) =>
+    semanticIdsEqual(semanticMemoryIdFromSymbol(symbol.id), alias.pointerRoot!),
+  );
+  if (!root) return undefined;
+  return {
+    baseId: semanticMemoryIdFromSymbol(root.id),
+    base: root.name,
+    addressSpace: alias.pointerAddressSpace,
+    valueType,
+    ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
+    indices: alias.pointerBaseIndices,
+    fields: [],
+    span,
+  };
+}
+
+function semanticReferenceLocalDeclarations(
+  operations: readonly SemanticKernelIrOperation[],
+): readonly Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] {
+  const declarations: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] = [];
+  for (const operation of operations) {
+    if (operation.kind === "declare") declarations.push(operation);
+    if (operation.kind === "branch") declarations.push(...semanticReferenceLocalDeclarations([...operation.consequent, ...operation.alternate]));
+    if (operation.kind === "loop" || operation.kind === "block") declarations.push(...semanticReferenceLocalDeclarations(operation.body));
+  }
+  return declarations;
 }
 
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
@@ -5674,7 +5799,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     if (target) return readMemory(localPointerTargetRef(target.ref, ref), target.context);
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) {
-      if (ref.indices.length === 0 && typeof buffer === "number") return buffer;
+      if (typeof buffer === "number" && semanticReferenceScalarLocalIndexIsZero(ref, context)) return buffer;
       throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     }
     if (semanticReferenceLocalVectorRootType(ref, context) !== undefined && ref.indices.length === 1 &&
@@ -5725,8 +5850,8 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     context.trace.sharedReads.push({ name: ref.base, index, value, ok });
     return value;
   }
-  if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
-    const buffer = context.buffers.get(ref.base);
+  if (semanticReferenceDirectByteRawView(ref, context)) {
+    const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
     const bytes = semanticAtomicMemoryRootNames(context.compiled.kernelIr).has(ref.base)
       ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
@@ -5772,7 +5897,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     }
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) {
-      if (ref.indices.length === 0 && typeof buffer === "number") {
+      if (typeof buffer === "number" && semanticReferenceScalarLocalIndexIsZero(ref, context)) {
         context.locals.set(ref.base, value);
         return;
       }
@@ -5827,8 +5952,8 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     context.trace.sharedWrites.push({ name: ref.base, index, value, ok });
     return;
   }
-  if (semanticReferenceDirectByteRawView(ref, context.compiled)) {
-    const buffer = context.buffers.get(ref.base);
+  if (semanticReferenceDirectByteRawView(ref, context)) {
+    const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
     const bytes = semanticAtomicMemoryRootNames(context.compiled.kernelIr).has(ref.base)
       ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
@@ -5852,6 +5977,14 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   const ok = index >= 0 && index < buffer.length;
   if (ok) buffer[index] = value;
   context.trace.writes.push({ name: ref.base, index, value, ok });
+}
+
+function semanticReferenceScalarLocalIndexIsZero(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+): boolean {
+  return ref.indices.length === 0 ||
+    ref.indices.length === 1 && Math.trunc(evalNumber(ref.indices[0]!, context)) === 0;
 }
 
 function semanticMemoryPoolView(
@@ -6018,7 +6151,11 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
       return value;
     });
   }
-  const base = flatIndex(ref, context) * semanticReferenceVectorStorageStride(ref, context);
+  const stride = semanticReferenceVectorStorageStride(ref, context);
+  const inheritedView = context.storagePointerViews.get(ref.base);
+  const base = ref.addressSpace === "storage" && inheritedView !== undefined
+    ? (context.storageOffsets.get(ref.base) ?? 0) + stride * ref.indices.reduce((sum, index) => sum + Math.trunc(evalNumber(index, context)), 0)
+    : flatIndex(ref, context) * stride;
   const buffer = ref.addressSpace === "constant"
     ? context.constants.get(ref.base)
     : ref.addressSpace === "device-global"
@@ -6132,9 +6269,13 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
   }
 }
 
-function semanticReferenceDirectByteRawView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
-  return ref.addressSpace === "storage" && ref.packedByteLanes === 4 &&
-    compiled.kernelIr.params.some((param) => param.name === ref.base && param.valueType === "uchar");
+function semanticReferenceDirectByteRawView(ref: SemanticMemoryRef, context: SemanticReferenceContext): boolean {
+  const view = semanticReferenceStoragePointerView(ref, context);
+  return (ref.addressSpace === "storage" || ref.addressSpace === "device-global") && (ref.packedByteLanes === 4 || view?.packedByteLanes === 4) && (
+    view?.containerValueType === "uchar" ||
+    context.compiled.kernelIr.params.some((param) => param.name === ref.base && param.valueType === "uchar") ||
+    context.compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "device-global" && symbol.valueType === "uchar")
+  );
 }
 
 function semanticReferenceLocalPackedByteRawView(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
@@ -6263,9 +6404,11 @@ function writeVectorContainerMemory(ref: SemanticMemoryRef, value: readonly numb
 }
 
 function semanticReferenceVectorStorageStride(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  const inheritedType = semanticStorageVectorType(context.storagePointerViews.get(ref.base)?.containerValueType);
+  if (inheritedType !== undefined) return cudaVectorLaneCount(inheritedType);
   const root = context.compiled.kernelIr.params.find((param) => param.name === ref.base) ??
     context.compiled.kernelIr.memory.find((symbol) => symbol.name === ref.base);
-  const valueType = semanticStorageVectorType(root?.valueType);
+  const valueType = semanticStorageVectorType(root?.valueType) ?? semanticStorageVectorType(ref.containerValueType);
   return valueType === undefined ? 1 : cudaVectorLaneCount(valueType);
 }
 
@@ -6314,7 +6457,8 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
   if (ref.addressSpace === "storage") {
     const offset = context.storageOffsets.get(ref.base) ?? 0;
     if (ref.indices.length === 0) return offset;
-    return offset + ref.indices.reduce((sum, index) => sum + Math.trunc(evalNumber(index, context)), 0);
+    const stride = context.storagePointerViews.get(ref.base)?.pointerBaseUnitBytes ?? 1;
+    return offset + stride * ref.indices.reduce((sum, index) => sum + Math.trunc(evalNumber(index, context)), 0);
   }
   if (ref.addressSpace === "constant") {
     const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === "constant");

@@ -5,7 +5,7 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import { semanticAtomicOperation } from "./semantic_atomic_intrinsics.js";
-import { semanticIdKey } from "./semantic_ids.js";
+import { semanticIdKey, semanticIdsEqual, semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 
 export function semanticOperationExpressions(operation: SemanticKernelIrOperation): readonly SemanticExpression[] {
@@ -141,6 +141,12 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
         const ref = semanticPointerArgumentMemoryRef(operation.init);
         if (ref) runtimePointerSources.set(semanticIdKey(operation.target.id), new Set([ref.base]));
       }
+      if (operation.kind === "declare" && operation.target.pointerArrayAliases !== undefined) {
+        const sources = new Set(operation.target.pointerArrayAliases.flatMap((alias) =>
+          alias === undefined ? [] : semanticPointerAliasRootNames(alias, ir)
+        ));
+        if (sources.size > 0) runtimePointerSources.set(semanticIdKey(operation.target.id), sources);
+      }
       if (operation.kind === "pointer-rebind") {
         const pointerId = semanticIdKey(operation.target.id);
         const sources = runtimePointerSources.get(pointerId) ?? new Set<string>();
@@ -181,7 +187,9 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
         if (!ref) continue;
         const ownerParams = call.owner === undefined ? undefined : functionParams.get(call.owner);
         const ownerIndex = ownerParams?.findIndex((param) => param.name === ref.base && param.pointer) ?? -1;
-        if (call.owner !== undefined && ownerIndex >= 0) {
+        if (ref.addressSpace === "local") {
+          atomicRuntimePointers.add(semanticIdKey(ref.baseId));
+        } else if (call.owner !== undefined && ownerIndex >= 0) {
           const ownerIndexes = atomicParamIndexes.get(call.owner) ?? new Set<number>();
           if (!ownerIndexes.has(ownerIndex)) {
             ownerIndexes.add(ownerIndex);
@@ -200,6 +208,28 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
     for (const source of sources) roots.add(source);
   }
   return roots;
+}
+
+type SemanticPointerArrayAlias = Exclude<
+  NonNullable<SemanticKernelIrModule["memory"][number]["pointerArrayAliases"]>[number],
+  undefined
+>;
+
+function semanticPointerAliasRootNames(
+  alias: SemanticPointerArrayAlias,
+  ir: SemanticKernelIrModule,
+): readonly string[] {
+  if (alias.pointerSelection) {
+    return [
+      ...semanticPointerAliasRootNames(alias.pointerSelection.consequent, ir),
+      ...semanticPointerAliasRootNames(alias.pointerSelection.alternate, ir),
+    ];
+  }
+  if (alias.pointerRoot === undefined) return [];
+  const root = [...ir.params, ...ir.memory].find((symbol) =>
+    semanticIdsEqual(semanticMemoryIdFromSymbol(symbol.id), alias.pointerRoot!),
+  );
+  return root === undefined ? [] : [root.name];
 }
 
 export function isSemanticKernelIrOperation(

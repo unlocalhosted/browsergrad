@@ -37,7 +37,7 @@ import { semanticPtxIntegerCallInfo } from "./semantic_inline_ptx.js";
 import { promotedCudaScalarType } from "./wgsl_value_conversion.js";
 import { sizeofCudaType } from "./type_layout.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
-import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
+import { collectSemanticWgslOperationNames, createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 import { isCudaBuiltinVectorSymbolName } from "./cuda_builtin_symbols.js";
 import { emitBfloatConversionHelpers, emitCuComplexRobustMathHelpers, emitCurandHelpers, emitFp8Helpers, emitHalfConversionHelpers, emitSpecialFloatConstantHelpers, rawPoolHelperName } from "./wgsl_support_helpers.js";
 import { collectSemanticWgslPoolResources, emitSemanticWgslPoolDeclarations, emitSemanticWgslPoolHelpers, semanticWgslPoolBindingNames, semanticWgslPoolBindings } from "./semantic_wgsl_pools.js";
@@ -113,6 +113,7 @@ import {
   emitTypedWgslUnary,
   type TypedWgslExpression,
   type TypedWgslPlace,
+  type WgslArrayType,
   type WgslPointerType,
 } from "./typed_wgsl_expression.js";
 import {
@@ -142,8 +143,6 @@ import {
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import {
   emitSemanticFlatArrayType,
-  emitSemanticFlatLocalArrayIndexes,
-  emitSemanticFlatRankedIndex,
   emitSemanticNestedArrayType,
 } from "./semantic_wgsl_memory_layout.js";
 import {
@@ -158,6 +157,7 @@ import {
   semanticWgslFunctionStoragePointerParam,
   semanticWgslFunctionSharedPointerParam,
 } from "./semantic_wgsl_pointers.js";
+import { createSemanticWgslIndexing } from "./semantic_wgsl_indexing.js";
 import { semanticRuntimePointerDeclarationForRef } from "./semantic_runtime_pointers.js";
 import {
   wgslAtomicScalar,
@@ -399,6 +399,24 @@ const {
 });
 
 const {
+  emitFlatConstantIndex,
+  emitFlatDeviceGlobalIndex,
+  emitFlatLocalArrayIndexes,
+  emitFlatSharedIndex,
+  emitFlatStorageIndex,
+  emitFlatStorageVectorBaseIndex,
+  emitSemanticRootStorageIndex,
+  emitTypedFlatRankedIndex,
+  emitTypedFlatStorageIndex,
+  emitTypedFlatStorageVectorBaseIndex,
+  semanticTypedLocalArrayPath,
+} = createSemanticWgslIndexing({
+  emitExpressionAs: emitSemanticExpressionAs,
+  nameFor,
+  indexingFailure: semanticWgslError,
+});
+
+const {
   emitUniformForLoop: emitSemanticUniformSubgroupForLoop,
   operationsContainNativeCollective: semanticOperationsContainNativeSubgroupCollective,
 } = createSemanticSubgroupControlEmitter({
@@ -511,7 +529,6 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
   const containsBarrier = semanticOperationsContainBarrier(ir.operations, barrierFunctions);
   if (shared.length === 0 && !containsBarrier) return true;
   if (!shared.every((symbol) => symbol.dimensions.length === 0 || symbol.dimensions.every((dimension) => dimension > 0))) return false;
-  if (ir.functions.some(semanticWgslFunctionHasSharedPointer) && shared.some((symbol) => symbol.dimensions.length > 1)) return false;
   if (!containsBarrier) return operationsHaveNoBarrierOrControlTransfer(ir.operations);
   if (barrierFunctions.size === 0 && semanticDirectBarriersHaveAnalyzerProof(ir)) return true;
   if (!shared.some((symbol) => isSemanticFloatVectorType(symbol.valueType)) && barrierFunctions.size === 0) {
@@ -532,10 +549,6 @@ function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): bo
       semanticBarrierOperationsMatchActiveLaneProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions) ||
     semanticBarrierOperationsMatchUniformityProof(fn.body, semanticBarrierFunctionProof(ir, fn.name), barrierFunctions)
   );
-}
-
-function semanticWgslFunctionHasSharedPointer(fn: SemanticKernelIrModule["functions"][number]): boolean {
-  return fn.params.some((param) => param.pointer && param.addressSpace === "shared");
 }
 
 function semanticOperationsHaveActiveLaneDeclaration(operations: readonly SemanticKernelIrOperation[]): boolean {
@@ -593,7 +606,7 @@ function emitSemanticKernelIrWgslFromIr(
   const storageOffsetBases = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets);
   const rawNames = new Set(ir.params.map((param) => param.name));
   for (const base of storageOffsetBases) rawNames.add(storageOffsetSymbol(base));
-  for (const operation of ir.operations) collectOperationNames(operation, rawNames);
+  for (const operation of ir.operations) collectSemanticWgslOperationNames(operation, rawNames);
   const poolResources = collectSemanticWgslPoolResources(ir);
   const { devicePoolNames } = poolResources;
   for (const bindingName of semanticWgslPoolBindingNames(devicePoolNames)) rawNames.add(bindingName);
@@ -607,7 +620,7 @@ function emitSemanticKernelIrWgslFromIr(
       rawNames.add(semanticPointerBufferParamName(param.name));
       rawNames.add(semanticPointerBaseParamName(param.name));
     }
-    for (const operation of fn.body) collectOperationNames(operation, rawNames);
+    for (const operation of fn.body) collectSemanticWgslOperationNames(operation, rawNames);
   }
   const surfaces = surfaceSymbols(ir);
   for (const surface of surfaces) {
@@ -1314,6 +1327,11 @@ function semanticWgslFunctionArgSupported(
     const ref = semanticPointerArgMemoryRef(arg);
     return ref?.addressSpace === "storage" && semanticDirectByteStorageParamSupported(ir, ref.base);
   }
+  if (param?.pointer && param.addressSpace === "storage") {
+    const ref = semanticPointerArgMemoryRef(arg);
+    if (ref?.addressSpace === "local" && (semanticRuntimePointerDeclarationForRef(ir, ref) !== undefined ||
+      semanticStoragePointerArrayDeclarationForRef(ir, ref) !== undefined)) return true;
+  }
   return semanticFunctionArgContractSupported(arg, param, semanticPointerArgMemoryRef, (item, mode) => semanticWgslExpressionSupported(item, mode, ir));
 }
 
@@ -1689,6 +1707,23 @@ function emitSemanticLocalPointerDeclaration(
   indentLevel: number,
   options: EmitSemanticKernelIrWgslOptions,
 ): readonly string[] {
+  const completePointerArray = operation.target.dimensions.length === 1 &&
+    operation.target.pointerArrayAliases?.every((alias) => alias !== undefined);
+  if (completePointerArray && operation.target.pointerArrayAliases!.every((alias) => semanticPointerAliasStorageBacked(alias!, ir))) {
+    const extent = operation.target.dimensions[0]!;
+    const prefix = "  ".repeat(indentLevel);
+    const buffer = nameFor(semanticPointerBufferParamName(operation.target.name), names);
+    const base = nameFor(semanticPointerBaseParamName(operation.target.name), names);
+    return [
+      `${prefix}var ${buffer}: array<u32, ${extent}>;`,
+      `${prefix}var ${base}: array<u32, ${extent}>;`,
+      ...operation.target.pointerArrayAliases.flatMap((alias, index) => [
+        `${prefix}${buffer}[${index}u] = ${emitSemanticPointerAliasBuffer(alias!, ir, names, options)};`,
+        `${prefix}${base}[${index}u] = ${emitSemanticPointerAliasBase(alias!, operation.target.valueType, ir, names, options)};`,
+      ]),
+    ];
+  }
+  if (completePointerArray) return [];
   if (!semanticPointerDeclarationNeedsRuntimeState(operation)) return [];
   const prefix = "  ".repeat(indentLevel);
   const ref = semanticLocalPointerStorageRef(operation);
@@ -1701,6 +1736,123 @@ function emitSemanticLocalPointerDeclaration(
     `${prefix}var ${buffer}: u32 = ${bufferId === undefined ? "0xffffffffu" : `${bufferId}u`};`,
     `${prefix}var ${base}: u32 = ${ref === undefined ? "0u" : emitSemanticPointerArgBaseIndex(ref, ir, names, options)};`,
   ];
+}
+
+type SemanticPointerArrayAlias = Exclude<NonNullable<CudaLiteSemanticSymbol["pointerArrayAliases"]>[number], undefined>;
+
+function emitSemanticPointerAliasBuffer(
+  alias: SemanticPointerArrayAlias,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): string {
+  if (alias.pointerSelection) {
+    const condition = emitTruthiness(alias.pointerSelection.condition, ir, names, options);
+    const consequent = emitSemanticPointerAliasBuffer(alias.pointerSelection.consequent, ir, names, options);
+    const alternate = emitSemanticPointerAliasBuffer(alias.pointerSelection.alternate, ir, names, options);
+    return `select(${alternate}, ${consequent}, ${condition})`;
+  }
+  const root = semanticPointerAliasRootSymbol(alias, ir);
+  const bufferId = root === undefined ? undefined : semanticStoragePointerBufferId(root.name, ir);
+  if (bufferId === undefined) throw semanticWgslError("pointer array alias requires a storage-backed root", alias.pointerBaseIndices?.[0]?.span ?? ir.span);
+  return `${bufferId}u`;
+}
+
+function emitSemanticPointerAliasBase(
+  alias: SemanticPointerArrayAlias,
+  valueType: CudaLiteScalarType | undefined,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): string {
+  if (alias.pointerSelection) {
+    const condition = emitTruthiness(alias.pointerSelection.condition, ir, names, options);
+    const consequent = emitSemanticPointerAliasBase(alias.pointerSelection.consequent, valueType, ir, names, options);
+    const alternate = emitSemanticPointerAliasBase(alias.pointerSelection.alternate, valueType, ir, names, options);
+    return `select(${alternate}, ${consequent}, ${condition})`;
+  }
+  const root = semanticPointerAliasRootSymbol(alias, ir);
+  const index = alias.pointerBaseIndices?.[0];
+  if (!root || !index || valueType === undefined || valueType === "voidptr" || valueType === "void") {
+    throw semanticWgslError("pointer array alias requires a typed base", index?.span ?? ir.span);
+  }
+  return emitSemanticPointerArgBaseIndex({
+    baseId: semanticMemoryIdFromSymbol(root.id),
+    base: root.name,
+    addressSpace: root.addressSpace,
+    valueType,
+    ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+    ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
+    indices: [index],
+    fields: [],
+    span: index.span,
+  }, ir, names, options);
+}
+
+function semanticPointerAliasRootSymbol(
+  alias: SemanticPointerArrayAlias,
+  ir: SemanticKernelIrModule,
+): CudaLiteSemanticSymbol | undefined {
+  if (!alias.pointerRoot) return undefined;
+  return [...ir.params, ...ir.memory].find((symbol) =>
+    semanticIdsEqual(semanticMemoryIdFromSymbol(symbol.id), alias.pointerRoot!),
+  );
+}
+
+function semanticStaticPointerArrayAlias(
+  declaration: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
+  index: SemanticExpression,
+): SemanticPointerArrayAlias | undefined {
+  if (index.kind !== "literal" || index.literalKind !== "number" || !Number.isInteger(index.value) || index.value < 0) return undefined;
+  return declaration.target.pointerArrayAliases?.[index.value];
+}
+
+function semanticStoragePointerArrayDeclarationForRef(
+  ir: SemanticKernelIrModule,
+  ref: SemanticMemoryRef,
+): Extract<SemanticKernelIrOperation, { readonly kind: "declare" }> | undefined {
+  const declaration = semanticPointerArrayDeclarationForRef(ir, ref);
+  return declaration?.target.pointerArrayAliases?.every((alias) => alias !== undefined && semanticPointerAliasStorageBacked(alias, ir))
+    ? declaration
+    : undefined;
+}
+
+function semanticPointerArrayDeclarationForRef(
+  ir: SemanticKernelIrModule,
+  ref: SemanticMemoryRef,
+): Extract<SemanticKernelIrOperation, { readonly kind: "declare" }> | undefined {
+  if (ref.addressSpace !== "local" || ref.indices.length !== 1) return undefined;
+  return semanticAllLocalDeclarations(ir).find((operation) =>
+    semanticIdsEqual(operation.target.id, ref.baseId) &&
+    operation.target.dimensions.length === 1 &&
+    operation.target.pointerArrayAliases?.every((alias) => alias !== undefined),
+  );
+}
+
+function semanticPointerAliasStorageBacked(
+  alias: SemanticPointerArrayAlias,
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (alias.pointerSelection) return semanticPointerAliasStorageBacked(alias.pointerSelection.consequent, ir) &&
+    semanticPointerAliasStorageBacked(alias.pointerSelection.alternate, ir);
+  const root = semanticPointerAliasRootSymbol(alias, ir);
+  return root !== undefined && (root.addressSpace === "storage" || root.addressSpace === "device-global");
+}
+
+function semanticAllLocalDeclarations(
+  ir: SemanticKernelIrModule,
+): readonly Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] {
+  const declarations: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] = [];
+  const collect = (operations: readonly SemanticKernelIrOperation[]): void => {
+    for (const operation of operations) {
+      if (operation.kind === "declare") declarations.push(operation);
+      if (operation.kind === "branch") collect([...operation.consequent, ...operation.alternate]);
+      if (operation.kind === "loop" || operation.kind === "block") collect(operation.body);
+    }
+  };
+  collect(ir.operations);
+  for (const fn of ir.functions) collect(fn.body);
+  return declarations;
 }
 
 function emitSemanticOperation(
@@ -2834,6 +2986,9 @@ function emitSemanticStore(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  if (operation.target.addressSpace === "local" && semanticPointerArrayDeclarationForRef(ir, operation.target)) {
+    return "{}";
+  }
   if (semanticWgslStorageOffsetStoreSupported(operation, ir)) {
     const offset = nameFor(storageOffsetSymbol(operation.target.base), names);
     const value = emitSemanticExpressionAs(operation.value, ir, names, "i32", options, textureSpecializations).code;
@@ -2872,9 +3027,10 @@ function emitSemanticStore(
       if (operation.operator !== "=" && binaryOperator === undefined) {
         throw semanticWgslError(`semantic WGSL does not support vector assignment '${operation.operator}'`, operation.span);
       }
-      const target = emitSemanticMemoryRef(operation.target, ir, names, options);
       const value = emitSemanticVectorOperand(operation.value, operation.target.valueType as CudaLiteScalarType, ir, names, options, textureSpecializations);
-      return `${target} = ${operation.operator === "=" ? value : `(${target} ${binaryOperator} ${value})`}`;
+      if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
+      const current = emitSemanticMemoryRead(operation.target, ir, names, options);
+      return emitSemanticMemoryWrite(operation.target, `(${current} ${binaryOperator} ${value})`, ir, names, options);
     }
     const value = emitSemanticScalarStoreValue(operation.value, operation.target.valueType, ir, names, options, textureSpecializations);
     if (operation.operator === "=") return emitSemanticMemoryWrite(operation.target, value, ir, names, options);
@@ -3295,6 +3451,22 @@ function emitSemanticAssignmentStatement(
     if (semanticAssignmentBinaryOperator(expression.operator)) return `${target} ${expression.operator} ${value}`;
     return `${target} = ${value}`;
   }
+  if (expression.target.kind === "conditional") {
+    const consequent = semanticWgslAssignmentMemoryRef(expression.target.consequent, ir);
+    const alternate = semanticWgslAssignmentMemoryRef(expression.target.alternate, ir);
+    if (!consequent || !alternate) {
+      throw semanticWgslError("semantic WGSL conditional assignment targets must resolve to memory", expression.target.span);
+    }
+    const conditionName = `bg_pointer_array_target_condition_${expression.target.span.start}`;
+    const valueName = `bg_pointer_array_target_value_${expression.target.span.start}`;
+    const condition = emitTruthiness(expression.target.condition, ir, names, options);
+    const value = isCudaVectorType(consequent.valueType)
+      ? emitSemanticExpression(expression.value, ir, names, options, textureSpecializations).code
+      : emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(consequent.valueType), options, textureSpecializations).code;
+    const consequentWrite = emitSemanticMemoryWrite(consequent, valueName, ir, names, options);
+    const alternateWrite = emitSemanticMemoryWrite(alternate, valueName, ir, names, options);
+    return `{ let ${conditionName}: bool = ${condition}; let ${valueName} = ${value}; if (${conditionName}) { ${consequentWrite}; } else { ${alternateWrite}; } }`;
+  }
   {
     const ref = semanticWgslAssignmentMemoryRef(expression.target, ir);
     if (ref) {
@@ -3619,6 +3791,13 @@ function emitSemanticCall(
     }, ir, names, options, textureSpecializations)};`];
   }
   if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options, textureSpecializations)};`];
+  const ignoredResultFunction = semanticFunctionForCall(operation, ir.functions);
+  if (ignoredResultFunction && ignoredResultFunction.returnType !== "void") {
+    const expression = semanticCallOperationExpression(operation, ignoredResultFunction);
+    if (semanticWgslFunctionCallSupported(expression, ir)) {
+      return [`${"  ".repeat(indentLevel)}${emitSemanticFunctionCall(expression, ir, names, options, textureSpecializations)};`];
+    }
+  }
   if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options, textureSpecializations);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
 }
@@ -5270,13 +5449,32 @@ function emitSemanticTypedStoragePointerFunctionCall(
         ? semanticLocalPointerDeclarations(ir).find((operation) =>
             operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation))
         : undefined;
-      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && localRuntimePointer === undefined) {
+      const pointerArray = ref === undefined ? undefined : semanticStoragePointerArrayDeclarationForRef(ir, ref);
+      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && localRuntimePointer === undefined && pointerArray === undefined) {
         throw semanticWgslError(`storage pointer argument '${param.name}' is not modeled storage`, arg.span);
       }
       const forwarded = options.activeFunction === undefined
         ? undefined
         : ir.functions.find((candidate) => candidate.name === options.activeFunction)?.params.find((candidate) =>
           candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "storage");
+      if (pointerArray) {
+        const slot = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
+        const size = pointerArray.target.dimensions[0]!;
+        const arrayType: WgslArrayType = `array<u32,${size}>`;
+        args.push(createTypedWgslIndexAccess(
+          createTypedWgslIdentifier(nameFor(semanticPointerBufferParamName(ref.base), names), arrayType, ref.span),
+          slot,
+          "u32",
+          ref.span,
+        ));
+        args.push(createTypedWgslIndexAccess(
+          createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(ref.base), names), arrayType, ref.span),
+          slot,
+          "u32",
+          ref.span,
+        ));
+        return;
+      }
       if (forwarded || localRuntimePointer) {
         args.push(createTypedWgslIdentifier(nameFor(semanticPointerBufferParamName(ref.base), names), "u32", ref.span));
       } else {
@@ -5284,7 +5482,9 @@ function emitSemanticTypedStoragePointerFunctionCall(
         if (bufferId === undefined) throw semanticWgslError(`unknown storage pointer base '${ref.base}'`, ref.span);
         args.push(createTypedWgslLiteral(`${bufferId}u`, "u32", ref.span));
       }
-      args.push(emitTypedFlatStorageIndex(ref, ir, names, options));
+      args.push(forwarded || localRuntimePointer
+        ? emitTypedFlatStorageIndex(ref, ir, names, options)
+        : emitTypedSemanticPointerArgBaseIndex(ref, ir, names, options));
       return;
     }
     if (param.valueType === "bool") {
@@ -6182,29 +6382,6 @@ function emitSemanticSharedVectorScalarReadExpression(
   return createTypedWgslIndexAccess(vector, laneIndex, targetType, ref.span);
 }
 
-function emitTypedFlatStorageVectorBaseIndex(
-  ref: SemanticMemoryRef,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions,
-): TypedWgslExpression {
-  const pointerParam = semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null);
-  const root = ir.params.find((param) => param.name === ref.base) ?? ir.memory.find((symbol) => symbol.name === ref.base);
-  const rootVector = semanticStorageVectorType(ref.containerValueType) ?? semanticStorageVectorType(pointerParam?.valueType) ?? semanticStorageVectorType(root?.valueType);
-  const stride = rootVector === undefined ? 1 : cudaVectorLaneCount(rootVector);
-  if (pointerParam) {
-    const base = createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(ref.base), names), "u32", ref.span);
-    const indices = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "u32", options));
-    const offset = indices.length === 0
-      ? createTypedWgslZero("u32", ref.span)
-      : indices.reduce((left, right) => emitTypedWgslBinary("+", left, right, ref.span));
-    const scaled = stride === 1 ? offset : emitTypedWgslBinary("*", offset, createTypedWgslLiteral(`${stride}u`, "u32", ref.span), ref.span);
-    return emitTypedWgslBinary("+", base, scaled, ref.span);
-  }
-  const base = emitTypedFlatStorageIndex(ref, ir, names, options);
-  return stride === 1 ? base : emitTypedWgslBinary("*", base, createTypedWgslLiteral(`${stride}u`, "u32", ref.span), ref.span);
-}
-
 function emitSemanticScalarMemorySymbolExpression(
   expression: Extract<SemanticExpression, { readonly kind: "symbol" }>,
   ir: SemanticKernelIrModule,
@@ -6394,69 +6571,6 @@ function emitSemanticDirectMemoryReadExpression(
     expression.span,
   );
   return legalizeSemanticMemoryReadValue(read, semanticType, expression.span);
-}
-
-function emitTypedFlatRankedIndex(
-  dimensions: readonly number[],
-  indices: readonly SemanticExpression[],
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions,
-  span: SourceSpan,
-): TypedWgslExpression {
-  if (indices.length === 1) return emitSemanticExpressionAs(indices[0]!, ir, names, "u32", options);
-  if (indices.length !== dimensions.length) throw semanticWgslError("typed WGSL array index rank mismatch", span);
-  return indices.map((index, offset) => {
-    const value = emitSemanticExpressionAs(index, ir, names, "u32", options);
-    const stride = dimensions.slice(offset + 1).reduce((size, dimension) => size * dimension, 1);
-    return stride === 1 ? value : emitTypedWgslBinary("*", value, createTypedWgslLiteral(`${stride}u`, "u32", span), span);
-  }).reduce((left, right) => emitTypedWgslBinary("+", left, right, span));
-}
-
-function semanticTypedLocalArrayPath(
-  flat: TypedWgslExpression,
-  dimensions: readonly number[],
-  span: SourceSpan,
-): readonly TypedWgslExpression[] {
-  return dimensions.map((dimension, offset) => {
-    const stride = dimensions.slice(offset + 1).reduce((size, value) => size * value, 1);
-    const quotient = stride === 1
-      ? flat
-      : emitTypedWgslBinary("/", flat, createTypedWgslLiteral(`${stride}u`, "u32", span), span);
-    return dimension > 1
-      ? emitTypedWgslBinary("%", quotient, createTypedWgslLiteral(`${Math.max(1, dimension)}u`, "u32", span), span)
-      : createTypedWgslZero("u32", span);
-  });
-}
-
-function emitTypedFlatStorageIndex(
-  ref: SemanticMemoryRef,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions,
-): TypedWgslExpression {
-  const pointerParam = semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null);
-  const localRuntimePointer = ref.addressSpace === "local"
-    ? semanticLocalPointerDeclarations(ir).find((operation) =>
-        operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation))
-    : undefined;
-  const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(ref.base);
-  if (!pointerParam && !localRuntimePointer && !hasOffset && ref.indices.length === 0) return createTypedWgslZero("u32", ref.span);
-  if (!pointerParam && !localRuntimePointer && !hasOffset && ref.indices.length === 1) {
-    return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
-  }
-  const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32", options));
-  if (pointerParam || localRuntimePointer) {
-    terms.unshift(convertTypedWgslExpression(
-      createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(ref.base), names), "u32", ref.span),
-      "i32",
-      true,
-    ));
-  } else if (hasOffset) {
-    terms.unshift(createTypedWgslIdentifier(nameFor(storageOffsetSymbol(ref.base), names), "i32", ref.span));
-  }
-  const index = terms.reduce((left, right) => emitTypedWgslBinary("+", left, right, ref.span));
-  return convertTypedWgslExpression(index, "u32", true);
 }
 
 function semanticTypedNativeMathCallee(
@@ -6928,6 +7042,20 @@ function emitSemanticFunctionArgs(
         : offset;
       return [pointer, base];
     }
+    const pointerArray = ref === undefined ? undefined : semanticPointerArrayDeclarationForRef(ir, ref);
+    const alias = pointerArray === undefined || ref?.indices[0] === undefined
+      ? undefined
+      : semanticStaticPointerArrayAlias(pointerArray, ref.indices[0]);
+    const aliasRoot = alias === undefined ? undefined : semanticPointerAliasRootSymbol(alias, ir);
+    if (alias && aliasRoot?.addressSpace === "local" && alias.pointerBaseIndices?.length === 1 && param.dimensions.length > 0) {
+      return [
+        `&${nameFor(aliasRoot.name, names)}`,
+        emitSemanticPointerAliasBase(alias, param.valueType, ir, names, options),
+      ];
+    }
+    if (pointerArray) {
+      throw semanticWgslError("semantic WGSL local pointer arrays require a statically resolved local alias", arg.span);
+    }
     const localArray = ref?.addressSpace === "local" ? localArraySymbol(ir, ref.base) : undefined;
     if (ref && localArray && ref.indices.length <= 1 && param.dimensions.length > 0) {
       const base = ref.indices[0] === undefined ? "0u" : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options).code;
@@ -6940,7 +7068,17 @@ function emitSemanticFunctionArgs(
   }
   if (param?.pointer && param.addressSpace === "storage") {
     const ref = semanticPointerArgMemoryRef(arg);
-    if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global") throw semanticWgslError("semantic WGSL storage pointer helper argument must be modeled storage", arg.span);
+    const pointerArray = ref === undefined ? undefined : semanticStoragePointerArrayDeclarationForRef(ir, ref);
+    if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && pointerArray === undefined) {
+      throw semanticWgslError("semantic WGSL storage pointer helper argument must be modeled storage", arg.span);
+    }
+    if (pointerArray) {
+      const slot = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
+      return [
+        `${nameFor(semanticPointerBufferParamName(ref.base), names)}[${slot}]`,
+        `${nameFor(semanticPointerBaseParamName(ref.base), names)}[${slot}]`,
+      ];
+    }
     const forwarded = options.activeFunction === undefined
       ? undefined
       : ir.functions.find((candidate) => candidate.name === options.activeFunction)?.params.find((candidate) =>
@@ -6995,6 +7133,26 @@ function emitSemanticPointerArgBaseIndex(
     return emitFlatStorageVectorBaseIndex({ ...ref, containerValueType: vectorType }, ir, names, options);
   }
   return emitFlatStorageIndex(ref, ir, names, options);
+}
+
+function emitTypedSemanticPointerArgBaseIndex(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): TypedWgslExpression {
+  const paramRoot = ir.params.find((param) => param.name === ref.base && param.addressSpace === "storage");
+  if (paramRoot) {
+    const base = emitTypedFlatStorageIndex({ ...ref, valueType: "float" }, ir, names, options);
+    if (!isCudaVectorType(paramRoot.valueType) || ref.pointerBaseIsScalarLane === true || !isCudaVectorType(ref.valueType)) return base;
+    const stride = cudaVectorLaneCount(paramRoot.valueType);
+    return stride === 1 ? base : emitTypedWgslBinary("*", base, createTypedWgslLiteral(`${stride}u`, "u32", ref.span), ref.span);
+  }
+  const root = ir.memory.find((symbol) => symbol.name === ref.base);
+  if (!isCudaVectorType(root?.valueType) || ref.pointerBaseIsScalarLane === true) {
+    return emitTypedFlatStorageIndex(ref, ir, names, options);
+  }
+  return emitTypedFlatStorageVectorBaseIndex({ ...ref, containerValueType: root.valueType }, ir, names, options);
 }
 
 function emitSemanticRootStoragePointerArgBaseIndex(
@@ -7085,8 +7243,10 @@ function emitSemanticMemoryRead(
 }
 
 function semanticWgslDirectByteRawView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
-  return ref.addressSpace === "storage" && ref.packedByteLanes === 4 &&
-    ir.params.some((param) => param.name === ref.base && param.valueType === "uchar");
+  return (ref.addressSpace === "storage" || ref.addressSpace === "device-global") && ref.packedByteLanes === 4 && (
+    ir.params.some((param) => param.name === ref.base && param.valueType === "uchar") ||
+    ir.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "device-global" && symbol.valueType === "uchar")
+  );
 }
 
 function semanticWgslLocalPackedByteRawView(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
@@ -7163,11 +7323,18 @@ function emitSemanticMemoryWrite(
     const stored = ref.valueType === "float" || ref.valueType === "bf16" ? `bitcast<u32>(${value})` : value;
     return `atomicStore(&${target}, ${stored})`;
   }
+  if (semanticAtomicMemoryRootNames(ir).has(ref.base) && ref.addressSpace !== "local") {
+    const target = emitSemanticMemoryRef(ref, ir, names, options);
+    const stored = ref.valueType === "float" || ref.valueType === "bf16" ? `bitcast<u32>(${value})` : value;
+    return `atomicStore(&${target}, ${stored})`;
+  }
   if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const valueType = ref.valueType ?? "float";
     const index = isCudaVectorType(valueType) ? emitFlatStorageVectorBaseIndex(ref, ir, names, options) : emitFlatStorageIndex(ref, ir, names, options);
     return `${semanticPointerWriteHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index}, ${value})`;
   }
+  const sharedVectorWrite = emitSemanticSharedPointerVectorWrite(ref, value, ir, names, options);
+  if (sharedVectorWrite !== undefined) return sharedVectorWrite;
   if (semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const target = emitSemanticSharedPointerMemoryRef(ref, ir, names, options);
     const param = semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)!;
@@ -7178,6 +7345,37 @@ function emitSemanticMemoryWrite(
   }
   const target = emitSemanticMemoryRef(ref, ir, names, options);
   return `${target} = ${value}`;
+}
+
+function emitSemanticSharedPointerVectorWrite(
+  ref: SemanticMemoryRef,
+  value: string,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+): string | undefined {
+  const param = semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null);
+  const vectorType = semanticStorageVectorType(ref.valueType);
+  const carrier = param?.pointerCarrierValueType ?? param?.valueType;
+  const scalar = vectorType === undefined ? undefined : cudaVectorScalarType(vectorType);
+  if (!param || !vectorType || scalar === undefined || isCudaVectorType(carrier) || carrier !== scalar || ref.indices.length > 1) {
+    return undefined;
+  }
+  const laneCount = cudaVectorLaneCount(vectorType);
+  const sourceIndex = ref.indices[0] === undefined
+    ? "0u"
+    : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options).code;
+  const scalarBase = ref.pointerBaseIsScalarLane === true ? sourceIndex : `(${sourceIndex} * ${laneCount}u)`;
+  const base = `(${nameFor(semanticPointerBaseParamName(ref.base), names)} + ${scalarBase})`;
+  const pointer = nameFor(semanticParamAliasName(ir, param) ?? ref.base, names);
+  const atomic = semanticWgslFunctionSharedPointerAtomicParam(ir, ref.base);
+  return Array.from({ length: laneCount }, (_, lane) => {
+    const index = lane === 0 ? base : `(${base} + ${lane}u)`;
+    const laneValue = `(${value}).${["x", "y", "z", "w"][lane]}`;
+    return atomic
+      ? `atomicStore(&(*${pointer})[${index}], ${laneValue})`
+      : `(*${pointer})[${index}] = ${laneValue}`;
+  }).join("; ");
 }
 
 function emitSemanticLocalVectorBitViewAccess(
@@ -8143,179 +8341,6 @@ function emitSemanticPackedSharedByteHelpers(): readonly string[] {
     "  }",
     "}",
   ];
-}
-
-function emitFlatStorageIndex(
-  ref: SemanticMemoryRef,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions = {},
-): string {
-  if (semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null)) {
-    const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32", options).code);
-    terms.unshift(`i32(${nameFor(semanticPointerBaseParamName(ref.base), names)})`);
-    return `u32(${terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`})`;
-  }
-  const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(ref.base);
-  if (!hasOffset && ref.indices.length === 0) return "0u";
-  if (!hasOffset && ref.indices.length === 1) {
-    return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
-  }
-  const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32", options).code);
-  if (hasOffset) {
-    terms.unshift(nameFor(storageOffsetSymbol(ref.base), names));
-  }
-  const expression = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
-  return `u32(${expression})`;
-}
-
-function emitSemanticRootStorageIndex(
-  ref: SemanticMemoryRef,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions = {},
-): string {
-  const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(ref.base);
-  if (!hasOffset && ref.indices.length === 0) return "0u";
-  if (!hasOffset && ref.indices.length === 1) {
-    return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
-  }
-  const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32", options).code);
-  if (hasOffset) terms.unshift(nameFor(storageOffsetSymbol(ref.base), names));
-  const expression = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
-  return `u32(${expression})`;
-}
-
-function emitFlatStorageVectorBaseIndex(
-  ref: SemanticMemoryRef,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions = {},
-): string {
-  const pointerParam = semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null);
-  if (pointerParam) {
-    const indexTerms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "u32", options).code);
-    const valueType = semanticStorageVectorType(ref.containerValueType) ?? semanticStorageVectorType(pointerParam.valueType);
-    const stride = valueType === undefined ? 1 : cudaVectorLaneCount(valueType);
-    const index = indexTerms.length === 0 ? "0u" : indexTerms.length === 1 ? indexTerms[0]! : `(${indexTerms.join(" + ")})`;
-    const offset = stride === 1 ? index : `(${index} * ${stride}u)`;
-    return `(${nameFor(semanticPointerBaseParamName(ref.base), names)} + ${offset})`;
-  }
-  const base = emitFlatStorageIndex({ ...ref, valueType: "float" }, ir, names, options);
-  const root = ir.params.find((param) => param.name === ref.base) ?? ir.memory.find((symbol) => symbol.name === ref.base);
-  const valueType = semanticStorageVectorType(ref.containerValueType) ?? semanticStorageVectorType(root?.valueType);
-  const stride = valueType === undefined ? 1 : cudaVectorLaneCount(valueType);
-  return stride === 1 ? base : `(${base} * ${stride}u)`;
-}
-
-function emitFlatSharedIndex(
-  symbol: SemanticKernelIrModule["memory"][number],
-  indices: readonly SemanticExpression[],
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-): string {
-  if (indices.length === 0) return "0u";
-  if (indices.length === 1) return emitSemanticExpressionAs(indices[0]!, ir, names, "u32").code;
-  return emitSemanticFlatRankedIndex(
-    "shared memory",
-    symbol.name,
-    symbol.dimensions,
-    indices,
-    symbol.span,
-    (index) => emitSemanticExpressionAs(index, ir, names, "u32").code,
-  );
-}
-
-function emitFlatDeviceGlobalIndex(
-  symbol: SemanticKernelIrModule["memory"][number],
-  indices: readonly SemanticExpression[],
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  span: SourceSpan,
-): string {
-  if (symbol.dimensions.length === 0) {
-    if (indices.length > 1) throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
-    return indices[0] ? emitSemanticExpressionAs(indices[0], ir, names, "u32").code : "0u";
-  }
-  if (indices.length === 1 && symbol.dimensions.length > 1) {
-    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32").code;
-  }
-  if (indices.length !== symbol.dimensions.length) {
-    throw semanticWgslError(`device-global memory '${symbol.name}' index rank mismatch`, span);
-  }
-  return emitSemanticFlatRankedIndex(
-    "device-global memory",
-    symbol.name,
-    symbol.dimensions,
-    indices,
-    span,
-    (index) => emitSemanticExpressionAs(index, ir, names, "u32").code,
-  );
-}
-
-function emitFlatConstantIndex(
-  symbol: SemanticKernelIrModule["memory"][number],
-  indices: readonly SemanticExpression[],
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  span: SourceSpan,
-  options: EmitSemanticKernelIrWgslOptions = {},
-): string {
-  if (symbol.dimensions.length === 0) {
-    if (indices.length !== 1) throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
-    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32", options).code;
-  }
-  if (indices.length === 1 && symbol.dimensions.length > 1) {
-    return emitSemanticExpressionAs(indices[0]!, ir, names, "u32", options).code;
-  }
-  if (indices.length !== symbol.dimensions.length) {
-    throw semanticWgslError(`constant memory '${symbol.name}' index rank mismatch`, span);
-  }
-  return emitSemanticFlatRankedIndex(
-    "constant memory",
-    symbol.name,
-    symbol.dimensions,
-    indices,
-    span,
-    (index) => emitSemanticExpressionAs(index, ir, names, "u32", options).code,
-  );
-}
-
-function emitFlatLocalArrayIndexes(flat: string, dimensions: readonly number[]): string {
-  return emitSemanticFlatLocalArrayIndexes(flat, dimensions);
-}
-
-function collectOperationNames(
-  operation: SemanticKernelIrOperation,
-  names: Set<string>,
-): void {
-  if (operation.kind === "declare") {
-    names.add(operation.target.name);
-    if (operation.target.pointer) {
-      names.add(semanticPointerBufferParamName(operation.target.name));
-      names.add(semanticPointerBaseParamName(operation.target.name));
-    }
-  }
-  if (operation.kind === "pointer-rebind") {
-    names.add(semanticPointerBufferParamName(operation.target.name));
-    names.add(semanticPointerBaseParamName(operation.target.name));
-  }
-  if (operation.kind === "pool-allocate") {
-    names.add(operation.target.name);
-    names.add(`${operation.target.name}__bg_pool_allocation`);
-    names.add(semanticPointerBufferParamName(operation.target.name));
-    names.add(semanticPointerBaseParamName(operation.target.name));
-  }
-  if (operation.kind === "branch") {
-    for (const child of [...operation.consequent, ...operation.alternate]) collectOperationNames(child, names);
-  }
-  if (operation.kind === "loop") {
-    if (operation.init && isSemanticKernelIrOperation(operation.init)) collectOperationNames(operation.init, names);
-    for (const child of operation.body) collectOperationNames(child, names);
-  }
-  if (operation.kind === "block") {
-    for (const child of operation.body) collectOperationNames(child, names);
-  }
 }
 
 function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {
