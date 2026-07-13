@@ -2169,13 +2169,30 @@ describe("CUDA-lite compiler: Atomics", () => {
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const leftResult = runCompiledKernelReference(
+        compiled,
+        {
+          buffers: {
+            left: new Uint32Array([4]),
+            right: new Uint32Array([8]),
+            out: new Uint32Array(1),
+          },
+          scalars: { pick_right: 0 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
       expect([...result.buffers.left as Uint32Array]).toEqual([4]);
       expect([...result.buffers.right as Uint32Array]).toEqual([9]);
       expect([...result.buffers.out as Uint32Array]).toEqual([8]);
+      expect([...leftResult.buffers.left as Uint32Array]).toEqual([5]);
+      expect([...leftResult.buffers.right as Uint32Array]).toEqual([8]);
+      expect([...leftResult.buffers.out as Uint32Array]).toEqual([4]);
       expect(compiled.wgsl).toContain("var<storage, read_write> left: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> right: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(ptr_buffer, u32(i32(ptr_base)), 1u)");
+      expect(compiled.wgsl).not.toContain("atomicAdd(&ptr[");
     });
 
   it("marks all possible atomic roots after conditional pointer initialization", () => {
@@ -2205,6 +2222,8 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(compiled.wgsl).toContain("var<storage, read_write> left: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> right: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(ptr_buffer, u32(i32(ptr_base)), 1u)");
+      expect(compiled.wgsl).not.toContain("atomicAdd(&ptr[");
     });
 
   it("keeps unrelated same-type storage non-atomic for helper pointer atomics", () => {

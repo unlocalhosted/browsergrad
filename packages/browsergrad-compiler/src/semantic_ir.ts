@@ -2257,7 +2257,7 @@ function lowerStatementsWithScope(
       out.push({ kind: "declare", target, span: statement.span });
       continue;
     }
-    out.push(...lowerStatementOperations(statement, scope));
+    out.push(...lowerStatementOperations(statement, scope, statements.slice(index + 1)));
   }
   return out.map((operation) => {
     if (operation.kind !== "declare" || !operation.target.pointer) return operation;
@@ -2274,6 +2274,7 @@ function lowerStatementsWithScope(
 function lowerStatementOperations(
   statement: CudaLiteStatement,
   scope: Map<string, CudaLiteSemanticSymbol>,
+  followingStatements: readonly CudaLiteStatement[],
 ): readonly SemanticKernelIrOperation[] {
   const dynamicPointerArrayAssignment = semanticDynamicPointerArrayAliasAssignmentOperations(statement, scope);
   if (dynamicPointerArrayAssignment) return dynamicPointerArrayAssignment;
@@ -2281,6 +2282,8 @@ function lowerStatementOperations(
   if (chainedStores) return chainedStores;
   const conditionalAssignment = semanticConditionalLocalAssignmentOperations(statement, scope);
   if (conditionalAssignment) return conditionalAssignment;
+  const conditionalPointerInit = semanticConditionalPointerVarInitOperations(statement, scope, followingStatements);
+  if (conditionalPointerInit) return conditionalPointerInit;
   const conditionalVarInit = semanticConditionalVarInitOperations(statement, scope);
   if (conditionalVarInit) return conditionalVarInit;
   const conditionalReturn = semanticConditionalReturnOperations(statement, scope);
@@ -2851,6 +2854,8 @@ function lowerStatement(
       if (cpAsync) return cpAsync;
       const matrixOperation = semanticMatrixOperation(statement.expression, scope, statement.span);
       if (matrixOperation) return matrixOperation;
+      const localPointerRebind = semanticLocalPointerRebindOperation(statement.expression, scope);
+      if (localPointerRebind) return localPointerRebind;
       const pointerRebase = semanticStoragePointerRebaseOperation(statement.expression, scope, statement.span);
       if (pointerRebase) return pointerRebase;
       const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
@@ -2987,6 +2992,7 @@ function lowerStatement(
       return { kind: "expression", expression, span: statement.span };
     }
     case "if": {
+      markBranchPointerRuntimeState(statement.consequent, statement.alternate ?? [], scope);
       const loweredCondition = lowerConditionExpression(statement.condition, scope);
       const materializedCondition = materializeConditionalCalls(loweredCondition);
       const condition = materializedCondition.expression;
@@ -3643,7 +3649,16 @@ function semanticLocalPointerRebindOperation(
   if (expression.kind !== "assignment" || expression.operator !== "=" || expression.left.kind !== "identifier") return undefined;
   const target = scope.get(expression.left.name);
   if (!target?.pointerRuntimeState || target.kind !== "local" || !target.pointer) return undefined;
-  const alias = localPointerAliasForInitializer(expression.right, scope);
+  return semanticLocalPointerRebindFromSource(target, expression.right, scope, expression.span);
+}
+
+function semanticLocalPointerRebindFromSource(
+  target: CudaLiteSemanticSymbol,
+  source: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): Extract<SemanticKernelIrOperation, { readonly kind: "pointer-rebind" }> | undefined {
+  const alias = localPointerAliasForInitializer(source, scope);
   if (!alias?.pointerRoot || alias.pointerAddressSpace !== "storage" || alias.pointerBaseIndices?.length !== 1) return undefined;
   const root = semanticSymbolForMemoryId(scope, alias.pointerRoot);
   const valueType = target.valueType;
@@ -3660,10 +3675,89 @@ function semanticLocalPointerRebindOperation(
       ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
       indices: alias.pointerBaseIndices,
       fields: [],
-      span: expression.right.span,
+      span: source.span,
     },
-    span: expression.span,
+    span,
   };
+}
+
+function markBranchPointerRuntimeState(
+  consequent: readonly CudaLiteStatement[],
+  alternate: readonly CudaLiteStatement[],
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): void {
+  const collect = (statements: readonly CudaLiteStatement[]): ReadonlySet<string> => {
+    const assigned = new Set<string>();
+    for (const statement of statements) {
+      if (statement.kind === "expr" && statement.expression.kind === "assignment" &&
+        statement.expression.operator === "=" && statement.expression.left.kind === "identifier") {
+        const target = scope.get(statement.expression.left.name);
+        const source = localPointerAliasForInitializer(statement.expression.right, scope);
+        if (target?.kind === "local" && target.pointer && target.dimensions.length === 0 &&
+          source?.pointerRoot && source.pointerAddressSpace === "storage" && source.pointerBaseIndices?.length === 1) {
+          assigned.add(target.name);
+        }
+      }
+    }
+    return assigned;
+  };
+  const consequentAssignments = collect(consequent);
+  const alternateAssignments = collect(alternate);
+  for (const name of new Set([...consequentAssignments, ...alternateAssignments])) {
+    const target = scope.get(name)!;
+    const hasInitialStorageRoot = target.pointerRoot !== undefined && target.pointerAddressSpace === "storage";
+    const assignedOnEveryPath = consequentAssignments.has(name) && alternateAssignments.has(name);
+    if (!hasInitialStorageRoot && !assignedOnEveryPath) continue;
+    scope.set(name, { ...semanticSymbolWithoutPointerAlias(target), pointerRuntimeState: true });
+  }
+}
+
+function semanticConditionalPointerVarInitOperations(
+  statement: CudaLiteStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+  followingStatements: readonly CudaLiteStatement[],
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "var" || statement.storage !== "local" || !statement.pointer ||
+    statement.dimensions.length !== 0 || statement.init?.kind !== "conditional" ||
+    !pointerRequiresRuntimeRootIdentity(statement.name, followingStatements)) return undefined;
+  const consequentAlias = localPointerAliasForInitializer(statement.init.consequent, scope);
+  const alternateAlias = localPointerAliasForInitializer(statement.init.alternate, scope);
+  if (!consequentAlias?.pointerRoot || consequentAlias.pointerAddressSpace !== "storage" || consequentAlias.pointerBaseIndices?.length !== 1 ||
+    !alternateAlias?.pointerRoot || alternateAlias.pointerAddressSpace !== "storage" || alternateAlias.pointerBaseIndices?.length !== 1 ||
+    semanticIdsEqual(consequentAlias.pointerRoot, alternateAlias.pointerRoot)) return undefined;
+  const original = symbolForVar(statement, scope);
+  const target: CudaLiteSemanticSymbol = {
+    ...semanticSymbolWithoutPointerAlias(original),
+    pointerRuntimeState: true,
+  };
+  scope.set(target.name, target);
+  const consequent = semanticLocalPointerRebindFromSource(target, statement.init.consequent, scope, statement.init.consequent.span);
+  const alternate = semanticLocalPointerRebindFromSource(target, statement.init.alternate, scope, statement.init.alternate.span);
+  if (!consequent || !alternate) return undefined;
+  return [
+    { kind: "declare", target, span: statement.span },
+    {
+      kind: "branch",
+      condition: lowerConditionExpression(statement.init.condition, scope),
+      consequent: [consequent],
+      alternate: [alternate],
+      span: statement.init.span,
+    },
+  ];
+}
+
+function pointerRequiresRuntimeRootIdentity(
+  pointerName: string,
+  statements: readonly CudaLiteStatement[],
+): boolean {
+  let required = false;
+  walkCudaLiteExpressions(statements, (expression) => {
+    if (required || expression.kind !== "call" || expression.callee.kind !== "identifier" ||
+      semanticAtomicOperation(expression.callee.name) === undefined) return;
+    const target = expression.args[0];
+    if (target?.kind === "identifier" && target.name === pointerName) required = true;
+  });
+  return required;
 }
 
 function semanticStoragePointerRebaseValue(

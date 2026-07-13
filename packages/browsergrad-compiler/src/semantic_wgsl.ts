@@ -944,7 +944,8 @@ function emitSemanticStoragePointerHelpers(
 function semanticStoragePointerValueTypes(ir: SemanticKernelIrModule): ReadonlySet<CudaLiteScalarType> {
   const types = new Set<CudaLiteScalarType>();
   for (const declaration of semanticLocalPointerDeclarations(ir)) {
-    if (declaration.target.valueType !== undefined && semanticLocalPointerStorageRef(declaration) !== undefined) {
+    if (declaration.target.dimensions.length === 0 && declaration.target.valueType !== undefined &&
+      (semanticLocalPointerStorageRef(declaration) !== undefined || declaration.target.pointerRuntimeState === true)) {
       types.add(declaration.target.valueType);
     }
   }
@@ -1019,8 +1020,9 @@ function semanticLocalStoragePointerDeclaration(
   if (expression.kind !== "symbol" || expression.addressSpace !== "local") return undefined;
   return semanticLocalPointerDeclarations(ir).find((operation) =>
     semanticIdsEqual(operation.target.id, expression.id) &&
+    operation.target.dimensions.length === 0 &&
     semanticPointerDeclarationNeedsRuntimeState(operation) &&
-    semanticLocalPointerStorageRef(operation) !== undefined
+    (semanticLocalPointerStorageRef(operation) !== undefined || operation.target.pointerRuntimeState === true)
   );
 }
 
@@ -2011,14 +2013,14 @@ function emitSemanticLocalPointerDeclaration(
   if (!semanticPointerDeclarationNeedsRuntimeState(operation)) return [];
   const prefix = "  ".repeat(indentLevel);
   const ref = semanticLocalPointerStorageRef(operation);
+  if (ref === undefined && operation.target.pointerRuntimeState !== true) return [];
   const buffer = nameFor(semanticPointerBufferParamName(operation.target.name), names);
   const base = nameFor(semanticPointerBaseParamName(operation.target.name), names);
-  if (!ref) return [];
-  const bufferId = semanticStoragePointerBufferId(ref.base, ir);
-  if (bufferId === undefined) throw semanticWgslError(`unknown local pointer storage root '${ref.base}'`, operation.span);
+  const bufferId = ref === undefined ? undefined : semanticStoragePointerBufferId(ref.base, ir);
+  if (ref !== undefined && bufferId === undefined) throw semanticWgslError(`unknown local pointer storage root '${ref.base}'`, operation.span);
   return [
-    `${prefix}var ${buffer}: u32 = ${bufferId}u;`,
-    `${prefix}var ${base}: u32 = ${emitSemanticPointerArgBaseIndex(ref, ir, names, options)};`,
+    `${prefix}var ${buffer}: u32 = ${bufferId === undefined ? "0xffffffffu" : `${bufferId}u`};`,
+    `${prefix}var ${base}: u32 = ${ref === undefined ? "0u" : emitSemanticPointerArgBaseIndex(ref, ir, names, options)};`,
   ];
 }
 
