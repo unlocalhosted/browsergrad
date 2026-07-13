@@ -1408,11 +1408,15 @@ function lowerSemanticDivergentBarrierBranches(
   barrierProof: CudaLiteAnalysis["barrierUniformity"]["kernel"],
   guardedBarrierFunctionNames: ReadonlyMap<string, string> = new Map(),
 ): readonly SemanticKernelIrOperation[] {
-  if (barrierProof.unverifiedControlStatementStarts.length !== 1) return operations;
+  const branchStarts = barrierProof.unverifiedControlStatementStarts.length === 1
+    ? barrierProof.unverifiedControlStatementStarts
+    : barrierProof.unverifiedControlStatementStarts.length === 0
+      ? barrierProof.workgroupUniformControlStatementStarts
+      : [];
+  if (branchStarts.length === 0) return operations;
   const barrierFunctions = semanticIrBarrierFunctionNames(functions);
-  const branchStart = barrierProof.unverifiedControlStatementStarts[0]!;
   const branchIndex = operations.findIndex((operation) =>
-    operation.kind === "branch" && operation.span.start === branchStart && operation.alternate.length === 0 &&
+    operation.kind === "branch" && branchStarts.includes(operation.span.start) && operation.alternate.length === 0 &&
     semanticIrOperationsContainBarrier(operation.consequent, barrierFunctions) && !semanticOperationContainsVoidReturn(operation)
   );
   if (branchIndex < 0) return operations;

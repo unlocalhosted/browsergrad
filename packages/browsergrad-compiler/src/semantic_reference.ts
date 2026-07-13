@@ -510,7 +510,9 @@ function unsupportedSemanticReferenceOperation(
         if (operation.value && !semanticReferenceExpressionSupported(operation.value, "any", compiled)) return reject(operation, "semantic reference does not support return expression", operation.value.span);
         break;
       case "barrier":
-        if (!isCudaBarrierCallName(operation.callee) && !isCudaCooperativeBarrierCallName(operation.callee)) return reject(operation, `semantic reference does not support barrier '${operation.callee}'`);
+        if (operation.scope !== "grid" && !isCudaBarrierCallName(operation.callee) && !isCudaCooperativeBarrierCallName(operation.callee)) {
+          return reject(operation, `semantic reference does not support barrier '${operation.callee}'`);
+        }
         break;
       case "fence":
         if (!isCudaFenceCallName(operation.callee)) return reject(operation, `semantic reference does not support fence '${operation.callee}'`);
