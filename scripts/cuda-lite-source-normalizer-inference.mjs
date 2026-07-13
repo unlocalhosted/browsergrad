@@ -504,11 +504,20 @@ export function inferArgumentValueType(arg, symbols, definesByName = new Map()) 
   }
   if (/\b[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?f\b/u.test(expression) || /\b[0-9]+\.[0-9]*(?:[eE][+-]?[0-9]+)?\b/u.test(expression)) return "float";
   if (/^\s*(?:0x[0-9A-Fa-f]+u?|\d+u)\s*$/u.test(expression)) return "uint";
+  const member = /^([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*[xyzw]\s*$/u.exec(expression);
+  if (member?.[1] !== undefined) {
+    const vectorType = symbols.get(member[1]);
+    if (/^float[234]$/u.test(vectorType ?? "")) return "float";
+    if (/^int[234]$/u.test(vectorType ?? "")) return "int";
+    if (/^uint[234]$/u.test(vectorType ?? "")) return "uint";
+    if (vectorType === "half2") return "half";
+  }
   const names = [...expression.matchAll(/\b[A-Za-z_][A-Za-z0-9_]*\b/gu)].map((match) => match[0]);
   const types = names
     .map((name) => symbols.get(name) ?? normalizeTemplateTypeArgument(definesByName.get(name) ?? name, definesByName))
     .filter(Boolean);
-  if (types.includes("float") || types.includes("half")) return "float";
+  if (types.includes("float")) return "float";
+  if (types.includes("half")) return "half";
   if (types.includes("uint")) return "uint";
   if (types.includes("int")) return "int";
   if (/^[0-9A-Fa-fxXuUlL\s()+\-*/%<>=!&|^?:.]+$/u.test(expression)) return "int";

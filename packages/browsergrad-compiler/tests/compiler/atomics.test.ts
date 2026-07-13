@@ -2400,6 +2400,27 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(compiled.wgsl).not.toContain("atomicAdd(&a[");
     });
 
+  it("uses atomic stores for vector roots reached through rebound helper pointers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void update_lane(uint* ptr) {
+    atomicAdd(ptr + 1, 1u);
+    ptr[2] = 9u;
+  }
+
+  __global__ void rebound_vector_atomic(uint4* values) {
+    if (threadIdx.x == 0) {
+      values[0] = make_uint4(1u, 2u, 3u, 4u);
+      uint* ptr = reinterpret_cast<uint*>(values);
+      update_lane(ptr);
+    }
+  }`, { workgroupSize: [1, 1, 1] });
+
+      expect(semanticAtomicMemoryRootNames(compiled.kernelIr)).toContain("values");
+      expect(compiled.wgsl).toContain("var<storage, read_write> values: array<atomic<u32>>;");
+      expect(compiled.wgsl).toContain("atomicStore(&values[");
+      expect(compiled.wgsl).not.toMatch(/values\[[^\n]+\]\s*=/u);
+    });
+
   it("marks storage atomic through local pointer-array elements", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void pointer_array_atomic(uint* counter, uint* untouched, uint* out) {

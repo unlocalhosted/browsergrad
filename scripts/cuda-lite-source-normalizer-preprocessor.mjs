@@ -20,11 +20,13 @@ const collectScalarizedPodRecords = (...args) => requireNormalizerHelpers().coll
 const collectSimpleSymbolWrapperTemplateArguments = (...args) => requireNormalizerHelpers().collectSimpleSymbolWrapperTemplateArguments(...args);
 const collectSymbolWrapperTemplateArguments = (...args) => requireNormalizerHelpers().collectSymbolWrapperTemplateArguments(...args);
 const collectVisibleIntegerConstants = (...args) => requireNormalizerHelpers().collectVisibleIntegerConstants(...args);
+const collectVisibleValueTypes = (...args) => requireNormalizerHelpers().collectVisibleValueTypes(...args);
 const collectWrapperPropagatedTemplateArguments = (...args) => requireNormalizerHelpers().collectWrapperPropagatedTemplateArguments(...args);
 const escapeRegExp = (...args) => requireNormalizerHelpers().escapeRegExp(...args);
 const evaluateIntegerExpression = (...args) => requireNormalizerHelpers().evaluateIntegerExpression(...args);
 const findBalanced = (...args) => requireNormalizerHelpers().findBalanced(...args);
 const isTemplateSymbolArgument = (...args) => requireNormalizerHelpers().isTemplateSymbolArgument(...args);
+const inferArgumentValueType = (...args) => requireNormalizerHelpers().inferArgumentValueType(...args);
 const normalizeTemplateTypeArgument = (...args) => requireNormalizerHelpers().normalizeTemplateTypeArgument(...args);
 const parseTemplateParam = (...args) => requireNormalizerHelpers().parseTemplateParam(...args);
 const resolveTemplateArgument = (...args) => requireNormalizerHelpers().resolveTemplateArgument(...args);
@@ -465,9 +467,57 @@ export function selectDeviceFunctionOverloadsForSource(source, name, overloads, 
   const selected = [];
   for (const arity of arityList) {
     const matches = overloads.filter((fn) => deviceFunctionParamCount(fn.source) === arity);
-    selected.push(...matches);
+    selected.push(...selectTypedDeviceFunctionOverloads(source, name, matches, definesByName));
   }
   return selected.length > 0 ? selected : overloads;
+}
+
+function selectTypedDeviceFunctionOverloads(source, name, overloads, definesByName) {
+  if (overloads.length <= 1) return overloads;
+  const calls = scanFunctionCallReferences(source).filter((call) =>
+    resolveFunctionDefineAlias(call.name, definesByName) === name
+  );
+  if (calls.length === 0) return overloads;
+  const symbols = collectVisibleValueTypes(source, definesByName);
+  const selected = new Set();
+  for (const call of calls) {
+    const argumentTypes = call.args.map((arg) => inferArgumentValueType(arg, symbols, definesByName));
+    const typedMatches = overloads.filter((fn) => {
+      const paramTypes = deviceFunctionParamValueTypes(fn.source, definesByName);
+      return argumentTypes.every((argumentType, index) =>
+        argumentType === undefined || paramTypes[index] === undefined || argumentType === paramTypes[index]
+      );
+    });
+    for (const match of typedMatches.length > 0 ? typedMatches : overloads) selected.add(match);
+  }
+  return selected.size > 0 ? [...selected] : overloads;
+}
+
+function resolveFunctionDefineAlias(name, definesByName) {
+  let current = name;
+  const visited = new Set();
+  while (!visited.has(current)) {
+    visited.add(current);
+    const next = definesByName.get(current)?.trim();
+    if (!next || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(next)) break;
+    current = next;
+  }
+  return current;
+}
+
+function deviceFunctionParamValueTypes(source, definesByName) {
+  const signature = source.slice(0, source.indexOf("{") < 0 ? source.length : source.indexOf("{"));
+  const open = signature.lastIndexOf("(");
+  if (open < 0) return [];
+  const close = findBalanced(signature, open, "(", ")") ?? signature.lastIndexOf(")");
+  if (close <= open) return [];
+  return splitTopLevel(signature.slice(open + 1, close)).map((param) => {
+    const match = /^\s*(?:const\s+|volatile\s+)*([A-Za-z_][A-Za-z0-9_:]*)\b/u.exec(param);
+    const type = match?.[1];
+    return type === undefined
+      ? undefined
+      : normalizeTemplateTypeArgument(definesByName.get(type) ?? type, definesByName);
+  });
 }
 
 function deviceFunctionParamCount(source) {

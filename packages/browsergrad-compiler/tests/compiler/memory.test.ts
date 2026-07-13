@@ -4034,7 +4034,10 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("vec4<f32>");
+      expect(compiled.wgsl).toMatch(/u32\(lane\) < u32\(4\)/u);
+      expect(compiled.wgsl).not.toContain("value.size");
       expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
     });
 

@@ -98,7 +98,11 @@ export function semanticOperationsReferenceRoot(
   });
 }
 
+const atomicMemoryRootNamesCache = new WeakMap<SemanticKernelIrModule, ReadonlySet<string>>();
+
 export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): ReadonlySet<string> {
+  const cached = atomicMemoryRootNamesCache.get(ir);
+  if (cached !== undefined) return cached;
   const roots = new Set<string>();
   const runtimePointerSources = new Map<string, Set<string>>();
   const atomicRuntimePointers = new Set<string>();
@@ -207,6 +211,7 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
     if (!atomicRuntimePointers.has(pointerId)) continue;
     for (const source of sources) roots.add(source);
   }
+  atomicMemoryRootNamesCache.set(ir, roots);
   return roots;
 }
 

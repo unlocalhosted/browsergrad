@@ -759,3 +759,33 @@ __global__ void overloaded_helper(float3 *out, float4 *matrix) {
   assert.match(source, /__device__ float3 mul\(float4 \*matrix, float3 value\)/u);
   assert.match(source, /__device__ float4 mul\(float4 \*matrix, float4 value\)/u);
 }
+
+{
+  const deviceFunctions = [
+    { name: "convert", source: "__device__ half convert(half value) { return value; }" },
+    { name: "convert", source: "__device__ float convert(float value) { return value; }" },
+  ];
+  const floatSource = createKernelCompilationUnit({
+    kernel: "__global__ void use_float(float *out) { float value = out[0]; out[0] = CONVERT(value); }",
+    definesByName: new Map([["CONVERT", "convert"]]),
+    deviceFunctions,
+  });
+  assert.match(floatSource, /__device__ float convert\(float value\)/u);
+  assert.doesNotMatch(floatSource, /__device__ half convert\(half value\)/u);
+
+  const floatVectorSource = createKernelCompilationUnit({
+    kernel: "__global__ void use_float_vector(float4 *out) { float4 value = out[0]; value.x = CONVERT(value.x); out[0] = value; }",
+    definesByName: new Map([["CONVERT", "convert"]]),
+    deviceFunctions,
+  });
+  assert.match(floatVectorSource, /__device__ float convert\(float value\)/u);
+  assert.doesNotMatch(floatVectorSource, /__device__ half convert\(half value\)/u);
+
+  const halfSource = createKernelCompilationUnit({
+    kernel: "__global__ void use_half(half *out) { half value = out[0]; out[0] = CONVERT(value); }",
+    definesByName: new Map([["CONVERT", "convert"]]),
+    deviceFunctions,
+  });
+  assert.match(halfSource, /__device__ half convert\(half value\)/u);
+  assert.doesNotMatch(halfSource, /__device__ float convert\(float value\)/u);
+}
