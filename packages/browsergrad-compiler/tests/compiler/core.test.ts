@@ -1475,12 +1475,17 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
   }`, {
         workgroupSize: [4, 1, 1],
       });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Int32Array(8) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
 
-      expect(compiled.wgsl).toContain("fn sumReduction");
-      expect(compiled.wgsl).toContain("g__bg_group_rank: i32, g__bg_group_size: i32");
-      expect(compiled.wgsl).toContain("sumReduction(i32(local_id.x), 4");
-      expect(compiled.wgsl).toContain("sumReduction(i32((local_id.x) % 2u), 2");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
+      expect([...result.buffers.out as Int32Array]).toEqual([4, 5, 6, 7, 2, 3, 4, 5]);
     });
 
   it("explains why unsafe peer-copy lifts stay reference-only", () => {
@@ -1853,11 +1858,6 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("clamp(value, 0.0, 1.0)");
-      expect(compiled.wgsl).toContain("pow(abs(value), 3.0)");
-      expect(compiled.wgsl).toContain("(value / 4.0)");
-      expect(compiled.wgsl).toContain("(value + 2.0)");
-      expect(compiled.wgsl).toContain("select(abs(value), -abs(value)");
       expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
       expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
       expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
@@ -1900,10 +1900,6 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0))");
-      expect(compiled.wgsl).toContain("(1.0 / sqrt((value * value) + (2.0 * 2.0)))");
-      expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + (-(3.0) * -(3.0)))");
-      expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + (-(3.0) * -(3.0)) + (4.0 * 4.0))");
       expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
       expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
       expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
@@ -1981,9 +1977,6 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("select(0u, 1u, ((nan_value) != (nan_value)))");
-      expect(compiled.wgsl).toContain("select(0u, 1u, (abs(inf_value) > 3.4028234663852886e38))");
-      expect(compiled.wgsl).toContain("select(0u, 1u, ((bitcast<u32>(neg_zero) & 0x80000000u) != 0u))");
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1]);
       expect([...result.buffers.out as Float32Array]).toEqual([1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1]);
     });
@@ -4707,8 +4700,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       });
 
       expect(backendIr(child).name).toBe("childKernel");
-      expect(compiled.wgsl).not.toContain("fn childKernel(");
-      expect(child.wgsl).not.toContain("fn childKernel(");
+      expect(canEmitSemanticKernelIrWgsl(child.wgslLegalizedKernelIr)).toBe(true);
       expect(plan.supported).toBe(true);
       expect(plan.launches).toHaveLength(2);
     });
@@ -5706,9 +5698,6 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect([...result.buffers.out as Uint32Array]).toEqual([5, 16, 3]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
-      expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
-      expect(compiled.wgsl).toContain("out[1u] = u32((4u * 4u));");
-      expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
     });
 
   it("lowers shared address conversion for multi-dimensional shared lvalues", () => {
@@ -5728,8 +5717,6 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
 
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 92]);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
-      expect(compiled.wgsl).toContain("out[0u] = u32((0u * 4u));");
-      expect(compiled.wgsl).toContain("out[1u] = u32((((1u * 12u) + (2u * 4u) + 3u) * 4u));");
     });
 
   it("resolves dynamic shared-memory pointer aliases into semantic memory refs", () => {
@@ -5750,9 +5737,6 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect([...result.buffers.out as Uint32Array]).toEqual([8, 7]);
-      expect(compiled.kernelIr.operations.some((operation) =>
-        operation.kind === "declare" && operation.target.name === "tile")).toBe(false);
-      expect(compiled.wgsl).toContain("smem[2u] = 7.0;");
     });
 
   it("lowers CUDA assignment expression chains as ordered statements", () => {

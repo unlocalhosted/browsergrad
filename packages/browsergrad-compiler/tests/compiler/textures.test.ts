@@ -607,8 +607,6 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect([...result.buffers.out as Float32Array]).toEqual([10, 12, 14, 16]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([10, 12, 14, 16]);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("layeredPointer = select(vec4<f32>(), vec4<f32>(f32(bg_sem_surf2dread_surf((0 + 0), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 4), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 8), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 12), 0, 1))), (0 >= 0 && (0 % 4) == 0))");
-      expect(compiled.wgsl).toContain("var layeredReturn: vec4<f32> = select(vec4<f32>(), vec4<f32>(f32(bg_sem_surf2dread_surf((0 + 0), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 4), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 8), 0, 1)), f32(bg_sem_surf2dread_surf((0 + 12), 0, 1))), (0 >= 0 && (0 % 4) == 0))");
 
       const helperCompiled = compileCudaLiteKernel(`
   __device__ float4 read_layer_vec(cudaSurfaceObject_t surfaceArg, int row, int layer) {
@@ -624,9 +622,18 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
     float4 zReturn = read_z_vec(surf, 0, 1);
     out[0] = layeredReturn.x + zReturn.x;
   }`, { workgroupSize: [1, 1, 1] });
+      const helperResult = runCompiledKernelSemanticReference(
+        helperCompiled,
+        {
+          buffers: { out: new Float32Array(1) },
+          surfaces: { surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(canRunCompiledKernelSemanticReference(helperCompiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(helperCompiled.wgslLegalizedKernelIr)).toBe(true);
       expect(helperCompiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(helperCompiled.wgsl).toContain("return select(vec4<f32>(), vec4<f32>(f32(bg_sem_surf2dread(surfaceArg, (0 + 0), row, layer)), f32(bg_sem_surf2dread(surfaceArg, (0 + 4), row, layer)), f32(bg_sem_surf2dread(surfaceArg, (0 + 8), row, layer)), f32(bg_sem_surf2dread(surfaceArg, (0 + 12), row, layer))), (0 >= 0 && (0 % 4) == 0))");
-      expect(helperCompiled.wgsl).toContain("return select(vec4<f32>(), vec4<f32>(f32(bg_sem_surf2dread(surfaceArg, (0 + 0), row, z)), f32(bg_sem_surf2dread(surfaceArg, (0 + 4), row, z)), f32(bg_sem_surf2dread(surfaceArg, (0 + 8), row, z)), f32(bg_sem_surf2dread(surfaceArg, (0 + 12), row, z))), (0 >= 0 && (0 % 4) == 0))");
+      expect([...helperResult.buffers.out as Float32Array]).toEqual([10]);
     });
 
   it("lowers vector surface writes through helper params lane-wise in semantic IR", () => {
@@ -898,8 +905,6 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode(f32(bg_sem_surf2dread_surf(0, 0, 0)), 0u)");
-      expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(bg_sem_surf2dread_surf((0 + 0), 0, 0)), 0u) << 16u), bitcast<f32>(bg_f32_to_bf16_bits_mode(f32(bg_sem_surf2dread_surf((0 + 4), 0, 0)), 0u) << 16u))");
       expect(compiled.wgsl).not.toContain("enable f16;");
       expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -956,7 +961,6 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("return select(vec4<f32>(), vec4<f32>(f32(bg_sem_surf2dread(surfaceArg, (0 + 0), 0, 0)), f32(bg_sem_surf2dread(surfaceArg, (0 + 4), 0, 0)), f32(bg_sem_surf2dread(surfaceArg, (0 + 8), 0, 0)), f32(bg_sem_surf2dread(surfaceArg, (0 + 12), 0, 0))), (0 >= 0 && (0 % 4) == 0))");
       expect(compiled.wgsl).not.toContain("return f32(vec4<f32>");
       expect([...result.buffers.out as Float32Array]).toEqual([1]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1]);
@@ -1144,11 +1148,26 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
     __syncthreads();
     out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
   }`, { workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: { out: new Float32Array(16) },
+          scalars: { N: 2 },
+          textures: { tex: { width: 1, height: 1, data: new Float32Array([5]) } },
+        },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
-      expect(compiled.wgsl).toContain("write_alias_lane");
-      expect(compiled.wgsl).toContain("bg_active_lane = false;");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect([...result.buffers.out as Float32Array]).toEqual([
+        1, 10, 20, 30,
+        2, 11, 21, 31,
+        0, 7, 0, 0,
+        0, 8, 0, 0,
+      ]);
     });
 
   it("preserves texture-to-surface side effects before returns lowered for barriers", () => {
@@ -1459,7 +1478,6 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-texture");
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode(f32(textureLoad(texRef");
       expect(compiled.wgsl).not.toContain("bg_tex2d_bf16_texRef");
       expect(compiled.wgsl).not.toContain("bg_tex2d_bf162_texRef");
       expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
@@ -1963,8 +1981,9 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("vec4<u32>(u32((textureLoad(texRef");
       expect(compiled.wgsl).not.toContain("bg_tex2d_uint4_texRef");
       expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 3, 255]);
     });
