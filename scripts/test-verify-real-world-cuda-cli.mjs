@@ -16,6 +16,13 @@ assert.equal(defaultBrowserSteps.length, 2);
 for (const step of defaultBrowserSteps) {
   assert.equal(argAfter(step.args, "--auto-corpus-smoke-profile"), "fast");
   assert.ok(step.args.includes("--forbid-skips"));
+  const cases = argAfter(step.args, "--cases").split(",");
+  assert.ok(cudaLiteCorpusExecutionFixtures.every((fixture) => cases.includes(fixture.caseName)));
+  assert.ok(cases.includes("auto-corpus:cuda-samples:"));
+  assert.ok(cases.includes("auto-corpus:cuda-120:"));
+  assert.ok(cases.includes("auto-corpus:llm.c:"));
+  assert.ok(cases.includes("auto-corpus:leetcuda:"));
+  assert.ok(!cases.includes("example:saxpy"));
 }
 
 const full = parseVerifyRealWorldCudaArgs([

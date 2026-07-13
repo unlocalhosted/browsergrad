@@ -300,8 +300,8 @@ function ratioArg(flag, value) {
 }
 
 function scopedCaseFilterArgs(only, autoCorpusSmokeLimit) {
-  if (only.length === 0) return [];
-  const filters = only.flatMap((id) => [
+  const corpusIds = only.length === 0 ? cudaLiteCorpora.map((corpus) => corpus.id) : only;
+  const filters = corpusIds.flatMap((id) => [
     ...cudaLiteCorpusExecutionFixtures
       .filter((fixture) => fixture.corpusId === id)
       .map((fixture) => fixture.caseName),
