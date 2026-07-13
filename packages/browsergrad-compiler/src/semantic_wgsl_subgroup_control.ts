@@ -96,6 +96,17 @@ export function semanticSubgroupControlDeclarations(ir: SemanticKernelIrModule):
     : [];
 }
 
+export function semanticSubgroupLoopControlIsWorkgroupUniform(operation: SemanticLoopOperation): boolean {
+  if (operation.init?.kind !== "declare" || operation.init.target.addressSpace !== "local" || !operation.init.init) return false;
+  const counter = operation.init.target.id;
+  if (!expressionIsWorkgroupUniform(operation.init.init) ||
+    !operation.condition || !expressionIsWorkgroupUniformWithCounter(operation.condition, counter)) return false;
+  const update = operation.update;
+  if (update?.kind === "update") return update.argument.kind === "symbol" && semanticIdsEqual(update.argument.id, counter);
+  return update?.kind === "assignment" && update.target.kind === "symbol" && semanticIdsEqual(update.target.id, counter) &&
+    expressionIsWorkgroupUniformWithCounter(update.value, counter);
+}
+
 function expressionContainsNativeCollective(expression: SemanticExpression): boolean {
   if (expression.kind === "call" && expression.callee.kind === "symbol" &&
     expression.callee.addressSpace !== "function" && SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return true;
@@ -126,7 +137,8 @@ function operationsContainNativeCollective(operations: readonly SemanticKernelIr
 function operationsNeedUniformSubgroupLoop(operations: readonly SemanticKernelIrOperation[]): boolean {
   return operations.some((operation) => {
     if (operation.kind === "loop" && operation.loopKind === "for" && operation.continuing === undefined &&
-      operation.update?.kind !== "sequence" && operationsContainNativeCollective(operation.body)) return true;
+      operation.update?.kind !== "sequence" && !semanticSubgroupLoopControlIsWorkgroupUniform(operation) &&
+      operationsContainNativeCollective(operation.body)) return true;
     if (operation.kind === "branch") return operationsNeedUniformSubgroupLoop(operation.consequent) || operationsNeedUniformSubgroupLoop(operation.alternate);
     if (operation.kind === "loop" || operation.kind === "block") return operationsNeedUniformSubgroupLoop(operation.body);
     return false;
@@ -234,8 +246,8 @@ export function createSemanticSubgroupControlEmitter<
         lines.push(`${prefix}}`);
         continue;
       }
-      if (operation.kind === "declare" && operation.target.addressSpace === "local" &&
-        !operation.target.pointer && operation.target.dimensions.length === 0) {
+      if (operation.kind === "declare" && operation.target.addressSpace === "local" && operation.target.dimensions.length === 0 &&
+        (!operation.target.pointer || operation.init !== undefined && !expressionContainsNativeCollective(operation.init))) {
         lines.push(...emitOperation(
           operation,
           ir,
@@ -376,9 +388,18 @@ function emitUniformIterationBudget<
     Number.isInteger(update.value.value) && update.value.value > 0 && update.value.value < 32
     ? { operator: update.operator, amount: update.value.value }
     : undefined;
+  const geometric = update?.kind === "assignment" && (update.operator === "*=" || update.operator === "/=") &&
+    update.target.kind === "symbol" && semanticIdsEqual(update.target.id, operation.init.target.id) &&
+    update.value.kind === "literal" && update.value.literalKind === "number" &&
+    typeof update.value.value === "number" && Number.isInteger(update.value.value) && update.value.value > 1
+    ? { operator: update.operator, factor: update.value.value }
+    : undefined;
   const conditionIncreases = condition.operator === "<" || condition.operator === "<=";
   const shiftIncreases = shift?.operator === "<<=";
-  if (!additiveProgress && (shift === undefined || shiftIncreases !== conditionIncreases)) {
+  const geometricIncreases = geometric?.operator === "*=";
+  if (!additiveProgress &&
+    (shift === undefined || shiftIncreases !== conditionIncreases) &&
+    (geometric === undefined || geometricIncreases !== conditionIncreases)) {
     throw dependencies.semanticError("native subgroup loops require a compile-time positive counter step", update?.span ?? operation.span);
   }
   const initialRange = operation.init.init ? staticIntegerRange(operation.init.init, ir) : { min: 0, max: 0 };
@@ -387,6 +408,9 @@ function emitUniformIterationBudget<
       throw dependencies.semanticError("native subgroup left-shift loops require a provably positive initializer", operation.init.span);
     }
     return { expression: `${Math.ceil(32 / shift.amount)}u`, workgroupMaximum: false };
+  }
+  if (geometric !== undefined) {
+    return { expression: `${Math.ceil(32 / Math.log2(geometric.factor))}u`, workgroupMaximum: false };
   }
   const inclusive = condition.operator === "<=" || condition.operator === ">=" ? 1 : 0;
   const bound = condition.right;
@@ -523,7 +547,20 @@ function expressionIsWorkgroupUniform(expression: SemanticExpression): boolean {
   if (expression.kind === "binary") return expressionIsWorkgroupUniform(expression.left) && expressionIsWorkgroupUniform(expression.right);
   if (expression.kind === "conditional") return expressionIsWorkgroupUniform(expression.condition) &&
     expressionIsWorkgroupUniform(expression.consequent) && expressionIsWorkgroupUniform(expression.alternate);
+  if (expression.kind === "call" && expression.callee.kind === "member" && expression.args.length === 0) {
+    return expression.callee.property === "size" || expression.callee.property === "meta_group_size";
+  }
   return false;
+}
+
+function expressionIsWorkgroupUniformWithCounter(
+  expression: SemanticExpression,
+  counter: CudaLiteSemanticSymbol["id"],
+): boolean {
+  if (expression.kind === "symbol" && semanticIdsEqual(expression.id, counter)) return true;
+  if (expressionIsWorkgroupUniform(expression)) return true;
+  const children = semanticExpressionChildren(expression);
+  return children.length > 0 && children.every((child) => expressionIsWorkgroupUniformWithCounter(child, counter));
 }
 
 function collectiveNot(expression: SemanticExpression): SemanticExpression {

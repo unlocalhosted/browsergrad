@@ -631,6 +631,7 @@ export function analyzeCudaLite(
           for (const arg of statement.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
           break;
         case "cooperative-group":
+          if (activeStatementsReachable && statement.groupKind === "coalesced") activeRequiredFeatures.add("subgroups");
           if (names.has(statement.name)) {
             diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
           }
@@ -4970,6 +4971,13 @@ function validateDivergentReturnsBeforeBarriers(
           return { containsBarrier: true };
         }
         return { containsBarrier: false };
+      case "var":
+        if (statement.init && isUniformityBarrierCall(statement.init, barrierFunctionNames)) {
+          barrierStatementStarts.push(statement.span.start);
+          if (divergentDepth > 0) verified = false;
+          return { containsBarrier: true };
+        }
+        return { containsBarrier: false };
       case "asm": {
         const containsBarrier = isInlineAsmBarrier(statement);
         if (containsBarrier) {
@@ -5081,6 +5089,7 @@ function statementProvidesBarrierDominance(
   barrierFunctionNames: ReadonlySet<string>,
 ): boolean {
   return statement.kind === "expr" && isUniformityBarrierCall(statement.expression, barrierFunctionNames) ||
+    statement.kind === "var" && statement.init !== undefined && isUniformityBarrierCall(statement.init, barrierFunctionNames) ||
     statement.kind === "asm" && isInlineAsmBarrier(statement);
 }
 

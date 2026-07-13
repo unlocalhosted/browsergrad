@@ -467,9 +467,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.wgsl).toContain("enable subgroups;");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_down_float_32(val, 16u, 32u, local_id)");
-      expect(compiled.wgsl).toContain("fn warpReduceSum(bg_arg_val: f32, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> f32");
+      expect(compiled.wgsl).toContain("fn warpReduceSum(bg_arg_val: f32, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>, subgroup_invocation_id: u32) -> f32");
       expect(compiled.wgsl).toContain("var val: f32 = bg_arg_val;");
-      expect(compiled.wgsl).toContain("val = warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
+      expect(compiled.wgsl).toContain("val = warpReduceSum(val, local_id, workgroup_id, num_workgroups, subgroup_invocation_id)");
     });
 
   it("lowers semantic block reductions as subgroup reductions", () => {
@@ -3674,6 +3674,53 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     wmma::mma_sync(c, a, b, c);
   }`));
       expect(invalidImma.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-wmma-fragment-value-type");
+    });
+
+  it("lowers coalesced rank and size through explicit subgroup topology", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ int active_rank() {
+    cg::coalesced_group active = cg::coalesced_threads();
+    return active.thread_rank() + active.size();
+  }
+  __global__ void coalescedTopology(int *out) {
+    out[threadIdx.x] = active_rank();
+  }`, { features: { subgroups: true }, workgroupSize: [32, 1, 1] });
+      const semantic = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Int32Array(32) } },
+        { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("@builtin(subgroup_invocation_id) subgroup_invocation_id: u32");
+      expect(compiled.wgsl).toContain("fn active_rank(local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>, subgroup_invocation_id: u32)");
+      expect([...semantic.buffers.out as Int32Array]).toEqual(Array.from({ length: 32 }, (_, lane) => lane + 32));
+    });
+
+  it("keeps value-returning tile barrier helpers on the guarded semantic path", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ int guarded_value(int *values, cg::thread_group tile) {
+    cg::sync(tile);
+    ++values[tile.thread_rank()];
+    cg::sync(tile);
+    return values[0];
+  }
+  __global__ void guardedBarrierValue(int *out) {
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_group tile = cg::tiled_partition(block, 16);
+    __shared__ int values[16];
+    if (threadIdx.x < 16) {
+      values[threadIdx.x] = 0;
+      int value = guarded_value(values, tile);
+      out[threadIdx.x] = value;
+    }
+  }`, { workgroupSize: [32, 1, 1] });
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("guarded_value__bg_guarded_barrier");
+      expect(compiled.wgsl).toContain("(*values__bg_shared_ptr)[");
     });
 });
 export {

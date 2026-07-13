@@ -659,7 +659,9 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
         semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
       ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
         semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
-        semanticBarrierOperationsMatchUniformityProof(fn.body, ir.barrierUniformity.functions[fn.name], barrierFunctions)
+        semanticOperationsContainActiveLaneControl(fn.body) &&
+          semanticBarrierOperationsMatchActiveLaneProof(fn.body, semanticReferenceBarrierFunctionProof(ir, fn.name), barrierFunctions) ||
+        semanticBarrierOperationsMatchUniformityProof(fn.body, semanticReferenceBarrierFunctionProof(ir, fn.name), barrierFunctions)
       );
   }
   if (shared.length === 0) return true;
@@ -668,6 +670,16 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
       (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
         semanticBarrierOperationsMatchActiveLaneProof(ir.operations, proof, barrierFunctions))) ||
     semanticBarrierOperationsMatchUniformityProof(ir.operations, proof, barrierFunctions);
+}
+
+function semanticReferenceBarrierFunctionProof(
+  ir: CompiledCudaLiteKernel["kernelIr"],
+  name: string,
+): CompiledCudaLiteKernel["kernelIr"]["barrierUniformity"]["kernel"] | undefined {
+  return ir.barrierUniformity.functions[name] ??
+    (name.endsWith("__bg_guarded_barrier")
+      ? ir.barrierUniformity.functions[name.slice(0, -"__bg_guarded_barrier".length)]
+      : undefined);
 }
 
 function semanticReferenceLoopInitSupported(
@@ -1089,6 +1101,7 @@ function semanticReferenceCoalescedGroupCallSupported(
   if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return false;
   const group = semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name);
   if (group?.kind !== "coalesced") return false;
+  if ((expression.callee.property === "thread_rank" || expression.callee.property === "size") && expression.args.length === 0) return true;
   if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
     return expression.args.length === 1 && semanticReferenceExpressionSupported(expression.args[0]!, "scalar", compiled);
   }
@@ -4856,10 +4869,16 @@ function evalSemanticCoalescedGroupCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
 ): number {
-  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol" || !expression.args[0]) {
-    throw semanticReferenceError("semantic coalesced-group call requires group receiver and value", expression.span);
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") {
+    throw semanticReferenceError("semantic coalesced-group call requires group receiver", expression.span);
   }
   const peers = semanticReferenceCooperativeContexts(expression.callee.object.name, context);
+  if (expression.callee.property === "size") return peers.length;
+  if (expression.callee.property === "thread_rank") {
+    const rank = semanticLocalLinearRank(context);
+    return peers.findIndex((peer) => semanticLocalLinearRank(peer) === rank);
+  }
+  if (!expression.args[0]) throw semanticReferenceError("semantic coalesced-group vote or shuffle requires a value", expression.span);
   if (expression.callee.property === "ballot") {
     return peers.reduce((mask, peer) => truthy(evalNumber(expression.args[0]!, peer))
       ? mask | (1 << (semanticLocalLinearRank(peer) % 32))

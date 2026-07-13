@@ -21,11 +21,13 @@ import {
   convertTypedWgslExpression,
   createTypedWgslCall,
   createTypedWgslIdentifier,
+  createTypedWgslIndexAccess,
   createTypedWgslLiteral,
   createTypedWgslMemberAccess,
   emitTypedWgslBinary,
   emitTypedWgslSelect,
   emitTypedWgslUnary,
+  legalizeTypedWgslBoolToNumeric,
   type TypedWgslExpression,
 } from "./typed_wgsl_expression.js";
 
@@ -60,6 +62,66 @@ export interface SemanticCooperativePartitionMaskDeclaration {
   readonly trueMaskValue: TypedWgslExpression;
   readonly name: string;
   readonly value: TypedWgslExpression;
+}
+
+export function semanticWgslCoalescedGroupCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  valueSupported: (expression: SemanticExpression) => boolean,
+): boolean {
+  if (ir.subgroupMode === "scalar" || expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return false;
+  if (semanticCooperativeGroupInfo(ir, expression.callee.object.name)?.kind !== "coalesced") return false;
+  if (expression.callee.property === "thread_rank" || expression.callee.property === "size") return expression.args.length === 0;
+  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
+    return expression.args.length === 1 && valueSupported(expression.args[0]!);
+  }
+  return expression.callee.property === "shfl" && expression.args.length === 2 && expression.args.every(valueSupported);
+}
+
+export function emitSemanticTypedCoalescedGroupCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  emitTruthiness: (expression: SemanticExpression) => TypedWgslExpression,
+  emitAs: (expression: SemanticExpression, type: ReturnType<typeof wgslValueScalar>) => TypedWgslExpression,
+  valueSupported: (expression: SemanticExpression) => boolean,
+): TypedWgslExpression | undefined {
+  if (!semanticWgslCoalescedGroupCallSupported(expression, ir, valueSupported) || expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return undefined;
+  const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
+  if (group?.kind !== "coalesced") return undefined;
+  const method = expression.callee.property;
+  const span = expression.span;
+  const lane = createTypedWgslIdentifier("subgroup_invocation_id", "u32", span);
+  const wordIndex = emitTypedWgslBinary(">>", lane, semanticTypedU32(5, span), span);
+  const ballotWord = (predicate: TypedWgslExpression): TypedWgslExpression => createTypedWgslIndexAccess(
+    createTypedWgslCall("subgroupBallot", [predicate], "vec4<u32>", span),
+    wordIndex,
+    "u32",
+    span,
+  );
+  if (method === "thread_rank" || method === "size") {
+    if (expression.args.length !== 0) return undefined;
+    const active = ballotWord(createTypedWgslLiteral("true", "bool", span));
+    if (method === "size") return convertTypedWgslExpression(createTypedWgslCall("countOneBits", [active], "u32", span), expression.valueType === "uint" ? "u32" : "i32");
+    const bit = emitTypedWgslBinary("&", lane, semanticTypedU32(31, span), span);
+    const lower = emitTypedWgslBinary("-", emitTypedWgslBinary("<<", semanticTypedU32(1, span), bit, span), semanticTypedU32(1, span), span);
+    return convertTypedWgslExpression(createTypedWgslCall("countOneBits", [emitTypedWgslBinary("&", active, lower, span)], "u32", span), expression.valueType === "uint" ? "u32" : "i32");
+  }
+  const value = expression.args[0];
+  if (!value || !valueSupported(value)) return undefined;
+  if (method === "ballot" || method === "any" || method === "all") {
+    if (expression.args.length !== 1) return undefined;
+    const predicate = ballotWord(emitTruthiness(value));
+    if (method === "ballot") return predicate;
+    const expected = method === "all" ? ballotWord(createTypedWgslLiteral("true", "bool", span)) : semanticTypedU32(0, span);
+    const vote = emitTypedWgslBinary(method === "all" ? "==" : "!=", predicate, expected, span);
+    return legalizeTypedWgslBoolToNumeric(vote, expression.valueType === "uint" ? "u32" : "i32");
+  }
+  const index = expression.args[1];
+  const valueType = semanticExpressionValueType(value);
+  if (method !== "shfl" || expression.args.length !== 2 || !index || !valueSupported(index) || !valueType || valueType === "void") return undefined;
+  const scalar = wgslValueScalar(valueType);
+  const logicalBase = emitTypedWgslBinary("&", lane, semanticTypedU32(0xffffffe0, span), span);
+  return createTypedWgslCall("subgroupShuffle", [emitAs(value, scalar), emitTypedWgslBinary("+", logicalBase, emitAs(index, "u32"), span)], scalar, span);
 }
 
 export function semanticCooperativePartitionDeclarations(

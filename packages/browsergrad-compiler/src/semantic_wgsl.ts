@@ -254,6 +254,7 @@ import {
   emitSemanticCooperativeGroupCall,
   emitSemanticCooperativeReduceHelper,
   emitSemanticCooperativeScanHelper,
+  emitSemanticTypedCoalescedGroupCall,
   emitSemanticTypedCooperativeGroupCall,
   emitSemanticTypedCooperativePartitionBallotMask,
   emitSemanticTypedCooperativePartitionMaskDeclaration,
@@ -267,6 +268,7 @@ import {
   semanticCooperativeScanHelpers,
   semanticCooperativeVectorReduceHelperFor,
   semanticCooperativeVectorReduceHelpers,
+  semanticWgslCoalescedGroupCallSupported,
   semanticWgslCooperativeGroupCallSupported,
   semanticWgslCooperativeReduceCallSupported,
   semanticWgslCooperativeScanCallSupported,
@@ -280,7 +282,7 @@ import { emitSemanticNumericHelpers } from "./semantic_wgsl_numeric_helpers.js";
 import { createSemanticBfloatScalarEmitter, roundTypedBf16, semanticTypedIsNan } from "./semantic_wgsl_bfloat_scalar.js";
 import { createSemanticTypedIntrinsicEmitter } from "./semantic_wgsl_typed_intrinsics.js";
 import { createSemanticWgslAtomicAnalysis } from "./semantic_wgsl_atomic_analysis.js";
-import { createSemanticSubgroupControlEmitter, semanticSubgroupControlDeclarations } from "./semantic_wgsl_subgroup_control.js";
+import { createSemanticSubgroupControlEmitter, semanticSubgroupControlDeclarations, semanticSubgroupLoopControlIsWorkgroupUniform } from "./semantic_wgsl_subgroup_control.js";
 import {
   emitSemanticSyncthreadsPredicateHelper,
   semanticSyncthreadsPredicateHelperFor,
@@ -886,7 +888,8 @@ function emitSemanticKernelIrWgslFromIr(
     "  @builtin(global_invocation_id) global_id: vec3<u32>,",
     "  @builtin(local_invocation_id) local_id: vec3<u32>,",
     "  @builtin(workgroup_id) workgroup_id: vec3<u32>,",
-    "  @builtin(num_workgroups) num_workgroups: vec3<u32>",
+    `  @builtin(num_workgroups) num_workgroups: vec3<u32>${ir.requiredFeatures.includes("subgroups") ? "," : ""}`,
+    ...(ir.requiredFeatures.includes("subgroups") ? ["  @builtin(subgroup_invocation_id) subgroup_invocation_id: u32"] : []),
     ") {",
     ...emitSemanticStorageOffsetDeclarations(ir, names, 1, options),
     ...emitSemanticOperations(ir.operations, ir, names, 1, false, options, textureSpecializations),
@@ -1593,7 +1596,7 @@ function semanticWgslExpressionSupported(
         expression.callee.kind === "symbol" && semanticPtxIntegerCallInfo(expression.callee.name) !== undefined &&
           expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir)) ||
         ir !== undefined && semanticWgslCooperativeGroupCallSupported(expression, ir) ||
-        ir !== undefined && semanticWgslCoalescedGroupCallSupported(expression, ir) ||
+        ir !== undefined && semanticWgslCoalescedGroupCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
         ir !== undefined && semanticWgslCooperativeReduceCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
         ir !== undefined && semanticWgslCooperativeVectorReduceCallSupported(expression, ir) ||
         ir !== undefined && semanticWgslCooperativeScanCallSupported(expression, ir, (value) => semanticWgslExpressionSupported(value, "scalar", ir)) ||
@@ -1931,11 +1934,7 @@ function emitSemanticOperation(
     case "pointer-rebind":
       return emitSemanticPointerRebind(operation, ir, names, indentLevel, options);
     case "expression":
-      if (isSemanticNoopExpression(operation.expression)) return [];
-      if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names, options, textureSpecializations)};`];
-      if (operation.expression.kind === "sequence") return emitSemanticSequenceStatement(operation.expression, ir, names, indentLevel, options, textureSpecializations);
-      if (operation.expression.kind === "update") return [`${prefix}${emitSemanticLocalUpdateStatement(operation.expression, ir, names, options).code}`];
-      return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options, textureSpecializations).code};`];
+      return emitSemanticExpressionStatement(operation.expression, ir, names, indentLevel, options, textureSpecializations);
     case "branch": {
       const conditionOptions = operation.conditionUniformity === "workgroup"
         ? { ...options, workgroupUniformExpression: true }
@@ -2633,6 +2632,10 @@ function emitSemanticExpressionStatement(
 ): readonly string[] {
   if (isSemanticNoopExpression(expression)) return [];
   const prefix = "  ".repeat(indentLevel);
+  if (expression.kind === "assignment" && expression.value.kind === "assignment") {
+    return [...emitSemanticExpressionStatement(expression.value, ir, names, indentLevel, options, textureSpecializations),
+      `${prefix}${emitSemanticAssignmentStatement({ ...expression, value: expression.value.target }, ir, names, options, textureSpecializations)};`];
+  }
   if (expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(expression, ir, names, options, textureSpecializations)};`];
   if (expression.kind === "sequence") return emitSemanticSequenceStatement(expression, ir, names, indentLevel, options, textureSpecializations);
   if (expression.kind === "update") return [`${prefix}${emitSemanticLocalUpdateStatement(expression, ir, names, options).code}`];
@@ -2705,6 +2708,31 @@ function emitSemanticLocalUpdateStatement(
       );
       if (valueType === "uchar") next = emitTypedWgslBinary("&", next, createTypedWgslLiteral("0xffu", "u32", expression.span), expression.span);
       return createTypedWgslCallStatement(semanticPointerWriteHelperName(valueType), [buffer, index, next], expression.span);
+    }
+  }
+  if (ref && sharedPointer && ref.valueType !== "uchar" && ref.indices.length === 1 && ref.fields.length === 0 && semanticWgslScalarTypeSupported(ref.valueType)) {
+    const type = wgslValueType(ref.valueType);
+    if (type === "f16" || type === "f32" || type === "i32" || type === "u32") {
+      const index = emitTypedWgslBinary(
+        "+",
+        createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(ref.base), names), "u32", ref.span),
+        emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options),
+        ref.span,
+      );
+      const place = createTypedWgslDereferencedIndexedPlace(
+        nameFor(semanticParamAliasName(ir, sharedPointer) ?? ref.base, names),
+        index,
+        type,
+        false,
+        "workgroup",
+        ref.span,
+      );
+      return createTypedWgslPlaceAssignmentStatement(
+        place,
+        expression.operator === "++" ? "+=" : "-=",
+        createTypedWgslLiteral(type === "u32" ? "1u" : type === "i32" ? "1" : type === "f16" ? "f16(1.0)" : "1.0", type, expression.span),
+        expression.span,
+      );
     }
   }
   if (ref && (ref.indices.length === 1 || ref.indices.length === 0 && ref.addressSpace === "device-global") && ref.fields.length === 0 && (semanticWgslScalarTypeSupported(ref.valueType) || ref.valueType === "uchar") &&
@@ -2879,11 +2907,7 @@ function emitSemanticTypedValueFunctionCall(
     if (isSemanticFloatVectorType(param.valueType)) return [emitSemanticExpression(arg, ir, names, options, textureSpecializations)];
     return [emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param.valueType), options, textureSpecializations)];
   });
-  args.push(
-    createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("workgroup_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("num_workgroups", "vec3<u32>", expression.span),
-  );
+  args.push(...semanticTypedInvocationArguments(ir, expression.span));
   const calleeName = semanticFunctionCallName(fn.name, fn, expression.args, options, textureSpecializations);
   return createTypedWgslCall(nameFor(calleeName, names), args, wgslValueType(fn.returnType), expression.span);
 }
@@ -3299,9 +3323,7 @@ function emitSemanticFunction(
   const mutableParams = semanticFunctionMutableValueParams(fn);
   const params = [
     ...fn.params.flatMap((param) => emitSemanticFunctionParams(param, names, semanticFunctionSharedPointerAtomicParams(fn).has(param.name), mutableParams.has(param.name))),
-    "local_id: vec3<u32>",
-    "workgroup_id: vec3<u32>",
-    "num_workgroups: vec3<u32>",
+    ...semanticInvocationFunctionParams(ir),
   ].join(", ");
   const returnType = fn.returnType === "void" ? "" : ` -> ${wgslValueType(fn.returnType)}`;
   return [
@@ -3311,6 +3333,24 @@ function emitSemanticFunction(
     ...emitSemanticOperations(fn.body, ir, names, 1, true, { ...options, activeFunction: fn.name }, textureSpecializations),
     ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslValueType(fn.returnType))};`]),
     "}",
+  ];
+}
+
+function semanticInvocationFunctionParams(ir: SemanticKernelIrModule): readonly string[] {
+  return ["local_id: vec3<u32>", "workgroup_id: vec3<u32>", "num_workgroups: vec3<u32>",
+    ...(ir.requiredFeatures.includes("subgroups") ? ["subgroup_invocation_id: u32"] : [])];
+}
+
+function semanticInvocationArgumentNames(ir: SemanticKernelIrModule): readonly string[] {
+  return ["local_id", "workgroup_id", "num_workgroups", ...(ir.requiredFeatures.includes("subgroups") ? ["subgroup_invocation_id"] : [])];
+}
+
+function semanticTypedInvocationArguments(ir: SemanticKernelIrModule, span: SourceSpan): readonly TypedWgslExpression[] {
+  return [
+    createTypedWgslIdentifier("local_id", "vec3<u32>", span),
+    createTypedWgslIdentifier("workgroup_id", "vec3<u32>", span),
+    createTypedWgslIdentifier("num_workgroups", "vec3<u32>", span),
+    ...(ir.requiredFeatures.includes("subgroups") ? [createTypedWgslIdentifier("subgroup_invocation_id", "u32", span)] : []),
   ];
 }
 
@@ -3821,7 +3861,7 @@ function emitSemanticVoidFunctionCall(
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${operation.callee}'`, operation.span);
   const callee = semanticFunctionCallName(operation.callee, fn, operation.args, options, textureSpecializations);
   const args = operation.args.flatMap((arg, index) => emitSemanticFunctionArgs(arg, fn.params[index], ir, names, options, textureSpecializations));
-  return `${nameFor(callee, names)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
+  return `${nameFor(callee, names)}(${[...args, ...semanticInvocationArgumentNames(ir)].join(", ")})`;
 }
 
 function emitSemanticLocalArrayFill(
@@ -3949,7 +3989,8 @@ function emitSemanticLoop(
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   if (operation.loopKind === "for" && operation.continuing === undefined && operation.update?.kind !== "sequence" &&
-    ir.subgroupMode !== "scalar" && semanticOperationsContainNativeSubgroupCollective(operation.body)) {
+    ir.subgroupMode !== "scalar" && !semanticSubgroupLoopControlIsWorkgroupUniform(operation) &&
+    semanticOperationsContainNativeSubgroupCollective(operation.body)) {
     return emitSemanticUniformSubgroupForLoop(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations);
   }
   if (operation.loopKind === "for") {
@@ -4166,7 +4207,13 @@ function emitSemanticExpression(
     );
   }
   if (expression.kind === "call") {
-    const coalescedGroup = emitSemanticTypedCoalescedGroupCall(expression, ir, names, options, textureSpecializations);
+    const coalescedGroup = emitSemanticTypedCoalescedGroupCall(
+      expression,
+      ir,
+      (value) => emitSemanticTruthinessExpression(value, ir, names, options),
+      (value, type) => emitSemanticExpressionAs(value, ir, names, type, options, textureSpecializations),
+      (value) => semanticWgslExpressionSupported(value, "scalar", ir),
+    );
     if (coalescedGroup) return coalescedGroup;
     const cooperativeGroup = emitSemanticTypedCooperativeGroupCall(expression, ir, options.activeFunction, (predicate) => emitSemanticTruthinessExpression(predicate, ir, names, options));
     if (cooperativeGroup) return cooperativeGroup;
@@ -5247,7 +5294,7 @@ function semanticTypedSharedPointerFunctionForCall(
   if (!fn.params.some((param) => param.pointer && param.addressSpace === "shared")) return undefined;
   if (fn.params.some((param) =>
     param.addressSpace === "texture" || param.addressSpace === "surface" ||
-    param.pointer && param.addressSpace !== "shared")) return undefined;
+    param.pointer && param.addressSpace !== "shared" && param.addressSpace !== "local")) return undefined;
   return fn;
 }
 
@@ -5280,6 +5327,22 @@ function emitSemanticTypedSharedPointerFunctionCall(
     }
     if (param.pointer) {
       const ref = semanticPointerArgMemoryRef(arg);
+      if (param.addressSpace === "local") {
+        if (!ref || ref.addressSpace !== "local") throw semanticWgslError(`local pointer argument '${param.name}' is not modeled local memory`, arg.span);
+        const owner = options.activeFunction === undefined ? undefined : ir.functions.find((candidate) => candidate.name === options.activeFunction);
+        const forwarded = owner?.params.find((candidate) => candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "local");
+        const pointerType = semanticTypedLocalPointerType(forwarded ?? param);
+        args.push(forwarded
+          ? createTypedWgslIdentifier(nameFor(forwarded.name, names), pointerType, ref.span)
+          : createTypedWgslBindingAddress(nameFor(ref.base, names), pointerType, ref.span));
+        if (param.dimensions.length > 0) {
+          const offset = ref.indices[0] === undefined ? createTypedWgslLiteral("0u", "u32", ref.span) : emitSemanticExpressionAs(ref.indices[0], ir, names, "u32", options);
+          args.push(forwarded?.dimensions.length
+            ? emitTypedWgslBinary("+", createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(forwarded.name), names), "u32", ref.span), offset, ref.span)
+            : offset);
+        }
+        return;
+      }
       if (!ref || ref.addressSpace !== "shared") throw semanticWgslError(`shared pointer argument '${param.name}' is not modeled shared memory`, arg.span);
       const owner = options.activeFunction === undefined ? undefined : ir.functions.find((candidate) => candidate.name === options.activeFunction);
       const forwarded = owner?.params.find((candidate) => candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "shared");
@@ -5308,11 +5371,7 @@ function emitSemanticTypedSharedPointerFunctionCall(
       args.push(emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param.valueType), options, textureSpecializations));
     }
   });
-  args.push(
-    createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("workgroup_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("num_workgroups", "vec3<u32>", expression.span),
-  );
+  args.push(...semanticTypedInvocationArguments(ir, expression.span));
   return createTypedWgslCall(
     nameFor(semanticFunctionCallName(fn.name, fn, expression.args, options, textureSpecializations), names),
     args,
@@ -5374,11 +5433,7 @@ function emitSemanticTypedLocalPointerFunctionCall(
     if (isSemanticFloatVectorType(param.valueType)) return [emitSemanticExpression(arg, ir, names, options, textureSpecializations)];
     return [emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param.valueType), options, textureSpecializations)];
   });
-  args.push(
-    createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("workgroup_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("num_workgroups", "vec3<u32>", expression.span),
-  );
+  args.push(...semanticTypedInvocationArguments(ir, expression.span));
   return createTypedWgslCall(
     nameFor(semanticFunctionCallName(fn.name, fn, expression.args, options, textureSpecializations), names),
     args,
@@ -5511,11 +5566,7 @@ function emitSemanticTypedStoragePointerFunctionCall(
       args.push(emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param.valueType), options, textureSpecializations));
     }
   });
-  args.push(
-    createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("workgroup_id", "vec3<u32>", expression.span),
-    createTypedWgslIdentifier("num_workgroups", "vec3<u32>", expression.span),
-  );
+  args.push(...semanticTypedInvocationArguments(ir, expression.span));
   return createTypedWgslCall(
     nameFor(semanticFunctionCallName(fn.name, fn, expression.args, options, textureSpecializations), names),
     args,
@@ -5953,63 +6004,6 @@ function emitSemanticTypedSyncthreadsPredicateCall(
       createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
     ],
     "i32",
-    expression.span,
-  );
-}
-
-function semanticWgslCoalescedGroupCallSupported(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  ir: SemanticKernelIrModule,
-): boolean {
-  if (ir.subgroupMode === "scalar" || expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return false;
-  const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
-  if (group?.kind !== "coalesced") return false;
-  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
-    return expression.args.length === 1 && semanticWgslExpressionSupported(expression.args[0]!, "scalar", ir);
-  }
-  return expression.callee.property === "shfl" && expression.args.length === 2 &&
-    expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir));
-}
-
-function emitSemanticTypedCoalescedGroupCall(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions,
-  textureSpecializations: SemanticTextureDescriptorSpecializations,
-): TypedWgslExpression | undefined {
-  if (!semanticWgslCoalescedGroupCallSupported(expression, ir) || expression.callee.kind !== "member") return undefined;
-  const method = expression.callee.property;
-  const value = expression.args[0]!;
-  if (method === "ballot") {
-    const ballot = createTypedWgslCall(
-      "subgroupBallot",
-      [emitSemanticTruthinessExpression(value, ir, names, options)],
-      "vec4<u32>",
-      expression.span,
-    );
-    return createTypedWgslMemberAccess(ballot, "x", "u32", expression.span);
-  }
-  if (method === "any" || method === "all") {
-    const vote = createTypedWgslCall(
-      method === "any" ? "subgroupAny" : "subgroupAll",
-      [emitSemanticTruthinessExpression(value, ir, names, options)],
-      "bool",
-      expression.span,
-    );
-    return legalizeTypedWgslBoolToNumeric(vote, expression.valueType === "uint" ? "u32" : "i32");
-  }
-  const valueType = semanticExpressionValueType(value);
-  const index = expression.args[1];
-  if (!valueType || valueType === "void" || !index) return undefined;
-  const scalar = wgslValueScalar(valueType);
-  return createTypedWgslCall(
-    "subgroupShuffle",
-    [
-      emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations),
-      emitSemanticExpressionAs(index, ir, names, "u32", options, textureSpecializations),
-    ],
-    scalar,
     expression.span,
   );
 }
@@ -6862,7 +6856,7 @@ function emitSemanticFunctionCall(
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${callee}'`, expression.span);
   const args = expression.args.flatMap((arg, index) => emitSemanticFunctionArgs(arg, fn.params[index], ir, names, options, textureSpecializations));
   const calleeName = semanticFunctionCallName(callee, fn, expression.args, options, textureSpecializations);
-  return `${nameFor(calleeName, names)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
+  return `${nameFor(calleeName, names)}(${[...args, ...semanticInvocationArgumentNames(ir)].join(", ")})`;
 }
 
 function emitSemanticVectorConstructorExpression(
