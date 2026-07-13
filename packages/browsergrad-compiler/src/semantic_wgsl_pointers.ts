@@ -22,7 +22,9 @@ import {
 import { sizeofCudaType } from "./type_layout.js";
 import {
   floatAtomicHelperName,
+  integerAtomicLoopHelperName,
   wgslAtomicCalleeForCudaAtomic,
+  wgslIntegerLoopAtomicKindForCudaAtomic,
 } from "./wgsl_atomic_helpers.js";
 import {
   wgslValueScalar,
@@ -329,6 +331,7 @@ function collectSemanticStoragePointerOperationRefs(
 
 const SEMANTIC_POINTER_ATOMIC_CALLS = [
   "atomicAdd", "atomicSub", "atomicMin", "atomicMax", "atomicAnd", "atomicOr", "atomicXor", "atomicExch", "atomicCAS",
+  "atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system",
 ] as const;
 
 function emitSemanticStoragePointerReadHelper(
@@ -507,7 +510,7 @@ function semanticPointerAtomicHelperName(callee: string, valueType: CudaLiteScal
 function semanticWgslPointerAtomicCallSupported(callee: string, valueType: CudaLiteScalarType): boolean {
   const op = semanticAtomicOperation(callee);
   if (semanticAtomicUsesF32Storage(valueType)) return op === "add" || op === "sub" || op === "min" || op === "max" || op === "exchange" || op === "cas";
-  if (valueType === "int" || valueType === "uint") return op === "add" || op === "sub" || op === "min" || op === "max" || op === "and" || op === "or" || op === "xor" || op === "exchange" || op === "cas";
+  if (valueType === "int" || valueType === "uint") return op === "add" || op === "sub" || op === "min" || op === "max" || op === "and" || op === "or" || op === "xor" || op === "exchange" || op === "cas" || op === "inc" || op === "dec";
   return false;
 }
 
@@ -555,6 +558,17 @@ function emitSemanticStoragePointerAtomicValue(
     return kind === "Add" || kind === "Sub" || kind === "Min" || kind === "Max"
       ? `${floatAtomicHelperName(kind, "storage")}(&${storage}[${index}], ${value})`
       : "0.0";
+  }
+  const loopKind = wgslIntegerLoopAtomicKindForCudaAtomic(callee);
+  if (loopKind && (valueType === "uint" || valueType === "int")) {
+    const scalar = valueType === "uint" ? "u32" : "i32";
+    const helper = integerAtomicLoopHelperName(loopKind, {
+      valueType,
+      storageValueType: valueType,
+      storageScalar: scalar,
+      addressSpace: "storage",
+    });
+    return `${helper}(&${storage}[${index}], ${value})`;
   }
   const wgslCallee = wgslAtomicCalleeForCudaAtomic(callee);
   if (wgslCallee === "atomicCompareExchangeWeak") return `atomicCompareExchangeWeak(&${storage}[${index}], ${compare}, ${value}).old_value`;

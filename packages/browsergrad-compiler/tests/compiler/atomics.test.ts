@@ -2075,9 +2075,26 @@ describe("CUDA-lite compiler: Atomics", () => {
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {
+            counter: new Uint32Array([1]),
+            out: new Uint32Array(6),
+          },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
       expect([...result.buffers.counter as Uint32Array]).toEqual([1]);
       expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 1, 1, 2, 1]);
+      expect([...semanticResult.buffers.counter as Uint32Array]).toEqual([1]);
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 2, 1, 1, 2, 1]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toContain("fn bg_ptr_atomicInc_u32");
+      expect(compiled.wgsl).toContain("fn bg_ptr_atomicDec_u32");
       expect(compiled.wgsl).toContain("bg_atomicInc_storage_u32");
       expect(compiled.wgsl).toContain("bg_atomicDec_storage_u32");
       expect(compiled.wgsl).toContain("bg_atomicInc_workgroup_u32");
@@ -2112,16 +2129,33 @@ describe("CUDA-lite compiler: Atomics", () => {
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
+      const semanticResult = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {
+            out: new Uint32Array(3),
+          },
+          deviceGlobals: {
+            g_counter: new Uint32Array([1]),
+          },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
 
       expect([...result.buffers.g_counter as Uint32Array]).toEqual([1]);
       expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 1]);
+      expect([...semanticResult.buffers.g_counter as Uint32Array]).toEqual([1]);
+      expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 2, 1]);
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("g_counter: array<atomic<u32>>");
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
       expect(compiled.wgsl).not.toContain("var<storage, read_write> out: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicInc_u32");
       expect(compiled.wgsl).toContain("fn bg_ptr_atomicDec_u32");
-      expect(compiled.wgsl).toContain("return bg_atomicInc_storage_u32(&g_counter[index], limit);");
-      expect(compiled.wgsl).toContain("return bg_atomicDec_storage_u32(&g_counter[index], limit);");
+      expect(compiled.wgsl).toContain("return bg_atomicInc_storage_u32(&g_counter[index], value);");
+      expect(compiled.wgsl).toContain("return bg_atomicDec_storage_u32(&g_counter[index], value);");
     });
 
   it("marks storage atomic after local pointer assignment rebinding", () => {
