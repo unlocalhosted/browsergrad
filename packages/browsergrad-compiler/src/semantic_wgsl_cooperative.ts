@@ -16,6 +16,7 @@ import {
   semanticCooperativeGroupRankParamName,
   semanticCooperativeGroupSizeParamName,
 } from "./semantic_cooperative_groups.js";
+import { cooperativeReductionOperationForName, type CooperativeReductionOperation } from "./cooperative_reduction.js";
 import {
   convertTypedWgslExpression,
   createTypedWgslCall,
@@ -304,7 +305,8 @@ export function semanticCooperativeReduceHelperFor(
   }
   if (!isCooperativeReduceName(expression.callee.name)) return undefined;
   const [groupArg, valueArg, operationArg] = expression.args;
-  if (!groupArg || groupArg.kind !== "symbol" || !valueArg || !isPlusOperation(operationArg)) return undefined;
+  const operation = semanticCooperativeReductionOperation(operationArg);
+  if (!groupArg || groupArg.kind !== "symbol" || !valueArg || operation === undefined) return undefined;
   const group = semanticCooperativeGroupInfo(ir, groupArg.name);
   if (!group || (group.kind !== "tile" && group.kind !== "thread" && group.kind !== "binary")) return undefined;
   const valueType = semanticExpressionValueType(valueArg);
@@ -312,14 +314,15 @@ export function semanticCooperativeReduceHelperFor(
   const parent = group.partitionParent ? semanticCooperativeGroupInfo(ir, group.partitionParent) : undefined;
   const tileSize = group.tileSize ?? parent?.tileSize ?? 32;
   const typeName = wgslValueScalar(valueType).replace(/[^A-Za-z0-9_]/gu, "_");
+  const operationName = operation === "add" ? "" : `_${operation}`;
   return {
-    name: `bg_semantic_cg_reduce_${typeName}_${tileSize}`,
-    scratchName: `bg_semantic_cg_reduce_${typeName}_${tileSize}_scratch`,
+    name: `bg_semantic_cg_reduce${operationName}_${typeName}_${tileSize}`,
+    scratchName: `bg_semantic_cg_reduce${operationName}_${typeName}_${tileSize}_scratch`,
     valueType,
     tileSize,
     masked: group.partitioned === true || group.kind === "binary",
     partitioned: group.partitioned === true || group.kind === "binary",
-    operation: "add",
+    operation,
   };
 }
 
@@ -550,8 +553,18 @@ function isCooperativeReduceName(name: string): boolean {
 }
 
 function isPlusOperation(expression: SemanticExpression | undefined): boolean {
-  if (expression?.kind === "symbol") return expression.addressSpace === "builtin" && expression.name.endsWith("::plus");
-  return expression?.kind === "call" && expression.callee.kind === "symbol" && expression.callee.name.endsWith("::plus");
+  return semanticCooperativeReductionOperation(expression) === "add";
+}
+
+function semanticCooperativeReductionOperation(
+  expression: SemanticExpression | undefined,
+): CooperativeReductionOperation | undefined {
+  if (expression?.kind === "symbol" && expression.addressSpace === "builtin") {
+    return cooperativeReductionOperationForName(expression.name);
+  }
+  return expression?.kind === "call" && expression.callee.kind === "symbol"
+    ? cooperativeReductionOperationForName(expression.callee.name)
+    : undefined;
 }
 
 function semanticCooperativeWorkgroupSize(ir: SemanticKernelIrModule): number {

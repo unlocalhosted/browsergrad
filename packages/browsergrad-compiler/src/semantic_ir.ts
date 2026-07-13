@@ -77,6 +77,7 @@ import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS, SEMANTIC_NOOP_CALLS, SEMANTIC_SUBGROUP_CALLS } from "./semantic_builtin_calls.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
+import { isCooperativeReductionObjectName } from "./cooperative_reduction.js";
 import { SEMANTIC_CURAND_CALLS, SEMANTIC_CURAND_VECTOR_RETURN_TYPES } from "./semantic_curand_intrinsics.js";
 import {
   isSemanticGeneratedRandomCall,
@@ -2487,6 +2488,18 @@ function lowerStatementsWithScope(
   });
 }
 
+function bindSemanticSymbol(
+  scope: Map<string, CudaLiteSemanticSymbol>,
+  sourceName: string,
+  symbol: CudaLiteSemanticSymbol,
+): void {
+  const shadowed = scope.get(sourceName);
+  if (shadowed !== undefined && shadowed.id.key !== symbol.id.key) {
+    scope.set(`__bg_identity:${shadowed.id.key}`, shadowed);
+  }
+  scope.set(sourceName, symbol);
+}
+
 function lowerStatementOperations(
   statement: CudaLiteStatement,
   scope: Map<string, CudaLiteSemanticSymbol>,
@@ -3239,7 +3252,7 @@ function lowerStatement(
     }
     case "var": {
       const target = symbolForVar(statement, scope);
-      scope.set(target.name, target);
+      bindSemanticSymbol(scope, target.name, target);
       return {
         kind: "declare",
         target,
@@ -4276,7 +4289,7 @@ function lowerExpression(
           span: expression.span,
         };
       }
-      if (symbol === undefined && expression.name === "cg::plus") {
+      if (symbol === undefined && isCooperativeReductionObjectName(expression.name)) {
         return {
           kind: "symbol",
           id: createBuiltinSemanticSymbolId(expression.name),
@@ -7166,7 +7179,9 @@ function isBfloat162VectorName(name: string): boolean {
 
 function indexedValueType(target: SemanticExpression): CudaLiteScalarType | undefined {
   const targetType = expressionValueType(target);
-  return expressionAddressSpace(target) === "local" && targetType !== undefined && isCudaVectorType(targetType)
+  const indexesVectorValue = target.kind === "index" ||
+    expressionAddressSpace(target) === "local" && !(target.kind === "cast" && target.pointer);
+  return indexesVectorValue && targetType !== undefined && isCudaVectorType(targetType)
     ? cudaVectorScalarType(targetType)
     : targetType;
 }

@@ -1568,6 +1568,36 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.output as Float32Array]).toEqual([8]);
     });
 
+  it("lowers typed cooperative min and max reducers", () => {
+    const compiled = compileCudaLiteKernel(`
+  namespace cg = cooperative_groups;
+  __global__ void tileMinMax(const float *input, float *output) {
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<8> tile = cg::tiled_partition<8>(block);
+    int rank = tile.thread_rank();
+    float value = input[rank];
+    float maximum = cg::reduce(tile, value, cg::greater<float>{});
+    float minimum = cg::reduce(tile, value, cg::less<float>{});
+    if (rank == 0) {
+      output[0] = maximum;
+      output[1] = minimum;
+    }
+  }`, { workgroupSize: [8, 1, 1] });
+    const input = {
+      buffers: {
+        input: new Float32Array([3, -2, 9, 4, 1, 7, 0, 5]),
+        output: new Float32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [8, 1, 1] as const };
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect([...runCompiledKernelSemanticReference(compiled, input, launch).buffers.output as Float32Array]).toEqual([9, -2]);
+    expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_max_f32_8(value, local_id)");
+    expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_min_f32_8(value, local_id)");
+  });
+
   it("lowers cooperative-group inclusive and exclusive tile scans", () => {
       const compiled = compileCudaLiteKernel(`
   namespace cg = cooperative_groups;

@@ -11,6 +11,7 @@ import { semanticBinaryResultType } from "./semantic_type_rules.js";
 import { isSemanticValueType } from "./semantic_value_type.js";
 import { completeIrTypeChecking, type TypeCheckedIrArtifact } from "./compiler_phases.js";
 import { semanticFunctionIdFromSymbol, semanticIdsEqual } from "./semantic_ids.js";
+import { isCooperativeReductionObjectName } from "./cooperative_reduction.js";
 
 const typeCheckedSemanticKernelIrArtifact: unique symbol = Symbol("type-checked-semantic-kernel-ir");
 
@@ -204,7 +205,8 @@ function checkExpression(
   ir: SemanticKernelIrModule,
   report: (message: string, span: SourceSpan) => void,
 ): void {
-  const nonScalarBuiltinValue = expression.kind === "symbol" && expression.addressSpace === "builtin" && expression.name === "cg::plus";
+  const nonScalarBuiltinValue = expression.kind === "symbol" && expression.addressSpace === "builtin" &&
+    isCooperativeReductionObjectName(expression.name);
   if (use === "value" && !nonScalarBuiltinValue && expression.kind !== "initializer" && !(expression.kind === "literal" && expression.literalKind === "string")) {
     const valueType = expressionValueType(expression);
     if (valueType === undefined || valueType === "void") report(`${describeExpression(expression)} has no value type`, expression.span);

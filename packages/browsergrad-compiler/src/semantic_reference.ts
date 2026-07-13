@@ -223,6 +223,7 @@ import {
 } from "./semantic_value_types.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, isCudaVectorType } from "./vector_types.js";
+import { cooperativeReductionOperationForName, type CooperativeReductionOperation } from "./cooperative_reduction.js";
 import {
   semanticCooperativeGroupInfo,
   semanticCooperativeGroupRankParamName,
@@ -4882,7 +4883,32 @@ function evalSemanticCooperativeReduceCall(
       return evalSemanticVectorReducer(reducer, left, right, valueType, context, expression.span);
     }, first);
   }
-  return semanticReferenceCooperativeContexts(groupArg.name, context).reduce((sum, peer) => sum + evalNumber(valueArg, peer), 0);
+  const operation = semanticReferenceCooperativeReductionOperation(expression.args[2]);
+  if (operation === undefined) throw semanticReferenceError("semantic cooperative reduce requires a supported reducer", expression.span);
+  const values = semanticReferenceCooperativeContexts(groupArg.name, context).map((peer) => evalNumber(valueArg, peer));
+  const first = values.shift();
+  if (first === undefined) throw semanticReferenceError("semantic cooperative reduce has no active lanes", expression.span);
+  return values.reduce((left, right) => combineSemanticCooperativeReduction(operation, left, right), first);
+}
+
+function semanticReferenceCooperativeReductionOperation(
+  expression: SemanticExpression | undefined,
+): CooperativeReductionOperation | undefined {
+  if (expression === undefined) return "add";
+  if (expression.kind === "symbol") return cooperativeReductionOperationForName(expression.name);
+  return expression.kind === "call" && expression.callee.kind === "symbol"
+    ? cooperativeReductionOperationForName(expression.callee.name)
+    : undefined;
+}
+
+function combineSemanticCooperativeReduction(
+  operation: CooperativeReductionOperation,
+  left: number,
+  right: number,
+): number {
+  if (operation === "min") return Math.min(left, right);
+  if (operation === "max") return Math.max(left, right);
+  return left + right;
 }
 
 function evalSemanticVectorReducer(
