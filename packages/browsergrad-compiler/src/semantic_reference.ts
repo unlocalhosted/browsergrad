@@ -5660,7 +5660,8 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
       if (ref.indices.length === 0 && typeof buffer === "number") return buffer;
       throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     }
-    if (semanticReferenceLocalVectorRootType(ref, context) !== undefined && ref.indices.length === 1) {
+    if (semanticReferenceLocalVectorRootType(ref, context) !== undefined && ref.indices.length === 1 &&
+      semanticReferenceLocalVectorBitViewRootType(ref, context.compiled) === undefined) {
       const lane = Math.trunc(evalNumber(ref.indices[0]!, context));
       return lane >= 0 && lane < buffer.length ? Number(buffer[lane] ?? 0) : 0;
     }
@@ -5760,7 +5761,8 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
       }
       throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     }
-    if (semanticReferenceLocalVectorRootType(ref, context) !== undefined && ref.indices.length === 1) {
+    if (semanticReferenceLocalVectorRootType(ref, context) !== undefined && ref.indices.length === 1 &&
+      semanticReferenceLocalVectorBitViewRootType(ref, context.compiled) === undefined) {
       const lane = Math.trunc(evalNumber(ref.indices[0]!, context));
       if (lane >= 0 && lane < buffer.length) buffer[lane] = value;
       return;

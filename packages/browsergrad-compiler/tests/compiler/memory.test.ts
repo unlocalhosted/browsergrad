@@ -1693,7 +1693,7 @@ __global__ void shared_reinterpret(int *out) {
       );
 
       expect([...result.buffers.data as Int32Array]).toEqual([1, 2, 3, 4]);
-      expect(compiled.wgsl).toMatch(/data(?:\[i\]|\[u32\(i\)\]) = \((?:i32\()?data(?:\[i\]|\[u32\(i\)\])\)? \+ 1\)/u);
+      expect(compiled.wgsl).toMatch(/data(?:\[i\]|\[u32\(i\)\]) (?:\+= 1|= \((?:i32\()?data(?:\[i\]|\[u32\(i\)\])\)? \+ 1\))/u);
       expect(compiled.wgsl).not.toContain("bg_ptr_read_i32");
       expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
     });

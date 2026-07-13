@@ -2518,7 +2518,7 @@ function emitSemanticLocalUpdateStatement(
       return createTypedWgslCallStatement(semanticPointerWriteHelperName(valueType), [buffer, index, next], expression.span);
     }
   }
-  if (ref && ref.indices.length === 1 && ref.fields.length === 0 && (semanticWgslScalarTypeSupported(ref.valueType) || ref.valueType === "uchar") &&
+  if (ref && (ref.indices.length === 1 || ref.indices.length === 0 && ref.addressSpace === "device-global") && ref.fields.length === 0 && (semanticWgslScalarTypeSupported(ref.valueType) || ref.valueType === "uchar") &&
     ref.packedByteLanes === undefined && !semanticWgslPackedSharedByteRoot(ref, ir) && !semanticWgslDirectByteRawView(ref, ir) &&
     !semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null) && !semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null)) {
     const type = wgslValueType(ref.valueType);
