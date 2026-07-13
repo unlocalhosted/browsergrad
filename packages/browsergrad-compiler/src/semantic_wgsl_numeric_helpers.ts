@@ -1,5 +1,14 @@
 export function emitSemanticNumericHelpers(): readonly string[] {
   return [
+    "fn bg_semantic_isnan_f32(value: f32) -> bool {",
+    "  return (bitcast<u32>(value) & 0x7fffffffu) > 0x7f800000u;",
+    "}",
+    "fn bg_semantic_isnan_vec2_f32(value: vec2<f32>) -> vec2<bool> {",
+    "  return (bitcast<vec2<u32>>(value) & vec2<u32>(0x7fffffffu)) > vec2<u32>(0x7f800000u);",
+    "}",
+    "fn bg_semantic_isinf_f32(value: f32) -> bool {",
+    "  return (bitcast<u32>(value) & 0x7fffffffu) == 0x7f800000u;",
+    "}",
     "fn bg_semantic_round_even_f32(value: f32) -> f32 {",
     "  if (value != value || abs(value) > 3.4028234663852886e38) { return value; }",
     "  let lower = floor(value);",

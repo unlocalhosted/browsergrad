@@ -270,6 +270,7 @@ import {
   semanticCooperativeGroupSizeParamName,
 } from "./semantic_cooperative_groups.js";
 import { emitSemanticNumericHelpers } from "./semantic_wgsl_numeric_helpers.js";
+import { createSemanticBfloatScalarEmitter, roundTypedBf16, semanticTypedIsNan } from "./semantic_wgsl_bfloat_scalar.js";
 import { createSemanticTypedIntrinsicEmitter } from "./semantic_wgsl_typed_intrinsics.js";
 import { createSemanticWgslAtomicAnalysis } from "./semantic_wgsl_atomic_analysis.js";
 import {
@@ -355,6 +356,8 @@ const {
   semanticWgslError,
   semanticWgslVectorLerpCallSupported,
 });
+
+const emitSemanticTypedBfloatScalarCall = createSemanticBfloatScalarEmitter({ emitSemanticExpressionAs });
 
 const {
   semanticAtomicStorageNames,
@@ -4501,15 +4504,6 @@ function emitSemanticTypedPtxIntegerCall(
   return expression.valueType === "int" ? createTypedWgslBitcast("i32", result, expression.span) : result;
 }
 
-function roundTypedBf16(value: TypedWgslExpression, span: SourceSpan): TypedWgslExpression {
-  const bits = createTypedWgslCall("bg_f32_to_bf16_bits_mode", [value, createTypedWgslZero("u32", span)], "u32", span);
-  return createTypedWgslBitcast(
-    "f32",
-    emitTypedWgslBinary("<<", bits, createTypedWgslLiteral("16u", "u32", span), span),
-    span,
-  );
-}
-
 function emitSemanticTypedBf16Call(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
@@ -4550,7 +4544,7 @@ function emitSemanticTypedBf16Call(
       : normalized === "__hge2" || normalized === "__hgeu2" ? ">="
       : normalized === "__hlt2" || normalized === "__hltu2" ? "<" : "<=";
     const base = emitTypedWgslBinary(operator, lhs, rhs, expression.span);
-    const unordered = emitTypedWgslBinary("|", emitTypedWgslBinary("!=", lhs, lhs, expression.span), emitTypedWgslBinary("!=", rhs, rhs, expression.span), expression.span);
+    const unordered = emitTypedWgslBinary("|", semanticTypedIsNan(lhs, expression.span), semanticTypedIsNan(rhs, expression.span), expression.span);
     const predicate = normalized.includes("u2")
       ? emitTypedWgslBinary("|", unordered, base, expression.span)
       : emitTypedWgslBinary("&", emitTypedWgslUnary("!", unordered, expression.span), base, expression.span);
@@ -4613,7 +4607,7 @@ function emitSemanticTypedBf16Call(
     const lhs = vector(left);
     const rhs = vector(right);
     const result = createTypedWgslCall(name === "__hmin2_nan" ? "min" : "max", [lhs, rhs], "vec2<f32>", expression.span);
-    const nan = emitTypedWgslBinary("|", emitTypedWgslBinary("!=", lhs, lhs, expression.span), emitTypedWgslBinary("!=", rhs, rhs, expression.span), expression.span);
+    const nan = emitTypedWgslBinary("|", semanticTypedIsNan(lhs, expression.span), semanticTypedIsNan(rhs, expression.span), expression.span);
     return roundPair(emitTypedWgslSelect(result, emitTypedWgslBinary("+", lhs, rhs, expression.span), nan, expression.span));
   }
   if (isPair && (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat" || name === "__hfma2_relu")) {
@@ -4652,10 +4646,12 @@ function emitSemanticTypedBf16Call(
     return emitTypedWgslSelect(
       createTypedWgslZero("vec2<f32>", expression.span),
       createTypedWgslConstructor("vec2<f32>", [createTypedWgslLiteral("1.0", "f32", expression.span)], expression.span),
-      emitTypedWgslBinary("!=", pair, pair, expression.span),
+      semanticTypedIsNan(pair, expression.span),
       expression.span,
     );
   }
+  const scalarCall = emitSemanticTypedBfloatScalarCall(expression, ir, names, options, textureSpecializations);
+  if (scalarCall) return scalarCall;
   if (expression.valueType === "bf16" && (name === "__hdiv" || name === "__hdiv_rn")) {
     const [left, right] = expression.args;
     return left && right ? roundTypedBf16(emitTypedWgslBinary("/", scalar(left), scalar(right), expression.span), expression.span) : undefined;
@@ -4699,7 +4695,7 @@ function emitSemanticTypedHalfCall(
     const rhs = scalar(right);
     const operator = ({ eq: "==", ne: "!=", gt: ">", ge: ">=", lt: "<", le: "<=" } as const)[scalarComparison[1] as "eq" | "ne" | "gt" | "ge" | "lt" | "le"];
     const base = emitTypedWgslBinary(operator, lhs, rhs, expression.span);
-    const unordered = emitTypedWgslBinary("||", emitTypedWgslBinary("!=", lhs, lhs, expression.span), emitTypedWgslBinary("!=", rhs, rhs, expression.span), expression.span);
+    const unordered = emitTypedWgslBinary("||", semanticTypedIsNan(convertTypedWgslExpression(lhs, "f32", true), expression.span), semanticTypedIsNan(convertTypedWgslExpression(rhs, "f32", true), expression.span), expression.span);
     const predicate = scalarComparison[2] ? emitTypedWgslBinary("||", unordered, base, expression.span) : emitTypedWgslBinary("&&", emitTypedWgslUnary("!", unordered, expression.span), base, expression.span);
     return emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("1u", "u32", expression.span), predicate, expression.span);
   }
@@ -4715,7 +4711,12 @@ function emitSemanticTypedHalfCall(
       : normalized === "__hge2" || normalized === "__hgeu2" ? ">="
       : normalized === "__hlt2" || normalized === "__hltu2" ? "<" : "<=";
     const base = emitTypedWgslBinary(operator, lhs, rhs, expression.span);
-    const unordered = emitTypedWgslBinary("|", emitTypedWgslBinary("!=", lhs, lhs, expression.span), emitTypedWgslBinary("!=", rhs, rhs, expression.span), expression.span);
+    const unordered = emitTypedWgslBinary(
+      "|",
+      semanticTypedIsNan(lhs, expression.span),
+      semanticTypedIsNan(rhs, expression.span),
+      expression.span,
+    );
     const predicate = normalized.includes("u2")
       ? emitTypedWgslBinary("|", unordered, base, expression.span)
       : emitTypedWgslBinary("&", emitTypedWgslUnary("!", unordered, expression.span), base, expression.span);
@@ -4761,10 +4762,22 @@ function emitSemanticTypedHalfCall(
     const value = expression.args[0];
     if (!value) return undefined;
     const operand = scalar(value);
-    const condition = name === "__hisnan"
-      ? emitTypedWgslBinary("!=", operand, operand, expression.span)
-      : emitTypedWgslBinary(">", createTypedWgslCall("abs", [operand], "f16", expression.span), createTypedWgslLiteral("f16(65504.0)", "f16", expression.span), expression.span);
-    return emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("1u", "u32", expression.span), condition, expression.span);
+    const f32Operand = convertTypedWgslExpression(operand, "f32", true);
+    if (name === "__hisnan") {
+      return emitTypedWgslSelect(createTypedWgslZero("i32", expression.span), createTypedWgslLiteral("1", "i32", expression.span), semanticTypedIsNan(f32Operand, expression.span), expression.span);
+    }
+    const classification = emitTypedWgslSelect(
+      createTypedWgslLiteral("-1", "i32", expression.span),
+      createTypedWgslLiteral("1", "i32", expression.span),
+      emitTypedWgslBinary(">", f32Operand, createTypedWgslZero("f32", expression.span), expression.span),
+      expression.span,
+    );
+    return emitTypedWgslSelect(
+      createTypedWgslZero("i32", expression.span),
+      classification,
+      createTypedWgslCall("bg_semantic_isinf_f32", [f32Operand], "bool", expression.span),
+      expression.span,
+    );
   }
   if (["__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat"].includes(name)) {
     if (name === "__hadd" && expression.valueType !== "half") return undefined;
@@ -4774,7 +4787,7 @@ function emitSemanticTypedHalfCall(
     const value = emitTypedWgslBinary(operator, scalar(left), scalar(right), expression.span);
     if (!name.endsWith("_sat")) return value;
     const clamped = createTypedWgslCall("clamp", [value, createTypedWgslZero("f16", expression.span), createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], "f16", expression.span);
-    return emitTypedWgslSelect(clamped, createTypedWgslZero("f16", expression.span), emitTypedWgslBinary("!=", value, value, expression.span), expression.span);
+    return emitTypedWgslSelect(clamped, createTypedWgslZero("f16", expression.span), semanticTypedIsNan(convertTypedWgslExpression(value, "f32", true), expression.span), expression.span);
   }
   if (name === "__hmin" || name === "__hmax" || name === "__hmin_nan" || name === "__hmax_nan") {
     const [left, right] = expression.args;
@@ -4783,7 +4796,12 @@ function emitSemanticTypedHalfCall(
     const rhs = scalar(right);
     const result = createTypedWgslCall(name.includes("min") ? "min" : "max", [lhs, rhs], "f16", expression.span);
     if (!name.endsWith("_nan")) return result;
-    const nan = emitTypedWgslBinary("||", emitTypedWgslBinary("!=", lhs, lhs, expression.span), emitTypedWgslBinary("!=", rhs, rhs, expression.span), expression.span);
+    const nan = emitTypedWgslBinary(
+      "||",
+      semanticTypedIsNan(convertTypedWgslExpression(lhs, "f32", true), expression.span),
+      semanticTypedIsNan(convertTypedWgslExpression(rhs, "f32", true), expression.span),
+      expression.span,
+    );
     return emitTypedWgslSelect(result, emitTypedWgslBinary("+", lhs, rhs, expression.span), nan, expression.span);
   }
   if (["__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat"].includes(name) && semanticExpressionWgslType(expression, ir) === "vec2<f16>") {
@@ -4847,7 +4865,12 @@ function emitSemanticTypedHalfCall(
     const rhs = vector(right);
     const result = createTypedWgslCall(name.includes("min") ? "min" : "max", [lhs, rhs], "vec2<f16>", expression.span);
     if (!name.endsWith("_nan")) return result;
-    const nan = emitTypedWgslBinary("|", emitTypedWgslBinary("!=", lhs, lhs, expression.span), emitTypedWgslBinary("!=", rhs, rhs, expression.span), expression.span);
+    const nan = emitTypedWgslBinary(
+      "|",
+      semanticTypedIsNan(lhs, expression.span),
+      semanticTypedIsNan(rhs, expression.span),
+      expression.span,
+    );
     return emitTypedWgslSelect(result, emitTypedWgslBinary("+", lhs, rhs, expression.span), nan, expression.span);
   }
   if (name === "__hisnan2" && semanticExpressionVectorValueType(expression.args[0]!, ir.functions) === "half2") {
@@ -4857,7 +4880,7 @@ function emitSemanticTypedHalfCall(
     return emitTypedWgslSelect(
       createTypedWgslZero("vec2<f16>", expression.span),
       createTypedWgslConstructor("vec2<f16>", [createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], expression.span),
-      emitTypedWgslBinary("!=", pair, pair, expression.span),
+      semanticTypedIsNan(pair, expression.span),
       expression.span,
     );
   }

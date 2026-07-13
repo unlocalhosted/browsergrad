@@ -1150,7 +1150,13 @@ function emitSemanticTypedConversionIntrinsic(
       const sourceScalar = sourceKind === "int" || sourceKind === "short" ? "i32" : "u32";
       let source = emitSemanticExpressionAs(value, ir, names, sourceScalar, options, textureSpecializations);
       if (sourceKind === "short") {
-        source = createTypedWgslCall("bg_i16_to_f32", [source], "f32", expression.span);
+        const bits = emitTypedWgslBinary(
+          "&",
+          createTypedWgslBitcast("u32", source, expression.span),
+          createTypedWgslLiteral("0xffffu", "u32", expression.span),
+          expression.span,
+        );
+        source = convertTypedWgslExpression(typedPackedSignedLane(bits, 16, expression.span), "f32", true);
       } else {
         if (sourceKind === "ushort") {
           source = emitTypedWgslBinary("&", source, createTypedWgslLiteral("0xffffu", "u32", expression.span), expression.span);
