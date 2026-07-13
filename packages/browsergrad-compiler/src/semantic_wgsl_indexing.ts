@@ -158,9 +158,13 @@ export function createSemanticWgslIndexing(host: SemanticWgslIndexingHost) {
     options: SemanticWgslIndexOptions = {},
   ): string {
     const pointer = semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null);
-    if (pointer) {
+    const localRuntimePointer = ref.addressSpace === "local"
+      ? semanticRuntimePointerDeclarations(ir).find((operation) =>
+          operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation))
+      : undefined;
+    if (pointer || localRuntimePointer) {
       const terms = ref.indices.map((index) => emitExpressionAs(index, ir, names, "i32", options).code);
-      if (terms.length > 0 && ref.pointerBaseUnitBytes === undefined) {
+      if (pointer && terms.length > 0 && ref.pointerBaseUnitBytes === undefined) {
         const elementBytes = sizeofCudaType(pointer.valueType ?? "void") ?? 1;
         const byteBufferIds = semanticStoragePointerByteBufferIds(ir);
         if (elementBytes > 1 && byteBufferIds.length > 0) {
@@ -204,9 +208,15 @@ export function createSemanticWgslIndexing(host: SemanticWgslIndexingHost) {
     options: SemanticWgslIndexOptions = {},
   ): string {
     const pointerParam = semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null);
-    if (pointerParam) {
+    const localRuntimePointer = ref.addressSpace === "local"
+      ? semanticRuntimePointerDeclarations(ir).find((operation) =>
+          operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation))
+      : undefined;
+    if (pointerParam || localRuntimePointer) {
       const indexTerms = ref.indices.map((index) => emitExpressionAs(index, ir, names, "u32", options).code);
-      const valueType = semanticStorageVectorType(ref.containerValueType) ?? semanticStorageVectorType(pointerParam.valueType);
+      const valueType = semanticStorageVectorType(ref.containerValueType) ??
+        semanticStorageVectorType(pointerParam?.valueType) ??
+        semanticStorageVectorType(localRuntimePointer?.target.valueType);
       const stride = valueType === undefined ? 1 : cudaVectorLaneCount(valueType);
       const index = indexTerms.length === 0 ? "0u" : indexTerms.length === 1 ? indexTerms[0]! : `(${indexTerms.join(" + ")})`;
       const offset = stride === 1 ? index : `(${index} * ${stride}u)`;

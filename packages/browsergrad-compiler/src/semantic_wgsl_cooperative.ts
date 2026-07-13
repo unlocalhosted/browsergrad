@@ -495,8 +495,10 @@ export function emitSemanticCooperativeVectorReduceHelper(
   const type = wgslValueType(helper.valueType);
   const workgroupSize = semanticCooperativeWorkgroupSize(ir);
   const start = Math.max(1, Math.floor(Math.min(helper.tileSize, workgroupSize) / 2));
+  const subgroupParam = ir.requiredFeatures.includes("subgroups") ? ", subgroup_invocation_id: u32" : "";
+  const subgroupArg = ir.requiredFeatures.includes("subgroups") ? ", subgroup_invocation_id" : "";
   return [
-    `fn ${helper.name}(value_arg: ${type}, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> ${type} {`,
+    `fn ${helper.name}(value_arg: ${type}, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>${subgroupParam}) -> ${type} {`,
     `  let rank: u32 = ${semanticCooperativeLocalLinearRank(ir)};`,
     `  let width: u32 = min(${helper.tileSize}u, ${workgroupSize}u);`,
     "  let lane: u32 = rank % width;",
@@ -506,7 +508,7 @@ export function emitSemanticCooperativeVectorReduceHelper(
     `  var stride: u32 = ${start}u;`,
     "  while (stride > 0u) {",
     `    if (lane < stride && (lane + stride) < width && (rank + stride) < ${workgroupSize}u) {`,
-    `      ${helper.scratchName}[rank] = ${helper.reducerName}(${helper.scratchName}[rank], ${helper.scratchName}[rank + stride], local_id, workgroup_id, num_workgroups);`,
+    `      ${helper.scratchName}[rank] = ${helper.reducerName}(${helper.scratchName}[rank], ${helper.scratchName}[rank + stride], local_id, workgroup_id, num_workgroups${subgroupArg});`,
     "    }",
     "    workgroupBarrier();",
     "    stride = stride / 2u;",

@@ -167,6 +167,7 @@ function semanticOperationsUseSurfaceParamWrite(
     if (operation.kind === "surface-write" && operation.surface.kind === "symbol" && surfaceParams.has(operation.surface.name)) return true;
     if (operation.kind === "branch" && (semanticOperationsUseSurfaceParamWrite(operation.consequent, surfaceParams) || semanticOperationsUseSurfaceParamWrite(operation.alternate, surfaceParams))) return true;
     if (operation.kind === "loop" && semanticOperationsUseSurfaceParamWrite(operation.body, surfaceParams)) return true;
+    if (operation.kind === "block" && semanticOperationsUseSurfaceParamWrite(operation.body, surfaceParams)) return true;
   }
   return false;
 }
@@ -176,12 +177,14 @@ function semanticOperationsUseSurfaceParamRead(
   surfaceParams: ReadonlySet<string>,
 ): boolean {
   for (const operation of operations) {
+    if (operation.kind === "surface-read-store" && operation.surface.kind === "symbol" && surfaceParams.has(operation.surface.name)) return true;
     if (operation.kind === "return" && operation.value && semanticExpressionUsesSurfaceParamRead(operation.value, surfaceParams)) return true;
     if (operation.kind === "expression" && semanticExpressionUsesSurfaceParamRead(operation.expression, surfaceParams)) return true;
     if (operation.kind === "declare" && operation.init && semanticExpressionUsesSurfaceParamRead(operation.init, surfaceParams)) return true;
     if (operation.kind === "store" && semanticExpressionUsesSurfaceParamRead(operation.value, surfaceParams)) return true;
     if (operation.kind === "branch" && (semanticOperationsUseSurfaceParamRead(operation.consequent, surfaceParams) || semanticOperationsUseSurfaceParamRead(operation.alternate, surfaceParams))) return true;
     if (operation.kind === "loop" && semanticOperationsUseSurfaceParamRead(operation.body, surfaceParams)) return true;
+    if (operation.kind === "block" && semanticOperationsUseSurfaceParamRead(operation.body, surfaceParams)) return true;
   }
   return false;
 }

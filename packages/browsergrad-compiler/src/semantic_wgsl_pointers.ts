@@ -268,6 +268,11 @@ function semanticStoragePointerValueTypes(ir: SemanticKernelIrModule): ReadonlyS
     for (const param of fn.params) {
       if (param.pointer && param.addressSpace === "storage" && param.valueType !== undefined) types.add(param.valueType);
     }
+    for (const declaration of semanticPointerDeclarationsIn(fn.body)) {
+      if (declaration.target.valueType !== undefined && declaration.target.valueType !== "voidptr") {
+        types.add(declaration.target.valueType);
+      }
+    }
     walkSemanticOperations(fn.body, (expression) => {
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) add(ref);
@@ -275,6 +280,23 @@ function semanticStoragePointerValueTypes(ir: SemanticKernelIrModule): ReadonlyS
     collectSemanticStoragePointerOperationRefs(fn.body, add);
   }
   return types;
+}
+
+function semanticPointerDeclarationsIn(
+  operations: readonly SemanticKernelIrOperation[],
+): readonly Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] {
+  const declarations: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] = [];
+  for (const operation of operations) {
+    if (operation.kind === "declare" && operation.target.pointer) declarations.push(operation);
+    if (operation.kind === "branch") {
+      declarations.push(...semanticPointerDeclarationsIn(operation.consequent));
+      declarations.push(...semanticPointerDeclarationsIn(operation.alternate));
+    }
+    if (operation.kind === "loop" || operation.kind === "block") {
+      declarations.push(...semanticPointerDeclarationsIn(operation.body));
+    }
+  }
+  return declarations;
 }
 
 function semanticLocalPointerStorageRef(

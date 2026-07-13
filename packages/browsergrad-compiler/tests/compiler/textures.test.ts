@@ -703,6 +703,29 @@ __global__ void read_surface_1d(cudaSurfaceObject_t surf, float *out) {
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([2]);
     });
 
+  it("emits generic dispatch for output-pointer reads across multiple surfaces", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ float read_surface_alias(cudaSurfaceObject_t surfaceArg) {
+    float value = 0.0f;
+    surf2Dread(&value, surfaceArg, 0, 0);
+    return value;
+  }
+
+  __device__ void write_surface_alias(cudaSurfaceObject_t surfaceArg, float value) {
+    surf2Dwrite(value, surfaceArg, 4, 0);
+  }
+
+  __global__ void surfaceDispatch(cudaSurfaceObject_t first, cudaSurfaceObject_t second) {
+    float value = read_surface_alias(first);
+    write_surface_alias(second, value + 7.0f);
+  }`, { workgroupSize: [1, 1, 1] });
+
+      expect(compiled.wgsl).toContain("fn bg_sem_surf2dread(surface: u32, x_bytes: i32, y: i32, z: i32) -> f32");
+      expect(compiled.wgsl).toContain("fn bg_sem_surf2dwrite(surface: u32, value: f32, x_bytes: i32, y: i32, z: i32)");
+      expect(compiled.wgsl).toContain("bg_sem_surf2dread(surfaceArg, 0, 0, 0)");
+      expect(compiled.wgsl).toContain("bg_sem_surf2dwrite(surfaceArg, value, 4, 0, 0)");
+    });
+
   it("lowers scalar surface write helper params through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ void write_value(cudaSurfaceObject_t surfaceArg, float value) {

@@ -1038,6 +1038,23 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(compiled.wgsl).not.toContain("vectorOut[");
     });
 
+  it("discovers vector helpers from local casts of scalar storage params", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ void update_vector_alias(uint *scalarTarget) {
+    uint4 *vectorTarget = reinterpret_cast<uint4*>(scalarTarget);
+    vectorTarget[0].z += 7u;
+  }
+
+  __global__ void localVectorAlias(uint4 *out) {
+    uint *scalarTarget = reinterpret_cast<uint*>(out);
+    update_vector_alias(scalarTarget);
+  }`, { workgroupSize: [1, 1, 1] });
+
+      expect(compiled.wgsl).toContain("fn bg_ptr_read_u32x4(buffer: u32, index: u32) -> vec4<u32>");
+      expect(compiled.wgsl).toContain("fn bg_ptr_write_u32x4(buffer: u32, index: u32, value: vec4<u32>)");
+      expect(compiled.wgsl).toContain("bg_ptr_read_u32x4(scalarTarget_buffer");
+    });
+
   it("runs top-level shared integer atomics through semantic IR", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void semantic_shared_atomic(uint *out) {

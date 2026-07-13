@@ -5027,6 +5027,26 @@ __global__ void sharedHelperScoped(float *out) {
       expect(compiled.wgsl).not.toContain("select(0u, conditional_pointer_init_helper_with_pointer_side_effect");
     });
 
+  it("inherits runtime pointer identity in conditional helper-call initializers", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ uint conditional_pointer_identity_helper(uint *ptr, uint add) {
+    atomicAdd(ptr, add);
+    return 1u;
+  }
+
+  __global__ void conditionalPointerIdentity(uint4 *left, uint4 *right, int pickRight, int enabled) {
+    uint *ptr = reinterpret_cast<uint*>(left);
+    if (pickRight != 0) ptr = reinterpret_cast<uint*>(right);
+    uint *target = ptr + (enabled != 0 ? conditional_pointer_identity_helper(ptr, 7u) : 0u);
+    target[0] = 9u;
+  }`, { workgroupSize: [1, 1, 1] });
+
+      expect(compiled.wgsl).toContain("var target_buffer: u32 = ptr_buffer;");
+      expect(compiled.wgsl).toContain("var target_base: u32 = u32((i32(ptr_base) + i32(");
+      expect(compiled.wgsl).toContain("conditional_pointer_identity_helper(ptr_buffer");
+      expect(compiled.wgsl).toContain("bg_ptr_write_u32(target_buffer, u32((i32(target_base) + 0)), 9u)");
+    });
+
   it("guards conditional helper-call pointer initializers inside active-lane predication", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ uint active_conditional_pointer_init_helper_with_pointer_side_effect(uint *ptr, uint lane, uint add) {

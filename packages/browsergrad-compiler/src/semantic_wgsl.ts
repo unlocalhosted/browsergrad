@@ -1724,20 +1724,31 @@ function emitSemanticLocalPointerDeclaration(
   if (completePointerArray) return [];
   if (!semanticPointerDeclarationNeedsRuntimeState(operation)) return [];
   const prefix = "  ".repeat(indentLevel);
-  const ref = semanticLocalPointerStorageRef(operation);
-  if (ref === undefined && operation.target.pointerRuntimeState !== true) return [];
+  const candidateRef = semanticLocalPointerStorageRef(operation);
+  const ref = candidateRef && semanticStoragePointerBufferId(candidateRef.base, ir) !== undefined ? candidateRef : undefined;
+  const pointerInitRef = operation.init ? semanticPointerArgMemoryRef(operation.init) : undefined;
+  const runtimeSourceCandidate = pointerInitRef?.addressSpace === "local" ? semanticRuntimePointerDeclarationForRef(ir, pointerInitRef) : undefined;
+  const runtimeSourceRef = runtimeSourceCandidate ? semanticLocalPointerStorageRef(runtimeSourceCandidate) : undefined;
+  const runtimeSource = runtimeSourceCandidate && runtimeSourceRef && semanticStoragePointerBufferId(runtimeSourceRef.base, ir) !== undefined ? runtimeSourceCandidate : undefined;
+  const initRef = ref ?? (runtimeSource ? pointerInitRef : undefined);
+  if (initRef === undefined && operation.target.pointerRuntimeState !== true) return [];
   const buffer = nameFor(semanticPointerBufferParamName(operation.target.name), names);
   const base = nameFor(semanticPointerBaseParamName(operation.target.name), names);
-  const bufferId = ref === undefined ? undefined : semanticStoragePointerBufferId(ref.base, ir);
-  if (ref !== undefined && bufferId === undefined) throw semanticWgslError(`unknown local pointer storage root '${ref.base}'`, operation.span);
+  const bufferId = initRef === undefined ? undefined : semanticStoragePointerBufferId(initRef.base, ir);
+  if (initRef !== undefined && bufferId === undefined && runtimeSource === undefined) throw semanticWgslError(`unknown local pointer storage root '${initRef.base}'`, operation.span);
+  const initialBuffer = runtimeSource === undefined ? bufferId === undefined ? "0xffffffffu" : `${bufferId}u`
+    : nameFor(semanticPointerBufferParamName(initRef!.base), names);
+  const initialBase = initRef === undefined
+    ? "0u"
+    : runtimeSource === undefined
+      ? emitSemanticPointerArgBaseIndex(initRef, ir, names, options)
+      : emitTypedFlatStorageIndex(initRef, ir, names, options).code;
   return [
-    `${prefix}var ${buffer}: u32 = ${bufferId === undefined ? "0xffffffffu" : `${bufferId}u`};`,
-    `${prefix}var ${base}: u32 = ${ref === undefined ? "0u" : emitSemanticPointerArgBaseIndex(ref, ir, names, options)};`,
+    `${prefix}var ${buffer}: u32 = ${initialBuffer};`,
+    `${prefix}var ${base}: u32 = ${initialBase};`,
   ];
 }
-
 type SemanticPointerArrayAlias = Exclude<NonNullable<CudaLiteSemanticSymbol["pointerArrayAliases"]>[number], undefined>;
-
 function emitSemanticPointerAliasBuffer(
   alias: SemanticPointerArrayAlias,
   ir: SemanticKernelIrModule,
@@ -1755,7 +1766,6 @@ function emitSemanticPointerAliasBuffer(
   if (bufferId === undefined) throw semanticWgslError("pointer array alias requires a storage-backed root", alias.pointerBaseIndices?.[0]?.span ?? ir.span);
   return `${bufferId}u`;
 }
-
 function emitSemanticPointerAliasBase(
   alias: SemanticPointerArrayAlias,
   valueType: CudaLiteScalarType | undefined,
@@ -5971,6 +5981,9 @@ function emitSemanticTypedCooperativeVectorReduceCall(
       createTypedWgslIdentifier("local_id", "vec3<u32>", expression.span),
       createTypedWgslIdentifier("workgroup_id", "vec3<u32>", expression.span),
       createTypedWgslIdentifier("num_workgroups", "vec3<u32>", expression.span),
+      ...(ir.requiredFeatures.includes("subgroups")
+        ? [createTypedWgslIdentifier("subgroup_invocation_id", "u32", expression.span)]
+        : []),
     ],
     type,
     expression.span,

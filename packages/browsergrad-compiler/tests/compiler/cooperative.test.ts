@@ -1757,6 +1757,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     cg::thread_block block = cg::this_thread_block();
     cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
     float2 value = out[0];
+    float scalar = bg_subgroup_add(0.0f);
+    value.x += scalar;
     float2 total = cg::reduce(tile, value, merge_pair);
     if (threadIdx.x == 0) { out[0] = total; }
   }`, {
@@ -1770,9 +1772,11 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       );
 
       expect(compiled.wgsl).toContain("fn bg_semantic_cg_reduce_merge_pair_float2_32");
+      expect(compiled.wgsl).toContain("num_workgroups: vec3<u32>, subgroup_invocation_id: u32");
       expect(compiled.wgsl).toContain("var<workgroup> bg_semantic_cg_reduce_merge_pair_float2_32_scratch");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect(compiled.wgsl).toContain("merge_pair(bg_semantic_cg_reduce_merge_pair_float2_32_scratch[rank]");
+      expect(compiled.wgsl).toContain("num_workgroups, subgroup_invocation_id);");
       const mergeFnIndex = compiled.wgsl!.indexOf("fn merge_pair(");
       const reduceHelperIndex = compiled.wgsl!.indexOf("fn bg_semantic_cg_reduce_merge_pair_float2_32");
       expect(mergeFnIndex).toBeGreaterThanOrEqual(0);
