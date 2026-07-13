@@ -397,12 +397,12 @@ function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kerne
 }
 
 function semanticIrWgslCoverageFor(compiled) {
-  if (canEmitSemanticKernelIrWgsl(compiled.kernelIr)) return { semanticIrDirectWgslOk: true };
+  if (canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)) return { semanticIrDirectWgslOk: true };
   const lift = webGpuLiftFor(compiled);
-  const failure = semanticKernelIrWgslPreflightFailure(compiled.kernelIr);
+  const failure = semanticKernelIrWgslPreflightFailure(compiled.wgslLegalizedKernelIr);
   return {
     semanticIrDirectWgslOk: false,
-    semanticIrDirectWgslBlocker: failure?.message ?? semanticKernelIrWgslPreflightBlocker(compiled.kernelIr) ?? "semantic WGSL preflight rejected",
+    semanticIrDirectWgslBlocker: failure?.message ?? semanticKernelIrWgslPreflightBlocker(compiled.wgslLegalizedKernelIr) ?? "semantic WGSL preflight rejected",
     ...(failure === undefined ? {} : { semanticIrDirectWgslBlockerSpan: failure.span }),
     ...(lift.kind === "host-retirement-reduction"
       ? { semanticIrWebGpuPlanOk: true, semanticIrWebGpuPlanKind: lift.kind }
