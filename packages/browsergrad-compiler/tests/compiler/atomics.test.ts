@@ -2392,7 +2392,9 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> untouched: array<u32>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
-      expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
+      expect(compiled.wgsl).toContain("out[0u] = atomicAdd(&counter[0u], 1u);");
+      expect(compiled.wgsl).toContain("out[1u] = atomicLoad(&counter[0u]);");
+      expect(compiled.wgsl).not.toContain("ptrs[");
       expect(compiled.wgsl).not.toContain("var<storage, read_write> untouched: array<atomic<u32>>;");
     });
 });
