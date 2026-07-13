@@ -40,7 +40,6 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -53,11 +52,8 @@ import { collectSemanticPoolAllocations } from "../../src/semantic_ir";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 const gammaCoefficients = [
@@ -4074,7 +4070,7 @@ __global__ void sharedHelperScoped(float *out) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).toContain("shader-f16");
       expect(compiled.wgsl).toContain("enable f16;");
       expect(compiled.wgsl).toContain("vec2<f16>");
       expect(Array.from(result.buffers.y as ArrayLike<number>)).toEqual([4, 7]);
@@ -4850,7 +4846,7 @@ __global__ void sharedHelperScoped(float *out) {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "device-global").map((symbol) => symbol.name)).not.toContain("unused_state");
       expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_state");
       expect([...result.buffers.x as Float32Array]).toEqual([5]);
       expect(compiled.wgsl).not.toContain("unused_state");
@@ -5492,7 +5488,7 @@ __global__ void localOut(float *out) {
         { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
       );
 
-      expect(backendIr(compiled).constants.map((constant) => [constant.name, constant.dimensions])).toEqual([
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant").map((symbol) => [symbol.name, symbol.dimensions])).toEqual([
         ["scale", []],
         ["coeffs", [3]],
       ]);
@@ -5526,7 +5522,7 @@ __global__ void localOut(float *out) {
         f16Mode: "f32",
         workgroupSize: [1, 1, 1],
       });
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).not.toContain("enable f16;");
       expect(compiled.wgsl).not.toMatch(/\bf16\b/u);
       expect(compiled.wgsl).toContain("vec2<f32>");
@@ -5645,7 +5641,7 @@ __global__ void localOut(float *out) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("vec2<f32>");
       expect(compiled.wgsl).toContain("((bitcast<u32>(output[1u]) >> 16u) & 0xffffu)");
       expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>(((1073758144u & 0xffffu) << 16u)), bitcast<f32>((1073758144u & 0xffff0000u)))");
@@ -5750,7 +5746,7 @@ __global__ void localOut(float *out) {
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(backendIr(compiled).sharedDeclarations[0]?.valueType).toBe("uchar");
+      expect(compiled.kernelIr.memory.find((symbol) => symbol.kind === "shared")?.valueType).toBe("uchar");
       expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(true);
       expect(compiled.wgsl).toContain("var<workgroup> bytes: array<atomic<u32>, 4>;");
       expect(compiled.wgsl).toContain("fn bg_semantic_packed_shared_u8_add(");
@@ -5936,14 +5932,13 @@ export {
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
-  lowerAnalyzedCudaLiteToKernelIr,
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
   deviceLaunchTreeIsExternallySilent,
   packCudaWebGpuUniformParams,
   packageRoot,
-  backendIr,
+  semanticIr,
   gammaCoefficients,
   gammaApprox,
   erfApprox,

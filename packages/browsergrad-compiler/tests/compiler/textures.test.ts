@@ -37,7 +37,6 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -48,11 +47,8 @@ import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 const gammaCoefficients = [
@@ -821,7 +817,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).toContain("f16(bg_sem_surf2dread_surf(0, 0, 0))");
       expect(compiled.wgsl).toContain("vec2<f16>(f16(bg_sem_surf2dread_surf((0 + 0), 0, 0)), f16(bg_sem_surf2dread_surf((0 + 4), 0, 0)))");
       expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
-      expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).toContain("shader-f16");
       expect([...result.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
       expect([...result.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66, 0x46804580]);
@@ -864,7 +860,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("enable f16;");
       expect(compiled.wgsl).not.toContain("f16(");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect([...result.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1.099609375, 1.099609375, 2.19921875, 5.5, 6.5]);
       expect([...result.buffers.bits as Uint32Array]).toEqual([0x3c66, 0x40663c66, 0x46804580]);
@@ -907,7 +903,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("enable f16;");
       expect(compiled.wgsl).not.toContain("bg_surf2dread_surf");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect([...result.buffers.out as Float32Array]).toEqual([1.1015625, 1.1015625, 2.203125, 5.5, 6.5]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1.1015625, 1.1015625, 2.203125, 5.5, 6.5]);
       expect([...result.buffers.bits as Uint32Array]).toEqual([0x3f8d, 0x400d3f8d, 0x40d040b0]);
@@ -1227,7 +1223,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(backendIr(compiled).textures.map((texture) => texture.name)).toEqual(["texRef"]);
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "texture").map((symbol) => symbol.name)).toEqual(["texRef"]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -1268,7 +1264,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
       );
 
-      expect(backendIr(compiled).params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
+      expect(semanticIr(compiled).params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -1480,7 +1476,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).not.toContain("bg_tex2d_bf16_texRef");
       expect(compiled.wgsl).not.toContain("bg_tex2d_bf162_texRef");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.1015625);
       expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.1015625);
       expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.203125);
@@ -1522,7 +1518,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).toContain("f16(textureLoad(texRef");
       expect(compiled.wgsl).not.toContain("bg_tex2d_half_texRef");
       expect(compiled.wgsl).not.toContain("bg_tex2d_half2_texRef");
-      expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).toContain("shader-f16");
       expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.099609375);
       expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.099609375);
       expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.19921875);
@@ -1564,7 +1560,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
       expect(compiled.wgsl).not.toContain("f16(");
       expect(compiled.wgsl).not.toContain("bg_tex2d_half_texRef");
       expect(compiled.wgsl).not.toContain("bg_tex2d_half2_texRef");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.099609375);
       expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.099609375);
       expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.19921875);
@@ -1969,7 +1965,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(backendIr(compiled).params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
+      expect(semanticIr(compiled).params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
       expect([...result.buffers.out as Float32Array]).toEqual([7, 11]);
     });
 
@@ -2239,7 +2235,7 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
+      expect(semanticIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -2287,14 +2283,13 @@ export {
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
-  lowerAnalyzedCudaLiteToKernelIr,
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
   deviceLaunchTreeIsExternallySilent,
   packCudaWebGpuUniformParams,
   packageRoot,
-  backendIr,
+  semanticIr,
   gammaCoefficients,
   gammaApprox,
   erfApprox,

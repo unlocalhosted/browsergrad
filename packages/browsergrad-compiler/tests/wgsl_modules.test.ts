@@ -46,12 +46,6 @@ import {
   zeroValue,
 } from "../src/wgsl_storage";
 import {
-  resolveStorageView,
-  resolveStorageViewForPointerExpression,
-  type WgslStorageViewCallbacks,
-  type WgslStorageViewContext,
-} from "../src/wgsl_storage_views";
-import {
   emitExpressionAsWgslScalarText,
   emitNumberLiteral,
   emitNumberLiteralAsU32,
@@ -72,7 +66,6 @@ import type {
   CudaLiteExpression,
   CudaLiteNumberLiteral,
   CudaLiteStatement,
-  CudaLiteVarDecl,
 } from "../src/types";
 
 const span = { start: 0, end: 0, line: 1, column: 1 };
@@ -120,51 +113,6 @@ describe("WGSL storage helpers", () => {
     expect(emitSharedFlatAccess("tile", [2, 4], "idx")).toBe("tile[min((((idx) / 4u) % 2u), 1u)][min((idx % 4u), 3u)]");
   });
 
-  it("parses storage-view index units instead of making callers rediscover them", () => {
-    const context = storageContext({
-      params: [{ name: "out", valueType: "float3", pointer: true }],
-    });
-
-    const parsed = resolveStorageViewForPointerExpression(id("p"), id("i"), context, storageCallbacks);
-
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-    expect(parsed.view.root).toEqual({ kind: "param", name: "out", valueType: "float3" });
-    expect(parsed.view.rootBytes).toBe(12);
-    expect(parsed.view.viewBytes).toBe(4);
-    expect(parsed.view.flatScalarVectorStorage).toBe(true);
-    expect(parsed.view.indexUnit).toBe("flat-scalar-lane");
-    expect(parsed.view.subElementLane).toBeUndefined();
-    expect(parsed.view.index).toBe("(u32((1 * 3)) + u32(i))");
-  });
-
-  it("keeps packed shared vector scalar views distinct from flat atomic lanes", () => {
-    const packed = storageContext({
-      shared: [varDecl("tile", "float3", "shared")],
-    });
-    const packedView = resolveStorageView("tile", number("0", 0), id("i"), "float", packed, storageCallbacks);
-
-    expect(packedView.ok).toBe(true);
-    if (!packedView.ok) return;
-    expect(packedView.view.root.kind).toBe("shared");
-    expect(packedView.view.flatScalarVectorStorage).toBe(false);
-    expect(packedView.view.indexUnit).toBe("storage-element");
-    expect(packedView.view.index).toBe("(u32(0) + (u32(i) / 3u))");
-    expect(packedView.view.subElementLane).toBe("(u32(i) % 3u)");
-
-    const atomicFlat = storageContext({
-      shared: [varDecl("tile", "float3", "shared")],
-      atomicShared: ["tile"],
-    });
-    const flatView = resolveStorageView("tile", number("0", 0), id("i"), "float", atomicFlat, storageCallbacks);
-
-    expect(flatView.ok).toBe(true);
-    if (!flatView.ok) return;
-    expect(flatView.view.flatScalarVectorStorage).toBe(true);
-    expect(flatView.view.indexUnit).toBe("flat-scalar-lane");
-    expect(flatView.view.index).toBe("(u32(0) + u32(i))");
-    expect(flatView.view.subElementLane).toBeUndefined();
-  });
 });
 
 describe("WGSL value conversion helpers", () => {
@@ -210,74 +158,6 @@ describe("WGSL value conversion helpers", () => {
 function number(raw: string, value: number): CudaLiteNumberLiteral {
   return { kind: "number", raw, value, span };
 }
-
-function emitTestExpression(expression: CudaLiteExpression): string {
-  if (expression.kind === "number") return expression.raw;
-  if (expression.kind === "identifier") return expression.name;
-  if (expression.kind === "binary") return `(${emitTestExpression(expression.left)} ${expression.operator} ${emitTestExpression(expression.right)})`;
-  throw new Error(`unsupported test expression ${expression.kind}`);
-}
-
-function varDecl(name: string, valueType: CudaLiteVarDecl["valueType"], storage: CudaLiteVarDecl["storage"]): CudaLiteVarDecl {
-  return {
-    kind: "var",
-    name,
-    valueType,
-    storage,
-    pointer: false,
-    dimensions: [2],
-    span,
-  };
-}
-
-function storageContext(options: {
-  readonly params?: readonly { readonly name: string; readonly valueType: "float" | "float3"; readonly pointer: boolean }[];
-  readonly shared?: readonly CudaLiteVarDecl[];
-  readonly atomicShared?: readonly string[];
-}): WgslStorageViewContext {
-  const params = new Map((options.params ?? []).map((param) => [param.name, {
-    name: param.name,
-    valueType: param.valueType,
-    pointer: param.pointer,
-    constant: false,
-    span,
-  }]));
-  const shared = new Map((options.shared ?? []).map((decl) => [decl.name, decl]));
-  return {
-    ir: {
-      name: "test",
-      span,
-      params: [...params.values()],
-      constants: [],
-      textures: [],
-      body: [],
-      functions: [],
-      deviceGlobals: [],
-      sharedDeclarations: [...shared.values()],
-      atomicParams: [],
-      atomicDeviceGlobals: [],
-      atomicShared: options.atomicShared ?? [],
-      requiredFeatures: [],
-      workgroupSize: [1, 1, 1],
-    },
-    nameFor: (name) => name,
-    paramFor: (name) => params.get(name),
-    deviceGlobalFor: () => undefined,
-    devicePointerParamFor: () => undefined,
-    pointerAliasFor: (name) => name === "p"
-      ? { rootName: "out", baseIndex: number("1", 1), valueType: "float" }
-      : undefined,
-    localArrayFor: () => undefined,
-  };
-}
-
-const storageCallbacks: WgslStorageViewCallbacks = {
-  emitExpression: (expression) => emitTestExpression(expression),
-  emitExpressionAsWgslScalar: (expression) => emitTestExpression(expression),
-  pointerBaseExpression: () => undefined,
-  sharedDeclarationFor: (name, context) => context.ir.sharedDeclarations.find((decl) => decl.name === name),
-  devicePointerValueTypeForExpression: () => "float",
-};
 
 describe("WGSL atomic helpers", () => {
   it("names atomic helper families by value and address space", () => {

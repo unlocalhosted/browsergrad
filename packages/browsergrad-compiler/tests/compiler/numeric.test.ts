@@ -38,7 +38,6 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -49,11 +48,8 @@ import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 const gammaCoefficients = [
@@ -696,7 +692,7 @@ __global__ void shared_helper_result(int *out, int n) {
     if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("fn addOne(value: f32");
       expect(compiled.wgsl).not.toContain("unused_half2");
     });
@@ -3146,9 +3142,9 @@ __global__ void shared_helper_result(int *out, int n) {
       );
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("missing-feature-shader-f16");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
-      expect(backendIr(compiled).constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
-      expect(backendIr(compiled).deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant").map((symbol) => symbol.name)).not.toContain("unused_coeffs");
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "device-global").map((symbol) => symbol.name)).not.toContain("unused_state");
       expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_coeffs");
       expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_state");
       expect([...result.buffers.x as Float32Array]).toEqual([5]);
@@ -3248,7 +3244,7 @@ __global__ void shared_helper_result(int *out, int n) {
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(backendIr(compiled).sharedDeclarations[0]?.dimensions).toEqual([2]);
+      expect(compiled.kernelIr.memory.find((symbol) => symbol.kind === "shared")?.dimensions).toEqual([2]);
       expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
       expect([...result.buffers.out as Float32Array]).toEqual([1]);
     });
@@ -3510,7 +3506,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("bg_semantic_round_even_f32(f32(a))");
       expect(compiled.wgsl).toContain("i32(trunc(f32(a)))");
       expect(compiled.wgsl).toContain("u32(max(bg_semantic_round_even_f32(f32(b)), 0.0))");
@@ -3599,7 +3595,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
       expect([...result.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2, 2.5, 1, 0, 1, 1, 0, Number.NaN, Number.NaN, 1.75, 2, 1, -1, 0.5, 0.5, 2, -0.5, 1]);
       expect([...semanticResult.buffers.output as Float32Array]).toEqual([2.5, 1.5, 1, 4, 2, 0.5, 2, 2.5, 1, 0, 1, 1, 0, Number.NaN, Number.NaN, 1.75, 2, 1, -1, 0.5, 0.5, 2, -0.5, 1]);
@@ -3976,7 +3972,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
       expect([...result.buffers.out as Float32Array]).toEqual(expected);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
@@ -4075,7 +4071,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect(compiled.wgsl).toContain("bg_f32_to_bf16_bits_mode");
       expect([...result.buffers.out as Float32Array]).toEqual(expected);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual(expected);
@@ -4154,7 +4150,7 @@ __global__ void shared_helper_result(int *out, int n) {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
       expect([...result.buffers.out as Float32Array]).toEqual([1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 2, 1, 3, 1, 1, 1, 1]);
       expect([...semanticResult.buffers.out as Float32Array]).toEqual([1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 2, 1, 3, 1, 1, 1, 1]);
       expect([...result.buffers.mask as Uint32Array]).toEqual([0x0000ffff, 0xffff0000, 0xffff0000, 0x0000ffff, 0xffffffff, 0xffffffff]);
@@ -4337,14 +4333,13 @@ export {
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
-  lowerAnalyzedCudaLiteToKernelIr,
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
   deviceLaunchTreeIsExternallySilent,
   packCudaWebGpuUniformParams,
   packageRoot,
-  backendIr,
+  semanticIr,
   gammaCoefficients,
   gammaApprox,
   erfApprox,

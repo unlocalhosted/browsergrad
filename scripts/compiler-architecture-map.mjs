@@ -21,7 +21,6 @@ const maxTestLines = Number.parseInt(option("--max-test-lines", "4500"), 10);
 const check = args.has("--check");
 const json = args.has("--json");
 const includeTests = args.has("--include-tests") || check;
-const forbidPublicLegacy = args.has("--forbid-public-legacy");
 
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -172,15 +171,17 @@ function bucketSummary(rows) {
     .sort((left, right) => right.lines - left.lines);
 }
 
-function publicLegacyLeaks() {
-  const indexFile = path.join(compilerSrc, "index.ts");
-  const runnerFile = path.join(compilerSrc, "runner.ts");
-  const indexSource = fs.readFileSync(indexFile, "utf8");
-  const runnerSource = fs.readFileSync(runnerFile, "utf8");
+function legacyBackendLeaks(rows) {
   const leaks = [];
-  if (/from\s+["']\.\/wgsl\.js["']/u.test(indexSource)) leaks.push("src/index.ts exports AST WGSL backend");
-  if (/from\s+["']\.\/reference\.js["']/u.test(runnerSource)) leaks.push("src/runner.ts imports AST reference backend");
-  if (/from\s+["']\.\/wgsl\.js["']/u.test(runnerSource)) leaks.push("src/runner.ts imports AST WGSL backend");
+  const forbiddenFiles = new Set(["ir_usage.ts", "kernel_ir_atomic_usage.ts", "kernel_ir_usage.ts", "reference.ts", "wgsl.ts"]);
+  const forbiddenSymbols = ["KernelIrModule", "lowerCudaLiteToKernelIr", "lowerAnalyzedCudaLiteToKernelIr", "emitKernelIrWgsl"];
+  for (const row of rows) {
+    const sourceRelativeFile = path.relative(compilerSrc, row.file);
+    if (forbiddenFiles.has(sourceRelativeFile)) leaks.push(`${row.relativeFile} is a removed AST backend module`);
+    for (const symbol of forbiddenSymbols) {
+      if (new RegExp(`\\b${symbol}\\b`, "u").test(row.source)) leaks.push(`${row.relativeFile} references removed ${symbol}`);
+    }
+  }
   return leaks;
 }
 
@@ -193,7 +194,7 @@ const report = {
   tests: testRows.map(({ source, ...row }) => row),
   buckets: bucketSummary(allRows),
   cycles,
-  publicLegacyLeaks: publicLegacyLeaks(),
+  legacyBackendLeaks: legacyBackendLeaks(sourceRows),
   limits: { maxSourceLines, maxTestLines },
 };
 
@@ -215,8 +216,8 @@ if (json) {
   console.log("");
   console.log(`Dependency cycles: ${cycles.length}`);
   for (const cycle of cycles) console.log(`  ${cycle.join(" -> ")}`);
-  console.log(`Public legacy backend leaks: ${report.publicLegacyLeaks.length}`);
-  for (const leak of report.publicLegacyLeaks) console.log(`  ${leak}`);
+  console.log(`Legacy backend leaks: ${report.legacyBackendLeaks.length}`);
+  for (const leak of report.legacyBackendLeaks) console.log(`  ${leak}`);
 }
 
 if (check) {
@@ -228,7 +229,7 @@ if (check) {
       .filter((row) => row.lines > maxTestLines)
       .map((row) => `${row.relativeFile} has ${row.lines} lines (limit ${maxTestLines})`),
     ...cycles.map((cycle) => `dependency cycle: ${cycle.join(" -> ")}`),
-    ...(forbidPublicLegacy ? report.publicLegacyLeaks : []),
+    ...report.legacyBackendLeaks,
   ];
   if (failures.length > 0) {
     console.error("Compiler architecture check failed:");

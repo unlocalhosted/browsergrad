@@ -91,6 +91,11 @@ backend, not the first dependency.
 
 ## Implementation Decisions
 
+> Current architecture note: the original `lowerCudaLiteToKernelIr` and
+> `emitKernelIrWgsl` APIs were removed before v1. The production pipeline now
+> exposes `CompiledCudaLiteKernel.kernelIr` as semantic Kernel IR and routes CPU
+> reference, WGSL emission, and WebGPU planning exclusively through it.
+
 - Add public compiler APIs:
   `parseCudaLite`, `analyzeCudaLite`, `lowerCudaLiteToKernelIr`,
   `emitKernelIrWgsl`, `compileCudaLiteKernel`,

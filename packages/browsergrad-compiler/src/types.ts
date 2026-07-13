@@ -470,23 +470,6 @@ export interface CudaLiteAnalysis {
   readonly barrierUniformity: CudaLiteBarrierUniformityFacts;
 }
 
-export interface KernelIrModule {
-  readonly name: string;
-  readonly span: SourceSpan;
-  readonly params: readonly CudaLiteParam[];
-  readonly constants: readonly CudaLiteGlobalConstant[];
-  readonly deviceGlobals: readonly CudaLiteDeviceGlobal[];
-  readonly textures: readonly CudaLiteTexture2D[];
-  readonly functions: readonly CudaLiteDeviceFunction[];
-  readonly body: readonly CudaLiteStatement[];
-  readonly sharedDeclarations: readonly CudaLiteVarDecl[];
-  readonly requiredFeatures: readonly string[];
-  readonly atomicParams: readonly string[];
-  readonly atomicShared: readonly string[];
-  readonly atomicDeviceGlobals: readonly string[];
-  readonly workgroupSize: readonly [number, number, number];
-}
-
 export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
   readonly dynamicSharedMemory?: Readonly<Record<string, number>>;

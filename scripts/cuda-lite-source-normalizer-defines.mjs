@@ -14,7 +14,7 @@ const templateEnvironment = (...args) => requireNormalizerHelpers().templateEnvi
 
 export function collectObjectDefines(source) {
   const defines = new Map();
-  for (const line of source.split(/\r?\n/u)) {
+  for (const line of logicalPreprocessorLines(source)) {
     const stripped = stripLineComment(line);
     const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+(.+?)\s*$/u.exec(stripped);
     if (match?.[1] !== undefined && match[2] !== undefined) {
@@ -32,6 +32,22 @@ export function collectObjectDefines(source) {
   for (const [name, value] of collectEnumIntegerConstants(source, defines)) defines.set(name, value);
   for (const [name, value] of collectCarrierMemberDefines(source, defines)) defines.set(name, value);
   return defines;
+}
+
+function logicalPreprocessorLines(source) {
+  const lines = [];
+  let current = "";
+  for (const raw of source.split(/\r?\n/u)) {
+    const line = current.length === 0 ? raw : `${current} ${raw.trimStart()}`;
+    if (/\\\s*$/u.test(line)) {
+      current = line.replace(/\\\s*$/u, "").trimEnd();
+      continue;
+    }
+    lines.push(line);
+    current = "";
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
 }
 
 export function collectEnumIntegerConstants(source, initialDefines = new Map()) {

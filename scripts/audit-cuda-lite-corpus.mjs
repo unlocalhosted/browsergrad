@@ -430,8 +430,8 @@ const directLoweringOk = results.length - failures.length;
 const semanticIrDirectWgslOk = results.filter((result) => result.directLoweringOk && result.semanticIrDirectWgslOk).length;
 const semanticIrHostPlanOk = results.filter((result) => result.directLoweringOk && result.semanticIrWebGpuPlanOk).length;
 const semanticIrWebGpuOk = semanticIrDirectWgslOk + semanticIrHostPlanOk;
-const legacyAstDirectWgslFallback = directLoweringOk - semanticIrWebGpuOk;
-const legacyAstDirectWgslBlockers = countBy(
+const semanticIrWebGpuGaps = directLoweringOk - semanticIrWebGpuOk;
+const semanticIrWebGpuGapBlockers = countBy(
   results.filter((result) => result.directLoweringOk && !result.semanticIrDirectWgslOk && !result.semanticIrWebGpuPlanOk),
   (result) => result.semanticIrDirectWgslBlocker ?? "unknown",
 );
@@ -458,8 +458,8 @@ const summary = {
     semanticIrDirectWgslOk,
     semanticIrHostPlanOk,
     semanticIrWebGpuOk,
-    legacyAstDirectWgslFallback,
-    legacyAstDirectWgslBlockers,
+    semanticIrWebGpuGaps,
+    semanticIrWebGpuGapBlockers,
     compileCodegenOnlyOk: compileCodegenOk,
     fixtureBackedExecutedOk: 0,
     browserWebGpuExecutedOk: 0,
@@ -468,10 +468,10 @@ const summary = {
   executionTierNotes: {
     planCompiledOk: "Parsed, analyzed, lowered, and emitted direct WGSL or a host-orchestrated WebGPU plan under compileFeatureProfile assumptions.",
     planCompileGaps: "Extracted kernels that did not compile/codegen into direct WGSL or a host-orchestrated WebGPU plan.",
-    semanticIrDirectWgslOk: "Direct-dispatch kernels emitted from semantic IR without the AST WGSL fallback.",
-    semanticIrHostPlanOk: "Host-orchestrated kernels whose every dispatch emits from semantic IR without the AST WGSL fallback.",
+    semanticIrDirectWgslOk: "Direct-dispatch kernels emitted from semantic IR.",
+    semanticIrHostPlanOk: "Host-orchestrated kernels whose every dispatch emits from semantic IR.",
     semanticIrWebGpuOk: "Kernels whose direct or host-orchestrated WebGPU execution emits entirely from semantic IR.",
-    legacyAstDirectWgslFallback: "Compiled kernels whose WebGPU execution still requires the AST WGSL fallback.",
+    semanticIrWebGpuGaps: "Analyzed kernels that cannot emit a complete semantic-IR WebGPU execution plan.",
     compileCodegenOnlyOk: "Parsed, analyzed, lowered, and emitted WGSL or host WebGPU plan from pinned corpus source under compileFeatureProfile assumptions.",
     fixtureBackedExecutedOk: "Requires explicit input/output fixtures; this corpus audit does not synthesize them.",
     browserWebGpuExecutedOk: "Covered by separate browser E2E gates, not by this corpus audit.",
@@ -491,8 +491,8 @@ const summary = {
   semanticIrDirectWgslOk,
   semanticIrHostPlanOk,
   semanticIrWebGpuOk,
-  legacyAstDirectWgslFallback,
-  legacyAstDirectWgslBlockers,
+  semanticIrWebGpuGaps,
+  semanticIrWebGpuGapBlockers,
   webGpuHostPlanCompiledOk: hostPlanCompiledOk,
   singleDispatchPlanCompiledOk: directLoweringOk,
   hostOrchestratedPlanCompiledOk: hostPlanCompiledOk,

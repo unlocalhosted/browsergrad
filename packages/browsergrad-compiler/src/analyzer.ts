@@ -20,7 +20,6 @@ import {
   type CudaLiteUpdateExpression,
   type CudaLiteTexture2D,
   type CudaLiteVarDecl,
-  type KernelIrModule,
   type SourceSpan,
 } from "./types.js";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
@@ -851,49 +850,6 @@ export function analyzeCudaLite(
     atomicDeviceGlobals: [...atomicDeviceGlobals].sort(),
     barrierUniformity: { kernel: kernelBarrierUniformity, functions: functionBarrierUniformity },
   }, ast);
-}
-
-export function lowerCudaLiteToKernelIr(
-  ast: ParsedCudaLiteModule,
-  options: CudaLiteAnalyzeOptions = {},
-): KernelIrModule {
-  const analysis = analyzeCudaLite(ast, options);
-  return lowerAnalyzedCudaLiteToKernelIr(analysis, options);
-}
-
-export function lowerAnalyzedCudaLiteToKernelIr(
-  analysis: CudaLiteAnalysis,
-  options: CudaLiteAnalyzeOptions = {},
-): KernelIrModule {
-  const errors = analysis.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
-  if (errors.length > 0) {
-    throw new CudaLiteCompilerError("CUDA-lite analysis failed", errors);
-  }
-  const reachableFunctionSpans = reachableDeviceFunctionSpans(analysis.functions, analysis.kernel.body);
-  const sharedDeclarationBodies = [
-    analysis.kernel.body,
-    ...analysis.functions
-      .filter((fn) => reachableFunctionSpans.has(fn.span.start))
-      .map((fn) => fn.body),
-  ];
-  const reachableFunctions = analysis.functions.filter((fn) => reachableFunctionSpans.has(fn.span.start));
-  const reachableSymbolNames = collectReferencedSymbolNames(sharedDeclarationBodies);
-  return {
-    name: analysis.kernel.name,
-    span: analysis.kernel.span,
-    params: analysis.kernel.params,
-    constants: analysis.constants.filter((constant) => reachableSymbolNames.has(constant.name)),
-    deviceGlobals: analysis.deviceGlobals.filter((global) => reachableSymbolNames.has(global.name)),
-    textures: analysis.textures.filter((texture) => reachableSymbolNames.has(texture.name)),
-    functions: reachableFunctions,
-    body: analysis.kernel.body,
-    sharedDeclarations: collectSharedDeclarationsFromBodies(sharedDeclarationBodies, options),
-    requiredFeatures: analysis.requiredFeatures,
-    atomicParams: analysis.atomicParams,
-    atomicShared: analysis.atomicShared,
-    atomicDeviceGlobals: analysis.atomicDeviceGlobals,
-    workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
-  };
 }
 
 function reachableDeviceFunctionSpans(

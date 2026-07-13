@@ -10,6 +10,19 @@ import {
 } from "./test-cuda-lite-source-normalizer-support.mjs";
 
 {
+  const defines = collectCudaLiteContextDefines(String.raw`
+#define HALF_SQRT_2_PI \
+  __float2half(M_SQRT2) * __float2half(M_2_SQRTPI) * HALF_DIV2
+#define HALF_V_APP __float2half(0.044715f)
+`);
+  assert.equal(
+    defines.get("HALF_SQRT_2_PI"),
+    "__float2half(M_SQRT2) * __float2half(M_2_SQRTPI) * HALF_DIV2",
+  );
+  assert.equal(defines.get("HALF_V_APP"), "__float2half(0.044715f)");
+}
+
+{
   const source = createKernelCompilationUnit({
     kernel: `
 __global__ void vector_record(uint4 *dst, uint4 src) {

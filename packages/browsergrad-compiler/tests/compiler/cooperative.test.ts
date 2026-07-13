@@ -41,7 +41,6 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -52,11 +51,8 @@ import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 const gammaCoefficients = [
@@ -576,7 +572,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_u32_32_masked(input[0u], mask, local_id)");
       expect(compiled.wgsl).toContain("countOneBits");
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).toContain("subgroups");
       expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
     });
 
@@ -654,7 +650,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).not.toContain("subgroupAny");
       expect(compiled.wgsl).not.toContain("subgroupAll");
       expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
-      expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).toContain("subgroups");
       expect([...result.buffers.out as Uint32Array]).toEqual([
         1, 0, 10,
         1, 0, 10,
@@ -878,7 +874,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("enable subgroups;");
       expect(compiled.wgsl).toContain("bg_semantic_ballot_32(true, 0xffffffffu, local_id)");
       expect(compiled.wgsl).not.toContain("subgroupBallot(true).x");
-      expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).toContain("subgroups");
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-subgroup");
       expect([...result.buffers.out as Uint32Array]).toEqual([15, 15, 15, 15]);
     });
@@ -1564,7 +1560,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("bg_semantic_cg_reduce_f32_8(value, local_id)");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect(compiled.wgsl).not.toContain("enable subgroups;");
-      expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("subgroups");
       expect([...result.buffers.output as Float32Array]).toEqual([8]);
     });
 
@@ -1656,7 +1652,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         operation.kind === "cooperative-group-declare" && operation.declaration.name === "part"
       );
 
-      expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("subgroups");
       expect(partition).toMatchObject({
         kind: "cooperative-group-declare",
         declaration: {
@@ -1872,7 +1868,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
+      expect(semanticIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_32(0u, 0u, 32u, local_id)");
       expect(compiled.wgsl).toContain("workgroupBarrier()");
@@ -1908,7 +1904,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
+      expect(semanticIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_f32_32(x[u32(i)], local_id)");
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_max_f32_32(sum, local_id)");
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_min_f32_32(maxv, local_id)");
@@ -1953,7 +1949,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).toContain("subgroups");
       expect(compiled.wgsl).toContain("bg_semantic_warp_reduce_sum_i32_32(x[u32(i)], local_id)");
       expect([...result.buffers.out as Int32Array]).toEqual([7]);
     });
@@ -3186,7 +3182,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         subgroupMode: "scalar",
         workgroupSize: [32, 1, 1],
       });
-      expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).not.toContain("subgroups");
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -3762,14 +3758,13 @@ export {
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
-  lowerAnalyzedCudaLiteToKernelIr,
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
   deviceLaunchTreeIsExternallySilent,
   packCudaWebGpuUniformParams,
   packageRoot,
-  backendIr,
+  semanticIr,
   gammaCoefficients,
   gammaApprox,
   erfApprox,

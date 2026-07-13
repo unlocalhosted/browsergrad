@@ -37,7 +37,6 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -48,11 +47,8 @@ import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 const gammaCoefficients = [
@@ -351,8 +347,15 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     expect(view.getInt32(16, true)).toBe(3);
     expect([...result.buffers.out as Float32Array]).toEqual([3.25, 0.5]);
   });
-  it("keeps legacy IR and misleading GPU readiness out of public compiler contracts", () => {
+  it("keeps AST backends and misleading GPU readiness out of compiler contracts", () => {
       const srcDir = path.join(packageRoot, "src");
+      const legacyBackendFiles = [
+        "ir_usage.ts",
+        "kernel_ir_atomic_usage.ts",
+        "kernel_ir_usage.ts",
+        "reference.ts",
+        "wgsl.ts",
+      ].filter((file) => fs.existsSync(path.join(srcDir, file)));
       const sources = fs.readdirSync(srcDir)
         .filter((file) => file.endsWith(".ts"))
         .map((file) => [file, compilerSourceText(file)] as const);
@@ -360,10 +363,14 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         const hits: string[] = [];
         if (/\blegacyIr\b/u.test(source)) hits.push(`${file}:legacyIr`);
         if (/\bcanRunOnGpu\b/u.test(source)) hits.push(`${file}:canRunOnGpu`);
+        if (/\bKernelIrModule\b/u.test(source)) hits.push(`${file}:KernelIrModule`);
+        if (/\blower(?:Analyzed)?CudaLiteToKernelIr\b/u.test(source)) hits.push(`${file}:legacy-lowering`);
+        if (/\bemitKernelIrWgsl\b/u.test(source)) hits.push(`${file}:legacy-wgsl-emitter`);
         if (/interface\s+CompiledCudaLiteKernel[\s\S]*?readonly\s+ir\s*:/u.test(source)) hits.push(`${file}:CompiledCudaLiteKernel.ir`);
         return hits;
       });
 
+      expect(legacyBackendFiles).toEqual([]);
       expect(forbidden).toEqual([]);
     });
 
@@ -420,7 +427,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
 
       expect(ast.kernels[0]?.name).toBe("saxpy");
-      expect(backendIr(compiled).params.map((param) => param.name)).toEqual(["x", "y", "a", "n"]);
+      expect(semanticIr(compiled).params.map((param) => param.name)).toEqual(["x", "y", "a", "n"]);
       expect(Object.hasOwn(compiled, "ir")).toBe(false);
       expect(Object.hasOwn(compiled, "legacyIr")).toBe(false);
       expect(Object.hasOwn(compiled.loweringPlan, "canRunOnGpu")).toBe(false);
@@ -694,7 +701,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         compileOptions: { workgroupSize: [8, 1, 1] },
       });
       const compiled = defaulted.compile(SAXPY);
-      expect(backendIr(compiled).workgroupSize).toEqual([8, 1, 1]);
+      expect(semanticIr(compiled).workgroupSize).toEqual([8, 1, 1]);
       expect(defaulted.compile(SAXPY)).toBe(compiled);
 
       const disabled = createCudaLiteCompilerCache({ maxEntries: 0 });
@@ -915,8 +922,8 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["map", "uint"]);
-      expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["direction", "uint"]);
+      expect(semanticIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["map", "uint"]);
+      expect(semanticIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["direction", "uint"]);
       expect([...result.buffers.out as Uint32Array]).toEqual([53]);
     });
 
@@ -1187,7 +1194,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(compiled.wgsl).toContain("select");
       expect(compiled.wgsl).toContain("return;");
       expect(compiled.wgsl).toContain("continue;");
-      expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
+      expect(semanticIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
     });
 
   it("accepts empty CUDA statement bodies", () => {
@@ -1268,7 +1275,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
+      expect(semanticIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
       expect(compiled.wgsl).toContain("fn addOne(value: f32");
       expect(compiled.wgsl).toContain("return (value + 1.0);");
       expect([...result.buffers.x as Float32Array]).toEqual([3]);
@@ -1288,7 +1295,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
+      expect(semanticIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
       expect(compiled.wgsl).toContain("fn addOne(value: f32");
       expect(compiled.wgsl).not.toContain("unused_desc");
       expect(compiled.wgsl).not.toContain("<< 62");
@@ -1308,7 +1315,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(backendIr(compiled).sharedDeclarations.map((shared) => shared.name)).not.toContain("unusedScratch");
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "shared").map((symbol) => symbol.name)).not.toContain("unusedScratch");
       expect(compiled.wgsl).not.toContain("unusedScratch");
     });
 
@@ -1541,7 +1548,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         },
       };
 
-      expect(backendIr(detached).params.map((param) => param.name)).toEqual(["out", "n"]);
+      expect(semanticIr(detached).params.map((param) => param.name)).toEqual(["out", "n"]);
       expect(Object.keys(constantBufferInputs(detached, input))).toEqual(["coeffs"]);
       expect(Object.keys(deviceGlobalBufferInputs(detached, input))).toEqual(["global_state"]);
       expect(cudaWebGpuDefaultReadbackNames(detached)).toEqual(["out", "global_state"]);
@@ -1651,7 +1658,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       const badGrid = { gridDim: [0, 1, 1] as const, blockDim: [8, 1, 1] as const };
       const badBlock = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
 
-      expect(createCudaLaunchValidationDiagnostics(badGrid, backendIr(compiled).workgroupSize)).toContainEqual(expect.objectContaining({
+      expect(createCudaLaunchValidationDiagnostics(badGrid, semanticIr(compiled).workgroupSize)).toContainEqual(expect.objectContaining({
         code: "launch-grid-dim-invalid",
         message: "launch.gridDim[0] must be a positive integer",
       }));
@@ -1669,7 +1676,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         requiresHostOrchestration: false,
         blockers: [expect.objectContaining({ code: "launch-grid-dim-invalid" })],
       });
-      expect(() => validateCudaKernelLaunch(badBlock, backendIr(compiled).workgroupSize)).toThrow(CudaLiteCompilerError);
+      expect(() => validateCudaKernelLaunch(badBlock, semanticIr(compiled).workgroupSize)).toThrow(CudaLiteCompilerError);
       expect(() => runCompiledKernelReference(compiled, input, badGrid)).toThrow("launch.gridDim[0] must be a positive integer");
       await expect(runCompiledKernelWebGpu(
         {} as never,
@@ -1722,7 +1729,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(compiled.wgsl).toContain("subgroupBallot");
       expect(compiled.wgsl).toContain("subgroupShuffle");
       expect(compiled.wgsl).toContain("countOneBits");
-      expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
+      expect(semanticIr(compiled).requiredFeatures).toContain("subgroups");
       expect(compiled.kernelIr.operations).toContainEqual(expect.objectContaining({
         kind: "cooperative-group-declare",
         declaration: expect.objectContaining({ name: "group", groupKind: "coalesced" }),
@@ -2593,7 +2600,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(backendIr(compiled).params.map((param) => param.name)).toEqual(["data", "width", "partial_sums"]);
+      expect(semanticIr(compiled).params.map((param) => param.name)).toEqual(["data", "width", "partial_sums"]);
       expect([...result.buffers.data as Int32Array]).toEqual([4, 5]);
       expect([...result.buffers.partial_sums as Int32Array]).toEqual([4]);
     });
@@ -4457,7 +4464,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(backendIr(compiled).name).toBe("anonymous_kernel_1");
+      expect(semanticIr(compiled).name).toBe("anonymous_kernel_1");
       expect([...result.buffers.data as Float32Array]).toEqual([2, 4, 6, 8]);
     });
 
@@ -4505,7 +4512,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       );
 
       expect([...result.buffers.x as Float32Array]).toEqual([5]);
-      expect(backendIr(compiled).name).toBe("selected");
+      expect(semanticIr(compiled).name).toBe("selected");
       expect(compiled.wgsl).not.toContain("unused_launch");
     });
 
@@ -4566,7 +4573,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant").map((symbol) => symbol.name)).not.toContain("unused_coeffs");
       expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_coeffs");
       expect([...result.buffers.x as Float32Array]).toEqual([5]);
       expect(compiled.wgsl).not.toContain("unused_coeffs");
@@ -4598,7 +4605,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       );
 
-      expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
+      expect(semanticIr(compiled).functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
       expect(compiled.kernelIr.functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
       expect([...result.buffers.x as Float32Array]).toEqual([5]);
       expect(compiled.wgsl).toContain("selected_helper");
@@ -4699,7 +4706,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         blockDim: [2, 1, 1],
       });
 
-      expect(backendIr(child).name).toBe("childKernel");
+      expect(semanticIr(child).name).toBe("childKernel");
       expect(canEmitSemanticKernelIrWgsl(child.wgslLegalizedKernelIr)).toBe(true);
       expect(plan.supported).toBe(true);
       expect(plan.launches).toHaveLength(2);
@@ -5116,7 +5123,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     });
 
   it("normalizes simple C++ aliases and CUDA kernel qualifiers before parsing", () => {
-      expect(backendIr(compileCudaLiteKernel(`
+      expect(semanticIr(compileCudaLiteKernel(`
   static __global__ void staticFirst(int *out) {
     out[0] = 1;
   }`)).name).toBe("staticFirst");
@@ -5141,7 +5148,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [16, 1, 1] },
       );
 
-      expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
+      expect(semanticIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
       expect(compiled.wgsl).toContain("array<f32, 16>");
       expect([...result.buffers.out as Float32Array].slice(0, 3)).toEqual([16, 17, 0]);
     });
@@ -5162,7 +5169,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(backendIr(compiled).sharedDeclarations[0]?.dimensions).toEqual([4]);
+      expect(compiled.kernelIr.memory.find((symbol) => symbol.kind === "shared")?.dimensions).toEqual([4]);
       expect([...result.buffers.out as Float32Array]).toEqual([4]);
     });
 
@@ -5241,7 +5248,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
     if (threadIdx.x < 1) { x[0] = 1.0f; }
   }`, { workgroupSize: [1, 1, 1] });
 
-      expect(backendIr(compiled).name).toBe("bounded");
+      expect(semanticIr(compiled).name).toBe("bounded");
       expect(compiled.wgsl).toContain("@workgroup_size(1, 1, 1)");
     });
 
@@ -5277,7 +5284,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       );
 
-      expect(backendIr(compiled).constants.map((constant) => constant.name)).toEqual(["scaleFactor"]);
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant").map((symbol) => symbol.name)).toEqual(["scaleFactor"]);
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
@@ -5363,7 +5370,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
         { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
       );
 
-      expect(backendIr(compiled).constants.map((constant) => constant.name)).toEqual(["table"]);
+      expect(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant").map((symbol) => symbol.name)).toEqual(["table"]);
       expect([...result.buffers.out as Int32Array]).toEqual([3, 5]);
     });
 
@@ -5903,14 +5910,13 @@ export {
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
-  lowerAnalyzedCudaLiteToKernelIr,
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
   deviceLaunchTreeIsExternallySilent,
   packCudaWebGpuUniformParams,
   packageRoot,
-  backendIr,
+  semanticIr,
   gammaCoefficients,
   gammaApprox,
   erfApprox,

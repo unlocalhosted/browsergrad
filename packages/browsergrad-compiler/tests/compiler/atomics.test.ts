@@ -37,7 +37,6 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -45,14 +44,12 @@ import {
 } from "../../src/webgpu_inputs";
 import { deviceLaunchTreeIsExternallySilent } from "../../src/runtime_elision";
 import { packCudaWebGpuUniformParams } from "../../src/webgpu_orchestration";
+import { semanticAtomicMemoryRootNames } from "../../src/semantic_ir_walk";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 const gammaCoefficients = [
@@ -643,7 +640,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect([...semanticResult.buffers.counter as Uint32Array]).toEqual([4]);
       expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
       expect([...result.buffers.counter as Uint32Array]).toEqual([4]);
-      expect(backendIr(compiled).atomicDeviceGlobals).toEqual(["counter"]);
+      expect([...semanticAtomicMemoryRootNames(compiled.kernelIr)]).toEqual(["counter"]);
       expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 1u)");
     });
@@ -2328,7 +2325,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect([...result.buffers.out as Uint32Array]).toEqual([7]);
-      expect(backendIr(compiled).atomicDeviceGlobals).not.toContain("gCounter");
+      expect(semanticAtomicMemoryRootNames(compiled.kernelIr)).not.toContain("gCounter");
       expect(compiled.wgsl).toContain("var<storage, read_write> gCounter: array<u32>;");
       expect(compiled.wgsl).not.toContain("var<storage, read_write> gCounter: array<atomic<u32>>;");
     });
@@ -2358,8 +2355,8 @@ describe("CUDA-lite compiler: Atomics", () => {
       );
 
       expect([...result.buffers.out as Uint32Array]).toEqual([9]);
-      expect(backendIr(compiled).atomicShared).not.toContain("unusedScratch");
-      expect(backendIr(compiled).atomicShared).not.toContain("scratch");
+      expect(semanticAtomicMemoryRootNames(compiled.kernelIr)).not.toContain("unusedScratch");
+      expect(semanticAtomicMemoryRootNames(compiled.kernelIr)).not.toContain("scratch");
       expect(compiled.wgsl).toContain("var<workgroup> scratch: array<u32, 1>;");
       expect(compiled.wgsl).not.toContain("var<workgroup> scratch: array<atomic<u32>, 1>;");
       expect(compiled.wgsl).not.toContain("unusedScratch");
@@ -2478,14 +2475,13 @@ export {
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
-  lowerAnalyzedCudaLiteToKernelIr,
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
   deviceLaunchTreeIsExternallySilent,
   packCudaWebGpuUniformParams,
   packageRoot,
-  backendIr,
+  semanticIr,
   gammaCoefficients,
   gammaApprox,
   erfApprox,

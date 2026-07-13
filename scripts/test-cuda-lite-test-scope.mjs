@@ -26,7 +26,7 @@ import { buildWebGpuSlowSmokeHotArgs } from "./run-cuda-lite-webgpu-slow-smoke-h
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const storagePlan = planForChangedFiles([
-  "packages/browsergrad-compiler/src/wgsl_storage_views.ts",
+  "packages/browsergrad-compiler/src/semantic_wgsl_pointers.ts",
 ]);
 assert.deepEqual(storagePlan.scopes.map((scope) => scope.id), [
   "compiler-types",
@@ -67,7 +67,7 @@ assert.ok(
 );
 
 const sharedWgslPlan = planForChangedFiles([
-  "packages/browsergrad-compiler/src/wgsl_module.ts",
+  "packages/browsergrad-compiler/src/wgsl_support_helpers.ts",
 ]);
 assert.deepEqual(sharedWgslPlan.scopes.map((scope) => scope.id), [
   "compiler-types",
@@ -80,17 +80,21 @@ assert.deepEqual(sharedWgslPlan.commands.map(commandToString), [
 ]);
 
 const rootWgslPlan = planForChangedFiles([
-  "packages/browsergrad-compiler/src/wgsl.ts",
+  "packages/browsergrad-compiler/src/semantic_wgsl.ts",
 ]);
 assert.deepEqual(rootWgslPlan.scopes.map((scope) => scope.id), [
   "compiler-types",
+  "compiler-unit",
   "wgsl-shared-emitter",
   "wgsl-storage-pointer",
+  "wgsl-atomics",
+  "wgsl-control-cooperative",
+  "wgsl-texture-surface",
 ]);
 assert.ok(rootWgslPlan.commands.map(commandToString).includes("pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:smoke"));
 
 const atomicPlan = planForChangedFiles([
-  "packages/browsergrad-compiler/src/wgsl_atomics.ts",
+  "packages/browsergrad-compiler/src/semantic_wgsl_atomic_analysis.ts",
 ]);
 assert.deepEqual(atomicPlan.scopes.map((scope) => scope.id), [
   "compiler-types",
@@ -340,8 +344,8 @@ assert.deepEqual(realWorldVerifierPlan.commands.map(commandToString), [
 ]);
 
 const multiWgslPlan = planForChangedFiles([
-  "packages/browsergrad-compiler/src/wgsl_storage_views.ts",
-  "packages/browsergrad-compiler/src/wgsl_atomics.ts",
+  "packages/browsergrad-compiler/src/semantic_wgsl_pointers.ts",
+  "packages/browsergrad-compiler/src/semantic_wgsl_atomic_analysis.ts",
   "packages/browsergrad-compiler/src/wgsl_control_analysis.ts",
   "packages/browsergrad-compiler/src/wgsl_texture_surface.ts",
 ]);
@@ -364,7 +368,7 @@ assert.ok(
 );
 
 const compilePlan = planForChangedFiles([
-  "packages/browsergrad-compiler/src/wgsl_storage_views.ts",
+  "packages/browsergrad-compiler/src/semantic_wgsl_pointers.ts",
 ], { includeCompileCorpus: true });
 assert.ok(
   compilePlan.commands.map(commandToString).includes("pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:compile"),
@@ -408,7 +412,7 @@ const rawDashJson = spawnSync(process.execPath, [
   "--",
   "--json",
   "--files",
-  "packages/browsergrad-compiler/src/wgsl_atomics.ts",
+  "packages/browsergrad-compiler/src/semantic_wgsl_atomic_analysis.ts",
 ], { cwd: root, encoding: "utf8" });
 assert.equal(rawDashJson.status, 0, rawDashJson.stderr || rawDashJson.stdout);
 assert.match(rawDashJson.stdout, /"wgsl-atomics"/u);
@@ -428,6 +432,7 @@ assert.deepEqual(scopeCliPlan.scopes.map((scope) => scope.files), [[], []]);
 assert.deepEqual(scopeCliPlan.scopes.map((scope) => scope.requested), [true, true]);
 
 const compilerPackage = JSON.parse(fs.readFileSync(path.join(root, "packages/browsergrad-compiler/package.json"), "utf8"));
+assert.match(compilerPackage.scripts.build, /pnpm run clean/u);
 const expectedSmokeCases = new Set([
   "example:saxpy",
   ...runtimeScopeCases,

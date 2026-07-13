@@ -317,9 +317,9 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
   assertEqual(report.summary.deprecatedCompilePlanAliases.webGpuRunnableOk, "planCompiledOk", "deprecated runnable alias");
   assertEqual(report.summary.webGpuDirectCompiledOk, 14, "reverse include kernel direct WGSL compiled");
   assertEqual(
-    report.summary.semanticIrDirectWgslOk + report.summary.semanticIrHostPlanOk + report.summary.legacyAstDirectWgslFallback,
+    report.summary.semanticIrDirectWgslOk + report.summary.semanticIrHostPlanOk + report.summary.semanticIrWebGpuGaps,
     report.summary.webGpuDirectCompiledOk,
-    "semantic direct, semantic host, and AST fallback coverage partition",
+    "semantic direct, semantic host, and semantic WebGPU gap coverage partition",
   );
   assertEqual(report.summary.semanticIrHostPlanOk, 0, "semantic host-plan count");
   assertEqual(
@@ -328,9 +328,9 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
     "total semantic WebGPU coverage",
   );
   assertEqual(
-    Object.values(report.summary.legacyAstDirectWgslBlockers).reduce((total, count) => total + count, 0),
-    report.summary.legacyAstDirectWgslFallback,
-    "AST direct WGSL blocker coverage partition",
+    Object.values(report.summary.semanticIrWebGpuGapBlockers).reduce((total, count) => total + count, 0),
+    report.summary.semanticIrWebGpuGaps,
+    "semantic WebGPU blocker coverage partition",
   );
   assertEqual(report.summary.webGpuHostPlanCompiledOk, 1, "reverse include kernel host-plan compiled");
   assertEqual(report.summary.compileCodegenOk, 15, "reverse include kernel compile/codegen count");

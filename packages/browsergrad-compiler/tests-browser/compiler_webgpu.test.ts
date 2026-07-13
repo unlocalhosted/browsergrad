@@ -21,13 +21,8 @@ import {
   runCompiledKernelSemanticReference,
   runCompiledKernelWebGpu,
 } from "../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../src/analyzer";
-
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 interface DeviceCheck {
@@ -792,7 +787,7 @@ __global__ void subgroupScalarCompat(float *x) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("subgroups");
     expect(compiled.wgsl).not.toContain("enable subgroups;");
     expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Elect|Broadcast|All|Any)\b/u);
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
@@ -3785,7 +3780,7 @@ __global__ void driverSurfaceAlias(CUsurfObject surf) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
+    expect(semanticIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
     expect([...actual.buffers.surf as Float32Array]).toEqual([...expected.buffers.surf as Float32Array]);
     expect([...actual.buffers.surf as Float32Array]).toEqual([3, 13]);
   });
@@ -3998,7 +3993,7 @@ __global__ void halfCompat(half* x, half2* y, half a) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.x as Float32Array]).toEqual([3.5]);
     expect([...actual.buffers.y as Float32Array]).toEqual([4, 7]);
   });
@@ -4025,7 +4020,7 @@ __global__ void halfSat(half* x, half2* y) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.x as Float32Array]).toEqual([1]);
     expect([...actual.buffers.y as Float32Array]).toEqual([0.5, 1]);
@@ -4057,7 +4052,7 @@ __global__ void halfUnary(half* x) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.x as Float32Array]).toEqual([1.5, 2, 1, -1, 0.5, 0.5, 2]);
   });
@@ -4092,7 +4087,7 @@ __global__ void half2Unary(half2* x, half2* out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.out as Float32Array]).toEqual([1.5, 1.25, -1, 2, -2, 1, 1.5, -1.25, 0.25, 0.0625, 0.5, 0.25, 2, 4, -1, 1]);
   });
@@ -4112,7 +4107,7 @@ __global__ void half2Assignment(half2 *out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.out as Float32Array]).toEqual([10, 18]);
   });
@@ -4418,7 +4413,7 @@ __global__ void half2Compare(const half2* a, const half2* b, half2* vec, uint* m
       },
     }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.vec as Float32Array]).toEqual([1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1]);
     expect([...actual.buffers.mask as Uint32Array]).toEqual([0x0000ffff, 0xffff0000, 0, 0x0000ffff, 0xffff0000, 0xffffffff, 0, 0xffffffff, 0xffffffff, 0xffffffff]);
@@ -4456,7 +4451,7 @@ __global__ void half2MinMaxNan(const half2* a, const half2* b, half2* out, half2
     }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] });
     const out = [...actual.buffers.out as Float32Array];
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(out.slice(0, 4)).toEqual([1, 2, 3, 4]);
     expect(Number.isNaN(out[4])).toBe(true);
@@ -4535,7 +4530,7 @@ __global__ void doubleCompat(double* result, double* out, double a) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.result as Float32Array]).toEqual([3]);
     expect([...actual.buffers.out as Float32Array]).toEqual([2.75, 3.75]);
   });
@@ -4573,7 +4568,7 @@ __global__ void halfUnordered(const half* input, half* output, int* flags) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
     const output = Array.from(actual.buffers.output as Float32Array);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(Number.isNaN(output[0])).toBe(true);
     expect(Number.isNaN(output[1])).toBe(true);
@@ -4608,7 +4603,7 @@ __global__ void half2LaneHelpers(const half2 *input, half2 *out, half *scalar) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.scalar as Float32Array]).toEqual([1, 2]);
     expect([...actual.buffers.out as Float32Array]).toEqual([2, 1, 1, 1, 1, 1, 2, 2, 1, 3, 2, 4, 2, 1]);
@@ -4647,7 +4642,7 @@ __global__ void halfShortConvert(const half* input, int* out, uint* uout, half* 
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.out as Int32Array]).toEqual([2, 1, 2, 1, -2, -1, -1, -2, -16384]);
     expect([...actual.buffers.uout as Uint32Array]).toEqual([2, 1, 2, 1]);
@@ -4679,7 +4674,7 @@ __global__ void halfDirectedConvert(half* out) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect([...actual.buffers.out as Float32Array]).toEqual([2048, 2048, 2050, 2048, -2048, -2048, -2048, -2050, 2048, 2050, -2050, 2050, 32752, -32768, 2050, -1]);
   });
@@ -4891,7 +4886,7 @@ __global__ void bf162Move(float *out, uint *bits) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.out as Float32Array]).toEqual([256, -256, 256, -256, 256, -256, 256, 256, -256, -256, 256, 256, -256, -256, -256, 256, 1.5, 1.5, 256, 256]);
     expect([...actual.buffers.bits as Uint32Array]).toEqual([0xc3804380, 0xc3804380, 0x3fc03fc0, 0x43804380]);
   });
@@ -4984,7 +4979,7 @@ __global__ void bf162Math(float *out, uint *bits) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.out as Float32Array]).toEqual([4, 1.75, 1, 6.25, 3.75, -9, 2, 3, -1.5, 2.25, 1.5, 2.25, 4.75, -10, 0.5, 1, 4.75, 0, 0, 16, 2, -1, 1, -2, 0.25, 0.0625, 0.5, 0.25, 2, 4, 1, -1, 1, 2.71875, 2, 8, 1, 10, 0, 1.3828125, 0, 2, 0, 1, 0, 0.83984375, 1, 0.5390625, 0, 0.76171875, 0, 0.76171875, 2, -2]);
     expect([...actual.buffers.bits as Uint32Array]).toEqual([0x3fe04080, 0xc1204098]);
   });
@@ -5058,7 +5053,7 @@ __global__ void bf162Compare(const float *seed, float *out, uint *mask, uint *fl
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
-    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(semanticIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.out as Float32Array]).toEqual([1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 2, 1, 3, 1, 1, 1, 1]);
     expect([...actual.buffers.mask as Uint32Array]).toEqual([0x0000ffff, 0xffff0000, 0xffff0000, 0x0000ffff, 0xffffffff, 0xffffffff]);
     expect([...actual.buffers.flags as Uint32Array]).toEqual([0, 0, 1, 1, 1]);

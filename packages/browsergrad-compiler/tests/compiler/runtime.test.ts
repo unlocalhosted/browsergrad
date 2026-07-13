@@ -38,7 +38,6 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../../src/index";
-import { lowerAnalyzedCudaLiteToKernelIr } from "../../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -50,11 +49,8 @@ import { collectSemanticPoolAllocations } from "../../src/semantic_ir";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-function backendIr(compiled: CompiledCudaLiteKernel) {
-  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
-    workgroupSize: compiled.kernelIr.workgroupSize,
-    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
-  });
+function semanticIr(compiled: CompiledCudaLiteKernel) {
+  return compiled.kernelIr;
 }
 
 const gammaCoefficients = [
@@ -478,9 +474,8 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       const stageConsumers = [
         "analyzer.ts",
-        "reference.ts",
+        "semantic_ir.ts",
         "runtime_plan.ts",
-        "wgsl.ts",
       ];
       const missingConsumers = stageConsumers
         .filter((file) => !compilerSourceText(file).includes("isHostManagedRuntimeNoopCall"))
@@ -538,7 +533,6 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       const consumerChecks = [
         ["analyzer.ts", "isCudaIntegerRuntimeQueryCall"],
-        ["wgsl.ts", "isCudaIntegerRuntimeQueryCall"],
         ["dynamic_launch.ts", "isCudaHostDynamicNoopCall"],
         ["peer_copy.ts", "isCudaPeerCopyHostNoopCall"],
         ["cuda_host_silent_calls.ts", "isCudaRuntimeQueryWriteCall"],
@@ -2823,14 +2817,13 @@ export {
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
-  lowerAnalyzedCudaLiteToKernelIr,
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
   deviceLaunchTreeIsExternallySilent,
   packCudaWebGpuUniformParams,
   packageRoot,
-  backendIr,
+  semanticIr,
   gammaCoefficients,
   gammaApprox,
   erfApprox,

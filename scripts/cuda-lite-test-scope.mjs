@@ -74,7 +74,7 @@ export const scopeRules = [
     id: "compiler-unit",
     reason: "parser/analyzer/reference/core compiler changed",
     matches: [
-      /^packages\/browsergrad-compiler\/src\/(?:analyzer|parser|reference|types|index|webgpu_orchestration)\.ts$/u,
+      /^packages\/browsergrad-compiler\/src\/(?:analyzer|parser|semantic_ir|semantic_reference|semantic_wgsl|types|index|runner|webgpu_orchestration)\.ts$/u,
       /^packages\/browsergrad-compiler\/tests\/compiler\/.+\.test\.ts$/u,
     ],
     commands: [
@@ -95,7 +95,7 @@ export const scopeRules = [
     id: "wgsl-shared-emitter",
     reason: "WGSL shared emitter/orchestration path changed",
     matches: [
-      /^packages\/browsergrad-compiler\/src\/(?:ir_usage|wgsl|wgsl_(?:context|declarations|feature_usage|ir_analysis|module|names|support_helpers))\.ts$/u,
+      /^packages\/browsergrad-compiler\/src\/(?:semantic_wgsl|wgsl_(?:feature_usage|names|support_helpers))\.ts$/u,
     ],
     commands: [
       command("pnpm", "--filter", COMPILER, "run", "test:wgsl-modules"),
@@ -106,7 +106,7 @@ export const scopeRules = [
     id: "wgsl-storage-pointer",
     reason: "WGSL storage/pointer/value path changed",
     matches: [
-      /^packages\/browsergrad-compiler\/src\/wgsl(?:_storage|_storage_views|_device_pointers|_pointer_helpers|_pointer_usage|_value_conversion|_pool_access)?\.ts$/u,
+      /^packages\/browsergrad-compiler\/src\/(?:semantic_wgsl|semantic_wgsl_(?:indexing|memory_layout|pointers|pools)|semantic_(?:byte_storage|pointer_arguments|runtime_pointers)|wgsl_(?:storage|value_conversion))\.ts$/u,
       /^packages\/browsergrad-compiler\/tests\/wgsl_modules\.test\.ts$/u,
     ],
     commands: [
@@ -118,8 +118,7 @@ export const scopeRules = [
     id: "wgsl-atomics",
     reason: "WGSL atomic path changed",
     matches: [
-      /^packages\/browsergrad-compiler\/src\/wgsl_atomics?\.ts$/u,
-      /^packages\/browsergrad-compiler\/src\/wgsl_atomic_helpers\.ts$/u,
+      /^packages\/browsergrad-compiler\/src\/(?:semantic_wgsl|semantic_wgsl_atomic_analysis|semantic_atomic_intrinsics|wgsl_atomic_helpers)\.ts$/u,
     ],
     commands: [
       command("pnpm", "--filter", COMPILER, "run", "test:wgsl-modules"),
@@ -130,7 +129,7 @@ export const scopeRules = [
     id: "wgsl-control-cooperative",
     reason: "WGSL active-lane/cooperative path changed",
     matches: [
-      /^packages\/browsergrad-compiler\/src\/wgsl_(?:control_analysis|cooperative)\.ts$/u,
+      /^packages\/browsergrad-compiler\/src\/(?:semantic_wgsl|semantic_wgsl_(?:cooperative|subgroup_control|subgroups|sync)|semantic_(?:barrier_contracts|cooperative_groups)|wgsl_control_analysis)\.ts$/u,
     ],
     commands: [
       command("pnpm", "--filter", COMPILER, "run", "test:wgsl-modules"),
@@ -141,7 +140,7 @@ export const scopeRules = [
     id: "wgsl-texture-surface",
     reason: "WGSL texture/surface path changed",
     matches: [
-      /^packages\/browsergrad-compiler\/src\/wgsl_texture_surface\.ts$/u,
+      /^packages\/browsergrad-compiler\/src\/(?:semantic_wgsl|semantic_wgsl_texture_descriptors|semantic_texture_surface|wgsl_texture_surface)\.ts$/u,
     ],
     commands: [
       e2eCases(...textureScopeCases),

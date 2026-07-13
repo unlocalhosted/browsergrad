@@ -11,10 +11,13 @@ Pipeline:
 ```text
 CUDA-lite source
   -> lexer/parser
-  -> semantic analysis
-  -> Kernel IR
-  -> CPU reference interpreter
-  -> WGSL emitter
+  -> analyzed syntax and diagnostics
+  -> typed semantic model
+  -> canonical semantic Kernel IR
+  -> runtime lowering
+  -> IR verification and type checking
+  -> WGSL legalization
+  -> semantic CPU reference or semantic WGSL emission
   -> WebGPU execution plan
   -> kernels package dispatch
 ```
@@ -25,14 +28,18 @@ resident buffers, and readback mechanics.
 
 ## Source Of Truth
 
-- `src/types.ts`: AST, diagnostics, private backend IR, launch/input/result types.
+- `src/types.ts`: AST, diagnostics, launch/input/result types, and public compile
+  result contracts.
 - `src/parser.ts` and `src/lexer.ts`: syntax only. No semantic rewrites.
 - `src/analyzer.ts`: symbols, types, feature gates, safety checks, and lowering
   eligibility.
-- `src/semantic_ir.ts`: semantic model plus the new backend-neutral Kernel IR.
-  New compiler passes should target this path first.
-- `src/reference.ts`: CPU truth and traces from Kernel IR semantics.
-- `src/wgsl.ts`: WGSL emission only. It should not rediscover CUDA semantics.
+- `src/semantic_ir.ts`: typed semantic model plus the canonical backend-neutral
+  Kernel IR. Executable compiler passes consume this contract.
+- `src/semantic_ir_verifier.ts`, `src/semantic_type_check.ts`, and
+  `src/wgsl_legalization.ts`: explicit phase contracts before emission.
+- `src/semantic_reference.ts`: CPU truth and traces from semantic Kernel IR.
+- `src/semantic_wgsl.ts`: WGSL emission from legalized semantic Kernel IR. It
+  does not consume AST statements or rediscover CUDA meaning.
 - `src/runtime_plan.ts`: CUDA runtime operations discovered from IR.
 - `src/webgpu_orchestration.ts`: exact WebGPU executable plan selection.
 - `src/launch.ts`: shared launch-shape diagnostics for reference/WebGPU parity.
@@ -77,11 +84,9 @@ If a feature needs support in multiple files, add it in this order:
 - Every emitted diagnostic/blocker code must have an explicit
   `compatibility.ts` feature record. The compiler unit suite source-scans for
   drift.
-- During the migration, `CompiledCudaLiteKernel.kernelIr` is the public semantic
-  IR contract. The AST-backed backend bridge is private implementation state
-  for reference, WGSL, and WebGPU orchestration while those paths migrate.
-  Do not add public or feature-level dependencies on the private bridge; migrate
-  feature families into `kernelIr` instead.
+- `CompiledCudaLiteKernel.kernelIr` is the only executable IR contract.
+  AST-shaped backend IR, AST reference execution, and AST WGSL emission are
+  prohibited and enforced by the architecture gate.
 - Semantic Kernel IR operations must expose compiler meaning, not parser shape:
   stores carry typed `MemoryRef` targets and read refs, calls/atomics/barriers
   are explicit operations, and backend code may not infer execution readiness
@@ -227,8 +232,8 @@ Vertical feature modules should grow in this order:
 5. Move fixtures/status metadata close to the feature or generate registries
    from the feature catalog.
 
-Keep old import paths as thin compatibility shims only while internal callers
-migrate. Compiler internals should import the vertical module directly.
+Do not add backend compatibility shims around AST statements. Compiler
+internals should import the owning semantic or vertical feature module directly.
 
 ## Evidence Gates
 

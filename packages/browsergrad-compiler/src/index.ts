@@ -40,7 +40,6 @@ export {
   type CudaLiteUpdateExpression,
   type CudaLiteVarDecl,
   type DiagnosticSeverity,
-  type KernelIrModule,
   type KernelLaunch,
   type KernelMemoryAccess,
   type KernelThreadTrace,
@@ -155,7 +154,7 @@ export {
   projectSemanticHostRuntimeToGpuIr,
   type ProjectedSemanticGpuIr,
 } from "./semantic_gpu_projection.js";
-export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
+export { analyzeCudaLite } from "./analyzer.js";
 export {
   classifyCudaCompatibilityFamily,
   createCudaLoweringPlan,
