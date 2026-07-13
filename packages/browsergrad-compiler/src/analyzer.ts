@@ -65,6 +65,7 @@ import {
 import {
   isCudaArithmeticReduceCallName as isMaskedWarpReductionBuiltin,
   isCudaBitwiseReduceCallName as isMaskedWarpBitwiseReductionBuiltin,
+  isCudaCompatSubgroupReduceCallName,
   isCudaShuffleCallName as isShuffleBuiltin,
   isCudaVoteCallName as isVoteBuiltin,
 } from "./cuda_subgroup_calls.js";
@@ -2228,6 +2229,15 @@ function validateCallExpression(
   if (callName === "__activemask") {
     requiredFeatures.add("subgroups");
     return { kind: "scalar", valueType: "uint" };
+  }
+  if (isCudaCompatSubgroupReduceCallName(callName)) {
+    requiredFeatures.add("subgroups");
+    const value = expression.args[0];
+    if (!value) return { kind: "unknown" };
+    const info = walkExpression(value, scope);
+    validateScalarOperand(info, value.span, diagnostics);
+    for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "scalar", valueType: info.valueType };
   }
   if (isShuffleBuiltin(callName) || isVoteBuiltin(callName)) {
     requiredFeatures.add("subgroups");

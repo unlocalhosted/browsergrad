@@ -744,6 +744,32 @@ __global__ void constantLocalOut(float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs subgroup reductions through lane-varying loop bounds on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupLoop(float *x, float *out, int count) {
+  int lane = threadIdx.x;
+  float acc = 0.0f;
+  for (int i = lane; i < count; ++i) {
+    acc += x[i];
+    acc = bg_subgroup_add(acc);
+  }
+  out[lane] = acc;
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { x: new Float32Array([1, 2, 3, 4]), out: new Float32Array(4) },
+      scalars: { count: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("for (var bg_subgroup_loop_iteration_");
+    expect(compiled.wgsl).not.toContain("subgroupAny(bg_subgroup_loop_active_");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs subgroup scalar compatibility mode through real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

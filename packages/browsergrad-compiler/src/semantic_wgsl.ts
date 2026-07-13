@@ -136,6 +136,7 @@ import {
 import {
   cudaArithmeticReduceOpForCall,
   cudaVoteOpForCall,
+  isCudaCompatSubgroupReduceCallName,
   isCudaWarpReduceCallName,
 } from "./cuda_subgroup_calls.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
@@ -278,6 +279,7 @@ import { emitSemanticNumericHelpers } from "./semantic_wgsl_numeric_helpers.js";
 import { createSemanticBfloatScalarEmitter, roundTypedBf16, semanticTypedIsNan } from "./semantic_wgsl_bfloat_scalar.js";
 import { createSemanticTypedIntrinsicEmitter } from "./semantic_wgsl_typed_intrinsics.js";
 import { createSemanticWgslAtomicAnalysis } from "./semantic_wgsl_atomic_analysis.js";
+import { createSemanticSubgroupControlEmitter } from "./semantic_wgsl_subgroup_control.js";
 import {
   emitSemanticSyncthreadsPredicateHelper,
   semanticSyncthreadsPredicateHelperFor,
@@ -394,6 +396,19 @@ const {
   memoryRefFromIndexExpression,
   nameFor,
   semanticWgslFloatAtomicCallKind,
+});
+
+const {
+  emitUniformForLoop: emitSemanticUniformSubgroupForLoop,
+  operationsContainNativeCollective: semanticOperationsContainNativeSubgroupCollective,
+} = createSemanticSubgroupControlEmitter({
+  createGeneratedSymbolId: createGeneratedSemanticSymbolId,
+  emitExpressionAs: emitSemanticExpressionAs,
+  emitLoopInit: emitSemanticLoopInit,
+  emitOperation: emitSemanticOperation,
+  emitTruthiness,
+  nameFor,
+  semanticError: semanticWgslError,
 });
 
 export function canEmitSemanticKernelIrWgsl(
@@ -1228,7 +1243,6 @@ function semanticWgslSubgroupCallSupported(
 ): boolean {
   if (expression.callee.kind !== "symbol" || expression.callee.addressSpace === "function" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) ||
     ir?.requiredFeatures.includes("subgroups") !== true && ir?.subgroupMode !== "scalar") return false;
-  if (expression.callee.name === "bg_subgroup_add" && ir?.subgroupMode !== "scalar") return false;
   const scalarArgs = semanticSubgroupScalarArguments(expression.callee.name, expression.args);
   if (scalarArgs === undefined || !scalarArgs.every((arg) => semanticWgslExpressionSupported(arg, "scalar", ir))) return false;
   if (semanticBitwiseReduceOpForCall(expression.callee.name)) {
@@ -2182,12 +2196,14 @@ function emitSemanticPredicatedOperations(
         throw semanticWgslError("predicated cooperative shuffle requires local scalar assignment", operation.span);
       }
       const valueType = operation.expression.target.valueType;
-      if (!valueType || isSemanticFloatVectorType(valueType)) {
-        throw semanticWgslError("predicated cooperative shuffle requires typed scalar assignment", operation.span);
-      }
+      if (!valueType) throw semanticWgslError("predicated cooperative shuffle requires typed assignment", operation.span);
       const temporary = nameFor(`bg_collective_${operation.span.start}`, names);
       const collectiveOptions = { ...options, activeCollectivePredicate: predicateExpression };
-      lines.push(`${prefix}let ${temporary}: ${wgslValueScalar(valueType)} = ${emitSemanticLocalScalarExpressionAs(operation.expression.value, valueType, ir, names, collectiveOptions, textureSpecializations)};`);
+      const temporaryType = wgslValueType(valueType);
+      const collectiveValue = isSemanticFloatVectorType(valueType)
+        ? emitSemanticExpressionAs(operation.expression.value, ir, names, temporaryType as WgslValueType, collectiveOptions, textureSpecializations).code
+        : emitSemanticLocalScalarExpressionAs(operation.expression.value, valueType, ir, names, collectiveOptions, textureSpecializations);
+      lines.push(`${prefix}let ${temporary}: ${temporaryType} = ${collectiveValue};`);
       lines.push(`${prefix}if (${predicate}) {`);
       lines.push(`${"  ".repeat(indentLevel + 1)}${emitSemanticAssignmentStatement({ ...operation.expression, value: { kind: "symbol", id: createGeneratedSemanticSymbolId(temporary, operation.span), name: temporary, valueType, addressSpace: "local", span: operation.span } }, ir, names, options, textureSpecializations)};`);
       lines.push(`${prefix}}`);
@@ -3758,6 +3774,10 @@ function emitSemanticLoop(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
+  if (operation.loopKind === "for" && operation.continuing === undefined && operation.update?.kind !== "sequence" &&
+    ir.subgroupMode !== "scalar" && semanticOperationsContainNativeSubgroupCollective(operation.body)) {
+    return emitSemanticUniformSubgroupForLoop(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations);
+  }
   if (operation.loopKind === "for") {
     if (operation.continuing !== undefined || operation.update?.kind === "sequence") {
       const init = operation.init === undefined
@@ -5481,7 +5501,7 @@ function emitSemanticTypedSubgroupCall(
   const value = expression.args[
     isCudaWarpReduceCallName(name)
       ? expression.args.length - 1
-      : name === "bg_subgroup_add" || legacyVoteCall(name) || legacyShuffleCall(name)
+      : isCudaCompatSubgroupReduceCallName(name) || legacyVoteCall(name) || legacyShuffleCall(name)
         ? 0
         : 1
   ];
@@ -5562,14 +5582,35 @@ function emitSemanticTypedSubgroupCall(
   if (arithmeticReduceOp !== undefined) {
     const scalar = semanticExpressionWgslScalar(value);
     const callee = arithmeticReduceOp === "add" ? "subgroupAdd" : arithmeticReduceOp === "min" ? "subgroupMin" : "subgroupMax";
+    const emittedValue = emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations);
+    const input = options.activeCollectivePredicate === undefined
+      ? emittedValue
+      : emitTypedWgslSelect(
+          semanticArithmeticReduceIdentity(arithmeticReduceOp, scalar, span),
+          emittedValue,
+          emitSemanticTruthinessExpression(options.activeCollectivePredicate, ir, names, options),
+          span,
+        );
     return createTypedWgslCall(
       callee,
-      [emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)],
+      [input],
       scalar,
       span,
     );
   }
   return undefined;
+}
+
+function semanticArithmeticReduceIdentity(
+  operation: NonNullable<ReturnType<typeof cudaArithmeticReduceOpForCall>>,
+  type: WgslValueType,
+  span: SourceSpan,
+): TypedWgslExpression {
+  if (operation === "add") return createTypedWgslZero(type, span);
+  if (type === "f32") return createTypedWgslLiteral(operation === "min" ? "3.4028234663852886e38" : "-3.4028234663852886e38", type, span);
+  if (type === "i32") return createTypedWgslLiteral(operation === "min" ? "2147483647" : "-2147483648", type, span);
+  if (type === "u32") return createTypedWgslLiteral(operation === "min" ? "0xffffffffu" : "0u", type, span);
+  return createTypedWgslZero(type, span);
 }
 
 function emitSemanticTypedCooperativeReduceCall(

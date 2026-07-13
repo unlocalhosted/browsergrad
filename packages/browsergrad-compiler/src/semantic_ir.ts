@@ -75,7 +75,7 @@ import {
 } from "./features/inline_ptx/model.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import { cudaVectorConstructorType, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleType, isCudaVectorType } from "./vector_types.js";
-import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS, SEMANTIC_NOOP_CALLS } from "./semantic_builtin_calls.js";
+import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS, SEMANTIC_NOOP_CALLS, SEMANTIC_SUBGROUP_CALLS } from "./semantic_builtin_calls.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { SEMANTIC_CURAND_CALLS, SEMANTIC_CURAND_VECTOR_RETURN_TYPES } from "./semantic_curand_intrinsics.js";
 import {
@@ -865,7 +865,7 @@ export function lowerSemanticModelToKernelIr(
       proof,
       sourceBarrierFunctions,
     );
-    const body = lowerSemanticEarlyReturnsBeforeDirectBarriers(loweredBreaks, semantic.functions, fn.span, proof);
+    const body = lowerSemanticEarlyReturnsBeforeCollectives(loweredBreaks, semantic.functions, fn.span, proof);
     return {
       ...fn,
       body: markSemanticWorkgroupUniformControl(body, proof.workgroupUniformControlStatementStarts),
@@ -900,7 +900,7 @@ export function lowerSemanticModelToKernelIr(
     analysis.barrierUniformity.kernel,
     sourceBarrierFunctions,
   );
-  const activeLaneOperations = lowerSemanticEarlyReturnsBeforeDirectBarriers(
+  const activeLaneOperations = lowerSemanticEarlyReturnsBeforeCollectives(
     breakOperations,
     loweredSourceFunctions,
     analysis.kernel.span,
@@ -1512,20 +1512,20 @@ function lowerSemanticPredicatedBarrierOperations(
   });
 }
 
-function lowerSemanticEarlyReturnsBeforeDirectBarriers(
+function lowerSemanticEarlyReturnsBeforeCollectives(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
   kernelSpan: SourceSpan,
   barrierProof: CudaLiteAnalysis["barrierUniformity"]["kernel"],
 ): readonly SemanticKernelIrOperation[] {
   const barrierFunctions = semanticIrBarrierFunctionNames(functions);
-  const firstReturnBeforeBarrier = operations.findIndex((operation, index) =>
+  const firstReturnBeforeCollective = operations.findIndex((operation, index) =>
     semanticOperationContainsVoidReturn(operation) &&
-    (semanticOperationContainsVoidReturnBeforeBarrier(operation, barrierFunctions) ||
-      semanticIrOperationsContainBarrier(operations.slice(index + 1), barrierFunctions))
+    (semanticOperationContainsVoidReturnBeforeCollective(operation, barrierFunctions) ||
+      semanticIrOperationsContainSchedulingCollective(operations.slice(index + 1), barrierFunctions))
   );
-  if (firstReturnBeforeBarrier < 0) return operations;
-  const affected = operations.slice(firstReturnBeforeBarrier);
+  if (firstReturnBeforeCollective < 0) return operations;
+  const affected = operations.slice(firstReturnBeforeCollective);
   const returnStarts = semanticVoidReturnStarts(affected);
   if (barrierProof.unverifiedControlStatementStarts.some((start) => !returnStarts.has(start))) return operations;
   const pointerFunctions = new Map(functions.filter((fn) => fn.params.some((param) => param.pointer)).map((fn) => [fn.name, fn] as const));
@@ -1533,7 +1533,7 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
   if (!semanticVoidReturnsAreTerminal(affected)) return operations;
   if (affected.some((operation) => semanticActiveLaneTransformUnsafe(operation, pointerFunctions, pointerWrites, barrierFunctions))) return operations;
 
-  const firstAffected = operations[firstReturnBeforeBarrier]!;
+  const firstAffected = operations[firstReturnBeforeCollective]!;
   const activeName = firstAffected.kind === "loop"
     ? `bg_barrier_loop_active_${firstAffected.span.start}`
     : "bg_active_lane";
@@ -1554,33 +1554,33 @@ function lowerSemanticEarlyReturnsBeforeDirectBarriers(
     span: kernelSpan,
   };
   const lowered = lowerSemanticActiveLaneOperations(affected, active, activeExpression, barrierFunctions);
-  return [...operations.slice(0, firstReturnBeforeBarrier), declare, ...lowered];
+  return [...operations.slice(0, firstReturnBeforeCollective), declare, ...lowered];
 }
 
-function semanticOperationContainsVoidReturnBeforeBarrier(
+function semanticOperationContainsVoidReturnBeforeCollective(
   operation: SemanticKernelIrOperation,
   barrierFunctions: ReadonlySet<string>,
 ): boolean {
   if (operation.kind === "branch") {
-    return semanticOperationsContainVoidReturnBeforeBarrier(operation.consequent, barrierFunctions) ||
-      semanticOperationsContainVoidReturnBeforeBarrier(operation.alternate, barrierFunctions);
+    return semanticOperationsContainVoidReturnBeforeCollective(operation.consequent, barrierFunctions) ||
+      semanticOperationsContainVoidReturnBeforeCollective(operation.alternate, barrierFunctions);
   }
   if (operation.kind === "loop" || operation.kind === "block") {
-    return semanticOperationsContainVoidReturnBeforeBarrier(operation.body, barrierFunctions) ||
+    return semanticOperationsContainVoidReturnBeforeCollective(operation.body, barrierFunctions) ||
       (operation.kind === "loop" && operation.continuing !== undefined &&
-        semanticOperationsContainVoidReturnBeforeBarrier(operation.continuing, barrierFunctions));
+        semanticOperationsContainVoidReturnBeforeCollective(operation.continuing, barrierFunctions));
   }
   return false;
 }
 
-function semanticOperationsContainVoidReturnBeforeBarrier(
+function semanticOperationsContainVoidReturnBeforeCollective(
   operations: readonly SemanticKernelIrOperation[],
   barrierFunctions: ReadonlySet<string>,
 ): boolean {
   return operations.some((operation, index) =>
     semanticOperationContainsVoidReturn(operation) &&
-    (semanticOperationContainsVoidReturnBeforeBarrier(operation, barrierFunctions) ||
-      semanticIrOperationsContainBarrier(operations.slice(index + 1), barrierFunctions))
+    (semanticOperationContainsVoidReturnBeforeCollective(operation, barrierFunctions) ||
+      semanticIrOperationsContainSchedulingCollective(operations.slice(index + 1), barrierFunctions))
   );
 }
 
@@ -3842,6 +3842,22 @@ function semanticIrOperationsContainBarrier(
     operation.kind === "branch" && (semanticIrOperationsContainBarrier(operation.consequent, barrierFunctions) || semanticIrOperationsContainBarrier(operation.alternate, barrierFunctions)) ||
     (operation.kind === "loop" || operation.kind === "block") && semanticIrOperationsContainBarrier(operation.body, barrierFunctions) ||
     operation.kind === "loop" && operation.continuing !== undefined && semanticIrOperationsContainBarrier(operation.continuing, barrierFunctions)
+  );
+}
+
+function semanticIrOperationsContainSchedulingCollective(
+  operations: readonly SemanticKernelIrOperation[],
+  barrierFunctions: ReadonlySet<string>,
+): boolean {
+  if (semanticIrOperationsContainBarrier(operations, barrierFunctions)) return true;
+  return collectSemanticFunctionCalls(operations).some(({ callee }) =>
+    SEMANTIC_SUBGROUP_CALLS.has(callee) ||
+    callee === "cg::reduce" ||
+    callee === "cooperative_groups::reduce" ||
+    callee === "cg::inclusive_scan" ||
+    callee === "cooperative_groups::inclusive_scan" ||
+    callee === "cg::exclusive_scan" ||
+    callee === "cooperative_groups::exclusive_scan"
   );
 }
 

@@ -28,6 +28,7 @@ import { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
 import {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
+  semanticKernelIrWgslPreflightFailure,
 } from "./semantic_wgsl.js";
 import {
   type CudaWebGpuExecutionPlan,
@@ -96,13 +97,23 @@ export function compileCudaLiteKernel(
   const verifiedKernelIr = validateSemanticKernelIr(kernelIr);
   const typeCheckedKernelIr = typeCheckSemanticKernelIr(verifiedKernelIr);
   const wgslLegalizedKernelIr = legalizeSemanticKernelIrForWgsl(typeCheckedKernelIr);
-  const diagnostics = reconcileSemanticRuntimeDiagnostics(analysis.diagnostics, kernelIr.operations);
+  const semanticDiagnostics = reconcileSemanticRuntimeDiagnostics(analysis.diagnostics, kernelIr.operations);
   const semanticWgslOptions = {
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
     ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
   };
-  const emitted = canEmitSemanticKernelIrWgsl(wgslLegalizedKernelIr, semanticWgslOptions)
+  const preflightFailure = semanticKernelIrWgslPreflightFailure(wgslLegalizedKernelIr);
+  const semanticPlan = createCudaLoweringPlan(semanticDiagnostics);
+  const diagnostics: readonly CudaLiteDiagnostic[] = preflightFailure !== undefined && semanticPlan.canDirectLowerToWgsl
+    ? [...semanticDiagnostics, {
+        code: "semantic-wgsl-unsupported",
+        severity: "error",
+        message: preflightFailure.message,
+        span: preflightFailure.span,
+      }]
+    : semanticDiagnostics;
+  const emitted = preflightFailure === undefined
     ? emitSemanticKernelIrWgsl(wgslLegalizedKernelIr, semanticWgslOptions)
     : undefined;
   const loweringPlan = createCudaLoweringPlan(diagnostics);

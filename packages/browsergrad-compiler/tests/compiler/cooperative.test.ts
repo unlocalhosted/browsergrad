@@ -478,7 +478,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
     out[0] = blockReduce(value, false, 0.0f);
   }`, { features: { subgroups: true } });
 
-      expect(compiled.wgsl).toContain("out[0] = f32(subgroupAdd(bg_uniforms.value))");
+      expect(compiled.wgsl).toContain("out[0u] = subgroupAdd(bg_uniforms.value);");
     });
 
   it("lowers masked warp reductions using the value operand", () => {
@@ -3117,7 +3117,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
 
       expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
       expect(compiled.wgsl).not.toContain("return;");
-      expect(compiled.wgsl).toContain("sum = select(sum, subgroupAdd(v), bg_active_lane);");
+      expect(compiled.wgsl).toMatch(/let bg_collective_\d+: f32 = subgroupAdd\(select\(0\.0, v, bg_active_lane\)\);/u);
+      expect(compiled.wgsl).toMatch(/if \(bg_active_lane\) \{\n\s+sum = bg_collective_\d+;/u);
       expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n    sum = subgroupAdd");
     });
 
@@ -3140,7 +3141,8 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       workgroupSize: [4, 1, 1],
     });
 
-      expect(compiled.wgsl).toContain("values[k] = select(values[k], bg_predicated_value_");
+      expect(compiled.wgsl).toMatch(/let bg_collective_\d+: f32 = subgroupAdd\(select\(0\.0, values\[u32\(k\)\], bg_active_lane\)\);/u);
+      expect(compiled.wgsl).toMatch(/if \(bg_active_lane\) \{\n\s+values\[u32\(k\)\] = bg_collective_\d+;/u);
       expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n      values[k] = subgroupAdd");
     });
 
@@ -3161,18 +3163,17 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [32, 1, 1],
       });
 
-      expect(compiled.wgsl).toContain("let bg_subgroup_if_active_");
-      expect(compiled.wgsl).toContain("total = select(total, subgroupAdd(gathered), bg_subgroup_if_active_");
-      expect(compiled.wgsl).not.toContain("if (((i32(local_id.x) / 32) == 0)) {\n    var gathered");
-      expect(compiled.wgsl).not.toContain("if (((i32(local_id.x) / 32) == 0)) {\n    var total");
+      expect(compiled.wgsl).toContain("var gathered: f32;");
+      expect(compiled.wgsl).toContain("var total: f32 = subgroupAdd(select(0.0, gathered");
+      expect(compiled.wgsl).not.toMatch(/if \([^\n]+\) \{\n\s+var total: f32 = subgroupAdd/u);
     });
 
-  it("keeps native subgroup reductions uniform inside data-dependent loops", () => {
+  it("keeps native subgroup reductions uniform inside proven-progress loops", () => {
       const compiled = compileCudaLiteKernel(`
-  __global__ void subgroupInDataLoop(float* x, float* out, int count, int stride) {
+  __global__ void subgroupInDataLoop(float* x, float* out, int count) {
     int lane = threadIdx.x;
     float acc = 0.0f;
-    for (int i = lane; i < count; i += stride) {
+    for (int i = lane; i < count; i += 2) {
       acc += x[i];
       acc = bg_subgroup_add(acc);
     }
@@ -3182,9 +3183,32 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [32, 1, 1],
       });
 
-      expect(compiled.wgsl).toContain("var bg_barrier_loop_active_");
-      expect(compiled.wgsl).toContain("acc = select(acc, bg_predicated_value_");
-      expect(compiled.wgsl).not.toContain("for (var i: i32 = i32(local_id.x); (i < bg_uniforms.count); i += bg_uniforms.stride)");
+      expect(compiled.wgsl).toContain("var bg_subgroup_loop_active_");
+      expect(compiled.wgsl).toContain("for (var bg_subgroup_loop_iteration_");
+      expect(compiled.wgsl).toContain("subgroupAdd(select(0.0, acc, bg_subgroup_loop_active_");
+      expect(compiled.wgsl).not.toContain("subgroupAny(bg_subgroup_loop_active_");
+    });
+
+  it("rejects subgroup loops without compile-time positive progress", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void subgroupUnknownProgress(float* x, int count, int stride) {
+    float acc = 0.0f;
+    for (int i = threadIdx.x; i < count; i += stride) {
+      acc = bg_subgroup_add(acc + x[i]);
+    }
+    x[threadIdx.x] = acc;
+      }`, {
+        features: { subgroups: true },
+        workgroupSize: [32, 1, 1],
+      });
+
+      expect(compiled.wgsl).toBeUndefined();
+      expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+        code: "semantic-wgsl-unsupported",
+        severity: "error",
+        message: expect.stringMatching(/compile-time positive counter step/u),
+      }));
+      expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(false);
     });
 
   it("avoids nonuniform dynamic bounds for subgroup loops with local lane-derived limits", () => {
@@ -3201,8 +3225,10 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [32, 1, 1],
       });
 
-      expect(compiled.wgsl).toContain("< 256u;");
-      expect(compiled.wgsl).not.toContain("t + 1");
+      expect(compiled.wgsl).toContain("var bg_subgroup_loop_active_");
+      expect(compiled.wgsl).toMatch(/for \(var bg_subgroup_loop_iteration_\d+: u32 = 0u; bg_subgroup_loop_iteration_\d+ < 1u;/u);
+      expect(compiled.wgsl).toContain("subgroupAdd(select(0.0, acc, bg_subgroup_loop_active_");
+      expect(compiled.wgsl).not.toContain("< 256u");
     });
 
   it("keeps vector cooperative reductions uniform after active-lane early returns", () => {
@@ -3229,8 +3255,9 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
         workgroupSize: [32, 1, 1],
       });
 
-      expect(compiled.wgsl).toContain("total = select(total, bg_cg_reduce_merge_pair_float2_32(pair");
-      expect(compiled.wgsl).toContain("var<workgroup> bg_cg_reduce_merge_pair_float2_32_scratch");
+      expect(compiled.wgsl).toMatch(/let bg_collective_\d+: vec2<f32> = bg_semantic_cg_reduce_merge_pair_float2_32\(pair/u);
+      expect(compiled.wgsl).toMatch(/if \(bg_active_lane\) \{\n\s+total = bg_collective_\d+;/u);
+      expect(compiled.wgsl).toContain("var<workgroup> bg_semantic_cg_reduce_merge_pair_float2_32_scratch");
       expect(compiled.wgsl).toContain("workgroupBarrier();");
       expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n    total = bg_cg_reduce");
     });

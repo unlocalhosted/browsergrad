@@ -47,6 +47,7 @@ import {
   cudaBitwiseReduceOpForCall,
   cudaShuffleOpForCall,
   cudaVoteOpForCall,
+  isCudaCompatSubgroupReduceCallName,
   isCudaLegacyShuffleCallName as legacyShuffleCall,
   isCudaLegacyVoteCallName as legacyVoteCall,
   isCudaShuffleCallName,
@@ -112,7 +113,11 @@ import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
 } from "./matrix_tiles.js";
-import { semanticAtomicMemoryRootNames } from "./semantic_ir_walk.js";
+import {
+  semanticAtomicMemoryRootNames,
+  semanticExpressionChildren,
+  semanticOperationExpressions,
+} from "./semantic_ir_walk.js";
 import {
   SEMANTIC_BF162_BINARY_VECTOR_CALLS,
   SEMANTIC_BF162_BOOL_COMPARISON_CALLS,
@@ -255,6 +260,7 @@ interface SemanticReferenceContext {
   readonly blockContexts: readonly SemanticReferenceContext[];
   readonly trace: MutableTrace;
   activeCollectiveContexts?: readonly SemanticReferenceContext[];
+  stagedSubgroupCallValues?: ReadonlyMap<SemanticExpression, number>;
   returnValue?: SemanticValue;
 }
 
@@ -3032,10 +3038,12 @@ function evalSemanticSubgroupCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
 ): number {
+  const staged = context.stagedSubgroupCallValues?.get(expression);
+  if (staged !== undefined) return staged;
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic subgroup call requires symbol callee", expression.span);
   const name = expression.callee.name;
   if (name === "__activemask") return semanticReferenceActiveMask(context);
-  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : name === "bg_subgroup_add" || legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
+  const value = expression.args[isCudaWarpReduceCallName(name) ? expression.args.length - 1 : isCudaCompatSubgroupReduceCallName(name) || legacyVoteCall(name) || legacyShuffleCall(name) ? 0 : 1];
   if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
   const voteOp = cudaVoteOpForCall(name);
   if (context.compiled.subgroupMode === "scalar") {
@@ -3043,7 +3051,7 @@ function evalSemanticSubgroupCall(
     if (voteOp !== undefined) return truthy(scalar) ? 1 : 0;
     return scalar;
   }
-  const mask = expression.args.length === 2 &&
+  const mask = !isCudaCompatSubgroupReduceCallName(name) && expression.args.length === 2 &&
     (isCudaWarpReduceCallName(name) || voteOp !== undefined || cudaArithmeticReduceOpForCall(name) !== undefined)
     ? evalNumber(expression.args[0]!, context) >>> 0
     : undefined;
@@ -6631,15 +6639,40 @@ function runSemanticCollectiveOperations(
     }
     for (const context of current) context.activeCollectiveContexts = current;
     try {
+      const subgroupCalls = semanticSubgroupCallsForOperation(operation);
+      if (subgroupCalls.length > 0) {
+        const staged = new Map(current.map((context) => [context, new Map(
+          subgroupCalls.map((call) => [call, evalSemanticSubgroupCall(call, context)] as const),
+        )] as const));
+        for (const [context, values] of staged) context.stagedSubgroupCallValues = values;
+      }
       for (const context of current) {
         const control = execSemanticOperations([operation], context);
         if (control !== "fallthrough") controls.set(context, control);
       }
     } finally {
-      for (const context of current) delete context.activeCollectiveContexts;
+      for (const context of current) {
+        delete context.activeCollectiveContexts;
+        delete context.stagedSubgroupCallValues;
+      }
     }
   }
   return controls;
+}
+
+function semanticSubgroupCallsForOperation(
+  operation: SemanticKernelIrOperation,
+): readonly Extract<SemanticExpression, { readonly kind: "call" }>[] {
+  const calls: Extract<SemanticExpression, { readonly kind: "call" }>[] = [];
+  const visit = (expression: SemanticExpression): void => {
+    if (expression.kind === "call" && expression.callee.kind === "symbol" &&
+      expression.callee.addressSpace !== "function" && SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) {
+      calls.push(expression);
+    }
+    for (const child of semanticExpressionChildren(expression)) visit(child);
+  };
+  for (const expression of semanticOperationExpressions(operation)) visit(expression);
+  return calls;
 }
 
 function runSemanticCollectiveScopedOperations(

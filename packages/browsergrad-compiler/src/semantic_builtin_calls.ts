@@ -3,6 +3,7 @@ import {
   CUDA_SUBGROUP_CALL_NAMES,
   cudaBitwiseReduceOpForCall,
   cudaShuffleOpForCall,
+  isCudaCompatSubgroupReduceCallName,
   isCudaLegacyShuffleCallName,
   isCudaLegacyVoteCallName,
   isCudaWarpReduceCallName,
@@ -55,7 +56,11 @@ export function semanticSubgroupCallShape(name: string | undefined): SemanticSub
   if (name === "__activemask") return { minArgs: 0, maxArgs: 0, scalarArgRule: [] };
   if (isCudaLegacyVoteCallName(name)) return { minArgs: 1, maxArgs: 1, scalarArgRule: [0] };
   if (isCudaLegacyShuffleCallName(name)) return { minArgs: 2, maxArgs: 3, scalarArgRule: "all" };
-  if (name === "bg_subgroup_add") return { minArgs: 1, maxArgs: 1, scalarArgRule: [0] };
+  if (isCudaCompatSubgroupReduceCallName(name)) {
+    return name === "blockReduce"
+      ? { minArgs: 1, maxArgs: 3, scalarArgRule: "all" }
+      : { minArgs: 1, maxArgs: 1, scalarArgRule: [0] };
+  }
   if (isCudaWarpReduceCallName(name)) return { minArgs: 1, maxArgs: 2, scalarArgRule: "all" };
   if (cudaBitwiseReduceOpForCall(name)) return { minArgs: 2, maxArgs: 2, scalarArgRule: "all" };
   if (cudaShuffleOpForCall(name)) return { minArgs: 3, maxArgs: 4, scalarArgRule: "all" };
