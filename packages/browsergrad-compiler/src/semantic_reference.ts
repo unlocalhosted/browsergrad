@@ -200,6 +200,7 @@ import {
   semanticPointerFunctionBodySupported as semanticPointerFunctionBodyContractSupported,
 } from "./semantic_function_calls.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
+import { semanticRuntimePointerDeclarationForRef } from "./semantic_runtime_pointers.js";
 import {
   semanticDirectByteStorageParamSupported,
   semanticDirectByteVectorMemberRef,
@@ -1104,10 +1105,12 @@ function semanticReferenceFunctionArgSupported(
   param: CompiledCudaLiteKernel["kernelIr"]["functions"][number]["params"][number] | undefined,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  if (param?.pointer && param.addressSpace === "storage" && semanticPointerArgMemoryRef(arg)?.addressSpace === "shared") return true;
+  const pointerRef = semanticPointerArgMemoryRef(arg);
+  if (param?.pointer && param.addressSpace === "storage" && pointerRef?.addressSpace === "shared") return true;
+  if (param?.pointer && param.addressSpace === "storage" && pointerRef !== undefined &&
+    semanticRuntimePointerDeclarationForRef(compiled.kernelIr, pointerRef) !== undefined) return true;
   if (param?.pointer && param.addressSpace === "storage" && param.valueType === "uchar") {
-    const ref = semanticPointerArgMemoryRef(arg);
-    return ref?.addressSpace === "storage" && semanticDirectByteStorageParamSupported(compiled.kernelIr, ref.base);
+    return pointerRef?.addressSpace === "storage" && semanticDirectByteStorageParamSupported(compiled.kernelIr, pointerRef.base);
   }
   const supported = semanticFunctionArgContractSupported(
     arg,
@@ -5390,16 +5393,25 @@ function createSemanticFunctionContext(
     }
     if (param.pointer && param.addressSpace === "constant" && param.pointerMemoryAlias !== undefined) continue;
     if (param.pointer && param.addressSpace === "storage") {
-      const ref = semanticPointerArgMemoryRef(arg);
-      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared") throw semanticReferenceError(`semantic reference function '${fn.name}' pointer argument must be modeled storage or shared memory`, arg.span);
+      const unresolvedRef = semanticPointerArgMemoryRef(arg);
+      const resolved = unresolvedRef === undefined ? undefined : semanticReferenceResolvePointerArg(unresolvedRef, context);
+      const ref = resolved?.ref;
+      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && ref.addressSpace !== "shared") {
+        const actual = ref === undefined ? "unmodeled" : `${ref.addressSpace} '${ref.base}'`;
+        const available = [...context.localPointerTargets.keys()].join(", ") || "none";
+        throw semanticReferenceError(
+          `semantic reference function '${fn.name}' pointer argument resolved to ${actual}; available runtime pointers: ${available}`,
+          arg.span,
+        );
+      }
       const buffer = ref.addressSpace === "device-global"
-        ? context.deviceGlobals.get(ref.base)
+        ? resolved.context.deviceGlobals.get(ref.base)
         : ref.addressSpace === "shared"
-          ? context.sharedMemory.get(ref.base)
-          : context.buffers.get(ref.base);
+          ? resolved.context.sharedMemory.get(ref.base)
+          : resolved.context.buffers.get(ref.base);
       if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, arg.span);
       buffers.set(param.name, buffer);
-      storageOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, context));
+      storageOffsets.set(param.name, semanticReferencePointerArgBaseIndex(ref, resolved.context));
       continue;
     }
     if (param.pointer && param.addressSpace === "shared") {
@@ -5506,6 +5518,19 @@ function semanticReferencePointerArgBaseIndex(ref: SemanticMemoryRef, context: S
   return ref.pointerBaseIsScalarLane !== true && isSemanticFloatVectorType(valueType) && isSemanticFloatVectorType(ref.valueType)
     ? index * cudaVectorLaneCount(valueType)
     : index;
+}
+
+function semanticReferenceResolvePointerArg(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+  visited = new Set<string>(),
+): { readonly ref: SemanticMemoryRef; readonly context: SemanticReferenceContext } {
+  if (ref.addressSpace !== "local") return { ref, context };
+  if (visited.has(ref.base)) throw semanticReferenceError(`cyclic local pointer '${ref.base}'`, ref.span);
+  const target = context.localPointerTargets.get(ref.base);
+  if (!target) return { ref, context };
+  visited.add(ref.base);
+  return semanticReferenceResolvePointerArg(localPointerTargetRef(target.ref, ref), target.context, visited);
 }
 
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {

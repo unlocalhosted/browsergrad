@@ -3292,7 +3292,9 @@ __global__ void shared_helper_result(int *out, int n) {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toMatch(/bg__bg_condition_value_\d+_\d+ = bitcast<i32>\(active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect/u);
       expect(compiled.wgsl).toContain("active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0, i32(active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect");

@@ -620,8 +620,27 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+total = \(total \+ helper_with_pointer_side_effect/u);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{/u);
+      expect(compiled.wgsl).toContain("total += helper_with_pointer_side_effect(ptr_buffer");
       expect(compiled.wgsl).not.toContain("select(total, (total + helper_with_pointer_side_effect");
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {
+            left: new Uint32Array(4),
+            right: new Uint32Array(4),
+            out: new Uint32Array(4),
+          },
+          scalars: { limit: 2, pickRight: 0 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+      expect([...result.buffers.left as Uint32Array]).toEqual([1, 2, 0, 0]);
+      expect([...result.buffers.right as Uint32Array]).toEqual([2, 3, 0, 0]);
+      expect([...result.buffers.out as Uint32Array]).toEqual([3, 5, 0, 0]);
     });
 
   it("preserves conditional expression laziness for helper-call assignment RHS", () => {
@@ -681,7 +700,9 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{/u);
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
       expect(compiled.wgsl).toContain("total += active_conditional_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_helper_with_pointer_side_effect");
     });
@@ -751,8 +772,10 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
-      expect(compiled.wgsl).toContain("value = active_conditional_var_init_helper_with_pointer_side_effect");
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toMatch(/bg__bg_condition_value_\d+_\d+ = active_conditional_var_init_helper_with_pointer_side_effect/u);
+      expect(compiled.wgsl).toMatch(/value = bg__bg_condition_value_\d+_\d+;/u);
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_var_init_helper_with_pointer_side_effect");
     });
 
@@ -777,8 +800,10 @@ describe("CUDA-lite compiler: Control flow and synchronization", () => {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
-      expect(compiled.wgsl).toContain("value = (bitcast<u32>((step + 1)) + active_nested_conditional_var_init_helper_with_pointer_side_effect");
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toMatch(/bg__bg_condition_value_\d+_\d+ = active_nested_conditional_var_init_helper_with_pointer_side_effect/u);
+      expect(compiled.wgsl).toMatch(/value = \(bitcast<u32>\(\(step \+ 1\)\) \+ bg__bg_condition_value_\d+_\d+\);/u);
       expect(compiled.wgsl).not.toContain("select(0u, active_nested_conditional_var_init_helper_with_pointer_side_effect");
     });
 

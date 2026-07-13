@@ -1575,6 +1575,19 @@ function lowerSemanticActiveLaneOperations(
     }
     if (operation.kind === "declare") {
       if (operation.target.addressSpace === "shared" || operation.init === undefined || operation.target.dimensions.length > 0) return [rewritten];
+      if (operation.target.pointer) {
+        const source = semanticIrPointerArgumentMemoryRef(operation.init);
+        if (source?.addressSpace !== "storage") return [rewritten];
+        const target: CudaLiteSemanticSymbol = {
+          ...semanticSymbolWithoutPointerAlias(operation.target),
+          pointerRuntimeState: true,
+        };
+        const { init: _init, ...declaration } = operation;
+        return [
+          { ...declaration, target },
+          semanticActiveLaneBranch(activeExpression, [{ kind: "pointer-rebind", target, source, span: operation.span }], operation.span),
+        ];
+      }
       const { init: _init, ...declaration } = operation;
       return [declaration, semanticActiveLaneBranch(activeExpression, [{
         kind: "expression",
@@ -2143,7 +2156,8 @@ function collectSemanticLocalAddressNames(
   names: Set<string>,
 ): void {
   for (const operation of operations) {
-    if (operation.kind === "declare" && operation.target.addressSpace === "local") names.add(operation.target.name);
+    if (operation.kind === "declare" && operation.target.addressSpace === "local" &&
+      (!operation.target.pointer || operation.target.pointerAddressSpace === "local")) names.add(operation.target.name);
     if (operation.kind === "block") collectSemanticLocalAddressNames(operation.body, names);
     if (operation.kind === "branch") {
       collectSemanticLocalAddressNames(operation.consequent, names);
@@ -2329,7 +2343,11 @@ function lowerStatementsWithScope(
   for (let index = 0; index < statements.length; index++) {
     const statement = statements[index]!;
     if (isLocalPointerAliasPlaceholder(statement) && hasLaterLocalPointerAliasAssignment(statement.name, statements.slice(index + 1), scope)) {
-      const target = symbolForVar(statement, scope);
+      const original = symbolForVar(statement, scope);
+      const assignmentProfile = localPointerAliasAssignmentProfile(statement.name, statements.slice(index + 1), scope);
+      const target = assignmentProfile.total > 1 && assignmentProfile.controlDependent
+        ? { ...semanticSymbolWithoutPointerAlias(original), pointerRuntimeState: true }
+        : original;
       scope.set(target.name, target);
       out.push({ kind: "declare", target, span: statement.span });
       continue;
@@ -2359,10 +2377,14 @@ function lowerStatementOperations(
   if (dynamicPointerArrayAssignment) return dynamicPointerArrayAssignment;
   const chainedStores = semanticMemoryAssignmentChainOperations(statement, scope);
   if (chainedStores) return chainedStores;
+  const conditionalAssignmentTarget = semanticConditionalAssignmentTargetOperations(statement, scope);
+  if (conditionalAssignmentTarget) return conditionalAssignmentTarget;
   const conditionalAssignment = semanticConditionalLocalAssignmentOperations(statement, scope);
   if (conditionalAssignment) return conditionalAssignment;
   const conditionalPointerInit = semanticConditionalPointerVarInitOperations(statement, scope, followingStatements);
   if (conditionalPointerInit) return conditionalPointerInit;
+  const conditionalPointerOffsetInit = semanticConditionalPointerOffsetVarInitOperations(statement, scope);
+  if (conditionalPointerOffsetInit) return conditionalPointerOffsetInit;
   const conditionalVarInit = semanticConditionalVarInitOperations(statement, scope);
   if (conditionalVarInit) return conditionalVarInit;
   const conditionalReturn = semanticConditionalReturnOperations(statement, scope);
@@ -2461,6 +2483,31 @@ function semanticConditionalReturnOperations(
   ];
 }
 
+function semanticConditionalAssignmentTargetOperations(
+  statement: CudaLiteStatement,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "expr" || statement.expression.kind !== "assignment") return undefined;
+  const expression = lowerExpression(statement.expression, scope);
+  if (expression.kind !== "assignment") return undefined;
+  const target = materializeConditionalCalls(expression.target);
+  if (target.operations.length === 0) return undefined;
+  const ref = semanticMatrixLaneMemoryRef(target.expression, scope) ?? memoryRefFromExpression(target.expression);
+  if (!ref) return undefined;
+  const value = semanticSequencedAssignmentValue(expression.value);
+  return [
+    ...target.operations,
+    {
+      kind: "store",
+      target: ref,
+      value,
+      operator: expression.operator,
+      reads: collectMemoryRefs(value),
+      span: statement.span,
+    },
+  ];
+}
+
 function semanticConditionalCallArgumentOperations(
   statement: CudaLiteStatement,
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
@@ -2529,6 +2576,39 @@ function semanticConditionalVarInitOperations(
       },
       span: statement.span,
     },
+  ];
+}
+
+function semanticConditionalPointerOffsetVarInitOperations(
+  statement: CudaLiteStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "var" || statement.storage !== "local" || !statement.pointer ||
+    statement.dimensions.length !== 0 || statement.init === undefined) return undefined;
+  const original = symbolForVar(statement, scope);
+  if (original.pointerRoot === undefined || original.pointerAddressSpace !== "storage" || original.pointerBaseIndices?.length !== 1) return undefined;
+  const materialized = materializeConditionalCalls(original.pointerBaseIndices[0]!);
+  if (materialized.operations.length === 0) return undefined;
+  const root = semanticSymbolForMemoryId(scope, original.pointerRoot);
+  const valueType = original.valueType;
+  if (!root || valueType === undefined || valueType === "void") return undefined;
+  const init: SemanticExpression = {
+    kind: "index",
+    target: semanticSymbolExpression(root, statement.init.span),
+    index: materialized.expression,
+    valueType,
+    addressSpace: "storage",
+    span: statement.init.span,
+  };
+  const target: CudaLiteSemanticSymbol = {
+    ...original,
+    init,
+    pointerBaseIndices: [materialized.expression],
+  };
+  scope.set(target.name, target);
+  return [
+    ...materialized.operations,
+    { kind: "declare", target, init, span: statement.span },
   ];
 }
 
@@ -5936,6 +6016,55 @@ function hasLaterLocalPointerAliasAssignment(
     if ((statement.kind === "while" || statement.kind === "do-while") && hasLaterLocalPointerAliasAssignment(name, statement.body, scope)) return true;
   }
   return false;
+}
+
+function localPointerAliasAssignmentProfile(
+  name: string,
+  statements: readonly CudaLiteStatement[],
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  controlDependent = false,
+): { readonly total: number; readonly controlDependent: boolean } {
+  let total = 0;
+  let hasControlDependentAssignment = false;
+  const add = (profile: { readonly total: number; readonly controlDependent: boolean }): void => {
+    total += profile.total;
+    hasControlDependentAssignment ||= profile.controlDependent;
+  };
+  for (const statement of statements) {
+    if (statement.kind === "expr") {
+      const expression = statement.expression;
+      if (expression.kind !== "assignment" || expression.operator !== "=" ||
+        expression.left.kind !== "identifier" || expression.left.name !== name) continue;
+      const alias = localPointerAliasForInitializer(expression.right, scope);
+      if (alias !== undefined && semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace)) {
+        total += 1;
+        hasControlDependentAssignment ||= controlDependent;
+      }
+      continue;
+    }
+    if (statement.kind === "block") {
+      add(localPointerAliasAssignmentProfile(name, statement.body, scope, controlDependent));
+      continue;
+    }
+    if (statement.kind === "if") {
+      add(localPointerAliasAssignmentProfile(name, statement.consequent, scope, true));
+      add(localPointerAliasAssignmentProfile(name, statement.alternate ?? [], scope, true));
+      continue;
+    }
+    if (statement.kind === "for") {
+      const loopScope = new Map(scope);
+      if (statement.init?.kind === "var") {
+        const init = symbolForVar(statement.init, loopScope);
+        loopScope.set(init.name, init);
+      }
+      add(localPointerAliasAssignmentProfile(name, statement.body, loopScope, controlDependent));
+      continue;
+    }
+    if (statement.kind === "while" || statement.kind === "do-while") {
+      add(localPointerAliasAssignmentProfile(name, statement.body, scope, controlDependent));
+    }
+  }
+  return { total, controlDependent: hasControlDependentAssignment };
 }
 
 function offsetSemanticPointerAliasSelection(

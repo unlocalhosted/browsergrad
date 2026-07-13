@@ -5,7 +5,6 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 import {
-  semanticPointerSymbolNeedsRuntimeState,
   walkSemanticOperations,
 } from "./semantic_ir.js";
 import { semanticIdsEqual } from "./semantic_ids.js";
@@ -15,6 +14,10 @@ import {
 } from "./semantic_ir_walk.js";
 import type { CudaLiteScalarType } from "./types.js";
 import { semanticPointerArgumentMemoryRef as semanticPointerArgMemoryRef } from "./semantic_pointer_arguments.js";
+import {
+  semanticPointerDeclarationNeedsRuntimeState,
+  semanticRuntimePointerDeclarations as semanticLocalPointerDeclarations,
+} from "./semantic_runtime_pointers.js";
 import {
   semanticAtomicOperation,
   semanticAtomicUsesF32Storage,
@@ -214,48 +217,11 @@ function semanticStoragePointerValueTypes(ir: SemanticKernelIrModule): ReadonlyS
   return types;
 }
 
-function semanticLocalPointerDeclarations(
-  ir: SemanticKernelIrModule,
-): readonly Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] {
-  return [
-    ...collectSemanticLocalPointerDeclarations(ir.operations),
-    ...ir.functions.flatMap((fn) => collectSemanticLocalPointerDeclarations(fn.body)),
-  ];
-}
-
-function collectSemanticLocalPointerDeclarations(
-  operations: readonly SemanticKernelIrOperation[],
-): readonly Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] {
-  const declarations: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>[] = [];
-  for (const operation of operations) {
-    if (operation.kind === "declare" && semanticPointerSymbolNeedsRuntimeState(operation.target)) declarations.push(operation);
-    if (operation.kind === "block") declarations.push(...collectSemanticLocalPointerDeclarations(operation.body));
-    if (operation.kind === "branch") {
-      declarations.push(...collectSemanticLocalPointerDeclarations(operation.consequent));
-      declarations.push(...collectSemanticLocalPointerDeclarations(operation.alternate));
-    }
-    if (operation.kind === "loop") {
-      if (operation.init && isSemanticKernelIrOperation(operation.init)) {
-        declarations.push(...collectSemanticLocalPointerDeclarations([operation.init]));
-      }
-      declarations.push(...collectSemanticLocalPointerDeclarations(operation.body));
-      if (operation.continuing) declarations.push(...collectSemanticLocalPointerDeclarations(operation.continuing));
-    }
-  }
-  return declarations;
-}
-
 function semanticLocalPointerStorageRef(
   declaration: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
 ): SemanticMemoryRef | undefined {
   const ref = declaration.init ? semanticPointerArgMemoryRef(declaration.init) : undefined;
   return ref?.addressSpace === "storage" || ref?.addressSpace === "device-global" ? ref : undefined;
-}
-
-function semanticPointerDeclarationNeedsRuntimeState(
-  declaration: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
-): boolean {
-  return semanticPointerSymbolNeedsRuntimeState(declaration.target);
 }
 
 function semanticLocalStoragePointerDeclaration(

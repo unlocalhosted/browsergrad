@@ -1199,10 +1199,11 @@ __global__ void shared_reinterpret(int *out) {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
       expect(compiled.wgsl).toContain("active_conditional_pointer_array_index_helper");
       expect(compiled.wgsl!.match(/\bactive_conditional_pointer_array_index_helper\(/gu) ?? []).toHaveLength(2);
-      expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = active_conditional_pointer_array_index_helper\(/u);
+      expect(compiled.wgsl).toMatch(/bg__bg_condition_value_\d+_\d+ = active_conditional_pointer_array_index_helper\(/u);
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_pointer_array_index_helper");
     });
 
@@ -4984,9 +4985,12 @@ __global__ void sharedHelperScoped(float *out) {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
-      expect(compiled.wgsl).toContain("_ = bg_ptr_atomicAdd_u32(ptr_buffer, ptr_base, add);");
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toContain("_ = bg_ptr_atomicAdd_u32(ptr_buffer, u32((i32(ptr_base) + 0)), add);");
       expect(compiled.wgsl).toContain("active_conditional_pointer_init_helper_with_pointer_side_effect");
+      expect(compiled.wgsl).toContain("var target_buffer: u32 = 0xffffffffu;");
+      expect(compiled.wgsl).toMatch(/target_base = \(u32\(\(tid \* 2\)\) \+ bg__bg_condition_value_\d+_\d+\);/u);
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_pointer_init_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("_ = atomicAdd(&bg_storage[(u32((0 + (tid * 2))))");
     });
@@ -5029,7 +5033,9 @@ __global__ void sharedHelperScoped(float *out) {
   }`, { workgroupSize: [4, 1, 1] });
 
       expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
-      expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("if ((u32(bg_uniforms.enabled) != 0u))");
+      expect(compiled.wgsl).toMatch(/bg__bg_condition_value_\d+_\d+ = bitcast<i32>\(active_conditional_vector_member_lvalue_helper_with_pointer_side_effect/u);
       expect(compiled.wgsl).toContain("active_conditional_vector_member_lvalue_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0, i32(active_conditional_vector_member_lvalue_helper_with_pointer_side_effect");
       expect(compiled.wgsl).not.toContain("select(0u, active_conditional_vector_member_lvalue_helper_with_pointer_side_effect");

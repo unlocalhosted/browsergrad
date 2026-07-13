@@ -982,7 +982,7 @@ function semanticWgslTypedMemoryRefSupported(ref: SemanticMemoryRef, ir: Semanti
   if (ref.addressSpace === "shared" && semanticWgslFunctionSharedPointerParam(ir, ref.base)) return true;
   if (ref.addressSpace === "local" && semanticWgslFunctionLocalPointerParam(ir, ref.base)) return true;
   if (ref.addressSpace === "local" && semanticLocalPointerDeclarations(ir).some((operation) =>
-    operation.target.name === ref.base && operation.target.pointerRuntimeState === true)) return true;
+    operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation))) return true;
   if (semanticWgslVectorFieldMemoryRefSupported(ref)) return true;
   if (semanticWgslLocalVectorLaneRefSupported(ref, ir)) return true;
   if (semanticWgslLocalScalarVectorView(ref, ir)) return true;
@@ -1462,7 +1462,7 @@ function semanticWgslSurfaceValueSupported(expression: SemanticExpression): bool
 function semanticWgslAtomicTargetRootSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (ref.addressSpace === "local") {
     return semanticLocalPointerDeclarations(ir).some((operation) =>
-      operation.target.name === ref.base && operation.target.pointerRuntimeState === true);
+      operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation));
   }
   if (ref.addressSpace === "storage") {
     return ir.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant) ||
@@ -5156,14 +5156,18 @@ function emitSemanticTypedStoragePointerFunctionCall(
     const param = fn.params[index]!;
     if (param.pointer) {
       const ref = semanticPointerArgMemoryRef(arg);
-      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global") {
+      const localRuntimePointer = ref?.addressSpace === "local"
+        ? semanticLocalPointerDeclarations(ir).find((operation) =>
+            operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation))
+        : undefined;
+      if (!ref || ref.addressSpace !== "storage" && ref.addressSpace !== "device-global" && localRuntimePointer === undefined) {
         throw semanticWgslError(`storage pointer argument '${param.name}' is not modeled storage`, arg.span);
       }
       const forwarded = options.activeFunction === undefined
         ? undefined
         : ir.functions.find((candidate) => candidate.name === options.activeFunction)?.params.find((candidate) =>
           candidate.name === ref.base && candidate.pointer && candidate.addressSpace === "storage");
-      if (forwarded) {
+      if (forwarded || localRuntimePointer) {
         args.push(createTypedWgslIdentifier(nameFor(semanticPointerBufferParamName(ref.base), names), "u32", ref.span));
       } else {
         const bufferId = semanticStoragePointerBufferId(ref.base, ir);
@@ -6412,7 +6416,7 @@ function emitTypedFlatStorageIndex(
   const pointerParam = semanticWgslFunctionStoragePointerParam(ir, ref.base, options.activeFunction ?? null);
   const localRuntimePointer = ref.addressSpace === "local"
     ? semanticLocalPointerDeclarations(ir).find((operation) =>
-        operation.target.name === ref.base && operation.target.pointerRuntimeState === true)
+        operation.target.name === ref.base && semanticPointerDeclarationNeedsRuntimeState(operation))
     : undefined;
   const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options.pointerBaseOffsets).has(ref.base);
   if (!pointerParam && !localRuntimePointer && !hasOffset && ref.indices.length === 0) return createTypedWgslZero("u32", ref.span);
