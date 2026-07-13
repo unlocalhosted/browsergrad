@@ -2149,7 +2149,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
       expect(compiled.wgsl).toContain("var bg_active_lane: bool");
-      expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
+      expect(compiled.wgsl).toMatch(/workgroupBarrier\(\);\n\s+if \(bg_active_lane\)/u);
       expect([...result.buffers.C as Float32Array]).toEqual([11, 22]);
     });
 
@@ -2168,7 +2168,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool");
-      expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
+      expect(compiled.wgsl).toMatch(/workgroupBarrier\(\);\n\s+if \(bg_active_lane\)/u);
       expect(compiled.wgsl).not.toContain("if ((tid < bg_uniforms.N)) {\n    x[u32(tid)] = (x[u32(tid)] + 1.0);\n    workgroupBarrier();");
     });
 
@@ -2187,7 +2187,7 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("var bg_active_lane: bool");
-      expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
+      expect(compiled.wgsl).toMatch(/workgroupBarrier\(\);\n\s+if \(bg_active_lane\)/u);
       expect(compiled.wgsl).not.toContain("if ((tid < bg_uniforms.N)) {\n    x[u32(tid)] = (x[u32(tid)] + 1.0);\n    workgroupBarrier();");
     });
 

@@ -1412,44 +1412,49 @@ function lowerSemanticDivergentBarrierBranches(
   barrierProof: CudaLiteAnalysis["barrierUniformity"]["kernel"],
   guardedBarrierFunctionNames: ReadonlyMap<string, string> = new Map(),
 ): readonly SemanticKernelIrOperation[] {
-  const branchStarts = barrierProof.unverifiedControlStatementStarts.length === 1
+  const branchStarts = barrierProof.unverifiedControlStatementStarts.length > 0
     ? barrierProof.unverifiedControlStatementStarts
-    : barrierProof.unverifiedControlStatementStarts.length === 0
-      ? barrierProof.workgroupUniformControlStatementStarts
-      : [];
+    : barrierProof.workgroupUniformControlStatementStarts;
   if (branchStarts.length === 0) return operations;
+  const branchStartSet = new Set(branchStarts);
   const barrierFunctions = semanticIrBarrierFunctionNames(functions);
-  const branchIndex = operations.findIndex((operation) =>
-    operation.kind === "branch" && branchStarts.includes(operation.span.start) && operation.alternate.length === 0 &&
-    semanticIrOperationsContainBarrier(operation.consequent, barrierFunctions) && !semanticOperationContainsVoidReturn(operation)
-  );
-  if (branchIndex < 0) return operations;
-  const branch = operations[branchIndex]!;
-  if (branch.kind !== "branch") return operations;
-  if (semanticPredicatedBarrierTransformUnsafe(branch.consequent, barrierFunctions, guardedBarrierFunctionNames)) return operations;
-  const predicate: CudaLiteSemanticSymbol = {
-    id: createSemanticSymbolId("generated-local", "bg_active_lane", kernelSpan),
-    name: "bg_active_lane",
-    kind: "local",
-    valueType: "bool",
-    dimensions: [],
-    addressSpace: "local",
-    span: kernelSpan,
-  };
-  const predicateExpression = semanticSymbolExpression(predicate, kernelSpan);
-  const declaration: SemanticKernelIrOperation = {
-    kind: "declare",
-    target: predicate,
-    init: branch.condition,
-    span: branch.span,
-  };
-  const lowered = lowerSemanticPredicatedBarrierOperations(
-    branch.consequent,
-    predicateExpression,
-    barrierFunctions,
-    guardedBarrierFunctionNames,
-  );
-  return [...operations.slice(0, branchIndex), declaration, ...lowered, ...operations.slice(branchIndex + 1)];
+  return operations.flatMap((operation): readonly SemanticKernelIrOperation[] => {
+    if (operation.kind !== "branch" || !branchStartSet.has(operation.span.start) || operation.alternate.length > 0 ||
+      !semanticIrOperationsContainBarrier(operation.consequent, barrierFunctions) || semanticOperationContainsVoidReturn(operation) ||
+      semanticPredicatedBarrierTransformUnsafe(operation.consequent, barrierFunctions, guardedBarrierFunctionNames)) {
+      return [operation];
+    }
+    const predicateName = branchStarts.length === 1 ? "bg_active_lane" : `bg_active_lane_${operation.span.start}`;
+    const predicate: CudaLiteSemanticSymbol = {
+      id: createSemanticSymbolId("generated-local", predicateName, kernelSpan),
+      name: predicateName,
+      kind: "local",
+      valueType: "bool",
+      dimensions: [],
+      addressSpace: "local",
+      span: kernelSpan,
+    };
+    const predicateExpression = semanticSymbolExpression(predicate, kernelSpan);
+    const declaration: SemanticKernelIrOperation = {
+      kind: "declare",
+      target: predicate,
+      init: operation.condition,
+      span: operation.span,
+    };
+    return [{
+      kind: "block",
+      body: [
+        declaration,
+        ...lowerSemanticPredicatedBarrierOperations(
+          operation.consequent,
+          predicateExpression,
+          barrierFunctions,
+          guardedBarrierFunctionNames,
+        ),
+      ],
+      span: operation.span,
+    }];
+  });
 }
 
 function semanticPredicatedBarrierTransformUnsafe(

@@ -1855,9 +1855,21 @@ describe("CUDA-lite compiler: Textures and surfaces", () => {
         },
       });
 
-      expect(compiled.wgsl).toContain("fn guardedSample__bg_tex_0__bg_guarded_barrier");
-      expect(compiled.wgsl).toContain("fn guardedSample__bg_tex_1__bg_guarded_barrier");
-      expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
+      const guardedBlocks = compiled.kernelIr.operations.filter((operation) =>
+        operation.kind === "block" && operation.body.some((item) =>
+          item.kind === "declare" && item.target.name.startsWith("bg_active_lane_")
+        )
+      );
+      expect(guardedBlocks).toHaveLength(2);
+      expect(guardedBlocks.flatMap((block) => block.kind === "block"
+        ? block.body.filter((item) => item.kind === "call").map((item) => item.callee)
+        : [])).toEqual([
+        "guardedSample__bg_guarded_barrier",
+        "guardedSample__bg_guarded_barrier",
+      ]);
+      expect(compiled.wgsl!.match(/fn guardedSample__bg_guarded_barrier__bg_tex_[a-z0-9]+/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl!.match(/fn bg_sem_tex2d_texSrc_[a-z0-9]+/gu) ?? []).toHaveLength(2);
+      expect(compiled.wgsl).toContain("textureDimensions(bg_texture)");
     });
 
   it("does not apply 2D texture descriptors to cubemap direction coords", () => {

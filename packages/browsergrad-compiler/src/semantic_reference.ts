@@ -190,6 +190,7 @@ import {
   semanticBarrierOperationsMatchUniformityProof,
   semanticBarrierFunctionNames,
   semanticBarrierShapeSupported,
+  semanticOperationsContainActiveLaneControl,
   semanticOperationsContainBarrier,
 } from "./semantic_barrier_contracts.js";
 import {
@@ -652,6 +653,8 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
   if (!containsBarrier) return true;
   if (barrierFunctions.size > 0) {
     return (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
+        semanticOperationsContainActiveLaneControl(ir.operations) &&
+          semanticBarrierOperationsMatchActiveLaneProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions) ||
         semanticBarrierOperationsMatchUniformityProof(ir.operations, ir.barrierUniformity.kernel, barrierFunctions)) &&
       ir.functions.filter((fn) => barrierFunctions.has(fn.name)).every((fn) =>
         semanticBarrierShapeSupported(fn.body, barrierFunctions) ||
@@ -660,7 +663,7 @@ function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel)
   }
   if (shared.length === 0) return true;
   const proof = compiled.kernelIr.barrierUniformity.kernel;
-  return (ir.operations.some((operation) => operation.kind === "declare" && operation.target.name === "bg_active_lane") &&
+  return (semanticOperationsContainActiveLaneControl(ir.operations) &&
       (semanticBarrierShapeSupported(ir.operations, barrierFunctions) ||
         semanticBarrierOperationsMatchActiveLaneProof(ir.operations, proof, barrierFunctions))) ||
     semanticBarrierOperationsMatchUniformityProof(ir.operations, proof, barrierFunctions);

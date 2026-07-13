@@ -1,6 +1,22 @@
 import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir.js";
 import type { CudaLiteBarrierUniformityFact } from "./types.js";
 
+export function semanticOperationsContainActiveLaneControl(
+  operations: readonly SemanticKernelIrOperation[],
+): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === "declare") return operation.target.name.startsWith("bg_active_lane") ||
+      operation.target.name.startsWith("bg_barrier_loop_active_") ||
+      operation.target.name.startsWith("bg_loop_active_");
+    if (operation.kind === "branch") return semanticOperationsContainActiveLaneControl(operation.consequent) ||
+      semanticOperationsContainActiveLaneControl(operation.alternate);
+    if (operation.kind === "loop" || operation.kind === "block") {
+      return semanticOperationsContainActiveLaneControl(operation.body);
+    }
+    return false;
+  });
+}
+
 export function semanticBarrierFunctionNames(ir: SemanticKernelIrModule): ReadonlySet<string> {
   const names = new Set<string>();
   let changed = true;
