@@ -2348,8 +2348,18 @@ describe("CUDA-lite compiler: Atomics", () => {
 
       expect([...result.buffers.counter as Uint32Array]).toEqual([5]);
       expect([...result.buffers.out as Uint32Array]).toEqual([4, 5]);
+      expect(compiled.kernelIr.operations).toContainEqual(expect.objectContaining({
+        kind: "branch",
+        consequent: expect.arrayContaining([
+          expect.objectContaining({ kind: "pointer-rebind", target: expect.objectContaining({ name: "b" }) }),
+          expect.objectContaining({ kind: "pointer-rebind", target: expect.objectContaining({ name: "a" }) }),
+        ]),
+      }));
       expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
       expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+      expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(a_buffer");
+      expect(compiled.wgsl).toContain("bg_ptr_read_u32(b_buffer");
+      expect(compiled.wgsl).not.toContain("atomicAdd(&a[");
     });
 
   it("marks storage atomic through local pointer-array elements", () => {

@@ -2276,6 +2276,8 @@ function lowerStatementOperations(
   scope: Map<string, CudaLiteSemanticSymbol>,
   followingStatements: readonly CudaLiteStatement[],
 ): readonly SemanticKernelIrOperation[] {
+  const pointerAssignmentChain = semanticLocalPointerAssignmentChainOperations(statement, scope);
+  if (pointerAssignmentChain) return pointerAssignmentChain;
   const dynamicPointerArrayAssignment = semanticDynamicPointerArrayAliasAssignmentOperations(statement, scope);
   if (dynamicPointerArrayAssignment) return dynamicPointerArrayAssignment;
   const chainedStores = semanticMemoryAssignmentChainOperations(statement, scope);
@@ -2294,6 +2296,37 @@ function lowerStatementOperations(
   const mathOutAssignment = semanticMathOutAssignmentOperations(statement, scope);
   const mathOutCall = semanticMathOutCallStatementOperations(statement, scope);
   return mathOutVarDecl ?? mathOutAssignment ?? mathOutCall ?? [lowerStatement(statement, scope)];
+}
+
+function semanticLocalPointerAssignmentChainOperations(
+  statement: CudaLiteStatement,
+  scope: Map<string, CudaLiteSemanticSymbol>,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (statement.kind !== "expr") return undefined;
+  const targets: CudaLiteSemanticSymbol[] = [];
+  let source = statement.expression;
+  while (source.kind === "assignment" && source.operator === "=" && source.left.kind === "identifier") {
+    const target = scope.get(source.left.name);
+    if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length !== 0) return undefined;
+    targets.push(target);
+    source = source.right;
+  }
+  if (targets.length < 2) return undefined;
+  const alias = localPointerAliasForInitializer(source, scope);
+  if (!alias?.pointerRoot || alias.pointerAddressSpace !== "storage" || alias.pointerBaseIndices?.length !== 1) return undefined;
+  const operations: SemanticKernelIrOperation[] = [];
+  for (let index = targets.length - 1; index >= 0; index--) {
+    const original = targets[index]!;
+    const target: CudaLiteSemanticSymbol = {
+      ...semanticSymbolWithoutPointerAlias(original),
+      pointerRuntimeState: true,
+    };
+    scope.set(target.name, target);
+    const rebind = semanticLocalPointerRebindFromSource(target, source, scope, statement.span);
+    if (!rebind) return undefined;
+    operations.push(rebind);
+  }
+  return operations;
 }
 
 function semanticDynamicPointerArrayAliasAssignmentOperations(

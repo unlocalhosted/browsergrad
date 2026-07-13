@@ -6238,6 +6238,29 @@ function emitSemanticDirectMemoryReadExpression(
   const sharedPointerParam = semanticWgslFunctionSharedPointerParam(ir, ref.base, options.activeFunction ?? null);
   const localPointerParam = semanticWgslFunctionLocalPointerParam(ir, ref.base, options.activeFunction ?? null);
   const semanticType = wgslValueType(ref.valueType);
+  const runtimeLocalPointer = semanticLocalStoragePointerDeclaration(ir, expression.target);
+  if (runtimeLocalPointer) {
+    if (ref.indices.length !== 1 || expression.target.kind !== "symbol") return undefined;
+    const base = createTypedWgslIdentifier(
+      nameFor(semanticPointerBaseParamName(expression.target.name), names),
+      "u32",
+      expression.target.span,
+    );
+    const offset = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
+    return createTypedWgslCall(
+      semanticPointerReadHelperName(ref.valueType ?? "float"),
+      [
+        createTypedWgslIdentifier(
+          nameFor(semanticPointerBufferParamName(expression.target.name), names),
+          "u32",
+          expression.target.span,
+        ),
+        emitTypedWgslBinary("+", base, offset, expression.span),
+      ],
+      semanticType,
+      expression.span,
+    );
+  }
   if (pointerParam) {
     if (ref.indices.length !== 1) return undefined;
     return createTypedWgslCall(
