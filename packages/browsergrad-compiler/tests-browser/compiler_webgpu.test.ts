@@ -34,6 +34,7 @@ interface DeviceCheck {
   readonly available: boolean;
   readonly reason?: string;
   readonly features?: readonly string[];
+  readonly adapter?: GPUAdapter;
 }
 
 const SAXPY = `
@@ -305,9 +306,9 @@ async function checkDevice(): Promise<DeviceCheck> {
     return { available: false, reason: "navigator.gpu undefined" };
   }
   try {
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) return { available: false, reason: "no GPU adapter" };
-    return { available: true, features: [...adapter.features].map(String) };
+    return { available: true, features: [...adapter.features].map(String), adapter };
   } catch (error) {
     return {
       available: false,
@@ -328,7 +329,8 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     }
     const requiredFeatures = ["subgroups", "shader-f16"]
       .filter((feature) => deviceCheck.features?.includes(feature)) as GPUFeatureName[];
-    defaultDevice = await createDevice({ requiredFeatures });
+    const gpu = await deviceCheck.adapter!.requestDevice({ requiredFeatures });
+    defaultDevice = await createDevice({ device: gpu });
   });
 
   afterAll(() => {
