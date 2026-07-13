@@ -280,7 +280,7 @@ import { emitSemanticNumericHelpers } from "./semantic_wgsl_numeric_helpers.js";
 import { createSemanticBfloatScalarEmitter, roundTypedBf16, semanticTypedIsNan } from "./semantic_wgsl_bfloat_scalar.js";
 import { createSemanticTypedIntrinsicEmitter } from "./semantic_wgsl_typed_intrinsics.js";
 import { createSemanticWgslAtomicAnalysis } from "./semantic_wgsl_atomic_analysis.js";
-import { createSemanticSubgroupControlEmitter } from "./semantic_wgsl_subgroup_control.js";
+import { createSemanticSubgroupControlEmitter, semanticSubgroupControlDeclarations } from "./semantic_wgsl_subgroup_control.js";
 import {
   emitSemanticSyncthreadsPredicateHelper,
   semanticSyncthreadsPredicateHelperFor,
@@ -825,6 +825,7 @@ function emitSemanticKernelIrWgslFromIr(
   for (const helper of syncthreadsPredicateHelpers) {
     lines.push(`var<workgroup> ${helper.scratchName}: array<u32, ${semanticWorkgroupSize(ir)}>;`);
   }
+  lines.push(...semanticSubgroupControlDeclarations(ir));
   for (const shared of sharedMemorySymbols(ir)) {
     lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared, atomicShared.has(shared.name))};`);
   }
@@ -4033,13 +4034,22 @@ function emitSemanticLoopInit(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
-  if (!isSemanticKernelIrOperation(init)) return emitSemanticExpression(init, ir, names, options, textureSpecializations).code;
+  if (!isSemanticKernelIrOperation(init)) {
+    return init.kind === "assignment"
+      ? emitSemanticAssignmentStatement(init, ir, names, options, textureSpecializations)
+      : emitSemanticExpression(init, ir, names, options, textureSpecializations).code;
+  }
   if (init.kind === "declare") {
     const type = wgslScalar(init.target.valueType);
     const value = init.init ? emitSemanticLocalScalarExpressionAs(init.init, init.target.valueType, ir, names, options, textureSpecializations) : zeroForType(type);
     return `var ${nameFor(init.target.name, names)}: ${type} = ${value}`;
   }
-  if (init.kind === "expression") return isSemanticNoopExpression(init.expression) ? "" : emitSemanticExpression(init.expression, ir, names, options, textureSpecializations).code;
+  if (init.kind === "expression") {
+    if (isSemanticNoopExpression(init.expression)) return "";
+    return init.expression.kind === "assignment"
+      ? emitSemanticAssignmentStatement(init.expression, ir, names, options, textureSpecializations)
+      : emitSemanticExpression(init.expression, ir, names, options, textureSpecializations).code;
+  }
   throw semanticWgslError(`semantic WGSL does not support ${init.kind} loop initializer`, init.span);
 }
 
@@ -4158,7 +4168,7 @@ function emitSemanticExpression(
   if (expression.kind === "call") {
     const coalescedGroup = emitSemanticTypedCoalescedGroupCall(expression, ir, names, options, textureSpecializations);
     if (coalescedGroup) return coalescedGroup;
-    const cooperativeGroup = emitSemanticTypedCooperativeGroupCall(expression, ir, options.activeFunction);
+    const cooperativeGroup = emitSemanticTypedCooperativeGroupCall(expression, ir, options.activeFunction, (predicate) => emitSemanticTruthinessExpression(predicate, ir, names, options));
     if (cooperativeGroup) return cooperativeGroup;
     const cooperativeReduce = emitSemanticTypedCooperativeReduceCall(expression, ir, names, options, textureSpecializations);
     if (cooperativeReduce) return cooperativeReduce;

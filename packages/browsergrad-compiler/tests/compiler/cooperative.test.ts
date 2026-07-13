@@ -2440,6 +2440,66 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 4]);
     });
 
+  it("keeps analyzer-cleared uniform returns independent from subgroup barrier predicates", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void uniformReturnSubgroupBarrier(int *out, int enabled) {
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
+    __shared__ int values[64];
+    if (enabled == 0) return;
+    int warp = threadIdx.x / 32;
+    if (warp == 0) {
+      values[tile.thread_rank()] = tile.thread_rank();
+      tile.sync();
+      if (tile.thread_rank() == 0) out[0] = values[31];
+      tile.sync();
+    }
+    block.sync();
+  }`, {
+        workgroupSize: [64, 1, 1],
+        features: { subgroups: true },
+      });
+
+      expect(compiled.kernelIr.barrierUniformity.kernel.verified).toBe(false);
+      expect(compiled.kernelIr.barrierUniformity.kernel.unverifiedControlStatementStarts).toHaveLength(1);
+      expect(compiled.kernelIr.operations.some((operation) =>
+        operation.kind === "block" && operation.body.some((item) =>
+          item.kind === "barrier" && item.scope === "subgroup"
+        )
+      )).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("workgroupBarrier();");
+    });
+
+  it("emits tile-relative any, all, and ballot votes from semantic IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void tileVotes(uint *out) {
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<4> tile = cg::tiled_partition<4>(block);
+    bool low = tile.thread_rank() < 2;
+    uint any_low = tile.any(low);
+    uint all_low = tile.all(low);
+    uint low_mask = tile.ballot(low);
+    out[threadIdx.x * 3] = any_low;
+    out[threadIdx.x * 3 + 1] = all_low;
+    out[threadIdx.x * 3 + 2] = low_mask;
+  }`, { workgroupSize: [4, 1, 1], features: { subgroups: true } });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(12) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect([...result.buffers.out as Uint32Array]).toEqual([
+        1, 0, 3,
+        1, 0, 3,
+        1, 0, 3,
+        1, 0, 3,
+      ]);
+      expect(compiled.wgsl).toContain("bg_semantic_ballot_32");
+    });
+
   it("uniformizes value-returning barrier helpers with read-only storage pointers after early returns", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ float readTile(const float *input, float value) {

@@ -34,7 +34,11 @@ import {
 } from "./webgpu_inputs.js";
 import { semanticUniformLayout } from "./semantic_uniform_layout.js";
 import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
-import { canEmitSemanticKernelIrWgsl, emitSemanticKernelIrWgsl } from "./semantic_wgsl.js";
+import {
+  canEmitSemanticKernelIrWgsl,
+  emitSemanticKernelIrWgsl,
+  semanticKernelIrWgslPreflightFailure,
+} from "./semantic_wgsl.js";
 import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { typeCheckSemanticKernelIr } from "./semantic_type_check.js";
 import { legalizeSemanticKernelIrForWgsl } from "./wgsl_legalization.js";
@@ -46,6 +50,7 @@ import {
   type CompileCudaLiteOptions,
   type CudaLiteDiagnostic,
   type KernelLaunch,
+  type SourceSpan,
 } from "./types.js";
 
 export type CudaWebGpuExecutionPlanKind =
@@ -70,6 +75,7 @@ export interface CudaWebGpuExecutionBlocker {
   readonly kind: CudaWebGpuExecutionBlockerKind;
   readonly code: string;
   readonly message: string;
+  readonly span?: SourceSpan;
 }
 
 export type CudaWebGpuExecutionPlan =
@@ -645,8 +651,14 @@ function createSingleDispatchWebGpuPlanWithKind(
 ): CudaWebGpuExecutionPlan {
   const program = compiled.wgslProgram ?? emitProjectedHostRuntimeProgram(compiled);
   if (program === undefined) {
+    const failure = projectedHostRuntimeWgslFailure(compiled);
     return unsupportedWebGpuPlan(compiled, [
-      webGpuBlocker("lowering", "direct-wgsl-unavailable", "semantic IR has no direct WGSL program"),
+      webGpuBlocker(
+        "lowering",
+        "direct-wgsl-unavailable",
+        failure?.message ?? "semantic IR has no direct WGSL program",
+        failure?.span,
+      ),
     ]);
   }
   const wgslInput = createWgslRunInput(compiled, input);
@@ -671,6 +683,11 @@ function emitProjectedHostRuntimeProgram(compiled: CompiledCudaLiteKernel): Wgsl
   };
   if (!canEmitSemanticKernelIrWgsl(projected, options)) return undefined;
   return emitSemanticKernelIrWgsl(projected, options).program;
+}
+
+function projectedHostRuntimeWgslFailure(compiled: CompiledCudaLiteKernel):
+  ReturnType<typeof semanticKernelIrWgslPreflightFailure> {
+  return semanticKernelIrWgslPreflightFailure(projectSemanticHostRuntimeToGpuIr(compiled.kernelIr));
 }
 
 function createReferenceOnlyRuntimePlan(
@@ -740,8 +757,9 @@ function webGpuBlocker(
   kind: CudaWebGpuExecutionBlockerKind,
   code: string,
   message: string,
+  span?: SourceSpan,
 ): CudaWebGpuExecutionBlocker {
-  return { kind, code, message };
+  return { kind, code, message, ...(span === undefined ? {} : { span }) };
 }
 
 function formatWebGpuBlockers(blockers: readonly CudaWebGpuExecutionBlocker[]): string {

@@ -1533,6 +1533,43 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
       });
     });
 
+  it("projects inactive recursive launches through subgroup barrier IR", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void recursiveBarrierParent(int *out, int enabled) {
+    cg::thread_block block = cg::this_thread_block();
+    cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
+    __shared__ int values[64];
+    if (enabled == 0) return;
+    int warp = threadIdx.x / 32;
+    if (warp == 0) {
+      values[tile.thread_rank()] = tile.thread_rank();
+      tile.sync();
+      if (tile.thread_rank() == 0) out[0] = values[31];
+      tile.sync();
+    }
+    block.sync();
+    if (threadIdx.x == 0) recursiveBarrierParent<<<1, 64>>>(out, enabled - 1);
+  }`, {
+        kernelName: "recursiveBarrierParent",
+        referenceDynamicParallelism: true,
+        workgroupSize: [64, 1, 1],
+        features: { subgroups: true },
+      });
+      const projected = projectSemanticHostRuntimeToGpuIr(compiled.kernelIr);
+      const executionPlan = createCudaWebGpuExecutionPlan(
+        compiled,
+        { buffers: { out: new Int32Array(1) }, scalars: { enabled: 0 } },
+        { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+        { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(projected)).toBe(true);
+      expect(executionPlan).toMatchObject({ supported: true, kind: "single-dispatch" });
+      if (executionPlan.supported) {
+        expect(executionPlan.steps[0]?.program.wgsl).toContain("browsergrad-semantic-wgsl");
+      }
+    });
+
   it("rejects host-lifted dynamic launches followed by runtime query writes", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void child(int *out) {

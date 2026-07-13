@@ -96,7 +96,7 @@ export function semanticBarrierOperationsMatchActiveLaneProof(
   proof: CudaLiteBarrierUniformityFact | undefined,
   barrierFunctions: ReadonlySet<string> = new Set(),
 ): boolean {
-  if (!proof || semanticOperationsContainReturn(operations)) return false;
+  if (!proof || semanticOperationsContainUnverifiedReturn(operations, proof)) return false;
   const provenStarts = new Set(proof.barrierStatementStarts);
   let hasBarrier = false;
   const visit = (items: readonly SemanticKernelIrOperation[]): boolean => items.every((operation) => {
@@ -109,6 +109,26 @@ export function semanticBarrierOperationsMatchActiveLaneProof(
     return true;
   });
   return visit(operations) && hasBarrier;
+}
+
+function semanticOperationsContainUnverifiedReturn(
+  operations: readonly SemanticKernelIrOperation[],
+  proof: CudaLiteBarrierUniformityFact,
+  inheritedUnverifiedControl = false,
+): boolean {
+  const unverifiedStarts = new Set(proof.unverifiedControlStatementStarts);
+  return operations.some((operation) => {
+    const unverifiedControl = inheritedUnverifiedControl || unverifiedStarts.has(operation.span.start);
+    if (operation.kind === "return") return unverifiedControl;
+    if (operation.kind === "branch") {
+      return semanticOperationsContainUnverifiedReturn(operation.consequent, proof, unverifiedControl) ||
+        semanticOperationsContainUnverifiedReturn(operation.alternate, proof, unverifiedControl);
+    }
+    if (operation.kind === "loop" || operation.kind === "block") {
+      return semanticOperationsContainUnverifiedReturn(operation.body, proof, unverifiedControl);
+    }
+    return false;
+  });
 }
 
 function semanticOperationsContainReturn(operations: readonly SemanticKernelIrOperation[]): boolean {

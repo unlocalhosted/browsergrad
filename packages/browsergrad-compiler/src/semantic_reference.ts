@@ -1068,14 +1068,17 @@ function semanticReferenceCooperativeGroupCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  if (!(expression.callee.kind === "member" &&
-    expression.callee.object.kind === "symbol" &&
-    expression.args.length === 0 &&
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return false;
+  const group = semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name);
+  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
+    return expression.args.length === 1 && (group?.kind === "tile" || group?.kind === "binary") &&
+      semanticReferenceExpressionSupported(expression.args[0]!, "scalar", compiled);
+  }
+  if (!(expression.args.length === 0 &&
     (expression.callee.property === "thread_rank" ||
       expression.callee.property === "size" ||
       expression.callee.property === "meta_group_rank" ||
       expression.callee.property === "meta_group_size"))) return false;
-  const group = semanticCooperativeGroupInfo(compiled.kernelIr, expression.callee.object.name);
   return group !== undefined && group.kind !== "coalesced";
 }
 
@@ -4826,6 +4829,17 @@ function evalSemanticCooperativeGroupCall(
 ): number {
   if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") {
     throw semanticReferenceError("semantic reference cooperative-group call requires symbol receiver", expression.span);
+  }
+  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
+    const value = expression.args[0];
+    if (!value) throw semanticReferenceError("semantic cooperative-group vote requires a predicate", expression.span);
+    const groupName = expression.callee.object.name;
+    const peers = semanticReferenceCooperativeContexts(groupName, context);
+    if (expression.callee.property === "any") return Number(peers.some((peer) => truthy(evalNumber(value, peer))));
+    if (expression.callee.property === "all") return Number(peers.every((peer) => truthy(evalNumber(value, peer))));
+    return peers.reduce((mask, peer) => truthy(evalNumber(value, peer))
+      ? mask | (1 << semanticReferenceCooperativeGroupValue(groupName, "thread_rank", peer))
+      : mask, 0) >>> 0;
   }
   if (
     expression.callee.property !== "thread_rank" &&

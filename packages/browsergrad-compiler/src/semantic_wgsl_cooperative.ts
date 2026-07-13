@@ -127,6 +127,7 @@ export function emitSemanticTypedCooperativeGroupCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
   activeFunction?: string,
+  emitPredicate?: (expression: SemanticExpression) => TypedWgslExpression,
 ): TypedWgslExpression | undefined {
   if (!semanticWgslCooperativeGroupCallSupported(expression, ir) || expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return undefined;
   const span = expression.span;
@@ -141,6 +142,17 @@ export function emitSemanticTypedCooperativeGroupCall(
   }
   const localRank = semanticTypedCooperativeLocalLinearRank(ir, span);
   const asResult = (value: TypedWgslExpression): TypedWgslExpression => convertTypedWgslExpression(value, resultType);
+  if ((expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") && emitPredicate) {
+    const predicate = expression.args[0];
+    if (!predicate) return undefined;
+    const ballot = emitSemanticTypedCooperativePartitionBallotMask(group, ir, emitPredicate(predicate), span);
+    if (expression.callee.property === "ballot") return asResult(ballot);
+    const expected = expression.callee.property === "all"
+      ? semanticTypedCooperativePartitionLowMask(group, ir, span)
+      : semanticTypedU32(0, span);
+    const vote = emitTypedWgslBinary(expression.callee.property === "all" ? "==" : "!=", ballot, expected, span);
+    return asResult(emitTypedWgslSelect(semanticTypedU32(0, span), semanticTypedU32(1, span), vote, span));
+  }
   if (group.partitioned && (expression.callee.property === "thread_rank" || expression.callee.property === "size")) {
     const mask = createTypedWgslIdentifier(semanticCooperativePartitionMaskName(groupName), "u32", span);
     if (expression.callee.property === "size") return asResult(createTypedWgslCall("countOneBits", [mask], "u32", span));
@@ -170,14 +182,18 @@ export function semanticWgslCooperativeGroupCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
-  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol" || expression.args.length !== 0) return false;
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") return false;
+  const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
+  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
+    return expression.args.length === 1 && (group?.kind === "tile" || group?.kind === "binary");
+  }
+  if (expression.args.length !== 0) return false;
   if (
     expression.callee.property !== "thread_rank" &&
     expression.callee.property !== "size" &&
     expression.callee.property !== "meta_group_rank" &&
     expression.callee.property !== "meta_group_size"
   ) return false;
-  const group = semanticCooperativeGroupInfo(ir, expression.callee.object.name);
   return group !== undefined && group.kind !== "coalesced";
 }
 
