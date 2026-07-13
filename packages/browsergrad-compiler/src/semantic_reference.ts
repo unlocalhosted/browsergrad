@@ -269,6 +269,7 @@ interface SemanticStoragePointerView {
   readonly containerValueType?: CudaLiteScalarType;
   readonly packedByteLanes?: 2 | 3 | 4;
   readonly pointerBaseUnitBytes?: number;
+  readonly atomicCarrier?: boolean;
 }
 
 type MutableTrace = MutableReferenceTrace;
@@ -5616,12 +5617,14 @@ function semanticReferenceStoragePointerView(
   const containerValueType = inherited?.containerValueType ?? root?.valueType ?? ref.containerValueType;
   const packedByteLanes = ref.packedByteLanes ?? inherited?.packedByteLanes;
   const pointerBaseUnitBytes = ref.pointerBaseUnitBytes ?? inherited?.pointerBaseUnitBytes;
-  return containerValueType === undefined && packedByteLanes === undefined && pointerBaseUnitBytes === undefined
+  const atomicCarrier = inherited?.atomicCarrier === true || semanticAtomicMemoryRootNames(context.compiled.kernelIr).has(ref.base);
+  return containerValueType === undefined && packedByteLanes === undefined && pointerBaseUnitBytes === undefined && !atomicCarrier
     ? undefined
     : {
         ...(containerValueType === undefined ? {} : { containerValueType }),
         ...(packedByteLanes === undefined ? {} : { packedByteLanes }),
         ...(pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes }),
+        ...(atomicCarrier ? { atomicCarrier: true } : {}),
       };
 }
 
@@ -5853,7 +5856,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   if (semanticReferenceDirectByteRawView(ref, context)) {
     const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
-    const bytes = semanticAtomicMemoryRootNames(context.compiled.kernelIr).has(ref.base)
+    const bytes = semanticReferenceStoragePointerView(ref, context)?.atomicCarrier === true
       ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
       : buffer;
     const base = flatIndex(ref, context);
@@ -5955,7 +5958,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   if (semanticReferenceDirectByteRawView(ref, context)) {
     const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
     if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
-    const bytes = semanticAtomicMemoryRootNames(context.compiled.kernelIr).has(ref.base)
+    const bytes = semanticReferenceStoragePointerView(ref, context)?.atomicCarrier === true
       ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
       : buffer;
     const base = flatIndex(ref, context);

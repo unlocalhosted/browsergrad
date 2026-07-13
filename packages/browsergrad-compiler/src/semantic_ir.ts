@@ -2180,12 +2180,13 @@ function specializeSharedPointerFunctionsOnce(
       const effectiveDimensions = dimensions.map((item, argIndex) => {
         const carrierType = carrierTypes[argIndex];
         if (item === undefined) return undefined;
+        if (item.length === 0) return [];
         const flatExtent = totalElements(item);
         return refs[argIndex]?.pointerBaseIsScalarLane === true && isCudaVectorType(carrierType)
           ? [flatExtent * cudaVectorLaneCount(carrierType)]
           : [flatExtent];
       });
-      if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && effectiveDimensions.every((item) => item !== undefined && item[0] !== undefined) && sameSemanticDimensions(effectiveDimensions as readonly (readonly number[])[])) {
+      if (args.length > 0 && args.every((root) => root !== undefined) && matchingValueTypes && effectiveDimensions.every((item) => item !== undefined) && sameSemanticDimensions(effectiveDimensions as readonly (readonly number[])[])) {
         sharedPointerNames.set(param.name, `${param.name}__bg_shared_ptr`);
         sharedPointerDimensions.set(param.name, effectiveDimensions[0]!);
         sharedPointerRoots.set(param.name, args);
