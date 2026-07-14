@@ -459,7 +459,7 @@ WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
 runtime copy, host dynamic launch, and prepared resident dispatch.
 `e2e:webgpu:corpus` additionally requires fixture-backed corpus kernels loaded
 from pinned local corpora under `/tmp` and executes them through real WebGPU
-with readback comparisons. Required fixture names currently cover `92` exact
+with readback comparisons. Required fixture names currently cover `127` exact
 kernel launches across CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA,
 including vector ops, activations, embedding, softmax, cross-entropy,
 cross-entropy backward, encoder forward/backward, attention, AdamW, permute,
@@ -468,14 +468,15 @@ RoPE pack/transposes, layernorm, scale/lowp conversions, and cuda-samples
 mdspan row-scale/shared-tile transpose, matrix multiply, scalar product, simple
 memory kernels, plus SobelTex function-pointer/texture kernels.
 `e2e:webgpu:corpus -- --require-webgpu` enforces this as a no-regression floor:
-at least `92` total passing real WebGPU corpus fixtures, with per-corpus minimums
-of CUDA-120 `2`, NVIDIA `cuda-samples` `17`, `llm.c` `27`, and LeetCUDA `46`.
+at least `127` total passing real WebGPU corpus fixtures, with per-corpus minimums
+of CUDA-120 `19`, NVIDIA `cuda-samples` `34`, `llm.c` `28`, and LeetCUDA `46`.
 Fixture specs can set a per-case tolerance for numerically sensitive
 transcendental kernels while still comparing CPU reference output against real
 WebGPU readback. Specs can also pin explicit expected readbacks for kernels
 where the small fixture output is known; the e2e gate checks both CPU reference
 and WebGPU against that expected output so interpreter and GPU wrong-code cannot
-agree silently. Current hard floor requires at least `40` such pinned-output
+agree silently. All `127` baseline fixtures carry pinned expected readbacks, and
+the current hard floor requires at least `127` such pinned-output
 corpus fixtures.
 Fixture source is emitted through the same corpus-audit normalization path used
 for full-corpus compile/codegen counts, so helper/context handling does not

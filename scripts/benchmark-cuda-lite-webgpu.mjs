@@ -40,6 +40,18 @@ __global__ void saxpy(const float* x, float* y, float a, int n) {
 }
 `;
 
+const gridSyncSource = `
+namespace cg = cooperative_groups;
+__global__ void gridSync(float *scratch, float *out, float scale) {
+  cg::grid_group grid = cg::this_grid();
+  scratch[blockIdx.x] = ((float)blockIdx.x + 1.0f) * scale;
+  grid.sync();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    out[0] = scratch[0] + scratch[1];
+  }
+}
+`;
+
 const html = String.raw`<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>BrowserGrad CUDA-lite WebGPU bench</title></head>
@@ -59,6 +71,7 @@ const html = String.raw`<!doctype html>
       } from "@unlocalhosted/browsergrad-compiler";
 
       const SAXPY = ${JSON.stringify(saxpySource)};
+      const GRID_SYNC = ${JSON.stringify(gridSyncSource)};
 
       window.__bgRunBench = async ({ runs, warmup, length }) => {
         if (!navigator.gpu) {
@@ -74,10 +87,15 @@ const html = String.raw`<!doctype html>
 
         const device = await createDevice();
         const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [256, 1, 1] });
+        const gridSyncCompiled = compileCudaLiteKernel(GRID_SYNC, {
+          referenceGridSync: true,
+          workgroupSize: [1, 1, 1],
+        });
         const launch = {
           gridDim: [Math.ceil(length / 256), 1, 1],
           blockDim: [256, 1, 1],
         };
+        const gridSyncLaunch = { gridDim: [2, 1, 1], blockDim: [1, 1, 1] };
         const xData = filledFloat32(length, 1);
         const yInitial = filledFloat32(length, 2);
         const x = createWgslStorageBuffer(device, {
@@ -90,6 +108,18 @@ const html = String.raw`<!doctype html>
           data: yInitial,
           label: "bench-y",
         });
+        const gridSyncScratchInitial = new Float32Array(2);
+        const gridSyncOutInitial = new Float32Array(1);
+        const gridSyncScratch = createWgslStorageBuffer(device, {
+          valueType: "f32",
+          data: gridSyncScratchInitial,
+          label: "bench-grid-sync-scratch",
+        });
+        const gridSyncOut = createWgslStorageBuffer(device, {
+          valueType: "f32",
+          data: gridSyncOutInitial,
+          label: "bench-grid-sync-out",
+        });
 
         try {
           const input = {
@@ -98,11 +128,32 @@ const html = String.raw`<!doctype html>
             scalars: { a: 3, n: length },
             readback: [],
           };
+          const gridSyncInput = {
+            buffers: {},
+            residentBuffers: { scratch: gridSyncScratch, out: gridSyncOut },
+            scalars: { scale: 1 },
+            readback: [],
+          };
           const prepareMs = await timeOnce(async () => {
             const prepared = await prepareCompiledKernelWebGpu(device, compiled, input, launch);
             prepared.destroy();
           });
+          const gridSyncPrepareMs = await timeOnce(async () => {
+            const prepared = await prepareCompiledKernelWebGpu(
+              device,
+              gridSyncCompiled,
+              gridSyncInput,
+              gridSyncLaunch,
+            );
+            prepared.destroy();
+          });
           const prepared = await prepareCompiledKernelWebGpu(device, compiled, input, launch);
+          const preparedGridSync = await prepareCompiledKernelWebGpu(
+            device,
+            gridSyncCompiled,
+            gridSyncInput,
+            gridSyncLaunch,
+          );
           try {
             const oneShot = await measure("webgpu:saxpy-one-shot-resident", runs, warmup, async () => {
               writeWgslStorageBuffer(device, y, yInitial);
@@ -123,10 +174,40 @@ const html = String.raw`<!doctype html>
               writeWgslStorageBuffer(device, y, yInitial);
               await prepared.run({ readback: ["y"], awaitCompletion: true });
             });
+            const resetGridSync = () => {
+              writeWgslStorageBuffer(device, gridSyncScratch, gridSyncScratchInitial);
+              writeWgslStorageBuffer(device, gridSyncOut, gridSyncOutInitial);
+            };
+            const gridSyncOneShot = await measure("webgpu:grid-sync-one-shot-resident", runs, warmup, async () => {
+              resetGridSync();
+              await runCompiledKernelWebGpu(device, gridSyncCompiled, gridSyncInput, gridSyncLaunch);
+              await device.gpu.queue.onSubmittedWorkDone();
+            });
+            const gridSyncPreparedRun = await measure("webgpu:grid-sync-prepared-resident", runs, warmup, async () => {
+              resetGridSync();
+              await preparedGridSync.run({ readback: [], awaitCompletion: true });
+            });
+            let gridSyncScale = 2;
+            const gridSyncPreparedScalarUpdate = await measure("webgpu:grid-sync-prepared-scalar-update", runs, warmup, async () => {
+              resetGridSync();
+              gridSyncScale = gridSyncScale === 2 ? 1 : 2;
+              await preparedGridSync.run({
+                scalars: { scale: gridSyncScale },
+                readback: [],
+                awaitCompletion: true,
+              });
+            });
+            const gridSyncPreparedReadback = await measure("webgpu:grid-sync-prepared-readback", runs, warmup, async () => {
+              resetGridSync();
+              await preparedGridSync.run({ readback: ["out"], awaitCompletion: true });
+            });
             writeWgslStorageBuffer(device, y, yInitial);
             await prepared.run({ scalars: { a: 4 }, readback: [], awaitCompletion: true });
             const out = await readWgslStorageBuffer(device, y);
-            const ok = out[0] === 6 && out[length - 1] === 6;
+            resetGridSync();
+            const gridSyncResult = await preparedGridSync.run({ scalars: { scale: 2 }, readback: ["out"] });
+            const saxpyOk = out[0] === 6 && out[length - 1] === 6;
+            const gridSyncOk = gridSyncResult.buffers.out?.[0] === 6;
             return {
               available: true,
               runs,
@@ -134,19 +215,27 @@ const html = String.raw`<!doctype html>
               length,
               benchmarks: [
                 { name: "webgpu:prepare-compiled-saxpy", minMs: prepareMs, medianMs: prepareMs, p95Ms: prepareMs, maxMs: prepareMs },
+                { name: "webgpu:prepare-compiled-grid-sync", minMs: gridSyncPrepareMs, medianMs: gridSyncPrepareMs, p95Ms: gridSyncPrepareMs, maxMs: gridSyncPrepareMs },
                 oneShot,
                 preparedRun,
                 preparedScalarUpdate,
                 preparedReadback,
+                gridSyncOneShot,
+                gridSyncPreparedRun,
+                gridSyncPreparedScalarUpdate,
+                gridSyncPreparedReadback,
               ],
-              validation: { saxpy: ok },
+              validation: { saxpy: saxpyOk, gridSync: gridSyncOk },
             };
           } finally {
             prepared.destroy();
+            preparedGridSync.destroy();
           }
         } finally {
           destroyWgslStorageBuffer(x);
           destroyWgslStorageBuffer(y);
+          destroyWgslStorageBuffer(gridSyncScratch);
+          destroyWgslStorageBuffer(gridSyncOut);
         }
       };
 
@@ -335,6 +424,9 @@ function benchmarkComparisons(report) {
     comparison(report, "prepared-vs-one-shot", "webgpu:saxpy-prepared-resident", "webgpu:saxpy-one-shot-resident"),
     comparison(report, "prepared-scalar-update-vs-one-shot", "webgpu:saxpy-prepared-scalar-update", "webgpu:saxpy-one-shot-resident"),
     comparison(report, "prepared-readback-vs-prepared-resident", "webgpu:saxpy-prepared-readback", "webgpu:saxpy-prepared-resident"),
+    comparison(report, "grid-sync-prepared-vs-one-shot", "webgpu:grid-sync-prepared-resident", "webgpu:grid-sync-one-shot-resident"),
+    comparison(report, "grid-sync-prepared-scalar-update-vs-one-shot", "webgpu:grid-sync-prepared-scalar-update", "webgpu:grid-sync-one-shot-resident"),
+    comparison(report, "grid-sync-prepared-readback-vs-prepared-resident", "webgpu:grid-sync-prepared-readback", "webgpu:grid-sync-prepared-resident"),
   ].filter(Boolean);
 }
 

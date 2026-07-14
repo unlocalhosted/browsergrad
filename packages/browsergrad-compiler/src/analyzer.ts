@@ -4885,6 +4885,7 @@ function validateDivergentReturnsBeforeBarriers(
 ): CudaLiteBarrierUniformityFact {
   const uniformity = collectBarrierUniformity(statements, params, workgroupSize, uniformScalarFunctionNames);
   const sharedScalars = collectBarrierSharedScalarNames(statements);
+  const barrierSafeContinueStarts = collectBarrierSafeForContinueStarts(statements, uniformity, barrierFunctionNames);
   const barrierStatementStarts: number[] = [];
   const unverifiedControlStatementStarts: number[] = [];
   const workgroupUniformControlStatementStarts: number[] = [];
@@ -4968,9 +4969,11 @@ function validateDivergentReturnsBeforeBarriers(
         if (divergentDepth > 0 && continueBarrierLater) {
           verified = false;
           unverifiedControlStatementStarts.push(statement.span.start);
-          diagnostics.push(error(
+          diagnostics.push((barrierSafeContinueStarts.has(statement.span.start) ? warning : error)(
             "divergent-continue-before-barrier",
-            "thread-dependent continue before a later barrier would make WGSL barrier control flow non-uniform",
+            barrierSafeContinueStarts.has(statement.span.start)
+              ? "canonical for-loop continue before a later barrier is lowered with per-iteration active-lane state"
+              : "thread-dependent continue before a later barrier would make WGSL barrier control flow non-uniform",
             statement.span,
           ));
         }
@@ -5019,6 +5022,116 @@ function validateDivergentReturnsBeforeBarriers(
     unverifiedControlStatementStarts: [...new Set(unverifiedControlStatementStarts)].sort((left, right) => left - right),
     workgroupUniformControlStatementStarts: [...new Set(workgroupUniformControlStatementStarts)].sort((left, right) => left - right),
   };
+}
+
+/**
+ * Identify the narrow loop shape for which semantic lowering can retain CUDA
+ * iteration semantics while making a later workgroup barrier uniform. The
+ * loop's trip count and update must be workgroup-uniform; the divergent
+ * continue itself is an immediate if-body, and barriers remain direct
+ * statements in the loop body. Other shapes remain hard errors.
+ */
+function collectBarrierSafeForContinueStarts(
+  statements: readonly CudaLiteStatement[],
+  uniformity: BarrierUniformityContext,
+  barrierFunctionNames: ReadonlySet<string>,
+): ReadonlySet<number> {
+  const starts = new Set<number>();
+  const visit = (body: readonly CudaLiteStatement[]): void => {
+    for (const statement of body) {
+      if (statement.kind === "for") {
+        for (const start of barrierSafeForContinueStarts(statement, uniformity, barrierFunctionNames)) starts.add(start);
+        visit(statement.body);
+        continue;
+      }
+      if (statement.kind === "if") {
+        visit(statement.consequent);
+        if (statement.alternate) visit(statement.alternate);
+      } else if (statement.kind === "block" || statement.kind === "while" || statement.kind === "do-while") {
+        visit(statement.body);
+      }
+    }
+  };
+  visit(statements);
+  return starts;
+}
+
+function barrierSafeForContinueStarts(
+  loop: Extract<CudaLiteStatement, { readonly kind: "for" }>,
+  uniformity: BarrierUniformityContext,
+  barrierFunctionNames: ReadonlySet<string>,
+): ReadonlySet<number> {
+  if (
+    loop.init?.kind !== "var" ||
+    loop.condition === undefined ||
+    loop.update?.kind !== "update" ||
+    loop.update.argument.kind !== "identifier" ||
+    expressionMayBeNonUniformBeforeBarrier(loop.condition, uniformity)
+  ) return new Set();
+
+  const starts: number[] = [];
+  for (const [index, statement] of loop.body.entries()) {
+    const continueStart = directForContinueStart(statement);
+    if (continueStart !== undefined) {
+      if (!loop.body.slice(index + 1).some((item) => statementProvidesBarrierDominance(item, barrierFunctionNames))) {
+        return new Set();
+      }
+      starts.push(continueStart);
+      continue;
+    }
+    if (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while" ||
+      statement.kind === "block" ||
+      statement.kind === "var" ||
+      cudaStatementContainsLoopExitOrContinue(statement) ||
+      cudaStatementContainsBarrierOutsideDirectStatement(statement, barrierFunctionNames)) return new Set();
+  }
+  return new Set(starts);
+}
+
+function directForContinueStart(statement: CudaLiteStatement): number | undefined {
+  if (statement.kind !== "if" || statement.alternate !== undefined || statement.consequent.length !== 1) return undefined;
+  const consequent = statement.consequent[0]!;
+  return consequent.kind === "continue" ? consequent.span.start : undefined;
+}
+
+function cudaStatementContainsLoopExitOrContinue(statement: CudaLiteStatement): boolean {
+  if (statement.kind === "break" || statement.kind === "continue" || statement.kind === "return") return true;
+  if (statement.kind === "if") {
+    return statement.consequent.some(cudaStatementContainsLoopExitOrContinue) ||
+      (statement.alternate?.some(cudaStatementContainsLoopExitOrContinue) ?? false);
+  }
+  if (statement.kind === "block" || statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") {
+    return statement.body.some(cudaStatementContainsLoopExitOrContinue);
+  }
+  return false;
+}
+
+function cudaStatementContainsBarrierOutsideDirectStatement(
+  statement: CudaLiteStatement,
+  barrierFunctionNames: ReadonlySet<string>,
+): boolean {
+  if (statementProvidesBarrierDominance(statement, barrierFunctionNames)) return false;
+  if (statement.kind === "if") {
+    return statement.consequent.some((item) => cudaStatementContainsBarrier(item, barrierFunctionNames)) ||
+      (statement.alternate?.some((item) => cudaStatementContainsBarrier(item, barrierFunctionNames)) ?? false);
+  }
+  return statement.kind === "block" || statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while"
+    ? statement.body.some((item) => cudaStatementContainsBarrier(item, barrierFunctionNames))
+    : false;
+}
+
+function cudaStatementContainsBarrier(
+  statement: CudaLiteStatement,
+  barrierFunctionNames: ReadonlySet<string>,
+): boolean {
+  if (statementProvidesBarrierDominance(statement, barrierFunctionNames)) return true;
+  if (statement.kind === "if") {
+    return statement.consequent.some((item) => cudaStatementContainsBarrier(item, barrierFunctionNames)) ||
+      (statement.alternate?.some((item) => cudaStatementContainsBarrier(item, barrierFunctionNames)) ?? false);
+  }
+  return statement.kind === "block" || statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while"
+    ? statement.body.some((item) => cudaStatementContainsBarrier(item, barrierFunctionNames))
+    : false;
 }
 
 function collectBarrierSharedScalarNames(

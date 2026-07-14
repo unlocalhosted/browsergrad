@@ -3092,12 +3092,12 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       }
     });
 
-  it("rejects divergent continues before later barriers instead of emitting unsafe WGSL", () => {
+  it("lowers canonical divergent for-loop continues before later barriers with per-iteration state", () => {
       const source = `
   __global__ void continueBeforeBarrier(uint *out, int N) {
     int tid = threadIdx.x;
     for (int i = 0; i < 3; ++i) {
-      if (tid >= N) { continue; }
+      if (tid >= N && i == 1) { continue; }
       out[tid] = out[tid] + 1u;
       __syncthreads();
       out[tid] = out[tid] + 10u;
@@ -3105,8 +3105,36 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
   }`;
       const analysis = analyzeCudaLite(parseCudaLite(source), { workgroupSize: [4, 1, 1] });
       const diagnostic = analysis.diagnostics.find((item) => item.code === "divergent-continue-before-barrier");
+      const compiled = compileCudaLiteKernel(source, { workgroupSize: [4, 1, 1] });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(4) }, scalars: { N: 2 } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
 
-      expect(diagnostic?.severity).toBe("error");
+      expect(diagnostic?.severity).toBe("warning");
+      expect(compiled.wgsl).toMatch(/var bg_continue_active_\d+: bool = true;/u);
+      expect(compiled.wgsl).toMatch(/bg_continue_active_\d+ = false;/u);
+      expect(compiled.wgsl).toContain("workgroupBarrier();");
+      expect([...result.buffers.out as Uint32Array]).toEqual([33, 33, 22, 22]);
+    });
+
+  it("keeps noncanonical divergent continues before barriers rejected", () => {
+      const source = `
+  __global__ void whileContinueBeforeBarrier(uint *out, int N) {
+    int tid = threadIdx.x;
+    int i = 0;
+    while (i < 3) {
+      if (tid >= N && i == 1) { continue; }
+      out[tid] = out[tid] + 1u;
+      __syncthreads();
+      out[tid] = out[tid] + 10u;
+      ++i;
+    }
+  }`;
+      const analysis = analyzeCudaLite(parseCudaLite(source), { workgroupSize: [4, 1, 1] });
+
+      expect(analysis.diagnostics.find((item) => item.code === "divergent-continue-before-barrier")?.severity).toBe("error");
       expect(() => compileCudaLiteKernel(source, { workgroupSize: [4, 1, 1] })).toThrow(/divergent-continue-before-barrier/u);
     });
 

@@ -1261,6 +1261,31 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(compiled.wgsl).toContain("halfOut[u32(idx)] = f16");
     });
 
+  it("lowers static CuTe Int values without accepting CuTe object graphs", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void cuteIntValues(int *out) {
+    constexpr int width = 4;
+    constexpr auto area = cute::Int<width * 2>{};
+    auto depth = Int<2>{};
+    if (threadIdx.x == 0) out[0] = area + depth;
+  }`, { workgroupSize: [1, 1, 1] });
+      const result = runCompiledKernelReference(
+        compiled,
+        { buffers: { out: new Int32Array(1) } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+
+      expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect([...result.buffers.out as Int32Array]).toEqual([10]);
+      expect(() => parseCudaLite(`
+  __global__ void dynamicCuteInt(int *out) {
+    int width = threadIdx.x;
+    auto value = cute::Int<width>{};
+    out[0] = value;
+  }`)).toThrow(/CuTe Int value must be an i32 integer constant expression/);
+    });
+
   it("lowers scalar __device__ helper functions", () => {
       const compiled = compileCudaLiteKernel(`
   __device__ float addOne(float value) {

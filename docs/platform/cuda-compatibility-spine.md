@@ -301,5 +301,7 @@ Performance gate:
 - Browser/WebGPU hot-loop perf should compare one-shot execution against
   `prepareCompiledKernelWebGpu()` over resident buffers. Keep this as measured
   evidence, not prose claims; no-readback prepared measurements should use
-  `awaitCompletion: true`. Run:
+  `awaitCompletion: true`. The benchmark covers both direct SAXPY and a
+  two-phase grid-sync plan, including prepared scalar updates and readback, so
+  a direct-dispatch baseline cannot hide multi-dispatch regressions. Run:
   `pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --bundle dist --markdown /tmp/bg-cuda-lite-webgpu-bench.md`.

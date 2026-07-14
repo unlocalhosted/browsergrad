@@ -2897,7 +2897,11 @@ function emitSemanticStore(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
-  if (operation.target.addressSpace === "local" && semanticPointerArrayDeclarationForRef(ir, operation.target)) {
+  if (
+    operation.target.addressSpace === "local" &&
+    semanticPointerArrayDeclarationForRef(ir, operation.target) &&
+    !semanticStoragePointerArrayDeclarationForRef(ir, operation.target)
+  ) {
     return "{}";
   }
   if (semanticWgslStorageOffsetStoreSupported(operation, ir)) {
@@ -2926,6 +2930,7 @@ function emitSemanticStore(
     return emitSemanticMemoryWrite(operation.target, `(${current} ${binaryOperator} ${value})`, ir, names, options);
   }
   if (semanticRuntimePointerDeclarationForRef(ir, operation.target) ||
+    semanticStoragePointerArrayDeclarationForRef(ir, operation.target) ||
     semanticWgslFunctionStoragePointerParam(ir, operation.target.base, options.activeFunction ?? null)) {
     return emitSemanticPointerMemoryStore(operation, ir, names, options, textureSpecializations);
   }
@@ -3034,10 +3039,18 @@ function emitSemanticPointerMemoryStore(
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
   const valueType = operation.target.valueType ?? "float";
-  const index = isCudaVectorType(valueType)
-    ? emitFlatStorageVectorBaseIndex(operation.target, ir, names, options)
-    : emitFlatStorageIndex(operation.target, ir, names, options);
-  const buffer = nameFor(semanticPointerBufferParamName(operation.target.base), names);
+  const pointerArray = semanticStoragePointerArrayDeclarationForRef(ir, operation.target);
+  const slot = pointerArray === undefined
+    ? undefined
+    : emitSemanticExpressionAs(operation.target.indices[0]!, ir, names, "u32", options).code;
+  const index = slot === undefined
+    ? isCudaVectorType(valueType)
+      ? emitFlatStorageVectorBaseIndex(operation.target, ir, names, options)
+      : emitFlatStorageIndex(operation.target, ir, names, options)
+    : `${nameFor(semanticPointerBaseParamName(operation.target.base), names)}[${slot}]`;
+  const buffer = slot === undefined
+    ? nameFor(semanticPointerBufferParamName(operation.target.base), names)
+    : `${nameFor(semanticPointerBufferParamName(operation.target.base), names)}[${slot}]`;
   const read = `${semanticPointerReadHelperName(valueType)}(${buffer}, ${index})`;
   const value = isSemanticFloatVectorType(valueType)
     ? emitSemanticVectorOperand(operation.value, valueType as CudaLiteScalarType, ir, names, options, textureSpecializations)
@@ -5915,6 +5928,30 @@ function emitSemanticDirectMemoryReadExpression(
       expression.span,
     );
   }
+  const pointerArray = semanticStoragePointerArrayDeclarationForRef(ir, ref);
+  if (pointerArray) {
+    const extent = pointerArray.target.dimensions[0]!;
+    const arrayType: WgslArrayType = `array<u32,${extent}>`;
+    const slot = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
+    const buffer = createTypedWgslIndexAccess(
+      createTypedWgslIdentifier(nameFor(semanticPointerBufferParamName(ref.base), names), arrayType, ref.span),
+      slot,
+      "u32",
+      ref.span,
+    );
+    const base = createTypedWgslIndexAccess(
+      createTypedWgslIdentifier(nameFor(semanticPointerBaseParamName(ref.base), names), arrayType, ref.span),
+      slot,
+      "u32",
+      ref.span,
+    );
+    return createTypedWgslCall(
+      semanticPointerReadHelperName(ref.valueType ?? "float"),
+      [buffer, base],
+      semanticType,
+      expression.span,
+    );
+  }
   if (pointerParam) {
     if (ref.indices.length !== 1) return undefined;
     return createTypedWgslCall(
@@ -6628,6 +6665,13 @@ function emitSemanticMemoryRead(
     const index = emitTypedFlatStorageIndex(ref, ir, names, options).code;
     return `${semanticPointerReadHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index})`;
   }
+  const pointerArray = semanticStoragePointerArrayDeclarationForRef(ir, ref);
+  if (pointerArray) {
+    const slot = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
+    const buffer = nameFor(semanticPointerBufferParamName(ref.base), names);
+    const base = nameFor(semanticPointerBaseParamName(ref.base), names);
+    return `${semanticPointerReadHelperName(ref.valueType ?? "float")}(${buffer}[${slot}], ${base}[${slot}])`;
+  }
   if (semanticWgslLocalPackedHalf2View(ref, ir)) {
     const index = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
     const root = localArraySymbol(ir, ref.base)!;
@@ -6726,6 +6770,13 @@ function emitSemanticMemoryWrite(
     const valueType = ref.valueType ?? "float";
     const index = emitTypedFlatStorageIndex(ref, ir, names, options).code;
     return `${semanticPointerWriteHelperName(valueType)}(${nameFor(semanticPointerBufferParamName(ref.base), names)}, ${index}, ${value})`;
+  }
+  const pointerArray = semanticStoragePointerArrayDeclarationForRef(ir, ref);
+  if (pointerArray) {
+    const slot = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;
+    const buffer = nameFor(semanticPointerBufferParamName(ref.base), names);
+    const base = nameFor(semanticPointerBaseParamName(ref.base), names);
+    return `${semanticPointerWriteHelperName(ref.valueType ?? "float")}(${buffer}[${slot}], ${base}[${slot}], ${value})`;
   }
   if (semanticWgslLocalPackedHalf2View(ref, ir)) {
     const index = emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options).code;

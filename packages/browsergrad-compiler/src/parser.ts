@@ -1339,6 +1339,7 @@ class Parser {
       } while (this.peek().kind === "string");
       return { kind: "string", value: valueParts.join(""), raw: rawParts.join(" "), span: mergeSpans(start, end) };
     }
+    if (this.startsCuteIntValue()) return this.parseCuteIntValue();
     const ident = this.expectIdentifier("expression");
     let name = ident.value;
     let end = ident.span;
@@ -1352,6 +1353,43 @@ class Parser {
       return { kind: "number", value: constant, raw: String(constant), span: mergeSpans(ident.span, end) };
     }
     return { kind: "identifier", name, span: mergeSpans(ident.span, end) };
+  }
+
+  /**
+   * CuTe exposes a small compile-time integer wrapper (`cute::Int<N>{}`) that
+   * frequently survives otherwise scalarized CUDA. Treat only the empty-brace
+   * value form as its integer constant. CuTe tensor, layout, and tile objects
+   * still require source normalization and keep their explicit diagnostics.
+   */
+  private startsCuteIntValue(): boolean {
+    let typeIndex = this.index;
+    if (this.tokens[typeIndex]?.value === "cute" && this.tokens[typeIndex + 1]?.value === "::") typeIndex += 2;
+    if (this.tokens[typeIndex]?.value !== "Int" || this.tokens[typeIndex + 1]?.value !== "<") return false;
+    const templateEnd = this.findTemplateArgumentEnd(typeIndex + 1);
+    return templateEnd !== undefined && this.tokens[templateEnd + 1]?.value === "{" && this.tokens[templateEnd + 2]?.value === "}";
+  }
+
+  private parseCuteIntValue(): CudaLiteExpression {
+    const start = this.peek().span;
+    const qualified = this.consumeIf("cute") !== undefined;
+    if (qualified) this.expect("::");
+    this.expect("Int");
+    this.expect("<");
+    this.templateArgumentDepth++;
+    let argument: CudaLiteExpression;
+    try {
+      argument = this.parseExpression();
+    } finally {
+      this.templateArgumentDepth--;
+    }
+    const value = this.evaluateIntegerConstantExpression(argument);
+    if (value === undefined || !Number.isSafeInteger(value) || value < -0x8000_0000 || value > 0x7fff_ffff) {
+      this.fail("CuTe Int value must be an i32 integer constant expression", argument.span);
+    }
+    this.expect(">");
+    this.expect("{");
+    const end = this.expect("}").span;
+    return { kind: "number", value, raw: String(value), span: mergeSpans(start, end) };
   }
 
   private parseArgumentList(): readonly CudaLiteExpression[] {

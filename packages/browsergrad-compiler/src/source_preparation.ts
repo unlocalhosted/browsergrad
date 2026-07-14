@@ -1,3 +1,5 @@
+import type { CudaLiteDiagnostic } from "./types.js";
+
 /**
  * An externally supplied source fragment that will appear verbatim in a
  * CUDA-lite compilation unit. Keep normalization policy outside the compiler:
@@ -51,6 +53,29 @@ export interface CudaLiteCompilationUnitSegment {
   readonly kind?: string;
   readonly label?: string;
   readonly provenance?: CudaLiteSourceProvenance;
+}
+
+/** A position in the source that supplied a prepared compilation-unit fragment. */
+export interface CudaLiteSourceProvenancePosition {
+  readonly sourceName: string;
+  readonly offset?: number;
+  readonly line?: number;
+  readonly column?: number;
+}
+
+/**
+ * The portion of one compiler diagnostic attributable to a caller-provided
+ * fragment. A diagnostic can map to several fragments when its span crosses a
+ * compilation-unit boundary. Separators intentionally produce no mapping.
+ */
+export interface CudaLiteProvenanceDiagnosticSegment {
+  readonly fragmentIndex: number;
+  readonly outputStart: CudaLiteCompilationUnitPosition;
+  readonly outputEnd: CudaLiteCompilationUnitPosition;
+  readonly kind?: string;
+  readonly label?: string;
+  readonly sourceStart?: CudaLiteSourceProvenancePosition;
+  readonly sourceEnd?: CudaLiteSourceProvenancePosition;
 }
 
 export interface PrepareCudaLiteCompilationUnitOptions {
@@ -119,6 +144,77 @@ export function prepareCudaLiteCompilationUnit(
       name: transform.name,
       ...(transform.detail === undefined ? {} : { detail: transform.detail }),
     })) ?? [],
+  };
+}
+
+/**
+ * Relate a compiler diagnostic from assembled source back to the verbatim
+ * caller fragments that produced it. This deliberately maps only fragment
+ * provenance: caller-owned transforms remain responsible for their own
+ * source-map policy.
+ */
+export function mapCudaLiteDiagnosticToSourceProvenance(
+  unit: PreparedCudaLiteCompilationUnit,
+  diagnostic: CudaLiteDiagnostic,
+): readonly CudaLiteProvenanceDiagnosticSegment[] {
+  const { start, end } = diagnostic.span;
+  if (end < start) return [];
+
+  return unit.segments.flatMap((segment) => {
+    const segmentStart = segment.outputStart.offset;
+    const segmentEnd = segment.outputEnd.offset;
+    const overlapStart = Math.max(start, segmentStart);
+    const overlapEnd = Math.min(end, segmentEnd);
+    const pointInsideSegment = start === end && start >= segmentStart && start < segmentEnd;
+    if (overlapStart > overlapEnd || overlapStart === overlapEnd && !pointInsideSegment) return [];
+
+    const outputStart = positionAtOffset(unit.source, segment, overlapStart);
+    const outputEnd = positionAtOffset(unit.source, segment, overlapEnd);
+    return [{
+      fragmentIndex: segment.fragmentIndex,
+      outputStart,
+      outputEnd,
+      ...(segment.kind === undefined ? {} : { kind: segment.kind }),
+      ...(segment.label === undefined ? {} : { label: segment.label }),
+      ...(segment.provenance === undefined ? {} : {
+        sourceStart: provenancePositionAtOffset(unit.source, segment, overlapStart),
+        sourceEnd: provenancePositionAtOffset(unit.source, segment, overlapEnd),
+      }),
+    }];
+  });
+}
+
+function positionAtOffset(
+  source: string,
+  segment: CudaLiteCompilationUnitSegment,
+  offset: number,
+): CudaLiteCompilationUnitPosition {
+  return advancePosition(
+    segment.outputStart,
+    source.slice(segment.outputStart.offset, offset),
+  );
+}
+
+function provenancePositionAtOffset(
+  source: string,
+  segment: CudaLiteCompilationUnitSegment,
+  offset: number,
+): CudaLiteSourceProvenancePosition {
+  const provenance = segment.provenance;
+  if (provenance === undefined) throw new Error("expected source provenance for prepared source segment");
+  const relative = advancePosition(
+    { offset: 0, line: 1, column: 1 },
+    source.slice(segment.outputStart.offset, offset),
+  );
+  return {
+    sourceName: provenance.sourceName,
+    ...(provenance.sourceOffset === undefined ? {} : { offset: provenance.sourceOffset + relative.offset }),
+    ...(provenance.sourceLine === undefined ? {} : { line: provenance.sourceLine + relative.line - 1 }),
+    ...(provenance.sourceColumn === undefined ? {} : {
+      column: relative.line === 1
+        ? provenance.sourceColumn + relative.column - 1
+        : relative.column,
+    }),
   };
 }
 

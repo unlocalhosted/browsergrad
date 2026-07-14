@@ -1785,6 +1785,16 @@ __global__ void activeLaneBreakPostLoopBarrier(uint *out, int N) {
     out[tid] = out[tid] + 10u;
   }
 }`,
+  activeLaneCanonicalContinueBarrier: `
+__global__ void activeLaneCanonicalContinueBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  for (int i = 0; i < 3; ++i) {
+    if (tid >= N && i == 1) { continue; }
+    out[tid] = out[tid] + 1u;
+    __syncthreads();
+    out[tid] = out[tid] + 10u;
+  }
+}`,
   activeLaneNestedBreakPostLoopBarrier: `
 __global__ void activeLaneNestedBreakPostLoopBarrier(uint *out, int N) {
   int tid = threadIdx.x;
@@ -4410,6 +4420,16 @@ __global__ void pointerArrayAssignmentIndexOnce(uint *storage) {
   ptrs[1] = storage + 1;
   ptrs[pointer_array_assignment_index_helper(storage, 1u)] = storage + 2;
   add_pointer_array_assignment_selected(ptrs[1], 5u);
+}`,
+  conditionalDynamicPointerArrayRebind: `
+__global__ void conditional_dynamic_pointer_array_rebind(uint *left, uint *right, uint *out, int select) {
+  uint *ptrs[2];
+  ptrs[0] = left;
+  ptrs[1] = right;
+  ptrs[select != 0 ? 1 : 0] = select != 0 ? left : right;
+  *ptrs[select != 0 ? 1 : 0] = 7u;
+  out[0] = left[0];
+  out[1] = right[0];
 }`,
   nestedPointerArrayTargetIndexOnce: `
 __device__ uint nested_pointer_array_target_index_helper(uint *ptr, uint add) {
@@ -13284,6 +13304,18 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [12, 12, 12, 0] },
           },
           {
+            name: "control:active-lane-canonical-continue-barrier",
+            source: SOURCES.activeLaneCanonicalContinueBarrier,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: { out: new Uint32Array(4) },
+              scalars: { N: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [33, 33, 22, 22] },
+          },
+          {
             name: "control:active-lane-nested-break-post-loop-barrier",
             source: SOURCES.activeLaneNestedBreakPostLoopBarrier,
             options: { workgroupSize: [4, 1, 1] },
@@ -15804,6 +15836,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "storage",
             expectedOutput: { type: "Uint32Array", data: [11, 20, 35, 40] },
+          },
+          {
+            name: "storage:conditional-dynamic-pointer-array-rebind",
+            source: SOURCES.conditionalDynamicPointerArrayRebind,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array([10]),
+                right: new Uint32Array([20]),
+                out: new Uint32Array(2),
+              },
+              scalars: { select: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [7, 20] },
           },
           {
             name: "storage:nested-pointer-array-target-index-once",

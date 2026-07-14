@@ -69,6 +69,10 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   avoid per-call upload and skip readback with `readback: []`.
 - `prepareWgslKernelProgramSequence()` — prebuilds pipelines and bind groups
   once, then reruns the same WGSL sequence over resident buffers for hot loops.
+- `getWgslPipelineCacheStats()` / `clearWgslPipelineCache()` — inspect or
+  invalidate only the generic WGSL program cache for one device. This is kept
+  separate from `device.getStats()` so compiler-prepared sequences have
+  attributable cache telemetry.
 
 ## Install
 

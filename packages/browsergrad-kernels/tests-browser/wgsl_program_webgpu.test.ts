@@ -1,10 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  clearWgslPipelineCache,
   createDevice,
   createWgslFloat16Array,
   createWgslStorageBuffer,
   defineWgslKernelProgram,
   destroyWgslStorageBuffer,
+  getWgslPipelineCacheStats,
   prepareWgslKernelProgramSequence,
   readWgslStorageBuffer,
   runWgslKernelProgram,
@@ -84,6 +86,62 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     );
 
     expect([...result.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
+  });
+
+  it("reports and clears WGSL program pipeline cache entries", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "wgsl_pipeline_cache_stats",
+      workgroupSize: [1, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write" }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] + 1.0; }
+}`,
+    });
+    const input = { buffers: { x: new Float32Array([1]) }, readback: [] };
+    const steps = [{ program, launch: { dispatchCount: [1, 1, 1] } }];
+
+    clearWgslPipelineCache(device);
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 0,
+      pipelineCacheHits: 0,
+      pipelineCacheMisses: 0,
+    });
+
+    const first = await prepareWgslKernelProgramSequence(device, steps, input);
+    first.destroy();
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 1,
+      pipelineCacheHits: 0,
+      pipelineCacheMisses: 1,
+    });
+
+    const second = await prepareWgslKernelProgramSequence(device, steps, input);
+    second.destroy();
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 1,
+      pipelineCacheHits: 1,
+      pipelineCacheMisses: 1,
+    });
+
+    clearWgslPipelineCache(device);
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 0,
+      pipelineCacheHits: 1,
+      pipelineCacheMisses: 1,
+    });
+
+    const third = await prepareWgslKernelProgramSequence(device, steps, input);
+    third.destroy();
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 1,
+      pipelineCacheHits: 1,
+      pipelineCacheMisses: 2,
+    });
   });
 
   it("runs f32 texture2d bindings", async () => {
@@ -550,6 +608,47 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   });
 
+  it("reuses prepared readback staging buffers without sharing in-flight reads", async () => {
+    if (!deviceCheck.available) return;
+    const rawDevice = await createDevice();
+    const trackedGpu = trackReadbackBufferAllocations(rawDevice.gpu);
+    const device = await createDevice({ device: trackedGpu.gpu });
+    const program = defineWgslKernelProgram({
+      name: "prepared_readback_pool",
+      workgroupSize: [1, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write" }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] + 1.0; }
+}`,
+    });
+    const prepared = await prepareWgslKernelProgramSequence(
+      device,
+      [{ program, launch: { dispatchCount: [1, 1, 1] } }],
+      { buffers: { x: new Float32Array([1]) }, readback: [] },
+    );
+
+    try {
+      expect([...(await prepared.run({ readback: ["x"] })).buffers.x as Float32Array]).toEqual([2]);
+      expect(trackedGpu.readbackBufferAllocations()).toBe(1);
+
+      expect([...(await prepared.run({ readback: ["x"] })).buffers.x as Float32Array]).toEqual([3]);
+      expect(trackedGpu.readbackBufferAllocations()).toBe(1);
+
+      const first = prepared.run({ readback: ["x"] });
+      const second = prepared.run({ readback: ["x"] });
+      expect(trackedGpu.readbackBufferAllocations()).toBe(2);
+      await Promise.all([first, second]);
+
+      expect([...(await prepared.run({ readback: ["x"] })).buffers.x as Float32Array]).toEqual([6]);
+      expect(trackedGpu.readbackBufferAllocations()).toBe(2);
+    } finally {
+      prepared.destroy();
+    }
+  });
+
   it("updates prepared uniform buffers without rebuilding bind groups", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();
@@ -635,4 +734,24 @@ function paramsBytes(scale: number, n: number): Uint8Array {
   view.setFloat32(0, scale, true);
   view.setInt32(4, n, true);
   return bytes;
+}
+
+function trackReadbackBufferAllocations(gpu: GPUDevice): {
+  readonly gpu: GPUDevice;
+  readbackBufferAllocations(): number;
+} {
+  let allocations = 0;
+  const tracked = new Proxy(gpu, {
+    get(target, property): unknown {
+      if (property === "createBuffer") {
+        return (descriptor: GPUBufferDescriptor): GPUBuffer => {
+          if ((descriptor.usage & GPUBufferUsage.MAP_READ) !== 0) allocations++;
+          return target.createBuffer(descriptor);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as GPUDevice;
+  return { gpu: tracked, readbackBufferAllocations: () => allocations };
 }

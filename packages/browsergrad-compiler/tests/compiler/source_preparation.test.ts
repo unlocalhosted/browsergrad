@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  mapCudaLiteDiagnosticToSourceProvenance,
   parseCudaLite,
   prepareCudaLiteCompilationUnit,
 } from "../../src/index.js";
@@ -94,6 +95,80 @@ describe("CUDA-lite source preparation", () => {
         kind: "kernel",
       },
     ]);
+  });
+
+  it("maps a diagnostic inside a CRLF fragment back to caller provenance", () => {
+    const unit = prepareCudaLiteCompilationUnit({
+      fragments: [
+        { source: "#define SCALE 2", kind: "define" },
+        {
+          source: "__global__ void scale() {\r\n  nope;\r\n}",
+          kind: "kernel",
+          label: "scale",
+          provenance: { sourceName: "kernels.cu", sourceOffset: 200, sourceLine: 40, sourceColumn: 1 },
+        },
+      ],
+    });
+    const start = unit.source.indexOf("nope");
+
+    expect(mapCudaLiteDiagnosticToSourceProvenance(unit, {
+      code: "unknown-symbol",
+      severity: "error",
+      message: "unknown CUDA-lite symbol 'nope'",
+      span: { start, end: start + 4, line: 3, column: 3 },
+    })).toEqual([
+      {
+        fragmentIndex: 1,
+        outputStart: { offset: start, line: 3, column: 3 },
+        outputEnd: { offset: start + 4, line: 3, column: 7 },
+        kind: "kernel",
+        label: "scale",
+        sourceStart: { sourceName: "kernels.cu", offset: 229, line: 41, column: 3 },
+        sourceEnd: { sourceName: "kernels.cu", offset: 233, line: 41, column: 7 },
+      },
+    ]);
+  });
+
+  it("splits a cross-fragment diagnostic and leaves separator-only spans unmapped", () => {
+    const adjacent = prepareCudaLiteCompilationUnit({
+      separator: "",
+      fragments: [
+        { source: "abc", provenance: { sourceName: "first.cu", sourceOffset: 10, sourceLine: 1, sourceColumn: 1 } },
+        { source: "def", provenance: { sourceName: "second.cu", sourceOffset: 20, sourceLine: 7, sourceColumn: 4 } },
+      ],
+    });
+
+    expect(mapCudaLiteDiagnosticToSourceProvenance(adjacent, {
+      code: "parse-error",
+      severity: "error",
+      message: "cross-fragment issue",
+      span: { start: 2, end: 4, line: 1, column: 3 },
+    })).toEqual([
+      {
+        fragmentIndex: 0,
+        outputStart: { offset: 2, line: 1, column: 3 },
+        outputEnd: { offset: 3, line: 1, column: 4 },
+        sourceStart: { sourceName: "first.cu", offset: 12, line: 1, column: 3 },
+        sourceEnd: { sourceName: "first.cu", offset: 13, line: 1, column: 4 },
+      },
+      {
+        fragmentIndex: 1,
+        outputStart: { offset: 3, line: 1, column: 4 },
+        outputEnd: { offset: 4, line: 1, column: 5 },
+        sourceStart: { sourceName: "second.cu", offset: 20, line: 7, column: 4 },
+        sourceEnd: { sourceName: "second.cu", offset: 21, line: 7, column: 5 },
+      },
+    ]);
+
+    const separated = prepareCudaLiteCompilationUnit({
+      fragments: [{ source: "abc" }, { source: "def" }],
+    });
+    expect(mapCudaLiteDiagnosticToSourceProvenance(separated, {
+      code: "parse-error",
+      severity: "error",
+      message: "separator issue",
+      span: { start: 3, end: 4, line: 1, column: 4 },
+    })).toEqual([]);
   });
 
   it("rejects non-string fragment source supplied by untyped callers", () => {

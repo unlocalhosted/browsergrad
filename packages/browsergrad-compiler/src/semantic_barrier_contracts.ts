@@ -7,7 +7,8 @@ export function semanticOperationsContainActiveLaneControl(
   return operations.some((operation) => {
     if (operation.kind === "declare") return operation.target.name.startsWith("bg_active_lane") ||
       operation.target.name.startsWith("bg_barrier_loop_active_") ||
-      operation.target.name.startsWith("bg_loop_active_");
+      operation.target.name.startsWith("bg_loop_active_") ||
+      operation.target.name.startsWith("bg_continue_active_");
     if (operation.kind === "branch") return operation.condition.kind === "symbol" && operation.condition.id.key.startsWith("guard-param:") ||
       semanticOperationsContainActiveLaneControl(operation.consequent) || semanticOperationsContainActiveLaneControl(operation.alternate);
     if (operation.kind === "loop" || operation.kind === "block") {

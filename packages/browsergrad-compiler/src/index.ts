@@ -235,12 +235,15 @@ export {
   type CudaLiteCompilerCacheStats,
 } from "./cache.js";
 export {
+  mapCudaLiteDiagnosticToSourceProvenance,
   prepareCudaLiteCompilationUnit,
   type CudaLiteAppliedSourceTransform,
   type CudaLiteCompilationUnitPosition,
   type CudaLiteCompilationUnitSegment,
+  type CudaLiteProvenanceDiagnosticSegment,
   type CudaLiteSourceFragment,
   type CudaLiteSourceProvenance,
+  type CudaLiteSourceProvenancePosition,
   type PrepareCudaLiteCompilationUnitOptions,
   type PreparedCudaLiteCompilationUnit,
 } from "./source_preparation.js";

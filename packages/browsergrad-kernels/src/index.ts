@@ -94,10 +94,12 @@ export {
 } from "./float16.js";
 
 export {
+  clearWgslPipelineCache,
   createWgslStorageBuffer,
   defineWgslKernelProgram,
   destroyWgslStorageBuffer,
   detectKernelFeatures,
+  getWgslPipelineCacheStats,
   readWgslStorageBuffer,
   prepareWgslKernelProgramSequence,
   runWgslKernelProgram,
@@ -112,6 +114,7 @@ export {
   type WgslKernelProgramInput,
   type WgslKernelRunInput,
   type WgslKernelRunResult,
+  type WgslPipelineCacheStats,
   type WgslKernelSequenceStep,
   type WgslPreparedKernelSequence,
   type WgslPreparedKernelSequenceRunOptions,

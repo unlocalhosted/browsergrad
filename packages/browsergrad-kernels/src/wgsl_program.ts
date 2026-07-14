@@ -141,9 +141,22 @@ export interface WgslPreparedKernelSequence {
   destroy(): void;
 }
 
+/** Cache accounting for WGSL program/sequence preparation on one KernelDevice. */
+export interface WgslPipelineCacheStats {
+  readonly pipelineCacheSize: number;
+  readonly pipelineCacheHits: number;
+  readonly pipelineCacheMisses: number;
+}
+
 interface CachedWgslPipeline {
   readonly pipeline: GPUComputePipeline;
   readonly bindGroupLayout: GPUBindGroupLayout;
+}
+
+interface WgslPipelineCache {
+  readonly entries: Map<string, Promise<CachedWgslPipeline>>;
+  hits: number;
+  misses: number;
 }
 
 type KernelDeviceImpl = ReturnType<typeof asImpl>;
@@ -152,7 +165,8 @@ type PreparedUniformBuffer = { buffer: GPUBuffer; byteLength: number };
 type PreparedExecutableStep = { pipeline: GPUComputePipeline; bindGroup: GPUBindGroup; program: WgslKernelProgram };
 
 const WGSL_PIPELINE_CACHE_LIMIT = 128;
-const WGSL_PIPELINE_CACHE = new WeakMap<GPUDevice, Map<string, Promise<CachedWgslPipeline>>>();
+const WGSL_PIPELINE_CACHE = new WeakMap<GPUDevice, WgslPipelineCache>();
+const PREPARED_READBACK_POOL_LIMIT_PER_SIZE = 2;
 
 export async function detectKernelFeatures(
   adapterOrDevice?: GPUAdapter | GPUDevice | KernelDevice,
@@ -167,6 +181,21 @@ export async function detectKernelFeatures(
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) return createFeatureSet(false, [], false);
   return createFeatureSet(true, [...adapter.features].map(String), false);
+}
+
+/** Return cache residency and cumulative hit/miss counts for WGSL program preparation. */
+export function getWgslPipelineCacheStats(device: KernelDevice): WgslPipelineCacheStats {
+  const cache = WGSL_PIPELINE_CACHE.get(asImpl(device).gpu);
+  return {
+    pipelineCacheSize: cache?.entries.size ?? 0,
+    pipelineCacheHits: cache?.hits ?? 0,
+    pipelineCacheMisses: cache?.misses ?? 0,
+  };
+}
+
+/** Drop WGSL program/sequence pipeline references for one device without affecting direct-kernel caches. */
+export function clearWgslPipelineCache(device: KernelDevice): void {
+  WGSL_PIPELINE_CACHE.get(asImpl(device).gpu)?.entries.clear();
 }
 
 export function defineWgslKernelProgram(
@@ -486,6 +515,8 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
   readonly stepCount: number;
   private destroyed = false;
   private lastSubmission: Promise<void> = Promise.resolve();
+  private readonly readbackBufferPool = new Map<number, GPUBuffer[]>();
+  private readonly inFlightReadbackBuffers = new Set<GPUBuffer>();
 
   constructor(
     private readonly impl: KernelDeviceImpl,
@@ -522,19 +553,15 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
     }
 
     const readbackNames = new Set(options.readback ?? this.defaultReadbackNames);
-    const readBuffers = new Set<GPUBuffer>();
     const reads: Array<{ name: string; binding: CollectedWgslStorageBinding; readBuffer: GPUBuffer; byteLength: number }> = [];
+    let completedReadbacks = false;
     try {
       for (const name of readbackNames) {
         const entry = this.storageBuffers.get(name);
         if (!entry) throw new KernelError(`readback buffer is not a storage binding: ${name}`);
-        const readBuffer = gpu.createBuffer({
-          size: alignTo(entry.byteLength, 4),
-          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        });
-        readBuffers.add(readBuffer);
-        encoder.copyBufferToBuffer(entry.buffer, 0, readBuffer, 0, alignTo(entry.byteLength, 4));
+        const readBuffer = this.acquireReadbackBuffer(gpu, entry.byteLength);
         reads.push({ name, binding: entry.binding, readBuffer, byteLength: entry.byteLength });
+        encoder.copyBufferToBuffer(entry.buffer, 0, readBuffer, 0, alignTo(entry.byteLength, 4));
       }
 
       gpu.queue.submit([encoder.finish()]);
@@ -542,17 +569,54 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
       this.lastSubmission = completion;
       const output = await collectReadbacks(reads);
       if (options.awaitCompletion === true) await completion;
+      completedReadbacks = true;
       for (let i = 0; i < this.stepCount; i++) this.impl.recordInvocation();
       return { buffers: output };
     } finally {
-      for (const readBuffer of readBuffers) readBuffer.destroy();
+      for (const read of reads) {
+        this.releaseReadbackBuffer(read.readBuffer, read.byteLength, completedReadbacks);
+      }
     }
   }
 
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.destroyReadbackBufferPool();
     destroyPreparedResources(this.storageBuffers, this.uniformBuffers, this.textures);
+  }
+
+  private acquireReadbackBuffer(gpu: GPUDevice, byteLength: number): GPUBuffer {
+    const alignedByteLength = alignTo(byteLength, 4);
+    const pooled = this.readbackBufferPool.get(alignedByteLength)?.pop();
+    const buffer = pooled ?? gpu.createBuffer({
+      size: alignedByteLength,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    this.inFlightReadbackBuffers.add(buffer);
+    return buffer;
+  }
+
+  private releaseReadbackBuffer(buffer: GPUBuffer, byteLength: number, reusable: boolean): void {
+    if (!this.inFlightReadbackBuffers.delete(buffer) || !reusable || this.destroyed) {
+      buffer.destroy();
+      return;
+    }
+    const alignedByteLength = alignTo(byteLength, 4);
+    const pool = this.readbackBufferPool.get(alignedByteLength) ?? [];
+    if (pool.length >= PREPARED_READBACK_POOL_LIMIT_PER_SIZE) {
+      buffer.destroy();
+      return;
+    }
+    pool.push(buffer);
+    this.readbackBufferPool.set(alignedByteLength, pool);
+  }
+
+  private destroyReadbackBufferPool(): void {
+    for (const buffers of this.readbackBufferPool.values()) {
+      for (const buffer of buffers) buffer.destroy();
+    }
+    this.readbackBufferPool.clear();
   }
 }
 
@@ -804,23 +868,32 @@ async function getOrCreatePipeline(
     program.workgroupSize.join(","),
     layoutSignature(layoutEntries),
   ].join("::");
-  let cache = WGSL_PIPELINE_CACHE.get(gpu);
-  if (!cache) {
-    cache = new Map();
-    WGSL_PIPELINE_CACHE.set(gpu, cache);
+  const cache = getOrCreateWgslPipelineCache(gpu);
+  const existing = cache.entries.get(cacheKey);
+  if (existing) {
+    cache.hits++;
+    return existing;
   }
-  const existing = cache.get(cacheKey);
-  if (existing) return existing;
-  if (cache.size >= WGSL_PIPELINE_CACHE_LIMIT) {
-    const firstKey = cache.keys().next().value;
-    if (firstKey !== undefined) cache.delete(firstKey);
+  cache.misses++;
+  if (cache.entries.size >= WGSL_PIPELINE_CACHE_LIMIT) {
+    const firstKey = cache.entries.keys().next().value;
+    if (firstKey !== undefined) cache.entries.delete(firstKey);
   }
   const promise = createPipeline(gpu, program, layoutEntries).catch((error: unknown) => {
-    cache.delete(cacheKey);
+    if (cache.entries.get(cacheKey) === promise) cache.entries.delete(cacheKey);
     throw error;
   });
-  cache.set(cacheKey, promise);
+  cache.entries.set(cacheKey, promise);
   return promise;
+}
+
+function getOrCreateWgslPipelineCache(gpu: GPUDevice): WgslPipelineCache {
+  let cache = WGSL_PIPELINE_CACHE.get(gpu);
+  if (!cache) {
+    cache = { entries: new Map(), hits: 0, misses: 0 };
+    WGSL_PIPELINE_CACHE.set(gpu, cache);
+  }
+  return cache;
 }
 
 async function createPipeline(

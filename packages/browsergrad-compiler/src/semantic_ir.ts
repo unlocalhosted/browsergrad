@@ -370,7 +370,13 @@ export function lowerSemanticModelToKernelIr(
       proof,
       sourceBarrierFunctions,
     );
-    const body = lowerSemanticEarlyReturnsBeforeCollectives(loweredBreaks, semantic.functions, fn.span, proof);
+    const loweredContinues = lowerSemanticDivergentContinuesBeforeBarriers(
+      loweredBreaks,
+      fn.span,
+      proof,
+      sourceBarrierFunctions,
+    );
+    const body = lowerSemanticEarlyReturnsBeforeCollectives(loweredContinues, semantic.functions, fn.span, proof);
     return {
       ...fn,
       body: markSemanticWorkgroupUniformControl(body, proof.workgroupUniformControlStatementStarts),
@@ -405,8 +411,14 @@ export function lowerSemanticModelToKernelIr(
     analysis.barrierUniformity.kernel,
     sourceBarrierFunctions,
   );
-  const activeLaneOperations = lowerSemanticEarlyReturnsBeforeCollectives(
+  const continueOperations = lowerSemanticDivergentContinuesBeforeBarriers(
     breakOperations,
+    analysis.kernel.span,
+    analysis.barrierUniformity.kernel,
+    sourceBarrierFunctions,
+  );
+  const activeLaneOperations = lowerSemanticEarlyReturnsBeforeCollectives(
+    continueOperations,
     loweredSourceFunctions,
     analysis.kernel.span,
     analysis.barrierUniformity.kernel,
@@ -578,6 +590,196 @@ function lowerSemanticDivergentBreaksBeforeBarriers(
       }];
     });
   return lower(operations);
+}
+
+/**
+ * A canonical divergent continue can skip a lane's useful work while every
+ * lane still reaches the workgroup barrier. The boolean is declared inside
+ * the loop body, so it resets for every CUDA iteration; the for-loop update
+ * remains outside the guard and therefore still runs after a continue.
+ */
+function lowerSemanticDivergentContinuesBeforeBarriers(
+  operations: readonly SemanticKernelIrOperation[],
+  scopeSpan: SourceSpan,
+  proof: CudaLiteAnalysis["barrierUniformity"]["kernel"],
+  barrierFunctions: ReadonlySet<string>,
+): readonly SemanticKernelIrOperation[] {
+  const unverified = new Set(proof.unverifiedControlStatementStarts);
+  const lower = (items: readonly SemanticKernelIrOperation[]): readonly SemanticKernelIrOperation[] =>
+    items.flatMap((operation): readonly SemanticKernelIrOperation[] => {
+      if (operation.kind === "branch") {
+        return [{
+          ...operation,
+          consequent: lower(operation.consequent),
+          alternate: lower(operation.alternate),
+        }];
+      }
+      if (operation.kind === "block") return [{ ...operation, body: lower(operation.body) }];
+      if (operation.kind !== "loop") return [operation];
+
+      const body = lower(operation.body);
+      const continuing = operation.continuing === undefined ? undefined : lower(operation.continuing);
+      const continueStarts = semanticBarrierSafeCurrentLoopContinueStarts(body, unverified, barrierFunctions);
+      if (
+        operation.loopKind !== "for" ||
+        operation.condition === undefined ||
+        operation.update === undefined ||
+        unverified.has(operation.span.start) ||
+        continueStarts === undefined
+      ) {
+        return [{
+          ...operation,
+          body,
+          ...(continuing === undefined ? {} : { continuing }),
+        }];
+      }
+
+      const activeName = `bg_continue_active_${operation.span.start}`;
+      const active: CudaLiteSemanticSymbol = {
+        id: createSemanticSymbolId("generated-local", activeName, scopeSpan),
+        name: activeName,
+        kind: "local",
+        valueType: "bool",
+        dimensions: [],
+        addressSpace: "local",
+        span: operation.span,
+      };
+      const activeExpression = semanticSymbolExpression(active, operation.span);
+      const declaration: SemanticKernelIrOperation = {
+        kind: "declare",
+        target: active,
+        init: booleanExpression(true, operation.span),
+        span: operation.span,
+      };
+      return [{
+        ...operation,
+        body: [
+          declaration,
+          ...lowerSemanticLoopContinueOperations(body, active, activeExpression, continueStarts, barrierFunctions),
+        ],
+        ...(continuing === undefined ? {} : { continuing }),
+      }];
+    });
+  return lower(operations);
+}
+
+function semanticBarrierSafeCurrentLoopContinueStarts(
+  operations: readonly SemanticKernelIrOperation[],
+  unverified: ReadonlySet<number>,
+  barrierFunctions: ReadonlySet<string>,
+): ReadonlySet<number> | undefined {
+  const starts = new Set<number>();
+  for (const [index, operation] of operations.entries()) {
+    const continueStart = semanticDirectCurrentLoopContinueStart(operation);
+    if (continueStart !== undefined && unverified.has(continueStart)) {
+      if (!operations.slice(index + 1).some((item) => semanticDirectBarrierOperation(item, barrierFunctions))) return undefined;
+      starts.add(continueStart);
+      continue;
+    }
+    if (
+      operation.kind === "loop" ||
+      operation.kind === "block" ||
+      operation.kind === "declare" ||
+      semanticOperationContainsCurrentLoopExitOrContinue(operation) ||
+      semanticOperationContainsNestedBarrier(operation, barrierFunctions)
+    ) return undefined;
+  }
+  return starts.size === 0 ? undefined : starts;
+}
+
+function semanticDirectCurrentLoopContinueStart(operation: SemanticKernelIrOperation): number | undefined {
+  if (operation.kind !== "branch" || operation.alternate.length !== 0 || operation.consequent.length !== 1) return undefined;
+  const consequent = operation.consequent[0]!;
+  return consequent.kind === "continue" ? consequent.span.start : undefined;
+}
+
+function semanticDirectBarrierOperation(
+  operation: SemanticKernelIrOperation,
+  barrierFunctions: ReadonlySet<string>,
+): boolean {
+  return operation.kind === "barrier" || operation.kind === "call" && barrierFunctions.has(operation.callee);
+}
+
+function semanticOperationContainsCurrentLoopExitOrContinue(operation: SemanticKernelIrOperation): boolean {
+  if (operation.kind === "break" || operation.kind === "continue" || operation.kind === "return") return true;
+  if (operation.kind === "branch") {
+    return operation.consequent.some(semanticOperationContainsCurrentLoopExitOrContinue) ||
+      operation.alternate.some(semanticOperationContainsCurrentLoopExitOrContinue);
+  }
+  return operation.kind === "loop" || operation.kind === "block"
+    ? operation.body.some(semanticOperationContainsCurrentLoopExitOrContinue)
+    : false;
+}
+
+function semanticOperationContainsNestedBarrier(
+  operation: SemanticKernelIrOperation,
+  barrierFunctions: ReadonlySet<string>,
+): boolean {
+  if (semanticDirectBarrierOperation(operation, barrierFunctions)) return false;
+  if (operation.kind === "branch") {
+    return operation.consequent.some((item) => semanticOperationContainsBarrier(item, barrierFunctions)) ||
+      operation.alternate.some((item) => semanticOperationContainsBarrier(item, barrierFunctions));
+  }
+  return operation.kind === "loop" || operation.kind === "block"
+    ? operation.body.some((item) => semanticOperationContainsBarrier(item, barrierFunctions))
+    : false;
+}
+
+function semanticOperationContainsBarrier(
+  operation: SemanticKernelIrOperation,
+  barrierFunctions: ReadonlySet<string>,
+): boolean {
+  if (semanticDirectBarrierOperation(operation, barrierFunctions)) return true;
+  if (operation.kind === "branch") {
+    return operation.consequent.some((item) => semanticOperationContainsBarrier(item, barrierFunctions)) ||
+      operation.alternate.some((item) => semanticOperationContainsBarrier(item, barrierFunctions));
+  }
+  return operation.kind === "loop" || operation.kind === "block"
+    ? operation.body.some((item) => semanticOperationContainsBarrier(item, barrierFunctions))
+    : false;
+}
+
+function lowerSemanticLoopContinueOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  active: CudaLiteSemanticSymbol,
+  activeExpression: SemanticExpression,
+  continueStarts: ReadonlySet<number>,
+  barrierFunctions: ReadonlySet<string>,
+): readonly SemanticKernelIrOperation[] {
+  return operations.flatMap((operation): readonly SemanticKernelIrOperation[] => {
+    const rewritten = rewriteSemanticCurrentLoopContinuesAsInactive(operation, active, continueStarts);
+    if (semanticDirectBarrierOperation(operation, barrierFunctions)) return [rewritten];
+    return [semanticActiveLaneBranch(activeExpression, [rewritten], operation.span)];
+  });
+}
+
+function rewriteSemanticCurrentLoopContinuesAsInactive(
+  operation: SemanticKernelIrOperation,
+  active: CudaLiteSemanticSymbol,
+  continueStarts: ReadonlySet<number>,
+): SemanticKernelIrOperation {
+  if (operation.kind === "continue" && continueStarts.has(operation.span.start)) {
+    return {
+      kind: "expression",
+      expression: {
+        kind: "assignment",
+        operator: "=",
+        target: semanticSymbolExpression(active, operation.span),
+        value: booleanExpression(false, operation.span),
+        valueType: "bool",
+        span: operation.span,
+      },
+      span: operation.span,
+    };
+  }
+  if (operation.kind === "branch") {
+    return {
+      ...operation,
+      consequent: operation.consequent.map((item) => rewriteSemanticCurrentLoopContinuesAsInactive(item, active, continueStarts)),
+      alternate: operation.alternate.map((item) => rewriteSemanticCurrentLoopContinuesAsInactive(item, active, continueStarts)),
+    };
+  }
+  return operation;
 }
 
 function linkSemanticOperationCallIdentities(
@@ -2218,7 +2420,7 @@ function semanticDynamicPointerArrayAliasAssignmentOperations(
   const target = scope.get(targetName);
   if (!semanticPointerArrayAliasesComplete(target)) return undefined;
   const replacement = localPointerAliasForInitializer(assignment.right, scope);
-  if (!replacement || !semanticPointerAliasAddressSpaceSupported(replacement.pointerAddressSpace) && !replacement.pointerSelection) return undefined;
+  if (!replacement || !semanticStoragePointerAlias(replacement)) return undefined;
   const loweredIndex = lowerExpression(left.index, scope);
   const indexType = expressionValueType(loweredIndex);
   const materialized = semanticExpressionContainsCall(loweredIndex) && indexType && indexType !== "void" && !isCudaVectorType(indexType)
@@ -2239,10 +2441,10 @@ function semanticDynamicPointerArrayAliasAssignmentOperations(
     },
   }));
   scope.set(target!.name, { ...target!, pointerArrayAliases: aliases });
-  const rebind = semanticPointerArrayRebindFromAlias(target!, materialized.expression, replacement, scope, statement.span);
-  return rebind === undefined
+  const rebinds = semanticPointerArrayRebindOperationsFromAlias(target!, materialized.expression, replacement, scope, statement.span);
+  return rebinds === undefined
     ? undefined
-    : [...materialized.operations, rebind];
+    : [...materialized.operations, ...rebinds];
 }
 
 function semanticConditionalReturnOperations(
@@ -3693,6 +3895,29 @@ function semanticPointerArrayRebindFromAlias(
     },
     span,
   };
+}
+
+function semanticPointerArrayRebindOperationsFromAlias(
+  target: CudaLiteSemanticSymbol,
+  slot: SemanticExpression,
+  alias: SemanticPointerAlias,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): readonly SemanticKernelIrOperation[] | undefined {
+  if (alias.pointerSelection) {
+    const consequent = semanticPointerArrayRebindOperationsFromAlias(target, slot, alias.pointerSelection.consequent, scope, span);
+    const alternate = semanticPointerArrayRebindOperationsFromAlias(target, slot, alias.pointerSelection.alternate, scope, span);
+    if (!consequent || !alternate) return undefined;
+    return [{
+      kind: "branch",
+      condition: alias.pointerSelection.condition,
+      consequent,
+      alternate,
+      span,
+    }];
+  }
+  const rebind = semanticPointerArrayRebindFromAlias(target, slot, alias, scope, span);
+  return rebind === undefined ? undefined : [rebind];
 }
 
 function markBranchPointerRuntimeState(
@@ -5661,8 +5886,13 @@ function hasLaterDynamicStoragePointerArrayAssignment(
         statement.expression.left.kind === "index" && statement.expression.left.target.kind === "identifier" &&
         statement.expression.left.target.name === name) {
         const alias = localPointerAliasForInitializer(statement.expression.right, scope);
-        if (!alias?.pointerRoot || alias.pointerAddressSpace !== "storage" || alias.pointerBaseIndices?.length !== 1) return false;
-        if (staticPointerArrayIndex(statement.expression.left.index) === undefined) sawDynamic = true;
+        const dynamicSlot = staticPointerArrayIndex(statement.expression.left.index) === undefined;
+        if (
+          !alias ||
+          dynamicSlot && !semanticStoragePointerAlias(alias) ||
+          !dynamicSlot && (!alias.pointerRoot || alias.pointerAddressSpace !== "storage" || alias.pointerBaseIndices?.length !== 1)
+        ) return false;
+        if (dynamicSlot) sawDynamic = true;
         continue;
       }
       if (statement.kind === "block" || statement.kind === "if") {
@@ -5680,6 +5910,13 @@ function hasLaterDynamicStoragePointerArrayAssignment(
 
 function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "shared" | "storage" | "constant" | "device-global" {
   return addressSpace === "local" || addressSpace === "shared" || addressSpace === "storage" || addressSpace === "constant" || addressSpace === "device-global";
+}
+
+function semanticStoragePointerAlias(alias: SemanticPointerAlias): boolean {
+  if (alias.pointerSelection) {
+    return semanticStoragePointerAlias(alias.pointerSelection.consequent) && semanticStoragePointerAlias(alias.pointerSelection.alternate);
+  }
+  return alias.pointerRoot !== undefined && alias.pointerAddressSpace === "storage" && alias.pointerBaseIndices?.length === 1;
 }
 
 function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
@@ -6106,6 +6343,8 @@ function localPointerAliasDerefExpression(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   span: SourceSpan,
 ): SemanticExpression | undefined {
+  const runtimePointerArray = semanticRuntimePointerArrayDerefExpression(expression, scope, span);
+  if (runtimePointerArray) return runtimePointerArray;
   const directPackedLocal = expression.kind === "cast" && expression.pointer &&
     expression.expression.kind === "unary" && expression.expression.operator === "&" &&
     expression.expression.argument.kind === "identifier"
@@ -6137,6 +6376,37 @@ function localPointerAliasDerefExpression(
     ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
     ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
     ...optionalPackedByteLanes(pointerAliasPackedByteLanes(expression, root, scope)),
+    span,
+  };
+}
+
+/**
+ * Dynamic pointer-array slots keep their storage root and base index in
+ * runtime state. Represent their dereference as a local memory reference so
+ * the reference evaluator and WGSL lowering can route through that state,
+ * rather than snapshotting the aliases as a conditional expression.
+ */
+function semanticRuntimePointerArrayDerefExpression(
+  expression: CudaLiteExpression,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticExpression | undefined {
+  if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
+  const target = scope.get(expression.target.name);
+  if (
+    !target?.pointerRuntimeState ||
+    target.kind !== "local" ||
+    !target.pointer ||
+    target.dimensions.length !== 1 ||
+    target.valueType === undefined ||
+    target.valueType === "void"
+  ) return undefined;
+  return {
+    kind: "index",
+    target: semanticSymbolExpression(target, expression.target.span),
+    index: lowerExpression(expression.index, scope),
+    valueType: target.valueType,
+    addressSpace: "local",
     span,
   };
 }
