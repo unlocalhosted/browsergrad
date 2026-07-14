@@ -8,10 +8,7 @@ import {
   isCudaLegacyVoteCallName,
   isCudaWarpReduceCallName,
 } from "./cuda_subgroup_calls.js";
-import type {
-  SemanticAddressSpace,
-  SemanticExpression,
-} from "./semantic_ir.js";
+import type { SemanticAddressSpace, SemanticExpression } from "./semantic_ir_types.js";
 
 export const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 

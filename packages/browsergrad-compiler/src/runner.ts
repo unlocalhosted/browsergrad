@@ -17,10 +17,7 @@ import {
   canRunCompiledKernelSemanticReference,
   runCompiledKernelSemanticReference,
 } from "./semantic_reference.js";
-import {
-  createCudaLiteSemanticModel,
-  lowerSemanticModelToKernelIr,
-} from "./semantic_ir.js";
+import { createCudaLiteSemanticModel, lowerSemanticModelToKernelIr } from "./semantic_ir.js";
 import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { typeCheckSemanticKernelIr } from "./semantic_type_check.js";
 import { legalizeSemanticKernelIrForWgsl } from "./wgsl_legalization.js";

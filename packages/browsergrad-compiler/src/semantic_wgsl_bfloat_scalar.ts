@@ -1,4 +1,4 @@
-import type { SemanticExpression, SemanticKernelIrModule } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule } from "./semantic_ir_types.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 import type { SemanticTextureDescriptorOptions, SemanticTextureDescriptorSpecializations } from "./semantic_wgsl_texture_descriptors.js";
 import type { SourceSpan } from "./types.js";

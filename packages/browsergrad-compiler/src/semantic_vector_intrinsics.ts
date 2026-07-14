@@ -1,5 +1,5 @@
 import type { CudaLiteScalarType } from "./types.js";
-import type { SemanticExpression } from "./semantic_ir.js";
+import type { SemanticExpression } from "./semantic_ir_types.js";
 import {
   CUDA_BF162_BINARY_VECTOR_CALLS,
   CUDA_BF162_BOOL_COMPARISON_CALLS,

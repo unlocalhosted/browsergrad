@@ -1,5 +1,5 @@
 import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
-import type { SemanticExpression, SemanticKernelIrModule, SemanticMemoryRef } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticMemoryRef } from "./semantic_ir_types.js";
 import { requireSemanticValueType } from "./semantic_value_type.js";
 import { semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 import type { CudaLiteScalarType } from "./types.js";

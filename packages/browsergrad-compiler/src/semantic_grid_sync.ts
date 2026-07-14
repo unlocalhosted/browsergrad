@@ -3,12 +3,7 @@ import {
   semanticExpressionChildren,
   semanticOperationExpressions,
 } from "./semantic_ir_walk.js";
-import type {
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir_types.js";
 
 export type SemanticGridSyncPhasePlan =
   | {

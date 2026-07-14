@@ -9,10 +9,7 @@ import {
   isSemanticKernelIrOperation,
   semanticOperationExpressions,
 } from "./semantic_ir_walk.js";
-import type {
-  SemanticExpression,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import type {
   CompiledCudaLiteKernel,
   SourceSpan,

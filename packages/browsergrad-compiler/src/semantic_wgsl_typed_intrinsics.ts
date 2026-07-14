@@ -1,5 +1,5 @@
 import type { WgslValueType } from "@unlocalhosted/browsergrad-kernels";
-import type { SemanticExpression, SemanticKernelIrModule } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule } from "./semantic_ir_types.js";
 import type { CudaLiteCompilerError, CudaLiteScalarType, SourceSpan } from "./types.js";
 import type { SemanticTextureDescriptorOptions, SemanticTextureDescriptorSpecializations } from "./semantic_wgsl_texture_descriptors.js";
 import { SEMANTIC_MATH_CALLS, semanticVectorMinMaxCallValueType } from "./semantic_math_intrinsics.js";

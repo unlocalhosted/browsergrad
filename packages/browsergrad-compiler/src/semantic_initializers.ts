@@ -1,4 +1,4 @@
-import type { SemanticExpression } from "./semantic_ir.js";
+import type { SemanticExpression } from "./semantic_ir_types.js";
 
 export function flattenSemanticInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
   if (expression.kind !== "initializer") return [expression];

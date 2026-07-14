@@ -5,9 +5,7 @@ import type {
   WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import type { CudaLoweringPlan } from "./compatibility.js";
-import type {
-  CudaLiteSemanticModel,
-} from "./semantic_ir.js";
+import type { CudaLiteSemanticModel } from "./semantic_ir_types.js";
 import type {
   CompilerPhase,
   TypeCheckedIrArtifact,

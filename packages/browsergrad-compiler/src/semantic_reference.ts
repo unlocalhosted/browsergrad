@@ -92,14 +92,15 @@ import {
 } from "./features/inline_ptx/reference.js";
 import { semanticPtxIntegerCallInfo } from "./semantic_inline_ptx.js";
 import { sizeofCudaType } from "./type_layout.js";
+import { semanticInlineAsmLdmatrixAssignments } from "./semantic_ir.js";
 import type {
   CudaLiteSemanticSymbol,
   SemanticExpression,
   SemanticKernelIrOperation,
   SemanticMatrixTileRef,
   SemanticMemoryRef,
-} from "./semantic_ir.js";
-import { semanticInlineAsmLdmatrixAssignments } from "./semantic_ir.js";
+} from "./semantic_ir_types.js";
+
 import {
   createBuiltinSemanticSymbolId,
   createSemanticSymbolId,

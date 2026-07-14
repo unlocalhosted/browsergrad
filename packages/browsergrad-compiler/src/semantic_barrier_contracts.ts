@@ -1,4 +1,4 @@
-import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir.js";
+import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import type { CudaLiteBarrierUniformityFact } from "./types.js";
 
 export function semanticOperationsContainActiveLaneControl(

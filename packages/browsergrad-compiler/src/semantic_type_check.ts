@@ -4,7 +4,7 @@ import type {
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
   SemanticMemoryRef,
-} from "./semantic_ir.js";
+} from "./semantic_ir_types.js";
 import type { VerifiedSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type CudaLiteScalarType, type SourceSpan } from "./types.js";
 import { semanticBinaryResultType } from "./semantic_type_rules.js";

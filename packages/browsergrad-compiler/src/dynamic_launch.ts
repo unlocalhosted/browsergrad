@@ -5,14 +5,14 @@ import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { createCudaRuntimePlan } from "./runtime_plan.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
-import {
-  isSemanticKernelIrOperation,
-  type CudaLiteSemanticLaunchableEntry,
-  type CudaLiteSemanticSymbol,
-  type SemanticDeviceLaunch,
-  type SemanticExpression,
-  type SemanticKernelIrOperation,
-} from "./semantic_ir.js";
+import { isSemanticKernelIrOperation } from "./semantic_ir.js";
+import type {
+  CudaLiteSemanticLaunchableEntry,
+  CudaLiteSemanticSymbol,
+  SemanticDeviceLaunch,
+  SemanticExpression,
+  SemanticKernelIrOperation,
+} from "./semantic_ir_types.js";
 import { semanticIdsEqual } from "./semantic_ids.js";
 import type {
   CompiledCudaLiteKernel,

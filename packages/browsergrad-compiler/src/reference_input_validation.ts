@@ -3,12 +3,9 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
-import {
-  type CudaLiteSemanticSymbol,
-  type SemanticKernelIrModule,
-  type SemanticKernelIrOperation,
-} from "./semantic_ir.js";
 import { collectSemanticPoolAllocations } from "./semantic_ir.js";
+import type { CudaLiteSemanticSymbol, SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
+
 import {
   CudaLiteCompilerError,
   type CompiledKernelInput,

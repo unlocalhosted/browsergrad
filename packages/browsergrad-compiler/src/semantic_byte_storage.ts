@@ -1,10 +1,6 @@
-import type {
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
 import { walkSemanticOperations } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir_types.js";
+
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import {
   cudaVectorLaneCount,

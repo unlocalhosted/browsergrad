@@ -1,9 +1,4 @@
-import type {
-  CudaLiteSemanticFunction,
-  SemanticExpression,
-  SemanticKernelIrOperation,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
+import type { CudaLiteSemanticFunction, SemanticExpression, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir_types.js";
 import { semanticPointerArgumentMemoryRef } from "./semantic_pointer_arguments.js";
 import {
   createBuiltinSemanticSymbolId,

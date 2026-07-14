@@ -377,7 +377,7 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
   it("keeps semantic IR traversal and shared expression contracts centralized", () => {
       const srcDir = path.join(packageRoot, "src");
       const duplicates = fs.readdirSync(srcDir)
-        .filter((file) => file.endsWith(".ts") && file !== "semantic_ir.ts")
+        .filter((file) => file.endsWith(".ts") && file !== "semantic_ir_walk.ts")
         .flatMap((file) => {
           const source = compilerSourceText(file);
           return [

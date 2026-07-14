@@ -1,4 +1,4 @@
-import type { SemanticExpression } from "./semantic_ir.js";
+import type { SemanticExpression } from "./semantic_ir_types.js";
 import { cudaLiteDimensionStride as dimensionStride, cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import { CudaLiteCompilerError, type CudaLiteDiagnostic, type SourceSpan } from "./types.js";
 

@@ -1,4 +1,4 @@
-import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir.js";
+import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 
 export interface SemanticCooperativeGroupInfo {
   readonly kind: "thread" | "block" | "grid" | "tile" | "coalesced" | "binary";

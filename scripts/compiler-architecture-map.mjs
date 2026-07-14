@@ -185,6 +185,45 @@ function legacyBackendLeaks(rows) {
   return leaks;
 }
 
+function semanticIrRepresentationLeaks(rows) {
+  const leaks = [];
+  const representation = rows.find((row) => path.relative(compilerSrc, row.file) === "semantic_ir_types.ts");
+  const representationFile = representation === undefined
+    ? undefined
+    : ts.createSourceFile(representation.file, representation.source, ts.ScriptTarget.Latest, true);
+  const typeNames = new Set((representationFile?.statements ?? [])
+    .filter((statement) => ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement))
+    .map((statement) => statement.name.text));
+  if (representation === undefined) leaks.push("semantic_ir_types.ts representation module is missing");
+  for (const row of rows) {
+    const sourceRelativeFile = path.relative(compilerSrc, row.file);
+    const sourceFile = ts.createSourceFile(row.file, row.source, ts.ScriptTarget.Latest, true);
+    if (sourceRelativeFile === "semantic_ir_types.ts") {
+      for (const statement of sourceFile.statements) {
+        const validImport = ts.isImportDeclaration(statement) && statement.importClause?.isTypeOnly === true;
+        if (!validImport && !ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) {
+          leaks.push(`${row.relativeFile} contains runtime implementation in the IR representation module`);
+        }
+      }
+      continue;
+    }
+    if (sourceRelativeFile === "semantic_ir.ts") continue;
+    for (const statement of sourceFile.statements) {
+      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== "./semantic_ir.js") continue;
+      const clause = statement.importClause;
+      const bindings = clause?.namedBindings;
+      if (!bindings || !ts.isNamedImports(bindings)) continue;
+      for (const element of bindings.elements) {
+        const imported = element.propertyName?.text ?? element.name.text;
+        if (clause?.isTypeOnly === true || element.isTypeOnly || typeNames.has(imported)) {
+          leaks.push(`${row.relativeFile} imports IR type ${imported} from semantic_ir.ts instead of semantic_ir_types.ts`);
+        }
+      }
+    }
+  }
+  return leaks;
+}
+
 const sourceRows = moduleRows([compilerSrc]);
 const testRows = includeTests ? moduleRows([compilerTests]) : [];
 const allRows = [...sourceRows, ...testRows];
@@ -195,6 +234,7 @@ const report = {
   buckets: bucketSummary(allRows),
   cycles,
   legacyBackendLeaks: legacyBackendLeaks(sourceRows),
+  semanticIrRepresentationLeaks: semanticIrRepresentationLeaks(sourceRows),
   limits: { maxSourceLines, maxTestLines },
 };
 
@@ -218,6 +258,8 @@ if (json) {
   for (const cycle of cycles) console.log(`  ${cycle.join(" -> ")}`);
   console.log(`Legacy backend leaks: ${report.legacyBackendLeaks.length}`);
   for (const leak of report.legacyBackendLeaks) console.log(`  ${leak}`);
+  console.log(`Semantic IR representation leaks: ${report.semanticIrRepresentationLeaks.length}`);
+  for (const leak of report.semanticIrRepresentationLeaks) console.log(`  ${leak}`);
 }
 
 if (check) {
@@ -230,6 +272,7 @@ if (check) {
       .map((row) => `${row.relativeFile} has ${row.lines} lines (limit ${maxTestLines})`),
     ...cycles.map((cycle) => `dependency cycle: ${cycle.join(" -> ")}`),
     ...report.legacyBackendLeaks,
+    ...report.semanticIrRepresentationLeaks,
   ];
   if (failures.length > 0) {
     console.error("Compiler architecture check failed:");

@@ -33,8 +33,12 @@ resident buffers, and readback mechanics.
 - `src/parser.ts` and `src/lexer.ts`: syntax only. No semantic rewrites.
 - `src/analyzer.ts`: symbols, types, feature gates, safety checks, and lowering
   eligibility.
-- `src/semantic_ir.ts`: typed semantic model plus the canonical backend-neutral
-  Kernel IR. Executable compiler passes consume this contract.
+- `src/semantic_ir_types.ts`: typed semantic model plus the canonical
+  backend-neutral Kernel IR representation. It contains types only.
+- `src/semantic_ir.ts`: semantic-model construction and canonical lowering
+  passes. It consumes and publicly re-exports the representation contract.
+- `src/semantic_ir_walk.ts`: canonical traversal and operation-discrimination
+  utilities shared by analysis, reference, and WGSL passes.
 - `src/semantic_ir_verifier.ts`, `src/semantic_type_check.ts`, and
   `src/wgsl_legalization.ts`: explicit phase contracts before emission.
 - `src/semantic_reference.ts`: CPU truth and traces from semantic Kernel IR.
@@ -91,6 +95,10 @@ If a feature needs support in multiple files, add it in this order:
   stores carry typed `MemoryRef` targets and read refs, calls/atomics/barriers
   are explicit operations, and backend code may not infer execution readiness
   from AST-shaped statements.
+- Internal compiler modules import IR declarations from `semantic_ir_types.ts`,
+  not the lowering-pass module. The architecture gate enforces that the
+  representation module remains type-only and that this dependency direction
+  does not regress.
 - Any new GPU lift needs either a real browser test or a documented reason why
   only planner/unit coverage is possible.
 

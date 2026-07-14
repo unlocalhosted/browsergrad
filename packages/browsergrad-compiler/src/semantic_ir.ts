@@ -31,7 +31,6 @@ import {
 import {
   isSemanticTextureReadCall,
   semanticTextureReadCoordinateCount,
-  type SemanticTextureReadCall,
 } from "./semantic_texture_surface.js";
 import {
   cudaVibMinMaxInfo,
@@ -99,8 +98,6 @@ import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import {
   completeCanonicalLowering,
   completeSemanticTyping,
-  type CanonicalIr,
-  type TypedSemantic,
 } from "./compiler_phases.js";
 import type { AnalyzedCudaLiteModule } from "./analyzer.js";
 import {
@@ -120,7 +117,7 @@ import {
   type SemanticMemoryId,
   type SemanticSymbolId,
 } from "./semantic_ids.js";
-import { createSemanticEnvironment, type SemanticEnvironment } from "./semantic_environment.js";
+import { createSemanticEnvironment } from "./semantic_environment.js";
 import { semanticBinaryResultType } from "./semantic_type_rules.js";
 import {
   matrixTileElementCount,
@@ -128,64 +125,52 @@ import {
   resolveMatrixTileSpec,
   wmmaBuiltinName,
   type MatrixTileLayout,
-  type MatrixTileResolvedSpec,
 } from "./matrix_tiles.js";
+import type {
+  SemanticAddressSpace,
+  CudaLiteSemanticSymbol,
+  SemanticPointerAlias,
+  SemanticPointerSelection,
+  CudaLiteSemanticFunction,
+  CudaLiteSemanticLaunchableEntry,
+  TypedCudaLiteSemanticModel,
+  SemanticMemoryRef,
+  SemanticPoolRef,
+  SemanticMatrixTileRef,
+  SemanticExpression,
+  SemanticKernelIrOperation,
+  SemanticDeviceLaunch,
+  CanonicalSemanticKernelIr,
+} from "./semantic_ir_types.js";
+import { isSemanticKernelIrOperation, walkSemanticExpression, walkSemanticOperations } from "./semantic_ir_walk.js";
 
-export type SemanticAddressSpace =
-  | "uniform"
-  | "storage"
-  | "constant"
-  | "device-global"
-  | "texture"
-  | "surface"
-  | "shared"
-  | "local"
-  | "pool"
-  | "function"
-  | "builtin"
-  | "unknown";
-
-export interface CudaLiteSemanticSymbol {
-  readonly id: SemanticSymbolId;
-  readonly name: string;
-  readonly kind:
-    | "param"
-    | "local"
-    | "shared"
-    | "constant"
-    | "device-global"
-    | "external-pool"
-    | "texture"
-    | "function"
-    | "builtin";
-  readonly valueType?: CudaLiteScalarType;
-  readonly pointer?: boolean;
-  readonly pointerRuntimeState?: boolean;
-  readonly pointerMayBeNull?: boolean;
-  readonly pointerRoot?: SemanticMemoryId;
-  readonly pointerMemoryAlias?: SemanticMemoryId;
-  readonly pointerParamAlias?: SemanticSymbolId;
-  readonly pointerAddressSpace?: SemanticAddressSpace;
-  readonly pointerBaseIndices?: readonly SemanticExpression[];
-  readonly pointerBaseIsScalarLane?: boolean;
-  readonly pointerBaseUnitBytes?: number;
-  readonly pointerValid?: SemanticExpression;
-  readonly pointerSelection?: SemanticPointerSelection;
-  readonly pointerArrayAliases?: readonly (SemanticPointerAlias | undefined)[];
-  readonly pointerCarrierValueType?: CudaLiteScalarType;
-  readonly packedByteLanes?: 2 | 3 | 4;
-  readonly cooperativeGroupKind?: CudaLiteParam["cooperativeGroupKind"];
-  readonly tileSize?: number;
-  readonly constant?: boolean;
-  readonly initialized?: boolean;
-  readonly init?: SemanticExpression;
-  readonly dimensions: readonly number[];
-  readonly dynamicShared?: boolean;
-  readonly matrixTile?: MatrixTileResolvedSpec;
-  readonly matrixTileArrayDimensions?: readonly number[];
-  readonly addressSpace: SemanticAddressSpace;
-  readonly span: SourceSpan;
-}
+export type {
+  SemanticAddressSpace,
+  CudaLiteSemanticSymbol,
+  SemanticPointerAlias,
+  SemanticPointerSelection,
+  CudaLiteSemanticFunction,
+  SemanticCooperativeGroupDeclaration,
+  CudaLiteSemanticLaunchableEntry,
+  CudaLiteSemanticModel,
+  TypedCudaLiteSemanticModel,
+  SemanticMemoryRef,
+  SemanticPoolRef,
+  SemanticMatrixTileRef,
+  SemanticExpression,
+  SemanticKernelIrOperation,
+  SemanticDeviceLaunch,
+  SemanticKernelIrModule,
+  CanonicalSemanticKernelIr,
+} from "./semantic_ir_types.js";
+export {
+  collectSemanticPoolAllocations,
+  isSemanticKernelIrOperation,
+  walkSemanticExpression,
+  walkSemanticMemoryRef,
+  walkSemanticOperation,
+  walkSemanticOperations,
+} from "./semantic_ir_walk.js";
 
 export function semanticPointerSymbolNeedsRuntimeState(symbol: CudaLiteSemanticSymbol): boolean {
   return Boolean(symbol.pointer) && (
@@ -195,273 +180,6 @@ export function semanticPointerSymbolNeedsRuntimeState(symbol: CudaLiteSemanticS
       symbol.pointerArrayAliases === undefined
   );
 }
-
-interface SemanticPointerAlias {
-  readonly pointerRoot?: SemanticMemoryId;
-  readonly pointerAddressSpace?: SemanticAddressSpace;
-  readonly pointerBaseIndices?: readonly SemanticExpression[];
-  readonly pointerBaseIsScalarLane?: boolean;
-  readonly pointerBaseUnitBytes?: number;
-  readonly pointerValid?: SemanticExpression;
-  readonly pointerSelection?: SemanticPointerSelection;
-}
-
-interface SemanticPointerSelection {
-  readonly condition: SemanticExpression;
-  readonly consequent: SemanticPointerAlias;
-  readonly alternate: SemanticPointerAlias;
-}
-
-export interface CudaLiteSemanticFunction {
-  readonly id: SemanticFunctionId;
-  readonly name: string;
-  readonly returnType: CudaLiteScalarType;
-  readonly params: readonly CudaLiteSemanticSymbol[];
-  readonly body: readonly SemanticKernelIrOperation[];
-  readonly span: SourceSpan;
-}
-
-export interface SemanticCooperativeGroupDeclaration {
-  readonly kind: "cooperative-group";
-  readonly id: SemanticSymbolId;
-  readonly groupKind: "thread" | "block" | "grid" | "tile" | "coalesced" | "binary";
-  readonly name: string;
-  readonly tileSize?: number;
-  readonly partitionParent?: string;
-  readonly partitionPredicate?: SemanticExpression;
-  readonly span: SourceSpan;
-}
-
-export interface CudaLiteSemanticLaunchableEntry {
-  readonly id: SemanticFunctionId;
-  readonly kind: "kernel" | "device-function";
-  readonly name: string;
-  readonly params: readonly CudaLiteSemanticSymbol[];
-  readonly span: SourceSpan;
-}
-
-export interface CudaLiteSemanticModel {
-  readonly kind: "cuda-lite-semantic-model";
-  readonly kernelName: string;
-  readonly span: SourceSpan;
-  readonly params: readonly CudaLiteSemanticSymbol[];
-  readonly symbols: readonly CudaLiteSemanticSymbol[];
-  readonly functions: readonly CudaLiteSemanticFunction[];
-  readonly launchableEntries: readonly CudaLiteSemanticLaunchableEntry[];
-  readonly requiredFeatures: readonly string[];
-  readonly environment: SemanticEnvironment;
-}
-
-export type TypedCudaLiteSemanticModel = TypedSemantic<CudaLiteSemanticModel>;
-
-export interface SemanticMemoryRef {
-  readonly baseId: SemanticMemoryId;
-  readonly base: string;
-  readonly addressSpace: SemanticAddressSpace;
-  readonly valueType: SemanticValueType;
-  readonly containerValueType?: CudaLiteScalarType;
-  readonly pointerBaseIsScalarLane?: boolean;
-  readonly pointerBaseUnitBytes?: number;
-  readonly packedByteLanes?: 2 | 3 | 4;
-  readonly indices: readonly SemanticExpression[];
-  readonly fields: readonly string[];
-  readonly span: SourceSpan;
-}
-
-export type SemanticPoolRef =
-  | {
-      readonly kind: "device-pool";
-      readonly id: SemanticMemoryId;
-      readonly name: string;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "raw-pool";
-      readonly data: SemanticMemoryRef;
-      readonly offset: SemanticMemoryRef;
-      readonly capacityBytes: SemanticExpression;
-      readonly span: SourceSpan;
-    };
-
-export interface SemanticMatrixTileRef {
-  readonly baseId: SemanticMemoryId;
-  readonly base: string;
-  readonly spec: MatrixTileResolvedSpec;
-  readonly arrayDimensions: readonly number[];
-  readonly indices: readonly SemanticExpression[];
-  readonly span: SourceSpan;
-}
-
-export type SemanticExpression =
-  | {
-      readonly kind: "literal";
-      readonly literalKind: "number";
-      readonly value: number;
-      readonly valueType: SemanticValueType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "literal";
-      readonly literalKind: "string";
-      readonly value: string;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "symbol";
-      readonly id: SemanticSymbolId;
-      readonly name: string;
-      readonly valueType?: CudaLiteScalarType;
-      readonly addressSpace: SemanticAddressSpace;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "pointer-valid";
-      readonly pointerId: SemanticSymbolId;
-      readonly pointer: string;
-      readonly valueType: "bool";
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "member";
-      readonly object: SemanticExpression;
-      readonly property: string;
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "index";
-      readonly target: SemanticExpression;
-      readonly index: SemanticExpression;
-      readonly valueType: SemanticValueType;
-      readonly addressSpace: SemanticAddressSpace;
-      readonly pointerBaseIsScalarLane?: boolean;
-      readonly pointerBaseUnitBytes?: number;
-      readonly packedByteLanes?: 2 | 3 | 4;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "call";
-      readonly callee: SemanticExpression;
-      readonly args: readonly SemanticExpression[];
-      readonly templateValueType?: Exclude<CudaLiteScalarType, "void">;
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "texture-read";
-      readonly callee: SemanticTextureReadCall;
-      readonly texture: SemanticExpression;
-      readonly x: SemanticExpression;
-      readonly y: SemanticExpression;
-      readonly z?: SemanticExpression;
-  readonly valueType: SemanticValueType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "surface-read";
-      readonly callee: "surf1Dread" | "surf2Dread" | "surf2DLayeredread" | "surf3Dread";
-      readonly surface: SemanticExpression;
-      readonly xBytes: SemanticExpression;
-      readonly y: SemanticExpression;
-      readonly z?: SemanticExpression;
-      readonly valueType: Exclude<CudaLiteScalarType, "void">;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "cast";
-      readonly valueType: Exclude<CudaLiteScalarType, "void">;
-      readonly pointer: boolean;
-      readonly packedByteLanes?: 2 | 3 | 4;
-      readonly expression: SemanticExpression;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "unary";
-      readonly operator: string;
-      readonly argument: SemanticExpression;
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "binary";
-      readonly operator: string;
-      readonly left: SemanticExpression;
-      readonly right: SemanticExpression;
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "conditional";
-      readonly condition: SemanticExpression;
-      readonly consequent: SemanticExpression;
-      readonly alternate: SemanticExpression;
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "assignment";
-      readonly operator: string;
-      readonly target: SemanticExpression;
-      readonly value: SemanticExpression;
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "update";
-      readonly operator: string;
-      readonly argument: SemanticExpression;
-      readonly prefix: boolean;
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "initializer";
-      readonly elements: readonly SemanticExpression[];
-      readonly span: SourceSpan;
-    }
-  | {
-      readonly kind: "sequence";
-      readonly expressions: readonly SemanticExpression[];
-      readonly valueType: CudaLiteScalarType;
-      readonly span: SourceSpan;
-    };
-
-export type SemanticKernelIrOperation =
-  | { readonly kind: "declare"; readonly target: CudaLiteSemanticSymbol; readonly init?: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "dim3-declare"; readonly target: CudaLiteSemanticSymbol; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
-  | { readonly kind: "cooperative-group-declare"; readonly declaration: SemanticCooperativeGroupDeclaration; readonly span: SourceSpan }
-  | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
-  | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
-  | { readonly kind: "copy"; readonly source: SemanticMemoryRef; readonly target: SemanticMemoryRef; readonly bytes: number; readonly span: SourceSpan }
-  | { readonly kind: "copy-fence"; readonly callee: string; readonly span: SourceSpan }
-  | { readonly kind: "matrix-fill"; readonly fragment: SemanticMatrixTileRef; readonly value: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "matrix-load"; readonly fragment: SemanticMatrixTileRef; readonly source: SemanticMemoryRef; readonly stride: SemanticExpression; readonly layout: MatrixTileLayout; readonly span: SourceSpan }
-  | { readonly kind: "matrix-mma"; readonly destination: SemanticMatrixTileRef; readonly a: SemanticMatrixTileRef; readonly b: SemanticMatrixTileRef; readonly accumulator: SemanticMatrixTileRef; readonly span: SourceSpan }
-  | { readonly kind: "matrix-store"; readonly target: SemanticMemoryRef; readonly fragment: SemanticMatrixTileRef; readonly stride: SemanticExpression; readonly layout: MatrixTileLayout; readonly span: SourceSpan }
-  | { readonly kind: "surface-write"; readonly surface: SemanticExpression; readonly value: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "surface-read-store"; readonly target: SemanticExpression; readonly surface: SemanticExpression; readonly xBytes: SemanticExpression; readonly y: SemanticExpression; readonly z?: SemanticExpression; readonly valueType?: CudaLiteScalarType; readonly span: SourceSpan }
-  | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
-  | { readonly kind: "call"; readonly calleeId: SemanticSymbolId; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly result?: Extract<SemanticExpression, { readonly kind: "symbol" }>; readonly span: SourceSpan }
-  | { readonly kind: "runtime-copy"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
-  | { readonly kind: "pool-allocate"; readonly allocator: "deviceAllocate" | "streamOrderedAllocate"; readonly target: CudaLiteSemanticSymbol; readonly pool: SemanticPoolRef; readonly sizeBytes: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "pointer-rebind"; readonly target: CudaLiteSemanticSymbol; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
-  | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly conditionUniformity?: "workgroup"; readonly span: SourceSpan }
-  | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly continuing?: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
-  | { readonly kind: "barrier"; readonly callee: string; readonly scope: "subgroup" | "workgroup" | "grid"; readonly groupName?: string; readonly span: SourceSpan }
-  | { readonly kind: "fence"; readonly callee: string; readonly span: SourceSpan }
-  | { readonly kind: "device-launch"; readonly launch: SemanticDeviceLaunch; readonly span: SourceSpan }
-  | {
-      readonly kind: "inline-asm";
-      readonly op?: InlineAsmOp;
-      readonly outputs: readonly SemanticExpression[];
-      readonly inputs: readonly SemanticExpression[];
-      readonly span: SourceSpan;
-    }
-  | { readonly kind: "return"; readonly value?: SemanticExpression; readonly span: SourceSpan }
-  | { readonly kind: "continue"; readonly span: SourceSpan }
-  | { readonly kind: "break"; readonly span: SourceSpan }
-  | { readonly kind: "block"; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan };
 
 export function semanticInlineAsmLdmatrixAssignments(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "inline-asm" }>,
@@ -486,294 +204,6 @@ export function semanticInlineAsmLdmatrixAssignments(
       span: operation.span,
     };
   });
-}
-
-export interface SemanticDeviceLaunch {
-  readonly calleeId: SemanticFunctionId;
-  readonly callee: string;
-  readonly grid: readonly SemanticExpression[];
-  readonly block: readonly SemanticExpression[];
-  readonly args: readonly SemanticExpression[];
-}
-
-export interface SemanticKernelIrModule {
-  readonly kind: "semantic-kernel-ir";
-  readonly name: string;
-  readonly span: SourceSpan;
-  readonly symbols: readonly CudaLiteSemanticSymbol[];
-  readonly params: readonly CudaLiteSemanticSymbol[];
-  readonly memory: readonly CudaLiteSemanticSymbol[];
-  readonly functions: readonly CudaLiteSemanticFunction[];
-  readonly launchableEntries: readonly CudaLiteSemanticLaunchableEntry[];
-  readonly operations: readonly SemanticKernelIrOperation[];
-  readonly requiredFeatures: readonly string[];
-  readonly barrierUniformity: CudaLiteAnalysis["barrierUniformity"];
-  readonly workgroupSize: KernelLaunch["blockDim"];
-  readonly subgroupMode?: "native" | "scalar";
-  readonly bindlessTextures?: readonly string[];
-}
-
-export type CanonicalSemanticKernelIr = CanonicalIr<SemanticKernelIrModule>;
-
-export function walkSemanticOperations(
-  operations: readonly SemanticKernelIrOperation[],
-  visitExpression: (expression: SemanticExpression) => void,
-): void {
-  for (const operation of operations) walkSemanticOperation(operation, visitExpression);
-}
-
-export function collectSemanticPoolAllocations(
-  operations: readonly SemanticKernelIrOperation[],
-): readonly Extract<SemanticKernelIrOperation, { readonly kind: "pool-allocate" }>[] {
-  const out: Extract<SemanticKernelIrOperation, { readonly kind: "pool-allocate" }>[] = [];
-  const visit = (items: readonly SemanticKernelIrOperation[]): void => {
-    for (const operation of items) {
-      if (operation.kind === "pool-allocate") out.push(operation);
-      if (operation.kind === "branch") visit([...operation.consequent, ...operation.alternate]);
-      if (operation.kind === "loop") visit([...(operation.init && isSemanticKernelIrOperation(operation.init) ? [operation.init] : []), ...operation.body, ...(operation.continuing ?? [])]);
-      if (operation.kind === "block") visit(operation.body);
-    }
-  };
-  visit(operations);
-  return out;
-}
-
-export function walkSemanticOperation(
-  operation: SemanticKernelIrOperation,
-  visitExpression: (expression: SemanticExpression) => void,
-): void {
-  switch (operation.kind) {
-    case "declare":
-      if (operation.init) walkSemanticExpression(operation.init, visitExpression);
-      return;
-    case "dim3-declare":
-      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
-      return;
-    case "cooperative-group-declare":
-      if (operation.declaration.partitionPredicate) {
-        walkSemanticExpression(operation.declaration.partitionPredicate, visitExpression);
-      }
-      return;
-    case "load":
-      walkSemanticMemoryRef(operation.source, visitExpression);
-      return;
-    case "store":
-      walkSemanticMemoryRef(operation.target, visitExpression);
-      walkSemanticExpression(operation.value, visitExpression);
-      for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
-      return;
-    case "copy":
-      walkSemanticMemoryRef(operation.source, visitExpression);
-      walkSemanticMemoryRef(operation.target, visitExpression);
-      return;
-    case "matrix-fill":
-      walkSemanticMatrixTileRef(operation.fragment, visitExpression);
-      walkSemanticExpression(operation.value, visitExpression);
-      return;
-    case "matrix-load":
-      walkSemanticMatrixTileRef(operation.fragment, visitExpression);
-      walkSemanticMemoryRef(operation.source, visitExpression);
-      walkSemanticExpression(operation.stride, visitExpression);
-      return;
-    case "matrix-mma":
-      walkSemanticMatrixTileRef(operation.destination, visitExpression);
-      walkSemanticMatrixTileRef(operation.a, visitExpression);
-      walkSemanticMatrixTileRef(operation.b, visitExpression);
-      walkSemanticMatrixTileRef(operation.accumulator, visitExpression);
-      return;
-    case "matrix-store":
-      walkSemanticMemoryRef(operation.target, visitExpression);
-      walkSemanticMatrixTileRef(operation.fragment, visitExpression);
-      walkSemanticExpression(operation.stride, visitExpression);
-      return;
-    case "surface-write":
-      walkSemanticExpression(operation.surface, visitExpression);
-      walkSemanticExpression(operation.value, visitExpression);
-      walkSemanticExpression(operation.xBytes, visitExpression);
-      walkSemanticExpression(operation.y, visitExpression);
-      if (operation.z) walkSemanticExpression(operation.z, visitExpression);
-      return;
-    case "surface-read-store":
-      walkSemanticExpression(operation.target, visitExpression);
-      walkSemanticExpression(operation.surface, visitExpression);
-      walkSemanticExpression(operation.xBytes, visitExpression);
-      walkSemanticExpression(operation.y, visitExpression);
-      if (operation.z) walkSemanticExpression(operation.z, visitExpression);
-      return;
-    case "atomic":
-      if (operation.target) walkSemanticMemoryRef(operation.target, visitExpression);
-      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
-      return;
-    case "call":
-      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
-      for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
-      return;
-    case "runtime-copy":
-      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
-      return;
-    case "pool-allocate":
-      walkSemanticExpression(operation.sizeBytes, visitExpression);
-      if (operation.pool.kind === "raw-pool") {
-        walkSemanticMemoryRef(operation.pool.data, visitExpression);
-        walkSemanticMemoryRef(operation.pool.offset, visitExpression);
-        walkSemanticExpression(operation.pool.capacityBytes, visitExpression);
-      }
-      return;
-    case "expression":
-      walkSemanticExpression(operation.expression, visitExpression);
-      return;
-    case "branch":
-      walkSemanticExpression(operation.condition, visitExpression);
-      walkSemanticOperations(operation.consequent, visitExpression);
-      walkSemanticOperations(operation.alternate, visitExpression);
-      return;
-    case "loop":
-      if (operation.init) {
-        if (isSemanticKernelIrOperation(operation.init)) walkSemanticOperation(operation.init, visitExpression);
-        else walkSemanticExpression(operation.init, visitExpression);
-      }
-      if (operation.condition) walkSemanticExpression(operation.condition, visitExpression);
-      if (operation.update) walkSemanticExpression(operation.update, visitExpression);
-      walkSemanticOperations(operation.body, visitExpression);
-      if (operation.continuing) walkSemanticOperations(operation.continuing, visitExpression);
-      return;
-    case "device-launch":
-      for (const expression of [...operation.launch.grid, ...operation.launch.block, ...operation.launch.args]) {
-        walkSemanticExpression(expression, visitExpression);
-      }
-      return;
-    case "return":
-      if (operation.value) walkSemanticExpression(operation.value, visitExpression);
-      return;
-    case "block":
-      walkSemanticOperations(operation.body, visitExpression);
-      return;
-    case "barrier":
-    case "fence":
-      return;
-    case "inline-asm":
-      for (const expression of operation.outputs) walkSemanticExpression(expression, visitExpression);
-      for (const expression of operation.inputs) walkSemanticExpression(expression, visitExpression);
-      return;
-    case "continue":
-    case "break":
-      return;
-  }
-}
-
-function walkSemanticMatrixTileRef(
-  ref: SemanticMatrixTileRef,
-  visitExpression: (expression: SemanticExpression) => void,
-): void {
-  for (const index of ref.indices) walkSemanticExpression(index, visitExpression);
-}
-
-export function walkSemanticMemoryRef(
-  ref: SemanticMemoryRef,
-  visitExpression: (expression: SemanticExpression) => void,
-): void {
-  for (const index of ref.indices) walkSemanticExpression(index, visitExpression);
-}
-
-export function walkSemanticExpression(
-  expression: SemanticExpression,
-  visitExpression: (expression: SemanticExpression) => void,
-): void {
-  visitExpression(expression);
-  switch (expression.kind) {
-    case "literal":
-    case "symbol":
-      return;
-    case "member":
-      walkSemanticExpression(expression.object, visitExpression);
-      return;
-    case "index":
-      walkSemanticExpression(expression.target, visitExpression);
-      walkSemanticExpression(expression.index, visitExpression);
-      return;
-    case "call":
-      walkSemanticExpression(expression.callee, visitExpression);
-      for (const arg of expression.args) walkSemanticExpression(arg, visitExpression);
-      return;
-    case "texture-read":
-      walkSemanticExpression(expression.texture, visitExpression);
-      walkSemanticExpression(expression.x, visitExpression);
-      walkSemanticExpression(expression.y, visitExpression);
-      if (expression.z) walkSemanticExpression(expression.z, visitExpression);
-      return;
-    case "surface-read":
-      walkSemanticExpression(expression.surface, visitExpression);
-      walkSemanticExpression(expression.xBytes, visitExpression);
-      walkSemanticExpression(expression.y, visitExpression);
-      if (expression.z) walkSemanticExpression(expression.z, visitExpression);
-      return;
-    case "cast":
-      walkSemanticExpression(expression.expression, visitExpression);
-      return;
-    case "unary":
-    case "update":
-      walkSemanticExpression(expression.argument, visitExpression);
-      return;
-    case "binary":
-      walkSemanticExpression(expression.left, visitExpression);
-      walkSemanticExpression(expression.right, visitExpression);
-      return;
-    case "conditional":
-      walkSemanticExpression(expression.condition, visitExpression);
-      walkSemanticExpression(expression.consequent, visitExpression);
-      walkSemanticExpression(expression.alternate, visitExpression);
-      return;
-    case "assignment":
-      walkSemanticExpression(expression.target, visitExpression);
-      walkSemanticExpression(expression.value, visitExpression);
-      return;
-    case "initializer":
-      for (const element of expression.elements) walkSemanticExpression(element, visitExpression);
-      return;
-    case "sequence":
-      for (const item of expression.expressions) walkSemanticExpression(item, visitExpression);
-      return;
-  }
-}
-
-export function isSemanticKernelIrOperation(
-  value: SemanticKernelIrOperation | SemanticExpression,
-): value is SemanticKernelIrOperation {
-  switch (value.kind) {
-    case "declare":
-    case "dim3-declare":
-    case "cooperative-group-declare":
-    case "load":
-    case "store":
-    case "copy":
-    case "copy-fence":
-    case "pool-allocate":
-    case "matrix-fill":
-    case "matrix-load":
-    case "matrix-mma":
-    case "matrix-store":
-    case "surface-write":
-    case "surface-read-store":
-    case "atomic":
-    case "runtime-copy":
-    case "pointer-rebind":
-    case "expression":
-    case "branch":
-    case "loop":
-    case "barrier":
-    case "fence":
-    case "device-launch":
-    case "inline-asm":
-    case "return":
-    case "continue":
-    case "break":
-    case "block":
-      return true;
-    case "call":
-      return typeof value.callee === "string";
-    default:
-      return false;
-  }
 }
 
 const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
@@ -1807,7 +1237,6 @@ function semanticExpressionContainsUnsafeActiveLaneDeclarationCall(expression: S
   });
   return unsafe;
 }
-
 
 function rewriteSemanticVoidReturnsAsInactive(
   operation: SemanticKernelIrOperation,

@@ -153,7 +153,7 @@ export function collectSemanticWgslOperationNames(
     for (const child of operation.body) collectSemanticWgslOperationNames(child, names);
   }
 }
-import type { SemanticKernelIrOperation } from "./semantic_ir.js";
+import type { SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import { isSemanticKernelIrOperation } from "./semantic_ir_walk.js";
 import {
   semanticPointerBaseParamName,

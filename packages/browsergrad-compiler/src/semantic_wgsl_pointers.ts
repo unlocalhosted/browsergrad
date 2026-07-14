@@ -1,13 +1,6 @@
-import type {
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
-import {
-  collectSemanticPoolAllocations,
-  walkSemanticOperations,
-} from "./semantic_ir.js";
+import { collectSemanticPoolAllocations, walkSemanticOperations } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir_types.js";
+
 import { semanticIdsEqual } from "./semantic_ids.js";
 import {
   isSemanticKernelIrOperation,
@@ -173,7 +166,6 @@ function semanticPointerHelperScalarName(valueType: CudaLiteScalarType | undefin
   if (valueType === "bool") return "u32";
   return "f32";
 }
-
 
 export interface SemanticRuntimePointerWgslHost {
   readonly memoryRefFromIndexExpression: (expression: SemanticExpression) => SemanticMemoryRef | undefined;

@@ -1,4 +1,4 @@
-import type { SemanticExpression } from "./semantic_ir.js";
+import type { SemanticExpression } from "./semantic_ir_types.js";
 import type { CudaLiteScalarType } from "./types.js";
 
 export type SemanticVectorMathCall = "dot" | "length" | "normalize" | "cross";

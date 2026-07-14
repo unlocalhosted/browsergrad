@@ -1,4 +1,4 @@
-import type { SemanticExpression } from "./semantic_ir.js";
+import type { SemanticExpression } from "./semantic_ir_types.js";
 import { isSemanticFloatVectorType, semanticExpressionValueType } from "./semantic_vector_intrinsics.js";
 import type { CudaLiteScalarType } from "./types.js";
 

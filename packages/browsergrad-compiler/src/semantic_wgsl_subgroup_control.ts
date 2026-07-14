@@ -1,10 +1,5 @@
 import type { WgslValueType } from "@unlocalhosted/browsergrad-kernels";
-import type {
-  CudaLiteSemanticSymbol,
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
+import type { CudaLiteSemanticSymbol, SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import { semanticIdsEqual } from "./semantic_ids.js";
 import { isSemanticKernelIrOperation, semanticExpressionChildren } from "./semantic_ir_walk.js";
 import { SEMANTIC_SUBGROUP_CALLS } from "./semantic_builtin_calls.js";

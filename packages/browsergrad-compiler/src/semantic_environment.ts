@@ -1,7 +1,4 @@
-import type {
-  CudaLiteSemanticFunction,
-  CudaLiteSemanticSymbol,
-} from "./semantic_ir.js";
+import type { CudaLiteSemanticFunction, CudaLiteSemanticSymbol } from "./semantic_ir_types.js";
 import type { SemanticFunctionId, SemanticSymbolId } from "./semantic_ids.js";
 import { semanticIdKey } from "./semantic_ids.js";
 

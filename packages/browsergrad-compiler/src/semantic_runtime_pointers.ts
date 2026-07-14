@@ -1,9 +1,6 @@
-import type {
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
 import { semanticPointerSymbolNeedsRuntimeState } from "./semantic_ir.js";
+import type { SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir_types.js";
+
 import { semanticIdsEqual } from "./semantic_ids.js";
 import { isSemanticKernelIrOperation } from "./semantic_ir_walk.js";
 

@@ -1,9 +1,5 @@
 import type { CudaLiteScalarType } from "./types.js";
-import type {
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import {
   isSemanticKernelIrOperation,
   semanticExpressionChildren,

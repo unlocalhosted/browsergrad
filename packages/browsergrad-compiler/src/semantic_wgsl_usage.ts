@@ -6,11 +6,7 @@ import {
   SEMANTIC_FP8_CALLS,
   SEMANTIC_HALF_CONVERSION_CALLS,
 } from "./semantic_math_intrinsics.js";
-import type {
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import {
   semanticExpressionChildren,
   semanticOperationExpressions,

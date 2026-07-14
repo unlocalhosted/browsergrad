@@ -8,16 +8,11 @@ import {
 } from "./cuda_runtime_queries.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
-import type {
-  SemanticExpression,
-  SemanticKernelIrOperation,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrOperation, SemanticMemoryRef, CanonicalSemanticKernelIr } from "./semantic_ir_types.js";
 import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 import type { CudaLiteScalarType, SourceSpan } from "./types.js";
 import { requireSemanticValueType } from "./semantic_value_type.js";
 import { completeRuntimeLowering, type RuntimeLoweredIr } from "./compiler_phases.js";
-import type { CanonicalSemanticKernelIr } from "./semantic_ir.js";
 
 export type RuntimeLoweredSemanticKernelIr = RuntimeLoweredIr<CanonicalSemanticKernelIr>;
 

@@ -1,11 +1,12 @@
+import { isSemanticKernelIrOperation, walkSemanticExpression } from "./semantic_ir.js";
 import type {
   CudaLiteSemanticFunction,
   CudaLiteSemanticSymbol,
   SemanticExpression,
   SemanticKernelIrOperation,
   SemanticMemoryRef,
-} from "./semantic_ir.js";
-import { isSemanticKernelIrOperation, walkSemanticExpression } from "./semantic_ir.js";
+} from "./semantic_ir_types.js";
+
 import type { CudaLiteScalarType } from "./types.js";
 import { isSemanticFloatVectorType } from "./semantic_vector_intrinsics.js";
 import { semanticIdsEqual } from "./semantic_ids.js";

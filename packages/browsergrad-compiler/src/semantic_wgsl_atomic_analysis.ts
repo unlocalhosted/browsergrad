@@ -1,4 +1,4 @@
-import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir_types.js";
 import type { CudaLiteScalarType, SourceSpan } from "./types.js";
 import { createSemanticSymbolId, createUnresolvedSemanticSymbolId, semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 import { isSemanticKernelIrOperation, semanticAtomicMemoryRootNames, semanticExpressionChildren } from "./semantic_ir_walk.js";

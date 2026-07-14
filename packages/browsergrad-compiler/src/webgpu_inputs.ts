@@ -8,8 +8,9 @@ import { cudaLiteTotalElements as totalElements } from "./cuda_lite_values.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
-import type { SemanticKernelIrOperation } from "./semantic_ir.js";
 import { collectSemanticPoolAllocations } from "./semantic_ir.js";
+import type { SemanticKernelIrOperation } from "./semantic_ir_types.js";
+
 import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import {
   CudaLiteCompilerError,

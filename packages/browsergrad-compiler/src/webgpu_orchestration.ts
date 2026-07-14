@@ -18,10 +18,7 @@ import { deviceLaunchTreeIsExternallySilent } from "./runtime_elision.js";
 import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
 import { createSemanticRetirementReductionPlan } from "./semantic_retirement_reduction.js";
 import { createCudaTrapLaunchPreconditionDiagnostics } from "./trap_preconditions.js";
-import type {
-  SemanticExpression,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -859,7 +856,6 @@ function definePeerByteCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgr
   peerByteCopyProgramCache = program;
   return program;
 }
-
 
 function definePeerFillProgram(fill: CudaPeerCopyOperation): WgslKernelProgram {
   if (fill.kind !== "fill") throw new Error("peer fill program requires a fill operation");

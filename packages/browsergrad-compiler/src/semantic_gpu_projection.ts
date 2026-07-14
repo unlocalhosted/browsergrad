@@ -1,6 +1,6 @@
 import { isCudaRuntimeCopyCall } from "./cuda_runtime_copies.js";
 import { isHostManagedRuntimeNoopCall } from "./cuda_runtime_noops.js";
-import type { SemanticExpression, SemanticKernelIrOperation } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { typeCheckSemanticKernelIr } from "./semantic_type_check.js";
 import { legalizeSemanticKernelIrForWgsl, type WgslLegalizedSemanticKernelIr } from "./wgsl_legalization.js";

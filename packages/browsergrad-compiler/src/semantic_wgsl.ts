@@ -3,6 +3,7 @@ import {
   type WgslKernelBindingInput,
   type WgslValueType,
 } from "@unlocalhosted/browsergrad-kernels";
+import { semanticInlineAsmLdmatrixAssignments, walkSemanticOperations } from "./semantic_ir.js";
 import type {
   CudaLiteSemanticSymbol,
   SemanticExpression,
@@ -10,8 +11,7 @@ import type {
   SemanticKernelIrOperation,
   SemanticMatrixTileRef,
   SemanticMemoryRef,
-} from "./semantic_ir.js";
-import { semanticInlineAsmLdmatrixAssignments, walkSemanticOperations } from "./semantic_ir.js";
+} from "./semantic_ir_types.js";
 import {
   createBuiltinSemanticSymbolId,
   createGeneratedSemanticSymbolId,

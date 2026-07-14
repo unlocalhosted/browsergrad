@@ -1,9 +1,5 @@
 import type { CudaLiteScalarType } from "./types.js";
-import type {
-  CudaLiteSemanticSymbol,
-  SemanticExpression,
-  SemanticKernelIrOperation,
-} from "./semantic_ir.js";
+import type { CudaLiteSemanticSymbol, SemanticExpression, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import { flattenSemanticInitializerExpressions as flattenInitializerExpressions } from "./semantic_initializers.js";
 import { SEMANTIC_LOCAL_ARRAY_FILL_CALLS } from "./semantic_builtin_calls.js";
 import { isSemanticFloatVectorType } from "./semantic_vector_intrinsics.js";

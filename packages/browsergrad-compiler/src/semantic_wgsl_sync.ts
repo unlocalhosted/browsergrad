@@ -1,5 +1,6 @@
-import type { SemanticExpression, SemanticKernelIrModule } from "./semantic_ir.js";
 import { walkSemanticOperations } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule } from "./semantic_ir_types.js";
+
 import {
   cudaSyncthreadsPredicateReduction,
   type CudaSyncthreadsPredicateReduction,

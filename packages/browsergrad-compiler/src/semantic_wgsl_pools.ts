@@ -1,6 +1,7 @@
 import type { WgslKernelBindingInput } from "@unlocalhosted/browsergrad-kernels";
-import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir.js";
 import { collectSemanticPoolAllocations } from "./semantic_ir.js";
+import type { SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
+
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import {
   emitPoolHelper,

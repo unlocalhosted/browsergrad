@@ -1,10 +1,6 @@
-import type {
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticKernelIrOperation,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
 import { isSemanticKernelIrOperation } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation, SemanticMemoryRef } from "./semantic_ir_types.js";
+
 import type { KernelLaunch } from "./types.js";
 
 export type SemanticRetirementReductionPlan =

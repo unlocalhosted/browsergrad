@@ -1,8 +1,4 @@
-import type {
-  SemanticExpression,
-  SemanticKernelIrModule,
-  SemanticMemoryRef,
-} from "./semantic_ir.js";
+import type { SemanticExpression, SemanticKernelIrModule, SemanticMemoryRef } from "./semantic_ir_types.js";
 import {
   createTypedWgslCall,
   createTypedWgslIdentifier,

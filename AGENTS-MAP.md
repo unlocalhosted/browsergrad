@@ -26,7 +26,7 @@ Use this as a fast navigation layer before diving into files.
 | `browsergrad-grad` | `packages/browsergrad-grad/README.md` | `src/python/tensor.py`, `src/python/functional.py`, `src/python/optim.py`, `src/python/nn_chunks/`, `src/python/_device.py`, `src/python/_torch_compat_*.py`, `src/kernel-device.ts` | `tests/`, `tests-integration/` |
 | `browsergrad-jit` | `packages/browsergrad-jit/README.md` | `src/python/_ir.py`, `_tensor_proxy.py`, `_realize.py`, `_vjp.py`, `_functional.py`, `_nn.py`, `_optim.py`, `_torch_compat.py` | `tests/`, `tests-integration/` |
 | `browsergrad-kernels` | `packages/browsergrad-kernels/README.md` | `src/realizer.ts`, `src/kernels/` | `tests/`, `tests-browser/` |
-| `browsergrad-compiler` | `packages/browsergrad-compiler/README.md`, `docs/platform/cuda-lite-compiler-architecture.md` | `src/parser.ts`, `src/analyzer.ts`, `src/semantic_ir.ts`, `src/semantic_reference.ts`, `src/semantic_wgsl.ts`, `src/runner.ts`, `scripts/cuda-lite-source-normalizer.mjs` | `tests/`, `tests-browser/`, corpus/e2e scripts |
+| `browsergrad-compiler` | `packages/browsergrad-compiler/README.md`, `docs/platform/cuda-lite-compiler-architecture.md` | `src/parser.ts`, `src/analyzer.ts`, `src/semantic_ir_types.ts`, `src/semantic_ir.ts`, `src/semantic_reference.ts`, `src/semantic_wgsl.ts`, `src/runner.ts`, `scripts/cuda-lite-source-normalizer.mjs` | `tests/`, `tests-browser/`, corpus/e2e scripts |
 | `browsergrad-primitives` | `packages/browsergrad-primitives/README.md` | `src/index.ts`, `src/text.ts`, `src/data.ts`, `src/evaluation.ts`, `src/scaling.ts`, `src/simulation.ts`, `src/rl.ts` | `tests/` |
 | `browsergrad-dogfood` | `packages/browsergrad-dogfood/README.md` | `tests-node/`, `tests/` | cross-package published compatibility |
 

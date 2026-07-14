@@ -1,4 +1,4 @@
-import type { SemanticExpression, SemanticMemoryRef } from "./semantic_ir.js";
+import type { SemanticExpression, SemanticMemoryRef } from "./semantic_ir_types.js";
 import { semanticMemoryIdFromSymbol } from "./semantic_ids.js";
 
 export function semanticPointerArgumentMemoryRef(expression: SemanticExpression): SemanticMemoryRef | undefined {

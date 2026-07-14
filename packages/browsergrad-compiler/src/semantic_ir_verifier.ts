@@ -5,7 +5,7 @@ import type {
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
   SemanticMemoryRef,
-} from "./semantic_ir.js";
+} from "./semantic_ir_types.js";
 import {
   semanticIdKey,
   semanticIdsEqual,
