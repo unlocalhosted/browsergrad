@@ -1,5 +1,5 @@
 import type { WgslValueType } from "@unlocalhosted/browsergrad-kernels";
-import type { CudaLiteSemanticSymbol, SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
+import type { CudaLiteSemanticFunction, CudaLiteSemanticSymbol, SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import { semanticIdsEqual } from "./semantic_ids.js";
 import { isSemanticKernelIrOperation, semanticExpressionChildren, semanticOperationExpressions } from "./semantic_ir_walk.js";
 import { SEMANTIC_SUBGROUP_CALLS } from "./semantic_builtin_calls.js";
@@ -63,6 +63,7 @@ interface SemanticSubgroupControlDependencies<
     allowReturnValue: boolean,
     options: Options,
     textureSpecializations: TextureSpecializations,
+    parentActivePredicate?: SemanticExpression,
   ) => readonly string[];
   readonly emitTruthiness: (
     expression: SemanticExpression,
@@ -181,6 +182,26 @@ export function createSemanticSubgroupControlEmitter<
       throw semanticError("native subgroup loops require typed local mutation targets", expression.span);
     }
     const semanticTargetType = wgslValueType(target.valueType);
+    // The IR lowers a `break` from a divergent source loop into an assignment
+    // of a literal boolean loop-active flag. Selecting that literal is safe:
+    // it has no memory effects or collectives, and it keeps the enclosing
+    // transformed loop's barriers and subgroup calls unconditional. Other
+    // boolean mutations remain rejected rather than speculatively evaluating
+    // lane-varying expressions for inactive lanes.
+    if (semanticTargetType === "bool" && expression.kind === "assignment" && expression.operator === "=" &&
+      expression.value.kind === "literal" && expression.value.literalKind === "number" && expression.value.valueType === "bool") {
+      const current = createTypedWgslIdentifier(nameFor(target.name, names), "bool", target.span);
+      const next = emitBoolExpression(expression.value, ir, names, options, textureSpecializations);
+      const condition = emitBoolExpression(predicateExpression, ir, names, options, textureSpecializations);
+      const selected = emitTypedWgslSelect(current, next, condition, expression.span);
+      return createTypedWgslLocalAssignmentStatement(
+        nameFor(target.name, names),
+        "bool",
+        "=",
+        selected,
+        expression.span,
+      ).code.slice(0, -1);
+    }
     if (semanticTargetType === "bool" || semanticTargetType.startsWith("vec") && semanticTargetType.endsWith("<bool>")) {
       throw semanticError("native subgroup loops require numeric local mutation targets", expression.span);
     }
@@ -273,7 +294,38 @@ export function createSemanticSubgroupControlEmitter<
         lines.push(`${prefix}}`);
         continue;
       }
+      // Nested canonical loops that contain a native collective or barrier
+      // need their own uniform iteration schedule. Thread the parent active
+      // predicate into the nested loop rather than placing synchronization in
+      // a divergent branch; both loops then reconverge at every collective
+      // and barrier. Barrier-only loops must already have uniform control;
+      // otherwise the workgroup scratch declaration required for a dynamic
+      // max schedule would be absent and we fail closed.
+      if (operation.kind === "loop" &&
+        (operationsContainNativeCollective(operation.body) || semanticOperationsContainBarrier(operation.body))) {
+        if (semanticOperationsContainBarrier(operation.body) && !semanticSubgroupLoopControlIsWorkgroupUniform(operation, ir)) {
+          throw semanticError("native subgroup loops require workgroup-uniform nested barrier control", operation.span);
+        }
+        lines.push(...emitUniformForLoop(
+          operation,
+          ir,
+          names,
+          indentLevel,
+          allowReturnValue,
+          options,
+          textureSpecializations,
+          predicateExpression,
+        ));
+        continue;
+      }
       if (operation.kind === "branch") {
+        const directBreak = semanticDirectBranchBreak(operation);
+        if (directBreak && predicateExpression.kind === "symbol" && predicateExpression.addressSpace === "local") {
+          const activeName = nameFor(predicateExpression.name, names);
+          const condition = emitBoolExpression(operation.condition, ir, names, options, textureSpecializations).code;
+          lines.push(`${prefix}${activeName} = ${activeName} && !(${condition});`);
+          continue;
+        }
         lines.push(`${prefix}{`);
         lines.push(...emitBranchlessOperations(operation.consequent, collectiveAnd(predicateExpression, operation.condition), ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
         lines.push(`${prefix}}`);
@@ -282,24 +334,86 @@ export function createSemanticSubgroupControlEmitter<
         lines.push(`${prefix}}`);
         continue;
       }
-      if (operation.kind === "declare" && operation.target.addressSpace === "local" && operation.target.dimensions.length === 0 &&
-        (!operation.target.pointer || operation.init !== undefined && !expressionContainsNativeCollective(operation.init))) {
-        lines.push(...emitOperation(
-          operation,
-          ir,
-          names,
-          indentLevel,
-          allowReturnValue,
-          operation.init && expressionContainsNativeCollective(operation.init)
-            ? { ...options, activeCollectivePredicate: predicateExpression }
-            : options,
-          textureSpecializations,
-        ));
-        continue;
+      if (operation.kind === "declare" && operation.target.addressSpace === "local") {
+        if (operation.target.pointer && (!operation.init || !expressionContainsNativeCollective(operation.init))) {
+          lines.push(...emitOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+          continue;
+        }
+        if (!operation.target.pointer && operation.target.dimensions.length > 0 && operation.init === undefined) {
+          lines.push(...emitOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+          continue;
+        }
+        if (!operation.target.pointer && operation.target.dimensions.length === 0 && operation.target.valueType && operation.target.valueType !== "void") {
+          if (operation.init && expressionContainsNativeCollective(operation.init)) {
+            lines.push(...emitOperation(
+              operation,
+              ir,
+              names,
+              indentLevel,
+              allowReturnValue,
+              { ...options, activeCollectivePredicate: predicateExpression },
+              textureSpecializations,
+            ));
+            continue;
+          }
+          const { init: _init, ...declaration } = operation;
+          lines.push(...emitOperation(declaration, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+          if (operation.init) {
+            const target: SemanticExpression = {
+              kind: "symbol",
+              id: operation.target.id,
+              name: operation.target.name,
+              valueType: operation.target.valueType,
+              addressSpace: "local",
+              span: operation.target.span,
+            };
+            const assignment: SemanticKernelIrOperation = {
+              kind: "expression",
+              expression: {
+                kind: "assignment",
+                operator: "=",
+                target,
+                value: operation.init,
+                valueType: operation.target.valueType,
+                span: operation.span,
+              },
+              span: operation.span,
+            };
+            const condition = emitBoolExpression(predicateExpression, ir, names, options, textureSpecializations).code;
+            lines.push(`${prefix}if (${condition}) {`);
+            lines.push(...emitOperation(assignment, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+            lines.push(`${prefix}}`);
+          }
+          continue;
+        }
       }
       if (operation.kind === "expression" &&
         (operation.expression.kind === "assignment" || operation.expression.kind === "update")) {
         lines.push(`${prefix}${emitBranchlessLocalMutation(operation.expression, predicateExpression, ir, names, options, textureSpecializations)};`);
+        continue;
+      }
+      // A plain storage/workgroup store may be predicated on the lane-active
+      // bit when neither its address nor value contains a collective. The
+      // branch reconverges before the next operation, while barriers remain
+      // on the unconditional path handled above. Stores that would invoke a
+      // collective stay rejected: emitting that collective inside this branch
+      // would violate WGSL's uniformity rules.
+      if (operation.kind === "store" && operation.target.addressSpace !== "local" &&
+        !expressionContainsNativeCollective(operation.value) &&
+        !operation.target.indices.some(expressionContainsNativeCollective)) {
+        const condition = emitBoolExpression(predicateExpression, ir, names, options, textureSpecializations).code;
+        lines.push(`${prefix}if (${condition}) {`);
+        lines.push(...emitOperation(operation, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+        lines.push(`${prefix}}`);
+        continue;
+      }
+      if (operation.kind === "store" && operation.target.addressSpace === "local" &&
+        !expressionContainsNativeCollective(operation.value) &&
+        !operation.target.indices.some(expressionContainsNativeCollective)) {
+        const condition = emitBoolExpression(predicateExpression, ir, names, options, textureSpecializations).code;
+        lines.push(`${prefix}if (${condition}) {`);
+        lines.push(...emitOperation(operation, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+        lines.push(`${prefix}}`);
         continue;
       }
       if (operation.kind === "store" && operation.target.addressSpace === "local") {
@@ -342,6 +456,7 @@ export function createSemanticSubgroupControlEmitter<
     allowReturnValue: boolean,
     options: Options,
     textureSpecializations: TextureSpecializations,
+    parentActivePredicate?: SemanticExpression,
   ): readonly string[] => {
     const prefix = "  ".repeat(indentLevel);
     const bodyPrefix = "  ".repeat(indentLevel + 1);
@@ -359,6 +474,9 @@ export function createSemanticSubgroupControlEmitter<
     const init = operation.init ? emitLoopInit(operation.init, ir, names, options, textureSpecializations) : "";
     const laneCondition = semanticSubgroupLoopLaneCondition(operation.condition);
     const condition = laneCondition ? emitTruthiness(laneCondition, ir, names, options) : "true";
+    const parentCondition = parentActivePredicate === undefined
+      ? undefined
+      : emitBoolExpression(parentActivePredicate, ir, names, options, textureSpecializations).code;
     const update = operation.update;
     if (update !== undefined && update.kind !== "assignment" && update.kind !== "update") {
       throw semanticError("native subgroup loops require local assignment or increment updates", update.span);
@@ -384,7 +502,7 @@ export function createSemanticSubgroupControlEmitter<
         `${bodyPrefix}workgroupBarrier();`,
         `${bodyPrefix}let ${budgetName}: u32 = workgroupUniformLoad(&${SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH}[0u]);`,
       ] : []),
-      `${bodyPrefix}var ${activeName}: bool = ${condition};`,
+      `${bodyPrefix}var ${activeName}: bool = ${parentCondition === undefined ? condition : `(${parentCondition}) && (${condition})`};`,
       `${bodyPrefix}for (var ${iterationName}: u32 = 0u; ${iterationName} < ${iterationBudget.workgroupMaximum ? budgetName : iterationBudget.expression}; ${iterationName} += 1u) {`,
       ...emitBranchlessOperations(operation.body, activeExpression, ir, names, indentLevel + 2, allowReturnValue, options, textureSpecializations),
       ...(update === undefined ? [] : [
@@ -495,6 +613,12 @@ function semanticOperationsContainBarrier(operations: readonly SemanticKernelIrO
     if (operation.kind === "block") return semanticOperationsContainBarrier(operation.body);
     return false;
   });
+}
+
+function semanticDirectBranchBreak(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "branch" }>,
+): boolean {
+  return operation.alternate.length === 0 && operation.consequent.length === 1 && operation.consequent[0]?.kind === "break";
 }
 
 function semanticSubgroupAdditiveProgress(
@@ -689,8 +813,99 @@ function expressionIsWorkgroupUniform(
     expression.callee.addressSpace === "builtin" && WORKGROUP_UNIFORM_BUILTIN_CALLS.has(expression.callee.name)) {
     return expression.args.every((arg) => expressionIsWorkgroupUniform(arg, ir, visiting));
   }
+  if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    const callee = expression.callee;
+    if (callee.addressSpace === "function" && expression.args.every((arg) => expressionIsWorkgroupUniform(arg, ir, visiting))) {
+      const calledFunction = ir.functions.find((candidate) => candidate.id.key === callee.id.key);
+      return calledFunction !== undefined && semanticFunctionIsWorkgroupUniform(calledFunction, ir, new Set());
+    }
+  }
   if (expression.kind === "call" && expression.callee.kind === "member" && expression.args.length === 0) {
     return expression.callee.property === "size" || expression.callee.property === "meta_group_size";
+  }
+  return false;
+}
+
+function semanticFunctionIsWorkgroupUniform(
+  functionValue: CudaLiteSemanticFunction,
+  ir: SemanticKernelIrModule,
+  visitingFunctions: ReadonlySet<string>,
+): boolean {
+  if (visitingFunctions.has(functionValue.id.key) || functionValue.params.some((param) => param.pointer || param.dimensions.length > 0)) return false;
+  const nextFunctions = new Set([...visitingFunctions, functionValue.id.key]);
+  const params = new Set(functionValue.params.map((param) => param.id.key));
+  return functionValue.body.every((operation) => semanticFunctionOperationIsWorkgroupUniform(operation, functionValue, params, ir, nextFunctions));
+}
+
+function semanticFunctionOperationIsWorkgroupUniform(
+  operation: SemanticKernelIrOperation,
+  functionValue: CudaLiteSemanticFunction,
+  params: ReadonlySet<string>,
+  ir: SemanticKernelIrModule,
+  visitingFunctions: ReadonlySet<string>,
+): boolean {
+  if (operation.kind === "return") {
+    return operation.value === undefined || semanticFunctionExpressionIsWorkgroupUniform(operation.value, functionValue, params, ir, visitingFunctions);
+  }
+  if (operation.kind === "declare") {
+    return operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length === 0 &&
+      (operation.init === undefined || semanticFunctionExpressionIsWorkgroupUniform(operation.init, functionValue, params, ir, visitingFunctions));
+  }
+  if (operation.kind === "expression") {
+    return (
+      (operation.expression.kind === "assignment" && operation.expression.target.kind === "symbol" &&
+        operation.expression.target.addressSpace === "local" &&
+        semanticFunctionExpressionIsWorkgroupUniform(operation.expression.value, functionValue, params, ir, visitingFunctions)) ||
+      (operation.expression.kind === "update" && operation.expression.argument.kind === "symbol" &&
+        operation.expression.argument.addressSpace === "local")
+    );
+  }
+  if (operation.kind === "branch") {
+    return semanticFunctionExpressionIsWorkgroupUniform(operation.condition, functionValue, params, ir, visitingFunctions) &&
+      operation.consequent.every((child) => semanticFunctionOperationIsWorkgroupUniform(child, functionValue, params, ir, visitingFunctions)) &&
+      operation.alternate.every((child) => semanticFunctionOperationIsWorkgroupUniform(child, functionValue, params, ir, visitingFunctions));
+  }
+  if (operation.kind === "block") {
+    return operation.body.every((child) => semanticFunctionOperationIsWorkgroupUniform(child, functionValue, params, ir, visitingFunctions));
+  }
+  return false;
+}
+
+function semanticFunctionExpressionIsWorkgroupUniform(
+  expression: SemanticExpression,
+  functionValue: CudaLiteSemanticFunction,
+  params: ReadonlySet<string>,
+  ir: SemanticKernelIrModule,
+  visitingFunctions: ReadonlySet<string>,
+  visitingLocals: ReadonlySet<string> = new Set(),
+): boolean {
+  if (expression.kind === "literal") return true;
+  if (expression.kind === "symbol") {
+    if (params.has(expression.id.key) || expression.addressSpace === "uniform" || expression.addressSpace === "constant") return true;
+    if (expression.addressSpace !== "local" || visitingLocals.has(expression.id.key)) return false;
+    const declaration = findLocalDeclaration(functionValue.body, expression.id);
+    return declaration?.target.constant === true && declaration.init !== undefined &&
+      semanticFunctionExpressionIsWorkgroupUniform(declaration.init, functionValue, params, ir, visitingFunctions, new Set([...visitingLocals, expression.id.key]));
+  }
+  if (expression.kind === "member" && expression.object.kind === "symbol" &&
+    ["blockIdx", "blockDim", "gridDim"].includes(expression.object.name)) return true;
+  if (expression.kind === "cast") return semanticFunctionExpressionIsWorkgroupUniform(expression.expression, functionValue, params, ir, visitingFunctions, visitingLocals);
+  if (expression.kind === "unary") return semanticFunctionExpressionIsWorkgroupUniform(expression.argument, functionValue, params, ir, visitingFunctions, visitingLocals);
+  if (expression.kind === "binary") return semanticFunctionExpressionIsWorkgroupUniform(expression.left, functionValue, params, ir, visitingFunctions, visitingLocals) &&
+    semanticFunctionExpressionIsWorkgroupUniform(expression.right, functionValue, params, ir, visitingFunctions, visitingLocals);
+  if (expression.kind === "conditional") return semanticFunctionExpressionIsWorkgroupUniform(expression.condition, functionValue, params, ir, visitingFunctions, visitingLocals) &&
+    semanticFunctionExpressionIsWorkgroupUniform(expression.consequent, functionValue, params, ir, visitingFunctions, visitingLocals) &&
+    semanticFunctionExpressionIsWorkgroupUniform(expression.alternate, functionValue, params, ir, visitingFunctions, visitingLocals);
+  if (expression.kind === "call" && expression.callee.kind === "symbol") {
+    const callee = expression.callee;
+    if (callee.addressSpace === "builtin" && WORKGROUP_UNIFORM_BUILTIN_CALLS.has(callee.name)) {
+      return expression.args.every((arg) => semanticFunctionExpressionIsWorkgroupUniform(arg, functionValue, params, ir, visitingFunctions, visitingLocals));
+    }
+    if (callee.addressSpace === "function" && expression.args.every((arg) =>
+      semanticFunctionExpressionIsWorkgroupUniform(arg, functionValue, params, ir, visitingFunctions, visitingLocals))) {
+      const calledFunction = ir.functions.find((candidate) => candidate.id.key === callee.id.key);
+      return calledFunction !== undefined && semanticFunctionIsWorkgroupUniform(calledFunction, ir, visitingFunctions);
+    }
   }
   return false;
 }

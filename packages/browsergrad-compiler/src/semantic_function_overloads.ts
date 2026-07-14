@@ -80,7 +80,6 @@ function semanticOverloadScore(
       if (ref.valueType === param.valueType) score += 4;
       continue;
     }
-    if (semanticPointerArgumentMemoryRef(arg)) return undefined;
     if ("valueType" in arg && arg.valueType === param.valueType) score += 2;
   }
   return score;

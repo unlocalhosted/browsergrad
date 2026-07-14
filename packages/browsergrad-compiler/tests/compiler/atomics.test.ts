@@ -1157,7 +1157,7 @@ describe("CUDA-lite compiler: Atomics", () => {
       expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
       expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
       expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
-      expect(compiled.wgsl).toContain("bitcast<u32>(f32(current.x)) >> 16u");
+      expect(compiled.wgsl).toContain("bitcast<u32>(current.x) >> 16u");
 
       const semanticResult = runCompiledKernelSemanticReference(
         compiled,

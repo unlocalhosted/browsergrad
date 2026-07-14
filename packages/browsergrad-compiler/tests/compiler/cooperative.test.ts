@@ -2412,6 +2412,28 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("group__bg_group_rank: i32, group__bg_group_size: i32");
     });
 
+  it("binds cooperative value helpers to a direct readonly storage root", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ float2 reduce_pair(cg::thread_block_tile<32>& warp, const float* input) {
+  float value = input[warp.thread_rank()];
+  float total = cg::reduce(warp, value, cg::plus<float>{});
+  return make_float2(total, value);
+}
+__global__ void cooperativeValue(float* out, const float* input) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+  float2 value = reduce_pair(warp, input);
+  out[warp.thread_rank()] = value.x;
+}`, {
+      features: { "shader-f16": true, subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("fn reduce_pair(warp__bg_group_rank: i32, warp__bg_group_size: i32");
+    expect(compiled.wgsl).toContain("input[u32(warp__bg_group_rank)]");
+  });
+
   it("lowers early returns before later barriers into active-lane guards", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void earlyReturnBarrier(float *x, int N) {
@@ -3435,6 +3457,39 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("subgroupAdd((acc + x[u32(lane)]))");
       expect(compiled.wgsl).not.toContain("bg_subgroup_loop_active_");
       expect(compiled.wgsl).not.toContain("bg_semantic_subgroup_loop_budget_scratch");
+    });
+
+  it("reconverges nested barrier loops with pure scalar helper bounds and lane breaks", () => {
+      const compiled = compileCudaLiteKernel(`
+  __device__ int ceil_div(int dividend, int divisor) {
+    return (dividend + divisor - 1) / divisor;
+  }
+  __global__ void subgroupNestedBarrierHelperLoop(float* x, float* out, int count) {
+    __shared__ float shared[4];
+    int lane = threadIdx.x;
+    int tiles = ceil_div(count, 2);
+    float total = 0.0f;
+    for (int outer = lane; outer < count; outer += 4) {
+      for (int tile = 0; tile < tiles; ++tile) {
+        if (tile * 2 + lane >= count) break;
+        shared[lane] = x[outer];
+        __syncthreads();
+        total += shared[0];
+        __syncthreads();
+      }
+      total = bg_subgroup_add(total);
+    }
+    out[lane] = total;
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [4, 1, 1],
+      });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("fn ceil_div(");
+      expect(compiled.wgsl).toContain("workgroupBarrier();");
+      expect(compiled.wgsl).toMatch(/bg_loop_active_\d+ = select\(bg_loop_active_\d+, false,/u);
+      expect(compiled.wgsl).toContain("subgroupAdd(select(0.0, total, bg_subgroup_loop_active_");
     });
 
   it("keeps cp.async fences and barriers unconditional in branchless subgroup loops", () => {

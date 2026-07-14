@@ -152,6 +152,24 @@ __global__ void vectorHelper(float* out, const float* inp) {
 }
 `;
 
+const MIXED_VECTOR_MEMORY_VIEW_HELPERS = `
+__device__ float4 ld_vec(const float* address) {
+  return *reinterpret_cast<const float4*>(address);
+}
+
+__device__ void st_vec(float* address, float4 value) {
+  *reinterpret_cast<float4*>(address) = value;
+}
+
+__global__ void mixedVectorStore(float* out) {
+  __shared__ float tile[2][4];
+  float4 value = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  st_vec(&tile[1][0], value);
+  float4 reloaded = ld_vec(&tile[1][0]);
+  st_vec(out, reloaded);
+}
+`;
+
 const COMPLEX_MULTIPLY = `
 __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -844,6 +862,41 @@ __global__ void subgroupUniformConstBound(float *x, float *out, int count) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs nested barrier loops with pure helper bounds and lane breaks on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__device__ int ceil_div(int dividend, int divisor) {
+  return (dividend + divisor - 1) / divisor;
+}
+__global__ void subgroupNestedBarrierHelperLoop(float* x, float* out, int count) {
+  __shared__ float shared[4];
+  int lane = threadIdx.x;
+  int tiles = ceil_div(count, 2);
+  float total = 0.0f;
+  for (int outer = lane; outer < count; outer += 4) {
+    for (int tile = 0; tile < tiles; ++tile) {
+      if (tile * 2 + lane >= count) break;
+      shared[lane] = x[outer];
+      __syncthreads();
+      total += shared[0];
+      __syncthreads();
+    }
+    total = bg_subgroup_add(total);
+  }
+  out[lane] = total;
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { x: new Float32Array([1, 2, 3, 4, 5, 6]), out: new Float32Array(4) },
+      scalars: { count: 6 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs subgroup scalar compatibility mode through real WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
@@ -1112,6 +1165,22 @@ __global__ void half2_shared_reduce(const half2 *input, half2 *out) {
     const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs mixed multi-rank shared and storage vector helpers through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernelForWebGpu(MIXED_VECTOR_MEMORY_VIEW_HELPERS, {
+      features: { "shader-f16": true, subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect([...expected.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
   it("runs compiled SAXPY over resident WebGPU buffers without forced readback", async () => {
@@ -5956,5 +6025,27 @@ __global__ void dynamicPointerArray(uint* storage) {
     expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
     expect([...expected.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
     expect([...actual.buffers.storage as Uint32Array]).toEqual([1, 0, 0, 7]);
+  });
+
+  it("runs direct local bf162 and uint bit reinterpret dereferences on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void local_bf162_bits(uint* bits, float* output) {
+  __nv_bfloat162 pair = __halves2bfloat162(__float2bfloat16(1.5f), __float2bfloat16(2.0f));
+  uint raw = *reinterpret_cast<uint*>(&pair);
+  __nv_bfloat162 roundtrip = *reinterpret_cast<__nv_bfloat162*>(&raw);
+  bits[0] = raw;
+  output[0] = roundtrip.x;
+  output[1] = roundtrip.y;
+}`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { bits: new Uint32Array(1), output: new Float32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect([...expected.buffers.bits as Uint32Array]).toEqual([0x40003fc0]);
+    expect([...actual.buffers.bits as Uint32Array]).toEqual([0x40003fc0]);
+    expect([...actual.buffers.output as Float32Array]).toEqual([1.5, 2]);
   });
 });

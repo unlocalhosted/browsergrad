@@ -477,9 +477,14 @@ export function lowerSemanticModelToKernelIr(
   );
   const localSpecializedFunctions = specializeLocalPointerFunctions(resolved.operations, specializedFunctions);
   const constantSpecializedFunctions = specializeConstantPointerFunctions(resolved.operations, localSpecializedFunctions);
-  const barrierFunctions = semanticIrBarrierFunctionNames(constantSpecializedFunctions);
-  const operations = promoteSemanticBarrierResultCalls(resolved.operations, barrierFunctions);
-  const functions = constantSpecializedFunctions.map((fn) => ({
+  const directStorageSpecialized = specializeCooperativeValueFunctionStorageRoots(
+    resolved.operations,
+    constantSpecializedFunctions,
+    semantic.params,
+  );
+  const barrierFunctions = semanticIrBarrierFunctionNames(directStorageSpecialized.functions);
+  const operations = promoteSemanticBarrierResultCalls(directStorageSpecialized.operations, barrierFunctions);
+  const functions = directStorageSpecialized.functions.map((fn) => ({
     ...fn,
     body: promoteSemanticBarrierResultCalls(fn.body, barrierFunctions),
   }));
@@ -1677,6 +1682,155 @@ function specializeConstantPointerFunctions(
   });
 }
 
+interface CooperativeValueStorageRootSpecialization {
+  readonly pointerIndexes: ReadonlySet<number>;
+  readonly roots: ReadonlyMap<string, SemanticPointerRewriteTarget>;
+}
+
+function specializeCooperativeValueFunctionStorageRoots(
+  operations: readonly SemanticKernelIrOperation[],
+  functions: readonly CudaLiteSemanticFunction[],
+  kernelParams: readonly CudaLiteSemanticSymbol[],
+): { readonly operations: readonly SemanticKernelIrOperation[]; readonly functions: readonly CudaLiteSemanticFunction[] } {
+  const directRoots = new Map(kernelParams
+    .filter((param) => param.pointer && param.addressSpace === "storage")
+    .map((param) => [semanticIdKey(semanticMemoryIdFromSymbol(param.id)), {
+      name: param.name,
+      id: semanticMemoryIdFromSymbol(param.id),
+    }] as const));
+  const calls = [
+    ...collectSemanticFunctionCalls(operations),
+    ...functions.flatMap((fn) => collectSemanticFunctionCalls(fn.body)),
+  ];
+  const specializations = new Map<string, CooperativeValueStorageRootSpecialization>();
+  for (const fn of functions) {
+    if (fn.returnType === "void" || !fn.params.some((param) => param.cooperativeGroupKind !== undefined)) continue;
+    const fnCalls = calls.filter((call) => call.callee === fn.name);
+    const pointerIndexes = new Set<number>();
+    const roots = new Map<string, SemanticPointerRewriteTarget>();
+    let compatible = fnCalls.length > 0;
+    for (const [index, param] of fn.params.entries()) {
+      if (!param.pointer) continue;
+      if (!param.constant || param.addressSpace !== "storage") {
+        compatible = false;
+        break;
+      }
+      const refs = fnCalls.map((call) => semanticIrPointerArgumentMemoryRef(call.args[index]!));
+      const root = refs[0];
+      const direct = root === undefined ? undefined : directRoots.get(semanticIdKey(root.baseId));
+      if (!root || !direct || !refs.every((ref) =>
+        ref?.addressSpace === "storage" &&
+        semanticIdsEqual(ref.baseId, root.baseId) &&
+        (ref.indices.length === 0 || ref.indices.length === 1 && isSemanticZeroLiteral(ref.indices[0]))
+      )) {
+        compatible = false;
+        break;
+      }
+      pointerIndexes.add(index);
+      roots.set(param.name, direct);
+      roots.set(semanticIdKey(semanticMemoryIdFromSymbol(param.id)), direct);
+    }
+    if (compatible && pointerIndexes.size > 0) specializations.set(fn.name, { pointerIndexes, roots });
+  }
+  if (specializations.size === 0) return { operations, functions };
+  return {
+    operations: rewriteSpecializedStorageValueCalls(operations, specializations),
+    functions: functions.map((fn) => {
+      const specialization = specializations.get(fn.name);
+      const body = specialization === undefined
+        ? fn.body
+        : rewriteSemanticPointerAddressSpace(fn.body, specialization.roots, "storage");
+      return {
+        ...fn,
+        ...(specialization === undefined ? {} : { params: fn.params.filter((_, index) => !specialization.pointerIndexes.has(index)) }),
+        body: rewriteSpecializedStorageValueCalls(body, specializations),
+      };
+    }),
+  };
+}
+
+function rewriteSpecializedStorageValueCalls(
+  operations: readonly SemanticKernelIrOperation[],
+  specializations: ReadonlyMap<string, CooperativeValueStorageRootSpecialization>,
+): readonly SemanticKernelIrOperation[] {
+  const expression = (value: SemanticExpression): SemanticExpression => rewriteSpecializedStorageValueExpression(value, specializations);
+  const memoryRef = (ref: SemanticMemoryRef): SemanticMemoryRef => ({ ...ref, indices: ref.indices.map(expression) });
+  return operations.map((operation): SemanticKernelIrOperation => {
+    switch (operation.kind) {
+      case "declare": return operation.init === undefined ? operation : { ...operation, init: expression(operation.init) };
+      case "dim3-declare": return { ...operation, args: operation.args.map(expression) };
+      case "load": return { ...operation, source: memoryRef(operation.source) };
+      case "store": return { ...operation, target: memoryRef(operation.target), value: expression(operation.value), reads: operation.reads.map(memoryRef) };
+      case "copy": return { ...operation, source: memoryRef(operation.source), target: memoryRef(operation.target) };
+      case "matrix-fill": return { ...operation, value: expression(operation.value) };
+      case "matrix-load": return { ...operation, source: memoryRef(operation.source), stride: expression(operation.stride) };
+      case "matrix-store": return { ...operation, target: memoryRef(operation.target), stride: expression(operation.stride) };
+      case "surface-write": return { ...operation, surface: expression(operation.surface), value: expression(operation.value), xBytes: expression(operation.xBytes), y: expression(operation.y), ...(operation.z === undefined ? {} : { z: expression(operation.z) }) };
+      case "surface-read-store": return { ...operation, target: expression(operation.target), surface: expression(operation.surface), xBytes: expression(operation.xBytes), y: expression(operation.y), ...(operation.z === undefined ? {} : { z: expression(operation.z) }) };
+      case "atomic": return { ...operation, ...(operation.target === undefined ? {} : { target: memoryRef(operation.target) }), args: operation.args.map(expression) };
+      case "call": {
+        const specialization = specializations.get(operation.callee);
+        return {
+          ...operation,
+          args: operation.args.map(expression).filter((_, index) => !specialization?.pointerIndexes.has(index)),
+          reads: operation.reads.map(memoryRef),
+        };
+      }
+      case "runtime-copy": return { ...operation, args: operation.args.map(expression) };
+      case "pool-allocate": return { ...operation, sizeBytes: expression(operation.sizeBytes) };
+      case "pointer-rebind": return { ...operation, source: memoryRef(operation.source) };
+      case "pointer-array-rebind": return { ...operation, slot: expression(operation.slot), source: memoryRef(operation.source) };
+      case "expression": return { ...operation, expression: expression(operation.expression) };
+      case "branch": return { ...operation, condition: expression(operation.condition), consequent: rewriteSpecializedStorageValueCalls(operation.consequent, specializations), alternate: rewriteSpecializedStorageValueCalls(operation.alternate, specializations) };
+      case "loop": return {
+        ...operation,
+        ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSpecializedStorageValueCalls([operation.init], specializations)[0]! : expression(operation.init) }),
+        ...(operation.condition === undefined ? {} : { condition: expression(operation.condition) }),
+        ...(operation.update === undefined ? {} : { update: expression(operation.update) }),
+        body: rewriteSpecializedStorageValueCalls(operation.body, specializations),
+        ...(operation.continuing === undefined ? {} : { continuing: rewriteSpecializedStorageValueCalls(operation.continuing, specializations) }),
+      };
+      case "device-launch": return { ...operation, launch: { ...operation.launch, grid: operation.launch.grid.map(expression), block: operation.launch.block.map(expression), args: operation.launch.args.map(expression) } };
+      case "inline-asm": return { ...operation, outputs: operation.outputs.map(expression), inputs: operation.inputs.map(expression) };
+      case "return": return operation.value === undefined ? operation : { ...operation, value: expression(operation.value) };
+      case "block": return { ...operation, body: rewriteSpecializedStorageValueCalls(operation.body, specializations) };
+      default: return operation;
+    }
+  });
+}
+
+function rewriteSpecializedStorageValueExpression(
+  expression: SemanticExpression,
+  specializations: ReadonlyMap<string, CooperativeValueStorageRootSpecialization>,
+): SemanticExpression {
+  switch (expression.kind) {
+    case "member": return { ...expression, object: rewriteSpecializedStorageValueExpression(expression.object, specializations) };
+    case "index": return { ...expression, target: rewriteSpecializedStorageValueExpression(expression.target, specializations), index: rewriteSpecializedStorageValueExpression(expression.index, specializations) };
+    case "call": {
+      const callee = rewriteSpecializedStorageValueExpression(expression.callee, specializations);
+      const specialization = callee.kind === "symbol" ? specializations.get(callee.name) : undefined;
+      return {
+        ...expression,
+        callee,
+        args: expression.args
+          .map((arg) => rewriteSpecializedStorageValueExpression(arg, specializations))
+          .filter((_, index) => !specialization?.pointerIndexes.has(index)),
+      };
+    }
+    case "texture-read": return { ...expression, texture: rewriteSpecializedStorageValueExpression(expression.texture, specializations), x: rewriteSpecializedStorageValueExpression(expression.x, specializations), y: rewriteSpecializedStorageValueExpression(expression.y, specializations), ...(expression.z === undefined ? {} : { z: rewriteSpecializedStorageValueExpression(expression.z, specializations) }) };
+    case "surface-read": return { ...expression, surface: rewriteSpecializedStorageValueExpression(expression.surface, specializations), xBytes: rewriteSpecializedStorageValueExpression(expression.xBytes, specializations), y: rewriteSpecializedStorageValueExpression(expression.y, specializations), ...(expression.z === undefined ? {} : { z: rewriteSpecializedStorageValueExpression(expression.z, specializations) }) };
+    case "cast": return { ...expression, expression: rewriteSpecializedStorageValueExpression(expression.expression, specializations) };
+    case "unary": return { ...expression, argument: rewriteSpecializedStorageValueExpression(expression.argument, specializations) };
+    case "binary": return { ...expression, left: rewriteSpecializedStorageValueExpression(expression.left, specializations), right: rewriteSpecializedStorageValueExpression(expression.right, specializations) };
+    case "conditional": return { ...expression, condition: rewriteSpecializedStorageValueExpression(expression.condition, specializations), consequent: rewriteSpecializedStorageValueExpression(expression.consequent, specializations), alternate: rewriteSpecializedStorageValueExpression(expression.alternate, specializations) };
+    case "assignment": return { ...expression, target: rewriteSpecializedStorageValueExpression(expression.target, specializations), value: rewriteSpecializedStorageValueExpression(expression.value, specializations) };
+    case "update": return { ...expression, argument: rewriteSpecializedStorageValueExpression(expression.argument, specializations) };
+    case "initializer": return { ...expression, elements: expression.elements.map((item) => rewriteSpecializedStorageValueExpression(item, specializations)) };
+    case "sequence": return { ...expression, expressions: expression.expressions.map((item) => rewriteSpecializedStorageValueExpression(item, specializations)) };
+    default: return expression;
+  }
+}
+
 function cloneMixedLocalPointerFunctionOverloads(
   operations: readonly SemanticKernelIrOperation[],
   functions: readonly CudaLiteSemanticFunction[],
@@ -1809,8 +1963,9 @@ function cloneMixedSharedPointerFunctionOverloads(
         const roots = refs.map((ref) => ref.base);
         const dimensions = roots.map((root) => sharedMemoryDimensions.get(root));
         const carriers = roots.map((root) => sharedMemoryValueTypes.get(root));
-        const compatible = dimensions.every((value) => value !== undefined && value.length <= 1) &&
-          sameSemanticDimensions(dimensions as readonly (readonly number[])[]) &&
+        const flatDimensions = dimensions.map((value) => value === undefined || value.length <= 1 ? value : [totalElements(value)]);
+        const compatible = flatDimensions.every((value) => value !== undefined) &&
+          sameSemanticDimensions(flatDimensions as readonly (readonly number[])[]) &&
           carriers.every((value) => value !== undefined && param.valueType !== undefined && sizeofCudaType(value) === sizeofCudaType(param.valueType));
         if (!compatible) return [];
         const name = `${param.name}__bg_shared_ptr`;
@@ -1823,7 +1978,7 @@ function cloneMixedSharedPointerFunctionOverloads(
           id,
           name,
           addressSpace: "shared",
-          dimensions: dimensions[0]!,
+          dimensions: flatDimensions[0]!,
           ...optionalPointerCarrierValueType(carriers[0]),
         };
         rewrites.set(param.name, { name, id: semanticMemoryIdFromSymbol(id) });
@@ -2032,14 +2187,18 @@ interface SemanticPointerRewriteTarget {
 function rewriteSemanticPointerAddressSpace(
   operations: readonly SemanticKernelIrOperation[],
   names: ReadonlyMap<string, SemanticPointerRewriteTarget>,
-  addressSpace: "shared" | "constant" | "local" = "shared",
+  addressSpace: "shared" | "constant" | "local" | "storage" = "shared",
 ): readonly SemanticKernelIrOperation[] {
   return operations.map((operation) => {
     if (operation.kind === "store") return { ...operation, target: rewriteSemanticMemoryRef(operation.target, names, addressSpace), value: rewriteSemanticExpressionAddressSpace(operation.value, names, addressSpace), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names, addressSpace)) };
     if (operation.kind === "load") return { ...operation, source: rewriteSemanticMemoryRef(operation.source, names, addressSpace) };
     if (operation.kind === "atomic") return { ...operation, ...(operation.target === undefined ? {} : { target: rewriteSemanticMemoryRef(operation.target, names, addressSpace) }), args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names, addressSpace)) };
     if (operation.kind === "call") return { ...operation, args: operation.args.map((arg) => rewriteSemanticExpressionAddressSpace(arg, names, addressSpace)), reads: operation.reads.map((ref) => rewriteSemanticMemoryRef(ref, names, addressSpace)) };
-    if (operation.kind === "declare") return operation.init === undefined ? operation : { ...operation, init: rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) };
+    if (operation.kind === "declare") return {
+      ...operation,
+      target: rewriteSemanticPointerSymbol(operation.target, names, addressSpace),
+      ...(operation.init === undefined ? {} : { init: rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) }),
+    };
     if (operation.kind === "expression") return { ...operation, expression: rewriteSemanticExpressionAddressSpace(operation.expression, names, addressSpace) };
     if (operation.kind === "branch") return { ...operation, condition: rewriteSemanticExpressionAddressSpace(operation.condition, names, addressSpace), consequent: rewriteSemanticPointerAddressSpace(operation.consequent, names, addressSpace), alternate: rewriteSemanticPointerAddressSpace(operation.alternate, names, addressSpace) };
     if (operation.kind === "loop") return { ...operation, ...(operation.init === undefined ? {} : { init: isSemanticKernelIrOperation(operation.init) ? rewriteSemanticPointerAddressSpace([operation.init], names, addressSpace)[0]! : rewriteSemanticExpressionAddressSpace(operation.init, names, addressSpace) }), ...(operation.condition === undefined ? {} : { condition: rewriteSemanticExpressionAddressSpace(operation.condition, names, addressSpace) }), ...(operation.update === undefined ? {} : { update: rewriteSemanticExpressionAddressSpace(operation.update, names, addressSpace) }), body: rewriteSemanticPointerAddressSpace(operation.body, names, addressSpace), ...(operation.continuing === undefined ? {} : { continuing: rewriteSemanticPointerAddressSpace(operation.continuing, names, addressSpace) }) };
@@ -2049,8 +2208,8 @@ function rewriteSemanticPointerAddressSpace(
   });
 }
 
-function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<string, SemanticPointerRewriteTarget>, addressSpace: "shared" | "constant" | "local"): SemanticMemoryRef {
-  const target = names.get(ref.base);
+function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<string, SemanticPointerRewriteTarget>, addressSpace: "shared" | "constant" | "local" | "storage"): SemanticMemoryRef {
+  const target = semanticPointerRewriteTarget(names, ref.base, ref.baseId);
   return {
     ...ref,
     ...(target !== undefined && ref.addressSpace === "storage" ? { baseId: target.id, base: target.name, addressSpace } : {}),
@@ -2058,7 +2217,33 @@ function rewriteSemanticMemoryRef(ref: SemanticMemoryRef, names: ReadonlyMap<str
   };
 }
 
-function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, SemanticPointerRewriteTarget>, addressSpace: "shared" | "constant" | "local"): SemanticExpression {
+function rewriteSemanticPointerSymbol(
+  symbol: CudaLiteSemanticSymbol,
+  names: ReadonlyMap<string, SemanticPointerRewriteTarget>,
+  addressSpace: "shared" | "constant" | "local" | "storage",
+): CudaLiteSemanticSymbol {
+  const target = symbol.pointerRoot === undefined
+    ? undefined
+    : semanticPointerRewriteTarget(names, symbol.name, symbol.pointerRoot);
+  if (target === undefined || symbol.pointerAddressSpace !== "storage") return symbol;
+  return {
+    ...symbol,
+    pointerRoot: target.id,
+    pointerAddressSpace: addressSpace,
+    ...(symbol.pointerBaseIndices === undefined ? {} : { pointerBaseIndices: symbol.pointerBaseIndices.map((index) => rewriteSemanticExpressionAddressSpace(index, names, addressSpace)) }),
+    ...(symbol.pointerValid === undefined ? {} : { pointerValid: rewriteSemanticExpressionAddressSpace(symbol.pointerValid, names, addressSpace) }),
+  };
+}
+
+function semanticPointerRewriteTarget(
+  names: ReadonlyMap<string, SemanticPointerRewriteTarget>,
+  name: string,
+  id: SemanticMemoryId | SemanticSymbolId,
+): SemanticPointerRewriteTarget | undefined {
+  return names.get(name) ?? names.get(semanticIdKey(id));
+}
+
+function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, names: ReadonlyMap<string, SemanticPointerRewriteTarget>, addressSpace: "shared" | "constant" | "local" | "storage"): SemanticExpression {
   switch (expression.kind) {
     case "pointer-valid": {
       const target = names.get(expression.pointer);
@@ -2067,7 +2252,7 @@ function rewriteSemanticExpressionAddressSpace(expression: SemanticExpression, n
         : { ...expression, pointerId: semanticSymbolIdFromMemory(target.id), pointer: target.name };
     }
     case "symbol": {
-      const target = names.get(expression.name);
+      const target = semanticPointerRewriteTarget(names, expression.name, expression.id);
       return target !== undefined && expression.addressSpace === "storage"
         ? { ...expression, id: semanticSymbolIdFromMemory(target.id), name: target.name, addressSpace }
         : expression;
@@ -4247,6 +4432,8 @@ function lowerExpression(
         span: expression.span,
       };
     case "unary": {
+      const localBf162BitsCast = expression.operator === "*" ? directLocalBf162BitsCastExpression(expression, scope) : undefined;
+      if (localBf162BitsCast) return localBf162BitsCast;
       const aliased = expression.operator === "*" ? localPointerAliasDerefExpression(expression.argument, scope, expression.span) : undefined;
       if (aliased) return aliased;
       const argument = lowerExpression(expression.argument, scope);
@@ -4397,6 +4584,37 @@ function directLocalScalarPointerIndexExpression(
     symbol.valueType !== expression.target.valueType
   ) return undefined;
   return semanticSymbolExpression(symbol, expression.span);
+}
+
+function directLocalBf162BitsCastExpression(
+  expression: Extract<CudaLiteExpression, { readonly kind: "unary" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): SemanticExpression | undefined {
+  const pointer = expression.argument;
+  if (
+    pointer.kind !== "cast" || !pointer.pointer ||
+    pointer.expression.kind !== "unary" || pointer.expression.operator !== "&" ||
+    pointer.expression.argument.kind !== "identifier"
+  ) return undefined;
+  const local = scope.get(pointer.expression.argument.name);
+  if (!local || local.kind !== "local" || local.pointer || local.dimensions.length !== 0) return undefined;
+  const bf162ToUint = local.valueType === "bf162" && pointer.valueType === "uint";
+  const uintToBf162 = local.valueType === "uint" && pointer.valueType === "bf162";
+  if (!bf162ToUint && !uintToBf162) return undefined;
+  const name = bf162ToUint ? "__bfloat162_as_uint" : "__uint_as_bfloat162";
+  return {
+    kind: "call",
+    callee: {
+      kind: "symbol",
+      id: createBuiltinSemanticSymbolId(name),
+      name,
+      addressSpace: "builtin",
+      span: pointer.span,
+    },
+    args: [semanticSymbolExpression(local, pointer.expression.argument.span)],
+    valueType: bf162ToUint ? "uint" : "bf162",
+    span: expression.span,
+  };
 }
 
 function semanticCooperativeShuffleCall(
@@ -5674,7 +5892,7 @@ function localPointerAliasForInitializer(
   if (expression.kind === "conditional") {
     const consequent = localPointerAliasForInitializer(expression.consequent, scope);
     const alternate = localPointerAliasForInitializer(expression.alternate, scope);
-    const condition = lowerExpression(expression.condition, scope);
+    const condition = lowerConditionExpression(expression.condition, scope);
     const consequentNull = isNullPointerLiteral(expression.consequent);
     const alternateNull = isNullPointerLiteral(expression.alternate);
     const nonNull = consequent ?? alternate;

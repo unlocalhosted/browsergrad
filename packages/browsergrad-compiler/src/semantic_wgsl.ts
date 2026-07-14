@@ -2192,6 +2192,17 @@ function emitSemanticPredicatedOperations(
         continue;
       }
       const valueType = operation.target.valueType;
+      // Function arrays must outlive the divergent source branch when a later
+      // collective reads or writes their lanes. WGSL gives a function-scope
+      // declaration its zero value, so an uninitialized array or `{}`
+      // initializer can be hoisted safely. Any non-zero array initializer
+      // remains rejected until it has an element-wise predicated lowering.
+      if (operation.target.addressSpace === "local" && !operation.target.pointer && operation.target.dimensions.length > 0 &&
+        (operation.init === undefined || operation.init.kind === "initializer" && operation.init.elements.length === 0)) {
+        const { init: _init, ...declaration } = operation;
+        lines.push(...emitSemanticOperation(declaration, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+        continue;
+      }
       if (operation.target.addressSpace === "local" && !operation.target.pointer && operation.init === undefined) {
         lines.push(...emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
         continue;
