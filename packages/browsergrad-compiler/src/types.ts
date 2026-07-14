@@ -58,11 +58,22 @@ export interface CudaLiteDiagnostic {
 
 export class CudaLiteCompilerError extends Error {
   readonly diagnostics: readonly CudaLiteDiagnostic[];
+  /**
+   * The CUDA-lite source that produced these diagnostics, when the failure
+   * originated from compilation. Runtime-only validation errors do not always
+   * have source available.
+   */
+  readonly source?: string;
 
-  constructor(message: string, diagnostics: readonly CudaLiteDiagnostic[]) {
+  constructor(
+    message: string,
+    diagnostics: readonly CudaLiteDiagnostic[],
+    source?: string,
+  ) {
     super(message);
     this.name = "CudaLiteCompilerError";
     this.diagnostics = diagnostics;
+    if (source !== undefined) this.source = source;
   }
 }
 
@@ -531,6 +542,17 @@ export interface KernelThreadTrace {
   readonly writes: readonly KernelMemoryAccess[];
   readonly sharedReads: readonly KernelMemoryAccess[];
   readonly sharedWrites: readonly KernelMemoryAccess[];
+}
+
+/** Controls optional memory-access tracing in the CPU reference executor. */
+export type ReferenceTraceMode = "full" | "none";
+
+export interface RunCompiledKernelReferenceOptions {
+  /**
+   * `"full"` preserves the teaching/debugging trace (the default). `"none"`
+   * avoids per-thread trace allocation for faster numerical-only validation.
+   */
+  readonly trace?: ReferenceTraceMode;
 }
 
 export interface ReferenceKernelResult {

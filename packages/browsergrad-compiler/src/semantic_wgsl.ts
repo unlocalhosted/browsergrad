@@ -9,7 +9,6 @@ import type {
   SemanticExpression,
   SemanticKernelIrModule,
   SemanticKernelIrOperation,
-  SemanticMatrixTileRef,
   SemanticMemoryRef,
 } from "./semantic_ir_types.js";
 import {
@@ -45,8 +44,6 @@ import { collectSemanticWgslPoolResources, emitSemanticWgslPoolDeclarations, emi
 import {
   semanticBf162CallArgumentsSupported,
   isSemanticHalf2BooleanComparisonCall,
-  isSemanticHalf2ComparisonCall,
-  isSemanticHalf2MaskComparisonCall,
   isSemanticFloatVectorType,
   semanticHalf2CallArgumentsSupported,
   semanticVectorAtCallSupported as semanticVectorAtCallContractSupported,
@@ -129,12 +126,8 @@ import {
   cudaLiteTotalElements as totalElements,
 } from "./cuda_lite_values.js";
 import { cudaAddressSpacePredicateKind } from "./cuda_pointer_calls.js";
-import {
-  isMatrixTileByteValueType,
-  matrixTileElementCount,
-  type MatrixTileLayout,
-  type MatrixTileResolvedSpec,
-} from "./matrix_tiles.js";
+import { createSemanticWgslHalfIntrinsicEmitter } from "./semantic_wgsl_half_intrinsics.js";
+import { emitSemanticWgslMatrixOperation } from "./semantic_wgsl_matrix.js";
 import {
   cudaArithmeticReduceOpForCall,
   cudaVoteOpForCall,
@@ -280,7 +273,7 @@ import {
   semanticCooperativeGroupSizeParamName,
 } from "./semantic_cooperative_groups.js";
 import { emitSemanticNumericHelpers } from "./semantic_wgsl_numeric_helpers.js";
-import { createSemanticBfloatScalarEmitter, roundTypedBf16, semanticTypedIsNan } from "./semantic_wgsl_bfloat_scalar.js";
+import { createSemanticBfloatScalarEmitter, roundTypedBf16 } from "./semantic_wgsl_bfloat_scalar.js";
 import { createSemanticTypedIntrinsicEmitter } from "./semantic_wgsl_typed_intrinsics.js";
 import { createSemanticWgslAtomicAnalysis, semanticIntegerLoopAtomicHelperName, semanticIntViewAtomicAddressSpaces } from "./semantic_wgsl_atomic_analysis.js";
 import { createSemanticSubgroupControlEmitter, semanticSubgroupControlDeclarations, semanticSubgroupLoopControlIsWorkgroupUniform } from "./semantic_wgsl_subgroup_control.js";
@@ -369,6 +362,16 @@ const {
 });
 
 const emitSemanticTypedBfloatScalarCall = createSemanticBfloatScalarEmitter({ emitSemanticExpressionAs });
+
+const {
+  emitSemanticTypedBf16Call,
+  emitSemanticTypedHalfCall,
+} = createSemanticWgslHalfIntrinsicEmitter({
+  emitExpression: emitSemanticExpression,
+  emitExpressionAs: emitSemanticExpressionAs,
+  emitBfloatScalarCall: emitSemanticTypedBfloatScalarCall,
+  semanticExpressionWgslType,
+});
 
 const {
   semanticFunctionSharedPointerAtomicParams,
@@ -1668,6 +1671,7 @@ function semanticWgslOperationsHaveObservableSideEffects(
 ): boolean {
   return operations.some((operation) => {
     if (operation.kind === "store" || operation.kind === "atomic" || operation.kind === "copy" ||
+      operation.kind === "pointer-rebind" || operation.kind === "pointer-array-rebind" ||
       operation.kind === "surface-write" || operation.kind === "surface-read-store" ||
       operation.kind === "matrix-store" || operation.kind === "device-launch") return true;
     if (operation.kind === "call") {
@@ -1705,6 +1709,16 @@ function emitSemanticLocalPointerDeclaration(
   indentLevel: number,
   options: EmitSemanticKernelIrWgslOptions,
 ): readonly string[] {
+  if (operation.target.pointerRuntimeState === true && operation.target.dimensions.length === 1) {
+    const extent = operation.target.dimensions[0]!;
+    const prefix = "  ".repeat(indentLevel);
+    const buffer = nameFor(semanticPointerBufferParamName(operation.target.name), names);
+    const base = nameFor(semanticPointerBaseParamName(operation.target.name), names);
+    return [
+      `${prefix}var ${buffer}: array<u32, ${extent}>;`,
+      `${prefix}var ${base}: array<u32, ${extent}>;`,
+    ];
+  }
   const completePointerArray = operation.target.dimensions.length === 1 &&
     operation.target.pointerArrayAliases?.every((alias) => alias !== undefined);
   if (completePointerArray && operation.target.pointerArrayAliases!.every((alias) => semanticPointerAliasStorageBacked(alias!, ir))) {
@@ -1820,6 +1834,7 @@ function semanticStoragePointerArrayDeclarationForRef(
   ref: SemanticMemoryRef,
 ): Extract<SemanticKernelIrOperation, { readonly kind: "declare" }> | undefined {
   const declaration = semanticPointerArrayDeclarationForRef(ir, ref);
+  if (declaration?.target.pointerRuntimeState === true) return declaration;
   return declaration?.target.pointerArrayAliases?.every((alias) => alias !== undefined && semanticPointerAliasStorageBacked(alias, ir))
     ? declaration
     : undefined;
@@ -1833,7 +1848,7 @@ function semanticPointerArrayDeclarationForRef(
   return semanticAllLocalDeclarations(ir).find((operation) =>
     semanticIdsEqual(operation.target.id, ref.baseId) &&
     operation.target.dimensions.length === 1 &&
-    operation.target.pointerArrayAliases?.every((alias) => alias !== undefined),
+    (operation.target.pointerRuntimeState === true || operation.target.pointerArrayAliases?.every((alias) => alias !== undefined)),
   );
 }
 
@@ -1924,13 +1939,15 @@ function emitSemanticOperation(
     case "copy-fence":
       return [`${prefix}// cp.async fence omitted: ${operation.callee}`];
     case "matrix-fill":
-      return emitSemanticMatrixFill(operation, ir, names, indentLevel, options, textureSpecializations);
     case "matrix-load":
-      return emitSemanticMatrixLoad(operation, ir, names, indentLevel, options, textureSpecializations);
     case "matrix-mma":
-      return emitSemanticMatrixMma(operation, ir, names, indentLevel, options, textureSpecializations);
     case "matrix-store":
-      return emitSemanticMatrixStore(operation, ir, names, indentLevel, options, textureSpecializations);
+      return emitSemanticWgslMatrixOperation(operation, {
+        emitExpression: (expression) => emitSemanticExpression(expression, ir, names, options, textureSpecializations).code,
+        emitMemoryRead: (ref) => emitSemanticMemoryRead(ref, ir, names, options),
+        emitMemoryWrite: (ref, value) => emitSemanticMemoryWrite(ref, value, ir, names, options),
+        nameFor: (name) => nameFor(name, names),
+      }, indentLevel);
     case "surface-write":
       return emitSemanticSurfaceWrite(operation, ir, names, indentLevel, options, textureSpecializations);
     case "surface-read-store":
@@ -1943,6 +1960,8 @@ function emitSemanticOperation(
       return emitSemanticPoolAllocation(operation, ir, names, indentLevel, options);
     case "pointer-rebind":
       return emitSemanticPointerRebind(operation, ir, names, indentLevel, options);
+    case "pointer-array-rebind":
+      return emitSemanticPointerArrayRebind(operation, ir, names, indentLevel, options);
     case "expression":
       return emitSemanticExpressionStatement(operation.expression, ir, names, indentLevel, options, textureSpecializations);
     case "branch": {
@@ -2031,6 +2050,25 @@ function emitSemanticPointerRebind(
   ];
 }
 
+function emitSemanticPointerArrayRebind(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "pointer-array-rebind" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions,
+): readonly string[] {
+  const bufferId = semanticStoragePointerBufferId(operation.source.base, ir);
+  if (bufferId === undefined) throw semanticWgslError(`unknown pointer-array rebind storage root '${operation.source.base}'`, operation.source.span);
+  const prefix = "  ".repeat(indentLevel);
+  const slot = emitSemanticExpressionAs(operation.slot, ir, names, "u32", options).code;
+  const buffer = nameFor(semanticPointerBufferParamName(operation.target.name), names);
+  const base = nameFor(semanticPointerBaseParamName(operation.target.name), names);
+  return [
+    `${prefix}${buffer}[${slot}] = ${bufferId}u;`,
+    `${prefix}${base}[${slot}] = ${emitSemanticPointerArgBaseIndex(operation.source, ir, names, options)};`,
+  ];
+}
+
 function emitSemanticPoolAllocation(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "pool-allocate" }>,
   ir: SemanticKernelIrModule,
@@ -2055,157 +2093,6 @@ function emitSemanticPoolAllocation(
     `${prefix}${buffer} = select(0xffffffffu, ${bufferId}u, ${allocation} != 0u);`,
     `${prefix}${base} = select(0u, (${allocation} - 1u) / ${elementBytes}u, ${allocation} != 0u);`,
   ];
-}
-
-function emitSemanticMatrixFill(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-fill" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  indentLevel: number,
-  options: EmitSemanticKernelIrWgslOptions,
-  textureSpecializations: SemanticTextureDescriptorSpecializations,
-): readonly string[] {
-  const prefix = "  ".repeat(indentLevel);
-  const index = `bg_wmma_i_${operation.span.start}`;
-  const value = emitSemanticMatrixCoerce(emitSemanticExpression(operation.value, ir, names, options, textureSpecializations).code, operation.fragment.spec);
-  return [
-    `${prefix}for (var ${index}: u32 = 0u; ${index} < ${matrixTileElementCount(operation.fragment.spec)}u; ${index} = ${index} + 1u) {`,
-    `${prefix}  ${emitSemanticMatrixAccess(operation.fragment, index, ir, names, options)} = ${value};`,
-    `${prefix}}`,
-  ];
-}
-
-function emitSemanticMatrixLoad(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-load" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  indentLevel: number,
-  options: EmitSemanticKernelIrWgslOptions,
-  _textureSpecializations: SemanticTextureDescriptorSpecializations,
-): readonly string[] {
-  const prefix = "  ".repeat(indentLevel);
-  const row = `bg_wmma_row_${operation.span.start}`;
-  const col = `bg_wmma_col_${operation.span.start}`;
-  const [rows, cols] = semanticWgslMatrixRowsCols(operation.fragment.spec);
-  const offset = semanticWgslMatrixOffset(row, col, operation.stride, operation.layout, operation.span);
-  const read = emitSemanticMemoryRead(semanticWgslMemoryRefOffset(operation.source, offset), ir, names, options);
-  const tileIndex = `(${row} * ${cols}u + ${col})`;
-  return [
-    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${rows}u; ${row} = ${row} + 1u) {`,
-    `${prefix}  for (var ${col}: u32 = 0u; ${col} < ${cols}u; ${col} = ${col} + 1u) {`,
-    `${prefix}    ${emitSemanticMatrixAccess(operation.fragment, tileIndex, ir, names, options)} = ${emitSemanticMatrixCoerce(read, operation.fragment.spec)};`,
-    `${prefix}  }`,
-    `${prefix}}`,
-  ];
-}
-
-function emitSemanticMatrixMma(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-mma" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  indentLevel: number,
-  options: EmitSemanticKernelIrWgslOptions,
-  _textureSpecializations: SemanticTextureDescriptorSpecializations,
-): readonly string[] {
-  const prefix = "  ".repeat(indentLevel);
-  const row = `bg_wmma_row_${operation.span.start}`;
-  const col = `bg_wmma_col_${operation.span.start}`;
-  const kk = `bg_wmma_k_${operation.span.start}`;
-  const sum = `bg_wmma_sum_${operation.span.start}`;
-  const { destination: dst, a, b, accumulator: c } = operation;
-  const dstIndex = `(${row} * ${dst.spec.n}u + ${col})`;
-  const aIndex = `(${row} * ${dst.spec.k}u + ${kk})`;
-  const bIndex = `(${kk} * ${dst.spec.n}u + ${col})`;
-  const integer = dst.spec.tileValueType === "s32" && isMatrixTileByteValueType(a.spec.tileValueType) && isMatrixTileByteValueType(b.spec.tileValueType);
-  const cValue = emitSemanticMatrixAccess(c, dstIndex, ir, names, options);
-  const aValue = emitSemanticMatrixAccess(a, aIndex, ir, names, options);
-  const bValue = emitSemanticMatrixAccess(b, bIndex, ir, names, options);
-  const init = integer ? emitSemanticMatrixInteger(cValue, c.spec) : `f32(${cValue})`;
-  const product = integer
-    ? `(${emitSemanticMatrixInteger(aValue, a.spec)} * ${emitSemanticMatrixInteger(bValue, b.spec)})`
-    : `(f32(${aValue}) * f32(${bValue}))`;
-  return [
-    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${dst.spec.m}u; ${row} = ${row} + 1u) {`,
-    `${prefix}  for (var ${col}: u32 = 0u; ${col} < ${dst.spec.n}u; ${col} = ${col} + 1u) {`,
-    `${prefix}    var ${sum}: ${integer ? "i32" : "f32"} = ${init};`,
-    `${prefix}    for (var ${kk}: u32 = 0u; ${kk} < ${dst.spec.k}u; ${kk} = ${kk} + 1u) {`,
-    `${prefix}      ${sum} = ${sum} + ${product};`,
-    `${prefix}    }`,
-    `${prefix}    ${emitSemanticMatrixAccess(dst, dstIndex, ir, names, options)} = ${emitSemanticMatrixCoerce(sum, dst.spec)};`,
-    `${prefix}  }`,
-    `${prefix}}`,
-  ];
-}
-
-function emitSemanticMatrixStore(
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "matrix-store" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  indentLevel: number,
-  options: EmitSemanticKernelIrWgslOptions,
-  _textureSpecializations: SemanticTextureDescriptorSpecializations,
-): readonly string[] {
-  const prefix = "  ".repeat(indentLevel);
-  const row = `bg_wmma_row_${operation.span.start}`;
-  const col = `bg_wmma_col_${operation.span.start}`;
-  const [rows, cols] = semanticWgslMatrixRowsCols(operation.fragment.spec);
-  const offset = semanticWgslMatrixOffset(row, col, operation.stride, operation.layout, operation.span);
-  const target = semanticWgslMemoryRefOffset(operation.target, offset);
-  const tileIndex = `(${row} * ${cols}u + ${col})`;
-  const value = emitSemanticMatrixAccess(operation.fragment, tileIndex, ir, names, options);
-  return [
-    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${rows}u; ${row} = ${row} + 1u) {`,
-    `${prefix}  for (var ${col}: u32 = 0u; ${col} < ${cols}u; ${col} = ${col} + 1u) {`,
-    `${prefix}    ${emitSemanticMemoryWrite(target, value, ir, names, options)};`,
-    `${prefix}  }`,
-    `${prefix}}`,
-  ];
-}
-
-function emitSemanticMatrixAccess(ref: SemanticMatrixTileRef, index: string, ir: SemanticKernelIrModule, names: ReadonlyMap<string, string>, options: EmitSemanticKernelIrWgslOptions): string {
-  const terms = ref.indices.map((item, axis) => {
-    const stride = ref.arrayDimensions.slice(axis + 1).reduce((product, value) => product * value, 1) * matrixTileElementCount(ref.spec);
-    const emitted = `u32(${emitSemanticExpression(item, ir, names, options).code})`;
-    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
-  });
-  const base = terms.length === 0 ? undefined : terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
-  return `${nameFor(ref.base, names)}[${base ? `(${base} + ${index})` : index}]`;
-}
-
-function semanticWgslMatrixOffset(row: string, col: string, stride: SemanticExpression, layout: MatrixTileLayout, span: SourceSpan): SemanticExpression {
-  const rowExpression = semanticWgslGeneratedSymbol(row, span);
-  const colExpression = semanticWgslGeneratedSymbol(col, span);
-  const major = layout === "col_major" || layout === "mem_col_major" ? colExpression : rowExpression;
-  const minor = layout === "col_major" || layout === "mem_col_major" ? rowExpression : colExpression;
-  return { kind: "binary", operator: "+", left: { kind: "binary", operator: "*", left: major, right: stride, valueType: "uint", span }, right: minor, valueType: "uint", span };
-}
-
-function semanticWgslGeneratedSymbol(name: string, span: SourceSpan): SemanticExpression {
-  return { kind: "symbol", id: createGeneratedSemanticSymbolId(name, span), name, valueType: "uint", addressSpace: "local", span };
-}
-
-function semanticWgslMemoryRefOffset(ref: SemanticMemoryRef, offset: SemanticExpression): SemanticMemoryRef {
-  const scaled = ref.pointerBaseUnitBytes === undefined || ref.pointerBaseUnitBytes === 1
-    ? offset
-    : { kind: "binary", operator: "*", left: offset, right: { kind: "literal", literalKind: "number", value: ref.pointerBaseUnitBytes, valueType: "uint", span: ref.span }, valueType: "uint", span: ref.span } satisfies SemanticExpression;
-  if (ref.indices.length === 0) return { ...ref, indices: [scaled] };
-  const last = ref.indices[ref.indices.length - 1]!;
-  return { ...ref, indices: [...ref.indices.slice(0, -1), { kind: "binary", operator: "+", left: last, right: scaled, valueType: "uint", span: ref.span }] };
-}
-
-function semanticWgslMatrixRowsCols(spec: MatrixTileResolvedSpec): readonly [number, number] {
-  return spec.role === "matrix_a" ? [spec.m, spec.k] : spec.role === "matrix_b" ? [spec.k, spec.n] : [spec.m, spec.n];
-}
-
-function emitSemanticMatrixCoerce(value: string, spec: MatrixTileResolvedSpec): string {
-  if (spec.tileValueType === "u8") return `(u32(${value}) & 255u)`;
-  if (spec.tileValueType === "s8") return `(i32((u32(${value}) & 255u) << 24u) >> 24)`;
-  if (spec.tileValueType === "s32") return `i32(${value})`;
-  return `f32(${value})`;
-}
-
-function emitSemanticMatrixInteger(value: string, spec: MatrixTileResolvedSpec): string {
-  return spec.tileValueType === "u8" ? `i32(u32(${value}) & 255u)` : spec.tileValueType === "s8" ? `(i32((u32(${value}) & 255u) << 24u) >> 24)` : `i32(${value})`;
 }
 
 function emitSemanticInlineMma(
@@ -4812,493 +4699,6 @@ function emitSemanticTypedPtxIntegerCall(
     result = rows.reduce((left, right) => emitTypedWgslBinary("|", left, right, expression.span));
   }
   return expression.valueType === "int" ? createTypedWgslBitcast("i32", result, expression.span) : result;
-}
-
-function emitSemanticTypedBf16Call(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions,
-  textureSpecializations: SemanticTextureDescriptorSpecializations,
-): TypedWgslExpression | undefined {
-  if (expression.callee.kind !== "symbol") return undefined;
-  const name = expression.callee.name;
-  const firstArg = expression.args[0];
-  if (firstArg === undefined) return undefined;
-  const isPair = semanticExpressionVectorValueType(firstArg, ir.functions) === "bf162";
-  const scalar = (arg: SemanticExpression): TypedWgslExpression => emitSemanticExpressionAs(arg, ir, names, "f32", options, textureSpecializations);
-  const vector = (arg: SemanticExpression): TypedWgslExpression => emitSemanticExpression(arg, ir, names, options, textureSpecializations);
-  const roundPair = (value: TypedWgslExpression): TypedWgslExpression => createTypedWgslConstructor(
-    "vec2<f32>",
-    [
-      roundTypedBf16(createTypedWgslMemberAccess(value, "x", "f32", expression.span), expression.span),
-      roundTypedBf16(createTypedWgslMemberAccess(value, "y", "f32", expression.span), expression.span),
-    ],
-    expression.span,
-  );
-  if (isPair && ["__hadd2", "__hadd2_rn", "__hsub2", "__hsub2_rn", "__hmul2", "__hmul2_rn", "__h2div"].includes(name)) {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const operator = name.includes("add") ? "+" : name.includes("sub") ? "-" : name === "__h2div" ? "/" : "*";
-    return roundPair(emitTypedWgslBinary(operator, vector(left), vector(right), expression.span));
-  }
-  if (isPair && isSemanticHalf2ComparisonCall(name)) {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const lhs = vector(left);
-    const rhs = vector(right);
-    const normalized = name.replace(/_mask$/u, "").replace(/^__hb/u, "__h");
-    const operator = normalized === "__heq2" || normalized === "__hequ2" ? "=="
-      : normalized === "__hne2" || normalized === "__hneu2" ? "!="
-      : normalized === "__hgt2" || normalized === "__hgtu2" ? ">"
-      : normalized === "__hge2" || normalized === "__hgeu2" ? ">="
-      : normalized === "__hlt2" || normalized === "__hltu2" ? "<" : "<=";
-    const base = emitTypedWgslBinary(operator, lhs, rhs, expression.span);
-    const unordered = emitTypedWgslBinary("|", semanticTypedIsNan(lhs, expression.span), semanticTypedIsNan(rhs, expression.span), expression.span);
-    const predicate = normalized.includes("u2")
-      ? emitTypedWgslBinary("|", unordered, base, expression.span)
-      : emitTypedWgslBinary("&", emitTypedWgslUnary("!", unordered, expression.span), base, expression.span);
-    if (isSemanticHalf2BooleanComparisonCall(name)) return createTypedWgslCall("all", [predicate], "bool", expression.span);
-    if (isSemanticHalf2MaskComparisonCall(name)) {
-      const x = createTypedWgslMemberAccess(predicate, "x", "bool", expression.span);
-      const y = createTypedWgslMemberAccess(predicate, "y", "bool", expression.span);
-      return emitTypedWgslBinary(
-        "|",
-        emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("0xffffu", "u32", expression.span), x, expression.span),
-        emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("0xffff0000u", "u32", expression.span), y, expression.span),
-        expression.span,
-      );
-    }
-    return emitTypedWgslSelect(
-      createTypedWgslZero("vec2<f32>", expression.span),
-      createTypedWgslConstructor("vec2<f32>", [createTypedWgslLiteral("1.0", "f32", expression.span)], expression.span),
-      predicate,
-      expression.span,
-    );
-  }
-  if (isPair && ["__hceil2", "__hfloor2", "__htrunc2", "__hsqrt2", "__hrsqrt2", "__hrcp2", "h2ceil", "h2floor", "h2trunc", "h2sqrt", "h2rsqrt", "h2rcp"].includes(name)) {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const operand = vector(value);
-    const result = name === "__hrcp2" || name === "h2rcp"
-      ? emitTypedWgslBinary("/", createTypedWgslConstructor("vec2<f32>", [createTypedWgslLiteral("1.0", "f32", expression.span)], expression.span), operand, expression.span)
-      : createTypedWgslCall(name === "__hceil2" || name === "h2ceil" ? "ceil" : name === "__hfloor2" || name === "h2floor" ? "floor" : name === "__htrunc2" || name === "h2trunc" ? "trunc" : name === "__hsqrt2" || name === "h2sqrt" ? "sqrt" : "inverseSqrt", [operand], "vec2<f32>", expression.span);
-    return roundPair(result);
-  }
-  if (isPair && ["h2exp", "h2exp2", "h2exp10", "h2log", "h2log2", "h2log10", "h2sin", "h2cos", "h2tanh", "h2tanh_approx", "h2rint"].includes(name)) {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const pair = vector(value);
-    const emitLane = (field: "x" | "y"): TypedWgslExpression => {
-      const lane = createTypedWgslMemberAccess(pair, field, "f32", expression.span);
-      if (name === "h2exp10") return createTypedWgslCall("pow", [createTypedWgslLiteral("10.0", "f32", expression.span), lane], "f32", expression.span);
-      if (name === "h2log10") return emitTypedWgslBinary("/", createTypedWgslCall("log", [lane], "f32", expression.span), createTypedWgslLiteral("2.302585092994046", "f32", expression.span), expression.span);
-      const callee = name === "h2exp" ? "exp" : name === "h2exp2" ? "exp2" : name === "h2log" ? "log" : name === "h2log2" ? "log2" : name === "h2sin" ? "sin" : name === "h2cos" ? "cos" : name === "h2rint" ? "bg_semantic_round_even_f32" : "tanh";
-      return createTypedWgslCall(callee, [lane], "f32", expression.span);
-    };
-    return createTypedWgslConstructor("vec2<f32>", [roundTypedBf16(emitLane("x"), expression.span), roundTypedBf16(emitLane("y"), expression.span)], expression.span);
-  }
-  if (isPair && name === "__hneg2") {
-    const value = expression.args[0];
-    return value ? roundPair(emitTypedWgslUnary("-", vector(value), expression.span)) : undefined;
-  }
-  if (isPair && name === "__habs2") {
-    const value = expression.args[0];
-    return value ? roundPair(createTypedWgslCall("abs", [vector(value)], "vec2<f32>", expression.span)) : undefined;
-  }
-  if (isPair && (name === "__hmin2" || name === "__hmax2")) {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    return roundPair(createTypedWgslCall(name === "__hmin2" ? "min" : "max", [vector(left), vector(right)], "vec2<f32>", expression.span));
-  }
-  if (isPair && (name === "__hmin2_nan" || name === "__hmax2_nan")) {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const lhs = vector(left);
-    const rhs = vector(right);
-    const result = createTypedWgslCall(name === "__hmin2_nan" ? "min" : "max", [lhs, rhs], "vec2<f32>", expression.span);
-    const nan = emitTypedWgslBinary("|", semanticTypedIsNan(lhs, expression.span), semanticTypedIsNan(rhs, expression.span), expression.span);
-    return roundPair(emitTypedWgslSelect(result, emitTypedWgslBinary("+", lhs, rhs, expression.span), nan, expression.span));
-  }
-  if (isPair && (name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat" || name === "__hfma2_relu")) {
-    const [left, right, addend] = expression.args;
-    if (!left || !right || !addend) return undefined;
-    let result = createTypedWgslCall("fma", [vector(left), vector(right), vector(addend)], "vec2<f32>", expression.span);
-    if (name.endsWith("_sat")) result = createTypedWgslCall("clamp", [result, createTypedWgslZero("vec2<f32>", expression.span), createTypedWgslConstructor("vec2<f32>", [createTypedWgslLiteral("1.0", "f32", expression.span)], expression.span)], "vec2<f32>", expression.span);
-    if (name.endsWith("_relu")) result = createTypedWgslCall("max", [result, createTypedWgslZero("vec2<f32>", expression.span)], "vec2<f32>", expression.span);
-    return roundPair(result);
-  }
-  if (isPair && name === "__hcmadd") {
-    const [left, right, addend] = expression.args;
-    if (!left || !right || !addend) return undefined;
-    const lhs = vector(left);
-    const rhs = vector(right);
-    const acc = vector(addend);
-    const lane = (value: TypedWgslExpression, field: "x" | "y"): TypedWgslExpression => createTypedWgslMemberAccess(value, field, "f32", expression.span);
-    const real = emitTypedWgslBinary(
-      "+",
-      emitTypedWgslBinary("-", emitTypedWgslBinary("*", lane(lhs, "x"), lane(rhs, "x"), expression.span), emitTypedWgslBinary("*", lane(lhs, "y"), lane(rhs, "y"), expression.span), expression.span),
-      lane(acc, "x"),
-      expression.span,
-    );
-    const imaginary = emitTypedWgslBinary(
-      "+",
-      emitTypedWgslBinary("+", emitTypedWgslBinary("*", lane(lhs, "x"), lane(rhs, "y"), expression.span), emitTypedWgslBinary("*", lane(lhs, "y"), lane(rhs, "x"), expression.span), expression.span),
-      lane(acc, "y"),
-      expression.span,
-    );
-    return createTypedWgslConstructor("vec2<f32>", [roundTypedBf16(real, expression.span), roundTypedBf16(imaginary, expression.span)], expression.span);
-  }
-  if (isPair && name === "__hisnan2") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const pair = vector(value);
-    return emitTypedWgslSelect(
-      createTypedWgslZero("vec2<f32>", expression.span),
-      createTypedWgslConstructor("vec2<f32>", [createTypedWgslLiteral("1.0", "f32", expression.span)], expression.span),
-      semanticTypedIsNan(pair, expression.span),
-      expression.span,
-    );
-  }
-  const scalarCall = emitSemanticTypedBfloatScalarCall(expression, ir, names, options, textureSpecializations);
-  if (scalarCall) return scalarCall;
-  if (expression.valueType === "bf16" && (name === "__hdiv" || name === "__hdiv_rn")) {
-    const [left, right] = expression.args;
-    return left && right ? roundTypedBf16(emitTypedWgslBinary("/", scalar(left), scalar(right), expression.span), expression.span) : undefined;
-  }
-  if (expression.valueType === "bf16" && (name === "__hfma" || name === "__hfma_rn" || name === "__hfma_sat")) {
-    const [left, right, addend] = expression.args;
-    if (!left || !right || !addend) return undefined;
-    let result = createTypedWgslCall("fma", [scalar(left), scalar(right), scalar(addend)], "f32", expression.span);
-    if (name.endsWith("_sat")) result = createTypedWgslCall("clamp", [result, createTypedWgslZero("f32", expression.span), createTypedWgslLiteral("1.0", "f32", expression.span)], "f32", expression.span);
-    return roundTypedBf16(result, expression.span);
-  }
-  if (expression.valueType === "bf16" && name === "__hfma_relu") {
-    const [left, right, addend] = expression.args;
-    if (!left || !right || !addend) return undefined;
-    const result = createTypedWgslCall("fma", [scalar(left), scalar(right), scalar(addend)], "f32", expression.span);
-    return roundTypedBf16(createTypedWgslCall("max", [result, createTypedWgslZero("f32", expression.span)], "f32", expression.span), expression.span);
-  }
-  if (expression.valueType === "bf16" && name === "__hneg") {
-    const value = expression.args[0];
-    return value ? roundTypedBf16(emitTypedWgslUnary("-", scalar(value), expression.span), expression.span) : undefined;
-  }
-  return undefined;
-}
-
-function emitSemanticTypedHalfCall(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  ir: SemanticKernelIrModule,
-  names: ReadonlyMap<string, string>,
-  options: EmitSemanticKernelIrWgslOptions,
-  textureSpecializations: SemanticTextureDescriptorSpecializations,
-): TypedWgslExpression | undefined {
-  if (expression.callee.kind !== "symbol") return undefined;
-  const name = expression.callee.name;
-  const scalar = (arg: SemanticExpression): TypedWgslExpression => emitSemanticExpressionAs(arg, ir, names, "f16", options, textureSpecializations);
-  const vector = (arg: SemanticExpression): TypedWgslExpression => emitSemanticExpression(arg, ir, names, options, textureSpecializations);
-  const scalarComparison = /^(?:__h)(eq|ne|gt|ge|lt|le)(u)?$/u.exec(name);
-  if (scalarComparison) {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const lhs = scalar(left);
-    const rhs = scalar(right);
-    const operator = ({ eq: "==", ne: "!=", gt: ">", ge: ">=", lt: "<", le: "<=" } as const)[scalarComparison[1] as "eq" | "ne" | "gt" | "ge" | "lt" | "le"];
-    const base = emitTypedWgslBinary(operator, lhs, rhs, expression.span);
-    const unordered = emitTypedWgslBinary("||", semanticTypedIsNan(convertTypedWgslExpression(lhs, "f32", true), expression.span), semanticTypedIsNan(convertTypedWgslExpression(rhs, "f32", true), expression.span), expression.span);
-    const predicate = scalarComparison[2] ? emitTypedWgslBinary("||", unordered, base, expression.span) : emitTypedWgslBinary("&&", emitTypedWgslUnary("!", unordered, expression.span), base, expression.span);
-    return emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("1u", "u32", expression.span), predicate, expression.span);
-  }
-  if (isSemanticHalf2ComparisonCall(name) && semanticExpressionVectorValueType(expression.args[0]!, ir.functions) === "half2") {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const lhs = vector(left);
-    const rhs = vector(right);
-    const normalized = name.replace(/_mask$/u, "").replace(/^__hb/u, "__h");
-    const operator = normalized === "__heq2" || normalized === "__hequ2" ? "=="
-      : normalized === "__hne2" || normalized === "__hneu2" ? "!="
-      : normalized === "__hgt2" || normalized === "__hgtu2" ? ">"
-      : normalized === "__hge2" || normalized === "__hgeu2" ? ">="
-      : normalized === "__hlt2" || normalized === "__hltu2" ? "<" : "<=";
-    const base = emitTypedWgslBinary(operator, lhs, rhs, expression.span);
-    const unordered = emitTypedWgslBinary(
-      "|",
-      semanticTypedIsNan(lhs, expression.span),
-      semanticTypedIsNan(rhs, expression.span),
-      expression.span,
-    );
-    const predicate = normalized.includes("u2")
-      ? emitTypedWgslBinary("|", unordered, base, expression.span)
-      : emitTypedWgslBinary("&", emitTypedWgslUnary("!", unordered, expression.span), base, expression.span);
-    if (isSemanticHalf2BooleanComparisonCall(name)) return createTypedWgslCall("all", [predicate], "bool", expression.span);
-    if (isSemanticHalf2MaskComparisonCall(name)) {
-      const x = createTypedWgslMemberAccess(predicate, "x", "bool", expression.span);
-      const y = createTypedWgslMemberAccess(predicate, "y", "bool", expression.span);
-      return emitTypedWgslBinary(
-        "|",
-        emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("0xffffu", "u32", expression.span), x, expression.span),
-        emitTypedWgslSelect(createTypedWgslZero("u32", expression.span), createTypedWgslLiteral("0xffff0000u", "u32", expression.span), y, expression.span),
-        expression.span,
-      );
-    }
-    return emitTypedWgslSelect(
-      createTypedWgslZero("vec2<f16>", expression.span),
-      createTypedWgslConstructor("vec2<f16>", [createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], expression.span),
-      predicate,
-      expression.span,
-    );
-  }
-  if (name === "__habs") {
-    const value = expression.args[0];
-    return value ? createTypedWgslCall("abs", [scalar(value)], "f16", expression.span) : undefined;
-  }
-  if (name === "__hneg" && semanticExpressionWgslType(expression, ir) === "f16") {
-    const value = expression.args[0];
-    return value ? emitTypedWgslUnary("-", scalar(value), expression.span) : undefined;
-  }
-  if (["__hceil", "__hfloor", "__htrunc", "__hsqrt", "__hrsqrt", "hrsqrt", "__hrcp", "hexp"].includes(name)) {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const operand = scalar(value);
-    if (name === "__hrcp") return emitTypedWgslBinary("/", createTypedWgslLiteral("f16(1.0)", "f16", expression.span), operand, expression.span);
-    return createTypedWgslCall(
-      name === "__hceil" ? "ceil" : name === "__hfloor" ? "floor" : name === "__htrunc" ? "trunc" : name === "__hsqrt" ? "sqrt" : name === "__hrsqrt" || name === "hrsqrt" ? "inverseSqrt" : "exp",
-      [operand],
-      "f16",
-      expression.span,
-    );
-  }
-  if (name === "__hisnan" || name === "__hisinf") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const operand = scalar(value);
-    const f32Operand = convertTypedWgslExpression(operand, "f32", true);
-    if (name === "__hisnan") {
-      return emitTypedWgslSelect(createTypedWgslZero("i32", expression.span), createTypedWgslLiteral("1", "i32", expression.span), semanticTypedIsNan(f32Operand, expression.span), expression.span);
-    }
-    const classification = emitTypedWgslSelect(
-      createTypedWgslLiteral("-1", "i32", expression.span),
-      createTypedWgslLiteral("1", "i32", expression.span),
-      emitTypedWgslBinary(">", f32Operand, createTypedWgslZero("f32", expression.span), expression.span),
-      expression.span,
-    );
-    return emitTypedWgslSelect(
-      createTypedWgslZero("i32", expression.span),
-      classification,
-      createTypedWgslCall("bg_semantic_isinf_f32", [f32Operand], "bool", expression.span),
-      expression.span,
-    );
-  }
-  if (["__hadd", "__hadd_rn", "__hadd_sat", "__hsub", "__hsub_rn", "__hsub_sat", "__hmul", "__hmul_rn", "__hmul_sat"].includes(name)) {
-    if (name === "__hadd" && expression.valueType !== "half") return undefined;
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const operator = name.includes("add") ? "+" : name.includes("sub") ? "-" : "*";
-    const value = emitTypedWgslBinary(operator, scalar(left), scalar(right), expression.span);
-    if (!name.endsWith("_sat")) return value;
-    const clamped = createTypedWgslCall("clamp", [value, createTypedWgslZero("f16", expression.span), createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], "f16", expression.span);
-    return emitTypedWgslSelect(clamped, createTypedWgslZero("f16", expression.span), semanticTypedIsNan(convertTypedWgslExpression(value, "f32", true), expression.span), expression.span);
-  }
-  if (name === "__hmin" || name === "__hmax" || name === "__hmin_nan" || name === "__hmax_nan") {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const lhs = scalar(left);
-    const rhs = scalar(right);
-    const result = createTypedWgslCall(name.includes("min") ? "min" : "max", [lhs, rhs], "f16", expression.span);
-    if (!name.endsWith("_nan")) return result;
-    const nan = emitTypedWgslBinary(
-      "||",
-      semanticTypedIsNan(convertTypedWgslExpression(lhs, "f32", true), expression.span),
-      semanticTypedIsNan(convertTypedWgslExpression(rhs, "f32", true), expression.span),
-      expression.span,
-    );
-    return emitTypedWgslSelect(result, emitTypedWgslBinary("+", lhs, rhs, expression.span), nan, expression.span);
-  }
-  if (["__hadd2", "__hadd2_rn", "__hadd2_sat", "__hsub2", "__hsub2_rn", "__hsub2_sat", "__hmul2", "__hmul2_rn", "__hmul2_sat"].includes(name) && semanticExpressionWgslType(expression, ir) === "vec2<f16>") {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const operator = name.includes("add") ? "+" : name.includes("sub") ? "-" : "*";
-    const value = emitTypedWgslBinary(operator, vector(left), vector(right), expression.span);
-    if (!name.endsWith("_sat")) return value;
-    return createTypedWgslCall(
-      "clamp",
-      [value, createTypedWgslZero("vec2<f16>", expression.span), createTypedWgslConstructor("vec2<f16>", [createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], expression.span)],
-      "vec2<f16>",
-      expression.span,
-    );
-  }
-  if ((name === "__hdiv" || name === "__hdiv_rn") && semanticExpressionWgslType(expression, ir) === "f16") {
-    const [left, right] = expression.args;
-    return left && right ? emitTypedWgslBinary("/", scalar(left), scalar(right), expression.span) : undefined;
-  }
-  if ((name === "__hfma" || name === "__hfma_rn" || name === "__hfma_sat") && semanticExpressionWgslType(expression, ir) === "f16") {
-    const [left, right, addend] = expression.args;
-    if (!left || !right || !addend) return undefined;
-    const result = createTypedWgslCall("fma", [scalar(left), scalar(right), scalar(addend)], "f16", expression.span);
-    if (!name.endsWith("_sat")) return result;
-    return createTypedWgslCall("clamp", [result, createTypedWgslZero("f16", expression.span), createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], "f16", expression.span);
-  }
-  if (name === "__habs2" && semanticExpressionWgslType(expression, ir) === "vec2<f16>") {
-    const value = expression.args[0];
-    return value ? createTypedWgslCall("abs", [vector(value)], "vec2<f16>", expression.span) : undefined;
-  }
-  if (name === "__hneg2" && semanticExpressionWgslType(expression, ir) === "vec2<f16>") {
-    const value = expression.args[0];
-    return value ? emitTypedWgslUnary("-", vector(value), expression.span) : undefined;
-  }
-  if (["__hceil2", "__hfloor2", "__htrunc2", "__hsqrt2", "__hrsqrt2", "__hrcp2"].includes(name) && semanticExpressionWgslType(expression, ir) === "vec2<f16>") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const operand = vector(value);
-    if (name === "__hrcp2") {
-      return emitTypedWgslBinary("/", createTypedWgslConstructor("vec2<f16>", [createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], expression.span), operand, expression.span);
-    }
-    return createTypedWgslCall(
-      name === "__hceil2" ? "ceil" : name === "__hfloor2" ? "floor" : name === "__htrunc2" ? "trunc" : name === "__hsqrt2" ? "sqrt" : "inverseSqrt",
-      [operand],
-      "vec2<f16>",
-      expression.span,
-    );
-  }
-  if ((name === "__hfma2" || name === "__hfma2_rn" || name === "__hfma2_sat") && semanticExpressionWgslType(expression, ir) === "vec2<f16>") {
-    const [left, right, addend] = expression.args;
-    if (!left || !right || !addend) return undefined;
-    const result = createTypedWgslCall("fma", [vector(left), vector(right), vector(addend)], "vec2<f16>", expression.span);
-    return name.endsWith("_sat")
-      ? createTypedWgslCall("clamp", [result, createTypedWgslZero("vec2<f16>", expression.span), createTypedWgslConstructor("vec2<f16>", [createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], expression.span)], "vec2<f16>", expression.span)
-      : result;
-  }
-  if ((name === "__hmin2" || name === "__hmax2" || name === "__hmin2_nan" || name === "__hmax2_nan") && semanticExpressionWgslType(expression, ir) === "vec2<f16>") {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const lhs = vector(left);
-    const rhs = vector(right);
-    const result = createTypedWgslCall(name.includes("min") ? "min" : "max", [lhs, rhs], "vec2<f16>", expression.span);
-    if (!name.endsWith("_nan")) return result;
-    const nan = emitTypedWgslBinary(
-      "|",
-      semanticTypedIsNan(lhs, expression.span),
-      semanticTypedIsNan(rhs, expression.span),
-      expression.span,
-    );
-    return emitTypedWgslSelect(result, emitTypedWgslBinary("+", lhs, rhs, expression.span), nan, expression.span);
-  }
-  if (name === "__hisnan2" && semanticExpressionVectorValueType(expression.args[0]!, ir.functions) === "half2") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const pair = vector(value);
-    return emitTypedWgslSelect(
-      createTypedWgslZero("vec2<f16>", expression.span),
-      createTypedWgslConstructor("vec2<f16>", [createTypedWgslLiteral("f16(1.0)", "f16", expression.span)], expression.span),
-      semanticTypedIsNan(pair, expression.span),
-      expression.span,
-    );
-  }
-  if (name === "__floats2half2_rn" || name === "__halves2half2") {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    return createTypedWgslConstructor("vec2<f16>", [scalar(left), scalar(right)], expression.span);
-  }
-  if (name === "__float22half2_rn") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const pair = vector(value);
-    return createTypedWgslConstructor("vec2<f16>", [
-      convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "x", "f32", expression.span), "f16", true),
-      convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "y", "f32", expression.span), "f16", true),
-    ], expression.span);
-  }
-  if (name === "__float2half2_rn" || name === "__half2half2") {
-    const value = expression.args[0];
-    return value ? createTypedWgslConstructor("vec2<f16>", [scalar(value)], expression.span) : undefined;
-  }
-  if (name === "__half22float2") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const pair = vector(value);
-    return createTypedWgslConstructor(
-      "vec2<f32>",
-      [
-        convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "x", "f16", expression.span), "f32", true),
-        convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "y", "f16", expression.span), "f32", true),
-      ],
-      expression.span,
-    );
-  }
-  if (name === "__low2half" || name === "__high2half") {
-    const value = expression.args[0];
-    return value ? createTypedWgslMemberAccess(vector(value), name === "__low2half" ? "x" : "y", "f16", expression.span) : undefined;
-  }
-  if (name === "__low2half2" || name === "__high2half2") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const lane = createTypedWgslMemberAccess(vector(value), name === "__low2half2" ? "x" : "y", "f16", expression.span);
-    return createTypedWgslConstructor("vec2<f16>", [lane], expression.span);
-  }
-  if (name === "__lows2half2" || name === "__highs2half2") {
-    const [left, right] = expression.args;
-    if (!left || !right) return undefined;
-    const field = name === "__lows2half2" ? "x" : "y";
-    return createTypedWgslConstructor(
-      "vec2<f16>",
-      [
-        createTypedWgslMemberAccess(vector(left), field, "f16", expression.span),
-        createTypedWgslMemberAccess(vector(right), field, "f16", expression.span),
-      ],
-      expression.span,
-    );
-  }
-  if (name === "__half2_as_uint") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const pair = vector(value);
-    const f32Pair = createTypedWgslConstructor(
-      "vec2<f32>",
-      [
-        convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "x", "f16", expression.span), "f32", true),
-        convertTypedWgslExpression(createTypedWgslMemberAccess(pair, "y", "f16", expression.span), "f32", true),
-      ],
-      expression.span,
-    );
-    return createTypedWgslCall("pack2x16float", [f32Pair], "u32", expression.span);
-  }
-  if (name === "__uint_as_half2") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const unpacked = createTypedWgslCall(
-      "unpack2x16float",
-      [emitSemanticExpressionAs(value, ir, names, "u32", options, textureSpecializations)],
-      "vec2<f32>",
-      expression.span,
-    );
-    return createTypedWgslConstructor("vec2<f16>", [
-      convertTypedWgslExpression(createTypedWgslMemberAccess(unpacked, "x", "f32", expression.span), "f16", true),
-      convertTypedWgslExpression(createTypedWgslMemberAccess(unpacked, "y", "f32", expression.span), "f16", true),
-    ], expression.span);
-  }
-  if (name === "__half_as_ushort" || name === "__half_as_short") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const pair = createTypedWgslConstructor(
-      "vec2<f32>",
-      [convertTypedWgslExpression(scalar(value), "f32", true), createTypedWgslZero("f32", expression.span)],
-      expression.span,
-    );
-    const bits = emitTypedWgslBinary("&", createTypedWgslCall("pack2x16float", [pair], "u32", expression.span), createTypedWgslLiteral("0xffffu", "u32", expression.span), expression.span);
-    if (name === "__half_as_ushort") return bits;
-    const shifted = emitTypedWgslBinary("<<", bits, createTypedWgslLiteral("16u", "u32", expression.span), expression.span);
-    return emitTypedWgslBinary(">>", createTypedWgslBitcast("i32", shifted, expression.span), createTypedWgslLiteral("16u", "u32", expression.span), expression.span);
-  }
-  if (name === "__ushort_as_half" || name === "__short_as_half") {
-    const value = expression.args[0];
-    if (!value) return undefined;
-    const source = emitSemanticExpressionAs(value, ir, names, name === "__short_as_half" ? "i32" : "u32", options, textureSpecializations);
-    const bits = name === "__short_as_half" ? convertTypedWgslExpression(source, "u32", true) : source;
-    const masked = emitTypedWgslBinary("&", bits, createTypedWgslLiteral("0xffffu", "u32", expression.span), expression.span);
-    const unpacked = createTypedWgslCall("unpack2x16float", [masked], "vec2<f32>", expression.span);
-    return convertTypedWgslExpression(createTypedWgslMemberAccess(unpacked, "x", "f32", expression.span), "f16", true);
-  }
-  return undefined;
 }
 
 function semanticTypedStoragePointerFunctionForCall(

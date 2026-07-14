@@ -2,7 +2,6 @@ import { tokenizeCudaLite, type Token } from "./lexer.js";
 import { flattenCudaLiteInitializerExpressions as flattenInitializerExpressions } from "./ast_initializers.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
-  CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
   type CudaLiteAsmStatement,
   type CudaLiteBinaryExpression,
@@ -37,6 +36,7 @@ import {
 import { CUDA_VECTOR_TYPES, cudaVectorTypeAlias, isCudaVectorType } from "./vector_types.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { completeParsing, type Parsed } from "./compiler_phases.js";
+import { createCudaLiteCompilerError } from "./diagnostics.js";
 
 export type ParsedCudaLiteModule = Parsed<CudaLiteModule>;
 
@@ -2071,12 +2071,12 @@ class Parser {
   }
 
   private fail(message: string, span: SourceSpan, code = "parse-error"): never {
-    throw new CudaLiteCompilerError(message, [{
+    throw createCudaLiteCompilerError(message, [{
       code,
       severity: "error",
       message,
       span,
-    }]);
+    }], this.source);
   }
 }
 

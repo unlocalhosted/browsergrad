@@ -109,7 +109,7 @@ function collectSemanticIrIdentities(
   };
   const collectOperations = (operations: readonly SemanticKernelIrOperation[]): void => {
     for (const operation of operations) {
-      if (operation.kind === "declare" || operation.kind === "dim3-declare" || operation.kind === "pointer-rebind") register(operation.target);
+      if (operation.kind === "declare" || operation.kind === "dim3-declare" || operation.kind === "pointer-rebind" || operation.kind === "pointer-array-rebind") register(operation.target);
       if (operation.kind === "cooperative-group-declare") {
         symbolNamesById.set(semanticIdKey(operation.declaration.id), operation.declaration.name);
       }
@@ -197,7 +197,7 @@ function verifyOperations(
 ): void {
   for (const operation of operations) {
     verifySpan(operation.span, `operation '${operation.kind}'`, report);
-    if (operation.kind === "declare" || operation.kind === "dim3-declare" || operation.kind === "pointer-rebind") {
+    if (operation.kind === "declare" || operation.kind === "dim3-declare" || operation.kind === "pointer-rebind" || operation.kind === "pointer-array-rebind") {
       verifySymbol(operation.target, fn, identityContext, report);
     }
     for (const expression of operationExpressions(operation)) verifyExpression(expression, identityContext, report);
@@ -348,6 +348,7 @@ function operationExpressions(operation: SemanticKernelIrOperation): readonly Se
       ...(operation.pool.kind === "raw-pool" ? [operation.pool.capacityBytes] : []),
     ];
     case "pointer-rebind": return [];
+    case "pointer-array-rebind": return [operation.slot];
     case "expression": return [operation.expression];
     case "branch": return [operation.condition];
     case "loop": return [
@@ -372,6 +373,7 @@ function operationMemoryRefs(operation: SemanticKernelIrOperation): readonly Sem
     case "atomic": return operation.target ? [operation.target] : [];
     case "call": return operation.reads;
     case "pointer-rebind": return [operation.source];
+    case "pointer-array-rebind": return [operation.source];
     case "pool-allocate": return operation.pool.kind === "raw-pool" ? [operation.pool.data, operation.pool.offset] : [];
     default: return [];
   }

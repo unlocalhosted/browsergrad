@@ -132,7 +132,7 @@ export function collectSemanticWgslOperationNames(
       names.add(semanticPointerBaseParamName(operation.target.name));
     }
   }
-  if (operation.kind === "pointer-rebind") {
+  if (operation.kind === "pointer-rebind" || operation.kind === "pointer-array-rebind") {
     names.add(semanticPointerBufferParamName(operation.target.name));
     names.add(semanticPointerBaseParamName(operation.target.name));
   }

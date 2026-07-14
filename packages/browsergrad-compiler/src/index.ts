@@ -44,6 +44,8 @@ export {
   type KernelMemoryAccess,
   type KernelThreadTrace,
   type ReferenceKernelResult,
+  type ReferenceTraceMode,
+  type RunCompiledKernelReferenceOptions,
   type SourceSpan,
 } from "./types.js";
 
@@ -232,6 +234,16 @@ export {
   type CudaLiteCompilerCacheOptions,
   type CudaLiteCompilerCacheStats,
 } from "./cache.js";
+export {
+  prepareCudaLiteCompilationUnit,
+  type CudaLiteAppliedSourceTransform,
+  type CudaLiteCompilationUnitPosition,
+  type CudaLiteCompilationUnitSegment,
+  type CudaLiteSourceFragment,
+  type CudaLiteSourceProvenance,
+  type PrepareCudaLiteCompilationUnitOptions,
+  type PreparedCudaLiteCompilationUnit,
+} from "./source_preparation.js";
 export {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,

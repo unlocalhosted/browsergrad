@@ -3306,6 +3306,12 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toContain("for (var bg_subgroup_loop_iteration_");
       expect(compiled.wgsl).toContain("subgroupAdd(select(0.0, acc, bg_subgroup_loop_active_");
       expect(compiled.wgsl).not.toContain("subgroupAny(bg_subgroup_loop_active_");
+      expect(compiled.wgsl).toContain("var<workgroup> bg_semantic_subgroup_loop_budget_scratch: array<u32, 32>;");
+      expect(compiled.wgsl).toMatch(/bg_semantic_subgroup_loop_budget_scratch\[\(local_id\.x \+ local_id\.y \* 32u \+ local_id\.z \* 32u\)\] = u32\(\(max\(\(bg_uniforms\.count - lane \+ 0\), 0\) \+ 1\) \/ 2\);/u);
+      expect(compiled.wgsl).toMatch(/if \(\(local_id\.x \+ local_id\.y \* 32u \+ local_id\.z \* 32u\) == 0u\) \{\n\s+var bg_subgroup_loop_budget_\d+: u32 = 0u;\n\s+for \(var bg_subgroup_loop_budget_lane_\d+: u32 = 0u; bg_subgroup_loop_budget_lane_\d+ < 32u; bg_subgroup_loop_budget_lane_\d+ \+= 1u\) \{\n\s+bg_subgroup_loop_budget_\d+ = max\(bg_subgroup_loop_budget_\d+, bg_semantic_subgroup_loop_budget_scratch\[bg_subgroup_loop_budget_lane_\d+\]\);/u);
+      expect(compiled.wgsl).toMatch(/let bg_subgroup_loop_budget_\d+: u32 = workgroupUniformLoad\(&bg_semantic_subgroup_loop_budget_scratch\[0u\]\);/u);
+      expect(compiled.wgsl).toMatch(/for \(var bg_subgroup_loop_iteration_\d+: u32 = 0u; bg_subgroup_loop_iteration_\d+ < bg_subgroup_loop_budget_\d+; bg_subgroup_loop_iteration_\d+ \+= 1u\)/u);
+      expect(compiled.wgsl).not.toMatch(/for \(var bg_subgroup_loop_iteration_\d+: u32 = 0u; bg_subgroup_loop_iteration_\d+ < u32\(\(max\(\(bg_uniforms\.count - lane \+ 0\), 0\) \+ 1\) \/ 2\);/u);
     });
 
   it("rejects subgroup loops without compile-time positive progress", () => {

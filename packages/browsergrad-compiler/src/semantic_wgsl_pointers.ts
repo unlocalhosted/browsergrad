@@ -335,6 +335,7 @@ function collectSemanticStoragePointerOperationRefs(
         operation.reads.forEach(add);
         break;
       case "pointer-rebind":
+      case "pointer-array-rebind":
         add(operation.source);
         break;
       case "pool-allocate":

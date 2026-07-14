@@ -333,11 +333,15 @@ export function createSemanticSubgroupControlEmitter<
       ...(iterationBudget.workgroupMaximum ? [
         `${bodyPrefix}${SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH}[${linearRank}] = ${iterationBudget.expression};`,
         `${bodyPrefix}workgroupBarrier();`,
-        `${bodyPrefix}var ${budgetName}: u32 = 0u;`,
-        `${bodyPrefix}for (var ${budgetLaneName}: u32 = 0u; ${budgetLaneName} < ${semanticWorkgroupSize(ir)}u; ${budgetLaneName} += 1u) {`,
-        `${loopPrefix}${budgetName} = max(${budgetName}, ${SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH}[${budgetLaneName}]);`,
+        `${bodyPrefix}if (${linearRank} == 0u) {`,
+        `${loopPrefix}var ${budgetName}: u32 = 0u;`,
+        `${loopPrefix}for (var ${budgetLaneName}: u32 = 0u; ${budgetLaneName} < ${semanticWorkgroupSize(ir)}u; ${budgetLaneName} += 1u) {`,
+        `${loopPrefix}  ${budgetName} = max(${budgetName}, ${SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH}[${budgetLaneName}]);`,
+        `${loopPrefix}}`,
+        `${loopPrefix}${SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH}[0u] = ${budgetName};`,
         `${bodyPrefix}}`,
         `${bodyPrefix}workgroupBarrier();`,
+        `${bodyPrefix}let ${budgetName}: u32 = workgroupUniformLoad(&${SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH}[0u]);`,
       ] : []),
       `${bodyPrefix}var ${activeName}: bool = ${condition};`,
       `${bodyPrefix}for (var ${iterationName}: u32 = 0u; ${iterationName} < ${iterationBudget.workgroupMaximum ? budgetName : iterationBudget.expression}; ${iterationName} += 1u) {`,
@@ -397,7 +401,8 @@ function emitUniformIterationBudget<
     (geometric === undefined || geometricIncreases !== conditionIncreases)) {
     throw dependencies.semanticError("native subgroup loops require a compile-time positive counter step", update?.span ?? operation.span);
   }
-  const initialRange = operation.init.init ? staticIntegerRange(operation.init.init, ir) : { min: 0, max: 0 };
+  const startExpression = operation.init.init;
+  const initialRange = startExpression ? staticIntegerRange(startExpression, ir) : { min: 0, max: 0 };
   if (shift !== undefined) {
     if (shift.operator === "<<=" && (!initialRange || initialRange.min <= 0)) {
       throw dependencies.semanticError("native subgroup left-shift loops require a provably positive initializer", operation.init.span);
@@ -416,8 +421,8 @@ function emitUniformIterationBudget<
       : initialRange.max - staticBound.min + inclusive;
     return { expression: `${Math.max(0, Math.trunc(distance))}u`, workgroupMaximum: false };
   }
-  const start = operation.init.init
-    ? dependencies.emitExpressionAs(operation.init.init, ir, names, "i32", options, textureSpecializations).code
+  const start = startExpression
+    ? dependencies.emitExpressionAs(startExpression, ir, names, "i32", options, textureSpecializations).code
     : "0";
   const emittedBound = dependencies.emitExpressionAs(bound, ir, names, "i32", options, textureSpecializations).code;
   const step = update?.kind === "update"
@@ -428,7 +433,8 @@ function emitUniformIterationBudget<
   const distance = conditionIncreases ? `(${emittedBound} - ${start} + ${inclusive})` : `(${start} - ${emittedBound} + ${inclusive})`;
   return {
     expression: `u32((max(${distance}, 0) + ${step - 1}) / ${step})`,
-    workgroupMaximum: !initialRange || !expressionIsWorkgroupUniform(bound),
+    workgroupMaximum: (startExpression !== undefined && !expressionIsWorkgroupUniform(startExpression)) ||
+      !expressionIsWorkgroupUniform(bound),
   };
 }
 

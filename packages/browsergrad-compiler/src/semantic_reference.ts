@@ -67,6 +67,7 @@ import {
   referenceVectorFromTuple,
   type ReferenceVector3,
 } from "./reference_vectors.js";
+import { createSemanticReferenceCollectiveExecutor } from "./semantic_reference_collectives.js";
 import { isSemanticGeneratedRandomCall } from "./semantic_generated_random_intrinsics.js";
 import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
@@ -77,6 +78,7 @@ import type {
   CudaLiteTextureDescriptor,
   KernelLaunch,
   ReferenceKernelResult,
+  RunCompiledKernelReferenceOptions,
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
@@ -224,7 +226,6 @@ import {
 } from "./semantic_value_types.js";
 import { assertCudaTrapLaunchPreconditions } from "./trap_preconditions.js";
 import { cudaVectorConstructorType, cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, cudaVectorSwizzleIndices, isCudaVectorType } from "./vector_types.js";
-import { cooperativeReductionOperationForName, type CooperativeReductionOperation } from "./cooperative_reduction.js";
 import {
   semanticCooperativeGroupInfo,
   semanticCooperativeGroupRankParamName,
@@ -253,6 +254,7 @@ interface SemanticReferenceContext {
   readonly storageOffsets: Map<string, number>;
   readonly storagePointerViews: Map<string, SemanticStoragePointerView>;
   readonly localPointerTargets: Map<string, { readonly ref: SemanticMemoryRef; readonly context: SemanticReferenceContext }>;
+  readonly localPointerArrayTargets: Map<string, Map<number, { readonly ref: SemanticMemoryRef; readonly context: SemanticReferenceContext }>>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly vectors: Readonly<Record<string, WgslTypedArray>>;
   readonly locals: Map<string, SemanticValue>;
@@ -262,7 +264,7 @@ interface SemanticReferenceContext {
   readonly blockDim: ReferenceVector3;
   readonly gridDim: ReferenceVector3;
   readonly blockContexts: readonly SemanticReferenceContext[];
-  readonly trace: MutableTrace;
+  readonly trace: MutableTrace | undefined;
   activeCollectiveContexts?: readonly SemanticReferenceContext[];
   stagedSubgroupCallValues?: ReadonlyMap<SemanticExpression, number>;
   returnValue?: SemanticValue;
@@ -276,6 +278,19 @@ interface SemanticStoragePointerView {
 }
 
 type MutableTrace = MutableReferenceTrace;
+
+const semanticReferenceCollectives = createSemanticReferenceCollectiveExecutor({
+  evalNumber(expression, context) {
+    return evalNumber(expression, context as SemanticReferenceContext);
+  },
+  evalExpression(expression, context) {
+    return evalSemanticExpression(expression, context as SemanticReferenceContext);
+  },
+  runFunction(fn, args, context, span) {
+    return runSemanticFunction(fn, args, context as SemanticReferenceContext, span).returnValue;
+  },
+  fail: semanticReferenceError,
+});
 
 export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLiteKernel): boolean {
   return compiled.kernelIr.params.every((param) => semanticReferenceParamSupported(param, compiled)) &&
@@ -292,6 +307,7 @@ export function runCompiledKernelSemanticReference(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  options: RunCompiledKernelReferenceOptions = {},
 ): ReferenceKernelResult {
   validateSemanticKernelIr(compiled.kernelIr);
   const unsupported = unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled);
@@ -314,6 +330,7 @@ export function runCompiledKernelSemanticReference(
   }]));
   const poolOffsets = new Map(Object.entries(memoryPools).map(([name, pool]) => [name, pool.offset?.[0] ?? 0]));
   const surfaces = cloneReferenceSurfaces(input.surfaces ?? {});
+  const captureTrace = options.trace !== "none";
   const traces: MutableTrace[] = [];
   const blockDim = referenceVectorFromTuple(launch.blockDim);
   const gridDim = referenceVectorFromTuple(launch.gridDim);
@@ -328,15 +345,15 @@ export function runCompiledKernelSemanticReference(
         for (let tz = 0; tz < launch.blockDim[2]; tz++) {
           for (let ty = 0; ty < launch.blockDim[1]; ty++) {
             for (let tx = 0; tx < launch.blockDim[0]; tx++) {
-              const trace: MutableTrace = {
+              const trace: MutableTrace | undefined = captureTrace ? {
                 blockIdx: [bx, by, bz],
                 threadIdx: [tx, ty, tz],
                 reads: [],
                 writes: [],
                 sharedReads: [],
                 sharedWrites: [],
-              };
-              traces.push(trace);
+              } : undefined;
+              if (trace) traces.push(trace);
               blockContexts.push({
                 compiled,
                 buffers,
@@ -352,6 +369,7 @@ export function runCompiledKernelSemanticReference(
                 storageOffsets: new Map(Object.entries(compiled.pointerBaseOffsets ?? {})),
                 storagePointerViews: new Map(),
                 localPointerTargets: new Map(),
+                localPointerArrayTargets: new Map(),
                 scalars,
                 vectors,
                 locals: new Map(),
@@ -398,7 +416,7 @@ export function runCompiledKernelSemanticReference(
       if (!buffer) throw semanticReferenceError(`missing readback buffer '${name}'`, compiled.kernelIr.span);
       return [name, buffer];
     })),
-    trace: traces.map(freezeReferenceTrace),
+    trace: captureTrace ? traces.map(freezeReferenceTrace) : [],
   };
 }
 
@@ -508,6 +526,14 @@ function unsupportedSemanticReferenceOperation(
           operation.source.addressSpace !== "storage" ||
           !semanticReferenceTypedMemoryRefSupported(operation.source, compiled)) {
           return reject(operation, `semantic reference does not support pointer rebind '${operation.target.name}'`);
+        }
+        break;
+      case "pointer-array-rebind":
+        if (!operation.target.pointer || operation.target.addressSpace !== "local" || operation.target.dimensions.length !== 1 ||
+          operation.source.addressSpace !== "storage" ||
+          !semanticReferenceExpressionSupported(operation.slot, "scalar", compiled) ||
+          !semanticReferenceTypedMemoryRefSupported(operation.source, compiled)) {
+          return reject(operation, `semantic reference does not support pointer-array rebind '${operation.target.name}'`);
         }
         break;
       case "expression":
@@ -1780,11 +1806,15 @@ function execSemanticOperations(
       case "dim3-declare":
         break;
       case "cooperative-group-declare":
-        recordSemanticPartitionMembership(operation.declaration, context);
+        semanticReferenceCollectives.recordPartitionMembership(operation.declaration, context);
         break;
       case "declare":
         if (operation.target.addressSpace === "shared") break;
         if (operation.target.pointer) {
+          if (operation.target.pointerRuntimeState === true && operation.target.dimensions.length === 1) {
+            context.localPointerArrayTargets.set(operation.target.name, new Map());
+            break;
+          }
           const ref = operation.init
             ? semanticPointerArgMemoryRef(operation.init)
             : undefined;
@@ -1841,6 +1871,12 @@ function execSemanticOperations(
       case "pointer-rebind":
         context.localPointerTargets.set(operation.target.name, { ref: operation.source, context });
         break;
+      case "pointer-array-rebind": {
+        const targets = context.localPointerArrayTargets.get(operation.target.name) ?? new Map();
+        targets.set(Math.trunc(evalNumber(operation.slot, context)), { ref: operation.source, context });
+        context.localPointerArrayTargets.set(operation.target.name, targets);
+        break;
+      }
       case "expression":
         evalSemanticExpression(operation.expression, context);
         break;
@@ -2025,10 +2061,12 @@ function execSemanticScopedOperations(
 ): SemanticControl {
   const savedLocals = new Map<string, SemanticValue | undefined>();
   const savedDimensions = new Map<string, readonly number[] | undefined>();
+  const savedPointerArrays = new Map<string, Map<number, { readonly ref: SemanticMemoryRef; readonly context: SemanticReferenceContext }> | undefined>();
   for (const operation of operations) {
     if (operation.kind !== "declare" || savedLocals.has(operation.target.name)) continue;
     savedLocals.set(operation.target.name, context.locals.get(operation.target.name));
     savedDimensions.set(operation.target.name, context.localDimensions.get(operation.target.name));
+    savedPointerArrays.set(operation.target.name, context.localPointerArrayTargets.get(operation.target.name));
   }
   try {
     return execSemanticOperations(operations, context);
@@ -2040,6 +2078,10 @@ function execSemanticScopedOperations(
     for (const [name, dimensions] of savedDimensions) {
       if (dimensions === undefined) context.localDimensions.delete(name);
       else context.localDimensions.set(name, dimensions);
+    }
+    for (const [name, targets] of savedPointerArrays) {
+      if (targets === undefined) context.localPointerArrayTargets.delete(name);
+      else context.localPointerArrayTargets.set(name, targets);
     }
   }
 }
@@ -2057,6 +2099,10 @@ function* execSemanticBarrierOperations(
       case "declare":
         if (operation.target.addressSpace !== "shared") {
           if (operation.target.pointer) {
+            if (operation.target.pointerRuntimeState === true && operation.target.dimensions.length === 1) {
+              context.localPointerArrayTargets.set(operation.target.name, new Map());
+              break;
+            }
             const ref = operation.init ? semanticPointerArgMemoryRef(operation.init) : undefined;
             if (ref) context.localPointerTargets.set(operation.target.name, { ref, context });
             break;
@@ -2078,6 +2124,7 @@ function* execSemanticBarrierOperations(
       case "runtime-copy":
       case "pool-allocate":
       case "pointer-rebind":
+      case "pointer-array-rebind":
       case "expression":
       case "fence":
         execSemanticOperations([operation], context);
@@ -2275,7 +2322,7 @@ function writeSemanticSurfaceLane(
   const index = ((z * surface.height) + y) * surface.width + x;
   const ok = aligned && xBytes >= 0 && x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index >= 0 && index < surface.data.length;
   if (ok) surface.data[index] = value;
-  context.trace.writes.push({ name: surfaceName, index, value, ok });
+  context.trace?.writes.push({ name: surfaceName, index, value, ok });
 }
 
 function storeValueExpression(
@@ -2693,8 +2740,8 @@ function copySemanticRuntimeBytes(
   const writable = Math.max(0, Math.min(readable, dst.bytes.byteLength - dst.byteOffset));
   if (writable === 0) return;
   dst.bytes.set(src.bytes.slice(src.byteOffset, src.byteOffset + writable), dst.byteOffset);
-  context.trace.reads.push({ name: src.name, index: src.byteOffset, value: writable, ok: writable === count });
-  context.trace.writes.push({ name: dst.name, index: dst.byteOffset, value: writable, ok: writable === count });
+  context.trace?.reads.push({ name: src.name, index: src.byteOffset, value: writable, ok: writable === count });
+  context.trace?.writes.push({ name: dst.name, index: dst.byteOffset, value: writable, ok: writable === count });
 }
 
 function fillSemanticRuntimeBytes(
@@ -2707,7 +2754,7 @@ function fillSemanticRuntimeBytes(
   const writable = Math.max(0, Math.min(count, dst.bytes.byteLength - dst.byteOffset));
   if (writable === 0) return;
   dst.bytes.fill(value, dst.byteOffset, dst.byteOffset + writable);
-  context.trace.writes.push({ name: dst.name, index: dst.byteOffset, value: writable, ok: writable === count });
+  context.trace?.writes.push({ name: dst.name, index: dst.byteOffset, value: writable, ok: writable === count });
 }
 
 function assignSemanticCallResult(
@@ -3284,11 +3331,11 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
         return evalSemanticPtxIntegerCall(expression, context);
       }
       if (semanticReferenceSharedAddressCallSupported(expression)) return evalSemanticSharedAddressCall(expression, context);
-      if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return evalSemanticCooperativeGroupCall(expression, context);
-      if (semanticReferenceCoalescedGroupCallSupported(expression, context.compiled)) return evalSemanticCoalescedGroupCall(expression, context);
-      if (semanticReferenceCooperativeReduceCallSupported(expression, context.compiled)) return evalSemanticCooperativeReduceCall(expression, context);
-      if (semanticReferenceCooperativeScanCallSupported(expression, context.compiled)) return evalSemanticCooperativeScanCall(expression, context);
-      if (semanticReferenceSyncthreadsPredicateCallSupported(expression, context.compiled)) return evalSemanticSyncthreadsPredicateCall(expression, context);
+      if (semanticReferenceCooperativeGroupCallSupported(expression, context.compiled)) return semanticReferenceCollectives.evaluateCooperativeGroupCall(expression, context);
+      if (semanticReferenceCoalescedGroupCallSupported(expression, context.compiled)) return semanticReferenceCollectives.evaluateCoalescedGroupCall(expression, context);
+      if (semanticReferenceCooperativeReduceCallSupported(expression, context.compiled)) return semanticReferenceCollectives.evaluateCooperativeReduceCall(expression, context);
+      if (semanticReferenceCooperativeScanCallSupported(expression, context.compiled)) return semanticReferenceCollectives.evaluateCooperativeScanCall(expression, context);
+      if (semanticReferenceSyncthreadsPredicateCallSupported(expression, context.compiled)) return semanticReferenceCollectives.evaluateSyncthreadsPredicateCall(expression, context);
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
       if (semanticReferenceCurandCallSupported(expression, context.compiled)) return evalSemanticCurandCall(expression, context);
       if (semanticReferenceGeneratedRandomCallSupported(expression)) return evalSemanticGeneratedRandomCall(expression, context);
@@ -3480,7 +3527,7 @@ function evalSemanticSurfaceLane(
   const index = ((z * surface.height) + y) * surface.width + x;
   const ok = aligned && xBytes >= 0 && x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index >= 0 && index < surface.data.length;
   const value = ok ? surface.data[index] ?? 0 : 0;
-  context.trace.reads.push({ name: surfaceName, index, value, ok });
+  context.trace?.reads.push({ name: surfaceName, index, value, ok });
   return value;
 }
 
@@ -4837,250 +4884,6 @@ function evalSemanticFunctionCall(
     : child.returnValue;
 }
 
-function evalSemanticCooperativeGroupCall(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  context: SemanticReferenceContext,
-): number {
-  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") {
-    throw semanticReferenceError("semantic reference cooperative-group call requires symbol receiver", expression.span);
-  }
-  if (expression.callee.property === "ballot" || expression.callee.property === "any" || expression.callee.property === "all") {
-    const value = expression.args[0];
-    if (!value) throw semanticReferenceError("semantic cooperative-group vote requires a predicate", expression.span);
-    const groupName = expression.callee.object.name;
-    const peers = semanticReferenceCooperativeContexts(groupName, context);
-    if (expression.callee.property === "any") return Number(peers.some((peer) => truthy(evalNumber(value, peer))));
-    if (expression.callee.property === "all") return Number(peers.every((peer) => truthy(evalNumber(value, peer))));
-    return peers.reduce((mask, peer) => truthy(evalNumber(value, peer))
-      ? mask | (1 << semanticReferenceCooperativeGroupValue(groupName, "thread_rank", peer))
-      : mask, 0) >>> 0;
-  }
-  if (
-    expression.callee.property !== "thread_rank" &&
-    expression.callee.property !== "size" &&
-    expression.callee.property !== "meta_group_rank" &&
-    expression.callee.property !== "meta_group_size"
-  ) {
-    throw semanticReferenceError("semantic reference cooperative-group call requires rank, size, or meta-group topology", expression.span);
-  }
-  return semanticReferenceCooperativeGroupValue(expression.callee.object.name, expression.callee.property, context);
-}
-
-function evalSemanticCoalescedGroupCall(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  context: SemanticReferenceContext,
-): number {
-  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "symbol") {
-    throw semanticReferenceError("semantic coalesced-group call requires group receiver", expression.span);
-  }
-  const peers = semanticReferenceCooperativeContexts(expression.callee.object.name, context);
-  if (expression.callee.property === "size") return peers.length;
-  if (expression.callee.property === "thread_rank") {
-    const rank = semanticLocalLinearRank(context);
-    return peers.findIndex((peer) => semanticLocalLinearRank(peer) === rank);
-  }
-  if (!expression.args[0]) throw semanticReferenceError("semantic coalesced-group vote or shuffle requires a value", expression.span);
-  if (expression.callee.property === "ballot") {
-    return peers.reduce((mask, peer) => truthy(evalNumber(expression.args[0]!, peer))
-      ? mask | (1 << (semanticLocalLinearRank(peer) % 32))
-      : mask, 0) >>> 0;
-  }
-  if (expression.callee.property === "any") return Number(peers.some((peer) => truthy(evalNumber(expression.args[0]!, peer))));
-  if (expression.callee.property === "all") return Number(peers.every((peer) => truthy(evalNumber(expression.args[0]!, peer))));
-  const sourceLane = expression.args[1] ? Math.trunc(evalNumber(expression.args[1], context)) : 0;
-  const base = Math.floor(semanticLocalLinearRank(context) / 32) * 32;
-  const source = peers.find((peer) => semanticLocalLinearRank(peer) === base + sourceLane) ?? context;
-  return evalNumber(expression.args[0], source);
-}
-
-function evalSemanticCooperativeReduceCall(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  context: SemanticReferenceContext,
-): SemanticValue {
-  const [groupArg, valueArg] = expression.args;
-  if (groupArg?.kind !== "symbol" || !valueArg) {
-    throw semanticReferenceError("semantic cooperative reduce requires group and value", expression.span);
-  }
-  const valueType = semanticExpressionValueType(valueArg);
-  if (valueType !== undefined && isSemanticFloatVectorType(valueType)) {
-    const reducerArg = expression.args[2];
-    const reducer = reducerArg?.kind === "symbol"
-      ? context.compiled.kernelIr.functions.find((fn) => semanticIdsEqual(fn.id, reducerArg.id))
-      : undefined;
-    if (!reducer) throw semanticReferenceError("semantic vector cooperative reduce requires resolved reducer", expression.span);
-    const values = semanticReferenceCooperativeContexts(groupArg.name, context)
-      .map((peer) => evalSemanticExpression(valueArg, peer));
-    const first = values.shift();
-    if (!Array.isArray(first)) throw semanticReferenceError("semantic vector cooperative reduce requires vector values", valueArg.span);
-    return values.reduce<SemanticValue>((left, right) => {
-      if (!Array.isArray(left) || !Array.isArray(right)) throw semanticReferenceError("semantic vector cooperative reduce requires vector values", valueArg.span);
-      return evalSemanticVectorReducer(reducer, left, right, valueType, context, expression.span);
-    }, first);
-  }
-  const operation = semanticReferenceCooperativeReductionOperation(expression.args[2]);
-  if (operation === undefined) throw semanticReferenceError("semantic cooperative reduce requires a supported reducer", expression.span);
-  const values = semanticReferenceCooperativeContexts(groupArg.name, context).map((peer) => evalNumber(valueArg, peer));
-  const first = values.shift();
-  if (first === undefined) throw semanticReferenceError("semantic cooperative reduce has no active lanes", expression.span);
-  return values.reduce((left, right) => combineSemanticCooperativeReduction(operation, left, right), first);
-}
-
-function semanticReferenceCooperativeReductionOperation(
-  expression: SemanticExpression | undefined,
-): CooperativeReductionOperation | undefined {
-  if (expression === undefined) return "add";
-  if (expression.kind === "symbol") return cooperativeReductionOperationForName(expression.name);
-  return expression.kind === "call" && expression.callee.kind === "symbol"
-    ? cooperativeReductionOperationForName(expression.callee.name)
-    : undefined;
-}
-
-function combineSemanticCooperativeReduction(
-  operation: CooperativeReductionOperation,
-  left: number,
-  right: number,
-): number {
-  if (operation === "min") return Math.min(left, right);
-  if (operation === "max") return Math.max(left, right);
-  return left + right;
-}
-
-function evalSemanticVectorReducer(
-  reducer: CompiledCudaLiteKernel["kernelIr"]["functions"][number],
-  left: readonly number[],
-  right: readonly number[],
-  valueType: CudaLiteScalarType,
-  context: SemanticReferenceContext,
-  span: SourceSpan,
-): SemanticValue {
-  const vectorExpression = (value: readonly number[]): SemanticExpression => ({
-    kind: "call",
-    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(`make_${valueType}`), name: `make_${valueType}`, addressSpace: "builtin", span },
-    args: value.map((lane) => ({ kind: "literal", literalKind: "number", value: lane, valueType: "float", span })),
-    valueType,
-    span,
-  });
-  const reducerContext = { ...context };
-  delete reducerContext.activeCollectiveContexts;
-  const child = runSemanticFunction(reducer, [vectorExpression(left), vectorExpression(right)], reducerContext, span);
-  if (!Array.isArray(child.returnValue)) throw semanticReferenceError(`semantic vector reducer '${reducer.name}' did not return vector`, reducer.span);
-  return child.returnValue;
-}
-
-function evalSemanticCooperativeScanCall(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  context: SemanticReferenceContext,
-): number {
-  const [groupArg, valueArg] = expression.args;
-  if (groupArg?.kind !== "symbol" || !valueArg || expression.callee.kind !== "symbol") {
-    throw semanticReferenceError("semantic cooperative scan requires group and value", expression.span);
-  }
-  const rank = semanticLocalLinearRank(context);
-  const peers = semanticReferenceCooperativeContexts(groupArg.name, context)
-    .filter((peer) => semanticLocalLinearRank(peer) <= rank);
-  if (expression.callee.name.endsWith("::exclusive_scan")) peers.pop();
-  return peers.reduce((sum, peer) => sum + evalNumber(valueArg, peer), 0);
-}
-
-function evalSemanticSyncthreadsPredicateCall(
-  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
-  context: SemanticReferenceContext,
-): number {
-  if (expression.callee.kind !== "symbol" || !expression.args[0]) {
-    throw semanticReferenceError("semantic syncthreads predicate requires one predicate", expression.span);
-  }
-  const reduction = cudaSyncthreadsPredicateReduction(expression.callee.name);
-  if (reduction === undefined) throw semanticReferenceError("unknown semantic syncthreads predicate", expression.span);
-  const values: number[] = (context.activeCollectiveContexts ?? context.blockContexts)
-    .map((peer) => truthy(evalNumber(expression.args[0]!, peer)) ? 1 : 0);
-  if (reduction === "count") return values.reduce((sum, value) => sum + value, 0);
-  if (reduction === "and") return Number(values.every(Boolean));
-  return Number(values.some(Boolean));
-}
-
-function semanticReferenceCooperativeGroupValue(
-  name: string,
-  property: "thread_rank" | "size" | "meta_group_rank" | "meta_group_size",
-  context: SemanticReferenceContext,
-): number {
-  const group = semanticCooperativeGroupInfo(context.compiled.kernelIr, name);
-  if (!group) throw semanticReferenceError(`unknown cooperative group '${name}'`, context.compiled.kernelIr.span);
-  const workgroupSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
-  const localRank = context.threadIdx.x + context.blockDim.x * (context.threadIdx.y + context.blockDim.y * context.threadIdx.z);
-  if (property === "meta_group_rank") return group.kind === "tile" ? Math.floor(localRank / (group.tileSize ?? 32)) : 0;
-  if (property === "meta_group_size") return group.kind === "tile" ? Math.ceil(workgroupSize / (group.tileSize ?? 32)) : 1;
-  const localName = property === "thread_rank"
-    ? semanticCooperativeGroupRankParamName(name)
-    : semanticCooperativeGroupSizeParamName(name);
-  const local = context.locals.get(localName);
-  if (typeof local === "number") return local;
-  if (group.partitioned && (property === "thread_rank" || property === "size")) {
-    const peers = semanticReferenceCooperativeContexts(name, context);
-    if (property === "size") return peers.length;
-    return peers.findIndex((peer) => semanticLocalLinearRank(peer) === localRank);
-  }
-  if (property === "thread_rank") {
-    if (group.kind === "grid") {
-      const blockRank = context.blockIdx.x + context.gridDim.x * (context.blockIdx.y + context.gridDim.y * context.blockIdx.z);
-      return localRank + workgroupSize * blockRank;
-    }
-    if (group.kind === "tile") return localRank % (group.tileSize ?? 32);
-    return localRank;
-  }
-  if (group.kind === "grid") return workgroupSize * context.gridDim.x * context.gridDim.y * context.gridDim.z;
-  if (group.kind === "tile") return group.tileSize ?? 32;
-  return workgroupSize;
-}
-
-function semanticReferenceCooperativeContexts(
-  name: string,
-  context: SemanticReferenceContext,
-): readonly SemanticReferenceContext[] {
-  const group = semanticCooperativeGroupInfo(context.compiled.kernelIr, name);
-  if (!group) return [];
-  const parent = group.partitionParent
-    ? semanticCooperativeGroupInfo(context.compiled.kernelIr, group.partitionParent)
-    : undefined;
-  const tileSize = group.tileSize ?? parent?.tileSize ?? 32;
-  const rank = semanticLocalLinearRank(context);
-  const base = Math.floor(rank / tileSize) * tileSize;
-  const peers = (group.partitioned ? context.blockContexts : context.activeCollectiveContexts ?? context.blockContexts).filter((peer) => {
-    const peerRank = semanticLocalLinearRank(peer);
-    return peerRank >= base && peerRank < base + tileSize;
-  });
-  if (!group.partitioned || !group.partitionPredicate) return peers;
-  const selected = semanticReferencePartitionMembership(name, group.partitionPredicate, context);
-  return peers.filter((peer) => semanticReferencePartitionMembership(name, group.partitionPredicate!, peer) === selected);
-}
-
-function semanticReferencePartitionMembership(
-  name: string,
-  predicate: SemanticExpression,
-  context: SemanticReferenceContext,
-): number {
-  const membershipName = semanticPartitionMembershipName(name);
-  const existing = context.locals.get(membershipName);
-  if (typeof existing === "number") return existing;
-  const membership = truthy(evalNumber(predicate, context)) ? 1 : 0;
-  context.locals.set(membershipName, membership);
-  return membership;
-}
-
-function recordSemanticPartitionMembership(
-  declaration: Extract<SemanticKernelIrOperation, { readonly kind: "cooperative-group-declare" }>["declaration"],
-  context: SemanticReferenceContext,
-): void {
-  if (!declaration.partitionPredicate) return;
-  context.locals.set(
-    semanticPartitionMembershipName(declaration.name),
-    truthy(evalNumber(declaration.partitionPredicate, context)) ? 1 : 0,
-  );
-}
-
-function semanticPartitionMembershipName(name: string): string {
-  return `${name}__bg_partition_membership`;
-}
-
 function evalSemanticVectorConstructor(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
@@ -5509,13 +5312,14 @@ function createSemanticFunctionContext(
   const storageOffsets = new Map(context.storageOffsets);
   const storagePointerViews = new Map(context.storagePointerViews);
   const localPointerTargets = new Map(context.localPointerTargets);
+  const localPointerArrayTargets = new Map(context.localPointerArrayTargets);
   for (const [index, param] of fn.params.entries()) {
     const arg = args[index];
     if (!arg) throw semanticReferenceError(`semantic reference function '${fn.name}' missing argument`, span);
     if (param.cooperativeGroupKind !== undefined) {
       if (arg.kind !== "symbol") throw semanticReferenceError(`semantic reference function '${fn.name}' cooperative-group argument must be a symbol`, arg.span);
-      locals.set(semanticCooperativeGroupRankParamName(param.name), semanticReferenceCooperativeGroupValue(arg.name, "thread_rank", context));
-      locals.set(semanticCooperativeGroupSizeParamName(param.name), semanticReferenceCooperativeGroupValue(arg.name, "size", context));
+      locals.set(semanticCooperativeGroupRankParamName(param.name), semanticReferenceCollectives.cooperativeGroupValue(arg.name, "thread_rank", context));
+      locals.set(semanticCooperativeGroupSizeParamName(param.name), semanticReferenceCollectives.cooperativeGroupValue(arg.name, "size", context));
       continue;
     }
     if (param.addressSpace === "texture") {
@@ -5604,6 +5408,7 @@ function createSemanticFunctionContext(
     storageOffsets,
     storagePointerViews,
     localPointerTargets,
+    localPointerArrayTargets,
     scalars: context.scalars,
     vectors: context.vectors,
     locals,
@@ -5700,11 +5505,27 @@ function semanticReferenceResolvePointerArg(
   if (visited.has(ref.base)) throw semanticReferenceError(`cyclic local pointer '${ref.base}'`, ref.span);
   const target = context.localPointerTargets.get(ref.base);
   if (!target) {
+    const pointerArrayTarget = semanticReferencePointerArrayTarget(ref, context);
+    if (pointerArrayTarget) return semanticReferenceResolvePointerArg(pointerArrayTarget.ref, pointerArrayTarget.context, visited);
     const alias = semanticReferencePointerArrayAlias(ref, context);
     return alias === undefined ? { ref, context } : semanticReferenceResolvePointerArg(alias, context, visited);
   }
   visited.add(ref.base);
   return semanticReferenceResolvePointerArg(localPointerTargetRef(target.ref, ref), target.context, visited);
+}
+
+function semanticReferencePointerArrayTarget(
+  ref: SemanticMemoryRef,
+  context: SemanticReferenceContext,
+): { readonly ref: SemanticMemoryRef; readonly context: SemanticReferenceContext } | undefined {
+  if (ref.addressSpace !== "local" || ref.indices.length === 0) return undefined;
+  const targets = context.localPointerArrayTargets.get(ref.base);
+  const target = targets?.get(Math.trunc(evalNumber(ref.indices[0]!, context)));
+  if (!target) return undefined;
+  return {
+    ref: localPointerTargetRef(target.ref, { ...ref, indices: ref.indices.slice(1) }),
+    context: target.context,
+  };
 }
 
 function semanticReferencePointerArrayAlias(
@@ -5863,6 +5684,8 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   if (ref.addressSpace === "local") {
     const target = context.localPointerTargets.get(ref.base);
     if (target) return readMemory(localPointerTargetRef(target.ref, ref), target.context);
+    const pointerArrayTarget = semanticReferencePointerArrayTarget(ref, context);
+    if (pointerArrayTarget) return readMemory(pointerArrayTarget.ref, pointerArrayTarget.context);
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) {
       if (typeof buffer === "number" && semanticReferenceScalarLocalIndexIsZero(ref, context)) return buffer;
@@ -5913,7 +5736,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
       : ref.valueType === "int"
       ? bits | 0
       : bits;
-    context.trace.sharedReads.push({ name: ref.base, index, value, ok });
+    context.trace?.sharedReads.push({ name: ref.base, index, value, ok });
     return value;
   }
   if (semanticReferenceDirectByteRawView(ref, context)) {
@@ -5938,7 +5761,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   const index = flatIndex(ref, context);
   const ok = index >= 0 && index < buffer.length;
   const value = ok ? Number(buffer[index]) : 0;
-  context.trace.reads.push({ name: ref.base, index, value, ok });
+  context.trace?.reads.push({ name: ref.base, index, value, ok });
   return value;
 }
 
@@ -5959,6 +5782,11 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     const target = context.localPointerTargets.get(ref.base);
     if (target) {
       writeMemory(localPointerTargetRef(target.ref, ref), value, target.context);
+      return;
+    }
+    const pointerArrayTarget = semanticReferencePointerArrayTarget(ref, context);
+    if (pointerArrayTarget) {
+      writeMemory(pointerArrayTarget.ref, value, pointerArrayTarget.context);
       return;
     }
     const buffer = context.locals.get(ref.base);
@@ -6015,7 +5843,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
         buffer[index] = bitRootType === "float" ? uintBitsToFloat32(bits) : bitRootType === "int" ? bits | 0 : bits;
       }
     }
-    context.trace.sharedWrites.push({ name: ref.base, index, value, ok });
+    context.trace?.sharedWrites.push({ name: ref.base, index, value, ok });
     return;
   }
   if (semanticReferenceDirectByteRawView(ref, context)) {
@@ -6031,7 +5859,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
       const byteValue = (word >>> (byte * 8)) & 0xff;
       const ok = index >= 0 && index < bytes.length;
       if (ok) bytes[index] = byteValue;
-      context.trace.writes.push({ name: ref.base, index, value: byteValue, ok });
+      context.trace?.writes.push({ name: ref.base, index, value: byteValue, ok });
     }
     return;
   }
@@ -6042,7 +5870,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
   const index = flatIndex(ref, context);
   const ok = index >= 0 && index < buffer.length;
   if (ok) buffer[index] = value;
-  context.trace.writes.push({ name: ref.base, index, value, ok });
+  context.trace?.writes.push({ name: ref.base, index, value, ok });
 }
 
 function semanticReferenceScalarLocalIndexIsZero(
@@ -6117,7 +5945,7 @@ function readPackedSemanticSharedByteView(
     const index = byteIndex + lane;
     const ok = index >= 0 && index < buffer.length;
     const value = ok ? Number(buffer[index]) & 0xff : 0;
-    context.trace.sharedReads.push({ name: ref.base, index, value, ok });
+    context.trace?.sharedReads.push({ name: ref.base, index, value, ok });
     bits = (bits | value << lane * 8) >>> 0;
   }
   if (ref.valueType === "half") return float16BitsToFloat32(bits & 0xffff);
@@ -6147,7 +5975,7 @@ function writePackedSemanticSharedByteView(
     const byte = bits >>> lane * 8 & 0xff;
     const ok = index >= 0 && index < buffer.length;
     if (ok) buffer[index] = byte;
-    context.trace.sharedWrites.push({ name: ref.base, index, value: byte, ok });
+    context.trace?.sharedWrites.push({ name: ref.base, index, value: byte, ok });
   }
 }
 
@@ -6173,6 +6001,8 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
   if (ref.addressSpace === "local") {
     const target = context.localPointerTargets.get(ref.base);
     if (target) return readVectorMemory(localPointerTargetRef(target.ref, ref), target.context);
+    const pointerArrayTarget = semanticReferencePointerArrayTarget(ref, context);
+    if (pointerArrayTarget) return readVectorMemory(pointerArrayTarget.ref, pointerArrayTarget.context);
     const buffer = context.locals.get(ref.base);
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     if (semanticReferenceLocalPackedHalf2View(ref, context.compiled)) {
@@ -6213,7 +6043,7 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
         : valueScalar === "int"
         ? bits | 0
         : bits;
-      context.trace.sharedReads.push({ name: ref.base, index, value, ok });
+      context.trace?.sharedReads.push({ name: ref.base, index, value, ok });
       return value;
     });
   }
@@ -6232,7 +6062,7 @@ function readVectorMemory(ref: SemanticMemoryRef, context: SemanticReferenceCont
     const index = base + lane;
     const ok = index >= 0 && index < buffer.length;
     const value = ok ? Number(buffer[index]) : 0;
-    context.trace.reads.push({ name: ref.base, index, value, ok });
+    context.trace?.reads.push({ name: ref.base, index, value, ok });
     return value;
   });
 }
@@ -6272,6 +6102,11 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     const target = context.localPointerTargets.get(ref.base);
     if (target) {
       writeMemoryValue(localPointerTargetRef(target.ref, ref), value, target.context);
+      return;
+    }
+    const pointerArrayTarget = semanticReferencePointerArrayTarget(ref, context);
+    if (pointerArrayTarget) {
+      writeMemoryValue(pointerArrayTarget.ref, value, pointerArrayTarget.context);
       return;
     }
     const buffer = context.locals.get(ref.base);
@@ -6319,7 +6154,7 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
         : bits;
       const ok = index >= 0 && index < buffer.length;
       if (ok) buffer[index] = stored;
-      context.trace.sharedWrites.push({ name: ref.base, index, value: laneValue, ok });
+      context.trace?.sharedWrites.push({ name: ref.base, index, value: laneValue, ok });
     }
     return;
   }
@@ -6331,7 +6166,7 @@ function writeMemoryValue(ref: SemanticMemoryRef, value: SemanticValue, context:
     const laneValue = ref.packedByteLanes === undefined ? value[lane] ?? 0 : (Number(value[lane] ?? 0) & 0xff);
     const ok = index >= 0 && index < buffer.length;
     if (ok) buffer[index] = laneValue;
-    context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
+    context.trace?.writes.push({ name: ref.base, index, value: laneValue, ok });
   }
 }
 
@@ -6434,8 +6269,8 @@ function readVectorContainerMemory(ref: SemanticMemoryRef, context: SemanticRefe
     const index = base + lane;
     const ok = index >= 0 && index < buffer.length;
     const value = ok ? Number(buffer[index]) : 0;
-    if (ref.addressSpace === "shared") context.trace.sharedReads.push({ name: ref.base, index, value, ok });
-    else context.trace.reads.push({ name: ref.base, index, value, ok });
+    if (ref.addressSpace === "shared") context.trace?.sharedReads.push({ name: ref.base, index, value, ok });
+    else context.trace?.reads.push({ name: ref.base, index, value, ok });
     return value;
   });
 }
@@ -6464,8 +6299,8 @@ function writeVectorContainerMemory(ref: SemanticMemoryRef, value: readonly numb
     const laneValue = Number(value[lane] ?? 0);
     const ok = index >= 0 && index < buffer.length;
     if (ok) buffer[index] = laneValue;
-    if (ref.addressSpace === "shared") context.trace.sharedWrites.push({ name: ref.base, index, value: laneValue, ok });
-    else context.trace.writes.push({ name: ref.base, index, value: laneValue, ok });
+    if (ref.addressSpace === "shared") context.trace?.sharedWrites.push({ name: ref.base, index, value: laneValue, ok });
+    else context.trace?.writes.push({ name: ref.base, index, value: laneValue, ok });
   }
 }
 

@@ -83,6 +83,54 @@ describe("compiler phase contracts", () => {
     );
   });
 
+  it("uses the module environment while retaining lexical helper scopes", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__device__ int add_local(int value) {
+  int result = value;
+  {
+    int value = 2;
+    result += value;
+  }
+  return result;
+}
+
+__global__ void environment_scope(int *out) {
+  out[0] = add_local(4);
+}
+`));
+    const semantic = createCudaLiteSemanticModel(analysis);
+    const out = semantic.params[0]!;
+    const helper = semantic.functions[0]!;
+    const moduleHelper = semantic.environment.resolveSymbol("add_local");
+    const resultDeclaration = helper.body.find((operation) =>
+      operation.kind === "declare" && operation.target.name === "result",
+    );
+    const innerBlock = helper.body.find((operation) => operation.kind === "block");
+    const innerValueDeclaration = innerBlock?.kind === "block"
+      ? innerBlock.body.find((operation) => operation.kind === "declare" && operation.target.name === "value")
+      : undefined;
+
+    expect(semantic.environment.resolveSymbol("out")).toBe(out);
+    expect(semantic.environment.resolveMemorySymbol(semanticMemoryIdFromSymbol(out.id))).toBe(out);
+    expect(semantic.environment.resolveFunction("add_local")).toBe(helper);
+    expect(semantic.environment.resolveFunctionCandidates("add_local")).toEqual([helper]);
+    expect(moduleHelper?.kind).toBe("function");
+    expect(resultDeclaration?.kind === "declare" && resultDeclaration.init).toMatchObject({
+      kind: "symbol",
+      id: helper.params[0]!.id,
+    });
+    expect(innerValueDeclaration?.kind === "declare" ? innerValueDeclaration.target.id : undefined)
+      .not.toBe(helper.params[0]!.id);
+
+    const canonical = lowerSemanticModelToKernelIr(analysis, semantic, { workgroupSize: [1, 1, 1] });
+    const store = canonical.operations.find((operation) => operation.kind === "store");
+    const callCalleeId = store?.kind === "store" && store.value.kind === "call" && store.value.callee.kind === "symbol"
+      ? semanticIdKey(store.value.callee.id)
+      : undefined;
+    expect(callCalleeId)
+      .toBe(moduleHelper === undefined ? undefined : semanticIdKey(moduleHelper.id));
+  });
+
   it("rejects phase bypasses during TypeScript checking", () => {
     if (false) {
       // @ts-expect-error raw AST has not passed parser phase

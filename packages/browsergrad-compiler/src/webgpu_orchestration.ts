@@ -498,6 +498,7 @@ function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boo
     case "pool-allocate":
       return false;
     case "pointer-rebind":
+    case "pointer-array-rebind":
       return true;
     case "expression":
       return expressionNeedsParentDispatch(operation.expression);

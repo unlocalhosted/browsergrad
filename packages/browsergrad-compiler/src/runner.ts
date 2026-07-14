@@ -44,8 +44,12 @@ import {
   type CudaLiteDiagnostic,
   type KernelLaunch,
   type ReferenceKernelResult,
+  type RunCompiledKernelReferenceOptions,
 } from "./types.js";
-import { formatCudaLiteDiagnostics } from "./diagnostics.js";
+import {
+  createCudaLiteCompilerError,
+  withCudaLiteDiagnosticSource,
+} from "./diagnostics.js";
 
 type SupportedCudaWebGpuExecutionPlan = Extract<CudaWebGpuExecutionPlan, { readonly supported: true }>;
 
@@ -78,14 +82,29 @@ export function compileCudaLiteKernel(
   source: string,
   options: CompileCudaLiteOptions = {},
 ): CompiledCudaLiteKernel {
+  try {
+    return compileCudaLiteKernelUnchecked(source, options);
+  } catch (error) {
+    if (error instanceof CudaLiteCompilerError) {
+      throw withCudaLiteDiagnosticSource(error, source);
+    }
+    throw error;
+  }
+}
+
+function compileCudaLiteKernelUnchecked(
+  source: string,
+  options: CompileCudaLiteOptions,
+): CompiledCudaLiteKernel {
   validateTextureDescriptorOptions(options);
   const ast = parseCudaLite(source);
   const analysis = analyzeCudaLite(ast, options);
   const errors = analysis.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length > 0) {
-    throw new CudaLiteCompilerError(
-      `CUDA-lite compile failed\n${formatCudaLiteDiagnostics(source, errors)}`,
+    throw createCudaLiteCompilerError(
+      "CUDA-lite compile failed",
       errors,
+      source,
     );
   }
   validateBindlessTextureOptions(options, analysis);
@@ -214,11 +233,12 @@ export function runCompiledKernelReference(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  options: RunCompiledKernelReferenceOptions = {},
 ): ReferenceKernelResult {
   if (semanticOperationsContainKind(compiled.kernelIr.operations, "device-launch")) {
-    return runCompiledKernelDynamicReference(compiled, input, launch, 0);
+    return runCompiledKernelDynamicReference(compiled, input, launch, 0, options);
   }
-  return runCompiledKernelSemanticReference(compiled, input, launch);
+  return runCompiledKernelSemanticReference(compiled, input, launch, options);
 }
 
 function runCompiledKernelDynamicReference(
@@ -226,21 +246,22 @@ function runCompiledKernelDynamicReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
   depth: number,
+  options: RunCompiledKernelReferenceOptions,
 ): ReferenceKernelResult {
-  if (depth >= 32) throw new CudaLiteCompilerError("semantic dynamic launch depth exceeded 32", [{
+  if (depth >= 32) throw createCudaLiteCompilerError("semantic dynamic launch depth exceeded 32", [{
     code: "semantic-reference-unsupported",
     severity: "error",
     message: "semantic dynamic launch depth exceeded 32",
     span: compiled.kernelIr.span,
-  }]);
+  }], compiled.ast.source);
   const working = cloneDynamicReferenceInput(input);
   const plan = createCudaHostDynamicLaunchPlan(compiled, working, launch);
-  if (!plan.supported) throw new CudaLiteCompilerError(plan.reason ?? "semantic dynamic launch planning failed", [{
+  if (!plan.supported) throw createCudaLiteCompilerError(plan.reason ?? "semantic dynamic launch planning failed", [{
     code: "semantic-reference-unsupported",
     severity: "error",
     message: plan.reason ?? "semantic dynamic launch planning failed",
     span: compiled.kernelIr.span,
-  }]);
+  }], compiled.ast.source);
   const traces: ReferenceKernelResult["trace"][number][] = [];
   for (const item of plan.launches) {
     const child = compileCudaLiteKernel(compiled.ast.source, {
@@ -256,8 +277,8 @@ function runCompiledKernelDynamicReference(
     });
     const childLaunch = { gridDim: item.gridDim, blockDim: item.blockDim };
     const result = semanticOperationsContainKind(child.kernelIr.operations, "device-launch")
-      ? runCompiledKernelDynamicReference(child, item.input, childLaunch, depth + 1)
-      : runCompiledKernelSemanticReference(child, item.input, childLaunch);
+      ? runCompiledKernelDynamicReference(child, item.input, childLaunch, depth + 1, options)
+      : runCompiledKernelSemanticReference(child, item.input, childLaunch, options);
     traces.push(...result.trace);
     copyDynamicReferenceReadback(item.input, result.buffers);
   }
@@ -353,7 +374,7 @@ export async function runCompiledKernelWebGpu(
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);
   if (!executionPlan.supported) {
-    throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
+    throw createCudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics, compiled.ast.source);
   }
   assertCompiledKernelWebGpuDeviceFeatures(device, compiled);
   const result = await runWgslKernelProgramSequence(
@@ -376,7 +397,7 @@ export async function prepareCompiledKernelWebGpu(
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);
   if (!executionPlan.supported) {
-    throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
+    throw createCudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics, compiled.ast.source);
   }
   assertCompiledKernelWebGpuDeviceFeatures(device, compiled);
   const prepared = await prepareWgslKernelProgramSequence(
@@ -405,12 +426,12 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
 
   async run(options?: PreparedCompiledKernelWebGpuRunOptions): Promise<ReferenceKernelResult> {
     if (this.destroyed) {
-      throw new CudaLiteCompilerError("prepared compiled WebGPU kernel has been destroyed", [{
+      throw createCudaLiteCompilerError("prepared compiled WebGPU kernel has been destroyed", [{
         code: "prepared-webgpu-kernel-destroyed",
         severity: "error",
         message: "prepared compiled WebGPU kernel has been destroyed",
         span: { start: 0, end: 0, line: 1, column: 1 },
-      }]);
+      }], this.compiled.ast.source);
     }
     const result = await this.prepared.run(normalizePreparedRunOptions(
       this.compiled,
@@ -460,8 +481,8 @@ function normalizePreparedRunOptions(
       return out;
     }
     const nextPlan = createCudaWebGpuExecutionPlan(compiled, nextInput, launch, planOptions);
-    if (!nextPlan.supported) throw new CudaLiteCompilerError(nextPlan.reason, nextPlan.diagnostics);
-    validatePreparedPlanTopology(initialPlan, nextPlan);
+    if (!nextPlan.supported) throw createCudaLiteCompilerError(nextPlan.reason, nextPlan.diagnostics, compiled.ast.source);
+    validatePreparedPlanTopology(initialPlan, nextPlan, compiled.ast.source);
     const stepUniforms = stepUniformUpdatesForPlan(nextPlan);
     if (Object.keys(stepUniforms).length > 0) out.stepUniforms = stepUniforms;
   }
@@ -490,35 +511,36 @@ function assertCompiledKernelWebGpuDeviceFeatures(
   const missing = required.filter((feature) => features?.has(feature as GPUFeatureName) !== true);
   if (missing.length === 0) return;
   const message = `WebGPU device missing required feature(s): ${missing.join(", ")}`;
-  throw new CudaLiteCompilerError(message, [{
+  throw createCudaLiteCompilerError(message, [{
     code: "missing-webgpu-device-feature",
     severity: "error",
     message,
     span: compiled.kernelIr.span,
-  }]);
+  }], compiled.ast.source);
 }
 
 function validatePreparedPlanTopology(
   initialPlan: SupportedCudaWebGpuExecutionPlan,
   nextPlan: SupportedCudaWebGpuExecutionPlan,
+  source: string,
 ): void {
   if (initialPlan.kind !== nextPlan.kind) {
-    throwPreparedTopologyChanged("prepared scalar update changed WebGPU execution plan kind");
+    throwPreparedTopologyChanged("prepared scalar update changed WebGPU execution plan kind", source);
   }
   if (initialPlan.steps.length !== nextPlan.steps.length) {
-    throwPreparedTopologyChanged("prepared scalar update changed WebGPU step count");
+    throwPreparedTopologyChanged("prepared scalar update changed WebGPU step count", source);
   }
   for (let i = 0; i < initialPlan.steps.length; i++) {
     const initial = initialPlan.steps[i]!;
     const next = nextPlan.steps[i]!;
     if (!sameTuple(initial.launch.dispatchCount, next.launch.dispatchCount)) {
-      throwPreparedTopologyChanged(`prepared scalar update changed dispatch count for step ${i}`);
+      throwPreparedTopologyChanged(`prepared scalar update changed dispatch count for step ${i}`, source);
     }
     if (!sameRecord(initial.storageAliases, next.storageAliases)) {
-      throwPreparedTopologyChanged(`prepared scalar update changed storage aliases for step ${i}`);
+      throwPreparedTopologyChanged(`prepared scalar update changed storage aliases for step ${i}`, source);
     }
     if (programTopologyKey(initial.program) !== programTopologyKey(next.program)) {
-      throwPreparedTopologyChanged(`prepared scalar update changed WGSL program topology for step ${i}`);
+      throwPreparedTopologyChanged(`prepared scalar update changed WGSL program topology for step ${i}`, source);
     }
   }
 }
@@ -560,13 +582,13 @@ function sameRecord(
   return true;
 }
 
-function throwPreparedTopologyChanged(message: string): never {
-  throw new CudaLiteCompilerError(message, [{
+function throwPreparedTopologyChanged(message: string, source: string): never {
+  throw createCudaLiteCompilerError(message, [{
     code: "prepared-scalar-update-topology-changed",
     severity: "error",
     message,
     span: { start: 0, end: 0, line: 1, column: 1 },
-  }]);
+  }], source);
 }
 
 function bindingTopologyKey(

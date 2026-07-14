@@ -23,6 +23,7 @@ export function semanticOperationExpressions(operation: SemanticKernelIrOperatio
     expressions.push(operation.sizeBytes);
     if (operation.pool.kind === "raw-pool") expressions.push(operation.pool.capacityBytes);
   }
+  if (operation.kind === "pointer-array-rebind") expressions.push(operation.slot);
   if (operation.kind === "expression") expressions.push(operation.expression);
   if (operation.kind === "branch") expressions.push(operation.condition);
   if (operation.kind === "loop") {
@@ -152,7 +153,7 @@ export function semanticAtomicMemoryRootNames(ir: SemanticKernelIrModule): Reado
         ));
         if (sources.size > 0) runtimePointerSources.set(semanticIdKey(operation.target.id), sources);
       }
-      if (operation.kind === "pointer-rebind") {
+      if (operation.kind === "pointer-rebind" || operation.kind === "pointer-array-rebind") {
         const pointerId = semanticIdKey(operation.target.id);
         const sources = runtimePointerSources.get(pointerId) ?? new Set<string>();
         sources.add(operation.source.base);
@@ -480,6 +481,7 @@ export function isSemanticKernelIrOperation(
     case "atomic":
     case "runtime-copy":
     case "pointer-rebind":
+    case "pointer-array-rebind":
     case "expression":
     case "branch":
     case "loop":

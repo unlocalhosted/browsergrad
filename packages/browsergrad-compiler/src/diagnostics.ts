@@ -1,4 +1,7 @@
-import type { CudaLiteDiagnostic } from "./types.js";
+import {
+  CudaLiteCompilerError,
+  type CudaLiteDiagnostic,
+} from "./types.js";
 
 export function formatCudaLiteDiagnostics(
   source: string,
@@ -18,4 +21,33 @@ export function formatCudaLiteDiagnostics(
       ].join("\n");
     })
     .join("\n\n");
+}
+
+/**
+ * Creates the user-facing compiler error at a phase boundary. Keeping source
+ * formatting here means parser, analyzer, and semantic-pass failures all show
+ * the same location context without changing diagnostic codes or spans.
+ */
+export function createCudaLiteCompilerError(
+  message: string,
+  diagnostics: readonly CudaLiteDiagnostic[],
+  source?: string,
+): CudaLiteCompilerError {
+  const formatted = source === undefined || diagnostics.length === 0
+    ? message
+    : `${message}\n${formatCudaLiteDiagnostics(source, diagnostics)}`;
+  return new CudaLiteCompilerError(formatted, diagnostics, source);
+}
+
+/**
+ * Adds source context to a compiler error produced by a lower compiler phase.
+ * Errors that already carry their source are returned unchanged so their
+ * diagnostic block is never formatted twice.
+ */
+export function withCudaLiteDiagnosticSource(
+  error: CudaLiteCompilerError,
+  source: string,
+): CudaLiteCompilerError {
+  if (error.source !== undefined) return error;
+  return createCudaLiteCompilerError(error.message, error.diagnostics, source);
 }

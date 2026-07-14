@@ -117,8 +117,25 @@ import {
   type SemanticMemoryId,
   type SemanticSymbolId,
 } from "./semantic_ids.js";
-import { createSemanticEnvironment } from "./semantic_environment.js";
+import { createSemanticEnvironment, type SemanticEnvironment } from "./semantic_environment.js";
 import { semanticBinaryResultType } from "./semantic_type_rules.js";
+import {
+  binaryFloatCallExpression,
+  binaryIntCallExpression,
+  castScalarExpression,
+  frexpExponentForFiniteNumber,
+  intNumberExpression,
+  mathCallExpression,
+  multiplyFloatExpressions,
+  numberExpression,
+  roundTiesToEvenNumber,
+  semanticCallExpression,
+  semanticExpressionSideEffectFree,
+  staticNumberValue,
+  uintNumberExpression,
+  unaryFloatCallExpression,
+  unaryIntCallExpression,
+} from "./semantic_expression_builders.js";
 import {
   matrixTileElementCount,
   normalizeMatrixTileLayout,
@@ -210,6 +227,51 @@ const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const POINTER_ORDER_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const BARRIER_CALLS: ReadonlySet<string> = new Set([...CUDA_BARRIER_CALL_NAMES, ...CUDA_COOPERATIVE_BARRIER_CALL_NAMES, "grid.sync"]);
 const FENCE_CALLS: ReadonlySet<string> = new Set(CUDA_FENCE_CALL_NAMES);
+
+/**
+ * Keeps mutable locals separate from the immutable module environment.
+ *
+ * A lowering scope intentionally supports assignment and shadowing, but it must
+ * not materialize a second name table for parameters, globals, and functions.
+ */
+class SemanticLexicalScope extends Map<string, CudaLiteSemanticSymbol> {
+  constructor(
+    private readonly environment: SemanticEnvironment,
+    locals?: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  ) {
+    super(locals);
+  }
+
+  override get(name: string): CudaLiteSemanticSymbol | undefined {
+    return super.get(name) ?? this.environment.resolveSymbol(name);
+  }
+
+  override has(name: string): boolean {
+    return super.has(name) || this.environment.resolveSymbol(name) !== undefined;
+  }
+
+  clone(): SemanticLexicalScope {
+    return new SemanticLexicalScope(this.environment, this);
+  }
+
+  resolveMemorySymbol(id: SemanticMemoryId): CudaLiteSemanticSymbol | undefined {
+    for (const symbol of this.values()) {
+      if (semanticIdsEqual(semanticMemoryIdFromSymbol(symbol.id), id)) return symbol;
+    }
+    return this.environment.resolveMemorySymbol(id);
+  }
+}
+
+function createSemanticLexicalScope(environment: SemanticEnvironment): SemanticLexicalScope {
+  return new SemanticLexicalScope(environment);
+}
+
+function cloneSemanticScope(
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): Map<string, CudaLiteSemanticSymbol> {
+  return scope instanceof SemanticLexicalScope ? scope.clone() : new Map(scope);
+}
+
 export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): TypedCudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
   const constants = analysis.constants.map(symbolForConstant);
@@ -222,8 +284,6 @@ export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): T
   ]);
   const externalPools = [...externalPoolNames].map((name) => symbolForExternalPool(name, analysis.kernel.span));
   const functionSymbols = helperFunctions.map(symbolForFunctionDeclaration);
-  const globalScope = new Map([...params, ...constants, ...deviceGlobals, ...textures, ...externalPools, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
-  const functions = helperFunctions.map((fn) => symbolForFunction(fn, globalScope));
   const launchableEntries: CudaLiteSemanticLaunchableEntry[] = [
     ...analysis.kernels.map((kernel) => ({
       id: createSemanticFunctionId(kernel.name, kernel.span),
@@ -241,8 +301,23 @@ export function createCudaLiteSemanticModel(analysis: AnalyzedCudaLiteModule): T
     })),
   ];
   const symbols = [...params, ...constants, ...deviceGlobals, ...textures, ...externalPools];
+  const kernelSymbols = launchableEntries
+    .filter((entry) => entry.kind === "kernel")
+    .map(symbolForLaunchableEntry);
+  const declarationEnvironment = createSemanticEnvironment(
+    [...symbols, ...functionSymbols, ...kernelSymbols],
+    [],
+  );
+  const functionSignatures = helperFunctions.map((fn) => semanticFunctionSignature(fn, declarationEnvironment));
+  const loweringEnvironment = createSemanticEnvironment(
+    [...symbols, ...functionSymbols, ...kernelSymbols],
+    functionSignatures,
+  );
+  const functions = helperFunctions.map((fn, index) =>
+    symbolForFunction(fn, loweringEnvironment, functionSignatures[index]!.params),
+  );
   const environment = createSemanticEnvironment(
-    [...symbols, ...functionSymbols, ...functions.flatMap((fn) => fn.params)],
+    [...symbols, ...functionSymbols, ...kernelSymbols],
     functions,
   );
   return completeSemanticTyping({
@@ -268,11 +343,10 @@ export function lowerSemanticModelToKernelIr(
     readonly bindlessTextures?: readonly string[];
   } = {},
 ): CanonicalSemanticKernelIr {
+  // These declarations remain part of the emitted module metadata. Resolution
+  // itself comes from semantic.environment through the lexical scope below.
   const functionSymbols = semantic.functions.map(symbolForSemanticFunctionDeclaration);
-  const scope = new Map([...semantic.symbols, ...functionSymbols].map((symbol) => [symbol.name, symbol]));
-  for (const entry of semantic.launchableEntries) {
-    if (!scope.has(entry.name)) scope.set(entry.name, symbolForLaunchableEntry(entry));
-  }
+  const scope = createSemanticLexicalScope(semantic.environment);
   const mutableParams = mutableKernelParamShadows(analysis, semantic.params);
   for (const shadow of mutableParams) scope.set(shadow.sourceName, shadow.symbol);
   const sourceBarrierFunctions = semanticIrBarrierFunctionNames(semantic.functions);
@@ -1882,7 +1956,7 @@ function lowerStatements(
   statements: readonly CudaLiteStatement[],
   parentScope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
 ): readonly SemanticKernelIrOperation[] {
-  const scope = new Map(parentScope);
+  const scope = cloneSemanticScope(parentScope);
   return lowerStatementsWithScope(statements, scope);
 }
 
@@ -1893,6 +1967,16 @@ function lowerStatementsWithScope(
   const out: SemanticKernelIrOperation[] = [];
   for (let index = 0; index < statements.length; index++) {
     const statement = statements[index]!;
+    if (isLocalPointerArray(statement) && hasLaterDynamicStoragePointerArrayAssignment(statement.name, statements.slice(index + 1), scope)) {
+      const original = symbolForVar(statement, scope);
+      const target: CudaLiteSemanticSymbol = {
+        ...semanticSymbolWithoutPointerAlias(original),
+        pointerRuntimeState: true,
+      };
+      scope.set(target.name, target);
+      out.push({ kind: "declare", target, span: statement.span });
+      continue;
+    }
     if (isLocalPointerAliasPlaceholder(statement) && hasLaterLocalPointerAliasAssignment(statement.name, statements.slice(index + 1), scope)) {
       const original = symbolForVar(statement, scope);
       const assignmentProfile = localPointerAliasAssignmentProfile(statement.name, statements.slice(index + 1), scope);
@@ -2155,7 +2239,10 @@ function semanticDynamicPointerArrayAliasAssignmentOperations(
     },
   }));
   scope.set(target!.name, { ...target!, pointerArrayAliases: aliases });
-  return [...materialized.operations, { kind: "expression", expression: zeroExpression(statement.span), span: statement.span }];
+  const rebind = semanticPointerArrayRebindFromAlias(target!, materialized.expression, replacement, scope, statement.span);
+  return rebind === undefined
+    ? undefined
+    : [...materialized.operations, rebind];
 }
 
 function semanticConditionalReturnOperations(
@@ -2244,7 +2331,7 @@ function semanticConditionalVarInitOperations(
   if (statement.kind !== "var" || statement.init === undefined) return undefined;
   const target = symbolForVar(statement, scope);
   if (target.pointer || target.dimensions.length > 0) return undefined;
-  const initScope = new Map(scope).set(target.name, target);
+  const initScope = cloneSemanticScope(scope).set(target.name, target);
   const materialized = materializeConditionalCalls(lowerExpression(statement.init, initScope));
   if (materialized.operations.length === 0) return undefined;
   scope.set(target.name, target);
@@ -2674,7 +2761,7 @@ function lowerStatement(
 ): SemanticKernelIrOperation {
   switch (statement.kind) {
     case "block": {
-      const childScope = new Map(scope);
+      const childScope = cloneSemanticScope(scope);
       const body = lowerStatementsWithScope(statement.body, childScope);
       mergeBlockLocalPointerAliases(scope, childScope);
       return { kind: "block", body, span: statement.span };
@@ -2739,7 +2826,7 @@ function lowerStatement(
       const aliasAssignment = localPointerAliasUpdate(statement.expression, scope);
       if (aliasAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
       const pointerArrayAssignment = localPointerArrayAliasUpdate(statement.expression, scope);
-      if (pointerArrayAssignment) return { kind: "expression", expression: zeroExpression(statement.span), span: statement.span };
+      if (pointerArrayAssignment) return pointerArrayAssignment;
       const expression = lowerExpression(statement.expression, scope);
       const callName = expression.kind === "call" ? semanticCallName(expression.callee) : undefined;
       const memberBarrier = expression.kind === "call" ? semanticCooperativeMemberBarrier(expression, scope) : undefined;
@@ -2877,13 +2964,13 @@ function lowerStatement(
       const condition = materializedCondition.expression;
       const constantCondition = staticNumberValue(condition);
       if (constantCondition !== undefined && materializedCondition.operations.length === 0) {
-        const selectedScope = new Map(scope);
+        const selectedScope = cloneSemanticScope(scope);
         const body = lowerStatementsWithScope(constantCondition !== 0 ? statement.consequent : statement.alternate ?? [], selectedScope);
         mergeBlockLocalPointerAliases(scope, selectedScope);
         return { kind: "block", body, span: statement.span };
       }
-      const consequentScope = new Map(scope);
-      const alternateScope = new Map(scope);
+      const consequentScope = cloneSemanticScope(scope);
+      const alternateScope = cloneSemanticScope(scope);
       const consequent = lowerStatementsWithScope(statement.consequent, consequentScope);
       const alternate = lowerStatementsWithScope(statement.alternate ?? [], alternateScope);
       mergeBranchLocalPointerAliases(scope, consequentScope, alternateScope, condition, statement.span);
@@ -2901,7 +2988,7 @@ function lowerStatement(
     case "for":
       {
         markLoopUpdatePointerRuntimeState(statement.update, scope);
-        const loopScope = new Map(scope);
+        const loopScope = cloneSemanticScope(scope);
         const init = statement.init?.kind === "var"
           ? lowerForInitStatement(statement.init, loopScope)
           : statement.init
@@ -3571,6 +3658,38 @@ function semanticLocalPointerRebindFromSource(
       indices: alias.pointerBaseIndices,
       fields: [],
       span: source.span,
+    },
+    span,
+  };
+}
+
+function semanticPointerArrayRebindFromAlias(
+  target: CudaLiteSemanticSymbol,
+  slot: SemanticExpression,
+  alias: SemanticPointerAlias,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): Extract<SemanticKernelIrOperation, { readonly kind: "pointer-array-rebind" }> | undefined {
+  if (target.dimensions.length !== 1 || !alias.pointerRoot || alias.pointerAddressSpace !== "storage" || alias.pointerBaseIndices?.length !== 1) {
+    return undefined;
+  }
+  const root = semanticSymbolForMemoryId(scope, alias.pointerRoot);
+  const valueType = target.valueType;
+  if (!root || valueType === undefined || valueType === "void") return undefined;
+  return {
+    kind: "pointer-array-rebind",
+    target,
+    slot,
+    source: {
+      baseId: alias.pointerRoot,
+      base: root.name,
+      addressSpace: alias.pointerAddressSpace,
+      valueType,
+      ...(alias.pointerBaseIsScalarLane === true ? { pointerBaseIsScalarLane: true } : {}),
+      ...(alias.pointerBaseUnitBytes === undefined ? {} : { pointerBaseUnitBytes: alias.pointerBaseUnitBytes }),
+      indices: alias.pointerBaseIndices,
+      fields: [],
+      span,
     },
     span,
   };
@@ -4765,26 +4884,6 @@ function semanticSincosStores(
   };
 }
 
-function mathCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
-  return {
-    kind: "call",
-    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "float", addressSpace: "builtin", span },
-    args: [value],
-    valueType: "float",
-    span,
-  };
-}
-
-function semanticCallExpression(name: string, args: readonly SemanticExpression[], valueType: Exclude<CudaLiteScalarType, "void">, span: SourceSpan): SemanticExpression {
-  return {
-    kind: "call",
-    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType, addressSpace: "builtin", span },
-    args,
-    valueType,
-    span,
-  };
-}
-
 function vibScalarPredicateExpression(left: SemanticExpression, right: SemanticExpression, signed: boolean, choose: "max" | "min", span: SourceSpan): SemanticExpression {
   const valueType: CudaLiteScalarType = signed ? "int" : "uint";
   return {
@@ -4806,73 +4905,6 @@ function vibLanePredicateExpression(left: SemanticExpression, right: SemanticExp
     valueType: "bool",
     span,
   };
-}
-
-function castScalarExpression(expression: SemanticExpression, valueType: Exclude<CudaLiteScalarType, "void">, span: SourceSpan): SemanticExpression {
-  return {
-    kind: "cast",
-    valueType,
-    pointer: false,
-    expression,
-    span,
-  };
-}
-
-function unaryFloatCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
-  return mathCallExpression(name, value, span);
-}
-
-function unaryIntCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
-  return {
-    kind: "call",
-    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "int", addressSpace: "builtin", span },
-    args: [value],
-    valueType: "int",
-    span,
-  };
-}
-
-function binaryFloatCallExpression(name: string, left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
-  return {
-    kind: "call",
-    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "float", addressSpace: "builtin", span },
-    args: [left, right],
-    valueType: "float",
-    span,
-  };
-}
-
-function binaryIntCallExpression(name: string, left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
-  return {
-    kind: "call",
-    callee: { kind: "symbol", id: createBuiltinSemanticSymbolId(name), name, valueType: "int", addressSpace: "builtin", span },
-    args: [left, right],
-    valueType: "int",
-    span,
-  };
-}
-
-function multiplyFloatExpressions(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
-  return {
-    kind: "binary",
-    operator: "*",
-    left,
-    right,
-    valueType: "float",
-    span,
-  };
-}
-
-function numberExpression(value: number, span: SourceSpan): SemanticExpression {
-  return { kind: "literal", literalKind: "number", value, valueType: "float", span };
-}
-
-function intNumberExpression(value: number, span: SourceSpan): SemanticExpression {
-  return { kind: "literal", literalKind: "number", value, valueType: "int", span };
-}
-
-function uintNumberExpression(value: number, span: SourceSpan): SemanticExpression {
-  return { kind: "literal", literalKind: "number", value, valueType: "uint", span };
 }
 
 function semanticSizeofAlignofValue(
@@ -4915,94 +4947,6 @@ function isFiniteStaticNumberExpression(expression: SemanticExpression): boolean
   return staticNumberValue(expression) !== undefined;
 }
 
-function staticNumberValue(expression: SemanticExpression): number | undefined {
-  if (expression.kind === "literal" && expression.literalKind === "number" && typeof expression.value === "number" && Number.isFinite(expression.value)) return expression.value;
-  if (expression.kind === "cast" && !expression.pointer) return staticNumberValue(expression.expression);
-  if (expression.kind === "unary" && (expression.operator === "-" || expression.operator === "+" || expression.operator === "!" || expression.operator === "~")) {
-    const value = staticNumberValue(expression.argument);
-    if (value === undefined) return undefined;
-    if (expression.operator === "-") return -value;
-    if (expression.operator === "+") return value;
-    if (expression.operator === "!") return value === 0 ? 1 : 0;
-    return ~Math.trunc(value);
-  }
-  if (expression.kind === "conditional") {
-    const condition = staticNumberValue(expression.condition);
-    return condition === undefined ? undefined : staticNumberValue(condition !== 0 ? expression.consequent : expression.alternate);
-  }
-  if (expression.kind === "binary") {
-    const left = staticNumberValue(expression.left);
-    if (left === undefined) return undefined;
-    if (expression.operator === "&&" && left === 0) return 0;
-    if (expression.operator === "||" && left !== 0) return 1;
-    const right = staticNumberValue(expression.right);
-    if (right === undefined) return undefined;
-    switch (expression.operator) {
-      case "+": return left + right;
-      case "-": return left - right;
-      case "*": return left * right;
-      case "/": return right === 0 ? undefined : Math.trunc(left / right);
-      case "%": return right === 0 ? undefined : Math.trunc(left) % Math.trunc(right);
-      case "<<": return Math.trunc(left) << (Math.trunc(right) & 31);
-      case ">>": return Math.trunc(left) >> (Math.trunc(right) & 31);
-      case "&": return Math.trunc(left) & Math.trunc(right);
-      case "|": return Math.trunc(left) | Math.trunc(right);
-      case "^": return Math.trunc(left) ^ Math.trunc(right);
-      case "==": return left === right ? 1 : 0;
-      case "!=": return left !== right ? 1 : 0;
-      case "<": return left < right ? 1 : 0;
-      case "<=": return left <= right ? 1 : 0;
-      case ">": return left > right ? 1 : 0;
-      case ">=": return left >= right ? 1 : 0;
-      case "&&": return right !== 0 ? 1 : 0;
-      case "||": return right !== 0 ? 1 : 0;
-      default: return undefined;
-    }
-  }
-  return undefined;
-}
-
-function semanticExpressionSideEffectFree(expression: SemanticExpression): boolean {
-  switch (expression.kind) {
-    case "assignment":
-    case "update":
-    case "sequence":
-      return false;
-    case "literal":
-    case "symbol":
-    case "pointer-valid":
-      return true;
-    case "member":
-      return semanticExpressionSideEffectFree(expression.object);
-    case "index":
-      return semanticExpressionSideEffectFree(expression.target) && semanticExpressionSideEffectFree(expression.index);
-    case "call":
-      return semanticExpressionSideEffectFree(expression.callee) && expression.args.every(semanticExpressionSideEffectFree);
-    case "texture-read":
-      return semanticExpressionSideEffectFree(expression.texture) &&
-        semanticExpressionSideEffectFree(expression.x) &&
-        semanticExpressionSideEffectFree(expression.y) &&
-        (expression.z === undefined || semanticExpressionSideEffectFree(expression.z));
-    case "surface-read":
-      return semanticExpressionSideEffectFree(expression.surface) &&
-        semanticExpressionSideEffectFree(expression.xBytes) &&
-        semanticExpressionSideEffectFree(expression.y) &&
-        (expression.z === undefined || semanticExpressionSideEffectFree(expression.z));
-    case "cast":
-      return semanticExpressionSideEffectFree(expression.expression);
-    case "unary":
-      return semanticExpressionSideEffectFree(expression.argument);
-    case "binary":
-      return semanticExpressionSideEffectFree(expression.left) && semanticExpressionSideEffectFree(expression.right);
-    case "conditional":
-      return semanticExpressionSideEffectFree(expression.condition) &&
-        semanticExpressionSideEffectFree(expression.consequent) &&
-        semanticExpressionSideEffectFree(expression.alternate);
-    case "initializer":
-      return expression.elements.every(semanticExpressionSideEffectFree);
-  }
-}
-
 function storeOperation(target: SemanticMemoryRef, value: SemanticExpression, span: SourceSpan): SemanticKernelIrOperation {
   return {
     kind: "store",
@@ -5012,18 +4956,6 @@ function storeOperation(target: SemanticMemoryRef, value: SemanticExpression, sp
     reads: collectMemoryRefs(value),
     span,
   };
-}
-
-function frexpExponentForFiniteNumber(value: number): number {
-  return value === 0 ? 0 : Math.floor(Math.log2(Math.abs(value))) + 1;
-}
-
-function roundTiesToEvenNumber(value: number): number {
-  const floor = Math.floor(value);
-  const diff = value - floor;
-  if (diff < 0.5) return floor;
-  if (diff > 0.5) return floor + 1;
-  return floor % 2 === 0 ? floor : floor + 1;
 }
 
 function pointerAliasValueExpression(
@@ -5355,10 +5287,10 @@ function semanticSymbolForDim3(name: string, span: SourceSpan): CudaLiteSemantic
 
 function symbolForFunction(
   fn: CudaLiteDeviceFunction,
-  globalScope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  environment: SemanticEnvironment,
+  params: readonly CudaLiteSemanticSymbol[],
 ): CudaLiteSemanticFunction {
-  const scope = new Map(globalScope);
-  const params = fn.params.map((param) => symbolForFunctionParam(param, fn.name, globalScope.has(param.name)));
+  const scope = createSemanticLexicalScope(environment);
   for (const [index, param] of params.entries()) scope.set(fn.params[index]!.name, param);
   return {
     id: createSemanticFunctionId(fn.name, fn.span),
@@ -5366,6 +5298,20 @@ function symbolForFunction(
     returnType: fn.returnType,
     params,
     body: lowerStatements(fn.body, scope),
+    span: fn.span,
+  };
+}
+
+function semanticFunctionSignature(
+  fn: CudaLiteDeviceFunction,
+  environment: SemanticEnvironment,
+): CudaLiteSemanticFunction {
+  return {
+    id: createSemanticFunctionId(fn.name, fn.span),
+    name: fn.name,
+    returnType: fn.returnType,
+    params: fn.params.map((param) => symbolForFunctionParam(param, fn.name, environment.resolveSymbol(param.name) !== undefined)),
+    body: [],
     span: fn.span,
   };
 }
@@ -5688,6 +5634,50 @@ function isLocalPointerAliasPlaceholder(statement: CudaLiteStatement): statement
     (statement.init === undefined || isNullPointerLiteral(statement.init));
 }
 
+function isLocalPointerArray(statement: CudaLiteStatement): statement is Extract<CudaLiteStatement, { readonly kind: "var" }> {
+  return statement.kind === "var" &&
+    statement.storage === "local" &&
+    statement.pointer &&
+    statement.dimensions.length === 1 &&
+    statement.init === undefined;
+}
+
+/**
+ * A dynamic slot cannot be represented by a final alias snapshot: the slot
+ * expression may execute after a helper call or an atomic side effect. Mark
+ * the array as runtime state only when every visible assignment can become a
+ * source-ordered storage rebind; static-only arrays keep the smaller alias
+ * representation.
+ */
+function hasLaterDynamicStoragePointerArrayAssignment(
+  name: string,
+  statements: readonly CudaLiteStatement[],
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): boolean {
+  let sawDynamic = false;
+  const scan = (items: readonly CudaLiteStatement[]): boolean => {
+    for (const statement of items) {
+      if (statement.kind === "expr" && statement.expression.kind === "assignment" && statement.expression.operator === "=" &&
+        statement.expression.left.kind === "index" && statement.expression.left.target.kind === "identifier" &&
+        statement.expression.left.target.name === name) {
+        const alias = localPointerAliasForInitializer(statement.expression.right, scope);
+        if (!alias?.pointerRoot || alias.pointerAddressSpace !== "storage" || alias.pointerBaseIndices?.length !== 1) return false;
+        if (staticPointerArrayIndex(statement.expression.left.index) === undefined) sawDynamic = true;
+        continue;
+      }
+      if (statement.kind === "block" || statement.kind === "if") {
+        if (!scan(statement.kind === "block" ? statement.body : [...statement.consequent, ...(statement.alternate ?? [])])) return false;
+        continue;
+      }
+      if (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") {
+        if (!scan(statement.body)) return false;
+      }
+    }
+    return true;
+  };
+  return scan(statements) && sawDynamic;
+}
+
 function semanticPointerAliasAddressSpaceSupported(addressSpace: SemanticAddressSpace | undefined): addressSpace is "local" | "shared" | "storage" | "constant" | "device-global" {
   return addressSpace === "local" || addressSpace === "shared" || addressSpace === "storage" || addressSpace === "constant" || addressSpace === "device-global";
 }
@@ -5712,7 +5702,7 @@ function hasLaterLocalPointerAliasAssignment(
     }
     if (statement.kind === "block" && hasLaterLocalPointerAliasAssignment(name, statement.body, scope)) return true;
     if (statement.kind === "for") {
-      const loopScope = new Map(scope);
+      const loopScope = cloneSemanticScope(scope);
       if (statement.init?.kind === "var") {
         const init = symbolForVar(statement.init, loopScope);
         loopScope.set(init.name, init);
@@ -5758,7 +5748,7 @@ function localPointerAliasAssignmentProfile(
       continue;
     }
     if (statement.kind === "for") {
-      const loopScope = new Map(scope);
+      const loopScope = cloneSemanticScope(scope);
       if (statement.init?.kind === "var") {
         const init = symbolForVar(statement.init, loopScope);
         loopScope.set(init.name, init);
@@ -5839,26 +5829,35 @@ function localPointerAliasUpdate(
 function localPointerArrayAliasUpdate(
   expression: CudaLiteExpression,
   scope: Map<string, CudaLiteSemanticSymbol>,
-): boolean {
+): SemanticKernelIrOperation | undefined {
   if (
     expression.kind !== "assignment" ||
     expression.operator !== "=" ||
     expression.left.kind !== "index" ||
     expression.left.target.kind !== "identifier"
   ) {
-    return false;
+    return undefined;
   }
   const target = scope.get(expression.left.target.name);
-  if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length !== 1) return false;
+  if (!target || target.kind !== "local" || !target.pointer || target.dimensions.length !== 1) return undefined;
   const slot = staticPointerArrayIndex(expression.left.index);
   const extent = target.dimensions[0];
-  if (slot === undefined || extent === undefined || slot >= extent) return false;
+  if (slot === undefined || extent === undefined || slot >= extent) return undefined;
   const alias = localPointerAliasForInitializer(expression.right, scope);
-  if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return false;
+  if (!alias?.pointerRoot || !semanticPointerAliasAddressSpaceSupported(alias.pointerAddressSpace) || alias.pointerBaseIndices?.length !== 1) return undefined;
   const aliases = Array.from({ length: extent }, (_, index) => target.pointerArrayAliases?.[index]);
   aliases[slot] = alias;
   scope.set(target.name, { ...target, pointerArrayAliases: aliases });
-  return true;
+  if (target.pointerRuntimeState !== true) {
+    return { kind: "expression", expression: zeroExpression(expression.span), span: expression.span };
+  }
+  return semanticPointerArrayRebindFromAlias(
+    target,
+    intNumberExpression(slot, expression.left.index.span),
+    alias,
+    scope,
+    expression.span,
+  );
 }
 
 function staticPointerArrayIndex(expression: CudaLiteExpression): number | undefined {
@@ -5970,6 +5969,7 @@ function semanticSymbolForMemoryId(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   memoryId: SemanticMemoryId,
 ): CudaLiteSemanticSymbol | undefined {
+  if (scope instanceof SemanticLexicalScope) return scope.resolveMemorySymbol(memoryId);
   for (const symbol of scope.values()) {
     if (semanticIdsEqual(semanticMemoryIdFromSymbol(symbol.id), memoryId)) return symbol;
   }

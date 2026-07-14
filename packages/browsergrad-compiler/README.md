@@ -124,6 +124,10 @@ Use `createCudaLiteCompilerCache()` for platform/rubric hot paths that compile
 the same source repeatedly. It uses deterministic option keys plus bounded LRU
 eviction; set `maxEntries: 0` to preserve the same call shape while disabling
 caching.
+For externally normalized source, use `prepareCudaLiteCompilationUnit()` to
+assemble explicit fragments before compiling. It does not ship corpus-specific
+normalization policy: callers provide transformed fragments and receive the
+exact assembled source plus transform records and provenance segments.
 Common CUDA float math helpers lower natively in both WGSL and CPU reference:
 `sqrt`, `sqrtf`, `expf`, `logf`, `fabsf`, `floorf`, `ceilf`, `roundf`,
 `truncf`, `sinf`, `cosf`, `tanf`, `tanhf`, `coshf`, `powf`, `fminf`,

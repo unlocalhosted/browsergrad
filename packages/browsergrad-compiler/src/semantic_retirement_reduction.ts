@@ -225,6 +225,11 @@ function replaceGridDimensionsInOperations(
         },
       };
       case "pointer-rebind": return { ...operation, source: replaceGridDimensionsInMemoryRef(operation.source, gridDim) };
+      case "pointer-array-rebind": return {
+        ...operation,
+        slot: replaceGridDimensions(operation.slot, gridDim),
+        source: replaceGridDimensionsInMemoryRef(operation.source, gridDim),
+      };
       case "expression": return { ...operation, expression: replaceGridDimensions(operation.expression, gridDim) };
       case "branch": return { ...operation, condition: replaceGridDimensions(operation.condition, gridDim), consequent: replaceGridDimensionsInOperations(operation.consequent, gridDim), alternate: replaceGridDimensionsInOperations(operation.alternate, gridDim) };
       case "block": return { ...operation, body: replaceGridDimensionsInOperations(operation.body, gridDim) };

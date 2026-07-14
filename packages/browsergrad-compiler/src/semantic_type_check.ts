@@ -147,6 +147,17 @@ function checkOperations(
         }
         checkAssignable(operation.target.valueType, operation.source.valueType, `pointer rebind '${operation.target.name}'`, operation.span, report);
         break;
+      case "pointer-array-rebind":
+        checkExpression(operation.slot, "value", ir, report);
+        checkMemoryRef(operation.source, ir, report);
+        if (!operation.target.pointer || operation.target.addressSpace !== "local" || operation.target.dimensions.length !== 1) {
+          report(`pointer-array rebind target '${operation.target.name}' must be a one-dimensional local pointer array`, operation.span);
+        }
+        if (operation.source.addressSpace !== "storage") {
+          report(`pointer-array rebind source '${operation.source.base}' must use storage memory`, operation.source.span);
+        }
+        checkAssignable(operation.target.valueType, operation.source.valueType, `pointer-array rebind '${operation.target.name}'`, operation.span, report);
+        break;
       case "expression":
         checkExpression(operation.expression, "discard", ir, report);
         break;
@@ -351,7 +362,8 @@ function isOperation(value: SemanticKernelIrOperation | SemanticExpression): val
   return value.kind === "declare" || value.kind === "dim3-declare" || value.kind === "cooperative-group-declare" ||
     value.kind === "load" || value.kind === "store" || value.kind === "copy" || value.kind === "copy-fence" ||
     value.kind === "matrix-fill" || value.kind === "matrix-load" || value.kind === "matrix-mma" || value.kind === "matrix-store" ||
-    value.kind === "surface-write" || value.kind === "surface-read-store" || value.kind === "atomic" || value.kind === "expression" ||
+    value.kind === "surface-write" || value.kind === "surface-read-store" || value.kind === "atomic" ||
+    value.kind === "pool-allocate" || value.kind === "pointer-rebind" || value.kind === "pointer-array-rebind" || value.kind === "expression" ||
     value.kind === "branch" || value.kind === "loop" || value.kind === "barrier" || value.kind === "fence" ||
     value.kind === "device-launch" || value.kind === "inline-asm" || value.kind === "return" || value.kind === "continue" ||
     value.kind === "break" || value.kind === "block";

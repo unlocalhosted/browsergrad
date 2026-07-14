@@ -312,6 +312,7 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "runtime-copy"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "pool-allocate"; readonly allocator: "deviceAllocate" | "streamOrderedAllocate"; readonly target: CudaLiteSemanticSymbol; readonly pool: SemanticPoolRef; readonly sizeBytes: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "pointer-rebind"; readonly target: CudaLiteSemanticSymbol; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
+  | { readonly kind: "pointer-array-rebind"; readonly target: CudaLiteSemanticSymbol; readonly slot: SemanticExpression; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly conditionUniformity?: "workgroup"; readonly span: SourceSpan }
   | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly continuing?: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }

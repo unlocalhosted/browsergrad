@@ -63,6 +63,21 @@ function main() {
       ),
     },
     {
+      name: "reference:no-trace:saxpy-16k",
+      fn: () => runCompiledKernelReference(
+        saxpyCompiled,
+        {
+          buffers: {
+            x: filledFloat32(16_384, 1),
+            y: filledFloat32(16_384, 2),
+          },
+          scalars: { a: 3, n: 16_384 },
+        },
+        { gridDim: [64, 1, 1], blockDim: [256, 1, 1] },
+        { trace: "none" },
+      ),
+    },
+    {
       name: "plan:host-dynamic-pointer-offset",
       fn: () => createCudaHostDynamicLaunchPlan(
         dynamicCompiled,
