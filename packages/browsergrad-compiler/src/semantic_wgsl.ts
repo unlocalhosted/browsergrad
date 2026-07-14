@@ -3922,7 +3922,7 @@ function emitSemanticLoop(
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   if (operation.loopKind === "for" && operation.continuing === undefined && operation.update?.kind !== "sequence" &&
-    ir.subgroupMode !== "scalar" && !semanticSubgroupLoopControlIsWorkgroupUniform(operation) &&
+    ir.subgroupMode !== "scalar" && !semanticSubgroupLoopControlIsWorkgroupUniform(operation, ir) &&
     semanticOperationsContainNativeSubgroupCollective(operation.body)) {
     return emitSemanticUniformSubgroupForLoop(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations);
   }

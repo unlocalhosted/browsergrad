@@ -17,6 +17,10 @@ import {
   type HostEvalValue,
 } from "./host_eval.js";
 import { createCudaRuntimePlan } from "./runtime_plan.js";
+import {
+  semanticRuntimeDeviceGlobals,
+  semanticRuntimeOperationsToHostStatements,
+} from "./semantic_runtime_host_adapter.js";
 import type {
   CompiledCudaLiteKernel,
   CompiledKernelInput,
@@ -125,7 +129,13 @@ export function createCudaPeerCopyPlan(
   if (!runtimePlan.operations.every((operation) => operation.kind === "runtime-copy" || operation.kind === "device-sync")) {
     return unsupported("mixed-runtime-operations", "runtime operations besides peer-copy/device sync require reference runtime");
   }
-  const copyCollection = collectHostPeerCopies(compiled.analysis.kernel.body, input, launch, compiled.analysis.deviceGlobals);
+  const hostStatements = semanticRuntimeOperationsToHostStatements(compiled.kernelIr.operations);
+  const copyCollection = collectHostPeerCopies(
+    hostStatements,
+    input,
+    launch,
+    semanticRuntimeDeviceGlobals(compiled.kernelIr.symbols),
+  );
   const copies = copyCollection.copies;
   if (copyCollection.blocker) return unsupportedWithBlocker(copyCollection.blocker);
   if (copies.length === 0) return unsupported("no-host-liftable-peer-copy", copyCollection.reason ?? "no host-liftable peer-copy operations");

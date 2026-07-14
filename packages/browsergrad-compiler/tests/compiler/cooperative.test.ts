@@ -3342,6 +3342,50 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).not.toMatch(/for \(var bg_subgroup_loop_iteration_\d+: u32 = 0u; bg_subgroup_loop_iteration_\d+ < u32\(\(max\(\(bg_uniforms\.count - lane \+ 0\), 0\) \+ 1\) \/ 2\);/u);
     });
 
+  it("recognizes const local subgroup bounds derived from uniform parameters", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void subgroupUniformConstBound(float* x, int count) {
+    int lane = threadIdx.x;
+    const int tiles = div_ceil(count, 2);
+    float acc = 0.0f;
+    for (int tile = 0; tile < tiles; ++tile) {
+      acc = bg_subgroup_add(acc + x[lane]);
+    }
+    x[lane] = acc;
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [32, 1, 1],
+      });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("for (var tile: i32 = 0; (u32(tile) < u32(tiles)); tile += 1)");
+      expect(compiled.wgsl).toContain("subgroupAdd((acc + x[u32(lane)]))");
+      expect(compiled.wgsl).not.toContain("bg_subgroup_loop_active_");
+      expect(compiled.wgsl).not.toContain("bg_semantic_subgroup_loop_budget_scratch");
+    });
+
+  it("keeps cp.async fences and barriers unconditional in branchless subgroup loops", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void subgroupFenceLoop(float* x, int count) {
+    int lane = threadIdx.x;
+    float acc = 0.0f;
+    for (int i = lane; i < count; i += 4) {
+      CP_ASYNC_WAIT_GROUP(0);
+      __syncthreads();
+      acc = bg_subgroup_add(acc + x[i]);
+    }
+    x[lane] = acc;
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [4, 1, 1],
+      });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("// cp.async fence omitted: CP_ASYNC_WAIT_GROUP");
+      expect(compiled.wgsl).toMatch(/cp\.async fence omitted: CP_ASYNC_WAIT_GROUP\n\s+workgroupBarrier\(\);/u);
+      expect(compiled.wgsl).toContain("subgroupAdd(select(0.0, (acc + x[u32(i)]), bg_subgroup_loop_active_");
+    });
+
   it("rejects subgroup loops without compile-time positive progress", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void subgroupUnknownProgress(float* x, int count, int stride) {

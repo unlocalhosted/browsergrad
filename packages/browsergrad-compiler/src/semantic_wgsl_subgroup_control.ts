@@ -86,20 +86,23 @@ export interface SemanticSubgroupControlEmitter<
 }
 
 export function semanticSubgroupControlDeclarations(ir: SemanticKernelIrModule): readonly string[] {
-  return ir.subgroupMode !== "scalar" && operationsNeedUniformSubgroupLoop(ir.operations)
+  return ir.subgroupMode !== "scalar" && operationsNeedUniformSubgroupLoop(ir, ir.operations)
     ? [`var<workgroup> ${SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH}: array<u32, ${semanticWorkgroupSize(ir)}>;`]
     : [];
 }
 
-export function semanticSubgroupLoopControlIsWorkgroupUniform(operation: SemanticLoopOperation): boolean {
+export function semanticSubgroupLoopControlIsWorkgroupUniform(
+  operation: SemanticLoopOperation,
+  ir: SemanticKernelIrModule,
+): boolean {
   if (operation.init?.kind !== "declare" || operation.init.target.addressSpace !== "local" || !operation.init.init) return false;
   const counter = operation.init.target.id;
-  if (!expressionIsWorkgroupUniform(operation.init.init) ||
-    !operation.condition || !expressionIsWorkgroupUniformWithCounter(operation.condition, counter)) return false;
+  if (!expressionIsWorkgroupUniform(operation.init.init, ir) ||
+    !operation.condition || !expressionIsWorkgroupUniformWithCounter(operation.condition, counter, ir)) return false;
   const update = operation.update;
   if (update?.kind === "update") return update.argument.kind === "symbol" && semanticIdsEqual(update.argument.id, counter);
   return update?.kind === "assignment" && update.target.kind === "symbol" && semanticIdsEqual(update.target.id, counter) &&
-    expressionIsWorkgroupUniformWithCounter(update.value, counter);
+    expressionIsWorkgroupUniformWithCounter(update.value, counter, ir);
 }
 
 function expressionContainsNativeCollective(expression: SemanticExpression): boolean {
@@ -129,13 +132,16 @@ function operationsContainNativeCollective(operations: readonly SemanticKernelIr
   });
 }
 
-function operationsNeedUniformSubgroupLoop(operations: readonly SemanticKernelIrOperation[]): boolean {
+function operationsNeedUniformSubgroupLoop(
+  ir: SemanticKernelIrModule,
+  operations: readonly SemanticKernelIrOperation[],
+): boolean {
   return operations.some((operation) => {
     if (operation.kind === "loop" && operation.loopKind === "for" && operation.continuing === undefined &&
-      operation.update?.kind !== "sequence" && !semanticSubgroupLoopControlIsWorkgroupUniform(operation) &&
+      operation.update?.kind !== "sequence" && !semanticSubgroupLoopControlIsWorkgroupUniform(operation, ir) &&
       operationsContainNativeCollective(operation.body)) return true;
-    if (operation.kind === "branch") return operationsNeedUniformSubgroupLoop(operation.consequent) || operationsNeedUniformSubgroupLoop(operation.alternate);
-    if (operation.kind === "loop" || operation.kind === "block") return operationsNeedUniformSubgroupLoop(operation.body);
+    if (operation.kind === "branch") return operationsNeedUniformSubgroupLoop(ir, operation.consequent) || operationsNeedUniformSubgroupLoop(ir, operation.alternate);
+    if (operation.kind === "loop" || operation.kind === "block") return operationsNeedUniformSubgroupLoop(ir, operation.body);
     return false;
   });
 }
@@ -230,6 +236,22 @@ export function createSemanticSubgroupControlEmitter<
         lines.push(`${prefix}{`);
         lines.push(...emitBranchlessOperations(operation.body, predicateExpression, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
         lines.push(`${prefix}}`);
+        continue;
+      }
+      // CUDA cp.async commit/wait fences have no standalone WGSL operation: the
+      // semantic WGSL backend intentionally emits them as comments.  Keeping
+      // that no-op in the uniformized loop is therefore sound, while copies
+      // themselves remain subject to the guarded branchless lowering below.
+      if (operation.kind === "copy-fence") {
+        lines.push(...emitOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+        continue;
+      }
+      // The whole point of this transform is to retain a workgroup-uniform
+      // control path around native subgroup work.  Barriers must therefore
+      // remain unconditional; predicating them on the per-lane activity bit
+      // would make the generated WGSL invalid and could deadlock a workgroup.
+      if (operation.kind === "barrier") {
+        lines.push(...emitOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
         continue;
       }
       if (operation.kind === "branch") {
@@ -433,8 +455,8 @@ function emitUniformIterationBudget<
   const distance = conditionIncreases ? `(${emittedBound} - ${start} + ${inclusive})` : `(${start} - ${emittedBound} + ${inclusive})`;
   return {
     expression: `u32((max(${distance}, 0) + ${step - 1}) / ${step})`,
-    workgroupMaximum: (startExpression !== undefined && !expressionIsWorkgroupUniform(startExpression)) ||
-      !expressionIsWorkgroupUniform(bound),
+    workgroupMaximum: (startExpression !== undefined && !expressionIsWorkgroupUniform(startExpression, ir)) ||
+      !expressionIsWorkgroupUniform(bound, ir),
   };
 }
 
@@ -540,14 +562,34 @@ function findLocalDeclaration(
   return undefined;
 }
 
-function expressionIsWorkgroupUniform(expression: SemanticExpression): boolean {
+const WORKGROUP_UNIFORM_BUILTIN_CALLS = new Set([
+  "div_ceil",
+  "min",
+  "max",
+]);
+
+function expressionIsWorkgroupUniform(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  visiting: ReadonlySet<string> = new Set(),
+): boolean {
   if (expression.kind === "literal") return true;
-  if (expression.kind === "symbol") return expression.addressSpace === "uniform" || expression.addressSpace === "constant";
-  if (expression.kind === "cast") return expressionIsWorkgroupUniform(expression.expression);
-  if (expression.kind === "unary") return expressionIsWorkgroupUniform(expression.argument);
-  if (expression.kind === "binary") return expressionIsWorkgroupUniform(expression.left) && expressionIsWorkgroupUniform(expression.right);
-  if (expression.kind === "conditional") return expressionIsWorkgroupUniform(expression.condition) &&
-    expressionIsWorkgroupUniform(expression.consequent) && expressionIsWorkgroupUniform(expression.alternate);
+  if (expression.kind === "symbol") {
+    if (expression.addressSpace === "uniform" || expression.addressSpace === "constant") return true;
+    if (expression.addressSpace !== "local" || visiting.has(expression.id.key)) return false;
+    const declaration = findLocalDeclaration(ir.operations, expression.id);
+    if (!declaration?.target.constant || !declaration.init) return false;
+    return expressionIsWorkgroupUniform(declaration.init, ir, new Set([...visiting, expression.id.key]));
+  }
+  if (expression.kind === "cast") return expressionIsWorkgroupUniform(expression.expression, ir, visiting);
+  if (expression.kind === "unary") return expressionIsWorkgroupUniform(expression.argument, ir, visiting);
+  if (expression.kind === "binary") return expressionIsWorkgroupUniform(expression.left, ir, visiting) && expressionIsWorkgroupUniform(expression.right, ir, visiting);
+  if (expression.kind === "conditional") return expressionIsWorkgroupUniform(expression.condition, ir, visiting) &&
+    expressionIsWorkgroupUniform(expression.consequent, ir, visiting) && expressionIsWorkgroupUniform(expression.alternate, ir, visiting);
+  if (expression.kind === "call" && expression.callee.kind === "symbol" &&
+    expression.callee.addressSpace === "builtin" && WORKGROUP_UNIFORM_BUILTIN_CALLS.has(expression.callee.name)) {
+    return expression.args.every((arg) => expressionIsWorkgroupUniform(arg, ir, visiting));
+  }
   if (expression.kind === "call" && expression.callee.kind === "member" && expression.args.length === 0) {
     return expression.callee.property === "size" || expression.callee.property === "meta_group_size";
   }
@@ -557,11 +599,12 @@ function expressionIsWorkgroupUniform(expression: SemanticExpression): boolean {
 function expressionIsWorkgroupUniformWithCounter(
   expression: SemanticExpression,
   counter: CudaLiteSemanticSymbol["id"],
+  ir: SemanticKernelIrModule,
 ): boolean {
   if (expression.kind === "symbol" && semanticIdsEqual(expression.id, counter)) return true;
-  if (expressionIsWorkgroupUniform(expression)) return true;
+  if (expressionIsWorkgroupUniform(expression, ir)) return true;
   const children = semanticExpressionChildren(expression);
-  return children.length > 0 && children.every((child) => expressionIsWorkgroupUniformWithCounter(child, counter));
+  return children.length > 0 && children.every((child) => expressionIsWorkgroupUniformWithCounter(child, counter, ir));
 }
 
 function collectiveNot(expression: SemanticExpression): SemanticExpression {

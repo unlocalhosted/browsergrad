@@ -683,6 +683,27 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
         },
         { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
       ).supported).toBe(true);
+      const semanticOnlyPlan = createCudaPeerCopyPlan(
+        {
+          ...compiled,
+          ast: { ...compiled.ast, functions: [], kernels: [] },
+          analysis: {
+            ...compiled.analysis,
+            kernel: { ...compiled.analysis.kernel, body: [] },
+            deviceGlobals: [],
+          },
+        },
+        {
+          buffers: {
+            dst: new Float32Array(4),
+            src: new Float32Array([2.5, 3.5]),
+          },
+          scalars: { n: 2 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(semanticOnlyPlan.supported).toBe(true);
+      expect(semanticOnlyPlan.copies).toHaveLength(2);
       expect(plan.copies[0]).toMatchObject({
         dstRoot: "dst",
         dstOffset: 0,
@@ -1195,6 +1216,20 @@ describe("CUDA-lite compiler: Runtime orchestration", () => {
 
       expect([...result.buffers.dst as Uint32Array]).toEqual([7, 8, 9]);
       expect(plan.supported).toBe(true);
+      const semanticGlobalPlan = createCudaRuntimeCopyPlan(
+        {
+          ...compiled,
+          ast: { ...compiled.ast, functions: [], kernels: [] },
+          analysis: {
+            ...compiled.analysis,
+            kernel: { ...compiled.analysis.kernel, body: [] },
+            deviceGlobals: [],
+          },
+        },
+        input,
+        launch,
+      );
+      expect(semanticGlobalPlan.supported).toBe(true);
       expect(plan.copies.map((copy) => copy.kind === "copy"
         ? { dstRoot: copy.dstRoot, srcRoot: copy.srcRoot, dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
         : copy.kind === "fill"

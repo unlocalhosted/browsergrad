@@ -1339,7 +1339,7 @@ class Parser {
       } while (this.peek().kind === "string");
       return { kind: "string", value: valueParts.join(""), raw: rawParts.join(" "), span: mergeSpans(start, end) };
     }
-    if (this.startsCuteIntValue()) return this.parseCuteIntValue();
+    if (this.startsCuteStaticIntegerValue()) return this.parseCuteStaticIntegerValue();
     const ident = this.expectIdentifier("expression");
     let name = ident.value;
     let end = ident.span;
@@ -1356,17 +1356,32 @@ class Parser {
   }
 
   /**
-   * CuTe exposes a small compile-time integer wrapper (`cute::Int<N>{}`) that
-   * frequently survives otherwise scalarized CUDA. Treat only the empty-brace
-   * value form as its integer constant. CuTe tensor, layout, and tile objects
-   * still require source normalization and keep their explicit diagnostics.
+   * CuTe exposes small compile-time integer values as either
+   * `cute::Int<N>{}` or the `_N{}` aliases used throughout CuTe layouts.
+   * Treat only their empty-brace value forms as i32 constants. CuTe tensor,
+   * layout, tile, and placeholder objects still require source normalization
+   * and keep their explicit diagnostics.
    */
+  private startsCuteStaticIntegerValue(): boolean {
+    return this.startsCuteIntValue() || this.startsCuteUnderscoreIntegerValue();
+  }
+
   private startsCuteIntValue(): boolean {
     let typeIndex = this.index;
     if (this.tokens[typeIndex]?.value === "cute" && this.tokens[typeIndex + 1]?.value === "::") typeIndex += 2;
     if (this.tokens[typeIndex]?.value !== "Int" || this.tokens[typeIndex + 1]?.value !== "<") return false;
     const templateEnd = this.findTemplateArgumentEnd(typeIndex + 1);
     return templateEnd !== undefined && this.tokens[templateEnd + 1]?.value === "{" && this.tokens[templateEnd + 2]?.value === "}";
+  }
+
+  private startsCuteUnderscoreIntegerValue(): boolean {
+    let typeIndex = this.index;
+    if (this.tokens[typeIndex]?.value === "cute" && this.tokens[typeIndex + 1]?.value === "::") typeIndex += 2;
+    return /^_[0-9]+$/u.test(this.tokens[typeIndex]?.value ?? "") && this.tokens[typeIndex + 1]?.value === "{";
+  }
+
+  private parseCuteStaticIntegerValue(): CudaLiteExpression {
+    return this.startsCuteIntValue() ? this.parseCuteIntValue() : this.parseCuteUnderscoreIntegerValue();
   }
 
   private parseCuteIntValue(): CudaLiteExpression {
@@ -1388,6 +1403,23 @@ class Parser {
     }
     this.expect(">");
     this.expect("{");
+    const end = this.expect("}").span;
+    return { kind: "number", value, raw: String(value), span: mergeSpans(start, end) };
+  }
+
+  private parseCuteUnderscoreIntegerValue(): CudaLiteExpression {
+    const start = this.peek().span;
+    const qualified = this.consumeIf("cute") !== undefined;
+    if (qualified) this.expect("::");
+    const alias = this.expectIdentifier("CuTe static integer value");
+    const match = /^_([0-9]+)$/u.exec(alias.value);
+    if (match?.[1] === undefined) this.fail("expected a CuTe _N static integer value", alias.span);
+    const value = Number(match[1]);
+    if (!Number.isSafeInteger(value) || value > 0x7fff_ffff) {
+      this.fail("CuTe _N value must be a non-negative i32 integer constant", alias.span);
+    }
+    this.expect("{");
+    if (!this.match("}")) this.fail("CuTe _N value must use empty braces", this.peek().span);
     const end = this.expect("}").span;
     return { kind: "number", value, raw: String(value), span: mergeSpans(start, end) };
   }
