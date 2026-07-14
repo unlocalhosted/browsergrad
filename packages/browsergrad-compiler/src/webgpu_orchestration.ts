@@ -333,7 +333,7 @@ function createHostLiftedPeerCopyWebGpuPlan(
   plan: ReturnType<typeof createCudaPeerCopyPlan>,
 ): CudaWebGpuExecutionPlan | undefined {
   if (!plan.supported || plan.copies.length === 0) return undefined;
-  const parentInput = createWgslRunInput(compiled, input);
+  const parentInput = createWgslRunInput(compiled, input, peerCopyStorageRoots(plan.copies));
   const parentProgram = compiled.wgslProgram ?? emitProjectedHostRuntimeProgram(compiled);
   const steps: WgslKernelSequenceStep[] = parentProgram === undefined ? [] : [{
       program: parentProgram,
@@ -1101,14 +1101,15 @@ function dynamicChildCompileFailureMessage(kernelName: string, error: unknown): 
 function createWgslRunInput(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
+  requiredStorageNames: ReadonlySet<string> = new Set(),
 ): WgslKernelRunInput {
   const uniforms = packCudaWebGpuUniformParams(compiled, input);
   const buffers = {
     ...input.buffers,
     ...surfaceBufferInputs(compiled, input),
     ...memoryPoolBufferInputs(compiled, input),
-    ...constantBufferInputs(compiled, input),
-    ...deviceGlobalBufferInputs(compiled, input),
+    ...constantBufferInputs(compiled, input, requiredStorageNames),
+    ...deviceGlobalBufferInputs(compiled, input, requiredStorageNames),
   };
   const storageMetadata = memoryPoolStorageMetadata(compiled);
   const readback = input.readback === undefined
@@ -1122,6 +1123,17 @@ function createWgslRunInput(
     ...(uniforms.byteLength === 0 ? {} : { uniforms: { bg_uniforms: uniforms } }),
     readback,
   };
+}
+
+function peerCopyStorageRoots(
+  copies: readonly CudaPeerCopyOperation[],
+): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const copy of copies) {
+    names.add(copy.dstRoot);
+    if (copy.kind === "copy" || copy.kind === "copy-bytes") names.add(copy.srcRoot);
+  }
+  return names;
 }
 
 function dispatchCountForLaunch(launch: KernelLaunch): readonly [number, number, number] {

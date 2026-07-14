@@ -211,6 +211,12 @@ Simple C++ intake accepts scalar/vector `typedef` and `using` aliases,
 arguments, `static` kernel qualifiers, late `__launch_bounds__` placement, and
 `static_assert` statements. This is bounded CUDA/C++ normalization, not full
 C++ template compatibility.
+CuTe support includes compile-time rank-one affine layouts declared with
+`make_layout(make_shape(...), make_stride(...))` or `Layout<_N, _Stride>{}`.
+Their `size`, `rank`, and `cosize` queries plus one-coordinate application
+lower to scalar Kernel IR expressions. Tensors, multi-rank layouts, dynamic
+layout objects, and tiled MMA remain explicit unsupported diagnostics rather
+than partially modeled C++ objects.
 WMMA fragments are accepted as scalarized cooperative-matrix primitives:
 `wmma::fragment`, `wmma::fill_fragment`, `wmma::load_matrix_sync`,
 `wmma::mma_sync`, and `wmma::store_matrix_sync` lower through CPU reference and

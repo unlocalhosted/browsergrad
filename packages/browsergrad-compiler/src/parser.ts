@@ -35,6 +35,12 @@ import {
 } from "./types.js";
 import { CUDA_VECTOR_TYPES, cudaVectorTypeAlias, isCudaVectorType } from "./vector_types.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import {
+  createCuteStaticRank1Layout,
+  cuteStaticRank1LayoutQuery,
+  type CuteStaticLayoutQuery,
+  type CuteStaticRank1Layout,
+} from "./cute_static_layout.js";
 import { completeParsing, type Parsed } from "./compiler_phases.js";
 import { createCudaLiteCompilerError } from "./diagnostics.js";
 
@@ -187,6 +193,7 @@ class Parser {
   private index = 0;
   private anonymousKernelIndex = 0;
   private readonly integerConstantScopes: Map<string, number>[] = [new Map()];
+  private readonly cuteStaticLayoutScopes: Map<string, CuteStaticRank1Layout>[] = [new Map()];
   private templateArgumentDepth = 0;
 
   constructor(source: string) {
@@ -209,12 +216,14 @@ class Parser {
       else if (this.match("template")) {
         const templateConstants = this.parseTemplateIntegerDefaults();
         this.integerConstantScopes.push(templateConstants);
+        this.cuteStaticLayoutScopes.push(new Map());
         try {
           if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
           else if (this.startsDeviceGlobal()) deviceGlobals.push(...this.parseDeviceGlobals());
           else kernels.push(this.parseKernel());
         } finally {
           this.integerConstantScopes.pop();
+          this.cuteStaticLayoutScopes.pop();
         }
       }
       else if (this.startsDeviceGlobal()) deviceGlobals.push(...this.parseDeviceGlobals());
@@ -530,10 +539,12 @@ class Parser {
   private parseBlock(): readonly CudaLiteStatement[] {
     this.expect("{");
     this.integerConstantScopes.push(new Map());
+    this.cuteStaticLayoutScopes.push(new Map());
     const statements: CudaLiteStatement[] = [];
     while (!this.match("}")) statements.push(...this.parseStatementEntry());
     this.expect("}");
     this.integerConstantScopes.pop();
+    this.cuteStaticLayoutScopes.pop();
     return statements;
   }
 
@@ -564,6 +575,10 @@ class Parser {
     if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];
     if (this.match("asm")) return [this.parseAsmStatement()];
     if (this.match("static_assert")) return this.parseStaticAssert();
+    if (this.startsCuteStaticLayoutDeclaration()) {
+      this.parseCuteStaticLayoutDeclaration();
+      return [];
+    }
     this.rejectUnsupportedCudaCppObjectStatement();
     if (this.startsVarDecl()) return this.parseVarDeclList(true);
     const expression = this.parseExpressionSequence();
@@ -1155,6 +1170,8 @@ class Parser {
 
   private parsePrefix(): CudaLiteExpression {
     const token = this.peek();
+    if (this.startsCuteStaticLayoutQuery()) return this.parseCuteStaticLayoutQuery();
+    if (this.startsCuteStaticLayoutApplication()) return this.parseCuteStaticLayoutApplication();
     if (this.startsSizeofTypeExpression()) return this.parseSizeofTypeExpression();
     if (this.startsScalarCast()) {
       const start = this.expect("(").span;
@@ -1352,6 +1369,13 @@ class Parser {
     if (constant !== undefined) {
       return { kind: "number", value: constant, raw: String(constant), span: mergeSpans(ident.span, end) };
     }
+    if (this.lookupCuteStaticLayout(name) !== undefined) {
+      this.fail(
+        "CuTe static rank-1 layouts are only supported through size/rank/cosize queries and a one-coordinate call",
+        mergeSpans(ident.span, end),
+        "unsupported-cute-static-layout-use",
+      );
+    }
     return { kind: "identifier", name, span: mergeSpans(ident.span, end) };
   }
 
@@ -1422,6 +1446,228 @@ class Parser {
     if (!this.match("}")) this.fail("CuTe _N value must use empty braces", this.peek().span);
     const end = this.expect("}").span;
     return { kind: "number", value, raw: String(value), span: mergeSpans(start, end) };
+  }
+
+  /**
+   * Models only rank-one, compile-time CuTe layouts.  The descriptor is
+   * intentionally erased to scalar expressions before semantic IR lowering;
+   * tensors, rank > 1 layouts, and runtime layout objects remain unsupported.
+   */
+  private startsCuteStaticLayoutDeclaration(): boolean {
+    let index = this.index;
+    while (["static", "constexpr", "const", "volatile"].includes(this.tokens[index]?.value ?? "")) index++;
+    if (
+      this.tokens[index]?.value !== "auto" ||
+      this.tokens[index + 1]?.kind !== "identifier" ||
+      this.tokens[index + 2]?.value !== "="
+    ) return false;
+    return this.startsCuteStaticRank1LayoutValue(index + 3);
+  }
+
+  private parseCuteStaticLayoutDeclaration(): void {
+    while (this.consumeIf("static") || this.consumeIf("constexpr") || this.consumeIf("const") || this.consumeIf("volatile")) {
+      // These qualifiers do not affect a compile-time descriptor.
+    }
+    this.expect("auto");
+    const name = this.expectIdentifier("CuTe static layout variable name");
+    this.expect("=");
+    const layout = this.parseCuteStaticRank1LayoutValue();
+    const end = this.expect(";").span;
+    const scope = this.cuteStaticLayoutScopes.at(-1);
+    if (scope?.has(name.value)) {
+      this.fail(`duplicate CuTe static layout '${name.value}'`, mergeSpans(name.span, end), "duplicate-symbol");
+    }
+    scope?.set(name.value, layout);
+  }
+
+  private startsCuteStaticRank1LayoutValue(index = this.index): boolean {
+    if (this.tokens[index]?.value === "cute" && this.tokens[index + 1]?.value === "::") index += 2;
+    const factory = this.tokens[index]?.value;
+    return (factory === "make_layout" && this.tokens[index + 1]?.value === "(") ||
+      (factory === "Layout" && this.tokens[index + 1]?.value === "<");
+  }
+
+  private parseCuteStaticRank1LayoutValue(): CuteStaticRank1Layout {
+    const start = this.peek().span;
+    if (this.consumeIf("cute")) this.expect("::");
+    const factory = this.expectIdentifier("CuTe static layout factory");
+    let extent: number;
+    let stride = 1;
+    let end: SourceSpan;
+    if (factory.value === "make_layout") {
+      this.expect("(");
+      extent = this.parseCuteStaticRank1Shape();
+      if (this.consumeIf(",")) stride = this.parseCuteStaticRank1Stride();
+      end = this.expect(")").span;
+    } else if (factory.value === "Layout") {
+      this.expect("<");
+      this.templateArgumentDepth++;
+      try {
+        extent = this.parseCuteStaticRank1TemplateComponent();
+        if (this.consumeIf(",")) stride = this.parseCuteStaticRank1TemplateComponent();
+        if (this.consumeIf(",")) {
+          this.fail("CuTe static layout support is limited to one shape and one stride", this.peek().span, "unsupported-cute-static-layout");
+        }
+        this.expect(">");
+      } finally {
+        this.templateArgumentDepth--;
+      }
+      this.expect("{");
+      end = this.expect("}").span;
+    } else {
+      this.fail("unsupported CuTe static layout factory", factory.span, "unsupported-cute-static-layout");
+    }
+    return this.createCuteStaticRank1Layout(extent, stride, mergeSpans(start, end));
+  }
+
+  private parseCuteStaticRank1Shape(): number {
+    if (!this.startsCuteStaticLayoutNamedCall("make_shape")) {
+      return this.parseCuteStaticLayoutInteger("shape");
+    }
+    this.consumeCuteStaticLayoutNamespace();
+    this.expect("make_shape");
+    this.expect("(");
+    const extent = this.parseCuteStaticLayoutInteger("shape");
+    if (this.consumeIf(",")) {
+      this.fail("CuTe static layout support is limited to rank-one shapes", this.peek().span, "unsupported-cute-static-layout");
+    }
+    this.expect(")");
+    return extent;
+  }
+
+  private parseCuteStaticRank1Stride(): number {
+    if (!this.startsCuteStaticLayoutNamedCall("make_stride")) {
+      return this.parseCuteStaticLayoutInteger("stride");
+    }
+    this.consumeCuteStaticLayoutNamespace();
+    this.expect("make_stride");
+    this.expect("(");
+    const stride = this.parseCuteStaticLayoutInteger("stride");
+    if (this.consumeIf(",")) {
+      this.fail("CuTe static layout support is limited to rank-one strides", this.peek().span, "unsupported-cute-static-layout");
+    }
+    this.expect(")");
+    return stride;
+  }
+
+  private parseCuteStaticRank1TemplateComponent(): number {
+    if (this.consumeIf("cute")) this.expect("::");
+    const component = this.expectIdentifier("CuTe static layout template component");
+    const alias = /^_([0-9]+)$/u.exec(component.value);
+    if (alias?.[1] !== undefined) return this.validateCuteStaticLayoutInteger(Number(alias[1]), component.span, "template component");
+    if (component.value !== "Int") {
+      this.fail("CuTe static rank-1 layouts require _N or Int<N> template components", component.span, "unsupported-cute-static-layout");
+    }
+    this.expect("<");
+    this.templateArgumentDepth++;
+    let expression: CudaLiteExpression;
+    try {
+      expression = this.parseExpression();
+    } finally {
+      this.templateArgumentDepth--;
+    }
+    this.expect(">");
+    const value = this.evaluateIntegerConstantExpression(expression);
+    if (value === undefined) {
+      this.fail("CuTe static layout template component must be an i32 integer constant expression", expression.span, "invalid-cute-static-layout");
+    }
+    return this.validateCuteStaticLayoutInteger(value, component.span, "template component");
+  }
+
+  private parseCuteStaticLayoutInteger(label: "shape" | "stride"): number {
+    const expression = this.parseExpression();
+    const value = this.evaluateIntegerConstantExpression(expression);
+    if (value === undefined) {
+      this.fail(`CuTe static rank-1 layout ${label} must be an i32 integer constant expression`, expression.span, "invalid-cute-static-layout");
+    }
+    return this.validateCuteStaticLayoutInteger(value, expression.span, label);
+  }
+
+  private validateCuteStaticLayoutInteger(value: number, span: SourceSpan, label: string): number {
+    if (!Number.isSafeInteger(value) || value < 0 || value > 0x7fff_ffff) {
+      this.fail(`CuTe static rank-1 layout ${label} must be a non-negative i32 integer constant`, span, "invalid-cute-static-layout");
+    }
+    return value;
+  }
+
+  private createCuteStaticRank1Layout(extent: number, stride: number, span: SourceSpan): CuteStaticRank1Layout {
+    const cosize = extent === 0 ? 0 : 1 + ((extent - 1) * stride);
+    if (!Number.isSafeInteger(cosize) || cosize > 0x7fff_ffff) {
+      this.fail("CuTe static rank-1 layout cosize must fit a non-negative i32", span, "invalid-cute-static-layout");
+    }
+    return createCuteStaticRank1Layout(extent, stride);
+  }
+
+  private startsCuteStaticLayoutNamedCall(name: string): boolean {
+    let index = this.index;
+    if (this.tokens[index]?.value === "cute" && this.tokens[index + 1]?.value === "::") index += 2;
+    return this.tokens[index]?.value === name && this.tokens[index + 1]?.value === "(";
+  }
+
+  private consumeCuteStaticLayoutNamespace(): void {
+    if (this.consumeIf("cute")) this.expect("::");
+  }
+
+  private startsCuteStaticLayoutQuery(): boolean {
+    let index = this.index;
+    if (this.tokens[index]?.value === "cute" && this.tokens[index + 1]?.value === "::") index += 2;
+    const query = this.tokens[index]?.value as CuteStaticLayoutQuery | undefined;
+    if ((query !== "size" && query !== "rank" && query !== "cosize") || this.tokens[index + 1]?.value !== "(") return false;
+    const argumentIndex = index + 2;
+    const argumentName = this.tokens[argumentIndex]?.value;
+    return (this.tokens[argumentIndex]?.kind === "identifier" &&
+      this.tokens[argumentIndex + 1]?.value === ")" &&
+      argumentName !== undefined &&
+      this.lookupCuteStaticLayout(argumentName) !== undefined) ||
+      this.startsCuteStaticRank1LayoutValue(argumentIndex);
+  }
+
+  private parseCuteStaticLayoutQuery(): CudaLiteExpression {
+    const start = this.peek().span;
+    this.consumeCuteStaticLayoutNamespace();
+    const name = this.expectIdentifier("CuTe static layout query");
+    const query = name.value as CuteStaticLayoutQuery;
+    this.expect("(");
+    let layout: CuteStaticRank1Layout;
+    if (this.startsCuteStaticRank1LayoutValue()) {
+      layout = this.parseCuteStaticRank1LayoutValue();
+    } else {
+      const descriptor = this.expectIdentifier("CuTe static layout value");
+      layout = this.lookupCuteStaticLayout(descriptor.value) ?? this.fail(
+        `unknown CuTe static layout '${descriptor.value}'`,
+        descriptor.span,
+        "unsupported-cute-static-layout-use",
+      );
+    }
+    const end = this.expect(")").span;
+    const value = cuteStaticRank1LayoutQuery(layout, query);
+    return { kind: "number", value, raw: String(value), span: mergeSpans(start, end) };
+  }
+
+  private startsCuteStaticLayoutApplication(): boolean {
+    return this.peek().kind === "identifier" &&
+      this.lookupCuteStaticLayout(this.peek().value) !== undefined &&
+      this.tokens[this.index + 1]?.value === "(";
+  }
+
+  private parseCuteStaticLayoutApplication(): CudaLiteExpression {
+    const name = this.expectIdentifier("CuTe static layout value");
+    const layout = this.lookupCuteStaticLayout(name.value);
+    if (layout === undefined) this.fail(`unknown CuTe static layout '${name.value}'`, name.span, "unsupported-cute-static-layout-use");
+    this.expect("(");
+    const coordinate = this.parseExpression();
+    if (this.consumeIf(",")) {
+      this.fail("CuTe static rank-1 layouts accept exactly one coordinate", this.peek().span, "unsupported-cute-static-layout");
+    }
+    const end = this.expect(")").span;
+    if (layout.stride === 1) return coordinate;
+    return {
+      kind: "binary",
+      operator: "*",
+      left: coordinate,
+      right: { kind: "number", value: layout.stride, raw: String(layout.stride), span: mergeSpans(name.span, end) },
+      span: mergeSpans(name.span, end),
+    };
   }
 
   private parseArgumentList(): readonly CudaLiteExpression[] {
@@ -1991,6 +2237,14 @@ class Parser {
 
   private recordIntegerConstant(name: string, value: number): void {
     this.integerConstantScopes.at(-1)?.set(name, value);
+  }
+
+  private lookupCuteStaticLayout(name: string): CuteStaticRank1Layout | undefined {
+    for (let index = this.cuteStaticLayoutScopes.length - 1; index >= 0; index--) {
+      const layout = this.cuteStaticLayoutScopes[index]?.get(name);
+      if (layout !== undefined) return layout;
+    }
+    return undefined;
   }
 
   private lookupIntegerConstant(name: string): number | undefined {

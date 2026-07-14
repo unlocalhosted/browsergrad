@@ -2181,6 +2181,16 @@ function emitSemanticPredicatedOperations(
       continue;
     }
     if (operation.kind === "declare") {
+      // Pointer aliases whose target carries a modeled root/base are compile-time
+      // address calculations, not WGSL values.  The ordinary declaration path
+      // intentionally emits nothing for them; preserve that contract while
+      // lowering a branch containing a workgroup collective.  Runtime pointers
+      // remain unsupported in this predicated form rather than emitting a
+      // pointer cast that WGSL cannot represent.
+      if (operation.target.pointer && !semanticPointerDeclarationNeedsRuntimeState(operation)) {
+        lines.push(...emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
+        continue;
+      }
       const valueType = operation.target.valueType;
       if (operation.target.addressSpace === "local" && !operation.target.pointer && operation.init === undefined) {
         lines.push(...emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));

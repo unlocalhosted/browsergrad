@@ -767,6 +767,58 @@ __global__ void subgroupLoop(float *x, float *out, int count) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs subgroup reductions through immutable workgroup-uniform strides on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupGridStride(float *x, float *out, int count) {
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  int gridStride = gridDim.x * blockDim.x;
+  float acc = 0.0f;
+  for (int i = index; i < count; i += gridStride) {
+    acc = bg_subgroup_add(acc + x[i]);
+  }
+  out[index] = acc;
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]), out: new Float32Array(8) },
+      scalars: { count: 12 },
+    };
+    const launch = { gridDim: [2, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("num_workgroups.x");
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs nested per-lane data loops before subgroup reductions on real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupNestedDataLoop(float *x, float *out, int count) {
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  int gridStride = gridDim.x * blockDim.x;
+  float acc = 0.0f;
+  for (int i = index; i < count; i += gridStride) {
+    for (int k = 0; k < 2; ++k) {
+      acc += x[i];
+    }
+    acc = bg_subgroup_add(acc);
+  }
+  out[index] = acc;
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]), out: new Float32Array(8) },
+      scalars: { count: 12 },
+    };
+    const launch = { gridDim: [2, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelSemanticReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(testDevice(), compiled, input, launch);
+
+    expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs subgroup reductions through const uniform loop bounds on real WebGPU", async () => {
     if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
     const compiled = compileCudaLiteKernel(`

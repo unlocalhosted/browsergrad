@@ -3315,6 +3315,34 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).not.toMatch(/if \([^\n]+\) \{\n\s+var total: f32 = subgroupAdd/u);
     });
 
+  it("keeps statically aliased local pointer casts elided inside predicated subgroup branches", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void subgroupPointerAliasInBranch(uint *out) {
+    int lane = threadIdx.x;
+    uint registers[4];
+    registers[0] = uint(lane);
+    if ((threadIdx.x / 32) == 0) {
+      uint *view = reinterpret_cast<uint *>(&registers[0]);
+      uint shuffled = __shfl_sync(0xffffffffu, registers[0], (lane + 1) & 3, 4);
+      view[1] = 7u;
+      out[0] = view[1];
+    }
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [4, 1, 1],
+      });
+      const result = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Uint32Array(4) } },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("bg_semantic_warp_shuffle_sync_uint_4");
+      expect(compiled.wgsl).not.toContain("typed WGSL emission missing for 'cast' expression");
+      expect([...result.buffers.out as Uint32Array]).toEqual([7, 0, 0, 0]);
+    });
+
   it("keeps native subgroup reductions uniform inside proven-progress loops", () => {
       const compiled = compileCudaLiteKernel(`
   __global__ void subgroupInDataLoop(float* x, float* out, int count) {
@@ -3340,6 +3368,51 @@ describe("CUDA-lite compiler: Cooperative execution and matrix tiles", () => {
       expect(compiled.wgsl).toMatch(/let bg_subgroup_loop_budget_\d+: u32 = workgroupUniformLoad\(&bg_semantic_subgroup_loop_budget_scratch\[0u\]\);/u);
       expect(compiled.wgsl).toMatch(/for \(var bg_subgroup_loop_iteration_\d+: u32 = 0u; bg_subgroup_loop_iteration_\d+ < bg_subgroup_loop_budget_\d+; bg_subgroup_loop_iteration_\d+ \+= 1u\)/u);
       expect(compiled.wgsl).not.toMatch(/for \(var bg_subgroup_loop_iteration_\d+: u32 = 0u; bg_subgroup_loop_iteration_\d+ < u32\(\(max\(\(bg_uniforms\.count - lane \+ 0\), 0\) \+ 1\) \/ 2\);/u);
+    });
+
+  it("proves immutable workgroup-uniform subgroup loop strides positive", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void subgroupGridStride(float* x, float* out, int count) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int gridStride = gridDim.x * blockDim.x;
+    float acc = 0.0f;
+    for (int i = index; i < count; i += gridStride) {
+      acc = bg_subgroup_add(acc + x[i]);
+    }
+    out[index] = acc;
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [4, 1, 1],
+      });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toContain("var gridStride: i32");
+      expect(compiled.wgsl).toContain("num_workgroups.x");
+      expect(compiled.wgsl).toMatch(/\+ \(gridStride - 1\)\) \/ gridStride/u);
+      expect(compiled.wgsl).toContain("subgroupAdd(select(0.0, (acc + x[u32(i)]), bg_subgroup_loop_active_");
+    });
+
+  it("reconverges nested per-lane data loops before native subgroup calls", () => {
+      const compiled = compileCudaLiteKernel(`
+  __global__ void subgroupNestedDataLoop(float* x, float* out, int count) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int gridStride = gridDim.x * blockDim.x;
+    float acc = 0.0f;
+    for (int i = index; i < count; i += gridStride) {
+      for (int k = 0; k < 2; ++k) {
+        acc += x[i];
+      }
+      acc = bg_subgroup_add(acc);
+    }
+    out[index] = acc;
+  }`, {
+        features: { subgroups: true },
+        workgroupSize: [4, 1, 1],
+      });
+
+      expect(canEmitSemanticKernelIrWgsl(compiled.wgslLegalizedKernelIr)).toBe(true);
+      expect(compiled.wgsl).toMatch(/if \(bg_subgroup_loop_active_\d+\) \{\n\s+for \(var k: i32 = 0;/u);
+      expect(compiled.wgsl).toContain("subgroupAdd(select(0.0, acc, bg_subgroup_loop_active_");
     });
 
   it("recognizes const local subgroup bounds derived from uniform parameters", () => {

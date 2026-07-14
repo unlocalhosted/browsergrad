@@ -1,7 +1,7 @@
 import type { WgslValueType } from "@unlocalhosted/browsergrad-kernels";
 import type { CudaLiteSemanticSymbol, SemanticExpression, SemanticKernelIrModule, SemanticKernelIrOperation } from "./semantic_ir_types.js";
 import { semanticIdsEqual } from "./semantic_ids.js";
-import { isSemanticKernelIrOperation, semanticExpressionChildren } from "./semantic_ir_walk.js";
+import { isSemanticKernelIrOperation, semanticExpressionChildren, semanticOperationExpressions } from "./semantic_ir_walk.js";
 import { SEMANTIC_SUBGROUP_CALLS } from "./semantic_builtin_calls.js";
 import { semanticAssignmentBinaryOperator } from "./semantic_expression_contracts.js";
 import { wgslValueType } from "./semantic_wgsl_types.js";
@@ -17,6 +17,11 @@ type SemanticLoopOperation = Extract<SemanticKernelIrOperation, { readonly kind:
 type SemanticLocalMutation =
   | Extract<SemanticExpression, { readonly kind: "assignment" }>
   | Extract<SemanticExpression, { readonly kind: "update" }>;
+interface SemanticSubgroupAdditiveProgress {
+  readonly direction: "increases" | "decreases";
+  readonly staticStep?: number;
+  readonly stepExpression?: SemanticExpression;
+}
 const SEMANTIC_SUBGROUP_LOOP_BUDGET_SCRATCH = "bg_semantic_subgroup_loop_budget_scratch";
 
 interface SemanticSubgroupControlOptions {
@@ -254,6 +259,20 @@ export function createSemanticSubgroupControlEmitter<
         lines.push(...emitOperation(operation, ir, names, indentLevel, allowReturnValue, options, textureSpecializations));
         continue;
       }
+      // A nested loop without barriers or subgroup collectives may run only
+      // for active lanes. Its divergent branch reconverges before the outer
+      // loop's collective, so it cannot make that collective non-uniform.
+      // Keeping this case narrow avoids moving synchronization into a
+      // predicated region while still supporting ordinary per-lane data work.
+      if (operation.kind === "loop" &&
+        !operationsContainNativeCollective(operation.body) && !operationsContainNativeCollective(operation.continuing ?? []) &&
+        !semanticOperationsContainBarrier(operation.body) && !semanticOperationsContainBarrier(operation.continuing ?? [])) {
+        const condition = emitBoolExpression(predicateExpression, ir, names, options, textureSpecializations).code;
+        lines.push(`${prefix}if (${condition}) {`);
+        lines.push(...emitOperation(operation, ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
+        lines.push(`${prefix}}`);
+        continue;
+      }
       if (operation.kind === "branch") {
         lines.push(`${prefix}{`);
         lines.push(...emitBranchlessOperations(operation.consequent, collectiveAnd(predicateExpression, operation.condition), ir, names, indentLevel + 1, allowReturnValue, options, textureSpecializations));
@@ -398,11 +417,7 @@ function emitUniformIterationBudget<
     throw dependencies.semanticError("native subgroup loops require a canonical directional integer bound", operation.span);
   }
   const update = operation.update;
-  const additiveProgress = update?.kind === "update"
-    ? update.operator === "++" && update.argument.kind === "symbol" && semanticIdsEqual(update.argument.id, operation.init.target.id)
-    : update?.kind === "assignment" && update.operator === "+=" && update.target.kind === "symbol" &&
-      semanticIdsEqual(update.target.id, operation.init.target.id) && update.value.kind === "literal" &&
-      update.value.literalKind === "number" && update.value.value > 0;
+  const additiveProgress = semanticSubgroupAdditiveProgress(update, operation.init.target.id, ir);
   const shift = update?.kind === "assignment" && (update.operator === "<<=" || update.operator === ">>=") &&
     update.target.kind === "symbol" && semanticIdsEqual(update.target.id, operation.init.target.id) &&
     update.value.kind === "literal" && update.value.literalKind === "number" &&
@@ -418,10 +433,10 @@ function emitUniformIterationBudget<
   const conditionIncreases = condition.operator === "<" || condition.operator === "<=";
   const shiftIncreases = shift?.operator === "<<=";
   const geometricIncreases = geometric?.operator === "*=";
-  if (!additiveProgress &&
+  if ((additiveProgress === undefined || (additiveProgress.direction === "increases") !== conditionIncreases) &&
     (shift === undefined || shiftIncreases !== conditionIncreases) &&
     (geometric === undefined || geometricIncreases !== conditionIncreases)) {
-    throw dependencies.semanticError("native subgroup loops require a compile-time positive counter step", update?.span ?? operation.span);
+    throw dependencies.semanticError("native subgroup loops require a compile-time positive counter step or a provably positive uniform counter step", update?.span ?? operation.span);
   }
   const startExpression = operation.init.init;
   const initialRange = startExpression ? staticIntegerRange(startExpression, ir) : { min: 0, max: 0 };
@@ -437,24 +452,28 @@ function emitUniformIterationBudget<
   const inclusive = condition.operator === "<=" || condition.operator === ">=" ? 1 : 0;
   const bound = condition.right;
   const staticBound = staticIntegerRange(bound, ir);
-  if (initialRange && staticBound) {
+  if (initialRange && staticBound && additiveProgress?.staticStep !== undefined) {
     const distance = conditionIncreases
       ? staticBound.max - initialRange.min + inclusive
       : initialRange.max - staticBound.min + inclusive;
-    return { expression: `${Math.max(0, Math.trunc(distance))}u`, workgroupMaximum: false };
+    return { expression: `${Math.max(0, Math.ceil(distance / additiveProgress.staticStep))}u`, workgroupMaximum: false };
   }
   const start = startExpression
     ? dependencies.emitExpressionAs(startExpression, ir, names, "i32", options, textureSpecializations).code
     : "0";
   const emittedBound = dependencies.emitExpressionAs(bound, ir, names, "i32", options, textureSpecializations).code;
-  const step = update?.kind === "update"
-    ? 1
-    : update?.kind === "assignment" && update.value.kind === "literal" && typeof update.value.value === "number"
-      ? update.value.value
-      : 0;
+  const step = additiveProgress?.staticStep === undefined
+    ? additiveProgress?.stepExpression === undefined
+      ? undefined
+      : dependencies.emitExpressionAs(additiveProgress.stepExpression, ir, names, "i32", options, textureSpecializations).code
+    : `${additiveProgress.staticStep}`;
+  if (step === undefined) {
+    throw dependencies.semanticError("native subgroup loops require a compile-time positive counter step or a provably positive uniform counter step", update?.span ?? operation.span);
+  }
+  const stepAdjustment = additiveProgress?.staticStep === undefined ? `(${step} - 1)` : `${additiveProgress.staticStep - 1}`;
   const distance = conditionIncreases ? `(${emittedBound} - ${start} + ${inclusive})` : `(${start} - ${emittedBound} + ${inclusive})`;
   return {
-    expression: `u32((max(${distance}, 0) + ${step - 1}) / ${step})`,
+    expression: `u32((max(${distance}, 0) + ${stepAdjustment}) / ${step})`,
     workgroupMaximum: (startExpression !== undefined && !expressionIsWorkgroupUniform(startExpression, ir)) ||
       !expressionIsWorkgroupUniform(bound, ir),
   };
@@ -465,6 +484,84 @@ function semanticSubgroupLoopLaneCondition(condition: SemanticExpression | undef
     return condition.args[0];
   }
   return condition;
+}
+
+function semanticOperationsContainBarrier(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === "barrier") return true;
+    if (operation.kind === "branch") return semanticOperationsContainBarrier(operation.consequent) || semanticOperationsContainBarrier(operation.alternate);
+    if (operation.kind === "loop") return semanticOperationsContainBarrier(operation.body) ||
+      operation.continuing !== undefined && semanticOperationsContainBarrier(operation.continuing);
+    if (operation.kind === "block") return semanticOperationsContainBarrier(operation.body);
+    return false;
+  });
+}
+
+function semanticSubgroupAdditiveProgress(
+  update: SemanticExpression | undefined,
+  counter: CudaLiteSemanticSymbol["id"],
+  ir: SemanticKernelIrModule,
+): SemanticSubgroupAdditiveProgress | undefined {
+  if (update?.kind === "update" && update.argument.kind === "symbol" && semanticIdsEqual(update.argument.id, counter)) {
+    if (update.operator === "++") return { direction: "increases", staticStep: 1 };
+    if (update.operator === "--") return { direction: "decreases", staticStep: 1 };
+    return undefined;
+  }
+  if (update?.kind !== "assignment" || update.target.kind !== "symbol" || !semanticIdsEqual(update.target.id, counter) ||
+    !["+=", "-="].includes(update.operator) || !semanticSubgroupCounterStepIsProvablyPositive(update.value, ir)) return undefined;
+  return {
+    direction: update.operator === "+=" ? "increases" : "decreases",
+    ...(update.value.kind === "literal" && update.value.literalKind === "number"
+      ? { staticStep: update.value.value }
+      : { stepExpression: update.value }),
+  };
+}
+
+function semanticSubgroupCounterStepIsProvablyPositive(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+): boolean {
+  const minimum = semanticPositiveIntegerMinimum(expression, ir);
+  return expressionIsWorkgroupUniform(expression, ir) && minimum !== undefined && minimum > 0;
+}
+
+function semanticPositiveIntegerMinimum(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  visiting: ReadonlySet<string> = new Set(),
+): number | undefined {
+  if (expression.kind === "literal" && expression.literalKind === "number" &&
+    Number.isInteger(expression.value) && expression.value >= 0) {
+    return expression.value;
+  }
+  if (expression.kind === "member" && expression.object.kind === "symbol") {
+    const axis = expression.property === "x" ? 0 : expression.property === "y" ? 1 : expression.property === "z" ? 2 : undefined;
+    if (axis === undefined) return undefined;
+    if (expression.object.name === "blockDim") return ir.workgroupSize[axis];
+    if (expression.object.name === "gridDim") return 1;
+    return undefined;
+  }
+  if (expression.kind === "symbol" && expression.addressSpace === "local") {
+    if (visiting.has(expression.id.key) || !semanticLocalSymbolIsImmutable(ir.operations, expression.id)) return undefined;
+    const declaration = findLocalDeclaration(ir.operations, expression.id);
+    return declaration?.init
+      ? semanticPositiveIntegerMinimum(declaration.init, ir, new Set([...visiting, expression.id.key]))
+      : undefined;
+  }
+  if (expression.kind === "cast") return semanticPositiveIntegerMinimum(expression.expression, ir, visiting);
+  if (expression.kind === "unary" && expression.operator === "+") return semanticPositiveIntegerMinimum(expression.argument, ir, visiting);
+  if (expression.kind !== "binary") return undefined;
+  const left = semanticPositiveIntegerMinimum(expression.left, ir, visiting);
+  const right = semanticPositiveIntegerMinimum(expression.right, ir, visiting);
+  if (left === undefined || right === undefined) return undefined;
+  if (expression.operator === "+") return left + right;
+  if (expression.operator === "*") return left * right;
+  if (expression.operator === "/") {
+    const denominator = staticIntegerRange(expression.right, ir);
+    if (!denominator || denominator.min <= 0 || denominator.max <= 0) return undefined;
+    return Math.trunc(left / denominator.max);
+  }
+  return undefined;
 }
 
 function semanticCompoundStoreNeutral(
@@ -578,9 +675,11 @@ function expressionIsWorkgroupUniform(
     if (expression.addressSpace === "uniform" || expression.addressSpace === "constant") return true;
     if (expression.addressSpace !== "local" || visiting.has(expression.id.key)) return false;
     const declaration = findLocalDeclaration(ir.operations, expression.id);
-    if (!declaration?.target.constant || !declaration.init) return false;
+    if (!declaration?.init || !semanticLocalSymbolIsImmutable(ir.operations, expression.id)) return false;
     return expressionIsWorkgroupUniform(declaration.init, ir, new Set([...visiting, expression.id.key]));
   }
+  if (expression.kind === "member" && expression.object.kind === "symbol" &&
+    ["blockIdx", "blockDim", "gridDim"].includes(expression.object.name)) return true;
   if (expression.kind === "cast") return expressionIsWorkgroupUniform(expression.expression, ir, visiting);
   if (expression.kind === "unary") return expressionIsWorkgroupUniform(expression.argument, ir, visiting);
   if (expression.kind === "binary") return expressionIsWorkgroupUniform(expression.left, ir, visiting) && expressionIsWorkgroupUniform(expression.right, ir, visiting);
@@ -594,6 +693,42 @@ function expressionIsWorkgroupUniform(
     return expression.callee.property === "size" || expression.callee.property === "meta_group_size";
   }
   return false;
+}
+
+function semanticLocalSymbolIsImmutable(
+  operations: readonly SemanticKernelIrOperation[],
+  id: CudaLiteSemanticSymbol["id"],
+): boolean {
+  return !operations.some((operation) => semanticOperationMutatesLocalSymbol(operation, id));
+}
+
+function semanticOperationMutatesLocalSymbol(
+  operation: SemanticKernelIrOperation,
+  id: CudaLiteSemanticSymbol["id"],
+): boolean {
+  if (semanticOperationExpressions(operation).some((expression) => semanticExpressionMutatesLocalSymbol(expression, id))) return true;
+  if (operation.kind === "store" && operation.target.addressSpace === "local" && semanticIdsEqual(operation.target.baseId, id)) return true;
+  if (operation.kind === "atomic" && operation.target?.addressSpace === "local" && semanticIdsEqual(operation.target.baseId, id)) return true;
+  if (operation.kind === "branch") {
+    return operation.consequent.some((child) => semanticOperationMutatesLocalSymbol(child, id)) ||
+      operation.alternate.some((child) => semanticOperationMutatesLocalSymbol(child, id));
+  }
+  if (operation.kind === "loop") {
+    return (operation.init !== undefined && isSemanticKernelIrOperation(operation.init) && semanticOperationMutatesLocalSymbol(operation.init, id)) ||
+      operation.body.some((child) => semanticOperationMutatesLocalSymbol(child, id)) ||
+      operation.continuing?.some((child) => semanticOperationMutatesLocalSymbol(child, id)) === true;
+  }
+  if (operation.kind === "block") return operation.body.some((child) => semanticOperationMutatesLocalSymbol(child, id));
+  return false;
+}
+
+function semanticExpressionMutatesLocalSymbol(
+  expression: SemanticExpression,
+  id: CudaLiteSemanticSymbol["id"],
+): boolean {
+  if (expression.kind === "assignment" && expression.target.kind === "symbol" && semanticIdsEqual(expression.target.id, id)) return true;
+  if (expression.kind === "update" && expression.argument.kind === "symbol" && semanticIdsEqual(expression.argument.id, id)) return true;
+  return semanticExpressionChildren(expression).some((child) => semanticExpressionMutatesLocalSymbol(child, id));
 }
 
 function expressionIsWorkgroupUniformWithCounter(

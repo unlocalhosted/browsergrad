@@ -131,9 +131,10 @@ export function memoryPoolStorageMetadata(
 export function constantBufferInputs(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
+  requiredStorageNames: ReadonlySet<string> = new Set(),
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  for (const constant of externalConstantDeclarations(compiled).filter((item) =>
+  for (const constant of externalConstantDeclarations(compiled, requiredStorageNames).filter((item) =>
     item.init === undefined &&
     (item.dimensions.length > 0 || isCudaVectorType(item.valueType))
   )) {
@@ -154,9 +155,10 @@ export function constantBufferInputs(
 export function deviceGlobalBufferInputs(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
+  requiredStorageNames: ReadonlySet<string> = new Set(),
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  for (const global of deviceGlobalDeclarations(compiled)) {
+  for (const global of deviceGlobalDeclarations(compiled, requiredStorageNames)) {
     out[global.name] = input.deviceGlobals?.[global.name] ?? deviceGlobalInitialValue(global);
   }
   return out;
@@ -228,7 +230,10 @@ function memoryPoolDescriptors(compiled: CompiledCudaLiteKernel): Array<{ readon
   return [...out].map(([name, span]) => ({ name, span }));
 }
 
-function externalConstantDeclarations(compiled: CompiledCudaLiteKernel): readonly CudaLiteGlobalConstant[] {
+function externalConstantDeclarations(
+  compiled: CompiledCudaLiteKernel,
+  requiredStorageNames: ReadonlySet<string> = new Set(),
+): readonly CudaLiteGlobalConstant[] {
   const semanticNames = new Set(
     compiled.kernelIr.memory
       .filter((symbol) => symbol.kind === "constant")
@@ -237,11 +242,14 @@ function externalConstantDeclarations(compiled: CompiledCudaLiteKernel): readonl
   const storageBindingNames = storageBindingNameSet(compiled);
   return compiled.analysis.constants.filter((constant) =>
     semanticNames.has(constant.name) &&
-    (storageBindingNames.has(constant.name) || constant.dimensions.length === 0)
+    (storageBindingNames.has(constant.name) || requiredStorageNames.has(constant.name) || constant.dimensions.length === 0)
   );
 }
 
-function deviceGlobalDeclarations(compiled: CompiledCudaLiteKernel): readonly CudaLiteDeviceGlobal[] {
+function deviceGlobalDeclarations(
+  compiled: CompiledCudaLiteKernel,
+  requiredStorageNames: ReadonlySet<string> = new Set(),
+): readonly CudaLiteDeviceGlobal[] {
   const semanticNames = new Set(
     compiled.kernelIr.memory
       .filter((symbol) => symbol.kind === "device-global")
@@ -250,7 +258,7 @@ function deviceGlobalDeclarations(compiled: CompiledCudaLiteKernel): readonly Cu
   const storageBindingNames = storageBindingNameSet(compiled);
   return compiled.analysis.deviceGlobals.filter((global) =>
     semanticNames.has(global.name) &&
-    storageBindingNames.has(global.name)
+    (storageBindingNames.has(global.name) || requiredStorageNames.has(global.name))
   );
 }
 
