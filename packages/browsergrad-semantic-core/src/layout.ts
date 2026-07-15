@@ -59,3 +59,12 @@ export {
   type PreparedViewAccessor,
   type PreparedViewAccessorRequest,
 } from "./layout/prepare.js";
+export {
+  prepareLayoutExpression,
+  traceLayoutExpressionCoordinate,
+  type LayoutExpressionCoordinateRequest,
+  type LayoutExpressionCoordinateTrace,
+  type PrepareLayoutExpressionOptions,
+  type PrepareLayoutExpressionRequest,
+  type PreparedLayoutExpression,
+} from "./layout/standalone.js";

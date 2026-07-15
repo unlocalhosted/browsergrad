@@ -9,6 +9,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Allocation-free, authority-bound standalone layout preparation and coordinate
+  tracing. The API verifies shared index semantics without inventing dtype,
+  allocation, alias, byte-address, effect, or backend claims.
 - Exact monorepo repository metadata required for npm trusted publishing and
   provenance identity verification.
 - Versioned rank-2/rank-3 dense-permutation fixtures with exact source/output

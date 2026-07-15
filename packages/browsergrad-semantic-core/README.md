@@ -34,6 +34,15 @@ shape, axes, and dtype; output shape, row-major strides, storage size, effects,
 and disjoint materialization are derived. Transport producer/artifact metadata
 is passed separately and cannot affect semantic hashes.
 
+`/layout` also supports standalone layout expressions for frontend facts that
+define index algebra but no tensor storage. `prepareLayoutExpression` produces
+an authority-bound `browsergrad.layout@1` value with one verified index map and
+zero allocations/views; `traceLayoutExpressionCoordinate` reports element
+locations and logical/predicate bounds. It deliberately makes no dtype,
+allocation, byte-address, alias, effect, CPU, or GPU claim. Storage-bearing
+frontends must add those facts through the view/kernel contracts instead of
+inferring them from layout size or codomain extent.
+
 The backend-neutral specialization step resolves bindings and hashes once,
 compiles the canonical index evaluators, proves guarded source access and a
 dense injective destination, and derives a binding-sensitive specialization
@@ -46,11 +55,10 @@ exclusion; it never turns an invalid address into clamping or implicit
 zero-fill.
 
 This is the semantic/reference contract, not a blanket GPU-support claim.
-Kernels-owned WGSL and the compiler read-only adapter have strict actual-device
-evidence for their declared profiles. Gate 2 still requires the typed JIT
-permutation adapter, identical compiler/JIT artifact hashes, and exact-release-
-commit reruns. Version `0.2.0` is locally packed and tested but must not be
-published as a completed Gate 2 release before those consumers land.
+Kernels-owned WGSL plus the compiler and JIT adapters have strict actual-device
+evidence for their declared Gate 2 profiles at the exact revisions recorded in
+the implementation ledger. Version `0.2.0` is locally packed and tested but has
+not been published; release CI must repeat the exact-source evidence gates.
 
 Current status and evidence live in
 [`docs/internal/package-requirements-implementation-ledger.md`](../../docs/internal/package-requirements-implementation-ledger.md).
