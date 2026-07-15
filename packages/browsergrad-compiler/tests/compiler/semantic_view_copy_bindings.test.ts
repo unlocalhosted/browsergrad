@@ -298,7 +298,7 @@ describe("CUDA-lite structured view-copy lowering", () => {
 
     expect(caught).toMatchObject({
       code: "BG-COMPILER-VIEW-COPY-BINDING-INVALID-ARTIFACT",
-      path: "$.operationId",
+      path: "$.source[0,0]",
     });
     expect((caught as Error & { readonly cause?: unknown }).cause).toMatchObject({
       diagnostic: {

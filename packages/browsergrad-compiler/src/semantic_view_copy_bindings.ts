@@ -12,6 +12,7 @@ import {
   encodeWireU64,
   hashNamedComponents,
   parseWireI64,
+  SemanticSchemaError,
   type JsonValue,
   type WireI64,
   type WireU64,
@@ -114,7 +115,7 @@ export async function prepareCudaLiteViewCopyBinding(
     const message = cause instanceof Error ? cause.message : "view-copy specialization failed";
     throw new CudaLiteViewCopyBindingError(
       "BG-COMPILER-VIEW-COPY-BINDING-INVALID-ARTIFACT",
-      "$.operationId",
+      cause instanceof SemanticSchemaError ? cause.diagnostic.path ?? "$.operationId" : "$.operationId",
       message,
       { cause },
     );
