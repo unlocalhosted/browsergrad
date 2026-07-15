@@ -96,6 +96,7 @@ result
         dtype: string;
       };
       permuteValueId: number;
+      permuteArgErased: boolean;
       ops: string[];
     }>(`
 import browsergrad_jit as bg
@@ -116,6 +117,7 @@ permute_step = next(step for step in plan["steps"] if step["op"] == "PERMUTE")
     "requestKeys": sorted(request.keys()),
     "request": request,
     "permuteValueId": int(permute_step["value_id"]),
+    "permuteArgErased": permute_step["arg"] is None,
     "ops": plan["ops"],
 }
 `);
@@ -135,6 +137,7 @@ permute_step = next(step for step in plan["steps"] if step["op"] == "PERMUTE")
     expect(result.ops).toContain("FUSED_ELEMENTWISE");
     expect(result.ops).not.toContain("EXP");
     expect(result.request.valueId).toBe(result.permuteValueId);
+    expect(result.permuteArgErased).toBe(true);
   });
 
   it("fail-closes PERMUTE requests outside the initial static f32 rank-2/3 profile", async () => {
@@ -169,6 +172,6 @@ errors
     expect(errors.zero).toMatch(/GpuPlanUnsupported.*positive static integer/);
     expect(errors.axes).toMatch(/GpuPlanUnsupported.*exact permutation/);
     expect(errors.shape).toMatch(/GpuPlanUnsupported.*does not match derived shape/);
-    expect(errors.closed).toMatch(/GpuPlanUnsupported.*closed record/);
+    expect(errors.closed).toMatch(/GpuPlanUnsupported.*unsupported fields/);
   });
 });

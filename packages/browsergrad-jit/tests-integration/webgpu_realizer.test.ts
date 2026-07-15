@@ -29,6 +29,7 @@ const MOCK_BRIDGE_PY = `
 # Records every call so tests can assert on the residency contract:
 #   - upload_count / materialize_count / release_count
 #   - alive set: handles minted minus handles released
+import json
 import numpy as np
 
 class MockBridge:
@@ -52,6 +53,9 @@ class MockBridge:
         self.cast_count = 0
         self.tensor_plan_count = 0
         self.tensor_plan_resident_count = 0
+        self.tensor_plan_semantic_count = 0
+        self.tensor_plan_resident_semantic_count = 0
+        self.last_semantic_requests = None
         self.calls = []           # ordered list of (op, handle_id_in_or_out)
 
     def _mint(self, arr):
@@ -326,10 +330,13 @@ class MockBridge:
         self.calls.append(("conv2d_backward_bias", hh))
         return hh
 
-    def run_tensor_plan(self, plan, inputs, dtype):
-        self.tensor_plan_count += 1
+    def _run_tensor_plan(self, plan, inputs, dtype, semantic_requests=None):
         if plan.get("has_custom_ops"):
             raise ValueError("mock tensor plan refuses CUSTOM-backed plans")
+        semantic_by_value = None
+        consumed_semantic_values = set()
+        if semantic_requests is not None:
+            semantic_by_value = {request["valueId"]: request for request in semantic_requests}
         provided = {}
         for item in inputs:
             value_id = item.get("value_id", item.get("valueId"))
@@ -397,7 +404,15 @@ class MockBridge:
             elif op == "RESHAPE":
                 values[value_id] = values[input_ids[0]].reshape(shape)
             elif op == "PERMUTE":
-                values[value_id] = np.transpose(values[input_ids[0]], axes=tuple(step["arg"]["axes"]))
+                if semantic_by_value is None:
+                    axes = tuple(step["arg"]["axes"])
+                else:
+                    request = semantic_by_value.get(value_id)
+                    if request is None:
+                        raise ValueError(f"mock tensor plan: PERMUTE {value_id} lacks semantic request")
+                    axes = tuple(request["axes"])
+                    consumed_semantic_values.add(value_id)
+                values[value_id] = np.transpose(values[input_ids[0]], axes=axes)
             elif op == "BROADCAST_TO":
                 values[value_id] = np.broadcast_to(values[input_ids[0]], shape).copy()
             elif op == "REDUCE":
@@ -940,9 +955,37 @@ class MockBridge:
                 ).astype(np.dtype(step["dtype"]), copy=False)
             else:
                 raise ValueError(f"mock tensor plan: unsupported op {op}")
+        if semantic_by_value is not None and consumed_semantic_values != set(semantic_by_value):
+            raise ValueError("mock tensor plan: unconsumed semantic requests")
+        root_id = plan.get("root_id", plan.get("rootId"))
+        return values[root_id].astype(np.dtype(dtype), copy=False).tobytes()
+
+    def run_tensor_plan(self, plan, inputs, dtype):
+        self.tensor_plan_count += 1
+        data = self._run_tensor_plan(plan, inputs, dtype)
         root_id = plan.get("root_id", plan.get("rootId"))
         self.calls.append(("run_tensor_plan", root_id))
-        return values[root_id].astype(np.dtype(dtype), copy=False).tobytes()
+        return data
+
+    def run_tensor_plan_semantic(self, plan, semantic_requests_json, inputs, dtype):
+        self.tensor_plan_semantic_count += 1
+        envelope = json.loads(semantic_requests_json)
+        self.last_semantic_requests = envelope
+        if set(envelope) != {"schema", "version", "requests"}:
+            raise ValueError("mock semantic requests: envelope must be closed")
+        if envelope["schema"] != "browsergrad.jit.tensor-plan-semantic-requests":
+            raise ValueError("mock semantic requests: wrong schema")
+        if envelope["version"] != {"major": 1, "minor": 0}:
+            raise ValueError("mock semantic requests: wrong version")
+        for request in envelope["requests"]:
+            if set(request) != {"kind", "valueId", "inputShape", "axes", "dtype"}:
+                raise ValueError("mock semantic requests: request must be closed")
+            if request["kind"] != "dense-permutation-view-copy" or request["dtype"] != "f32":
+                raise ValueError("mock semantic requests: unsupported request")
+        data = self._run_tensor_plan(plan, inputs, dtype, envelope["requests"])
+        root_id = plan.get("root_id", plan.get("rootId"))
+        self.calls.append(("run_tensor_plan_semantic", root_id))
+        return data
 
     def run_tensor_plan_resident(self, plan, inputs, dtype):
         self.tensor_plan_resident_count += 1
@@ -951,6 +994,15 @@ class MockBridge:
         root_id = plan.get("root_id", plan.get("rootId"))
         hh = self._mint(arr)
         self.calls.append(("run_tensor_plan_resident", root_id, hh))
+        return hh
+
+    def run_tensor_plan_resident_semantic(self, plan, semantic_requests_json, inputs, dtype):
+        self.tensor_plan_resident_semantic_count += 1
+        data = self.run_tensor_plan_semantic(plan, semantic_requests_json, inputs, dtype)
+        arr = np.frombuffer(data, dtype=np.dtype(dtype)).copy()
+        root_id = plan.get("root_id", plan.get("rootId"))
+        hh = self._mint(arr)
+        self.calls.append(("run_tensor_plan_resident_semantic", root_id, hh))
         return hh
 `;
 
@@ -1142,6 +1194,7 @@ plan = bg.gpu_plan_summary(out)
     const result = await target.run<{
       max_diff: number;
       tensor_plan: number;
+      tensor_plan_semantic: number;
       ops: string[];
       has_custom: boolean;
     }>(`
@@ -1161,12 +1214,14 @@ plan = bg.gpu_plan_summary(out)
 {
     "max_diff": float(np.max(np.abs(ref - gpu))),
     "tensor_plan": _mock.tensor_plan_count,
+    "tensor_plan_semantic": _mock.tensor_plan_semantic_count,
     "ops": plan["ops"],
     "has_custom": bool(plan["has_custom_ops"]),
 }
 `);
     expect(result.max_diff).toBeLessThan(1e-6);
-    expect(result.tensor_plan).toBe(1);
+    expect(result.tensor_plan).toBe(0);
+    expect(result.tensor_plan_semantic).toBe(1);
     expect(result.has_custom).toBe(false);
     expect(result.ops).toContain("MATMUL");
     expect(result.ops).toContain("FUSED_SOFTMAX");
@@ -1231,7 +1286,15 @@ arr = second.numpy()
       reduce_diff: number;
       broadcast_diff: number;
       tensor_plan: number;
+      tensor_plan_semantic: number;
       ops: string[];
+      semantic_request: {
+        kind: string;
+        valueId: number;
+        inputShape: string[];
+        axes: number[];
+        dtype: string;
+      };
     }>(`
 import browsergrad_jit as bg
 import numpy as np
@@ -1262,15 +1325,90 @@ plan = bg.gpu_plan_summary(reduced)
     "reduce_diff": float(np.max(np.abs(reduced_gpu - reduced_ref))),
     "broadcast_diff": float(np.max(np.abs(broadcast_gpu - broadcast_ref))),
     "tensor_plan": _mock.tensor_plan_count,
+    "tensor_plan_semantic": _mock.tensor_plan_semantic_count,
     "ops": plan["ops"],
+    "semantic_request": _mock.last_semantic_requests["requests"][0],
 }
 `);
     expect(result.reduce_diff).toBeLessThan(1e-6);
     expect(result.broadcast_diff).toBeLessThan(1e-6);
-    expect(result.tensor_plan).toBe(2);
+    expect(result.tensor_plan).toBe(1);
+    expect(result.tensor_plan_semantic).toBe(1);
     expect(result.ops).toContain("RESHAPE");
     expect(result.ops).toContain("PERMUTE");
     expect(result.ops).toContain("REDUCE");
+    expect(result.semantic_request).toMatchObject({
+      kind: "dense-permutation-view-copy",
+      inputShape: ["2", "3"],
+      axes: [1, 0],
+      dtype: "f32",
+    });
+  });
+
+  it("keeps semantic PERMUTE resident until an explicit materialization boundary", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      residentSemantic: number;
+      semantic: number;
+      legacy: number;
+      materializeBefore: number;
+      materializeAfter: number;
+      registered: boolean;
+      values: number[][];
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+x = bg.from_numpy(np.arange(6, dtype=np.float32).reshape(2, 3))
+out = bg.realize_tensor_plan_webgpu_resident(x.permute(1, 0))
+buffer_id = out._uop.inputs[0].arg
+gbt = bg._realize_webgpu.get_registered_gpu_buffer_table()
+before = _mock.materialize_count
+values = out.numpy().tolist()
+{
+    "residentSemantic": _mock.tensor_plan_resident_semantic_count,
+    "semantic": _mock.tensor_plan_semantic_count,
+    "legacy": _mock.tensor_plan_count,
+    "materializeBefore": before,
+    "materializeAfter": _mock.materialize_count,
+    "registered": gbt.has(buffer_id),
+    "values": values,
+}
+`);
+
+    expect(result).toEqual({
+      residentSemantic: 1,
+      semantic: 1,
+      legacy: 0,
+      materializeBefore: 0,
+      materializeAfter: 1,
+      registered: true,
+      values: [
+        [0, 3],
+        [1, 4],
+        [2, 5],
+      ],
+    });
+  });
+
+  it("refuses semantic PERMUTE before invoking a legacy-only bridge", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{ error: string; legacy: number }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+delattr(MockBridge, "run_tensor_plan_semantic")
+x = bg.from_numpy(np.arange(6, dtype=np.float32).reshape(2, 3))
+try:
+    bg.realize_tensor_plan_webgpu(x.permute(1, 0))
+    error = "no_error"
+except Exception as exc:
+    error = type(exc).__name__ + ": " + str(exc)
+{"error": error, "legacy": _mock.tensor_plan_count}
+`);
+
+    expect(result.error).toMatch(/RealizationError:.*legacy execution is forbidden/);
+    expect(result.legacy).toBe(0);
   });
 
   it("backward(device='webgpu') realizes symbolic leaf grads through tensor-plan WebGPU", async () => {
@@ -1279,6 +1417,7 @@ plan = bg.gpu_plan_summary(reduced)
       x_diff: number;
       w_diff: number;
       tensor_plan: number;
+      tensor_plan_semantic: number;
       upload: number;
       materialize: number;
       legacy_matmul: number;
@@ -1302,6 +1441,7 @@ w_gpu = bg.from_numpy(w_np.copy(), requires_grad=True)
     "x_diff": float(np.max(np.abs(x_gpu.grad.numpy() - x_cpu.grad.numpy()))),
     "w_diff": float(np.max(np.abs(w_gpu.grad.numpy() - w_cpu.grad.numpy()))),
     "tensor_plan": _mock.tensor_plan_count,
+    "tensor_plan_semantic": _mock.tensor_plan_semantic_count,
     "upload": _mock.upload_count,
     "materialize": _mock.materialize_count,
     "legacy_matmul": _mock.matmul_count,
@@ -1309,7 +1449,8 @@ w_gpu = bg.from_numpy(w_np.copy(), requires_grad=True)
 `);
     expect(result.x_diff).toBeLessThan(1e-5);
     expect(result.w_diff).toBeLessThan(1e-5);
-    expect(result.tensor_plan).toBe(2);
+    expect(result.tensor_plan).toBe(0);
+    expect(result.tensor_plan_semantic).toBe(2);
     expect(result.upload).toBe(0);
     expect(result.materialize).toBe(0);
     expect(result.legacy_matmul).toBe(0);

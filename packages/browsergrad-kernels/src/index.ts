@@ -156,6 +156,18 @@ export {
 } from "./tensor_plan.js";
 
 export {
+  DENSE_PERMUTATION_VIEW_COPY_REQUEST,
+  TENSOR_PLAN_SEMANTIC_REQUEST_SCHEMA,
+  TENSOR_PLAN_SEMANTIC_REQUEST_VERSION,
+  assertPreparedTensorPlanSemanticRequests,
+  prepareTensorPlanSemanticRequests,
+  runTensorGpuPlanResidentSemantic,
+  runTensorGpuPlanSemantic,
+  type PreparedTensorPlanSemanticRequest,
+  type PreparedTensorPlanSemanticRequests,
+} from "./tensor_plan_semantics.js";
+
+export {
   SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
   SEMANTIC_VIEW_COPY_WEBGPU_PROFILE,
   SemanticViewCopyWebGpuError,

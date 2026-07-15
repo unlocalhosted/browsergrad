@@ -12,6 +12,7 @@ import {
   type PreparedSemanticViewCopyWgsl,
   type SemanticViewCopyResidentSource,
 } from "../src/semantic_view_copy";
+import { runTensorGpuPlanResidentSemantic } from "../src/tensor_plan_semantics";
 
 const wire = (value: string): WireI64 => parseWireI64(value);
 const constant = (value: string) => ({ kind: "const" as const, value: wire(value) });
@@ -77,6 +78,28 @@ describe("resident semantic view-copy", () => {
     expect(result.buffer.size).toBe(24);
     expect(fake.shaderSources).toEqual([prepared.program.wgsl]);
     expect(fake.dispatches).toEqual([[1, 1, 1]]);
+    expect(fake.submitCount()).toBe(1);
+    expect(fake.writeCount()).toBe(0);
+    expect(fake.copyCount()).toBe(0);
+  });
+
+  it("routes tensor-plan PERMUTE through the prepared semantic WGSL", async () => {
+    const fake = createFakeGpu();
+    const device = await createDevice({ device: fake.device });
+    const source = fake.buffer(24, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+    const result = await runTensorGpuPlanResidentSemantic(
+      device,
+      permutationPlan(),
+      permutationRequests(),
+      [{ valueId: 0, resident: { buffer: source, byteLength: 24 } }],
+    );
+
+    expect(result.shape).toEqual([3, 2]);
+    expect(result.byteLength).toBe(24);
+    expect(result.residentValueId).toBe(1);
+    expect(result.buffer).not.toBe(source);
+    expect(fake.shaderSources).toEqual([prepared.program.wgsl]);
+    expect(fake.shaderSources[0]).not.toContain("tensor_plan_permute");
     expect(fake.submitCount()).toBe(1);
     expect(fake.writeCount()).toBe(0);
     expect(fake.copyCount()).toBe(0);
@@ -202,5 +225,36 @@ function createFakeGpu(options: { readonly maxBufferSize?: number } = {}): FakeG
     submitCount: () => submits,
     writeCount: () => writes,
     copyCount: () => copies,
+  };
+}
+
+function permutationRequests() {
+  return {
+    schema: "browsergrad.jit.tensor-plan-semantic-requests",
+    version: { major: 1, minor: 0 },
+    requests: [{
+      kind: "dense-permutation-view-copy",
+      valueId: 1,
+      inputShape: ["2", "3"],
+      axes: [1, 0],
+      dtype: "f32",
+    }],
+  };
+}
+
+function permutationPlan() {
+  return {
+    steps: [
+      { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [2, 3], dtype: "float32", arg: "buffer:x" },
+      { step: 1, value_id: 1, op: "PERMUTE", input_ids: [0], shape: [3, 2], dtype: "float32", arg: null },
+    ],
+    buffers: [
+      { value_id: 0, op: "BUFFER", shape: [2, 3], dtype: "float32", bytes: 24, first_step: 0, last_step: 1, materialize: false },
+      { value_id: 1, op: "PERMUTE", shape: [3, 2], dtype: "float32", bytes: 24, first_step: 1, last_step: 1, materialize: true },
+    ],
+    root_id: 1,
+    materialization_boundary: "root",
+    peak_live_bytes: 48,
+    has_custom_ops: false,
   };
 }

@@ -14,7 +14,7 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-## 2026-07 — semantic-core, kernels, and compiler 0.2.0
+## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 
 - Adds the bounded canonical semantic wire/layout/kernel foundation and one
   constructor-owned materializing view-copy contract shared across frontends.
@@ -23,6 +23,9 @@ Each package follows independent [SemVer](https://semver.org/).
 - Adds compiler verified-layout bindings, semantic/cache identity, guarded
   read-only lowering through the existing CPU and WGSL backends, and a required
   actual-device conformance lane.
+- Adds typed JIT permutation requests beside the frozen tensor plan and routes
+  them through constructor-owned kernels artifacts and resident canonical WGSL
+  without legacy offset reconstruction.
 
 ## 2026-07 — browsergrad-kernels/compiler 0.1.2
 

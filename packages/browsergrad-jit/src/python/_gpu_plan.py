@@ -182,7 +182,14 @@ class GpuExecutionSubmission:
     semantic_requests: Tuple[DensePermutationViewCopyRequest, ...]
 
     def plan_summary(self) -> Dict[str, Any]:
-        return self.plan.summary()
+        summary = self.plan.summary()
+        # Semantic-route PERMUTE meaning lives only in the side table. Erase
+        # legacy axes and non-serializable VJP annotations from this compatible
+        # scheduling/liveness projection; gpu_plan_summary() stays frozen.
+        for step in summary["steps"]:
+            if step["op"] == OP_PERMUTE:
+                step["arg"] = None
+        return summary
 
     def semantic_request_summary(self) -> Dict[str, Any]:
         return {
@@ -360,8 +367,14 @@ def _dense_permutation_request(
                 f"input shape axis {axis} exceeds canonical signed-64 wire range",
             )
 
-    if type(step.arg) is not dict or set(step.arg) != {"axes"}:
-        _semantic_request_unsupported(path, "arg must be the closed record {'axes': tuple[int, ...]}")
+    if type(step.arg) is not dict or "axes" not in step.arg:
+        _semantic_request_unsupported(path, "arg must contain canonical tuple axes")
+    unexpected_arg_fields = set(step.arg) - {"axes", "vjp_of"}
+    if unexpected_arg_fields:
+        _semantic_request_unsupported(
+            path,
+            f"arg contains unsupported fields {sorted(unexpected_arg_fields)!r}",
+        )
     raw_axes = step.arg["axes"]
     if type(raw_axes) is not tuple:
         _semantic_request_unsupported(path, "axes must be a canonical tuple")

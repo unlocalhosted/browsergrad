@@ -34,6 +34,7 @@ What this does NOT do:
 """
 
 from __future__ import annotations
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -50,7 +51,7 @@ from ._ir import (
 )
 from ._errors import JitNotImplementedError, RealizationError
 from ._gpu_buffer_table import GpuBufferTable
-from ._gpu_plan import gpu_plan_summary
+from ._gpu_plan import build_gpu_execution_submission
 
 
 # --------------------------------------------------------------------------
@@ -473,21 +474,27 @@ def realize_webgpu(
     return np.array(arr, copy=True)  # owning copy — `data` may be a view
 
 
-def realize_tensor_plan_webgpu(
-    root: UOp,
+def _tensor_plan_submission(root: UOp) -> Tuple[dict, dict, str]:
+    """Build the frozen plan once plus its closed semantic request wire."""
+    submission = build_gpu_execution_submission(root, allow_custom=False)
+    plan = submission.plan_summary()
+    semantic_requests = submission.semantic_request_summary()
+    semantic_requests_json = json.dumps(
+        semantic_requests,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return plan, semantic_requests, semantic_requests_json
+
+
+def _tensor_plan_inputs(
+    plan: dict,
     *,
     numpy_buffer_table: Any,
     gpu_buffer_table: GpuBufferTable,
-) -> np.ndarray:
-    """Realize through the canonical tensor GPU plan bridge.
-
-    Unlike `realize_webgpu`, this does not walk the graph by calling
-    per-op bridge methods. It sends one backend-neutral plan plus input
-    buffers to `bridge.run_tensor_plan(...)`; the JS runtime schedules
-    kernels and materializes only the root.
-    """
-    bridge = gpu_buffer_table.bridge
-    plan = gpu_plan_summary(root, allow_custom=False)
+) -> list:
+    """Bind BUFFER schedule entries without interpreting view meaning."""
     inputs = []
     for step in plan["steps"]:
         if step["op"] != OP_BUFFER:
@@ -510,7 +517,38 @@ def realize_tensor_plan_webgpu(
                 "value_id": int(step["value_id"]),
                 "data": arr.tobytes(),
             })
-    data = bridge.run_tensor_plan(plan, inputs, root.dtype)
+    return inputs
+
+
+def realize_tensor_plan_webgpu(
+    root: UOp,
+    *,
+    numpy_buffer_table: Any,
+    gpu_buffer_table: GpuBufferTable,
+) -> np.ndarray:
+    """Realize one plan through legacy scheduling and verified side semantics."""
+    bridge = gpu_buffer_table.bridge
+    plan, semantic_requests, semantic_requests_json = _tensor_plan_submission(root)
+    has_semantic_requests = bool(semantic_requests["requests"])
+    if has_semantic_requests and not hasattr(bridge, "run_tensor_plan_semantic"):
+        raise RealizationError(
+            "WebGPU tensor plan contains semantic requests but the bridge lacks "
+            "run_tensor_plan_semantic(...); legacy execution is forbidden."
+        )
+    inputs = _tensor_plan_inputs(
+        plan,
+        numpy_buffer_table=numpy_buffer_table,
+        gpu_buffer_table=gpu_buffer_table,
+    )
+    if has_semantic_requests:
+        data = bridge.run_tensor_plan_semantic(
+            plan,
+            semantic_requests_json,
+            inputs,
+            root.dtype,
+        )
+    else:
+        data = bridge.run_tensor_plan(plan, inputs, root.dtype)
     arr = np.frombuffer(data, dtype=np.dtype(root.dtype))
     if root.shape:
         arr = arr.reshape(root.shape)
@@ -529,34 +567,31 @@ def realize_tensor_plan_webgpu_resident(
     explicit materialization boundary asks for them.
     """
     bridge = gpu_buffer_table.bridge
-    if not hasattr(bridge, "run_tensor_plan_resident"):
+    plan, semantic_requests, semantic_requests_json = _tensor_plan_submission(root)
+    has_semantic_requests = bool(semantic_requests["requests"])
+    required_method = (
+        "run_tensor_plan_resident_semantic"
+        if has_semantic_requests
+        else "run_tensor_plan_resident"
+    )
+    if not hasattr(bridge, required_method):
         raise RealizationError(
-            "WebGPU tensor plan residency requires bridge.run_tensor_plan_resident(...)."
+            f"WebGPU tensor plan residency requires bridge.{required_method}(...)."
         )
-    plan = gpu_plan_summary(root, allow_custom=False)
-    inputs = []
-    for step in plan["steps"]:
-        if step["op"] != OP_BUFFER:
-            continue
-        buffer_id = step["arg"]
-        handle = gpu_buffer_table.get(buffer_id)
-        if handle is not None and not numpy_buffer_table.is_materialized(buffer_id):
-            inputs.append({
-                "value_id": int(step["value_id"]),
-                "handle": handle,
-            })
-        else:
-            arr = numpy_buffer_table.get(buffer_id)
-            if arr.dtype.name != step["dtype"]:
-                raise RealizationError(
-                    f"WebGPU tensor plan: buffer {step['value_id']} dtype mismatch: "
-                    f"plan={step['dtype']} table={arr.dtype.name}"
-                )
-            inputs.append({
-                "value_id": int(step["value_id"]),
-                "data": arr.tobytes(),
-            })
-    handle = bridge.run_tensor_plan_resident(plan, inputs, root.dtype)
+    inputs = _tensor_plan_inputs(
+        plan,
+        numpy_buffer_table=numpy_buffer_table,
+        gpu_buffer_table=gpu_buffer_table,
+    )
+    if has_semantic_requests:
+        handle = bridge.run_tensor_plan_resident_semantic(
+            plan,
+            semantic_requests_json,
+            inputs,
+            root.dtype,
+        )
+    else:
+        handle = bridge.run_tensor_plan_resident(plan, inputs, root.dtype)
     buffer_id = numpy_buffer_table.new_unmaterialized_buffer(root.shape, root.dtype)
     gpu_buffer_table.register(buffer_id, handle)
     return buffer_id

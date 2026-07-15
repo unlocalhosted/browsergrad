@@ -47,6 +47,10 @@ import {
 } from "./kernels/fused_elementwise.js";
 import { rowWiseOnlineAttentionDirect } from "./kernels/flash_attention.js";
 import { runTensorGpuPlan, runTensorGpuPlanResident, type TensorPlanInput } from "./tensor_plan.js";
+import {
+  runTensorGpuPlanResidentSemantic,
+  runTensorGpuPlanSemantic,
+} from "./tensor_plan_semantics.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
 type Handle = number;
@@ -236,11 +240,23 @@ export interface WebGpuRealizerBridge {
     inputs: readonly unknown[],
     dtype: string,
   ): Promise<Uint8Array>;
+  run_tensor_plan_semantic(
+    plan: unknown,
+    semanticRequests: unknown,
+    inputs: readonly unknown[],
+    dtype: string,
+  ): Promise<Uint8Array>;
   run_tensor_plan_resident(
     plan: unknown,
     inputs: readonly unknown[],
     dtype: string,
   ): Handle;
+  run_tensor_plan_resident_semantic(
+    plan: unknown,
+    semanticRequests: unknown,
+    inputs: readonly unknown[],
+    dtype: string,
+  ): Promise<Handle>;
   /** Diagnostic — number of GPU buffers currently alive. */
   aliveHandleCount(): number;
   /** Correctness-labeled BrowserGrad-owned WebGPU resource snapshot. */
@@ -1528,6 +1544,29 @@ export function createWebGpuRealizerBridge(
       );
     },
 
+    async run_tensor_plan_semantic(
+      plan: unknown,
+      semanticRequests: unknown,
+      inputs: readonly unknown[],
+      dtype: string,
+    ): Promise<Uint8Array> {
+      assertF32(dtype, "run_tensor_plan_semantic");
+      const result = await runTensorGpuPlanSemantic(
+        device,
+        plan,
+        semanticRequests,
+        normalizeTensorPlanInputs(inputs, get),
+      );
+      if (profilingEnabled) {
+        for (const profile of result.profiles) trackProfilePromise(profile);
+      }
+      return new Uint8Array(
+        result.data.buffer,
+        result.data.byteOffset,
+        result.data.byteLength,
+      );
+    },
+
     run_tensor_plan_resident(
       plan: unknown,
       inputs: readonly unknown[],
@@ -1537,6 +1576,29 @@ export function createWebGpuRealizerBridge(
       const result = runTensorGpuPlanResident(
         device,
         plan,
+        normalizeTensorPlanInputs(inputs, get),
+      );
+      logicalTensorPlanPeakBytes = Math.max(
+        logicalTensorPlanPeakBytes ?? 0,
+        result.peakLiveBytes,
+      );
+      if (profilingEnabled) {
+        for (const profile of result.profiles) trackProfilePromise(profile);
+      }
+      return mint(result.buffer, result.byteLength, result.shape, dtype);
+    },
+
+    async run_tensor_plan_resident_semantic(
+      plan: unknown,
+      semanticRequests: unknown,
+      inputs: readonly unknown[],
+      dtype: string,
+    ): Promise<Handle> {
+      assertF32(dtype, "run_tensor_plan_resident_semantic");
+      const result = await runTensorGpuPlanResidentSemantic(
+        device,
+        plan,
+        semanticRequests,
         normalizeTensorPlanInputs(inputs, get),
       );
       logicalTensorPlanPeakBytes = Math.max(

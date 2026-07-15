@@ -5,6 +5,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) per the [compatibility
 contract in the README](README.md#compatibility-contract).
 
+## [Unreleased]
+
+### Added
+
+- Closed `browsergrad.jit.tensor-plan-semantic-requests@1.0` side-table
+  emission for typed static positive rank-2/3 `f32` permutations. Requests are
+  emitted after fusion and carry only canonical input extents, axes, dtype,
+  and routing-only plan value identity.
+- Separate materializing and resident semantic tensor-plan bridge methods.
+  Eligible permutations now require kernels to construct verified
+  semantic-core artifacts and execute their canonical WGSL.
+
+### Changed
+
+- `permute` and `transpose` normalize negative axes and reject malformed
+  permutations before UOp construction.
+- Semantic-route plans erase legacy permutation args; scheduling/liveness
+  remains in the frozen plan while view meaning lives only in the side table.
+  A bridge lacking semantic methods fails before legacy execution.
+
 ## [0.8.2] — 2026-06-25
 
 ### Added

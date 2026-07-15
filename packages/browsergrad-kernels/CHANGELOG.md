@@ -33,6 +33,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   no upload/readback or offset reconstruction. It validates whole-root source
   bytes and permits only dense zero-offset destinations that overwrite their
   complete allocation.
+- Strict preparation and execution for JIT semantic tensor-plan request side
+  tables. Routing identity is authority-bound but excluded from layout,
+  kernel, specialization, and WGSL hashes; semantic-route `PERMUTE` never calls
+  the legacy shape/axes kernel.
 - Exact packed dependency on `@unlocalhosted/browsergrad-semantic-core@0.2.0`
   and a public `./semantic_view_copy` subpath. Publishing is blocked unless the
   required-device evidence marker names the exact current commit.

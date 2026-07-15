@@ -9,6 +9,10 @@ import {
   type DirectDispatchProfile,
   type DirectDispatchResult,
 } from "./runner.js";
+import {
+  runPreparedSemanticViewCopyResident,
+  type PreparedSemanticViewCopyWgsl,
+} from "./semantic_view_copy.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
 export type TensorPlanOp =
@@ -202,6 +206,35 @@ export async function runTensorGpuPlan(
   }
 }
 
+/** Internal semantic-adapter seam. Public callers use tensor_plan_semantics. */
+export async function runTensorGpuPlanWithPreparedSemanticViewCopies(
+  device: KernelDevice,
+  rawPlan: TensorGpuPlan | unknown,
+  inputs: readonly TensorPlanInput[],
+  semanticViewCopies: ReadonlyMap<number, PreparedSemanticViewCopyWgsl>,
+): Promise<TensorPlanRunResult> {
+  const { root, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats, profiles } = executeTensorGpuPlan(
+    device,
+    rawPlan,
+    inputs,
+    semanticViewCopies,
+  );
+  try {
+    const data = await materializeFloat32(device, root.buffer, root.byteLength);
+    return {
+      data,
+      shape: root.shape,
+      peakLiveBytes,
+      materializedValueId: rootId,
+      earlyReleasedBuffers: earlyReleaseStats.buffers,
+      earlyReleasedBytes: earlyReleaseStats.bytes,
+      profiles,
+    };
+  } finally {
+    for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
+  }
+}
+
 export function runTensorGpuPlanResident(
   device: KernelDevice,
   rawPlan: TensorGpuPlan | unknown,
@@ -232,10 +265,44 @@ export function runTensorGpuPlanResident(
   };
 }
 
+/** Internal semantic-adapter seam. Public callers use tensor_plan_semantics. */
+export function runTensorGpuPlanResidentWithPreparedSemanticViewCopies(
+  device: KernelDevice,
+  rawPlan: TensorGpuPlan | unknown,
+  inputs: readonly TensorPlanInput[],
+  semanticViewCopies: ReadonlyMap<number, PreparedSemanticViewCopyWgsl>,
+): TensorPlanResidentResult {
+  const { root, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats, profiles } = executeTensorGpuPlan(
+    device,
+    rawPlan,
+    inputs,
+    semanticViewCopies,
+  );
+  if (!owned.has(root.buffer)) {
+    for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
+    throw new KernelError(
+      `tensor plan root ${rootId} aliases an input buffer; resident output requires an owned root`,
+    );
+  }
+  owned.delete(root.buffer);
+  for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
+  return {
+    buffer: root.buffer,
+    byteLength: root.byteLength,
+    shape: root.shape,
+    peakLiveBytes,
+    residentValueId: rootId,
+    earlyReleasedBuffers: earlyReleaseStats.buffers,
+    earlyReleasedBytes: earlyReleaseStats.bytes,
+    profiles,
+  };
+}
+
 function executeTensorGpuPlan(
   device: KernelDevice,
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
+  semanticViewCopies?: ReadonlyMap<number, PreparedSemanticViewCopyWgsl>,
 ): {
   readonly root: ResidentValue;
   readonly rootMeta: TensorPlanBuffer;
@@ -267,7 +334,13 @@ function executeTensorGpuPlan(
 
   try {
     for (const step of plan.steps) {
-      const value = executeStep(device, step, values, inputData);
+      const value = executeStep(
+        device,
+        step,
+        values,
+        inputData,
+        semanticViewCopies,
+      );
       values.set(step.valueId, value);
       if (value.owns) {
         owned.add(value.buffer);
@@ -353,6 +426,7 @@ function executeStep(
   step: TensorPlanStep,
   values: Map<number, ResidentValue>,
   inputData: Map<number, TensorPlanInput>,
+  semanticViewCopies?: ReadonlyMap<number, PreparedSemanticViewCopyWgsl>,
 ): ResidentValue {
   switch (step.op) {
     case "BUFFER": {
@@ -424,6 +498,21 @@ function executeStep(
     }
     case "PERMUTE": {
       const src = requireValue(values, step.inputIds[0], step.op);
+      if (semanticViewCopies !== undefined) {
+        const prepared = semanticViewCopies.get(step.valueId);
+        if (prepared === undefined) {
+          throw new KernelError(
+            `tensor plan PERMUTE value ${step.valueId} is missing its prepared semantic request`,
+          );
+        }
+        return fromPreparedSemanticViewCopy(
+          prepared,
+          runPreparedSemanticViewCopyResident(device, prepared, {
+            buffer: src.buffer,
+            byteLength: src.byteLength,
+          }),
+        );
+      }
       const axes = expectAxes(step.arg, src.shape.length, step.op);
       return fromDirect(step, permuteDirect(device, src, step.shape, axes));
     }
@@ -3060,6 +3149,20 @@ function fromDirect(step: TensorPlanStep, result: DirectDispatchResult): Residen
   return {
     buffer: result.buffer,
     shape: step.shape,
+    owns: true,
+    poolable: true,
+    byteLength: result.byteLength,
+    ...(result.profile ? { profile: result.profile } : {}),
+  };
+}
+
+function fromPreparedSemanticViewCopy(
+  prepared: PreparedSemanticViewCopyWgsl,
+  result: DirectDispatchResult,
+): ResidentValue {
+  return {
+    buffer: result.buffer,
+    shape: Object.freeze(prepared.semantic.logicalShape.map(Number)),
     owns: true,
     poolable: true,
     byteLength: result.byteLength,

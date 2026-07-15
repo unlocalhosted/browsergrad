@@ -43,7 +43,11 @@ Op surface (v0 spike):
   - `conv2d_backward_weight(dy, input, ..., dtype)`  — dWeight
   - `conv2d_backward_bias(dy, ..., dtype)`           — dBias
   - `run_tensor_plan(plan, inputs, dtype) -> bytes`  — canonical tensor IR plan
+  - `run_tensor_plan_semantic(plan, requests_json, inputs, dtype) -> bytes`
+      — plan scheduling plus separately verified semantic requests
   - `run_tensor_plan_resident(plan, inputs, dtype) -> handle` — root stays on GPU
+  - `run_tensor_plan_resident_semantic(plan, requests_json, inputs, dtype) -> handle`
+      — semantic plan route with resident root
 
 Anything outside this set raises `JitNotImplementedError` from the
 realizer. The honest scope per the DL/GPU review.
@@ -260,9 +264,25 @@ class WebGpuBridge(Protocol):
         dtype: str,
     ) -> bytes: ...
 
+    def run_tensor_plan_semantic(
+        self,
+        plan: dict,
+        semantic_requests_json: str,
+        inputs: list,
+        dtype: str,
+    ) -> bytes: ...
+
     def run_tensor_plan_resident(
         self,
         plan: dict,
+        inputs: list,
+        dtype: str,
+    ) -> Any: ...
+
+    def run_tensor_plan_resident_semantic(
+        self,
+        plan: dict,
+        semantic_requests_json: str,
         inputs: list,
         dtype: str,
     ) -> Any: ...
