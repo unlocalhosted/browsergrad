@@ -196,6 +196,7 @@ try {
   verifyInstalledSemanticViewCopyConsumer(installedConsumer);
 
   const compilerPkg = readPackage(compiler);
+  const workspaceCompilerPkg = readPackage(join(root, "packages/browsergrad-compiler"));
   const kernelsRange = compilerPkg.dependencies?.["@unlocalhosted/browsergrad-kernels"];
   assert(kernelsRange, "compiler package missing kernels dependency");
   assert(!kernelsRange.includes("workspace:"), `compiler package leaked workspace dependency: ${kernelsRange}`);
@@ -209,6 +210,14 @@ try {
   assert(
     compilerSemanticCoreRange === workspaceSemanticCoreVersion,
     `compiler package semantic-core dependency should be ${workspaceSemanticCoreVersion}, got ${compilerSemanticCoreRange}`,
+  );
+  assert(
+    workspaceCompilerPkg.scripts?.prepublishOnly?.includes("require_layout_bindings_publish_gate.mjs"),
+    "compiler workspace package must retain the exact-commit layout-binding publish gate",
+  );
+  assert(
+    existsSync(join(root, "packages/browsergrad-compiler/scripts/require_layout_bindings_publish_gate.mjs")),
+    "compiler workspace package is missing the exact-commit layout-binding publish gate implementation",
   );
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
   for (const exportName of [

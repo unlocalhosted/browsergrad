@@ -12,5 +12,7 @@ npm-debug.log*
 .wibey-test/
 packages/browsergrad-kernels/.vitest-attachments/
 packages/browsergrad-kernels/tests-browser/__screenshots__/
+packages/browsergrad-compiler/tests-browser/__screenshots__/
+packages/browsergrad-compiler/.vitest-attachments/
 __pycache__/
 *.py[cod]

@@ -128,12 +128,29 @@ jobs:
         if: steps.parse.outputs.shortname == 'compiler'
         run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu
 
+      - name: Required compiler layout-binding WebGPU gate (compiler release)
+        if: steps.parse.outputs.shortname == 'compiler'
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-compiler test:browser:layout-bindings:required 2>&1 | tee compiler-layout-bindings-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Retain compiler layout-binding WebGPU evidence (compiler release)
+        if: always() && steps.parse.outputs.shortname == 'compiler'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler-layout-bindings-webgpu-evidence-${{ github.sha }}
+          path: compiler-layout-bindings-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Publish to npm
         working-directory: packages/${{ steps.parse.outputs.package }}
         run: pnpm publish --access public --provenance --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_COMPILER_LAYOUT_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
 
       - name: Extract changelog excerpt
         working-directory: packages/${{ steps.parse.outputs.package }}
