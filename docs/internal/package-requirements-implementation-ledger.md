@@ -30,7 +30,7 @@ test does not make a gate verified unless every exit criterion is covered.
 
 | Gate | Status | Current result | Missing before `verified` | Evidence |
 |---|---|---|---|---|
-| Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and four legacy adapters are machine-frozen. Compiler pointer/scalar memory now has an exact public/schema freeze plus five executable CPU-reference/WGSL eligibility fixtures. The check runs in root, compiler, CI, release, and publish gates; mutation tests cover representative bypasses. | Add stable diagnostic and semantic capability IDs; add separate machine-readable semantic capability, assignment-requirement, and dtype/view/materialization/opaque-operation inventories; freeze Grad view/bf16, runtime routing labels, and exact JIT opaque-operation decisions. | `pnpm architecture:check`; compiler semantic-architecture and pointer/scalar freeze tests. |
+| Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and five legacy adapters are machine-frozen. Stable diagnostic stages, the implemented layout/index-map semantic capability ID, three backend IDs, and 53 classified legacy assignment requirements are registered separately. Compiler pointer/scalar and runtime requirement behavior have executable fixtures. | Add the machine-readable dtype/view/materialization and exact opaque-operation inventories; freeze Grad view/bf16 and exact JIT opaque-operation decisions. | `pnpm architecture:check`; compiler semantic-architecture, pointer/scalar, and runtime assignment-requirement tests. |
 | Gate 1 — value/layout core and wire foundation | `verified` | The private package implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None for Gate 1. Public-package adoption still requires the separate packed/release-tested `0.x` transition recorded in D-004. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check. |
 | Gate 2 — multi-frontend, multi-backend view slice | `not-started` | No implementation in this workstream. | All Gate 2 exit criteria. | None. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
@@ -51,10 +51,10 @@ shells or another frontend-shaped execution path.
 
 | Work item | Status | Notes |
 |---|---|---|
-| Frozen-adapter inventory | `partial` | Baselines recorded and machine-enforced for compiler pointer/scalar memory, `cute_static_layout`, 44-op shape/f32 `TensorGpuPlan`, and 36 executable `OP_CUSTOM` constructors. The pointer/scalar baseline includes exact public/type shapes and five executable behavior cases; Grad, runtime, and exact opaque-operation decisions remain. |
+| Frozen-adapter inventory | `partial` | Baselines recorded and machine-enforced for compiler pointer/scalar memory, `cute_static_layout`, 44-op shape/f32 `TensorGpuPlan`, 36 executable `OP_CUSTOM` constructors, and runtime assignment requirement mapping. Grad and exact opaque-operation decisions remain. |
 | Semantic-core seam audit | `partial` | Existing compiler/JIT/kernels types must adapt into the core; none can be moved wholesale. Exact initial package split is selected. |
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
-| Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, four required legacy freezes, behavior-fixture IDs, and representative mutation tests are implemented and wired into delivery gates. Stable vocabulary and remaining compatibility inventories remain. |
+| Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, five required legacy freezes, exact runtime mapping/status unions, reviewed vocabulary, generated profile-usage parity, behavior-fixture IDs, and representative mutation tests are implemented and wired into delivery gates. Grad and exact JIT behavior inventories remain. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
 
 ### Audit findings recorded so far
@@ -80,9 +80,9 @@ shells or another frontend-shaped execution path.
   and outputs rather than imagined source-shaped nodes.
 - Runtime assignment labels mix semantic features, runtime facilities, device
   features, oracles, simulators, external services, and policy. They are legacy
-  routing requirements, not all `CapabilityDefinition` values or lowering
-  decisions. Current repository-owned usage is 53 labels: 51 in profiles plus
-  `shader-f16` and `subgroups` emitted by the browser mapping.
+  routing requirements, not all `SemanticCapabilityDefinition` values or
+  lowering decisions. Current repository-owned usage is 53 labels: 51 in
+  profiles plus `shader-f16` and `subgroups` emitted by the browser mapping.
 - Grad's current `bf16`/`bfloat16` path is f32 substitution. View/materialize
   behavior follows NumPy details: reshape/transpose/permute are conditional
   aliases, expand copies, and `contiguous()` currently returns `self` even for
@@ -126,6 +126,7 @@ shells or another frontend-shaped execution path.
 | D-010 | 2026-07-15 | accepted | V1 uses a closed byte-addressable scalar dtype registry and an affine/strided index algebra; swizzles and sub-byte storage require named extensions. | Prevents strings and backend spellings from becoming dtype/layout semantics before their bit rules exist. |
 | D-011 | 2026-07-15 | accepted | Minor additions are restricted to open bags with lossless unknown-field preservation; closed semantic records change only by major version or required extension. | Keeps old-reader canonical hashes stable instead of silently dropping new payload meaning. |
 | D-012 | 2026-07-15 | accepted | Keep the dependency-free Python implementation as an independent conformance oracle for the closed layout wire schema, synchronized atomically with TypeScript, fixtures, pinned goldens, and this ledger. | Provides cross-language drift detection without creating a second runtime or implying a stable Python package API. |
+| D-013 | 2026-07-15 | accepted | Separate semantic capabilities/lowering/evidence from assignment requirements/resolutions and universal diagnostics; register legacy assignment strings as routing requirements rather than promoting them to semantic capabilities. | Prevents device facts, simulators, oracles, policies, and external services from receiving fictitious preservation levels or lowering decisions. Runtime may eventually consume only the narrow diagnostic, capability, and requirement protocol subpaths. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -254,8 +255,35 @@ affected implementation slice is marked complete.
   generated IDs, and WGSL text are intentionally excluded.
 - Added mutation coverage for address-space widening, interface-field addition,
   readonly loss, operation widening, public-export removal, and missing fixture
-  IDs. Gate 0 remains `partial` pending Grad, runtime/vocabulary, diagnostic ID,
-  and exact opaque-operation inventories.
+  IDs. At this checkpoint Gate 0 remained `partial` pending Grad,
+  runtime/vocabulary, diagnostic ID, and exact opaque-operation inventories.
+
+### 2026-07-15 — Platform vocabulary and runtime requirement freeze
+
+- Corrected the normative model: semantic capabilities, program-specific
+  lowering decisions, execution evidence, assignment requirements, requirement
+  resolutions, and diagnostics are separate records with separate IDs.
+- Added a reviewed vocabulary registry with the closed nine diagnostic stages,
+  the implemented layout/index-map capability ID, three concrete backend
+  IDs, eight requirement kinds, and all 53 repository-owned legacy assignment
+  requirement IDs. Static capabilities reject runtime/evidence outcome fields.
+- Added a generated usage inventory for the 51 requirement IDs referenced by
+  the ten checked-in profiles. Architecture checking regenerates the same model
+  in memory and rejects a stale file or unregistered profile/mapping ID.
+- Promoted `runtime.generic-backend-labels.v0` to a required freeze covering the
+  exact eight browser-input fields/mappings, WebGPU-parent conditions, route
+  modes, readiness states, runner targets, and three behavior fixtures. The
+  compatibility API still accepts externally supplied strings; that does not
+  register them for repository-owned profiles.
+- Corrected platform guidance that inferred compiler/subset support solely from
+  `features.webgpu`. Device facts now produce only device requirements, a
+  loaded compiler is an environment facility, and source-subset/executability
+  results remain attached to the concrete artifact.
+- Exit review closed three P1s: source-subset/executability resolutions are now
+  explicitly artifact-scoped, fixtures have their own requirement kind, and
+  every vocabulary record is closed with validated capability links. It also
+  closed the fixture-drift gap with a pinned SHA-256 and all 256 boolean browser
+  mapping combinations; legacy meanings now define exact set-membership truth.
 
 ## Verification Log
 
@@ -275,6 +303,7 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Verified layout artifacts and traces | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: 6 files, 59 tests; build/typecheck/lint clean. | Add cross-language parity. |
 | 2026-07-15 | Gate 1 cross-language exit | `pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: architecture check; 8 files, 68 tests; typecheck/build/lint clean. Python source also parsed through `ast.parse`. | Gate 1 verified; resume Gate 0 inventory before Gate 2. |
 | 2026-07-15 | Compiler pointer/scalar freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test` | Passed: script syntax, architecture check, compiler typecheck, 28 files and 938 tests. | None. |
+| 2026-07-15 | Vocabulary and runtime requirement freeze | `pnpm architecture:generate-requirements && node --check scripts/semantic-architecture-check.mjs && node --check scripts/generate-assignment-requirement-usage.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test && pnpm --filter @unlocalhosted/browsergrad-runtime test` | Passed: deterministic 51-ID usage generation, script syntax, architecture check, compiler typecheck, 28 files/940 compiler tests, and 11 files/125 runtime tests. | Runtime repo-wide typecheck remains blocked by the recorded pre-existing optional-WGSL errors. |
 
 ## Failure and Recovery Log
 
@@ -298,6 +327,10 @@ whether any files may be left partially changed.
   `packages/browsergrad-runtime/tests/assignment-javascript-profile-e2e.test.ts`
   because `compiled.wgsl` / `compiled.wgslProgram` may be undefined. Semantic
   core is not consumed there; no runtime files were changed in this slice.
+- The vocabulary slice re-ran runtime typecheck after dependency builds and hit
+  the same three pre-existing optional-WGSL errors. The new fixture test and 53
+  related runtime routing/profile tests pass; no runtime source file was
+  changed.
 - The first layout-normalizer typecheck found two `noUncheckedIndexedAccess`
   errors when indexing already rank-validated stride/step arrays. Explicit
   post-validation casts document the invariant; all focused gates pass.
@@ -347,7 +380,7 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Finish Gate 0's stable diagnostic and semantic-capability IDs plus separate
-machine-readable dtype/view/materialization/opaque-operation and legacy
-assignment-requirement inventories. Extend freeze coverage to Grad view/bf16,
-runtime routing labels, and exact JIT opaque-operation decisions before Gate 2.
+Finish Gate 0's machine-readable Grad dtype/view/materialization inventory and
+exact JIT opaque-operation decision matrix. Extend freeze coverage to those two
+behaviors, then run the full architecture/compiler/runtime/JIT/Grad focused
+gates before beginning Gate 2.

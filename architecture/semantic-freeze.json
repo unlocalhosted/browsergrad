@@ -426,11 +426,51 @@
       "id": "runtime.generic-backend-labels.v0",
       "owner": "@unlocalhosted/browsergrad-runtime",
       "permittedCallers": [
-        "existing assignment capability compatibility mapping"
+        "existing assignment requirement compatibility mapping"
       ],
-      "newUseProhibition": "New readiness features use canonical capability definitions and lowering decisions.",
-      "retirementGate": "All readiness UI consumes emitted capability and lowering records.",
-      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-runtime@1.0.0"
+      "newUseProhibition": "New readiness features use canonical requirement definitions and resolutions; semantic lowering uses capability decisions only through an explicit link.",
+      "retirementGate": "All readiness UI consumes requirement resolutions and program-specific lowering records.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-runtime@1.0.0",
+      "baselineDecision": "docs/adr/0001-freeze-legacy-semantic-adapters.md",
+      "freeze": {
+        "kind": "runtime-assignment-requirements",
+        "definitionFile": "packages/browsergrad-runtime/src/assignment-capabilities.ts",
+        "typesFile": "packages/browsergrad-runtime/src/assignment-types.ts",
+        "vocabularyFile": "architecture/platform-vocabulary.json",
+        "usageInventoryFile": "architecture/assignment-requirement-usage.generated.json",
+        "profileDirectory": "docs/internal",
+        "profileSuffix": ".profile.json",
+        "behaviorFixtureFile": "packages/browsergrad-runtime/tests/fixtures/assignment-requirements.v0.json",
+        "behaviorFixtureSha256": "56bc5e8dbfe0f74e4ce4807b7336c4d973957755ba25a97c732c2d73a4f67fb5",
+        "behaviorFixtureIds": [
+          "runtime.assignment-requirements.browser-mapping.v0",
+          "runtime.assignment-requirements.route-precedence.v0",
+          "runtime.assignment-requirements.webgpu-parent.v0"
+        ],
+        "inputFields": [
+          "cudaCompatibleSubset",
+          "cudaLiteCompiler",
+          "kernelVisualizer",
+          "performanceRubric",
+          "shaderF16",
+          "subgroups",
+          "webgpu",
+          "wgslKernel"
+        ],
+        "browserMappings": [
+          { "field": "cudaCompatibleSubset", "requirementId": "cuda-compatible-subset", "condition": "input.webgpu && input.cudaCompatibleSubset" },
+          { "field": "cudaLiteCompiler", "requirementId": "cuda-lite-compiler", "condition": "input.webgpu && input.cudaLiteCompiler" },
+          { "field": "kernelVisualizer", "requirementId": "kernel-visualizer", "condition": "input.kernelVisualizer" },
+          { "field": "performanceRubric", "requirementId": "performance-rubric", "condition": "input.performanceRubric" },
+          { "field": "shaderF16", "requirementId": "shader-f16", "condition": "input.webgpu && input.shaderF16" },
+          { "field": "subgroups", "requirementId": "subgroups", "condition": "input.webgpu && input.subgroups" },
+          { "field": "webgpu", "requirementId": "webgpu", "condition": "input.webgpu" },
+          { "field": "wgslKernel", "requirementId": "wgsl-kernel", "condition": "input.webgpu && input.wgslKernel" }
+        ],
+        "assignmentModes": ["browser", "external", "simulated"],
+        "readinessStatuses": ["blocked", "external-only", "runnable", "simulated"],
+        "runnerTargets": ["blocked", "external", "javascript", "pyodide", "unsupported"]
+      }
     }
   ]
 }

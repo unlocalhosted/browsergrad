@@ -1,0 +1,841 @@
+{
+  "schemaVersion": 1,
+  "sourcePattern": "docs/internal/*.profile.json",
+  "requirements": [
+    {
+      "requirementId": "attention-oracle",
+      "usages": [
+        {
+          "profileId": "cs149gpt",
+          "sourcePath": "docs/internal/cs149gpt.profile.json",
+          "gate": "attention_optimization_browser_path",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "browser-cpp-simulator",
+      "usages": [
+        {
+          "profileId": "cs149gpt",
+          "sourcePath": "docs/internal/cs149gpt.profile.json",
+          "gate": "attention_optimization_browser_path",
+          "relation": "any-of",
+          "group": [
+            "browser-cpp-simulator"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "browser-math-only",
+      "usages": [
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "gpu_inference_external_only",
+          "relation": "any-of",
+          "group": [
+            "browser-math-only"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "classifier-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "classifier_dependencies",
+          "relation": "any-of",
+          "group": [
+            "classifier-oracle"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "cuda-compatible-subset",
+      "usages": [
+        {
+          "profileId": "cs149-assignment3",
+          "sourcePath": "docs/internal/cs149-assignment3.profile.json",
+          "gate": "cuda_concepts_browser_kernel_path",
+          "relation": "requires"
+        },
+        {
+          "profileId": "gpu-puzzles",
+          "sourcePath": "docs/internal/gpu-puzzles.profile.json",
+          "gate": "browser_wgsl_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "cuda-compatible-subset"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "cuda-lite-compiler",
+      "usages": [
+        {
+          "profileId": "cs149-assignment3",
+          "sourcePath": "docs/internal/cs149-assignment3.profile.json",
+          "gate": "cuda_concepts_browser_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "cuda-lite-compiler"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "dataset-fixture",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "browser_data_fixture_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "ddp-simulator",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "distributed_training_simulation_path",
+          "relation": "any-of",
+          "group": [
+            "worker-mesh",
+            "distributed-simulator",
+            "ddp-simulator",
+            "fsdp-simulator",
+            "sharded-optimizer-simulator"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "dedupe-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "browser_data_fixture_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "distributed-simulator",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "distributed_training_simulation_path",
+          "relation": "any-of",
+          "group": [
+            "worker-mesh",
+            "distributed-simulator",
+            "ddp-simulator",
+            "fsdp-simulator",
+            "sharded-optimizer-simulator"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "external-server",
+      "usages": [
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "scaling_api_browser_slice",
+          "relation": "any-of",
+          "group": [
+            "external-server"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "fasttext-external",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "classifier_dependencies",
+          "relation": "any-of",
+          "group": [
+            "fasttext-external",
+            "transformers-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "flash-attention-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "flash_attention_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "flash-attention-oracle"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "flash-attn-external",
+      "usages": [
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "gpu_inference_external_only",
+          "relation": "any-of",
+          "group": [
+            "vllm-external",
+            "flash-attn-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "fsdp-simulator",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "distributed_training_simulation_path",
+          "relation": "any-of",
+          "group": [
+            "worker-mesh",
+            "distributed-simulator",
+            "ddp-simulator",
+            "fsdp-simulator",
+            "sharded-optimizer-simulator"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "hosted-api-mock",
+      "usages": [
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "jax_training_external_only",
+          "relation": "any-of",
+          "group": [
+            "hosted-api-mock"
+          ]
+        },
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "scaling_api_browser_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "http-client",
+      "usages": [
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "scaling_api_browser_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "ispc-external",
+      "usages": [
+        {
+          "profileId": "cs149-assignment1",
+          "sourcePath": "docs/internal/cs149-assignment1.profile.json",
+          "gate": "browser_cpu_parallel_simulation",
+          "relation": "any-of",
+          "group": [
+            "ispc-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "ispc-simulator",
+      "usages": [
+        {
+          "profileId": "cs149-assignment1",
+          "sourcePath": "docs/internal/cs149-assignment1.profile.json",
+          "gate": "browser_cpu_parallel_simulation",
+          "relation": "any-of",
+          "group": [
+            "ispc-simulator"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "jax-external",
+      "usages": [
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "jax_training_external_only",
+          "relation": "any-of",
+          "group": [
+            "jax-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "js-oracles",
+      "usages": [
+        {
+          "profileId": "cs336-assignment1",
+          "sourcePath": "docs/internal/cs336-assignment1.profile.json",
+          "gate": "browser_tokenizer_rubric_path",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "browser_pyodide_runtime",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "kernel-visualizer",
+      "usages": [
+        {
+          "profileId": "gpu-puzzles",
+          "sourcePath": "docs/internal/gpu-puzzles.profile.json",
+          "gate": "browser_wgsl_kernel_path",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "large-file-streaming",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "browser_data_fixture_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "native-cpp-external",
+      "usages": [
+        {
+          "profileId": "cs149-assignment2",
+          "sourcePath": "docs/internal/cs149-assignment2.profile.json",
+          "gate": "task_runtime_browser_simulation",
+          "relation": "any-of",
+          "group": [
+            "native-cpp-external"
+          ]
+        },
+        {
+          "profileId": "cs149gpt",
+          "sourcePath": "docs/internal/cs149gpt.profile.json",
+          "gate": "attention_optimization_browser_path",
+          "relation": "any-of",
+          "group": [
+            "native-cpp-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "native-cuda-external",
+      "usages": [
+        {
+          "profileId": "cs149-assignment3",
+          "sourcePath": "docs/internal/cs149-assignment3.profile.json",
+          "gate": "cuda_concepts_browser_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "native-cuda-external"
+          ]
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "flash_attention_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "native-cuda-external",
+            "triton-native"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "native-distributed-external",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "distributed_training_simulation_path",
+          "relation": "any-of",
+          "group": [
+            "native-distributed-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "near-dedupe-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "browser_data_fixture_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "performance-rubric",
+      "usages": [
+        {
+          "profileId": "cs149-assignment1",
+          "sourcePath": "docs/internal/cs149-assignment1.profile.json",
+          "gate": "browser_cpu_parallel_simulation",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs149-assignment2",
+          "sourcePath": "docs/internal/cs149-assignment2.profile.json",
+          "gate": "task_runtime_browser_simulation",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs149-assignment3",
+          "sourcePath": "docs/internal/cs149-assignment3.profile.json",
+          "gate": "cuda_concepts_browser_kernel_path",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs149gpt",
+          "sourcePath": "docs/internal/cs149gpt.profile.json",
+          "gate": "attention_optimization_browser_path",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "pii-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "browser_data_fixture_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "pthreads-simulator",
+      "usages": [
+        {
+          "profileId": "cs149-assignment1",
+          "sourcePath": "docs/internal/cs149-assignment1.profile.json",
+          "gate": "browser_cpu_parallel_simulation",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs149-assignment2",
+          "sourcePath": "docs/internal/cs149-assignment2.profile.json",
+          "gate": "task_runtime_browser_simulation",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "pyodide",
+      "usages": [
+        {
+          "profileId": "cs336-assignment1",
+          "sourcePath": "docs/internal/cs336-assignment1.profile.json",
+          "gate": "browser_tokenizer_rubric_path",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "browser_pyodide_runtime",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "scaling_api_browser_slice",
+          "relation": "any-of",
+          "group": [
+            "pyodide"
+          ]
+        },
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "browser_data_fixture_slice",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "alignment_math_snapshot_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "quality-rule-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "browser_data_fixture_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "response-parser-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "alignment_math_snapshot_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "rl-loss-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "alignment_math_snapshot_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "scaling-law-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "scaling_api_browser_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "scheduler-simulator",
+      "usages": [
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "scaling_api_browser_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "server-fixture",
+      "usages": [
+        {
+          "profileId": "cs336-assignment3-scaling",
+          "sourcePath": "docs/internal/cs336-assignment3-scaling.profile.json",
+          "gate": "scaling_api_browser_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "sharded-optimizer-simulator",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "distributed_training_simulation_path",
+          "relation": "any-of",
+          "group": [
+            "worker-mesh",
+            "distributed-simulator",
+            "ddp-simulator",
+            "fsdp-simulator",
+            "sharded-optimizer-simulator"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "simd-simulator",
+      "usages": [
+        {
+          "profileId": "cs149-assignment1",
+          "sourcePath": "docs/internal/cs149-assignment1.profile.json",
+          "gate": "browser_cpu_parallel_simulation",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs149gpt",
+          "sourcePath": "docs/internal/cs149gpt.profile.json",
+          "gate": "attention_optimization_browser_path",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "snapshot-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "alignment_math_snapshot_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "structured-assertions",
+      "usages": [
+        {
+          "profileId": "cs336-assignment1",
+          "sourcePath": "docs/internal/cs336-assignment1.profile.json",
+          "gate": "browser_tokenizer_rubric_path",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "browser_pyodide_runtime",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "task-graph-simulator",
+      "usages": [
+        {
+          "profileId": "cs149-assignment2",
+          "sourcePath": "docs/internal/cs149-assignment2.profile.json",
+          "gate": "task_runtime_browser_simulation",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "tokenizer-oracle",
+      "usages": [
+        {
+          "profileId": "cs336-assignment1",
+          "sourcePath": "docs/internal/cs336-assignment1.profile.json",
+          "gate": "browser_tokenizer_rubric_path",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "alignment_math_snapshot_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "torch-compat",
+      "usages": [
+        {
+          "profileId": "cs149gpt",
+          "sourcePath": "docs/internal/cs149gpt.profile.json",
+          "gate": "attention_optimization_browser_path",
+          "relation": "any-of",
+          "group": [
+            "torch-compat"
+          ]
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "browser_pyodide_runtime",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "alignment_math_snapshot_slice",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "transformers-external",
+      "usages": [
+        {
+          "profileId": "cs336-assignment4-data",
+          "sourcePath": "docs/internal/cs336-assignment4-data.profile.json",
+          "gate": "classifier_dependencies",
+          "relation": "any-of",
+          "group": [
+            "fasttext-external",
+            "transformers-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "triton-compatible",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "flash_attention_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "triton-compatible"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "triton-native",
+      "usages": [
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "flash_attention_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "native-cuda-external",
+            "triton-native"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "vllm-external",
+      "usages": [
+        {
+          "profileId": "cs336-assignment5-alignment",
+          "sourcePath": "docs/internal/cs336-assignment5-alignment.profile.json",
+          "gate": "gpu_inference_external_only",
+          "relation": "any-of",
+          "group": [
+            "vllm-external",
+            "flash-attn-external"
+          ]
+        }
+      ]
+    },
+    {
+      "requirementId": "webgpu",
+      "usages": [
+        {
+          "profileId": "cs149-assignment3",
+          "sourcePath": "docs/internal/cs149-assignment3.profile.json",
+          "gate": "cuda_concepts_browser_kernel_path",
+          "relation": "requires"
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "flash_attention_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "webgpu",
+            "wgsl-kernel"
+          ]
+        },
+        {
+          "profileId": "gpu-puzzles",
+          "sourcePath": "docs/internal/gpu-puzzles.profile.json",
+          "gate": "browser_wgsl_kernel_path",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "wgsl-kernel",
+      "usages": [
+        {
+          "profileId": "cs149-assignment3",
+          "sourcePath": "docs/internal/cs149-assignment3.profile.json",
+          "gate": "cuda_concepts_browser_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "wgsl-kernel"
+          ]
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "flash_attention_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "webgpu",
+            "wgsl-kernel"
+          ]
+        },
+        {
+          "profileId": "gpu-puzzles",
+          "sourcePath": "docs/internal/gpu-puzzles.profile.json",
+          "gate": "browser_wgsl_kernel_path",
+          "relation": "any-of",
+          "group": [
+            "wgsl-kernel"
+          ]
+        },
+        {
+          "profileId": "gpu-puzzles",
+          "sourcePath": "docs/internal/gpu-puzzles.profile.json",
+          "gate": "browser_wgsl_kernel_path",
+          "relation": "requires"
+        }
+      ]
+    },
+    {
+      "requirementId": "worker-mesh",
+      "usages": [
+        {
+          "profileId": "cs149-assignment2",
+          "sourcePath": "docs/internal/cs149-assignment2.profile.json",
+          "gate": "task_runtime_browser_simulation",
+          "relation": "any-of",
+          "group": [
+            "worker-mesh"
+          ]
+        },
+        {
+          "profileId": "cs336-assignment2-systems",
+          "sourcePath": "docs/internal/cs336-assignment2-systems.profile.json",
+          "gate": "distributed_training_simulation_path",
+          "relation": "any-of",
+          "group": [
+            "worker-mesh",
+            "distributed-simulator",
+            "ddp-simulator",
+            "fsdp-simulator",
+            "sharded-optimizer-simulator"
+          ]
+        }
+      ]
+    }
+  ]
+}

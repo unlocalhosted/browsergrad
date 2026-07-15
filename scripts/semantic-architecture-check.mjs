@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,7 @@ const REQUIRED_FREEZES = new Map([
   ["compiler.cute-static-layout.v0", "cute-static-layout"],
   ["kernels.tensor-gpu-plan.v0", "tensor-gpu-plan"],
   ["jit.core-custom-ops.v0", "jit-op-custom"],
+  ["runtime.generic-backend-labels.v0", "runtime-assignment-requirements"],
 ]);
 
 export function runSemanticArchitectureCheck(root = repoRoot) {
@@ -59,6 +61,9 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
       case "jit-op-custom":
         checkJitCustomOps(root, ts, adapter.freeze, failures);
         break;
+      case "runtime-assignment-requirements":
+        checkRuntimeAssignmentRequirements(root, ts, adapter.freeze, failures);
+        break;
       default:
         failures.push(`adapter ${stringValue(adapter.id)} has unknown freeze kind ${stringValue(adapter.freeze.kind)}`);
     }
@@ -90,9 +95,13 @@ export function checkWorkspaceImportSpecifier(packageName, file, specifier) {
   if (
     packageName === "@unlocalhosted/browsergrad-runtime" &&
     specifier.startsWith("@unlocalhosted/browsergrad-semantic-core") &&
-    specifier !== "@unlocalhosted/browsergrad-semantic-core/capability"
+    !new Set([
+      "@unlocalhosted/browsergrad-semantic-core/capability",
+      "@unlocalhosted/browsergrad-semantic-core/diagnostic",
+      "@unlocalhosted/browsergrad-semantic-core/requirement",
+    ]).has(specifier)
   ) {
-    failures.push(`${file} imports ${specifier}; runtime may import semantic-core/capability only`);
+    failures.push(`${file} imports ${specifier}; runtime may import semantic-core diagnostic/capability/requirement protocols only`);
   }
   return failures;
 }
@@ -114,6 +123,18 @@ export function validateSemanticFreezeManifest(root, manifest) {
 export function extractModuleSpecifiers(ts, source, filename = "source.ts") {
   const sourceFile = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   return moduleSpecifiers(ts, sourceFile);
+}
+
+export function buildAssignmentRequirementUsage(
+  root,
+  profileDirectory = "docs/internal",
+  profileSuffix = ".profile.json",
+) {
+  const failures = [];
+  const directory = path.resolve(root, profileDirectory);
+  const usage = assignmentRequirementUsage(directory, profileSuffix, failures, path.resolve(root));
+  if (failures.length > 0) throw new Error(failures.join("\n"));
+  return usage;
 }
 
 export function checkFrozenCompilerPointerScalarMemorySource(
@@ -170,6 +191,76 @@ export function validateCompilerPointerBehaviorFixture(fixture, freeze, filename
     return failures;
   }
   compareStringSets("compiler pointer/scalar behavior fixture IDs", ids, freeze.behaviorFixtureIds, failures);
+  return failures;
+}
+
+export function checkFrozenRuntimeAssignmentRequirementsSource(
+  ts,
+  capabilitySource,
+  typesSource,
+  freeze,
+  capabilityFilename = "assignment-capabilities.ts",
+  typesFilename = "assignment-types.ts",
+) {
+  const failures = [];
+  const capabilityFile = ts.createSourceFile(capabilityFilename, capabilitySource, ts.ScriptTarget.Latest, true);
+  const typesFile = ts.createSourceFile(typesFilename, typesSource, ts.ScriptTarget.Latest, true);
+  const inputs = capabilityFile.statements.filter((statement) => ts.isInterfaceDeclaration(statement) && statement.name.text === "BrowserGpuCapabilityInput");
+  const input = inputs[0];
+  if (!input || !ts.isInterfaceDeclaration(input) || inputs.length !== 1) {
+    failures.push(`BrowserGpuCapabilityInput must have exactly one interface declaration; got ${inputs.length}`);
+  } else {
+    const fields = [];
+    for (const member of input.members) {
+      if (!ts.isPropertySignature(member) || member.type === undefined) {
+        failures.push("BrowserGpuCapabilityInput may contain property signatures only");
+        continue;
+      }
+      const name = member.name.getText(capabilityFile);
+      fields.push(name);
+      if (member.questionToken === undefined || member.type.kind !== ts.SyntaxKind.BooleanKeyword) {
+        failures.push(`BrowserGpuCapabilityInput.${name} must remain optional boolean`);
+      }
+      if (member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword) !== true) {
+        failures.push(`BrowserGpuCapabilityInput.${name} must remain readonly`);
+      }
+    }
+    compareStringSets("BrowserGpuCapabilityInput fields", fields, freeze.inputFields, failures);
+  }
+
+  const functionDeclarations = capabilityFile.statements.filter((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === "browserGpuCapabilities");
+  if (functionDeclarations.length !== 1 || functionDeclarations[0].body === undefined) {
+    failures.push(`browserGpuCapabilities must have exactly one function declaration; got ${functionDeclarations.length}`);
+  } else {
+    const mappings = [];
+    for (const statement of functionDeclarations[0].body.statements) {
+      if (!ts.isIfStatement(statement)) continue;
+      const requirementId = pushedStringLiteral(ts, statement.thenStatement);
+      if (requirementId === undefined) continue;
+      const condition = normalizeTypeText(statement.expression.getText(capabilityFile));
+      const fields = [...condition.matchAll(/\binput\.([A-Za-z][A-Za-z0-9]*)\b/gu)].map((match) => match[1]);
+      const field = [...fields].reverse().find((name) => name !== "webgpu") ?? fields[0];
+      mappings.push({ field, requirementId, condition });
+    }
+    let pushCalls = 0;
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText(capabilityFile) === "capabilities" && node.expression.name.text === "push") pushCalls += 1;
+      ts.forEachChild(node, visit);
+    };
+    visit(functionDeclarations[0].body);
+    if (pushCalls !== mappings.length) failures.push(`browserGpuCapabilities contains ${pushCalls} push calls but only ${mappings.length} frozen conditional mappings`);
+    compareRecordLists("browserGpuCapabilities mappings", mappings, freeze.browserMappings, "requirementId", failures);
+  }
+
+  checkClosedStringUnion(ts, typesFile, "AssignmentCapabilityMode", freeze.assignmentModes, failures);
+  checkClosedStringUnion(ts, typesFile, "AssignmentRunReadinessStatus", freeze.readinessStatuses, failures);
+  checkClosedStringUnion(ts, typesFile, "AssignmentRunnerTarget", freeze.runnerTargets, failures);
+  return failures;
+}
+
+export function validatePlatformVocabularySnapshot(root, vocabulary, profileIds, browserMappings) {
+  const failures = [];
+  validatePlatformVocabulary(path.resolve(root), vocabulary, profileIds, browserMappings, failures);
   return failures;
 }
 
@@ -559,6 +650,270 @@ function checkJitCustomOps(root, ts, freeze, failures) {
   const allowedLabels = new Set(freeze.labels ?? []);
   for (const label of [...labels].sort()) {
     if (!allowedLabels.has(label)) failures.push(`JIT OP_CUSTOM path introduces unregistered label ${label}`);
+  }
+}
+
+function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
+  const definitionFile = resolveManifestPath(root, freeze.definitionFile, failures);
+  const typesFile = resolveManifestFile(root, freeze.typesFile, "typesFile", failures);
+  const vocabularyFile = resolveManifestFile(root, freeze.vocabularyFile, "vocabularyFile", failures);
+  const behaviorFixture = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
+  const usageInventoryFile = resolveManifestFile(root, freeze.usageInventoryFile, "usageInventoryFile", failures);
+  const profileDirectory = resolveManifestFile(root, freeze.profileDirectory, "profileDirectory", failures);
+  if ([definitionFile, typesFile, vocabularyFile, behaviorFixture, usageInventoryFile, profileDirectory].some((value) => value === undefined)) return;
+
+  failures.push(...checkFrozenRuntimeAssignmentRequirementsSource(
+    ts,
+    fs.readFileSync(definitionFile, "utf8"),
+    fs.readFileSync(typesFile, "utf8"),
+    freeze,
+    definitionFile,
+    typesFile,
+  ));
+
+  const fixture = readJson(behaviorFixture, failures);
+  validateNamedFixture(
+    fixture,
+    "runtime.generic-backend-labels.v0",
+    freeze.behaviorFixtureIds,
+    relative(root, behaviorFixture),
+    "runtime assignment requirement",
+    failures,
+  );
+  const fixtureSha256 = createHash("sha256").update(fs.readFileSync(behaviorFixture)).digest("hex");
+  if (fixtureSha256 !== freeze.behaviorFixtureSha256) {
+    failures.push(`${relative(root, behaviorFixture)} content changed; expected SHA-256 ${stringValue(freeze.behaviorFixtureSha256)}, got ${fixtureSha256}`);
+  }
+
+  const usage = assignmentRequirementUsage(profileDirectory, freeze.profileSuffix, failures, root);
+  const recordedUsage = readJson(usageInventoryFile, failures);
+  if (JSON.stringify(recordedUsage) !== JSON.stringify(usage)) {
+    failures.push(`${relative(root, usageInventoryFile)} is stale; run pnpm architecture:generate-requirements`);
+  }
+  const profileIds = usage.requirements.map((entry) => entry.requirementId);
+  const vocabulary = readJson(vocabularyFile, failures);
+  validatePlatformVocabulary(root, vocabulary, profileIds, freeze.browserMappings, failures);
+}
+
+function pushedStringLiteral(ts, statement) {
+  const candidate = ts.isBlock(statement) && statement.statements.length === 1 ? statement.statements[0] : statement;
+  if (!ts.isExpressionStatement(candidate) || !ts.isCallExpression(candidate.expression)) return undefined;
+  const call = candidate.expression;
+  if (!ts.isPropertyAccessExpression(call.expression) || call.expression.expression.getText() !== "capabilities" || call.expression.name.text !== "push") return undefined;
+  return call.arguments.length === 1 && ts.isStringLiteral(call.arguments[0]) ? call.arguments[0].text : undefined;
+}
+
+function checkClosedStringUnion(ts, sourceFile, name, expected, failures) {
+  const declarations = sourceFile.statements.filter((statement) => ts.isTypeAliasDeclaration(statement) && statement.name.text === name);
+  if (declarations.length !== 1) {
+    failures.push(`${name} must have exactly one type alias declaration; got ${declarations.length}`);
+    return;
+  }
+  const type = declarations[0].type;
+  if (!ts.isUnionTypeNode(type) || type.types.some((entry) => !ts.isLiteralTypeNode(entry) || !ts.isStringLiteral(entry.literal))) {
+    failures.push(`${name} must remain a closed string-literal union`);
+    return;
+  }
+  compareStringSets(`${name} values`, type.types.map((entry) => entry.literal.text), expected, failures);
+}
+
+function compareRecordLists(label, actual, expected, key, failures) {
+  const normalize = (values) => [...(values ?? [])]
+    .map((entry) => sortRecord(Object.fromEntries(Object.entries(entry).map(([name, value]) => [name, typeof value === "string" ? normalizeTypeText(value) : value]))))
+    .sort((left, right) => String(left[key]).localeCompare(String(right[key])));
+  const left = normalize(actual);
+  const right = normalize(expected);
+  if (JSON.stringify(left) !== JSON.stringify(right)) failures.push(`${label} changed; expected ${JSON.stringify(right)}, got ${JSON.stringify(left)}`);
+}
+
+function validateNamedFixture(fixture, adapterId, expectedIds, filename, label, failures) {
+  if (!isRecord(fixture) || fixture.schemaVersion !== 1 || fixture.adapterId !== adapterId || !Array.isArray(fixture.cases)) {
+    failures.push(`${filename} must be a schemaVersion 1 ${adapterId} fixture`);
+    return;
+  }
+  const ids = fixture.cases.map((entry) => isRecord(entry) ? entry.id : undefined);
+  if (ids.some((id) => typeof id !== "string") || new Set(ids).size !== ids.length) {
+    failures.push(`${filename} case IDs must be unique strings`);
+    return;
+  }
+  compareStringSets(`${label} behavior fixture IDs`, ids, expectedIds, failures);
+}
+
+function assignmentRequirementUsage(directory, suffix, failures, root) {
+  if (typeof suffix !== "string" || suffix.length === 0) {
+    failures.push("runtime assignment requirement profileSuffix must be a non-empty string");
+    return { schemaVersion: 1, sourcePattern: `${relative(root, directory)}/*`, requirements: [] };
+  }
+  const usages = new Map();
+  const add = (requirementId, usage) => usages.set(requirementId, [...(usages.get(requirementId) ?? []), usage]);
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).filter((candidate) => candidate.isFile() && candidate.name.endsWith(suffix))) {
+    const file = path.join(directory, entry.name);
+    const profile = readJson(file, failures);
+    if (!isRecord(profile) || !Array.isArray(profile.gates)) continue;
+    const profileId = typeof profile.id === "string" ? profile.id : entry.name.slice(0, -suffix.length);
+    for (const gate of profile.gates) {
+      if (!isRecord(gate) || gate.kind !== "capability" || !isRecord(gate.options)) continue;
+      const gateName = typeof gate.name === "string" ? gate.name : "<unnamed>";
+      const requires = gate.options.requires;
+      if (requires !== undefined && !Array.isArray(requires)) failures.push(`${relative(root, file)} capability requires must be an array`);
+      for (const value of Array.isArray(requires) ? requires : []) {
+        if (typeof value === "string") add(value, { profileId, sourcePath: relative(root, file), gate: gateName, relation: "requires" });
+        else failures.push(`${relative(root, file)} capability requirement must be a string`);
+      }
+      const alternatives = gate.options.any_of;
+      if (alternatives !== undefined && !Array.isArray(alternatives)) failures.push(`${relative(root, file)} capability any_of must be an array`);
+      for (const group of Array.isArray(alternatives) ? alternatives : []) {
+        if (!Array.isArray(group)) {
+          failures.push(`${relative(root, file)} capability alternative must be an array`);
+          continue;
+        }
+        for (const value of group) {
+          if (typeof value === "string") add(value, { profileId, sourcePath: relative(root, file), gate: gateName, relation: "any-of", group });
+          else failures.push(`${relative(root, file)} capability alternative requirement must be a string`);
+        }
+      }
+    }
+  }
+  return {
+    schemaVersion: 1,
+    sourcePattern: `${relative(root, directory)}/*${suffix}`,
+    requirements: [...usages.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([requirementId, entries]) => ({
+      requirementId,
+      usages: entries.sort((left, right) =>
+        left.sourcePath.localeCompare(right.sourcePath) || left.gate.localeCompare(right.gate) || left.relation.localeCompare(right.relation) ||
+        JSON.stringify(left.group ?? []).localeCompare(JSON.stringify(right.group ?? []))),
+    })),
+  };
+}
+
+function validatePlatformVocabulary(root, vocabulary, profileIds, browserMappings, failures) {
+  const filename = "architecture/platform-vocabulary.json";
+  if (!isRecord(vocabulary) || vocabulary.schemaVersion !== 1) {
+    failures.push(`${filename} must have schemaVersion 1`);
+    return;
+  }
+  checkExactRecordKeys(filename, "top-level", vocabulary, [
+    "schemaVersion", "identifierPolicies", "diagnosticStages", "requirementKinds",
+    "semanticCapabilities", "backends", "legacyAssignmentRequirements",
+  ], failures);
+  compareStringSets(`${filename} diagnostic stages`, vocabulary.diagnosticStages, [
+    "preprocess", "frontend", "semantic-lowering", "verification", "scheduling",
+    "backend-lowering", "device-validation", "execution", "evidence",
+  ], failures);
+  compareStringSets(`${filename} requirement kinds`, vocabulary.requirementKinds, [
+    "semantic-feature", "runtime-facility", "device-feature", "oracle", "simulator", "fixture", "external-service", "policy",
+  ], failures);
+  if (!isRecord(vocabulary.identifierPolicies)) {
+    failures.push(`${filename} identifierPolicies are required`);
+    return;
+  }
+  checkExactRecordKeys(filename, "identifierPolicies", vocabulary.identifierPolicies, ["canonical", "legacyAssignment"], failures);
+  if (vocabulary.identifierPolicies.canonical !== "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$") {
+    failures.push(`${filename} canonical identifier policy changed`);
+  }
+  if (vocabulary.identifierPolicies.legacyAssignment !== "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$") {
+    failures.push(`${filename} legacy assignment identifier policy changed`);
+  }
+  const canonical = safeRegex(vocabulary.identifierPolicies.canonical, `${filename} canonical identifier policy`, failures);
+  const legacy = safeRegex(vocabulary.identifierPolicies.legacyAssignment, `${filename} legacy assignment identifier policy`, failures);
+  const capabilities = validateVocabularyRecords(root, vocabulary.semanticCapabilities, "capabilityId", canonical, filename, failures);
+  const backends = validateVocabularyRecords(root, vocabulary.backends, "backendId", canonical, filename, failures);
+  const requirements = validateVocabularyRecords(root, vocabulary.legacyAssignmentRequirements, "requirementId", legacy, filename, failures);
+
+  const allowedPreservation = new Set(["observable-equivalent", "portable-relegalized", "schedule-preserving", "native-facility"]);
+  for (const entry of vocabulary.semanticCapabilities ?? []) {
+    if (!isRecord(entry)) continue;
+    checkExactRecordKeys(filename, `semantic capability ${stringValue(entry.capabilityId)}`, entry, [
+      "capabilityId", "semanticVersion", "operationVersion", "preservationLevels", "owner", "evidence",
+    ], failures);
+    if (!Array.isArray(entry.preservationLevels) || entry.preservationLevels.length === 0 || entry.preservationLevels.some((value) => !allowedPreservation.has(value))) {
+      failures.push(`${filename} semantic capability ${stringValue(entry.capabilityId)} has invalid preservationLevels`);
+    }
+    if (Object.hasOwn(entry, "state") || Object.hasOwn(entry, "outcome") || Object.hasOwn(entry, "passed")) {
+      failures.push(`${filename} static semantic capability ${stringValue(entry.capabilityId)} contains runtime/evidence state`);
+    }
+    if (typeof entry.operationVersion !== "string" || entry.operationVersion.trim() === "" || !Array.isArray(entry.evidence) || entry.evidence.length === 0) {
+      failures.push(`${filename} semantic capability ${stringValue(entry.capabilityId)} requires operationVersion and evidence`);
+    }
+  }
+  const allowedExecutionTiers = new Set(["semantic-reference", "webgpu-core", "webgpu-enhanced", "native-companion", "simulation"]);
+  for (const entry of vocabulary.backends ?? []) {
+    if (!isRecord(entry)) continue;
+    checkExactRecordKeys(filename, `backend ${stringValue(entry.backendId)}`, entry, [
+      "backendId", "semanticVersion", "owner", "executionTiers", "evidence",
+    ], failures);
+    if (!Array.isArray(entry.executionTiers) || entry.executionTiers.length === 0 || entry.executionTiers.some((value) => !allowedExecutionTiers.has(value))) {
+      failures.push(`${filename} backend ${stringValue(entry.backendId)} has invalid executionTiers`);
+    }
+    if (!Array.isArray(entry.evidence) || entry.evidence.length === 0) failures.push(`${filename} backend ${stringValue(entry.backendId)} requires evidence`);
+  }
+  const kinds = new Set(vocabulary.requirementKinds ?? []);
+  for (const entry of vocabulary.legacyAssignmentRequirements ?? []) {
+    if (!isRecord(entry)) continue;
+    checkExactRecordKeys(filename, `legacy requirement ${stringValue(entry.requirementId)}`, entry, [
+      "requirementId", "semanticVersion", "kind", "owner", "lifecycle", "meaning", "capabilityId?",
+    ], failures);
+    if (!kinds.has(entry.kind) || entry.lifecycle !== "legacy" || typeof entry.meaning !== "string" || entry.meaning.trim() === "") {
+      failures.push(`${filename} legacy requirement ${stringValue(entry.requirementId)} has invalid classification/lifecycle/meaning`);
+    }
+    if (entry.capabilityId !== undefined) {
+      if (entry.kind !== "semantic-feature") failures.push(`${filename} legacy requirement ${stringValue(entry.requirementId)} may link a capability only when kind is semantic-feature`);
+      if (typeof entry.capabilityId !== "string" || !capabilities.includes(entry.capabilityId)) failures.push(`${filename} legacy requirement ${stringValue(entry.requirementId)} links unknown capability ${stringValue(entry.capabilityId)}`);
+    }
+  }
+  const browserIds = (browserMappings ?? []).map((entry) => entry.requirementId);
+  compareStringSets(`${filename} registered legacy assignment requirements`, requirements, [...new Set([...profileIds, ...browserIds])], failures);
+  const collisions = capabilities.filter((id) => requirements.includes(id));
+  if (collisions.length > 0) failures.push(`${filename} capability and requirement IDs collide: ${collisions.join(", ")}`);
+  if (backends.some((id) => capabilities.includes(id))) failures.push(`${filename} backend and capability IDs must use distinct namespaces`);
+}
+
+function checkExactRecordKeys(filename, label, record, fields, failures) {
+  const required = fields.filter((field) => !field.endsWith("?"));
+  const allowed = new Set(fields.map((field) => field.replace(/\?$/u, "")));
+  const actual = Object.keys(record);
+  const missing = required.filter((field) => !Object.hasOwn(record, field));
+  const unknown = actual.filter((field) => !allowed.has(field));
+  if (missing.length > 0 || unknown.length > 0) {
+    failures.push(`${filename} ${label} record keys changed; missing ${JSON.stringify(missing)}, unknown ${JSON.stringify(unknown)}`);
+  }
+}
+
+function validateVocabularyRecords(root, values, idField, pattern, filename, failures) {
+  if (!Array.isArray(values)) {
+    failures.push(`${filename} ${idField} records must be an array`);
+    return [];
+  }
+  const ids = [];
+  for (const entry of values) {
+    if (!isRecord(entry) || typeof entry[idField] !== "string") {
+      failures.push(`${filename} ${idField} record is invalid`);
+      continue;
+    }
+    const id = entry[idField];
+    ids.push(id);
+    if (pattern !== undefined && !pattern.test(id)) failures.push(`${filename} ${idField} ${id} violates its identifier policy`);
+    if (typeof entry.semanticVersion !== "string" || !/^\d+\.\d+\.\d+$/u.test(entry.semanticVersion)) failures.push(`${filename} ${id} must have an exact semanticVersion`);
+    if (typeof entry.owner !== "string" || entry.owner.trim() === "") failures.push(`${filename} ${id} must have an owner`);
+    if (entry.evidence !== undefined && !Array.isArray(entry.evidence)) failures.push(`${filename} ${id} evidence must be an array`);
+    for (const evidence of Array.isArray(entry.evidence) ? entry.evidence : []) {
+      if (typeof evidence !== "string" || !fs.existsSync(path.resolve(root, evidence))) failures.push(`${filename} ${id} evidence path is missing: ${stringValue(evidence)}`);
+    }
+  }
+  if (new Set(ids).size !== ids.length) failures.push(`${filename} ${idField} values must be unique`);
+  return ids.sort();
+}
+
+function safeRegex(value, label, failures) {
+  if (typeof value !== "string") {
+    failures.push(`${label} must be a string`);
+    return undefined;
+  }
+  try {
+    return new RegExp(value, "u");
+  } catch (error) {
+    failures.push(`${label} is invalid: ${errorMessage(error)}`);
+    return undefined;
   }
 }
 

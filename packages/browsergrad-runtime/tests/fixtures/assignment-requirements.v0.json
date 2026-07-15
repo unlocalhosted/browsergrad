@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "runtime.generic-backend-labels.v0",
+  "cases": [
+    {
+      "id": "runtime.assignment-requirements.browser-mapping.v0",
+      "kind": "browser-mapping",
+      "input": {
+        "webgpu": true,
+        "wgslKernel": true,
+        "cudaLiteCompiler": true,
+        "cudaCompatibleSubset": true,
+        "shaderF16": true,
+        "subgroups": true,
+        "performanceRubric": true,
+        "kernelVisualizer": true
+      },
+      "expected": [
+        "cuda-compatible-subset",
+        "cuda-lite-compiler",
+        "kernel-visualizer",
+        "performance-rubric",
+        "shader-f16",
+        "subgroups",
+        "webgpu",
+        "wgsl-kernel"
+      ]
+    },
+    {
+      "id": "runtime.assignment-requirements.webgpu-parent.v0",
+      "kind": "browser-mapping",
+      "input": {
+        "webgpu": false,
+        "wgslKernel": true,
+        "cudaLiteCompiler": true,
+        "cudaCompatibleSubset": true,
+        "shaderF16": true,
+        "subgroups": true,
+        "performanceRubric": true,
+        "kernelVisualizer": true
+      },
+      "expected": ["kernel-visualizer", "performance-rubric"]
+    },
+    {
+      "id": "runtime.assignment-requirements.route-precedence.v0",
+      "kind": "route-precedence",
+      "input": {
+        "browserCapabilities": ["shared", "browser-only", "unregistered-provider-id"],
+        "simulatedCapabilities": ["shared", "simulated-only"],
+        "externalCapabilities": ["shared", "external-only"]
+      },
+      "expectedCapabilities": [
+        "browser-only",
+        "external-only",
+        "shared",
+        "simulated-only",
+        "unregistered-provider-id"
+      ],
+      "expectedModes": {
+        "browser-only": "browser",
+        "external-only": "external",
+        "shared": "browser",
+        "simulated-only": "simulated",
+        "unregistered-provider-id": "browser"
+      }
+    }
+  ]
+}

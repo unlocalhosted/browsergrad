@@ -87,20 +87,6 @@ import {
 } from "@unlocalhosted/browsergrad-runtime";
 
 const features = await detectKernelFeatures(device);
-const environment = createAssignmentCapabilityEnvironment({
-  browserCapabilities: [
-    "pyodide",
-    ...browserGpuCapabilities({
-      webgpu: features.webgpu,
-      wgslKernel: features.webgpu,
-      cudaLiteCompiler: features.webgpu,
-      shaderF16: features.shaderF16,
-      subgroups: features.subgroups,
-      performanceRubric: true,
-    }),
-  ],
-});
-
 const compiled = compileCudaLiteKernelForWebGpu(
   source,
   compileCudaLiteOptionsFromKernelFeatures(features, {
@@ -110,10 +96,26 @@ const compiled = compileCudaLiteKernelForWebGpu(
 const executionStatus = summarizeCudaWebGpuExecutionPlan(
   createCudaWebGpuExecutionPlan(compiled, input, launch),
 );
+const environment = createAssignmentCapabilityEnvironment({
+  browserCapabilities: [
+    "pyodide",
+    "cuda-lite-compiler", // compiler facility loaded in this environment
+    ...browserGpuCapabilities({
+      webgpu: features.webgpu,
+      shaderF16: features.shaderF16,
+      subgroups: features.subgroups,
+      performanceRubric: true,
+    }),
+  ],
+});
 ```
-The same `features` object should feed both capability labels and compiler
-options. Platform code should not duplicate `shader-f16`, subgroup, or
-compatibility flag strings. Use `executionStatus`, not
+These strings are legacy assignment-routing requirements, not semantic
+capability proof. Reusable environments may contain device requirements and
+loaded facilities such as the compiler. Source-subset/executability results
+remain keyed to the concrete artifact; never merge them into an environment
+reused for another program. Until the versioned `RequirementResolution`
+protocol lands, keep `executionStatus` beside this compiled artifact and do not
+translate it into a reusable label. Use `executionStatus`, not
 `compiled.loweringPlan.canDirectLowerToWgsl`, for learner-facing WebGPU
 readiness because host-orchestrated plans can run real WebGPU even when direct
 lowering is conservatively marked as unsupported.
@@ -179,9 +181,10 @@ input order determines alpha blending. Use `defineKernel1DProgram()`,
 `runKernel1DProgramReference()`, `emitKernel1DProgramWgsl()`, and
 `runKernel1DProgramWebGpu()` for author-once 1D kernels that need scalar params,
 input reads, output reads, WGSL source generation, and browser WebGPU dispatch.
-Use the `cuda-lite-compiler` capability when rubrics accept learner CUDA-lite
-source through `@unlocalhosted/browsergrad-compiler` rather than handwritten
-WGSL only.
+Use the legacy `cuda-lite-compiler` requirement only to route to an environment
+where `@unlocalhosted/browsergrad-compiler` is loaded. Whether a learner's
+specific CUDA-lite source is accepted and executable remains an artifact-scoped
+compiler/lowering result, not an environment label.
 Runtime e2e coverage exercises a CS149 A3-style profile with `_bg_cuda_concepts`
 backed by the compiler package, proving platform profile wiring without making
 the runtime package production-depend on the compiler.

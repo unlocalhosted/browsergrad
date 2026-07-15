@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkFrozenCompilerPointerScalarMemorySource,
+  checkFrozenRuntimeAssignmentRequirementsSource,
   checkFrozenCuteStaticLayoutSource,
   checkFrozenTensorGpuPlanSource,
   checkWorkspaceImportSpecifier,
@@ -15,6 +16,7 @@ import {
   extractPythonCustomLabels,
   runSemanticArchitectureCheck,
   validateCompilerPointerBehaviorFixture,
+  validatePlatformVocabularySnapshot,
   validateSemanticFreezeManifest,
 } from "../../../scripts/semantic-architecture-check.mjs";
 
@@ -108,6 +110,89 @@ describe("semantic architecture guardrails", () => {
     fixture.cases.pop();
     expect(validateCompilerPointerBehaviorFixture(fixture, pointerFreeze))
       .toContainEqual(expect.stringContaining("behavior fixture IDs changed"));
+  });
+
+  it("rejects legacy assignment requirement mapping and status widening", () => {
+    const capabilityFile = join(repoRoot, "packages/browsergrad-runtime/src/assignment-capabilities.ts");
+    const typesFile = join(repoRoot, "packages/browsergrad-runtime/src/assignment-types.ts");
+    const capabilitySource = readFileSync(capabilityFile, "utf8");
+    const typesSource = readFileSync(typesFile, "utf8");
+    const runtimeFreeze = freeze("runtime-assignment-requirements");
+
+    expect(checkFrozenRuntimeAssignmentRequirementsSource(
+      ts,
+      capabilitySource.replace("export interface BrowserGpuCapabilityInput {", "export interface BrowserGpuCapabilityInput {\n  readonly newBackend?: boolean;"),
+      typesSource,
+      runtimeFreeze,
+    )).toContainEqual(expect.stringContaining("BrowserGpuCapabilityInput fields changed"));
+    expect(checkFrozenRuntimeAssignmentRequirementsSource(
+      ts,
+      capabilitySource.replace("input.webgpu && input.cudaLiteCompiler", "input.cudaLiteCompiler"),
+      typesSource,
+      runtimeFreeze,
+    )).toContainEqual(expect.stringContaining("browserGpuCapabilities mappings changed"));
+    expect(checkFrozenRuntimeAssignmentRequirementsSource(
+      ts,
+      capabilitySource.replace("  return uniqueSorted(capabilities);", '  capabilities.push("new-route");\n  return uniqueSorted(capabilities);'),
+      typesSource,
+      runtimeFreeze,
+    )).toContainEqual(expect.stringContaining("push calls"));
+    expect(checkFrozenRuntimeAssignmentRequirementsSource(
+      ts,
+      capabilitySource,
+      typesSource.replace('export type AssignmentCapabilityMode = "browser" | "simulated" | "external";', 'export type AssignmentCapabilityMode = "browser" | "simulated" | "external" | "native";'),
+      runtimeFreeze,
+    )).toContainEqual(expect.stringContaining("AssignmentCapabilityMode values changed"));
+  });
+
+  it("rejects static capability outcomes and unregistered assignment requirements", () => {
+    const vocabulary = JSON.parse(readFileSync(join(repoRoot, "architecture/platform-vocabulary.json"), "utf8")) as {
+      semanticCapabilities: Array<Record<string, unknown>>;
+      legacyAssignmentRequirements: Array<Record<string, unknown>>;
+    };
+    const usage = JSON.parse(readFileSync(join(repoRoot, "architecture/assignment-requirement-usage.generated.json"), "utf8")) as {
+      requirements: Array<{ requirementId: string }>;
+    };
+    const runtimeFreeze = freeze("runtime-assignment-requirements") as {
+      browserMappings: readonly unknown[];
+    };
+    const profileIds = usage.requirements.map((entry) => entry.requirementId);
+
+    const capabilityOutcome = structuredClone(vocabulary);
+    capabilityOutcome.semanticCapabilities[0]!.outcome = "passed";
+    expect(validatePlatformVocabularySnapshot(repoRoot, capabilityOutcome, profileIds, runtimeFreeze.browserMappings))
+      .toContainEqual(expect.stringContaining("contains runtime/evidence state"));
+
+    const disguisedOutcome = structuredClone(vocabulary);
+    disguisedOutcome.semanticCapabilities[0]!.support = "passed";
+    expect(validatePlatformVocabularySnapshot(repoRoot, disguisedOutcome, profileIds, runtimeFreeze.browserMappings))
+      .toContainEqual(expect.stringContaining("record keys changed"));
+
+    const danglingCapability = structuredClone(vocabulary);
+    const semanticRequirement = danglingCapability.legacyAssignmentRequirements.find((entry) => entry.kind === "semantic-feature");
+    if (semanticRequirement === undefined) throw new Error("missing semantic-feature requirement fixture");
+    semanticRequirement.capabilityId = "browsergrad.missing.capability";
+    expect(validatePlatformVocabularySnapshot(repoRoot, danglingCapability, profileIds, runtimeFreeze.browserMappings))
+      .toContainEqual(expect.stringContaining("links unknown capability"));
+
+    const oracleCapability = structuredClone(vocabulary);
+    const oracleRequirement = oracleCapability.legacyAssignmentRequirements.find((entry) => entry.kind === "oracle");
+    if (oracleRequirement === undefined) throw new Error("missing oracle requirement fixture");
+    oracleRequirement.capabilityId = "browsergrad.layout.index-map";
+    expect(validatePlatformVocabularySnapshot(repoRoot, oracleCapability, profileIds, runtimeFreeze.browserMappings))
+      .toContainEqual(expect.stringContaining("only when kind is semantic-feature"));
+
+    const missingRequirement = structuredClone(vocabulary);
+    missingRequirement.legacyAssignmentRequirements.pop();
+    expect(validatePlatformVocabularySnapshot(repoRoot, missingRequirement, profileIds, runtimeFreeze.browserMappings))
+      .toContainEqual(expect.stringContaining("registered legacy assignment requirements changed"));
+
+    const widenedPolicy = structuredClone(vocabulary) as typeof vocabulary & {
+      identifierPolicies: { canonical: string };
+    };
+    widenedPolicy.identifierPolicies.canonical = ".*";
+    expect(validatePlatformVocabularySnapshot(repoRoot, widenedPolicy, profileIds, runtimeFreeze.browserMappings))
+      .toContainEqual(expect.stringContaining("canonical identifier policy changed"));
   });
 
   it("rejects union widening, inheritance, and readonly loss", () => {
@@ -208,5 +293,13 @@ describe("semantic architecture guardrails", () => {
     if (adapter !== undefined) delete adapter.freeze;
     expect(validateSemanticFreezeManifest(repoRoot, mutated))
       .toContainEqual(expect.stringContaining("required freeze jit.core-custom-ops.v0"));
+
+    const runtimeMutated = structuredClone(freezeManifest) as {
+      adapters: Array<{ id?: string; freeze?: { kind?: string } }>;
+    };
+    const runtimeAdapter = runtimeMutated.adapters.find((entry) => entry.id === "runtime.generic-backend-labels.v0");
+    if (runtimeAdapter !== undefined) delete runtimeAdapter.freeze;
+    expect(validateSemanticFreezeManifest(repoRoot, runtimeMutated))
+      .toContainEqual(expect.stringContaining("required freeze runtime.generic-backend-labels.v0"));
   });
 });

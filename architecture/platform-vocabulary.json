@@ -1,0 +1,508 @@
+{
+  "schemaVersion": 1,
+  "identifierPolicies": {
+    "canonical": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$",
+    "legacyAssignment": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+  },
+  "diagnosticStages": [
+    "preprocess",
+    "frontend",
+    "semantic-lowering",
+    "verification",
+    "scheduling",
+    "backend-lowering",
+    "device-validation",
+    "execution",
+    "evidence"
+  ],
+  "requirementKinds": [
+    "semantic-feature",
+    "runtime-facility",
+    "device-feature",
+    "oracle",
+    "simulator",
+    "fixture",
+    "external-service",
+    "policy"
+  ],
+  "semanticCapabilities": [
+    {
+      "capabilityId": "browsergrad.layout.index-map",
+      "semanticVersion": "1.0.0",
+      "operationVersion": "browsergrad.layout@1",
+      "preservationLevels": [
+        "observable-equivalent"
+      ],
+      "owner": "@unlocalhosted/browsergrad-semantic-core",
+      "evidence": [
+        "packages/browsergrad-semantic-core/tests/layout/artifact.test.ts",
+        "packages/browsergrad-semantic-core/tests/layout/normalize-layout.test.ts",
+        "packages/browsergrad-semantic-core/tests/layout/python-parity.test.ts"
+      ]
+    }
+  ],
+  "backends": [
+    {
+      "backendId": "browsergrad.compiler.semantic-reference",
+      "semanticVersion": "0.1.0",
+      "owner": "@unlocalhosted/browsergrad-compiler",
+      "executionTiers": [
+        "semantic-reference"
+      ],
+      "evidence": [
+        "packages/browsergrad-compiler/tests/compiler/core.test.ts",
+        "packages/browsergrad-compiler/tests/compiler/pointer_scalar_memory_freeze.test.ts"
+      ]
+    },
+    {
+      "backendId": "browsergrad.jit.numpy-reference",
+      "semanticVersion": "0.1.0",
+      "owner": "@unlocalhosted/browsergrad-jit",
+      "executionTiers": [
+        "semantic-reference"
+      ],
+      "evidence": [
+        "packages/browsergrad-jit/tests-integration/arithmetic.test.ts"
+      ]
+    },
+    {
+      "backendId": "browsergrad.kernels.webgpu",
+      "semanticVersion": "0.1.0",
+      "owner": "@unlocalhosted/browsergrad-kernels",
+      "executionTiers": [
+        "webgpu-core",
+        "webgpu-enhanced"
+      ],
+      "evidence": [
+        "packages/browsergrad-kernels/tests-browser/webgpu_real.test.ts",
+        "packages/browsergrad-kernels/tests-browser/wgsl_program_webgpu.test.ts"
+      ]
+    }
+  ],
+  "legacyAssignmentRequirements": [
+    {
+      "requirementId": "attention-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'attention-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "browser-cpp-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'browser-cpp-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "browser-math-only",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'browser-math-only'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "classifier-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'classifier-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "cuda-compatible-subset",
+      "semanticVersion": "0.1.0",
+      "kind": "semantic-feature",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'cuda-compatible-subset'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "cuda-lite-compiler",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'cuda-lite-compiler'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "dataset-fixture",
+      "semanticVersion": "0.1.0",
+      "kind": "fixture",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'dataset-fixture'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "ddp-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'ddp-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "dedupe-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'dedupe-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "distributed-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'distributed-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "external-server",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'external-server'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "fasttext-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'fasttext-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "flash-attention-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'flash-attention-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "flash-attn-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'flash-attn-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "fsdp-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'fsdp-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "hosted-api-mock",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'hosted-api-mock'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "http-client",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'http-client'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "ispc-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'ispc-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "ispc-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'ispc-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "jax-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'jax-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "js-oracles",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'js-oracles'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "kernel-visualizer",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'kernel-visualizer'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "large-file-streaming",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'large-file-streaming'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "native-cpp-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'native-cpp-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "native-cuda-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'native-cuda-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "native-distributed-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'native-distributed-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "near-dedupe-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'near-dedupe-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "performance-rubric",
+      "semanticVersion": "0.1.0",
+      "kind": "policy",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'performance-rubric'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "pii-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'pii-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "pthreads-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'pthreads-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "pyodide",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'pyodide'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "quality-rule-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'quality-rule-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "response-parser-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'response-parser-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "rl-loss-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'rl-loss-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "scaling-law-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'scaling-law-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "scheduler-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'scheduler-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "server-fixture",
+      "semanticVersion": "0.1.0",
+      "kind": "fixture",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'server-fixture'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "shader-f16",
+      "semanticVersion": "0.1.0",
+      "kind": "device-feature",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'shader-f16'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "sharded-optimizer-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'sharded-optimizer-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "simd-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'simd-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "snapshot-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'snapshot-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "structured-assertions",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'structured-assertions'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "subgroups",
+      "semanticVersion": "0.1.0",
+      "kind": "device-feature",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'subgroups'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "task-graph-simulator",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'task-graph-simulator'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "tokenizer-oracle",
+      "semanticVersion": "0.1.0",
+      "kind": "oracle",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'tokenizer-oracle'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "torch-compat",
+      "semanticVersion": "0.1.0",
+      "kind": "semantic-feature",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'torch-compat'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "transformers-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'transformers-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "triton-compatible",
+      "semanticVersion": "0.1.0",
+      "kind": "semantic-feature",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'triton-compatible'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "triton-native",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'triton-native'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "vllm-external",
+      "semanticVersion": "0.1.0",
+      "kind": "external-service",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'vllm-external'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "webgpu",
+      "semanticVersion": "0.1.0",
+      "kind": "device-feature",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'webgpu'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "wgsl-kernel",
+      "semanticVersion": "0.1.0",
+      "kind": "runtime-facility",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'wgsl-kernel'; no provider, semantic lowering, or execution evidence is implied."
+    },
+    {
+      "requirementId": "worker-mesh",
+      "semanticVersion": "0.1.0",
+      "kind": "simulator",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "lifecycle": "legacy",
+      "meaning": "Availability means AssignmentCapabilityEnvironment.capabilities contains the exact legacy ID 'worker-mesh'; no provider, semantic lowering, or execution evidence is implied."
+    }
+  ]
+}

@@ -139,9 +139,11 @@ For every lab profile, the platform should:
     handoff)` when a BrowserGrad handoff object exists, then post the returned
     title/body/labels to the issue tracker.
 
-## Capability Vocabulary
+## Legacy Assignment Requirement Vocabulary
 
-Capability names are strings. Keep them descriptive and reusable:
+The current public API calls these strings "capabilities" for compatibility,
+but they are assignment-routing requirement IDs. Their presence selects a
+route; it does not by itself prove semantic lowering or execution evidence.
 
 | Capability | Meaning |
 | --- | --- |
@@ -177,12 +179,15 @@ Capability names are strings. Keep them descriptive and reusable:
 | `browser-cpp-simulator` | Browser-safe simulator stands in for a native C++ extension path. |
 | `native-cpp-external` | Lab requires external native C++ build/run support. |
 | `ispc-external` | Lab requires external ISPC support or a simulator. |
-| `openmp-external` | Lab requires external OpenMP support or a simulator. |
+| `transformers-external` | Lab requires an external Transformers classifier/model path. |
 | `vllm-external` | Lab requires an external vLLM service. |
 | `flash-attn-external` | Lab requires external flash-attn/CUDA support. |
 
-This table is a living convention, not a runtime enum. Add names when a new
-assignment family needs them, but prefer reusing names across courses.
+`architecture/platform-vocabulary.json` is the reviewed registry for
+repository-owned IDs. New profile IDs require a classification, owner, meaning,
+version, evidence/producer plan, and architecture review. The public legacy API
+continues to accept externally supplied strings for compatibility, but that
+does not register them or permit checked-in profiles to use them silently.
 The first reusable small-helper substrate is
 `@unlocalhosted/browsergrad-primitives`: it provides deterministic mesh event
 traces, task-graph traces, DDP/FSDP/sharded-optimizer simulators,
@@ -203,10 +208,10 @@ clamped-exp lane-mask simulation, vector array-sum reduction traces, and static
 contiguous/cyclic work partitioning for labs that choose `simd-simulator`,
 `pthreads-simulator`, `ispc-simulator`, or `performance-rubric` paths.
 
-## Readiness Modes
+## Legacy Requirement Readiness Modes
 
-Profiles declare capability names; platforms declare what those capabilities
-mean in the current environment:
+Profiles declare requirement IDs; platforms declare which routing providers
+are available in the current environment:
 
 - `browser`: direct in-browser execution such as Pyodide, WebGPU, or JS oracle
   execution.
@@ -219,8 +224,8 @@ Pass these labels through `createAssignmentCapabilityEnvironment()` when calling
 `createAssignmentRunPlan`, then use `assignmentRunReadiness(plan)`.
 The helper de-duplicates and sorts capabilities, and direct `browser` support
 wins over `simulated` or `external` labels for duplicate capability names.
-GPU platforms should derive browser GPU labels from feature detection, then pass
-them into the same environment helper:
+GPU platforms may derive legacy device-requirement labels from feature
+detection, then pass them into the same environment helper:
 
 ```ts
 import { detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
@@ -231,23 +236,25 @@ import {
 } from "@unlocalhosted/browsergrad-runtime";
 
 const features = await detectKernelFeatures(device);
+const compilerOptions = compileCudaLiteOptionsFromKernelFeatures(features, {
+  workgroupSize: [8, 1, 1],
+});
 const environment = createAssignmentCapabilityEnvironment({
   browserCapabilities: browserGpuCapabilities({
     webgpu: features.webgpu,
-    wgslKernel: features.webgpu,
-    cudaLiteCompiler: features.webgpu,
     shaderF16: features.shaderF16,
     subgroups: features.subgroups,
   }),
 });
-
-const compilerOptions = compileCudaLiteOptionsFromKernelFeatures(features, {
-  workgroupSize: [8, 1, 1],
-});
 ```
-Use the same `features` object for capability preflight and CUDA-lite compiler
-gates. This avoids drift between "lab runnable" UI and actual WGSL emission.
-For compiled CUDA-lite kernels, derive learner-facing WebGPU status from
+Do not infer `cuda-lite-compiler`, `cuda-compatible-subset`, or `wgsl-kernel`
+from `features.webgpu`. These are legacy assignment-routing requirements and a
+device fact alone does not prove a frontend accepted the program or that a
+program-specific lowering exists. A loaded compiler facility may be an
+environment requirement; source-subset and executable-plan results remain
+artifact-scoped and must not be added to an environment reused by another
+program. Prove a direct WGSL provider before adding `wgsl-kernel`. For compiled
+CUDA-lite kernels, derive WebGPU status from
 `summarizeCudaWebGpuExecutionPlan()`, not
 `compiled.loweringPlan.canDirectLowerToWgsl`, because host-orchestrated plans
 can still run as real WebGPU passes.

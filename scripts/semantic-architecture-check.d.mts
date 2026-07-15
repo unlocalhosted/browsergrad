@@ -23,6 +23,12 @@ export function extractModuleSpecifiers(
   filename?: string,
 ): string[];
 
+export function buildAssignmentRequirementUsage(
+  root: string,
+  profileDirectory?: string,
+  profileSuffix?: string,
+): unknown;
+
 export function checkFrozenCompilerPointerScalarMemorySource(
   typescript: typeof ts,
   source: string,
@@ -36,6 +42,22 @@ export function validateCompilerPointerBehaviorFixture(
   fixture: unknown,
   freeze: Record<string, unknown>,
   filename?: string,
+): string[];
+
+export function checkFrozenRuntimeAssignmentRequirementsSource(
+  typescript: typeof ts,
+  capabilitySource: string,
+  typesSource: string,
+  freeze: Record<string, unknown>,
+  capabilityFilename?: string,
+  typesFilename?: string,
+): string[];
+
+export function validatePlatformVocabularySnapshot(
+  root: string,
+  vocabulary: unknown,
+  profileIds: readonly string[],
+  browserMappings: readonly unknown[],
 ): string[];
 
 export function checkFrozenCuteStaticLayoutSource(

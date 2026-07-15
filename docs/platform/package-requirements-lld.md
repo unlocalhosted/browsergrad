@@ -42,9 +42,12 @@ This document owns:
 
 This document does not act as a hand-maintained feature-status dashboard.
 Current capability status MUST come from package tests and a generated
-capability manifest. Package READMEs describe the shipping public API. Mutable
-project sequencing MAY live in a roadmap, but it MUST reference the gates in
-this document rather than inventing a second completion definition.
+capability manifest. Assignment readiness MUST additionally come from a
+versioned requirement registry plus environment-specific resolutions; a profile
+label is not capability proof. Package READMEs describe the shipping public
+API. Mutable project sequencing MAY live in a roadmap, but it MUST reference
+the gates in this document rather than inventing a second completion
+definition.
 
 Changing a normative boundary in this document requires an architecture
 decision record that states the new invariant, migration path, compatibility
@@ -655,8 +658,8 @@ type ExecutionTier =
   | "native-companion"
   | "simulation";
 
-interface CapabilityDefinition {
-  featureId: string;
+interface SemanticCapabilityDefinition {
+  capabilityId: string;
   semanticVersion: string;
   operationVersion?: string;
   preservationLevels: PreservationLevel[];
@@ -670,7 +673,7 @@ type SupportState =
   | "not-applicable";
 
 interface LoweringDecision {
-  featureId: string;
+  capabilityId: string;
   backendId: string;
   executionTier: ExecutionTier;
   state: SupportState;
@@ -686,7 +689,7 @@ interface LoweringDecision {
 type EvidenceOutcome = "not-run" | "passed" | "failed";
 
 interface ExecutionEvidence {
-  featureId: string;
+  capabilityId: string;
   artifactHash: string;
   backendId: string;
   environmentId: string;
@@ -712,6 +715,72 @@ only after every referenced runtime guard is evaluated successfully.
 Capability records MUST be monotonic in meaning: adding evidence may strengthen
 confidence, but it cannot silently redefine what a feature identifier means.
 
+Assignment prerequisites are a separate model. A device feature, local oracle,
+simulator, fixture, external service, or policy gate is not automatically a
+semantic capability and does not receive a `LoweringDecision` merely because a
+profile requires it.
+
+```ts
+type RequirementKind =
+  | "semantic-feature"
+  | "runtime-facility"
+  | "device-feature"
+  | "oracle"
+  | "simulator"
+  | "fixture"
+  | "external-service"
+  | "policy";
+
+interface RequirementDefinition {
+  requirementId: string;
+  semanticVersion: string;
+  kind: RequirementKind;
+  owner: string;
+  capabilityId?: string; // semantic-feature only; never inferred from spelling
+}
+
+type RequirementResolution =
+  | {
+      requirementId: string;
+      environmentId: string;
+      availability: "available";
+      route: "browser" | "simulated" | "external";
+      providerId: string;
+    }
+  | {
+      requirementId: string;
+      environmentId: string;
+      availability: "unavailable";
+      reasonCode: string;
+    }
+  | {
+      requirementId: string;
+      environmentId: string;
+      availability: "unknown";
+      reasonCode?: string;
+    };
+```
+
+Assignment readiness consumes `RequirementResolution` records. Only a
+`semantic-feature` requirement with an explicit `capabilityId` may point to a
+semantic capability, and that link does not replace the program-specific
+lowering decision. Existing assignment strings remain versioned legacy routing
+requirement IDs until migrated; they are not canonical backend IDs, execution
+tiers, support states, or evidence outcomes.
+
+Environment-scoped resolutions describe reusable providers and device facts.
+A source subset, legalization result, runtime guard, or executable-plan result
+is artifact/program-scoped and MUST be keyed by artifact hash or program ID; it
+must not be promoted into a reusable environment merely because one program
+lowered successfully.
+
+Canonical semantic capability, backend, diagnostic, and requirement IDs use
+lowercase dot-separated namespaces and identify one immutable predicate.
+Versions, support outcomes, execution tiers, device names, and words such as
+`passed` or `supported` stay in separate fields. Legacy hyphenated assignment
+IDs are registered exactly as compatibility identifiers and are not a naming
+precedent for new protocols.
+
 ## Wire Format and Schema Evolution
 
 Create an initially private workspace package
@@ -724,11 +793,15 @@ Create an initially private workspace package
   policy.
 - `/host` — host-graph representation, resource hazards, and verification.
 - `/schema` — wire envelopes, canonical serialization, and validators.
+- `/diagnostic` — universal diagnostic stages and structured diagnostic schema.
 - `/capability` — capability, lowering-decision, and evidence schemas only.
+- `/requirement` — assignment requirement definitions and resolution records;
+  no semantic lowering policy.
 
 Gate 1 exports only `/schema`, `/layout`, and `/package.json`. `/kernel`,
-`/schedule`, `/host`, and `/capability` are added only when concrete contracts
-and real consumers exist; empty placeholder barrels are prohibited.
+`/schedule`, `/host`, `/diagnostic`, `/capability`, and `/requirement` are added
+only when concrete contracts and real consumers exist; empty placeholder
+barrels are prohibited.
 
 The package is justified by live compiler, kernels, JIT bridge, and runtime
 protocol consumers. `private` describes only its initial standalone Gate 1
@@ -742,8 +815,8 @@ Internal API status is communicated by `0.x` versioning, narrow subpaths, and
 release policy—not by leaving downstream installations with an unavailable
 dependency. Promotion to `1.0` still requires one major schema version to
 survive two frontend and two backend integrations. Runtime may import only
-`/capability`; architecture checks MUST prevent it from importing tensor
-evaluation or kernel lowering code.
+`/diagnostic`, `/capability`, and `/requirement`; architecture checks MUST
+prevent it from importing tensor evaluation or kernel lowering code.
 
 ### Envelope and version rules
 
@@ -832,12 +905,12 @@ validate, canonicalize, and hash the same artifacts.
 
 | Package | Owns | Must stop owning or inferring |
 | --- | --- | --- |
-| `browsergrad-semantic-core` *(private during standalone incubation; packed `0.x` before public-package adoption)* | Pure shared value/layout/kernel/schedule/host schemas, verifiers, canonical wire format, coordinate evaluation, and capability protocol subpath. | Source parsing, framework APIs, actual device resources, schedule-selection policy, course policy. |
+| `browsergrad-semantic-core` *(private during standalone incubation; packed `0.x` before public-package adoption)* | Pure shared value/layout/kernel/schedule/host schemas, verifiers, canonical wire format, coordinate evaluation, and diagnostic/capability/requirement protocol subpaths. | Source parsing, framework APIs, actual device resources, schedule-selection policy, course policy. |
 | `browsergrad-compiler` | CUDA-lite and C++/CuTe frontends, frontend artifacts, semantic lowering, compiler-owned schedule/host-graph construction, compiler reference orchestration, and source diagnostics. | A private second view/layout model; source-spelling CuTe compatibility; direct device resource ownership; framework/JIT scheduling. |
 | `browsergrad-kernels` | WebGPU schedule legalization/selection, backend plans, WGSL, device resources, resident storage, pipeline/buffer caches, device profiling, and actual-device conformance. | Primary tensor/layout semantics; source parsing; Python/framework rules. |
 | `browsergrad-jit` | PyTorch-shaped lazy graph, symbolic VJP, transforms, fusion intent, and framework-owned lowering into shared kernel/schedule/host representations. | Compiler internals; WGSL layout rules; permanent `CUSTOM` implementations for advertised portable core operations. |
 | `browsergrad-grad` | Readable NumPy eager reference/autograd and explicit bridge behavior. | Naming-only dtype/device/view compatibility; accidental GPU-resident architecture. |
-| `browsergrad-runtime` | Worker lifecycle, profile/rubric orchestration, cancellation, structured events, and presentation/scheduling from capability data. | Tensor evaluation, index-map interpretation, backend heuristics, or compiler policy. |
+| `browsergrad-runtime` | Worker lifecycle, profile/rubric orchestration, cancellation, structured events, requirement resolution, and presentation/scheduling from canonical decisions. | Tensor evaluation, index-map interpretation, semantic lowering, backend heuristics, or compiler policy. |
 | `browsergrad-primitives` | Browser-safe text, data, evaluation, simulation, hosted-training, and RL/math helpers. | Tensor/layout semantics or actual distributed/device execution. |
 | `browsergrad-dogfood` | Packed/published-package and cross-package compatibility proof. | Reimplementation of package internals as test-only glue. |
 
@@ -854,7 +927,7 @@ shared artifact representation and verification:
   semantic-core/layout + semantic-core/kernel + semantic-core/schema
   semantic-core/schedule + semantic-core/host where applicable
 
-runtime -> semantic-core/capability only
+runtime -> semantic-core/diagnostic + semantic-core/capability + semantic-core/requirement only
 primitives remains outside the tensor/compiler dependency chain
 dogfood consumes public or explicitly private test contracts only
 ```
@@ -911,6 +984,7 @@ interface Diagnostic {
   semanticNodeId?: string;
   backendId?: string;
   capabilityId?: string;
+  requirementId?: string;
   remediation?: string;
 }
 ```
@@ -919,6 +993,14 @@ Tests assert codes and structured fields, not complete prose. Messages remain
 human-readable and may improve without becoming a breaking API. A backend
 limitation must identify the semantic operation, target profile, failed guard,
 or missing device feature/limit.
+
+The nine stage IDs above are a closed registry for this schema version. A
+diagnostic records the boundary that rejected the artifact, not the package
+that happened to emit it. Codes use a stable lowercase dot-separated namespace
+owned by that boundary (for example `layout.rank.mismatch`); changing the
+meaning of an existing code is a breaking change. Runtime error `kind` strings,
+compiler feature-reason strings, readiness states, and prose are not diagnostic
+codes unless explicitly registered and emitted through this record.
 
 ## Security, Reliability, and Operational Requirements
 
@@ -1027,7 +1109,7 @@ Automated architecture checks MUST enforce:
 - No dependency cycles across semantic layers or packages.
 - Representation/schema modules do not import passes, emitters, device APIs, or
   source frontends.
-- Runtime imports only the capability subpath.
+- Runtime imports only the diagnostic, capability, and requirement subpaths.
 - Kernels do not import compiler internals.
 - No new uses of frozen adapters from newly added features.
 - No source-spelling CuTe handlers outside the frozen compatibility adapter.
@@ -1049,7 +1131,7 @@ all five.
 | JIT `OP_CUSTOM` for core framework ops | JIT | Existing `_tensor_proxy.py`, `_functional.py`, `_nn.py`, `_webnn.py`, explicit user-kernel code, and embedded legacy wrappers only. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions. | JIT `1.0.0`. |
 | Eager view materialization and bf16 aliasing | Grad | Existing Tensor/torch compatibility adapters only where accurately documented. | No new API may claim view aliasing or bf16 storage through these paths. | View/alias fixtures agree or reject; bf16 is real storage/conversion or rejected. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
-| Generic runtime backend labels | Runtime | Existing assignment capability compatibility mapping only. | New readiness features use canonical capability definitions and lowering decisions. | All readiness UI consumes emitted capability/lowering records. | Runtime `1.0.0`. |
+| Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |
 
 Each migration stage MUST delete an adapter, narrow its allowed callers, or make
 its retirement gate measurably closer. Adding only new handlers, special cases,
@@ -1072,7 +1154,7 @@ with broader acceptance or better wording:
 | Attention | Direct attention is fused row-wise online softmax, without proved workgroup K/V tiling. | Tiled attention workload gate and accurate naming. |
 | JIT | Core primitive paths exist, but many public operations still use opaque `CUSTOM` NumPy closures. | Operation-by-operation typed IR and capability ledger. |
 | Eager bf16/views | bf16 aliases normalize to f32 and some view behavior materializes. | Numerical/view conformance or early rejection. |
-| Capability reporting | Status is spread across summaries, backend labels, and tests. | Generated capability definitions plus runtime lowering decisions and evidence records. |
+| Capability and readiness reporting | Status is spread across summaries, assignment labels, backend labels, and tests. | Generated semantic capability definitions/lowering decisions/evidence plus a separate assignment requirement registry and resolution records. |
 | Real-device gate | Browser GPU suites may skip unavailable adapters and are not a required lane for every WebGPU claim. | Stable required actual-device lane for each released WebGPU capability. |
 
 Existing compiler semantic IR, CPU references, tensor-plan execution, tiled
@@ -1090,8 +1172,10 @@ to claim an earlier gate complete.
 
 - Freeze new `cute_static_layout`, shape-only `TensorGpuPlan`, and core
   `OP_CUSTOM` expansion.
-- Define stable diagnostic-stage and capability identifiers.
-- Inventory public dtype/view/materialization behavior and opaque operations.
+- Define stable diagnostic-stage, semantic-capability, backend, and assignment-
+  requirement identifiers without deriving one namespace from another.
+- Inventory public dtype/view/materialization behavior, opaque operations, and
+  legacy assignment requirement labels with explicit classifications.
 - Add architecture checks for forbidden new dependencies and frozen adapters.
 
 **Exit:** no new feature can extend a frozen adapter without an explicit
@@ -1166,7 +1250,8 @@ proved algorithm and execution profiles.
   behavior.
 - Make Grad view/dtype behavior agree with conformance fixtures or reject before
   execution.
-- Make runtime/profile UI consume capability and lowering records.
+- Make runtime/profile UI consume assignment requirement resolutions plus
+  program-specific semantic capability/lowering records where applicable.
 
 **Exit:** framework-facing support tables are generated from the same contracts
 used to compile and execute.
