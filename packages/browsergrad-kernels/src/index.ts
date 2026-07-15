@@ -104,6 +104,8 @@ export {
   prepareWgslKernelProgramSequence,
   runWgslKernelProgram,
   runWgslKernelProgramSequence,
+  WgslPipelineCreationError,
+  WgslShaderCreationError,
   writeWgslStorageBuffer,
   type KernelFeatureSet,
   type WgslFloat16Array,
@@ -152,6 +154,21 @@ export {
   type TensorPlanRunResult,
   type TensorPlanStep,
 } from "./tensor_plan.js";
+
+export {
+  SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
+  SEMANTIC_VIEW_COPY_WEBGPU_PROFILE,
+  SemanticViewCopyWebGpuError,
+  prepareSemanticViewCopyWgsl,
+  runSemanticViewCopyWebGpu,
+  type PreparedSemanticViewCopyWgsl,
+  type PrepareSemanticViewCopyWgslRequest,
+  type SemanticViewCopyWebGpuBuffers,
+  type SemanticViewCopyWebGpuDeviceFacts,
+  type SemanticViewCopyWebGpuErrorCode,
+  type SemanticViewCopyWebGpuResult,
+  type SemanticViewCopyWebGpuTrace,
+} from "./semantic_view_copy.js";
 
 export {
   defineCuda1DProgram,

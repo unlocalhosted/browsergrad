@@ -9,7 +9,9 @@ oracle; reference execution is distinct from device execution. The package also
 ships the production `WebGpuRealizerBridge` that
 [`browsergrad-jit`](../browsergrad-jit/) consumes for its WebGPU realizer tier.
 
-Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; layer in jit if you want the full PyTorch shape.
+No tensor-framework dependency. The package depends only on BrowserGrad's
+dependency-free semantic-core protocols for verified layout/kernel artifacts.
+Drop it in for WGSL primitives; layer in JIT for the PyTorch-shaped surface.
 
 ## What's shipped
 
@@ -27,6 +29,7 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `defineKernel1DProgram` / `runKernel1DProgramReference` / `emitKernel1DProgramWgsl` / `runKernel1DProgramWebGpu` | BrowserGrad-owned 1D kernel IR with reference executor, WGSL lowering, and browser WebGPU dispatch | ✅ |
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
+| `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with bit-exact u32 storage and structured guarded padding | ✅ nine-case strict CPU/WebGPU parity on Apple Metal 3; release evidence remains commit-scoped |
 | `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
 | `flashAttentionDirect` | Deprecated compatibility alias for `rowWiseOnlineAttentionDirect`. | ⚠️ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
@@ -110,11 +113,53 @@ import { createWgslFloat16Array } from "@unlocalhosted/browsergrad-kernels/float
 import { runThreadGrid } from "@unlocalhosted/browsergrad-kernels/cuda_concepts";
 import { defineCuda1DProgram } from "@unlocalhosted/browsergrad-kernels/cuda_program";
 import { createKernelRubric } from "@unlocalhosted/browsergrad-kernels/rubric";
+import {
+  prepareSemanticViewCopyWgsl,
+  runSemanticViewCopyWebGpu,
+} from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
 ```
 
 Do not import private files under `src/` or `dist/` from consumer code.
+
+`PreparedSemanticViewCopyWgsl` values are immutable and accepted only by the
+module instance that prepared them. View-copy execution bounds its planned
+owned working set, permits one in-flight run per `GPUDevice`, distinguishes
+shader/pipeline/validation/memory/device-loss failures, and retains the device
+slot after timeout or cancellation until submitted work has cleaned up. Pass an
+`AbortSignal` or a bounded `timeoutMs` to `runSemanticViewCopyWebGpu` when the
+caller owns a shorter lifecycle.
 Release CI verifies the packed tarball exports these entry points before npm
 publish.
+
+### Verified semantic view copy
+
+The semantic view-copy surface accepts only opaque verified layout/kernel
+artifacts from `@unlocalhosted/browsergrad-semantic-core`. Shared preparation
+resolves bindings, proves every guarded access and dense destination write,
+and derives one semantic specialization hash. Kernels then lowers the same
+canonical index/predicate expressions into a signed-i32 WebGPU profile.
+
+Root allocations are bound at offset zero as `array<u32>`, so ordinary values,
+signed zero, infinities, and NaN payloads copy bit-for-bit. Padding initializes
+exact fill bits and performs the source load only inside a structured `if`;
+the lowerer never uses eager `select`, implicit robust-buffer zeroing, address
+clamping, or ignored writes as semantics. Device execution validates storage,
+dispatch, workgroup, and binding limits before submission and reports separate
+pipeline, validation, memory, device-loss, and execution diagnostics.
+
+The advisory focused lane records a real skip when no adapter exists:
+
+```bash
+pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy
+```
+
+The evidence gate is deliberately strict and fails on missing adapter/device:
+
+```bash
+pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy:required
+```
+
+Passing Node tests or packed-tarball checks is not WebGPU conformance evidence.
 
 ## Quick start
 

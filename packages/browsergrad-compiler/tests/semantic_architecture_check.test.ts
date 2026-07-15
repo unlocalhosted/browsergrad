@@ -54,6 +54,15 @@ describe("semantic architecture guardrails", () => {
       "packages/browsergrad-kernels/src/new.ts deep-imports implementation path @unlocalhosted/browsergrad-compiler/src/semantic_ir",
       "packages/browsergrad-kernels/src/new.ts imports compiler from kernels",
     ]);
+    expect(
+      checkWorkspaceImportSpecifier(
+        "@unlocalhosted/browsergrad-kernels",
+        "packages/browsergrad-kernels/src/new.ts",
+        "@unlocalhosted/browsergrad-semantic-core/host",
+      ),
+    ).toEqual([
+      "packages/browsergrad-kernels/src/new.ts imports @unlocalhosted/browsergrad-semantic-core/host; kernels may import semantic-core schema/layout/kernel protocols only",
+    ]);
   });
 
   it("rejects a new TensorGpuPlan operation", () => {

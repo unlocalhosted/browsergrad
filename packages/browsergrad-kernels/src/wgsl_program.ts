@@ -148,6 +148,22 @@ export interface WgslPipelineCacheStats {
   readonly pipelineCacheMisses: number;
 }
 
+/** Shader-module diagnostics reported before a compute pipeline could be created. */
+export class WgslShaderCreationError extends KernelError {
+  constructor(message: string) {
+    super(message);
+    this.name = "WgslShaderCreationError";
+  }
+}
+
+/** Compute-pipeline creation failed after shader-module creation. */
+export class WgslPipelineCreationError extends KernelError {
+  constructor(message: string) {
+    super(message);
+    this.name = "WgslPipelineCreationError";
+  }
+}
+
 interface CachedWgslPipeline {
   readonly pipeline: GPUComputePipeline;
   readonly bindGroupLayout: GPUBindGroupLayout;
@@ -903,25 +919,39 @@ async function createPipeline(
 ): Promise<CachedWgslPipeline> {
   const bindGroupLayout = gpu.createBindGroupLayout({ entries: [...layoutEntries] });
   const shaderModule = gpu.createShaderModule({ code: program.wgsl });
+  const pipelineOutcome = gpu.createComputePipelineAsync({
+    layout: gpu.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+    compute: { module: shaderModule, entryPoint: "main" },
+  }).then(
+    (pipeline) => ({ kind: "completed", pipeline }) as const,
+    (error: unknown) => ({ kind: "failed", error }) as const,
+  );
+  let compilationInfo: GPUCompilationInfo | undefined;
   try {
-    const pipeline = await gpu.createComputePipelineAsync({
-      layout: gpu.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-      compute: { module: shaderModule, entryPoint: "main" },
-    });
-    return { pipeline, bindGroupLayout };
-  } catch (error) {
-    const compilationInfo = "getCompilationInfo" in shaderModule
+    compilationInfo = "getCompilationInfo" in shaderModule
       ? await shaderModule.getCompilationInfo()
       : undefined;
-    const messages = compilationInfo?.messages ?? [];
-    const errorMessages = messages.filter((message) => message.type === "error");
-    const detail = messages.length > 0
-      ? formatCompilationMessages(errorMessages.length > 0 ? errorMessages : messages)
-      : error instanceof Error
-        ? error.message
-        : String(error);
-    throw new KernelError(`WGSL pipeline creation failed for ${program.name}: ${detail}`);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new WgslShaderCreationError(`WGSL shader diagnostics failed for ${program.name}: ${detail}`);
   }
+  const messages = compilationInfo?.messages ?? [];
+  const shaderErrors = messages.filter((message) => message.type === "error");
+  if (shaderErrors.length > 0) {
+    throw new WgslShaderCreationError(
+      `WGSL shader creation failed for ${program.name}: ${formatCompilationMessages(shaderErrors)}`,
+    );
+  }
+  const pipelineResult = await pipelineOutcome;
+  if (pipelineResult.kind === "failed") {
+    const detail = messages.length > 0
+      ? formatCompilationMessages(messages)
+      : pipelineResult.error instanceof Error
+        ? pipelineResult.error.message
+        : String(pipelineResult.error);
+    throw new WgslPipelineCreationError(`WGSL pipeline creation failed for ${program.name}: ${detail}`);
+  }
+  return { pipeline: pipelineResult.pipeline, bindGroupLayout };
 }
 
 function featureStrings(input: GPUAdapter | GPUDevice | KernelDevice | undefined): string[] | undefined {

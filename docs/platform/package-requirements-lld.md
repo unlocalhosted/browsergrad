@@ -492,6 +492,19 @@ rejected until synchronization and ownership are explicit. Artifact hashing,
 expression compilation, and coordinate proofs stay outside per-dispatch copy
 loops.
 
+The initial WGSL backend profile uses interval-proved signed `i32` arithmetic
+for canonical index and predicate expressions. Positive affine maps may still
+have negative intercepts outside a padding predicate, so lowering the whole
+expression as `u32` would be incorrect. Conversion to a word index occurs only
+inside the proved true source guard. Whole root allocations bind at offset zero
+as `array<u32>` so view offsets remain semantic expressions and f32 values,
+including NaN payloads, copy bit-for-bit. A backend specialization hash extends
+the shared semantic-specialization hash with lowerer/profile version, generated
+WGSL, workgroup schedule, the selected feature profile, and every device limit
+used for legalization. Adapter identity, the full available feature inventory,
+and input hashes belong to execution evidence,
+not correctness cache keys.
+
 ### Logical tiles versus physical schedules
 
 `LogicalTile` describes a collective region and its observable operand,
@@ -666,6 +679,22 @@ WGSL, resource bindings, pipelines, and dispatches. It MUST:
   requires a new device and resource recreation.
 - Include semantic-program hash, schedule hash, backend version, feature set,
   relevant limits, and numerical policy in pipeline cache keys.
+- Treat prepared backend plans as authority-bound immutable values. Runtime
+  execution MUST reject caller-forged or mutated plans whose WGSL, bindings,
+  schedule, or hashes could diverge.
+- Bound owned host/GPU working bytes and in-flight work independently from
+  hardware maximum limits. The initial view-copy profile permits at most one
+  in-flight operation per `GPUDevice`; a timed-out or aborted submission keeps
+  that slot until its device work and owned-resource cleanup settle.
+- Keep WebGPU error scopes around the synchronous creation/submission window,
+  pop every scope in LIFO order before awaiting readback, and distinguish
+  shader, pipeline, validation, out-of-memory, internal, device-loss, timeout,
+  cancellation, and execution diagnostics. Device-loss watchers invalidate
+  every participating owner cache even when another rejection wins a race.
+- Provide a required-device conformance mode in which missing adapter/device,
+  validation errors, out-of-memory, device loss, or skipped cases are failures.
+  Advisory browser tests MAY record a real not-run result, but MUST NOT report
+  adapter absence as a passing execution test.
 
 The current direct attention implementation remains a fused row-wise
 online-softmax baseline. It may be named block-tiled FlashAttention only after
@@ -747,6 +776,22 @@ interface ExecutionEvidence {
   diagnosticCodes: string[];
 }
 ```
+
+A conformance run emits exactly one authoritative terminal
+`ExecutionEvidence`. Per-case observations are non-terminal and MUST NOT say
+`passed` while later cases, queue drainage, or uncaptured-error checks remain.
+The terminal artifact hash binds the prepared case set; reproducibility also
+records ordered case IDs, input hashes, module/specialization hashes, logical
+invocation counts, submitted workgroup counts, pipeline count, and the current
+stage/case on failure. Adapter-supported features and negotiated device
+features are distinct facts. Producer package versions come from package
+metadata rather than duplicated source constants.
+
+Required release lanes retain the complete terminal-evidence log under the
+tested commit. `passed` is legal only after the full ordered matrix completes,
+the queue and late-error window drain, no uncaptured error remains, and a
+runtime validator accepts the record. Missing device evidence is `failed` in a
+required lane and `not-run` in an advisory lane.
 
 Static capability does not contain `passed` or `not-run`. Test evidence does not
 decide whether the current user's device supports a feature. Runtime scheduling

@@ -1,0 +1,26 @@
+import { describe, expect, it } from "vitest";
+import { validateViewCopyPublishGate } from "../scripts/require_view_copy_publish_gate.mjs";
+
+const head = "1111111111111111111111111111111111111111";
+
+describe("kernels publish evidence gate", () => {
+  it("rejects missing or stale evidence commits", () => {
+    expect(() => validate(undefined)).toThrow(/run test:browser:view-copy:required/u);
+    expect(() => validate("0000000000000000000000000000000000000000")).toThrow(/does not match HEAD/u);
+  });
+
+  it("accepts only the exact clean evidenced commit", () => {
+    expect(() => validate(head)).not.toThrow();
+    expect(() => validate(head, " M packages/browsergrad-kernels/src/index.ts")).toThrow(/differ from evidenced HEAD/u);
+    expect(() => validate(head, "", "2222222222222222222222222222222222222222")).toThrow(/GitHub SHA/u);
+  });
+});
+
+function validate(evidenceCommit: string | undefined, relevantStatus = "", githubSha?: string) {
+  return validateViewCopyPublishGate({
+    evidenceCommit,
+    githubSha,
+    head,
+    relevantStatus,
+  });
+}

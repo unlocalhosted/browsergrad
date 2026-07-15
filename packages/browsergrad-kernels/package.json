@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-kernels",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "WGSL kernel catalog for browser-side machine learning: matmul, softmax, layernorm, attention, and friends. Each kernel ships with a JS reference for conformance + fallback. Independent of any tensor framework.",
   "type": "module",
   "license": "MIT",
@@ -55,6 +55,10 @@
       "types": "./dist/rubric.d.ts",
       "import": "./dist/rubric.js"
     },
+    "./semantic_view_copy": {
+      "types": "./dist/semantic_view_copy.d.ts",
+      "import": "./dist/semantic_view_copy.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -67,13 +71,19 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:browser:view-copy": "tsc -p tsconfig.browser-view-copy.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:browser:view-copy": "vitest run --config vitest.browser.config.ts tests-browser/semantic_view_copy_webgpu.test.ts",
+    "test:browser:view-copy:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_view_copy_webgpu.test.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test"
+    "prepublishOnly": "node scripts/require_view_copy_publish_gate.mjs && pnpm run build && pnpm run typecheck && pnpm run typecheck:browser:view-copy && pnpm run lint && pnpm run test"
+  },
+  "dependencies": {
+    "@unlocalhosted/browsergrad-semantic-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

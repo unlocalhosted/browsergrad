@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 2 kernels-owned WGSL view-copy lowering
+- **Current implementation slice:** Gate 2 compiler and JIT frontend adapters
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -32,7 +32,7 @@ test does not make a gate verified unless every exit criterion is covered.
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
-| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` now has a closed, independently versioned `browsergrad.kernel@1` materializing view-copy operation, separate generic verification and positive-affine portable-profile legalization, compiled prepared accessors, binding-sensitive specialization hashes, and a bounded CPU reference. The same operation executes transpose, rank-3 permutation, strided slice, broadcast, exact-bit padding, dynamic shapes, byte-unit maps, nonzero offsets, and zero extents. | Add kernels-owned WGSL lowering and strict real-device evidence; lower compiler read-only flat-logical-index bindings and typed JIT permutation to identical artifacts/hashes; derive/refuse the frozen legacy plan without widening it. Registry publication remains blocked until a real cross-package consumer and the Gate 2 release lane exist. | Semantic-core typecheck/build/lint; 9 files/81 tests; packed `/kernel` import plus real transpose execution; architecture check; adversarial profile, bounds, alias, buffer, alignment, dynamic-specialization, and resource tests. No WebGPU or two-frontend claim yet. |
+| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` owns verified view-copy meaning and shared specialization. Kernels `0.2.0` consumes that proof and passes the full nine-case CPU/actual-WebGPU bit-exact matrix on Apple Metal 3, including structured padding, dynamic specialization, and zero-extent no-submit. | Lower compiler read-only flat-logical-index bindings and typed JIT permutation to identical artifacts/hashes; derive/refuse the frozen legacy plan without widening it. Re-run retained strict evidence in release CI. Registry publication remains a separate release operation after the two-frontend gate passes. | Semantic-core 81 tests; kernels 13 files/86 tests; focused browser typecheck; packed bare-import runtime/typecheck; architecture guard; one validated `passed` terminal record for all nine cases on negotiated WebGPU core. No two-frontend claim yet. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
@@ -57,10 +57,10 @@ families extend the operation rather than add source-shaped execution paths.
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
 | Gate 0 architecture check | `verified` | Cross-package boundaries, generated-source parity, all six required freezes, exact runtime mapping/status unions, reviewed vocabulary, profile-usage parity, pinned inventories/harnesses, normalized definition fingerprints, and representative mutations are implemented and wired into delivery gates. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
-| Semantic-core package adoption gate | `verified` | `0.2.0` is public-package shaped, dependency-free, subpath-only, and locally packed with schema/layout/kernel imports, declarations, Python oracle, fixtures, license, changelog, and real packed view-copy execution verified. It has not been published and `/kernel` is not release-complete without a cross-package consumer. |
+| Semantic-core package adoption gate | `verified` | `0.2.0` is public-package shaped, dependency-free, subpath-only, locally packed, and now consumed through kernels' packed exact dependency. A fresh temporary consumer installs both tarballs, resolves bare public subpaths, typechecks, and prepares matching CPU/WGSL specializations. It has not been published. |
 | Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus a compiler read-only flat-logical-index storage binding, starting with rank-2 transpose. Both must emit the same artifact hash; Gate 2 remains incomplete until the full required view matrix and strict WebGPU proof pass. |
 | L2 materializing view-copy contract and CPU reference | `verified` | `view-copy@1.0` owns effects, exact reject/fill bits, and forbid-overlap semantics. Generic L2 verification stays backend-neutral; the shared initial profile legalizes positive-affine f32 rank-2/3 global views. Prepared CPU execution compiles maps once, proves guarded reads and dense destination writes, caches source offsets, derives binding-sensitive specialization hashes, and enforces element/step/scratch/wall-time budgets, cooperative browser yielding and abort, plus native buffer-slot, length, alignment, overlap, and shared-memory checks. |
-| Kernels-owned WGSL view-copy lowering | `not-started` | Must consume the same verified artifact/profile and specialization facts, use structured guarded loads for fill, and add a fail-on-skip required-device harness. |
+| Kernels-owned WGSL view-copy lowering | `verified` | The lowerer consumes authority-bound immutable backend-neutral specializations, preserves whole-root f32 bits through u32 storage, interval-proves signed i32 arithmetic, lowers canonical source/destination maps, emits structured guarded fill loads, validates device and transient-working-set limits, and derives semantic plus device-specific hashes. One-in-flight ownership, timeout/abort stale-result suppression, exact scope drainage, distinct error stages, and device-loss invalidation have deterministic fake-device coverage. The required headed lane emitted one validated `passed` terminal record for all nine bit-exact CPU/WebGPU cases on Apple Metal 3; headless absence remains a truthful failed environment record. |
 
 ### Audit findings recorded so far
 
@@ -184,6 +184,8 @@ families extend the operation rather than add source-shaped execution paths.
 | D-017 | 2026-07-15 | accepted | Gate 2 introduces one verified L2 materializing view-copy operation over verified L1 layouts. It owns explicit effects, exact reject/fill behavior for invalid source coordinates, and initially forbids overlap. Verified artifacts live in a side table; the frozen tensor plan is derived or refused and gains no semantic fields. The first tracer is rank-2 f32 transpose from typed JIT `PERMUTE` and a read-only compiler flat-logical-index binding through shared CPU and strict real-WebGPU execution. | All three ownership audits found independent offset reconstruction and disconnected proof paths. This seam makes padding and materialization explicit, prevents another source-shaped backend, preserves frozen schemas, and leaves signed/negative-stride semantics rejected until backend integer equivalence is proved. |
 | D-018 | 2026-07-15 | accepted | `browsergrad.kernel@1` contains exactly one independently versioned `view-copy@1.0`; host graphs own sequencing. Generic verification checks semantic validity, while the shared positive-affine portable profile and backend profiles own dtype/rank/space/integer limits. Prepared specializations include resolved bindings/guards in their hash and are bounded independently by elements, evaluation steps, and scratch bytes. The initial destination must be proved dense and injective; shared runtime memory is rejected without synchronization semantics. | Prevents backend limits from becoming wire meaning, ordinal arrays from becoming an accidental program, dynamic cache collisions, write races, buffer spoofing/concurrency, and browser hangs from valid but multiplicatively expensive artifacts. |
 | D-019 | 2026-07-15 | accepted | Resolve, prove, and hash a view-copy once through backend-neutral `prepareViewCopySpecialization`. CPU and device backends consume the same prepared accessors, portable profile, coordinate proof, and specialization hash; only interpreter backends request the optional source-offset cache. | Having kernels call a CPU-branded API would invert ownership and allocate unnecessary per-element scratch, while duplicating binding, guard, and destination proofs would create a second meaning for the same artifact. |
+| D-020 | 2026-07-15 | accepted | The first WGSL profile lowers canonical arithmetic as interval-proved signed i32, converts to word indices only after the source guard, binds whole root allocations as u32 words, and layers a device-specific backend hash over the shared semantic-specialization hash. Required evidence acquires through `navigator.gpu` and fails on missing adapter/device; adapter identity and input hashes are evidence only. | Padding maps can have negative intercepts outside their true predicate, so global u32 lowering wraps incorrectly. f32 loads/stores can canonicalize NaN payloads. Whole-root u32 bindings preserve exact bits and keep view offsets semantic. Separating cache facts from evidence avoids cache fragmentation by adapter labels or test inputs. |
+| D-021 | 2026-07-15 | accepted | WebGPU view-copy plans are module-authorized and deeply immutable; the runtime admits one operation per `GPUDevice`, budgets owned host/GPU working bytes, suppresses timed-out/aborted results until cleanup settles, scopes diagnostics to creation/submission rather than readback, and invalidates all participating wrapper caches through device-loss watchers. A conformance run emits one schema-validated terminal evidence record only after the full ordered case set and late-error drain. | Prevents WGSL/hash TOCTOU, caller-forged plans, aggregate queued-memory growth, interleaved error scopes, stale results, cache reuse after loss, partial pass lines, version drift, and failure records that cannot reproduce the current artifact/input/stage. The long-term cross-operation coordinator still belongs in `KernelDeviceImpl`; Gate 2 remains partial until actual-device and frontend evidence pass. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -463,6 +465,49 @@ affected implementation slice is marked complete.
 - Preserved all 81 semantic-core tests and added direct parity coverage for the
   backend-neutral and CPU specialization hashes.
 
+### 2026-07-15 — Kernels-owned WGSL view-copy lowering
+
+- Added kernels' first runtime dependency on semantic-core through its narrow
+  `/schema`, `/layout`, and `/kernel` protocols; the architecture check rejects
+  other semantic-core subpaths and any compiler/framework dependency.
+- Lowered canonical source and destination index maps with per-node signed-i32
+  interval proofs. Source word conversion and loading stay inside the true
+  predicate branch, so negative padding intercepts do not wrap through u32.
+- Bound whole root allocations as u32 words to preserve exact f32 and NaN bits,
+  including exact padding fill. The generated WGSL contains no eager `select`,
+  address clamping, implicit zero-fill, or ignored-write fallback.
+- Added device/owned-working-set legalization, exact runtime word-buffer
+  validation, authority-bound deeply immutable plans, full-digest pipeline
+  names, two-level semantic/device hashes, one-in-flight ownership,
+  zero-element no-submit, timeout/abort stale-result suppression, exact LIFO
+  scope drainage, and typed shader/pipeline/validation/memory/device-loss/
+  execution diagnostics.
+- Added the nine-case actual-device matrix: rank-2 transpose, rank-3
+  permutation, positive strided slice, read-only broadcast, byte maps with
+  nonzero offsets, exact-NaN padding in ranks 2 and 3, dynamic rank-2
+  specialization, and zero-extent no-submit. One validated terminal record
+  binds the full ordered artifact/input/case set and records logical
+  invocations separately from submitted workgroups/pipelines, adapter versus
+  negotiated features, relevant limits, producer versions from package
+  metadata, stage/current case on failure, environment, and bit-exact
+  whole-destination comparison policy.
+- Bumped kernels to `0.2.0`. Packed metadata rewrites the semantic-core
+  workspace dependency to exact `0.2.0`; a temporary consumer installs both
+  tarballs, resolves the bare public subpaths, runs the lowering, and typechecks
+  against packed declarations. No registry publication is claimed.
+- Official bulk/tag workflows run the strict lane before kernels publication,
+  retain its complete commit-addressed log, and pass an exact-HEAD evidence
+  marker. Kernels' `prepublishOnly` hook rejects missing/stale markers, so the
+  documented direct/manual path cannot accidentally bypass device evidence.
+- Headless Chromium exposed no adapter. Advisory mode recorded one actual
+  not-run; required mode emitted failure evidence and exited nonzero. This
+  verifies strict absence handling. A subsequent headed Chromium run acquired
+  Apple Metal 3 and passed all nine cases with one validated terminal record;
+  artifact hash `446889ab9e081a277508552c19b376cfcc44a499cdcec6c14cffd6c05342e64c`,
+  case-set hash `84320356003ad4f26995d3dcdb3ea5331b51ea80cdb3b83c110483adad7fd337`,
+  and device-profile hash
+  `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -488,6 +533,10 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Semantic-core package adoption gate | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint && pnpm test:release-packages && pnpm architecture:check` | Passed: semantic-core typecheck/build/lint, 8 files/68 tests, packed tarball metadata/content/runtime-import checks, existing kernels/compiler release-package checks, and architecture check. | Package is ready to become a workspace runtime dependency in a later coherent Gate 2 slice; npm publication is still pending the normal release workflow. |
 | 2026-07-15 | Gate 2 view-copy and CPU reference | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint && pnpm test:release-packages && pnpm architecture:check && git diff --check` | Passed: semantic-core typecheck/build/lint, 9 files/81 tests, packed `/schema`/`layout`/`kernel` imports and real extracted-tarball transpose, architecture check, and whitespace check. | Gate 2 remains partial; implement kernels-owned WGSL and strict actual-device proof next. |
 | 2026-07-15 | Backend-neutral view-copy specialization | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint && pnpm test:release-packages && pnpm architecture:check && git diff --check` | Passed: semantic-core typecheck/build/lint, 9 files/81 tests, CPU/shared specialization-hash parity, packed execution, architecture check, and whitespace check. | Kernels WGSL may now depend on the shared proof without calling a CPU API or allocating CPU-only offset scratch. |
+| 2026-07-15 | Kernels WGSL lowering and package adoption | `pnpm --filter @unlocalhosted/browsergrad-kernels typecheck && pnpm --filter @unlocalhosted/browsergrad-kernels typecheck:browser:view-copy && pnpm --filter @unlocalhosted/browsergrad-kernels test && pnpm --filter @unlocalhosted/browsergrad-kernels lint && pnpm --filter @unlocalhosted/browsergrad-kernels build && pnpm --filter @unlocalhosted/browsergrad-compiler exec vitest run tests/semantic_architecture_check.test.ts && pnpm architecture:check && pnpm test:release-packages` | Passed: both typechecks, kernels 13 files/86 tests including lifecycle/error/device-loss fakes and the exact-commit publish guard, build, 20 architecture-guard tests, architecture check, packed exact dependency/lowering, and fresh two-tarball consumer bare-import execution plus declaration typecheck. Lint exited zero with one pre-existing `realizer.ts` warning outside this slice. | Actual GPUDevice proof remains required. |
+| 2026-07-15 | Advisory view-copy browser lane | `BG_BROWSER_HEADLESS=1 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy` | Passed command with one test recorded as skipped/not-run because `requestAdapter` returned no adapter. | Advisory result is not conformance evidence. |
+| 2026-07-15 | Headless required view-copy browser lane | `BG_BROWSER_HEADLESS=1 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy:required` | Failed as designed: emitted one validated `browsergrad.execution-evidence@1` terminal record with `outcome=failed`, `required=true`, the complete nine-case artifact/input manifest, and diagnostic `BG-WEBGPU-EVIDENCE-DEVICE-UNAVAILABLE`; Vitest exited 1 because `requestAdapter` returned no adapter. | Preserve as environment evidence; absence is not a product failure and cannot be a release pass. |
+| 2026-07-15 | Headed required actual-device view-copy lane | `pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy:required` | Passed: headed Chromium acquired Apple Metal 3 with negotiated WebGPU core, all nine ordered static/dynamic/zero-extent cases matched the CPU reference bit-exact over complete destination allocations, queue/late-error drainage was clean, and one validated terminal record reported `outcome=passed`. | Re-run in release CI and retain the complete terminal log for the exact publish commit. |
 
 ## Failure and Recovery Log
 
@@ -603,6 +652,49 @@ whether any files may be left partially changed.
   backend limits into a shared profile, compiles evaluators, preflights and
   caches bounded offsets, requires a dense destination, validates native slots,
   versions the single operation, and hashes resolved specialization facts.
+- Extending the default kernels TypeScript project to all historical browser
+  tests exposed unrelated pre-existing unused-variable and tuple-narrowing
+  errors. The slice now has a focused `tsconfig.browser-view-copy.json` that
+  typechecks all production sources plus the new strict evidence harness; the
+  existing browser suite was not silently relabeled clean.
+- The first fresh-consumer install attempted two tarballs with `pnpm add
+  --offline`, but pnpm still resolved kernels' packed exact semantic-core
+  dependency through registry metadata and failed with
+  `ERR_PNPM_NO_OFFLINE_META`. The harness now declares both tarballs as file
+  dependencies and uses a temporary override for semantic-core. Packed
+  metadata is separately asserted exact and free of `workspace:` ranges.
+- Headless Chromium 148 returned no WebGPU adapter despite the existing
+  SwiftShader flags. Advisory mode recorded a not-run. Required mode emitted
+  auditable failure evidence and exited nonzero, so absence cannot become a
+  false green. Headed Chromium then exposed Apple Metal 3 and the same required
+  lane passed all nine cases; headless and headed outcomes remain separate
+  environment records rather than overwriting one another.
+- Adversarial review of the first WGSL runner found mutable prepared programs,
+  partial per-case pass lines, missing canonical evidence fields, no aggregate
+  working-set/in-flight bound, shader/pipeline diagnostic collapse, error
+  scopes spanning readback, cache reuse after device loss, i32-min literal
+  overflow, and buffer-slot TOCTOU risk. The runner now uses branded/deeply
+  frozen plans, full digests, one terminal schema-validated record, explicit
+  owned-memory and in-flight bounds, synchronous upload before the first await,
+  two scoped creation/submission phases with all LIFO pops initiated before
+  readback, stable staged diagnostics, device-loss watchers, and deterministic
+  fake-device regressions for the lifecycle/error branches.
+- The first packed-consumer declaration check tried a nonexistent root
+  `node_modules/typescript/bin/tsc`, then `pnpm exec tsc` where TypeScript was
+  not a root dependency; both failed before checking consumer types. It now
+  invokes kernels' declared TypeScript binary. The next run correctly found
+  the temporary consumer missing `type: module`; adding it made bare-import
+  runtime execution and strict NodeNext typecheck pass.
+- The first tarball assertion expected pnpm to retain `prepublishOnly` in the
+  packed `package.json`; pnpm intentionally strips publish lifecycle scripts.
+  The gate remains enforced and release-tested in the workspace package before
+  packing; its internal verifier is intentionally excluded from the published
+  artifact. The corrected release-package run passes.
+- The first abort-cleanup regression waited for six error-scope pops, but scopes
+  intentionally drain before readback and therefore did not prove active-slot
+  cleanup. The fake now exposes readback completion; the test waits for owned
+  cleanup before proving the next run is admitted. The final package run,
+  including the exact-commit publish guard, passes 13 files/86 tests.
 
 ## Quick Resume Checklist
 
@@ -617,10 +709,10 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Implement and commit the kernels-owned WGSL lowering over the verified
-`view-copy@1.0` artifact and shared positive-affine profile. Padding must use a
-structured guarded load, destination writes must remain dense/injective, and
-the browser harness must fail on adapter/device absence while recording device
-facts and hashes. Then make the first compiler and JIT adapters produce the
-same rank-2 transpose artifact/hash; they may derive or refuse the frozen
-legacy tensor plan but cannot widen it or reconstruct offsets independently.
+Make the first compiler and JIT adapters produce the same rank-2 transpose
+layout/kernel artifact hashes through a shared construction seam; they may
+derive or refuse the frozen legacy tensor plan but cannot widen it or
+reconstruct offsets independently. After the tracer passes CPU and strict
+WebGPU, extend the unchanged frontend adapters to the full view matrix. Re-run
+the retained strict WebGPU lane for the exact release commit; the current local
+Apple Metal 3 record proves this implementation slice, not a future publish.

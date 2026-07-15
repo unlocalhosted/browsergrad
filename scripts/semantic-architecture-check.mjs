@@ -87,6 +87,17 @@ export function checkWorkspaceImportSpecifier(packageName, file, specifier) {
   if (packageName === "@unlocalhosted/browsergrad-kernels" && specifier.startsWith("@unlocalhosted/browsergrad-compiler")) {
     failures.push(`${file} imports compiler from kernels`);
   }
+  if (
+    packageName === "@unlocalhosted/browsergrad-kernels" &&
+    specifier.startsWith("@unlocalhosted/browsergrad-semantic-core") &&
+    !new Set([
+      "@unlocalhosted/browsergrad-semantic-core/schema",
+      "@unlocalhosted/browsergrad-semantic-core/layout",
+      "@unlocalhosted/browsergrad-semantic-core/kernel",
+    ]).has(specifier)
+  ) {
+    failures.push(`${file} imports ${specifier}; kernels may import semantic-core schema/layout/kernel protocols only`);
+  }
   if (packageName === "@unlocalhosted/browsergrad-compiler" && /^@unlocalhosted\/browsergrad-(?:jit|grad)(?:\/|$)/u.test(specifier)) {
     failures.push(`${file} imports framework internals from compiler`);
   }

@@ -44,8 +44,25 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
 
+      - name: Run required semantic view-copy WebGPU gate
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy:required 2>&1 | tee semantic-view-copy-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Retain semantic view-copy WebGPU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-view-copy-webgpu-evidence-${{ github.sha }}
+          path: semantic-view-copy-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Run compiler real-world CUDA gate
         run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu
 
       - name: Publish missing versions
         run: node scripts/publish-missing-npm.mjs
+        env:
+          BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}

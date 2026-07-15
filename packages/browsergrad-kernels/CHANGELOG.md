@@ -7,8 +7,31 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-15
+
 ### Added
 
+- Kernels-owned WGSL lowering and execution for verified
+  `browsergrad.kernel@1` `view-copy@1.0` artifacts. It consumes the shared
+  backend-neutral specialization proof and never widens `TensorGpuPlan`.
+- Signed-i32 interval-checked lowering for canonical index/predicate
+  expressions, whole-root `array<u32>` bindings for exact f32/NaN bits,
+  structured guarded padding loads, and two-level semantic/device hashes.
+- Focused advisory and required-device browser lanes. The required lane fails
+  on adapter/device absence and emits one validated terminal evidence record
+  over nine ordered static/dynamic/zero-extent cases. It distinguishes adapter
+  versus negotiated features and records artifact, input, schedule, limit,
+  backend, environment, and bit-exact comparison facts.
+- The required lane passes all nine cases in headed Chromium on Apple Metal 3;
+  headless adapter absence remains a separate failed environment record, not a
+  false pass or a contradiction of the actual-device result.
+- Authority-bound immutable prepared plans, full-digest pipeline names,
+  bounded host/GPU working sets, one-in-flight device ownership, timeout/abort
+  stale-result suppression, scoped LIFO error drainage, distinct shader and
+  pipeline diagnostics, and cache invalidation on device loss.
+- Exact packed dependency on `@unlocalhosted/browsergrad-semantic-core@0.2.0`
+  and a public `./semantic_view_copy` subpath. Publishing is blocked unless the
+  required-device evidence marker names the exact current commit.
 - `runThreadGrid()`, `defineKernel1DProgram()`,
   `runKernel1DProgramReference()`, `emitKernel1DProgramWgsl()`, and
   `runKernel1DProgramWebGpu()` expose the generic BrowserGrad kernel-authoring

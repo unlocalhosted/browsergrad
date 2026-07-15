@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src",
+    "tests-browser/semantic_view_copy_webgpu.test.ts",
+    "tests-browser/webgpu_evidence.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}
