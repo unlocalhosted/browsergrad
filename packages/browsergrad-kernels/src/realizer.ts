@@ -17,7 +17,8 @@
  * v0 scope per the DL/GPU review:
  *   - f32 only. f16/AMP path is PRD-012a.
  *   - 2-D matmul only. Batched matmul is PRD-012a.
- *   - Flash Attention v2 forward. Backward is its own follow-on PRD.
+ *   - Fused row-wise online-softmax attention forward. This is not a
+ *     block-tiled FlashAttention schedule. Backward is separate.
  *   - Naive (un-tiled) matmul kernel — the existing `kernels/matmul.ts`.
  *     Replacing with a tiled GEMM is the first deliverable of PRD-012a.
  *
@@ -44,7 +45,7 @@ import {
   fusedElementwiseDirect,
   type FusedOp,
 } from "./kernels/fused_elementwise.js";
-import { flashAttentionDirect } from "./kernels/flash_attention.js";
+import { rowWiseOnlineAttentionDirect } from "./kernels/flash_attention.js";
 import { runTensorGpuPlan, runTensorGpuPlanResident, type TensorPlanInput } from "./tensor_plan.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
@@ -1089,7 +1090,7 @@ export function createWebGpuRealizerBridge(
       const kRec = get(k, "flash_attention[K]");
       const vRec = get(v, "flash_attention[V]");
       const maskRec = mask !== null ? get(mask, "flash_attention[mask]") : null;
-      const result = flashAttentionDirect(
+      const result = rowWiseOnlineAttentionDirect(
         device,
         qRec.buffer,
         kRec.buffer,

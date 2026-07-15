@@ -1,5 +1,5 @@
 /**
- * Flash Attention v2 forward (Dao 2023) — single fused kernel.
+ * Fused row-wise online-softmax attention forward.
  *
  * Inputs:
  *   Q: [B, H, Sq, D]
@@ -11,15 +11,15 @@
  *
  * Output: [B, H, Sq, D]
  *
- * v0 scope per PRD-011.5 review:
+ * v0 scope:
  *   - Forward-only. No backward (the recompute-from-Q,K,V backward kernel
  *     is its own follow-on PRD).
- *   - Fixed tile sizes (BR=32, BC=32). The kernel handles any D ≤ 128
- *     by carrying d in the per-thread accumulator; larger D fall back
- *     by being processed in chunks by the caller.
- *   - One workgroup per (B, H, q_block). Each workgroup walks the K
- *     blocks once, maintaining running (m_i, l_i, O_i) — the online
- *     softmax of Dao 2023 §3.1.
+ *   - One invocation per query row, grouped in batches of BR rows. Each
+ *     invocation scans every K/V row directly from storage while maintaining
+ *     running (m_i, l_i, O_i) online-softmax state.
+ *   - No workgroup K/V staging, block-tiled score computation, or proved
+ *     FlashAttention schedule preservation. This is the portable fused
+ *     baseline, not FlashAttention v2.
  *   - f32 throughout. f16/AMP variant is PRD-012a's job.
  *
  * Numerical contract: matches composed attention (Q @ K^T scaled →
@@ -37,11 +37,9 @@ import {
 import { KernelError, type KernelDevice } from "../types.js";
 
 const BR = 32;
-const BC = 32;
-// MAX_D bounds the workgroup-shared K_tile + V_tile memory:
-//   2 × BR × MAX_D × 4 bytes = workgroup memory.
-// WebGPU min spec is 16384 bytes → MAX_D ≤ 64 with BR=BC=32.
-// Larger D should chunk D-dimension across multiple FA passes (PRD-014b).
+// Each invocation carries Q and O arrays of MAX_D f32 values in private
+// storage. This conservative cap bounds shader-local state; it is not a K/V
+// tile size. Larger D needs a separately proved implementation.
 const MAX_D = 64;
 
 const WGSL = /* wgsl */ `
@@ -133,7 +131,7 @@ fn main(
 `;
 
 const DESCRIPTOR_WITH_MASK: KernelDescriptor = {
-  name: "flash_attention_v2_masked",
+  name: "rowwise_online_attention_masked",
   wgsl: WGSL,
   workgroupSize: [BR, 1, 1],
 };
@@ -141,18 +139,19 @@ const DESCRIPTOR_WITH_MASK: KernelDescriptor = {
 const DESCRIPTOR_NO_MASK: KernelDescriptor = {
   // Same WGSL; different name keeps the pipeline cache from confusing
   // the masked-vs-unmasked binding-count cases.
-  name: "flash_attention_v2",
+  name: "rowwise_online_attention",
   wgsl: WGSL,
   workgroupSize: [BR, 1, 1],
 };
 
 /**
- * Direct-dispatch FA-v2 forward. Inputs and output are GPUBuffers.
+ * Direct-dispatch row-wise online-softmax forward. Inputs and output are
+ * GPUBuffers.
  * `mask` may be null; pass a zero-length buffer in its place (the
  * shader's has_mask flag gates the read). The mask shape must be
  * broadcastable over batch/head dims (B' in {1, B}, H' in {1, H}).
  */
-export function flashAttentionDirect(
+export function rowWiseOnlineAttentionDirect(
   device: KernelDevice,
   Q: GPUBuffer,
   K: GPUBuffer,
@@ -172,8 +171,8 @@ export function flashAttentionDirect(
 ): DirectDispatchResult {
   if (shapes.D > MAX_D) {
     throw new KernelError(
-      `flash_attention: D=${shapes.D} exceeds MAX_D=${MAX_D}. ` +
-        `Larger head dims need PRD-012a's tiled-D variant.`,
+      `row_wise_online_attention: D=${shapes.D} exceeds MAX_D=${MAX_D}. ` +
+        `Larger head dims need a separately proved implementation.`,
     );
   }
   const params = new Uint32Array(12);
@@ -201,7 +200,7 @@ export function flashAttentionDirect(
       outputLength,
       params,
       dispatchCount: [shapes.B * shapes.H * BR, numQBlocks, 1],
-      cacheKeySuffix: `f32-${mask ? "masked" : "unmasked"}-D${shapes.D}-BR${BR}-BC${BC}`,
+      cacheKeySuffix: `rowwise-f32-${mask ? "masked" : "unmasked"}-D${shapes.D}-BR${BR}`,
       ...(profile ? { profile } : {}),
     });
   } finally {
@@ -210,6 +209,12 @@ export function flashAttentionDirect(
     }
   }
 }
+
+/**
+ * @deprecated Compatibility alias. This kernel is a row-wise online-softmax
+ * baseline, not a block-tiled FlashAttention implementation.
+ */
+export const flashAttentionDirect = rowWiseOnlineAttentionDirect;
 
 function makeDummyBuffer(device: KernelDevice): GPUBuffer {
   // 16-byte zero buffer satisfying STORAGE | COPY_DST + read-only-storage binding.

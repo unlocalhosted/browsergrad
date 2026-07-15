@@ -137,7 +137,10 @@ export {
   generateFusedWgsl,
   type FusedOp,
 } from "./kernels/fused_elementwise.js";
-export { flashAttentionDirect } from "./kernels/flash_attention.js";
+export {
+  flashAttentionDirect,
+  rowWiseOnlineAttentionDirect,
+} from "./kernels/flash_attention.js";
 
 export {
   normalizeTensorGpuPlan,

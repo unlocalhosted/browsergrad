@@ -3,7 +3,11 @@
 [![npm](https://img.shields.io/npm/v/@unlocalhosted/browsergrad-kernels.svg)](https://www.npmjs.com/package/@unlocalhosted/browsergrad-kernels)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-WGSL compute-shader catalog for browser ML. Each kernel ships with a pure-JS reference implementation that doubles as a conformance oracle and a CPU fallback. Also ships the production `WebGpuRealizerBridge` that [`browsergrad-jit`](../browsergrad-jit/) consumes for its WebGPU realizer tier.
+WGSL compute-shader catalog for browser ML and systems workloads. Each kernel
+ships with a pure-JS reference implementation that acts as a conformance
+oracle; reference execution is distinct from device execution. The package also
+ships the production `WebGpuRealizerBridge` that
+[`browsergrad-jit`](../browsergrad-jit/) consumes for its WebGPU realizer tier.
 
 Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; layer in jit if you want the full PyTorch shape.
 
@@ -23,7 +27,8 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `defineKernel1DProgram` / `runKernel1DProgramReference` / `emitKernel1DProgramWgsl` / `runKernel1DProgramWebGpu` | BrowserGrad-owned 1D kernel IR with reference executor, WGSL lowering, and browser WebGPU dispatch | ✅ |
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
-| `flashAttentionDirect` | Flash Attention forward with online softmax, strict real-WebGPU parity vs composed reference. | ✅ |
+| `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
+| `flashAttentionDirect` | Deprecated compatibility alias for `rowWiseOnlineAttentionDirect`. | ⚠️ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
 | `runTensorGpuPlan` / `runTensorGpuPlanResident` | Generic tensor-plan executor for primitive f32 BUFFER/LOAD/MATMUL/elementwise/shape/reduce/Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm-forward-backward/SGD/Adam/AdamW-update steps with GPUBuffer residency; materialized or resident root modes | ✅ |
 | `WebGpuRealizerBridge.conv1d*` / `conv2d*` | Resident Conv1d/Conv2d forward plus input/weight/bias backward kernels for jit explicit realization. | ✅ |
@@ -381,16 +386,17 @@ Launches Chromium via Playwright with WebGPU enabled. Runs against a real `GPUDe
 Use `pnpm test:browser:open` when you want the browser window to stay open for
 inspection; quit with `q`.
 
-7 scenarios: adapter info, naive vs tiled matmul, residency contract (3 uploads + 1 readback chained matmul), fused-elementwise codegen output matches NumPy semantics, FA-v2 (known-issue advisory), end-to-end `WebGpuRealizerBridge.matmul`.
+7 scenarios: adapter info, naive vs tiled matmul, residency contract (3 uploads + 1 readback chained matmul), fused-elementwise codegen output matches NumPy semantics, fused row-wise online-attention baseline (known-issue advisory), end-to-end `WebGpuRealizerBridge.matmul`.
 
-Real-WebGPU CI is the only reliable way to catch shader-level bugs — NumPy mocks pass everything green even when the WGSL is wrong. The FA-v2 numerical issue tracked in the changelog was caught this way.
+Real-WebGPU CI is the only reliable way to catch shader-level bugs — NumPy mocks pass everything green even when the WGSL is wrong. A numerical issue in the direct online-attention baseline, tracked in the changelog, was caught this way.
 
 ## API stability
 
 | Surface | Stability |
 |---|---|
 | `kernels.*`, `matmul`, `matmulTiled`, `softmax`, `relu`, `gelu`, `layernorm`, `attention` | Semver-stable across `0.x` |
-| `runDirect`, `matmulTiledDirect`, `fusedElementwiseDirect`, `flashAttentionDirect` | Semver-stable |
+| `runDirect`, `matmulTiledDirect`, `fusedElementwiseDirect`, `rowWiseOnlineAttentionDirect` | Semver-stable |
+| `flashAttentionDirect` | Deprecated compatibility alias; retained through the documented removal window |
 | `materializeFloat32`, `uploadFloat32` | Semver-stable |
 | `createWebGpuRealizerBridge`, `WebGpuRealizerBridge` interface | Semver-stable; new methods added additively |
 | `KernelError` | Semver-stable |
