@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,8 +8,40 @@ const root = resolve(new URL("..", import.meta.url).pathname);
 const tmp = mkdtempSync(join(tmpdir(), "browsergrad-release-pack-"));
 
 try {
+  const semanticCore = packAndExtract("browsergrad-semantic-core");
   const kernels = packAndExtract("browsergrad-kernels");
   const compiler = packAndExtract("browsergrad-compiler");
+
+  const semanticCorePkg = readPackage(semanticCore);
+  const workspaceSemanticCoreVersion = readPackage(join(root, "packages/browsergrad-semantic-core")).version;
+  assert(semanticCorePkg.version === workspaceSemanticCoreVersion, `semantic-core version mismatch: ${semanticCorePkg.version}`);
+  assert(semanticCorePkg.private !== true, "semantic-core tarball must be publishable");
+  assert(semanticCorePkg.exports?.["./schema"], "semantic-core package missing ./schema export");
+  assert(semanticCorePkg.exports?.["./layout"], "semantic-core package missing ./layout export");
+  assert(!semanticCorePkg.exports?.["."], "semantic-core package must not add a root barrel");
+  assert(Object.keys(semanticCorePkg.dependencies ?? {}).length === 0, "semantic-core package must remain dependency-free");
+  for (const file of [
+    "dist/schema.js",
+    "dist/schema.d.ts",
+    "dist/layout.js",
+    "dist/layout.d.ts",
+    "python/browsergrad_semantic_core.py",
+    "fixtures/layout-v1/row-major-rank2.input.json",
+    "fixtures/layout-v1/symbolic-byte-rank3.input.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+  ]) {
+    assert(existsSync(join(semanticCore, file)), `semantic-core tarball missing ${file}`);
+  }
+  const semanticSchema = await import(pathToFileURL(join(semanticCore, "dist/schema.js")));
+  const semanticLayout = await import(pathToFileURL(join(semanticCore, "dist/layout.js")));
+  for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "validateWireEnvelope"]) {
+    assert(exportName in semanticSchema, `semantic-core schema export missing ${exportName}`);
+  }
+  for (const exportName of ["normalizeLayoutExpr", "traceViewCoordinate", "verifyLayoutArtifact"]) {
+    assert(exportName in semanticLayout, `semantic-core layout export missing ${exportName}`);
+  }
 
   const kernelsPkg = readPackage(kernels);
   const workspaceKernelsVersion = readPackage(join(root, "packages/browsergrad-kernels")).version;

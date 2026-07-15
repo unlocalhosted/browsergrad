@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 0 closure; Gate 2 entry audit next
+- **Current implementation slice:** Gate 2 entry audit and semantic-core package adoption gate
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -31,8 +31,8 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate | Status | Current result | Missing before `verified` | Evidence |
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
-| Gate 1 — value/layout core and wire foundation | `verified` | The private package implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None for Gate 1. Public-package adoption still requires the separate packed/release-tested `0.x` transition recorded in D-004. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check. |
-| Gate 2 — multi-frontend, multi-backend view slice | `not-started` | No implementation in this workstream. | All Gate 2 exit criteria. | None. |
+| Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
+| Gate 2 — multi-frontend, multi-backend view slice | `audit` | Compiler, JIT, kernels, CPU-reference, and real-device ownership paths are under read-only audit. Semantic-core `0.1.0` is locally packed and release-tested so later public-package imports cannot depend on an unpublished private workspace package. | Select and implement the shared view-materialization contract; lower two frontends; execute the required rank-2/3 fixtures through CPU and required real WebGPU; derive the frozen legacy plan without widening it. | Semantic-core 8 files/68 tests, typecheck/build/lint, architecture check, and packed-tarball import/content gate. No npm publish performed. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
@@ -56,7 +56,8 @@ consumes the shared layout artifact without adding a second execution path.
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
 | Gate 0 architecture check | `verified` | Cross-package boundaries, generated-source parity, all six required freezes, exact runtime mapping/status unions, reviewed vocabulary, profile-usage parity, pinned inventories/harnesses, normalized definition fingerprints, and representative mutations are implemented and wired into delivery gates. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
-| Gate 2 view-family selection | `not-started` | Audit CUDA-lite, JIT, CPU reference, WGSL, and real-device evidence before selecting the first slice. |
+| Semantic-core package adoption gate | `verified` | `0.1.0` is public-package shaped, dependency-free, subpath-only, and locally packed with schema/layout imports, declarations, Python oracle, fixtures, license, and changelog verified. It has not been published. |
+| Gate 2 view-family selection | `audit` | CUDA-lite, JIT, CPU reference, WGSL, and real-device evidence are being compared before selecting the first slice. |
 
 ### Audit findings recorded so far
 
@@ -66,8 +67,9 @@ consumes the shared layout artifact without adding a second execution path.
   unresolved once they import it at runtime.
 - The LLD now permits `private` only during standalone Gate 1 incubation and
   requires a packed/release-tested `0.x` package before public-package runtime
-  adoption. The alternative bundling path requires explicit proof and is not
-  the current repository strategy.
+  adoption. Semantic-core `0.1.0` now satisfies that local package gate. The
+  alternative bundling path is not the current repository strategy, and npm
+  publication has not occurred.
 - Existing architecture checks cover compiler-local cycles, removed AST
   backends, representation purity, and line budgets, but not cross-package
   direction, frozen adapters, stable capability IDs, or core `CUSTOM` growth.
@@ -95,6 +97,12 @@ consumes the shared layout artifact without adding a second execution path.
 - Compiler semantic types remain CUDA/source-shaped, kernels plan types mix
   scheduling and execution, and JIT plan types own framework scheduling. They
   are adapter inputs, not semantic-core source material.
+- JIT's GPU planner currently admits `SLICE` and `PAD` as primitive plan ops,
+  while kernels' frozen 44-op `TensorGpuPlan` parser/executor accepts neither.
+  NumPy handlers and the WGSL `PERMUTE`/`BROADCAST_TO` kernels also reconstruct
+  offsets independently. Gate 2 must not widen the frozen plan to paper over
+  this mismatch; it needs one verified view-materialization contract and a
+  shared index-expression lowering/evaluation path.
 - The LLD's initial view model conflated geometry and effects and used constant
   offsets despite dynamic shape support. It now uses symbolic byte lengths and
   offsets, puts access mode in L2 effects, and makes normalized `IndexMap` the
@@ -133,6 +141,7 @@ consumes the shared layout artifact without adding a second execution path.
 | D-013 | 2026-07-15 | accepted | Separate semantic capabilities/lowering/evidence from assignment requirements/resolutions and universal diagnostics; register legacy assignment strings as routing requirements rather than promoting them to semantic capabilities. | Prevents device facts, simulators, oracles, policies, and external services from receiving fictitious preservation levels or lowering decisions. Runtime may eventually consume only the narrow diagnostic, capability, and requirement protocol subpaths. |
 | D-014 | 2026-07-15 | accepted | Model Grad compatibility as a frozen, versioned observation inventory with inventory-scoped execution context and per-behavior dtype, alias, contiguity, materialization, autograd, condition, failure, evidence, reference-contract, and target-conformance facts. | Prevents verified debt from being mislabeled conformant, prevents f32-only observations from becoming universal view claims, and makes Pyodide/NumPy upgrades explicit baseline reviews. |
 | D-015 | 2026-07-15 | accepted | Model JIT opaque compatibility as 36 exact constructor-call records and 39 operation records using five closed decision policies; preserve `name` versus `op`, conditional reachability/effects, declared versus realized dtype behavior, replay, autograd/transform/export/residency, default versus inspection-only versus executable tensor-plan decisions, and constructor-only status. | Counts and one-way allowlists hid two ghost labels, grouped distinct calls, allowed same-count relabels, treated declared dtype as realized dtype, overstated tensor-plan/WebNN/transformer execution, and missed silent gradient disconnection plus conditional stateful callback replay. |
+| D-016 | 2026-07-15 | accepted | Promote semantic-core `0.1.0` from private incubation to a dependency-free public-package shape before adding compiler, kernels, or JIT runtime imports; keep only explicit `/schema` and `/layout` exports and prove the packed tarball locally. | BrowserGrad packages ship unbundled ESM. A workspace-only private dependency would pass locally and break external installs. `0.x`, narrow exports, publish ordering, and tarball gates communicate instability without creating an unavailable dependency. This decision does not claim npm publication. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -343,6 +352,18 @@ affected implementation slice is marked complete.
 - Gate 0 is `verified`; Gate 1 was already `verified`. Gate 2 is the next
   implementation gate.
 
+### 2026-07-15 — Semantic-core `0.x` package adoption gate
+
+- Removed the private-workspace marker from semantic-core `0.1.0` without
+  widening its two explicit exports or adding a root barrel or dependency.
+- Added package-local license and changelog, public publish metadata, and the
+  same build/typecheck/lint/test prepublish gate used by shipping packages.
+- Extended the release-package harness to pack and extract semantic-core, then
+  verify tarball metadata, zero dependencies, declarations, runtime imports,
+  Python parity oracle, both fixture families, README, license, and changelog.
+- This is local package readiness only. No registry lookup, publish, push, or
+  deployment occurred.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -365,6 +386,7 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Grad dtype/view/materialization freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test && pnpm --filter @unlocalhosted/browsergrad-grad typecheck && pnpm --filter @unlocalhosted/browsergrad-grad test && pnpm --filter @unlocalhosted/browsergrad-grad exec vitest run --config vitest.integration.config.ts tests-integration/gate0_dtype_view_contract.test.ts && pnpm --filter @unlocalhosted/browsergrad-grad test:integration` | Passed: script syntax, architecture check, compiler typecheck and 28 files/942 tests, Grad typecheck and 2 files/30 unit tests, blocking contract 1 file/1 test, and full Grad integration 33 files/322 tests. | Exact JIT opaque-operation inventory remains for Gate 0. |
 | 2026-07-15 | Exact JIT opaque-operation freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-jit typecheck && pnpm --filter @unlocalhosted/browsergrad-jit test && pnpm --filter @unlocalhosted/browsergrad-jit exec vitest run --config vitest.integration.config.ts tests-integration/gate0_opaque_operation_contract.test.ts && pnpm --filter @unlocalhosted/browsergrad-jit test:integration && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test` | Passed: script syntax, architecture check, JIT typecheck and 8 unit tests, focused 5-case Pyodide contract, full JIT integration 23 files/228 tests, compiler typecheck and 28 files/945 tests. | None. |
 | 2026-07-15 | Gate 0 cross-package closure | `pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-runtime test && pnpm --filter @unlocalhosted/browsergrad-grad typecheck && pnpm --filter @unlocalhosted/browsergrad-grad exec vitest run --config vitest.integration.config.ts tests-integration/gate0_dtype_view_contract.test.ts` | Passed: architecture check, 11 files/125 runtime tests, Grad typecheck, and blocking Grad contract 1 file/1 test. | Gate 0 verified. |
+| 2026-07-15 | Semantic-core package adoption gate | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint && pnpm test:release-packages && pnpm architecture:check` | Passed: semantic-core typecheck/build/lint, 8 files/68 tests, packed tarball metadata/content/runtime-import checks, existing kernels/compiler release-package checks, and architecture check. | Package is ready to become a workspace runtime dependency in a later coherent Gate 2 slice; npm publication is still pending the normal release workflow. |
 
 ## Failure and Recovery Log
 
@@ -485,8 +507,9 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Commit Gate 0 closure after the unchanged runtime and Grad focused gates, then
-begin Gate 2 with a read-only ownership audit of one view/layout family across
-CUDA-lite, JIT, CPU reference, WGSL, and real-device evidence. Select the
-smallest two-frontend/two-backend slice that consumes the verified Gate 1
-layout artifact without introducing a second execution path.
+Commit the semantic-core package adoption gate, finish the three-lane Gate 2
+ownership audit, then record the selected shared view-materialization contract
+before implementation. The slice must cover compiler and JIT lowering plus CPU
+and required real-WebGPU execution from the same verified index-map fixtures;
+it must derive or refuse the frozen legacy tensor plan without widening its
+schema or adding a second offset-reconstruction path.

@@ -1,8 +1,7 @@
 {
   "name": "@unlocalhosted/browsergrad-semantic-core",
   "version": "0.1.0",
-  "description": "Private incubation package for BrowserGrad canonical semantic schemas and value/layout verification.",
-  "private": true,
+  "description": "Versioned BrowserGrad semantic schemas, canonical wire formats, and value/layout verification.",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -20,7 +19,9 @@
     "dist/",
     "python/",
     "fixtures/",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -28,7 +29,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "oxlint src",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
