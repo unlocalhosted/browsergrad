@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "architectureDecisionDirectory": "docs/adr",
+    "baselineChangesRequireDecision": true
+  },
+  "adapters": [
+    {
+      "id": "compiler.pointer-scalar-memory.v0",
+      "owner": "@unlocalhosted/browsergrad-compiler",
+      "permittedCallers": [
+        "existing CUDA-lite semantic lowering",
+        "Gate 2 TensorView/IndexMap adapter"
+      ],
+      "newUseProhibition": "No new view, layout, dtype, or alias feature may add source-shaped memory fields.",
+      "retirementGate": "CPU reference and WGSL consume shared offsets, bounds, and alias facts.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-compiler@1.0.0"
+    },
+    {
+      "id": "compiler.cute-static-layout.v0",
+      "owner": "@unlocalhosted/browsergrad-compiler",
+      "permittedCallers": [
+        "packages/browsergrad-compiler/src/parser.ts",
+        "packages/browsergrad-compiler/tests/compiler/parser.test.ts"
+      ],
+      "newUseProhibition": "No new spellings, ranks, queries, exports, or production callers.",
+      "retirementGate": "Pinned real frontend handles the frozen fixtures through shared layout semantics.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-compiler@1.0.0",
+      "baselineDecision": "docs/adr/0001-freeze-legacy-semantic-adapters.md",
+      "freeze": {
+        "kind": "cute-static-layout",
+        "definitionFile": "packages/browsergrad-compiler/src/cute_static_layout.ts",
+        "permittedProductionImporters": [
+          "packages/browsergrad-compiler/src/parser.ts"
+        ],
+        "exports": [
+          "CuteStaticLayoutQuery",
+          "CuteStaticRank1Layout",
+          "createCuteStaticRank1Layout",
+          "cuteStaticRank1LayoutQuery"
+        ],
+        "layoutKind": "cute-static-rank-1-layout",
+        "layoutFields": [
+          "kind",
+          "extent",
+          "stride"
+        ],
+        "queries": [
+          "cosize",
+          "rank",
+          "size"
+        ],
+        "maxParserTokenCounts": {
+          "CuteStaticLayoutQuery": 3,
+          "CuteStaticRank1Layout": 6,
+          "createCuteStaticRank1Layout": 4,
+          "cuteStaticRank1LayoutQuery": 2
+        }
+      }
+    },
+    {
+      "id": "kernels.tensor-gpu-plan.v0",
+      "owner": "@unlocalhosted/browsergrad-kernels",
+      "permittedCallers": [
+        "browsergrad-jit GPU plan serializer",
+        "browsergrad-kernels tensor-plan executor and realizer bridge"
+      ],
+      "newUseProhibition": "No new operation, dtype, view, offset, layout, allocation, or alias semantics may enter this compatibility schema.",
+      "retirementGate": "New view and dtype features enter through verified shared schemas and the plan has no unique semantics.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-kernels@1.0.0",
+      "baselineDecision": "docs/adr/0001-freeze-legacy-semantic-adapters.md",
+      "freeze": {
+        "kind": "tensor-gpu-plan",
+        "definitionFile": "packages/browsergrad-kernels/src/tensor_plan.ts",
+        "operations": [
+          "ADAMW_UPDATE_M",
+          "ADAMW_UPDATE_PARAM",
+          "ADAMW_UPDATE_V",
+          "ADAM_UPDATE_M",
+          "ADAM_UPDATE_PARAM",
+          "ADAM_UPDATE_V",
+          "ADD",
+          "BROADCAST_TO",
+          "BUFFER",
+          "CAST",
+          "CONST",
+          "CONV1D",
+          "CONV1D_BACKWARD_BIAS",
+          "CONV1D_BACKWARD_INPUT",
+          "CONV1D_BACKWARD_WEIGHT",
+          "CONV2D",
+          "CONV2D_BACKWARD_BIAS",
+          "CONV2D_BACKWARD_INPUT",
+          "CONV2D_BACKWARD_WEIGHT",
+          "CONV3D",
+          "CONV3D_BACKWARD_BIAS",
+          "CONV3D_BACKWARD_INPUT",
+          "CONV3D_BACKWARD_WEIGHT",
+          "CONV_TRANSPOSE2D",
+          "CONV_TRANSPOSE2D_BACKWARD_BIAS",
+          "CONV_TRANSPOSE2D_BACKWARD_INPUT",
+          "CONV_TRANSPOSE2D_BACKWARD_WEIGHT",
+          "DIV",
+          "EXP",
+          "FUSED_ELEMENTWISE",
+          "FUSED_SOFTMAX",
+          "LAYER_NORM",
+          "LAYER_NORM_BACKWARD_BIAS",
+          "LAYER_NORM_BACKWARD_INPUT",
+          "LAYER_NORM_BACKWARD_WEIGHT",
+          "LOAD",
+          "LOG",
+          "MATMUL",
+          "MUL",
+          "NEG",
+          "PERMUTE",
+          "REDUCE",
+          "RESHAPE",
+          "SGD_UPDATE"
+        ],
+        "interfaces": {
+          "TensorPlanStep": {
+            "arg?": "unknown",
+            "dtype": "\"float32\"",
+            "inputIds": "readonly number[]",
+            "op": "TensorPlanOp",
+            "shape": "readonly number[]",
+            "step": "number",
+            "valueId": "number"
+          },
+          "TensorPlanBuffer": {
+            "bytes": "number",
+            "dtype": "\"float32\"",
+            "firstStep": "number",
+            "lastStep": "number",
+            "materialize": "boolean",
+            "op": "string",
+            "shape": "readonly number[]",
+            "valueId": "number"
+          },
+          "TensorGpuPlan": {
+            "buffers": "readonly TensorPlanBuffer[]",
+            "hasCustomOps": "false",
+            "materializationBoundary": "\"root\"",
+            "peakLiveBytes": "number",
+            "rootId": "number",
+            "steps": "readonly TensorPlanStep[]"
+          }
+        }
+      }
+    },
+    {
+      "id": "jit.core-custom-ops.v0",
+      "owner": "@unlocalhosted/browsergrad-jit",
+      "permittedCallers": [
+        "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+        "packages/browsergrad-jit/src/python/_functional.py",
+        "packages/browsergrad-jit/src/python/_nn.py",
+        "packages/browsergrad-jit/src/python/_webnn.py",
+        "packages/browsergrad-jit/src/python/_custom_kernel.py",
+        "packages/browsergrad-jit/src/python/index.ts"
+      ],
+      "newUseProhibition": "No new core label or constructor site; only the explicit user-authored kernel API may supply user kernel names.",
+      "retirementGate": "Advertised core operations have typed IR plus explicit CPU, VJP, transform, export, and backend decisions.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-jit@1.0.0",
+      "baselineDecision": "docs/adr/0001-freeze-legacy-semantic-adapters.md",
+      "freeze": {
+        "kind": "jit-op-custom",
+        "constructorCounts": {
+          "packages/browsergrad-jit/src/python/_custom_kernel.py": 1,
+          "packages/browsergrad-jit/src/python/_functional.py": 7,
+          "packages/browsergrad-jit/src/python/_nn.py": 1,
+          "packages/browsergrad-jit/src/python/_tensor_proxy.py": 24,
+          "packages/browsergrad-jit/src/python/_webnn.py": 1,
+          "packages/browsergrad-jit/src/python/index.ts": 2
+        },
+        "maxTokenCounts": {
+          "packages/browsergrad-jit/src/python/_functional.py": {
+            "_custom_elementwise_loss": 5
+          }
+        },
+        "labels": [
+          "abs",
+          "batch_norm1d",
+          "binary_cross_entropy",
+          "binary_cross_entropy_with_logits",
+          "cat",
+          "clamp",
+          "cos",
+          "cross_entropy",
+          "cumsum",
+          "dropout",
+          "einsum",
+          "expand",
+          "flash_attention",
+          "flip",
+          "gather",
+          "gt",
+          "interpolate",
+          "kl_div",
+          "l1_loss",
+          "masked_fill",
+          "nll_loss",
+          "pad",
+          "prod",
+          "repeat",
+          "repeat_interleave",
+          "scatter",
+          "sign",
+          "sin",
+          "smooth_l1_loss",
+          "sort_indices",
+          "sort_values",
+          "stack",
+          "sum",
+          "topk_indices",
+          "topk_values",
+          "transformer_block",
+          "tril",
+          "triu",
+          "user",
+          "var",
+          "webnn_matmul"
+        ]
+      }
+    },
+    {
+      "id": "grad.view-bf16-compat.v0",
+      "owner": "@unlocalhosted/browsergrad-grad",
+      "permittedCallers": [
+        "existing Tensor and torch compatibility adapters"
+      ],
+      "newUseProhibition": "No new API may claim view aliasing or bf16 storage through materializing views or f32 aliases.",
+      "retirementGate": "View and alias fixtures agree or reject, and bf16 is real storage/conversion or rejected.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-grad@1.0.0"
+    },
+    {
+      "id": "kernels.flash-attention-direct-name.v0",
+      "owner": "@unlocalhosted/browsergrad-kernels",
+      "permittedCallers": [
+        "existing public export",
+        "browsergrad-kernels realizer compatibility call"
+      ],
+      "newUseProhibition": "New APIs and documentation use the accurate row-wise online-softmax name.",
+      "retirementGate": "A real block-tiled implementation is proven and the major-removal window passes.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-kernels@1.0.0"
+    },
+    {
+      "id": "runtime.generic-backend-labels.v0",
+      "owner": "@unlocalhosted/browsergrad-runtime",
+      "permittedCallers": [
+        "existing assignment capability compatibility mapping"
+      ],
+      "newUseProhibition": "New readiness features use canonical capability definitions and lowering decisions.",
+      "retirementGate": "All readiness UI consumes emitted capability and lowering records.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-runtime@1.0.0"
+    }
+  ]
+}

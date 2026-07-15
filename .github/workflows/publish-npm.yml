@@ -35,6 +35,9 @@ jobs:
       - name: Build workspace
         run: pnpm -r run build
 
+      - name: Verify semantic architecture boundaries
+        run: pnpm architecture:check
+
       - name: Verify packed package metadata and exports
         run: pnpm test:release-packages
 

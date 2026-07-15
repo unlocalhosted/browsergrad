@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const gates = [
+  ["pnpm", ["architecture:check"], repoRoot],
   [
     "pnpm",
     [

@@ -7,9 +7,10 @@
   "packageManager": "pnpm@10.29.3",
   "scripts": {
     "build": "pnpm -r run build",
-    "test": "pnpm -r run test",
+    "test": "pnpm run architecture:check && pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
+    "architecture:check": "node scripts/semantic-architecture-check.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "test:release-packages": "node scripts/test-release-packages.mjs",
     "validate:prd": "node scripts/validate-research-gated-prd.mjs",
