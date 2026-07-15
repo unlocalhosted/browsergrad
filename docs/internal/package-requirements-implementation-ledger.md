@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 0 audit and Gate 1 foundation design
+- **Current implementation slice:** Gate 0 enforcement and Gate 1 wire/value foundation
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -30,8 +30,8 @@ test does not make a gate verified unless every exit criterion is covered.
 
 | Gate | Status | Current result | Missing before `verified` | Evidence |
 |---|---|---|---|---|
-| Gate 0 — freeze and inventory | `in-progress` | Audits completed. Existing checks are compiler-local and do not freeze adapters. Frozen baselines and ownership gaps are now identified; the normative adapter ledger has all five required fields. | Add enforceable workspace/frozen-adapter checks; record dtype/view/materialization inventory; define stable IDs; run negative and repository checks. | Audit findings below. |
-| Gate 1 — value/layout core and wire foundation | `in-progress` | Private package shell now exists with only `/schema`, `/layout`, and `/package.json` exports. Semantic implementation is not yet claimed. | Implement canonical schemas/hashes, verifier, cross-language fixtures, resource and arithmetic limits; prove deterministic parity and meaning. | Package shell; tests pending. |
+| Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and three highest-risk legacy adapters are machine-frozen. The check runs in root, compiler, CI, release, and publish gates; mutation tests cover representative bypasses. | Add stable capability IDs and a machine-readable dtype/view/materialization inventory; freeze pointer/scalar memory, Grad view/bf16, runtime capability labels, and adapter behavior beyond surface shape. | `pnpm architecture:check`; compiler semantic-architecture tests. |
+| Gate 1 — value/layout core and wire foundation | `partial` | Private package now implements pre-decode byte limits and fatal UTF-8, bounded duplicate-aware JSON decoding, canonical JSON/SHA-256 domains, opaque verified hash inputs, wire integers/floats/envelopes, exact artifact-budgeted dimension arithmetic with declared symbol domains, constraints, the closed dtype registry, numerical policy, allocation/view records, and v1 layout/index expression types. | Add layout normalization and the schema-specific semantic verifier that creates verified wrappers; add cross-language canonical fixtures; prove coordinate/address/alias traces, deterministic parity, extension round-tripping, and all Gate 1 exit criteria. | Semantic-core typecheck, build, lint, and 43 focused tests. |
 | Gate 2 — multi-frontend, multi-backend view slice | `not-started` | No implementation in this workstream. | All Gate 2 exit criteria. | None. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
@@ -51,11 +51,11 @@ shells or another frontend-shaped execution path.
 
 | Work item | Status | Notes |
 |---|---|---|
-| Frozen-adapter inventory | `partial` | Baselines recorded for `cute_static_layout`, 44-op shape/f32 `TensorGpuPlan`, and 36 executable `OP_CUSTOM` constructors. Machine enforcement remains. |
+| Frozen-adapter inventory | `partial` | Baselines recorded and machine-enforced for `cute_static_layout`, 44-op shape/f32 `TensorGpuPlan`, and 36 executable `OP_CUSTOM` constructors. Lower-level behavior and remaining public surfaces still need freezes. |
 | Semantic-core seam audit | `partial` | Existing compiler/JIT/kernels types must adapt into the core; none can be moved wholesale. Exact initial package split is selected. |
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
-| Gate 0 architecture check | `in-progress` | Implement workspace boundaries and semantic freeze manifest/check. |
-| Gate 1 package design | `partial` | `/schema` and `/layout` only; no root barrel or empty future subpaths. Exact wire/arithmetic corrections are now normative. |
+| Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, required legacy freezes, and representative mutation tests are implemented and wired into delivery gates. Stable capability inventory remains. |
+| Gate 1 schema/value core | `partial` | `/schema` and `/layout` only; bounded canonical wire processing and exact dimension/value foundations are implemented. Normalization, verification, and cross-language parity remain. |
 
 ### Audit findings recorded so far
 
@@ -126,11 +126,56 @@ affected implementation slice is marked complete.
   incompatible with the repository's public unbundled package model.
 - No architecture gate or semantic-core implementation is claimed complete.
 
+### 2026-07-15 — Architecture freeze enforcement
+
+- Added a versioned semantic-freeze manifest and a workspace architecture
+  checker covering dependency direction, deep/cross-package imports,
+  generated-source parity, required baseline decisions, and the three initial
+  legacy adapter surfaces.
+- Wired the check into root tests, compiler verification, release verification,
+  and CI/publish workflows.
+- Added mutation tests for union and interface widening, exports, dynamic and
+  deep imports, inheritance, readonly removal, comments, custom-op aliases and
+  positional labels, and missing required freezes.
+- Kept Gate 0 `partial`: the current fingerprints freeze high-risk structure,
+  not every semantic behavior or public capability claim.
+
+### 2026-07-15 — Gate 1 wire/value foundation
+
+- Added the private `@unlocalhosted/browsergrad-semantic-core` 0.1 package with
+  only `/schema`, `/layout`, and `/package.json` exports.
+- Implemented bounded duplicate-aware JSON parsing and programmatic-value
+  validation, canonical JSON and domain-separated SHA-256 hashing, exact wire
+  integers and float bit patterns, envelope normalization, exact budgeted
+  dimension arithmetic and constraints, the closed builtin dtype registry,
+  complete numerical policy records, and initial allocation/view/layout types.
+- Added 43 focused tests. Kept Gate 1 `partial`: layout normalization,
+  verification, traces, and cross-language fixtures remain.
+- Closed review findings before commit: untrusted bytes are limited before
+  fatal UTF-8 decoding; semantic hashes require an unforgeable internal
+  verified-wrapper instance; constraint sets share one node/operation budget;
+  resolved invalid divisors cannot hide behind unresolved symbols; bindings
+  require declared domains; array accessors are never executed during JSON
+  validation.
+- Recorded architecture direction in commit `e16791d0` (`docs: define semantic
+  systems architecture`).
+- Recorded architecture enforcement in commit `6985611d` and the truthful
+  row-wise attention naming correction in commit `aa632f98`.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
 |---|---|---|---|---|
-| 2026-07-15 | Ledger creation | Not applicable | Documentation only; verification not yet run. | Run `git diff --check` with the first implementation slice. |
+| 2026-07-15 | Architecture guard | `pnpm architecture:check` | Passed. | Re-run before each architecture-affecting commit. |
+| 2026-07-15 | Compiler guard integration | `pnpm --filter @unlocalhosted/browsergrad-compiler test` | Passed: 27 files, 931 tests. | Re-run after final guard diff. |
+| 2026-07-15 | Compiler types | `pnpm --filter @unlocalhosted/browsergrad-compiler typecheck` | Passed. | None. |
+| 2026-07-15 | Kernels attention truth correction | `pnpm --filter @unlocalhosted/browsergrad-kernels typecheck` and `pnpm --filter @unlocalhosted/browsergrad-kernels test` | Passed: typecheck and 10 files, 71 tests. | Re-run before commit. |
+| 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck` | Passed. | None. |
+| 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core test` | Passed: 4 files, 43 tests. | None. |
+| 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core build` | Passed. | None. |
+| 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed with no warnings after replacing the control-character regex with explicit code-point comparisons. | None. |
+| 2026-07-15 | Workspace integration | `pnpm -r run build` | Passed for 7 of 8 workspace projects, including semantic core. | None. |
+| 2026-07-15 | Workspace integration | `pnpm -r run typecheck` | Semantic core and all packages before runtime passed; runtime failed on three pre-existing optional-value checks in `assignment-javascript-profile-e2e.test.ts`. | Keep as unrelated workspace evidence; semantic-core focused typecheck is green. |
 
 ## Failure and Recovery Log
 
@@ -138,7 +183,22 @@ Record failures that may matter after context loss. Include the exact failing
 command, concise error, suspected cause, resolution or next experiment, and
 whether any files may be left partially changed.
 
-No implementation failures recorded yet.
+- `pnpm install` failed with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` because
+  pnpm would not recreate `node_modules` without a TTY. No source files were
+  partially changed.
+- `CI=true pnpm install` then failed with `ERR_PNPM_OUTDATED_LOCKFILE` after the
+  new workspace importer was added. This was the expected frozen-lockfile gate.
+- `CI=true pnpm install --no-frozen-lockfile` succeeded and updated
+  `pnpm-lock.yaml`; all eight workspace projects were installed.
+- A semantic-core typecheck caught an `exactOptionalPropertyTypes` violation
+  when forwarding an absent envelope limit as `{ limits: undefined }`. The
+  call now omits the property when absent; typecheck, tests, build, and lint all
+  pass afterward.
+- `pnpm -r run typecheck` reached runtime after every other package passed, then
+  failed at lines 675, 682, and 694 of
+  `packages/browsergrad-runtime/tests/assignment-javascript-profile-e2e.test.ts`
+  because `compiled.wgsl` / `compiled.wgslProgram` may be undefined. Semantic
+  core is not consumed there; no runtime files were changed in this slice.
 
 ## Quick Resume Checklist
 
@@ -153,6 +213,5 @@ No implementation failures recorded yet.
 
 ## Next Checkpoint
 
-Record all three audit findings, choose the exact Gate 0 enforcement mechanism
-and Gate 1 package surface, then update D-003 before editing implementation
-source.
+Implement layout normalization plus the verified semantic wrapper, then add
+Python/TypeScript canonical fixtures and coordinate/address/alias traces.
