@@ -4,6 +4,11 @@
   "description": "Versioned BrowserGrad semantic schemas, canonical wire formats, and value/layout verification.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unlocalhosted/browsergrad.git",
+    "directory": "packages/browsergrad-semantic-core"
+  },
   "exports": {
     "./schema": {
       "types": "./dist/schema.d.ts",

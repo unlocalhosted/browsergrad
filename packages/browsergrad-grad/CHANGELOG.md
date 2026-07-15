@@ -5,6 +5,20 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.5.2] — 2026-07-15
+
+### Fixed
+
+- Corrected the published dependency contract without changing the Python or
+  TypeScript API. Pyodide now uses npm's standard optional peer metadata;
+  direct Pyodide users bring a compatible `^0.26.4` installation, while
+  runtime-managed and other duck-typed targets remain valid.
+- Kept `@unlocalhosted/browsergrad-kernels` as the runtime dependency for the
+  explicit `device=` bridge. pnpm rewrites its workspace range in the packed
+  package, and kernels owns the compatible semantic-core dependency.
+
 ## [0.5.1] — 2026-06-02
 
 Dogfood pass on the published 0.5.0 tarball surfaced two issues. Both fixed.

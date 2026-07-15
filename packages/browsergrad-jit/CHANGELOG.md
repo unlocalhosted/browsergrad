@@ -7,6 +7,8 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-15
+
 ### Added
 
 - Closed `browsergrad.jit.tensor-plan-semantic-requests@1.0` side-table
@@ -42,6 +44,10 @@ contract in the README](README.md#compatibility-contract).
 - Required evidence accepts only `timestamp-query/exact` or
   `queue-completion/coarse` dispatch profiles; unavailable or mismatched timing
   fails before a case can enter the completed prefix.
+- Package metadata now uses standard optional peer declarations for
+  `@unlocalhosted/browsergrad-kernels@^0.2.0` and `pyodide@^0.26.4`. The JIT
+  core remains bridge-agnostic; semantic-core stays a kernels-owned runtime
+  dependency rather than becoming a second direct JIT peer.
 
 ## [0.8.2] — 2026-06-25
 

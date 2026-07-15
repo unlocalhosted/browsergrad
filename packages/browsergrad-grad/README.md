@@ -15,7 +15,7 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.5.1 — stable.** Comprehensive layer set for CNNs and Transformers: ConvTranspose2d, Conv3d/2d/1d, BatchNorm3d/2d/1d, GroupNorm/InstanceNorm2d, LayerNorm, MaxPool/AvgPool, AdaptiveAvgPool2d, Dropout/Dropout2d, Embedding, MultiHeadAttention, RNN/LSTM/GRU, Flatten + all common activations. Optimizers: SGD/Adam/AdamW plus LR schedulers. Module.train()/eval(), hooks, state_dict/load_state_dict, torch-alias compatibility shims, and end-to-end training checks for MLP, CNN, sequence-CNN, and transformer-block.
+> **Status: v0.5.2 — stable.** Comprehensive layer set for CNNs and Transformers: ConvTranspose2d, Conv3d/2d/1d, BatchNorm3d/2d/1d, GroupNorm/InstanceNorm2d, LayerNorm, MaxPool/AvgPool, AdaptiveAvgPool2d, Dropout/Dropout2d, Embedding, MultiHeadAttention, RNN/LSTM/GRU, Flatten + all common activations. Optimizers: SGD/Adam/AdamW plus LR schedulers. Module.train()/eval(), hooks, state_dict/load_state_dict, torch-alias compatibility shims, and end-to-end training checks for MLP, CNN, sequence-CNN, and transformer-block.
 >
 > **The lazy-IR successor is [`browsergrad-jit`](../browsergrad-jit/)** — same PyTorch surface, but ops build a UOp graph that fusion / symbolic backward / AMP / gradient checkpointing / functional transforms / ONNX export / WebGPU realizer-bridge all hook into. Use grad for stable curriculum content; use jit when you want fusion + GPU acceleration + the broader toolkit. Both coexist in the same Pyodide session.
 
@@ -38,9 +38,14 @@ The library is meant to be **legible source code**. Tensor/autograd, functional 
 npm install @unlocalhosted/browsergrad-grad
 ```
 
-Depends on `@unlocalhosted/browsergrad-kernels` for the optional `device=`
-bridge. Pyodide is not a peer dep — `installGrad` works with any duck-typed
-Pyodide target.
+The npm package includes `@unlocalhosted/browsergrad-kernels` as a runtime
+dependency so the explicit `device=` bridge is available without a second
+install. Kernels owns its compatible `@unlocalhosted/browsergrad-semantic-core`
+dependency; applications do not need to install semantic-core directly.
+
+Pyodide is a standard optional peer. Applications using the direct Node
+adapter install a compatible `pyodide@^0.26.4`; `installGrad` itself continues
+to accept runtime-managed and other duck-typed Pyodide targets.
 
 ## Usage
 
@@ -99,7 +104,8 @@ await py.loadPackage(["numpy"]);
 await installGrad(createNodePyodideTarget(py));
 ```
 
-`pyodide` is an `optionalPeerDependencies` — bring your own version. The adapter has no other dependencies.
+`pyodide` is an optional peer — direct-adapter consumers bring their own
+compatible version. The adapter has no other dependencies.
 
 Optional WebGPU forward dispatch:
 
@@ -127,7 +133,7 @@ p = F.softmax(y, dim=-1, device=grad_device)
 `F.scaled_dot_product_attention(..., device=...)` for 2D Q/K/V. Backward still
 uses BrowserGrad's CPU formulas after the GPU forward result is materialized.
 
-## Python API surface (v0.5.1)
+## Python API surface (v0.5)
 
 ```python
 import browsergrad_grad as grad

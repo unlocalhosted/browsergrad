@@ -9,6 +9,7 @@
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import pkg from "../package.json";
 import { clearNamespace, getJitTarget } from "./pyodide-host";
 
 describe("install_torch_alias", () => {
@@ -80,7 +81,7 @@ import torch.nn.functional as F
 t = torch.tensor([1.0, 2.0, 3.0, 4.0])
 {"ver": torch.__version__, "sumValue": float(t.sum().item())}
 `);
-    expect(result.ver).toMatch(/^0\.8\.\d+$/);
+    expect(result.ver).toBe(pkg.version);
     expect(result.sumValue).toBe(10.0);
   });
 

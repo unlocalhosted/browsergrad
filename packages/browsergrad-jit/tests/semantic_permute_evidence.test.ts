@@ -9,6 +9,7 @@ import {
   prepareTensorPlanSemanticRequests,
   SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
 } from "@unlocalhosted/browsergrad-kernels";
+import pkg from "../package.json";
 
 import { EXECUTION_ENVIRONMENT_SCHEMA, EXECUTION_EVIDENCE_SCHEMA } from "../../../test-support/webgpu-evidence";
 import {
@@ -37,7 +38,7 @@ import {
 } from "../tests-browser/semantic_permute_evidence";
 
 const PRODUCER_VERSIONS = Object.freeze({
-  "@unlocalhosted/browsergrad-jit": "0.8.2-test",
+  "@unlocalhosted/browsergrad-jit": `${pkg.version}-test`,
   "@unlocalhosted/browsergrad-kernels": "0.2.0-test",
   "@unlocalhosted/browsergrad-semantic-core": "0.2.0-test",
   "browsergrad.backend.webgpu.view-copy": SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,

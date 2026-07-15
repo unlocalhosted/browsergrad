@@ -9,9 +9,29 @@ The IR is the substrate for everything downstream: fusion, symbolic backward, AM
 
 ## Install
 
+The core package installs Python sources into any Pyodide-shaped target and
+does not require a particular execution backend:
+
 ```sh
 npm install @unlocalhosted/browsergrad-jit
 ```
+
+Install the optional peer that owns the integration you use:
+
+```sh
+# Direct Node/Pyodide usage through the exported node adapter
+npm install @unlocalhosted/browsergrad-jit pyodide
+
+# Production WebGPU realization through the BrowserGrad bridge
+npm install @unlocalhosted/browsergrad-jit @unlocalhosted/browsergrad-kernels
+```
+
+`@unlocalhosted/browsergrad-kernels` supplies the production WebGPU bridge and
+its compatible semantic-core dependency. JIT intentionally does not declare a
+second semantic-core peer: it emits the versioned bridge request wire without
+importing semantic-core at runtime. Package managers therefore do not install
+semantic-core through JIT, and both optional peers may remain absent for
+core-only consumers.
 
 ## Hello world
 

@@ -12,6 +12,7 @@
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import pkg from "../package.json";
 import { clearNamespace, getJitTarget } from "./pyodide-host";
 
 describe("browsergrad_jit._ir under real Pyodide", () => {
@@ -30,7 +31,7 @@ describe("browsergrad_jit._ir under real Pyodide", () => {
 import browsergrad_jit
 browsergrad_jit.__version__
 `);
-    expect(version).toMatch(/^0\.8\.\d+$/);
+    expect(version).toBe(pkg.version);
   });
 
   it("exposes 55 opcodes in ALL_OPS (core + CNN + norm + fusion + autograd + AMP + optimizer)", async () => {

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { installJit } from "../src/index";
 import { JitInstallError } from "../src/types";
 import { SOURCE_FILES, MOUNT_ROOT } from "../src/python/index";
+import pkg from "../package.json";
 
 describe("@unlocalhosted/browsergrad-jit public surface", () => {
   it("exports installJit", () => {
@@ -81,7 +82,7 @@ describe("Python source registry", () => {
     // codegen, the actual version string should be substituted in.
     const initFile = SOURCE_FILES.find((f) => f.path.endsWith("__init__.py"));
     expect(initFile).toBeDefined();
-    expect(initFile!.content).toMatch(/__version__ = "0\.8\.\d+"/);
+    expect(initFile!.content).toContain(`__version__ = "${pkg.version}"`);
   });
 
   it("declares all 55 opcodes in _ir.py (core + CNN + norm + fusion + autograd + AMP + optimizer)", () => {

@@ -9,6 +9,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Exact monorepo repository metadata required for npm trusted publishing and
+  provenance identity verification.
 - Versioned rank-2/rank-3 dense-permutation fixtures with exact source/output
   f32 bit patterns and pinned layout/kernel hashes. The exact JSON subpath is
   release-packed, architecture-hash guarded, and excludes routing identity.
