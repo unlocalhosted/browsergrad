@@ -87,7 +87,7 @@ function featureBucket(file) {
   if (/\/semantic_/u.test(normalized) || normalized.endsWith("/semantic_ir.ts")) return "semantic-ir";
   if (/\/wgsl/u.test(normalized)) return "wgsl-backend";
   if (/\/reference/u.test(normalized)) return "reference";
-  if (/analyzer|parser|lexer|diagnostics|cpp_cute_frontend/u.test(normalized)) return "frontend";
+  if (/analyzer|parser|lexer|diagnostics|cpp_cute_/u.test(normalized)) return "frontend";
   if (/runtime|dynamic_launch|peer_copy|webgpu_orchestration|runner/u.test(normalized)) return "runtime-orchestration";
   return "support";
 }
@@ -240,7 +240,9 @@ function cppCuteFrontendLegacyLeaks(rows) {
   const leaks = [];
   for (const row of rows) {
     const sourceRelativeFile = path.relative(compilerSrc, row.file);
-    if (!sourceRelativeFile.startsWith("cpp_cute_frontend_")) continue;
+    // Every real C++/CuTe module belongs to this guarded sibling architecture,
+    // including later lowering/producer seams whose names are not "frontend".
+    if (!sourceRelativeFile.startsWith("cpp_cute_")) continue;
     const importedTargets = importsOf(row.file, row.source)
       .map((entry) => resolveLocalImport(row.file, entry.specifier))
       .filter((target) => target !== undefined);

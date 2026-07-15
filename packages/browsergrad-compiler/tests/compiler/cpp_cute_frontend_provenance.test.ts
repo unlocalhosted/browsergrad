@@ -1,222 +1,45 @@
-import { sha256Hex } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { describe, expect, it } from "vitest";
 import {
   deriveCppCuteFrontendArtifactId,
   verifyCppCuteFrontendArtifact,
-  type VerifiedCppCuteFrontendArtifact,
 } from "../../src/cpp_cute_frontend_artifact.js";
 import {
-  prepareCppCuteFrontendProfile,
-  unwrapPreparedCppCuteFrontendProfile,
-  type PreparedCppCuteFrontendProfile,
-} from "../../src/cpp_cute_frontend_profile.js";
-import {
   authorizeCppCuteFrontendArtifact,
-  computeCppCuteProfileDependencyManifestHash,
-  computeCppCuteProfileLimitsHash,
-  computeCppCuteProvenanceInvocationManifestHash,
-  computeCppCuteProvenanceOutputManifestHash,
-  CPP_CUTE_FRONTEND_BUILD_TYPE,
   CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE,
-  CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE,
-  cppCuteFrontendProvenancePayloadBase64,
   cppCuteFrontendProvenancePayloadBytes,
   cppCuteFrontendProvenanceSigningBytes,
   prepareCppCuteAttestationTrustStore,
   unwrapAuthorizedCppCuteFrontendArtifact,
   verifyCppCuteFrontendAttestation,
   type CppCuteAttestationTrustStoreV1,
-  type CppCuteFrontendProvenanceStatementV1,
   type CppCuteFrontendProvenanceV1,
-  type CppCuteProvenanceSourceV1,
   type PreparedCppCuteAttestationTrustStore,
   type VerifiedCppCuteFrontendAttestation,
 } from "../../src/cpp_cute_frontend_provenance.js";
 import { computeCppCuteInputHashes } from "../../src/cpp_cute_frontend_verify.js";
 import type { CppCuteFrontendArtifactV1 } from "../../src/cpp_cute_frontend_types.js";
 import {
-  artifactCompatibleProfileOptions,
   cloneCppCuteArtifactInput,
   CPP_CUTE_FIXTURE_BUILDER_ID,
   CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
   CPP_CUTE_FIXTURE_SOURCE_REVISION,
   createCppCuteArtifactInput,
-  createCppCuteProfileInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
-
-const TEST_PRIVATE_JWK: JsonWebKey = Object.freeze({
-  key_ops: ["sign"],
-  ext: true,
-  kty: "EC",
-  x: "l8h7VCP-TUDyAHiNww_AEpx-H6YG_bXR1bsUEtcquSc",
-  y: "3p-KJE0tWj0NKMioELWT6NjJ9qX0uk0gKzUy-wAkZnU",
-  crv: "P-256",
-  d: "8fPG8jPE6uiCLKn_wj78cZeIflSchaSojSYwmpIuV7c",
-});
-const TEST_SPKI_BASE64 =
-  "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl8h7VCP+TUDyAHiNww/AEpx+H6YG/bXR1bsUEtcquSfen4okTS1aPQ0oyKgQtZPo2Mn2pfS6TSArNTL7ACRmdQ==";
-const PINNED_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
-const PINNED_PROFILE_HASH = "15bc3d4f4b222a077e325ea0f9963fe900fa1e0e715c125632d4ad1a4ae02196";
-const PINNED_ARTIFACT_HASH = "626179c470d3b1e26fdf45d615b1b83da8eaf80533ef2ecb7cb59b63511153fd";
-const PINNED_SOURCE_SET_HASH = "9a122d8462fc232451f6e758bcda17f48dcf2614d67aa641e951a5886fac6975";
-
-interface ProvenanceFixture {
-  readonly privateKey: CryptoKey;
-  readonly keyId: string;
-  readonly trustStore: PreparedCppCuteAttestationTrustStore;
-  readonly profile: PreparedCppCuteFrontendProfile;
-  readonly artifact: VerifiedCppCuteFrontendArtifact;
-  readonly statement: CppCuteFrontendProvenanceStatementV1;
-  readonly provenance: CppCuteFrontendProvenanceV1;
-}
-
-async function createProvenanceFixture(): Promise<ProvenanceFixture> {
-  const privateKey = await crypto.subtle.importKey(
-    "jwk",
-    TEST_PRIVATE_JWK,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"],
-  );
-  const spkiBytes = decodeBase64(TEST_SPKI_BASE64);
-  const keyId = `sha256:${await sha256Hex(spkiBytes)}`;
-  const trustStore = await prepareCppCuteAttestationTrustStore({
-    schema: "browsergrad.compiler.cpp-cute.attestation-trust-store",
-    version: { major: 1, minor: 0 },
-    keys: [{
-      keyId,
-      builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
-      algorithm: "ecdsa-p256-sha256",
-      spkiDerBase64: TEST_SPKI_BASE64,
-    }],
-  });
-  const preliminaryArtifact = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput());
-  const profile = await prepareCppCuteFrontendProfile(createCppCuteProfileInput(artifactCompatibleProfileOptions(
-    preliminaryArtifact.headerSetSha256,
-    trustStore.trustStoreHash,
-  )));
-  const artifact = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput(profile.profileHash));
-  const statement = await createStatement(artifact, profile);
-  const provenance = await signStatement(statement, privateKey, keyId);
-  return { privateKey, keyId, trustStore, profile, artifact, statement, provenance };
-}
-
-async function createStatement(
-  artifact: VerifiedCppCuteFrontendArtifact,
-  profile: PreparedCppCuteFrontendProfile,
-): Promise<CppCuteFrontendProvenanceStatementV1> {
-  const configured = unwrapPreparedCppCuteFrontendProfile(profile).profile;
-  const source: CppCuteProvenanceSourceV1 = {
-    repository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
-    revision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
-  };
-  return {
-    _type: CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE,
-    subject: [{ name: artifact.artifactId, digest: { sha256: artifact.artifactHash } }],
-    predicateType: configured.deployment.provenance.predicateType,
-    predicate: {
-      builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
-      buildType: CPP_CUTE_FRONTEND_BUILD_TYPE,
-      source,
-      artifact: {
-        artifactId: artifact.artifactId,
-        artifactHash: artifact.artifactHash,
-        transportHash: artifact.transportHash,
-        profileHash: artifact.profileHash,
-        sourceSetSha256: artifact.sourceSetSha256,
-        headerSetSha256: artifact.headerSetSha256,
-        inputClosureSha256: artifact.inputClosureSha256,
-      },
-      profileId: profile.profileId,
-      toolchain: {
-        extractorId: configured.deployment.extractor.id,
-        extractorVersion: configured.deployment.extractor.version,
-        extractorBuildId: configured.deployment.extractor.buildId,
-        extractorBinarySha256: configured.deployment.extractor.binarySha256,
-        compilerId: configured.toolchain.compiler.id,
-        compilerVersion: configured.toolchain.compiler.version,
-        compilerBinarySha256: configured.toolchain.compiler.binarySha256,
-        compilerBuildId: configured.toolchain.compiler.buildId,
-        containerManifestDigest: configured.deployment.container.manifestDigest,
-        dependencyManifestSha256: await computeCppCuteProfileDependencyManifestHash(profile),
-      },
-      sandbox: {
-        contractId: configured.deployment.contractId,
-        policySha256: configured.deployment.sandboxPolicySha256,
-        limitsSha256: await computeCppCuteProfileLimitsHash(configured.extractionLimits),
-        network: "none",
-        readOnlyRoot: true,
-        noNewPrivileges: true,
-        linking: "forbidden",
-        nativeExecution: "forbidden",
-      },
-      run: {
-        platform: configured.deployment.container.platform,
-        runnerId: configured.deployment.runner.id,
-        runnerVersion: configured.deployment.runner.version,
-        runnerBinarySha256: configured.deployment.runner.binarySha256,
-        invocationId: "fixture-invocation-0001",
-        invocationManifestSha256: await computeCppCuteProvenanceInvocationManifestHash(artifact, profile, source),
-        outputManifestSha256: await computeCppCuteProvenanceOutputManifestHash(artifact),
-        outcome: "succeeded",
-        exitCode: 0,
-      },
-    },
-  };
-}
-
-async function signStatement(
-  statement: CppCuteFrontendProvenanceStatementV1,
-  privateKey: CryptoKey,
-  keyId: string,
-): Promise<CppCuteFrontendProvenanceV1> {
-  const signature = new Uint8Array(await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    copyToArrayBuffer(cppCuteFrontendProvenanceSigningBytes(statement)),
-  ));
-  if (signature.byteLength !== 64) throw new Error(`expected 64-byte P1363 signature, received ${signature.byteLength}`);
-  return {
-    payloadType: CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE,
-    payload: cppCuteFrontendProvenancePayloadBase64(statement),
-    signatures: [{ keyid: keyId, sig: encodeBase64(signature) }],
-  };
-}
-
-async function signedMutation(
-  fixture: ProvenanceFixture,
-  mutate: (statement: Record<string, unknown>) => void,
-): Promise<CppCuteFrontendProvenanceV1> {
-  const statement = structuredClone(fixture.statement) as unknown as Record<string, unknown>;
-  mutate(statement);
-  return signStatement(statement as unknown as CppCuteFrontendProvenanceStatementV1, fixture.privateKey, fixture.keyId);
-}
-
-async function verifyFixtureAttestation(
-  fixture: ProvenanceFixture,
-  provenance = fixture.provenance,
-): Promise<VerifiedCppCuteFrontendAttestation> {
-  return verifyCppCuteFrontendAttestation(provenance, {
-    artifact: fixture.artifact,
-    profile: fixture.profile,
-    trustStore: fixture.trustStore,
-  });
-}
-
-function authorizationRequest(
-  fixture: ProvenanceFixture,
-  attestation: VerifiedCppCuteFrontendAttestation,
-): Parameters<typeof authorizeCppCuteFrontendArtifact>[0] {
-  return {
-    artifact: fixture.artifact,
-    profile: fixture.profile,
-    attestation,
-    expectedProfileHash: PINNED_PROFILE_HASH,
-    expectedSourceSetSha256: PINNED_SOURCE_SET_HASH,
-    expectedSourceRepository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
-    expectedSourceRevision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
-  };
-}
+import {
+  cppCuteAuthorizationRequest as authorizationRequest,
+  createCppCuteProvenanceFixture as createProvenanceFixture,
+  createCppCuteProvenanceStatement as createStatement,
+  decodeBase64,
+  encodeBase64,
+  PINNED_CPP_CUTE_ARTIFACT_HASH as PINNED_ARTIFACT_HASH,
+  PINNED_CPP_CUTE_PROFILE_HASH as PINNED_PROFILE_HASH,
+  PINNED_CPP_CUTE_SOURCE_SET_HASH as PINNED_SOURCE_SET_HASH,
+  PINNED_CPP_CUTE_TRUST_STORE_HASH as PINNED_TRUST_STORE_HASH,
+  signCppCuteProvenanceStatement as signStatement,
+  signedCppCuteProvenanceMutation as signedMutation,
+  TEST_CPP_CUTE_SPKI_BASE64 as TEST_SPKI_BASE64,
+  verifyCppCuteFixtureAttestation as verifyFixtureAttestation,
+} from "./support/cpp_cute_provenance_fixtures.js";
 
 describe("C++/CuTe frontend provenance", () => {
   it("authorizes one canonical DSSE/in-toto statement through pinned opaque authority", async () => {
@@ -603,20 +426,6 @@ describe("C++/CuTe frontend provenance", () => {
     })).rejects.toThrow();
   });
 });
-
-function decodeBase64(value: string): Uint8Array {
-  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
-}
-
-function encodeBase64(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes));
-}
-
-function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
 
 function makeNoncanonicalPaddedBase64(value: string): string {
   if (!value.endsWith("==")) throw new Error("fixture signature no longer has two base64 padding bytes");

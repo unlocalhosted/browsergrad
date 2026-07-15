@@ -10,6 +10,7 @@ import {
   cloneCppCuteArtifactInput,
   CPP_CUTE_FIXTURE_DIAGNOSTIC_ID,
   CPP_CUTE_FIXTURE_PROFILE_HASH,
+  CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID,
   CPP_CUTE_FIXTURE_SPAN_ID,
   createCppCuteArtifactInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
@@ -200,6 +201,16 @@ describe("C++/CuTe frontend artifact", () => {
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
       path: expect.stringContaining(".cosize"),
     });
+
+    const wrongRoot = await cloneCppCuteArtifactInput();
+    const wrongRootPayload = wrongRoot["payload"] as Record<string, unknown>;
+    const entries = wrongRootPayload["entries"] as Record<string, unknown>[];
+    if (entries[0] === undefined) throw new Error("fixture lost layout entry");
+    entries[0]["selectedRootDeclarationIds"] = [CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID];
+    await expect(verifyCppCuteFrontendArtifact(wrongRoot)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.entries[0].selectedRootDeclarationIds",
+    });
   });
 
   it("rejects accepted outcomes with blocking diagnostics", async () => {
@@ -230,6 +241,13 @@ describe("C++/CuTe frontend artifact", () => {
     })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-RESOURCE-LIMIT",
       path: "$.options.artifactLimits.maxFiles",
+    });
+
+    await expect(verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput(), {
+      limits: { maxIntegerBits: 2 },
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-RESOURCE-LIMIT",
+      path: "$.payload.facts[0].size",
     });
   });
 

@@ -84,7 +84,7 @@ export async function verifyCppCuteFrontendArtifact(
     );
   }
   const payload = parseCppCuteFrontendPayload(envelope.payload, artifactLimits);
-  const inputHashes = await verifyCppCuteFrontendPayload(payload);
+  const inputHashes = await verifyCppCuteFrontendPayload(payload, { limits });
   throwIfAborted(options.signal);
   const artifactHash = await hashCppCuteFrontendSemantics(payload, envelope.requiredExtensions, { limits });
   const expectedArtifactId = `bg.artifact.cpp-cute-frontend.sha256.${artifactHash}`;

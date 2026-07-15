@@ -1,5 +1,15 @@
 # @unlocalhosted/browsergrad-compiler Changelog
 
+## Unreleased
+
+- Adds an internal, authorization-only C++/CuTe layout boundary that selects
+  one verified affine fact, preserves nested hierarchy and signed element
+  locations, and lowers it into allocation-free semantic-core layout meaning.
+- Hardens frontend layout verification with exact entry/result ownership,
+  caller-propagated bounded integer algebra, and CuTe's actual `cosize`
+  definition. Provenance remains outside semantic hashes and no tensor storage,
+  dtype, effect, CPU, WebGPU, SLSA, or source-compatibility claim is implied.
+
 ## 0.2.0
 
 - Adds authority-bound read-only CUDA-lite layout bindings over verified

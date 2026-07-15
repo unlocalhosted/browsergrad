@@ -6,6 +6,12 @@ import {
   cppCuteFrontendArtifactFailure,
   type CppCuteFrontendArtifactErrorCode,
 } from "./cpp_cute_frontend_parse.js";
+import {
+  CppCuteIntegerSemanticsError,
+  evaluateStaticCppCuteIntegerExpr,
+  evaluateStaticCppCuteLayoutSummary,
+} from "./cpp_cute_integer_semantics.js";
+import type { DecodeLimits } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import type {
   CppCuteConstantV1,
   CppCuteDeclarationV1,
@@ -31,6 +37,7 @@ export interface VerifiedCppCuteInputHashes {
 
 export async function verifyCppCuteFrontendPayload(
   payload: CppCuteFrontendPayloadV1,
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<VerifiedCppCuteInputHashes> {
   const indexes = buildIndexes(payload);
   verifyInputClosure(payload, indexes);
@@ -43,7 +50,7 @@ export async function verifyCppCuteFrontendPayload(
   verifyOverloadResolutions(payload, indexes);
   verifySourceAbi(payload, indexes);
   verifyFunctionBodies(payload, indexes);
-  verifyFacts(payload, indexes);
+  verifyFacts(payload, indexes, options.limits);
   verifyEntries(payload, indexes);
   verifyDiagnosticsAndOutcome(payload, indexes);
 
@@ -552,11 +559,15 @@ function verifyExpressionTree(
   active.delete(id);
 }
 
-function verifyFacts(payload: CppCuteFrontendPayloadV1, indexes: ArtifactIndexes): void {
+function verifyFacts(
+  payload: CppCuteFrontendPayloadV1,
+  indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
+): void {
   for (const [index, fact] of payload.facts.entries()) {
     const path = `$.payload.facts[${index}]`;
     verifyOrigin(fact.origin, `${path}.origin`, indexes);
-    if (fact.kind === "affine-layout") verifyAffineLayoutFact(fact, path, indexes);
+    if (fact.kind === "affine-layout") verifyAffineLayoutFact(fact, path, indexes, limits);
     else if (fact.kind === "tensor") verifyTensorFact(fact, path, indexes);
     else verifyTargetIntrinsicFact(fact, path, indexes);
   }
@@ -566,37 +577,38 @@ function verifyAffineLayoutFact(
   fact: Extract<CppCuteResolvedFactV1, { readonly kind: "affine-layout" }>,
   path: string,
   indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
 ): void {
   ref(indexes.declarations, fact.resultDeclarationId, `${path}.resultDeclarationId`, "declaration");
-  verifyHierarchyRefs(fact.shape, `${path}.shape`, indexes);
-  verifyHierarchyRefs(fact.stride, `${path}.stride`, indexes);
-  verifyIntegerExprRefs(fact.size, `${path}.size`, indexes);
-  verifyIntegerExprRefs(fact.cosize, `${path}.cosize`, indexes);
+  verifyHierarchyRefs(fact.shape, `${path}.shape`, indexes, limits);
+  verifyHierarchyRefs(fact.stride, `${path}.stride`, indexes, limits);
+  verifyIntegerExprRefs(fact.size, `${path}.size`, indexes, limits);
+  verifyIntegerExprRefs(fact.cosize, `${path}.cosize`, indexes, limits);
   if (!sameHierarchyTopology(fact.shape, fact.stride)) invalid(`${path}.stride`, "shape and stride hierarchy topology must match exactly");
   if (topRank(fact.shape) !== fact.rank) invalid(`${path}.rank`, "rank does not match top-level shape hierarchy");
   if (leafRank(fact.shape) !== fact.leafRank) invalid(`${path}.leafRank`, "leafRank does not match flattened shape hierarchy");
 
-  const shapeLeaves = hierarchyLeaves(fact.shape).map(evaluateStaticIntegerExpr);
-  const strideLeaves = hierarchyLeaves(fact.stride).map(evaluateStaticIntegerExpr);
-  const size = evaluateStaticIntegerExpr(fact.size);
-  const cosize = evaluateStaticIntegerExpr(fact.cosize);
+  const shapeLeaves = hierarchyLeaves(fact.shape).map((expression) => evaluateStaticIntegerExpr(expression, `${path}.shape`, limits));
+  const strideLeaves = hierarchyLeaves(fact.stride).map((expression) => evaluateStaticIntegerExpr(expression, `${path}.stride`, limits));
+  const size = evaluateStaticIntegerExpr(fact.size, `${path}.size`, limits);
+  const cosize = evaluateStaticIntegerExpr(fact.cosize, `${path}.cosize`, limits);
   if ([...shapeLeaves, ...strideLeaves, size, cosize].every((value) => value !== undefined)) {
     const shapes = shapeLeaves as bigint[];
     const strides = strideLeaves as bigint[];
     if (shapes.some((extent) => extent <= 0n)) invalid(`${path}.shape`, "static CuTe shape extents must be positive");
-    const expectedSize = shapes.reduce((product, extent) => product * extent, 1n);
-    let minimum = 0n;
-    let maximum = 0n;
-    for (const [index, extent] of shapes.entries()) {
-      const stride = strides[index];
-      if (stride === undefined) throw new Error("internal: verified shape/stride leaf mismatch");
-      const delta = (extent - 1n) * stride;
-      if (delta < 0n) minimum += delta;
-      else maximum += delta;
+    let summary;
+    try {
+      summary = evaluateStaticCppCuteLayoutSummary(shapes, strides, {
+        path,
+        ...(limits === undefined ? {} : { limits }),
+      });
+    } catch (error) {
+      if (!(error instanceof CppCuteIntegerSemanticsError)) throw error;
+      if (error.kind === "resource-limit") resource(error.path, error.message);
+      invalid(error.path, error.message);
     }
-    const expectedCosize = maximum - minimum + 1n;
-    if (size !== expectedSize) invalid(`${path}.size`, "static CuTe size does not equal product of shape leaves");
-    if (cosize !== expectedCosize) invalid(`${path}.cosize`, "static CuTe cosize does not equal affine address span");
+    if (size !== summary.size) invalid(`${path}.size`, "static CuTe size does not equal product of shape leaves");
+    if (cosize !== summary.cosize) invalid(`${path}.cosize`, "static CuTe cosize does not equal layout(size(layout) - 1) + 1");
   }
 }
 
@@ -656,6 +668,15 @@ function verifyEntries(payload: CppCuteFrontendPayloadV1, indexes: ArtifactIndex
     if (entry.kind === "layout") {
       const fact = ref(indexes.facts, entry.layoutFactId, `${path}.layoutFactId`, "fact");
       if (fact.kind !== "affine-layout") invalid(`${path}.layoutFactId`, "layout entry must reference an affine-layout fact");
+      if (
+        entry.selectedRootDeclarationIds.length !== 1
+        || entry.selectedRootDeclarationIds[0] !== fact.resultDeclarationId
+      ) {
+        invalid(
+          `${path}.selectedRootDeclarationIds`,
+          "layout entry must select exactly its affine-layout result declaration",
+        );
+      }
     } else {
       const source = ref(indexes.facts, entry.sourceTensorFactId, `${path}.sourceTensorFactId`, "fact");
       const destination = ref(indexes.facts, entry.destinationTensorFactId, `${path}.destinationTensorFactId`, "fact");
@@ -724,54 +745,54 @@ function verifyOrigin(origin: CppCuteSourceOriginV1, path: string, indexes: Arti
   else ref(indexes.spans, origin.anchorSpanId, `${path}.anchorSpanId`, "span");
 }
 
-function verifyHierarchyRefs(hierarchy: CppCuteHierarchyV1, path: string, indexes: ArtifactIndexes): void {
-  if (hierarchy.kind === "scalar") verifyIntegerExprRefs(hierarchy.value, `${path}.value`, indexes);
-  else hierarchy.elements.forEach((element, index) => verifyHierarchyRefs(element, `${path}.elements[${index}]`, indexes));
+function verifyHierarchyRefs(
+  hierarchy: CppCuteHierarchyV1,
+  path: string,
+  indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
+): void {
+  if (hierarchy.kind === "scalar") verifyIntegerExprRefs(hierarchy.value, `${path}.value`, indexes, limits);
+  else hierarchy.elements.forEach((element, index) => (
+    verifyHierarchyRefs(element, `${path}.elements[${index}]`, indexes, limits)
+  ));
 }
 
-function verifyIntegerExprRefs(expression: CppCuteIntegerExprV1, path: string, indexes: ArtifactIndexes): void {
+function verifyIntegerExprRefs(
+  expression: CppCuteIntegerExprV1,
+  path: string,
+  indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
+): void {
   if (expression.kind === "runtime") {
     const declaration = ref(indexes.declarations, expression.declarationId, `${path}.declarationId`, "declaration");
     if (declaration.typeId === null || !isIntegerType(indexes.types.get(declaration.typeId))) {
       invalid(`${path}.declarationId`, "runtime layout integer must reference an integer-typed declaration");
     }
   } else if (expression.kind === "add" || expression.kind === "multiply" || expression.kind === "minimum" || expression.kind === "maximum") {
-    expression.values.forEach((value, index) => verifyIntegerExprRefs(value, `${path}.values[${index}]`, indexes));
+    expression.values.forEach((value, index) => verifyIntegerExprRefs(value, `${path}.values[${index}]`, indexes, limits));
   } else if (expression.kind === "floor-divide" || expression.kind === "ceil-divide" || expression.kind === "modulo") {
-    verifyIntegerExprRefs(expression.value, `${path}.value`, indexes);
-    verifyIntegerExprRefs(expression.divisor, `${path}.divisor`, indexes);
-    const divisor = evaluateStaticIntegerExpr(expression.divisor);
+    verifyIntegerExprRefs(expression.value, `${path}.value`, indexes, limits);
+    verifyIntegerExprRefs(expression.divisor, `${path}.divisor`, indexes, limits);
+    const divisor = evaluateStaticIntegerExpr(expression.divisor, `${path}.divisor`, limits);
     if (divisor !== undefined && divisor <= 0n) invalid(`${path}.divisor`, "layout integer divisor must be positive");
   }
 }
 
-function evaluateStaticIntegerExpr(expression: CppCuteIntegerExprV1): bigint | undefined {
-  if (expression.kind === "integer") return wireIntegerToBigInt(expression.value);
-  if (expression.kind === "runtime") return undefined;
-  if (expression.kind === "add" || expression.kind === "multiply" || expression.kind === "minimum" || expression.kind === "maximum") {
-    const values = expression.values.map(evaluateStaticIntegerExpr);
-    if (values.some((value) => value === undefined)) return undefined;
-    const concrete = values as bigint[];
-    if (expression.kind === "add") return concrete.reduce((sum, value) => sum + value, 0n);
-    if (expression.kind === "multiply") return concrete.reduce((product, value) => product * value, 1n);
-    if (expression.kind === "minimum") return concrete.reduce((result, value) => value < result ? value : result);
-    return concrete.reduce((result, value) => value > result ? value : result);
+function evaluateStaticIntegerExpr(
+  expression: CppCuteIntegerExprV1,
+  path: string,
+  limits: Partial<DecodeLimits> | undefined,
+): bigint | undefined {
+  try {
+    return evaluateStaticCppCuteIntegerExpr(expression, {
+      path,
+      ...(limits === undefined ? {} : { limits }),
+    });
+  } catch (error) {
+    if (!(error instanceof CppCuteIntegerSemanticsError)) throw error;
+    if (error.kind === "resource-limit") resource(error.path, error.message);
+    invalid(error.path, error.message);
   }
-  if (expression.kind === "floor-divide" || expression.kind === "ceil-divide" || expression.kind === "modulo") {
-    const value = evaluateStaticIntegerExpr(expression.value);
-    const divisor = evaluateStaticIntegerExpr(expression.divisor);
-    if (value === undefined || divisor === undefined || divisor <= 0n) return undefined;
-    if (expression.kind === "floor-divide") return floorDiv(value, divisor);
-    if (expression.kind === "ceil-divide") return -floorDiv(-value, divisor);
-    return ((value % divisor) + divisor) % divisor;
-  }
-  throw new Error("internal: verified C++/CuTe integer expression kind escaped evaluation");
-}
-
-function floorDiv(value: bigint, divisor: bigint): bigint {
-  const quotient = value / divisor;
-  const remainder = value % divisor;
-  return remainder < 0n ? quotient - 1n : quotient;
 }
 
 function hierarchyLeaves(hierarchy: CppCuteHierarchyV1): readonly CppCuteIntegerExprV1[] {
