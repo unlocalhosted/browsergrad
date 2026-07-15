@@ -29,6 +29,16 @@ export const LAYOUT_DIAGNOSTIC_CODES = {
   invalidBindings: "BG-LAYOUT-INVALID-BINDINGS",
   undeclaredBinding: "BG-LAYOUT-UNDECLARED-BINDING",
   unknownDType: "BG-LAYOUT-UNKNOWN-DTYPE",
+  invalidArtifact: "BG-LAYOUT-INVALID-ARTIFACT",
+  unknownField: "BG-LAYOUT-UNKNOWN-FIELD",
+  duplicateId: "BG-LAYOUT-DUPLICATE-ID",
+  danglingReference: "BG-LAYOUT-DANGLING-REFERENCE",
+  rankMismatch: "BG-LAYOUT-RANK-MISMATCH",
+  invalidAlignment: "BG-LAYOUT-INVALID-ALIGNMENT",
+  fieldRange: "BG-LAYOUT-FIELD-RANGE",
+  constraintViolation: "BG-LAYOUT-CONSTRAINT-VIOLATION",
+  unresolvedSymbol: "BG-LAYOUT-UNRESOLVED-SYMBOL",
+  invalidCoordinate: "BG-LAYOUT-INVALID-COORDINATE",
 } as const;
 
 export type LayoutDiagnosticCode =

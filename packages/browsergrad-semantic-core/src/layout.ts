@@ -34,3 +34,22 @@ export {
   normalizeLayoutExpr,
   type NormalizedLayout,
 } from "./layout/normalize-layout.js";
+export {
+  LAYOUT_ARTIFACT_MAJOR,
+  LAYOUT_ARTIFACT_MINOR,
+  LAYOUT_ARTIFACT_SCHEMA,
+  decodeLayoutArtifact,
+  verifyLayoutArtifact,
+  type LayoutArtifactPayloadV1,
+  type LayoutArtifactVerificationOptions,
+  type VerifiedLayoutArtifact,
+} from "./layout/artifact.js";
+export {
+  layoutArtifactPayload,
+  traceViewAlias,
+  traceViewCoordinate,
+  type LayoutAliasTrace,
+  type LayoutAliasTraceRequest,
+  type LayoutCoordinateRequest,
+  type LayoutCoordinateTrace,
+} from "./layout/trace.js";
