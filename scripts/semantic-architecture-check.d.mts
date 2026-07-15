@@ -96,6 +96,11 @@ export function validatePlatformVocabularySnapshot(
   browserMappings: readonly unknown[],
 ): string[];
 
+export function checkFrozenCuteSourceNormalizerFiles(
+  sources: Readonly<Record<string, string>>,
+  freeze: Record<string, unknown>,
+): string[];
+
 export function checkFrozenCuteStaticLayoutSource(
   typescript: typeof ts,
   source: string,
