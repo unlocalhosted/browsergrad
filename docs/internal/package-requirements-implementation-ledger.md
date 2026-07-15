@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 2 compiler and JIT frontend adapters
+- **Current implementation slice:** Gate 2 typed JIT permutation adapter
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -32,7 +32,7 @@ test does not make a gate verified unless every exit criterion is covered.
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
-| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` owns verified view-copy meaning and shared specialization. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix on Apple Metal 3. The compiler prepares and lowers guarded read-only flat-logical-index bindings without changing frozen IR schemas and now passes a six-case CPU/actual-WebGPU matrix over the supported non-padded rank-2/3 profile on the same adapter tier. | Make typed JIT permutation construct and consume identical layout/kernel artifacts and hashes; add structured compiler padding only through the L2 guard/fill contract; derive/refuse the frozen legacy plan without widening it. Re-run both strict lanes on the exact release commit. Registry publication remains separate. | Semantic-core 81 tests; kernels 14 files/89 tests; compiler 30 files/965 tests; packed bare-import runtime/typecheck; architecture guard; validated kernels nine-case and compiler six-case `passed` terminal records on Apple Metal 3. No two-frontend or compiler-padding claim yet. |
+| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` owns verified view-copy meaning, shared specialization, and the sole canonical frontend construction sink. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix on Apple Metal 3. The compiler prepares and lowers guarded read-only flat-logical-index bindings without changing frozen IR schemas and passes a six-case CPU/actual-WebGPU matrix over the supported non-padded rank-2/3 profile on the same adapter tier. | Make typed JIT permutation emit and consume constructor-owned layout/kernel artifacts and hashes; add structured compiler padding only through the L2 guard/fill contract; derive/refuse the frozen legacy plan without widening it. Re-run strict lanes on the exact release commit. Registry publication remains separate. | Semantic-core 95 tests; kernels 14 files/89 tests; compiler 30 files/966 tests; packed bare-import runtime/typecheck; architecture guard; validated kernels nine-case and compiler six-case `passed` terminal records on Apple Metal 3. No two-frontend or compiler-padding claim yet. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
@@ -50,10 +50,10 @@ families extend the operation rather than add source-shaped execution paths.
 
 ### Work in flight
 
-| Work item | Status | Notes |
-|---|---|---|
+| Work item | Status | Notes | Remaining | Evidence |
+|---|---|---|---|---|
 | Frozen-adapter inventory | `verified` | Baselines are machine-enforced for compiler pointer/scalar memory, `cute_static_layout`, the 44-op shape/f32 `TensorGpuPlan`, 36 JIT constructors/39 real opaque labels and their decisions, runtime requirement mapping, and 17 Grad dtype/view/materialization behaviors. |
-| Semantic-core seam audit | `partial` | Existing compiler/JIT/kernels types must adapt into the core; none can be moved wholesale. Exact initial package split is selected. |
+| Semantic-core seam audit | `verified` | Existing compiler/JIT/kernels types adapt into the core through explicit public subpaths; none moved wholesale. The package split and dependency direction are architecture-guarded. |
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
 | Gate 0 architecture check | `verified` | Cross-package boundaries, generated-source parity, all six required freezes, exact runtime mapping/status unions, reviewed vocabulary, profile-usage parity, pinned inventories/harnesses, normalized definition fingerprints, and representative mutations are implemented and wired into delivery gates. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
@@ -63,8 +63,9 @@ families extend the operation rather than add source-shaped execution paths.
 | Kernels-owned WGSL view-copy lowering | `verified` | The lowerer consumes authority-bound immutable backend-neutral specializations, preserves whole-root f32 bits through u32 storage, interval-proves signed i32 arithmetic, lowers canonical source/destination maps, emits structured guarded fill loads, validates device and transient-working-set limits, and derives semantic plus device-specific hashes. One-in-flight ownership, timeout/abort stale-result suppression, exact scope drainage, distinct error stages, and device-loss invalidation have deterministic fake-device coverage. The required headed lane emitted one validated `passed` terminal record for all nine bit-exact CPU/WebGPU cases on Apple Metal 3; headless absence remains a truthful failed environment record. |
 | Shared required-WebGPU evidence test contract | `verified` | A neutral, unpublished test-support module now owns adapter/device acquisition, required-versus-advisory outcome rules, generic terminal-envelope validation, and exactly-once emission. Kernels retains its suite-specific ordered case and observation validation and passes the same advisory no-adapter path through the shared contract. Compiler and later JIT lanes consume this helper rather than fork release-evidence semantics. |
 | Compiler verified-layout binding preparation | `verified` | Compiler now depends on semantic-core through public `/layout` and `/schema` protocols and prepares explicit read-only, row-major-flat parameter bindings. Prepared objects are authority-bound and deeply immutable, retain the semantic layout hash plus a deterministic binding-projection hash, resolve dynamic dimensions once, reject non-global views and duplicate/malformed bindings, and provide a collision-resistant layout-bound compile-cache key without changing frozen semantic IR. Lowering into memory references is the next slice. |
-| Compiler read-only layout lowering | `verified` | A separate layout-bound compile entrypoint rewrites direct guarded reads after ordinary runtime lowering and before semantic-IR verification. It unflattens one stable non-escaping `uint` logical index, substitutes the verified positive-affine map, and sends the same physical expression through CPU reference and WGSL legalization. Initial support is specialized nonempty rank-2/3 global `f32`; predicates, writes, aliases, pointer offsets/rebasing, signed/mutated/escaped indices, non-affine maps, unaligned byte maps, rank drift, and u32 overflow fail closed. The frozen compiled wrapper is instance-authorized, execution validates the complete verified root allocation, and full semantic/binding hashes enter pipeline identity. Six supported cases pass complete source/output bit comparison on actual Apple Metal 3; padding remains explicitly unsupported. |
+| Compiler read-only layout lowering | `verified` | A separate layout-bound compile entrypoint rewrites direct guarded reads after ordinary runtime lowering and before semantic-IR verification. It unflattens one stable non-escaping `uint` logical index, substitutes the verified positive-affine map, and sends the same physical expression through CPU reference and WGSL legalization. Initial support is specialized nonempty rank-2/3 global `f32`; only index-map predicates proved true over the complete logical domain are erased, while conditional predicates, writes, aliases, pointer offsets/rebasing, signed/mutated/escaped indices, non-affine maps, unaligned byte maps, rank drift, and u32 overflow fail closed. The frozen compiled wrapper is instance-authorized, execution validates the complete verified root allocation, and full semantic/binding hashes enter pipeline identity. Six supported cases pass complete source/output bit comparison on actual Apple Metal 3; padding remains explicitly unsupported. |
 | Compiler required-device layout conformance | `verified` | The required/advisory lane prepares the exact compiler proof once per case, differentially checks semantic-core physical indices against CPU traces, validates one single-dispatch prepared topology, executes on real WebGPU, reads back complete source and destination allocations, drains queue/late errors, races device loss/timeouts, and emits one validated terminal record. Headless absence is failed/not-run by mode. Compiler publish workflows retain an exact-SHA log and prepublish rejects a missing, stale, dirty, or foreign marker. | Re-run required mode on the exact future release commit. The generic compiler runner does not yet claim the kernels view-copy runner's complete scoped error taxonomy. |
+| Canonical view-copy artifact construction | `verified` | One generic sink snapshots closed canonical JSON, sorts set-like symbols/constraints, normalizes resource-bounded layout algebra, fixes source/destination allocation/map/view roles, forces disjoint materialization, verifies both opaque artifacts, and returns canonical IDs plus hashes. Its dense-permutation wrapper derives output shape, balanced row-major stride/storage expressions, effects, and reject policy from only canonical input shape, axes, and dtype. Producer/artifact metadata is non-semantic. | JIT must now consume this API; no frontend may rebuild the same facts or use `value_id` in semantic identity. | 10 semantic-core files/95 tests; pinned rank-2 artifact hashes and CPU execution, rank-3, zero extent, >i64 byte lengths, u64 overflow, rank/expansion budgets, transport-hash independence, set-order independence, mutation/authority, hostile-input rejection, packed export/runtime/declaration proof. |
 
 ### Audit findings recorded so far
 
@@ -193,6 +194,7 @@ families extend the operation rather than add source-shaped execution paths.
 | D-022 | 2026-07-15 | accepted | Adapt compiler layout bindings after ordinary runtime lowering and before semantic-IR verification. The first profile accepts only direct read-only global `f32` access from one unmodified, non-escaping `uint` logical index dominated by its exact logical-domain guard; it interval-proves positive-affine rank-2/3 maps and root containment, then places one physical index expression in the existing memory reference consumed by both CPU and WGSL. The compiled wrapper is frozen and privately bound to its prepared proof, runtime admission validates the complete verified root allocation, and full semantic plus binding hashes enter pipeline identity; frozen semantic schemas gain no fields. | This preserves one indexing truth and one verification pipeline while preventing legacy CPU zero-fill, WebGPU robust-buffer behavior, indirect mutation, forged proof metadata, aliases, pointer rebasing, integer wrap, undersized buffers, or pipeline-cache collisions from silently substituting semantics. Padding and richer signed maps require their own structured lowering rather than widening this contract. |
 | D-023 | 2026-07-15 | accepted | Keep WebGPU evidence infrastructure test-only until the production capability/evidence package seam is implemented, but share one neutral repository module for real adapter/device acquisition, required/advisory outcomes, generic `browsergrad.execution-evidence@1` terminal validation, and exactly-once emission. Each suite owns its ordered cases, observations, comparison policy, and stage diagnostics. | A second package was about to copy the kernels evidence policy. Sharing the stable generic test contract prevents divergent false-green behavior without prematurely publishing or freezing a semantic-core `/capability` API around a test harness. |
 | D-024 | 2026-07-15 | accepted | Compiler layout conformance uses prepared single-dispatch execution, complete finite-f32 source and output bit comparison, semantic-core/CPU physical-index differential evidence, full semantic/binding/compile/WGSL hashes, explicit queue and late-error drainage, timeout/device-loss races, and no optional WebGPU features. Required release workflows retain the terminal log under the exact commit, and compiler prepublish has its own SHA/cleanliness marker. | One-shot execution hid topology/cleanup facts, output-only comparison could miss source mutation or tail writes, and the kernels release marker cannot authorize a compiler capability. Compiler padding and arbitrary NaN-payload preservation remain outside this profile rather than being inferred from finite f32 success. |
+| D-025 | 2026-07-15 | accepted | All frontend-created view copies pass through one semantic-core constructor that owns role ordering, entity IDs, disjoint aliases, effects, overlap, normalization, verification, and hashes. A dense permutation wrapper accepts only canonical input shape, axes, and dtype; transport metadata is a separate non-semantic option. Rank/dtype backend limits remain legalization policy. | Prevents compiler/JIT from independently reconstructing output shapes, strides, allocation sizes, aliases, or IDs; keeps zero extents exact; makes cross-frontend hash equality an architectural consequence rather than a fixture convention; and leaves the constructor reusable beyond the initial rank-2/3 f32 profile. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -599,6 +601,37 @@ affected implementation slice is marked complete.
   The local headed result proves this implementation, not a future release
   commit; release CI must rerun it.
 
+### 2026-07-15 — Canonical view-copy construction
+
+- Added the only frontend-facing construction sink for verified view-copy
+  layout/kernel pairs. The sink accepts no allocation, alias, map, view, or
+  operation IDs; it fixes role order, snapshots hostile in-memory input,
+  normalizes layouts, verifies both authority-bound artifacts, and returns
+  their canonical role IDs and semantic hashes.
+- Added a dense-permutation wrapper whose semantic inputs are only canonical
+  source extents, axes, and dtype. It derives output shape, balanced row-major
+  stride and byte-length expressions, global allocations, distinct aliases,
+  exact effects, forbid-overlap, and reject-invalid-source policy. Zero extents
+  allocate zero semantic bytes; no legacy `max(dim, 1)` rule is imported.
+- Canonicalized set-like symbol/constraint order and proved producer/artifact
+  metadata cannot affect either semantic hash or canonical entity IDs. Backend
+  rank/dtype restrictions stay outside construction and remain profile policy.
+- Fixed layout substitution to clone repeated coordinate expressions. The first
+  constructor run found that permutation normalization returned a frozen object
+  graph with shared coordinate nodes, which wire verification correctly
+  rejected as non-canonical JSON. Normalized results now remain both immutable
+  and canonical trees. Substitution consumes node/depth budgets while expanding
+  so a repeated-coordinate compose chain cannot allocate exponentially before
+  the resource limit fires.
+- Pinned the canonical rank-2 transpose layout and kernel hashes. The compiler
+  consumes that exact constructor layout after proving its explicit logical-
+  bounds predicate true over the complete view domain; conditional predicates
+  remain unsupported rather than being silently discarded.
+- Replaced release-test hand assembly with the public constructor and covered
+  the extracted tarball plus a fresh bare-import runtime/declaration consumer.
+  Semantic-core stays at unreleased `0.2.0`; wire schema and operation versions
+  are unchanged.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -635,6 +668,8 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Advisory compiler layout browser lane | `BG_BROWSER_HEADLESS=1 pnpm --filter @unlocalhosted/browsergrad-compiler test:browser:layout-bindings` | Passed command with one skipped/not-run test and one validated terminal record because headless Chromium returned no adapter. Prepared artifact and case-set hashes match required/headed runs. | Advisory result is not conformance evidence. |
 | 2026-07-15 | Headless required compiler layout browser lane | `BG_BROWSER_HEADLESS=1 pnpm --filter @unlocalhosted/browsergrad-compiler test:browser:layout-bindings:required` | Failed as designed: one validated required terminal record reported `outcome=failed` and `BG-WEBGPU-EVIDENCE-DEVICE-UNAVAILABLE`; Vitest exited 1. | Preserve as truthful environment evidence; absence cannot authorize release. |
 | 2026-07-15 | Headed required actual-device compiler layout lane | `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser:layout-bindings:required` | Passed: headed Chromium acquired Apple Metal 3/WebGPU core; all six ordered cases matched semantic-core physical traces, CPU reference, and complete source/output finite-f32 bits; each prepared plan was one single-dispatch pipeline/workgroup; queue, late-error, device-loss, and uncaptured-error checks were clean; one validated terminal pass was emitted. | Required release CI must repeat on the exact publish commit and retain its full log. |
+| 2026-07-15 | Canonical view-copy construction | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint && pnpm --filter @unlocalhosted/browsergrad-semantic-core build` | Passed: strict typecheck, 10 files/95 tests, lint, and build. Tests include pinned artifact hashes, structured hostile-input failures, rank/node/depth budgets, and CPU execution. | None. |
+| 2026-07-15 | Constructor/compiler packed integration | `pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test && pnpm --filter @unlocalhosted/browsergrad-compiler lint && pnpm --filter @unlocalhosted/browsergrad-compiler build && pnpm architecture:check && pnpm test:release-packages && git diff --check` | Passed: strict typecheck, 30 files/966 tests, lint/build, architecture guard, packed constructor exports/execution, and fresh three-tarball bare-import runtime/declaration proof. | JIT adapter is next; exact actual-device lanes still rerun at release commit. |
 
 ## Failure and Recovery Log
 
@@ -642,6 +677,19 @@ Record failures that may matter after context loss. Include the exact failing
 command, concise error, suspected cause, resolution or next experiment, and
 whether any files may be left partially changed.
 
+- The first constructor test run failed eight cases with
+  `BG-SCHEMA-NONCANONICAL-VALUE` because permutation substitution reused one
+  coordinate object in location and predicate branches. The semantics were
+  numerically correct but the result was an object graph, not canonical JSON.
+  Substitution now emits a fresh expression tree per occurrence and a direct
+  canonicalization regression guards the invariant; all 95 tests pass.
+- The first packed constructor consumer failed with
+  `BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-PREDICATE`: normalized layouts
+  correctly make logical bounds explicit, while the compiler adapter accepted
+  only literal `true`. The adapter now interval-proves a predicate is true over
+  the complete resolved logical domain before erasing it; the existing
+  conditional-predicate rejection still passes, as do all 966 compiler tests
+  and the packed fresh-consumer gate.
 - `pnpm install` failed with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` because
   pnpm would not recreate `node_modules` without a TTY. No source files were
   partially changed.
@@ -846,11 +894,12 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Run the compiler's lowered bindings through a required actual-WebGPU lane with
-the same artifacts, buffers, physical-index evidence, and truthful no-adapter
-failure policy. Then add the semantic-core construction seam and make the JIT
-`PERMUTE` side table produce the same rank-2 transpose artifact/hash without
-widening `TensorGpuPlan` or reconstructing offsets independently. Extend the
-unchanged adapters to the full matrix only after that tracer passes. Re-run the
-retained strict lanes for the exact release commit; current local evidence does
-not prove a future publish.
+Emit a separate typed JIT `PERMUTE` side table during the existing post-fusion
+plan traversal. It must call the semantic-core dense-permutation constructor,
+use `value_id` only for runtime correlation, reject the initial non-f32/rank-
+outside-2-or-3/dynamic/invalid-axis cases before legacy execution, and route
+eligible residents through kernels' semantic view-copy path without readback or
+offset reconstruction. Prove the first rank-2 transpose hash against the
+compiler adapter before expanding the matrix. Re-run retained strict lanes for
+the exact release commit; current local evidence does not prove a future
+publish.

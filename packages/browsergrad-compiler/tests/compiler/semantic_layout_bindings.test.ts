@@ -13,6 +13,7 @@ import {
   hashSemanticArtifact,
   parseWireI64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import { createVerifiedDensePermutationViewCopyArtifacts } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import {
   CUDA_LITE_LAYOUT_BINDING_PROFILE,
   CudaLiteCompilerError,
@@ -372,6 +373,32 @@ describe("CUDA-lite verified layout lowering", () => {
     expect(compiled.layoutBindingCompileCacheKey).toBe(
       createCudaLiteLayoutBindingCompileCacheKey(DIRECT_VIEW_COPY, prepared, { workgroupSize: [8, 1, 1] }),
     );
+  });
+
+  it("consumes the canonical constructor predicate when it is true over the logical domain", async () => {
+    const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+      inputShape: [parseWireI64("2"), parseWireI64("3")],
+      axes: [1, 0],
+      dtype: "f32",
+    }, { producer: { id: "compiler-constructor-test", version: "1" } });
+    const prepared = await preparedInput(artifacts.layout);
+    const compiled = compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, prepared, {
+      workgroupSize: [8, 1, 1],
+    });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([1, 2, 3, 4, 5, 6]),
+          output: new Float32Array(6),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+
+    expect(prepared.layoutSemanticHash).toBe(artifacts.layoutSemanticHash);
+    expect(prepared.layoutSemanticHash).toBe(await hashSemanticArtifact(artifacts.layout));
+    expect([...result.buffers.output as Float32Array]).toEqual([1, 4, 2, 5, 3, 6]);
   });
 
   it("specializes dynamic dimension bindings into physical offsets and compile identity", async () => {

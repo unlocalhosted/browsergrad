@@ -1,4 +1,4 @@
-import type { IndexExpr } from "@unlocalhosted/browsergrad-semantic-core/layout";
+import type { IndexExpr, PredicateExpr } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import { wireIntegerToBigInt } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { isSemanticKernelIrOperation } from "./semantic_ir.js";
 import type {
@@ -151,14 +151,6 @@ function createBindingContext(
       "layout-bound parameters cannot also use legacy pointerBaseOffsets",
     );
   }
-  if (record.indexMap.inBounds.kind !== "bool" || record.indexMap.inBounds.value !== true) {
-    fail(
-      "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-PREDICATE",
-      `${path}.viewId`,
-      "initial compiler layout binding requires an always-true verified index-map predicate",
-    );
-  }
-
   const logicalShape = record.summary.logicalShape.map((value) => BigInt(value));
   if (logicalShape.length < 2 || logicalShape.length > 3 || logicalShape.some((extent) => extent <= 0n)) {
     fail(
@@ -171,6 +163,13 @@ function createBindingContext(
   requireU32(logicalElementCount, `${path}.viewId`, "logical element count");
   const dimensionValues = new Map(Object.entries(record.summary.dimensionBindings).map(([id, value]) => [id, BigInt(value)]));
   const coordinateIntervals = logicalShape.map((extent) => ({ minimum: 0n, maximum: extent - 1n }));
+  if (provePredicate(record.indexMap.inBounds, coordinateIntervals, dimensionValues) !== "always-true") {
+    fail(
+      "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-PREDICATE",
+      `${path}.viewId`,
+      "initial compiler layout binding requires an index-map predicate proved true over the complete logical domain",
+    );
+  }
   const location = indexInterval(record.indexMap.location, coordinateIntervals, dimensionValues, `${path}.indexMap.location`);
   if (location.minimum < 0n) {
     fail(
@@ -224,6 +223,105 @@ function createBindingContext(
     mutatedSymbols,
     uses: 0,
   };
+}
+
+type PredicateProof = "always-true" | "always-false" | "unknown";
+
+// Admission proof for the unsigned initial lowering profile. Unknown is a
+// hard rejection: this removes a predicate only when every logical coordinate
+// in the resolved view domain satisfies it.
+function provePredicate(
+  expression: PredicateExpr,
+  coordinates: readonly IntegerInterval[],
+  dimensions: ReadonlyMap<string, bigint>,
+): PredicateProof {
+  switch (expression.kind) {
+    case "bool": return expression.value ? "always-true" : "always-false";
+    case "equal": {
+      const lhs = predicateIndexInterval(expression.lhs, coordinates, dimensions);
+      const rhs = predicateIndexInterval(expression.rhs, coordinates, dimensions);
+      if (lhs === undefined || rhs === undefined) return "unknown";
+      if (
+        lhs.minimum === lhs.maximum
+        && rhs.minimum === rhs.maximum
+        && lhs.minimum === rhs.minimum
+      ) return "always-true";
+      if (lhs.maximum < rhs.minimum || rhs.maximum < lhs.minimum) return "always-false";
+      return "unknown";
+    }
+    case "lessEqual": {
+      const lhs = predicateIndexInterval(expression.lhs, coordinates, dimensions);
+      const rhs = predicateIndexInterval(expression.rhs, coordinates, dimensions);
+      if (lhs === undefined || rhs === undefined) return "unknown";
+      if (lhs.maximum <= rhs.minimum) return "always-true";
+      if (lhs.minimum > rhs.maximum) return "always-false";
+      return "unknown";
+    }
+    case "and": {
+      let proof: PredicateProof = "always-true";
+      for (const value of expression.values) {
+        const current = provePredicate(value, coordinates, dimensions);
+        if (current === "always-false") return current;
+        if (current === "unknown") proof = current;
+      }
+      return proof;
+    }
+    case "or": {
+      let proof: PredicateProof = "always-false";
+      for (const value of expression.values) {
+        const current = provePredicate(value, coordinates, dimensions);
+        if (current === "always-true") return current;
+        if (current === "unknown") proof = current;
+      }
+      return proof;
+    }
+    case "not": {
+      const value = provePredicate(expression.value, coordinates, dimensions);
+      return value === "always-true" ? "always-false" : value === "always-false" ? "always-true" : "unknown";
+    }
+  }
+}
+
+function predicateIndexInterval(
+  expression: IndexExpr,
+  coordinates: readonly IntegerInterval[],
+  dimensions: ReadonlyMap<string, bigint>,
+): IntegerInterval | undefined {
+  switch (expression.kind) {
+    case "const": return predicateBoundedInterval(wireIntegerToBigInt(expression.value));
+    case "coordinate": return coordinates[expression.axis];
+    case "dimension": {
+      const value = dimensions.get(expression.symbolId);
+      return value === undefined ? undefined : predicateBoundedInterval(value);
+    }
+    case "add": {
+      let minimum = 0n;
+      let maximum = 0n;
+      for (const term of expression.terms) {
+        const interval = predicateIndexInterval(term, coordinates, dimensions);
+        if (interval === undefined || minimum > U32_MAX - interval.minimum || maximum > U32_MAX - interval.maximum) return undefined;
+        minimum += interval.minimum;
+        maximum += interval.maximum;
+      }
+      return { minimum, maximum };
+    }
+    case "mul": {
+      const lhs = predicateIndexInterval(expression.lhs, coordinates, dimensions);
+      const rhs = predicateIndexInterval(expression.rhs, coordinates, dimensions);
+      if (lhs === undefined || rhs === undefined) return undefined;
+      if (lhs.maximum !== 0n && rhs.maximum > U32_MAX / lhs.maximum) return undefined;
+      return { minimum: lhs.minimum * rhs.minimum, maximum: lhs.maximum * rhs.maximum };
+    }
+    case "floorDiv":
+    case "ceilDiv":
+    case "mod":
+    case "min":
+    case "max": return undefined;
+  }
+}
+
+function predicateBoundedInterval(value: bigint): IntegerInterval | undefined {
+  return value < 0n || value > U32_MAX ? undefined : { minimum: value, maximum: value };
 }
 
 function validateNoAliasMetadata(ir: RuntimeLoweredSemanticKernelIr, bindings: readonly BindingContext[]): void {

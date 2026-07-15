@@ -50,65 +50,28 @@ try {
   for (const exportName of ["normalizeLayoutExpr", "traceViewCoordinate", "verifyLayoutArtifact"]) {
     assert(exportName in semanticLayout, `semantic-core layout export missing ${exportName}`);
   }
-  for (const exportName of ["verifyKernelArtifact", "verifyInitialPortableViewCopyProfile", "prepareViewCopyCpu"]) {
+  for (const exportName of [
+    "createVerifiedDensePermutationViewCopyArtifacts",
+    "createVerifiedViewCopyArtifacts",
+    "verifyKernelArtifact",
+    "verifyInitialPortableViewCopyProfile",
+    "prepareViewCopyCpu",
+  ]) {
     assert(exportName in semanticKernel, `semantic-core kernel export missing ${exportName}`);
   }
-  const packedLayout = await semanticLayout.verifyLayoutArtifact({
-    schema: "browsergrad.layout",
-    version: { major: 1, minor: 0 },
+  const packedArtifacts = await semanticKernel.createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: ["2", "2"],
+    axes: [1, 0],
+    dtype: "f32",
+  }, {
     producer: { id: "release-test", version: "1" },
-    artifactId: "packed-layout",
-    requiredExtensions: [],
-    payload: {
-      symbols: [],
-      constraints: [],
-      allocations: [
-        { allocationId: "source", byteLength: { kind: "const", value: "16" }, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "sourceAlias" },
-        { allocationId: "destination", byteLength: { kind: "const", value: "16" }, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "destinationAlias" },
-      ],
-      indexMaps: [
-        {
-          indexMapId: "transpose",
-          coordinateRank: 2,
-          locationUnit: "element",
-          location: { kind: "add", terms: [{ kind: "mul", lhs: { kind: "coordinate", axis: 1 }, rhs: { kind: "const", value: "2" } }, { kind: "coordinate", axis: 0 }] },
-          inBounds: { kind: "bool", value: true },
-        },
-        {
-          indexMapId: "dense",
-          coordinateRank: 2,
-          locationUnit: "element",
-          location: { kind: "add", terms: [{ kind: "mul", lhs: { kind: "coordinate", axis: 0 }, rhs: { kind: "const", value: "2" } }, { kind: "coordinate", axis: 1 }] },
-          inBounds: { kind: "bool", value: true },
-        },
-      ],
-      views: [
-        { viewId: "sourceView", allocationId: "source", dtype: "f32", byteOffset: { kind: "const", value: "0" }, shape: [{ kind: "const", value: "2" }, { kind: "const", value: "2" }], indexMapId: "transpose", requiredAlignmentBytes: 4 },
-        { viewId: "destinationView", allocationId: "destination", dtype: "f32", byteOffset: { kind: "const", value: "0" }, shape: [{ kind: "const", value: "2" }, { kind: "const", value: "2" }], indexMapId: "dense", requiredAlignmentBytes: 4 },
-      ],
-    },
+    layoutArtifactId: "packed-layout",
+    kernelArtifactId: "packed-kernel",
   });
+  const packedLayout = packedArtifacts.layout;
   const packedLayoutPayload = semanticLayout.layoutArtifactPayload(packedLayout);
-  const packedKernel = await semanticKernel.verifyKernelArtifact({
-    schema: "browsergrad.kernel",
-    version: { major: 1, minor: 0 },
-    producer: { id: "release-test", version: "1" },
-    artifactId: "packed-kernel",
-    requiredExtensions: [],
-    payload: {
-      layoutSemanticHash: await semanticSchema.hashSemanticArtifact(packedLayout),
-      operations: [{
-        operationId: "transposeCopy",
-        kind: "view-copy",
-        version: { major: 1, minor: 0 },
-        dtype: "f32",
-        source: { viewId: packedLayoutPayload.views[0].viewId, access: "read", invalidSource: { kind: "reject" } },
-        destination: { viewId: packedLayoutPayload.views[1].viewId, access: "write" },
-        overlap: { kind: "forbid" },
-      }],
-    },
-  }, { layout: packedLayout });
-  const packedOperationId = semanticKernel.kernelArtifactPayload(packedKernel).operations[0].operationId;
+  const packedKernel = packedArtifacts.kernel;
+  const packedOperationId = packedArtifacts.operationId;
   const packedCopy = await semanticKernel.prepareViewCopyCpu(packedLayout, packedKernel, { operationId: packedOperationId });
   const packedSource = new Uint8Array(16);
   const packedDestination = new Uint8Array(16);
@@ -322,9 +285,9 @@ function installPackedConsumer(packageNames) {
 
 function verifyInstalledSemanticViewCopyConsumer(consumer) {
   const source = `
-import { layoutArtifactPayload, verifyLayoutArtifact } from "@unlocalhosted/browsergrad-semantic-core/layout";
-import { kernelArtifactPayload, prepareViewCopyCpu, verifyKernelArtifact } from "@unlocalhosted/browsergrad-semantic-core/kernel";
-import { hashSemanticArtifact } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
+import { createVerifiedDensePermutationViewCopyArtifacts, prepareViewCopyCpu } from "@unlocalhosted/browsergrad-semantic-core/kernel";
+import { hashSemanticArtifact, parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
 import {
   compileCudaLiteKernelWithLayoutBindings,
@@ -333,62 +296,17 @@ import {
   runCompiledKernelSemanticReference,
 } from "@unlocalhosted/browsergrad-compiler";
 
-const layout = await verifyLayoutArtifact({
-  schema: "browsergrad.layout",
-  version: { major: 1, minor: 0 },
+const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+  inputShape: [parseWireI64("2"), parseWireI64("2")],
+  axes: [1, 0],
+  dtype: "f32",
+}, {
   producer: { id: "fresh-consumer", version: "1" },
-  artifactId: "transpose-layout",
-  requiredExtensions: [],
-  payload: {
-    symbols: [],
-    constraints: [],
-    allocations: [
-      { allocationId: "source", byteLength: { kind: "const", value: "16" }, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "sourceAlias" },
-      { allocationId: "destination", byteLength: { kind: "const", value: "16" }, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "destinationAlias" },
-    ],
-    indexMaps: [
-      {
-        indexMapId: "transpose",
-        coordinateRank: 2,
-        locationUnit: "element",
-        location: { kind: "add", terms: [{ kind: "mul", lhs: { kind: "coordinate", axis: 1 }, rhs: { kind: "const", value: "2" } }, { kind: "coordinate", axis: 0 }] },
-        inBounds: { kind: "bool", value: true },
-      },
-      {
-        indexMapId: "dense",
-        coordinateRank: 2,
-        locationUnit: "element",
-        location: { kind: "add", terms: [{ kind: "mul", lhs: { kind: "coordinate", axis: 0 }, rhs: { kind: "const", value: "2" } }, { kind: "coordinate", axis: 1 }] },
-        inBounds: { kind: "bool", value: true },
-      },
-    ],
-    views: [
-      { viewId: "sourceView", allocationId: "source", dtype: "f32", byteOffset: { kind: "const", value: "0" }, shape: [{ kind: "const", value: "2" }, { kind: "const", value: "2" }], indexMapId: "transpose", requiredAlignmentBytes: 4 },
-      { viewId: "destinationView", allocationId: "destination", dtype: "f32", byteOffset: { kind: "const", value: "0" }, shape: [{ kind: "const", value: "2" }, { kind: "const", value: "2" }], indexMapId: "dense", requiredAlignmentBytes: 4 },
-    ],
-  },
+  layoutArtifactId: "transpose-layout",
+  kernelArtifactId: "transpose-kernel",
 });
+const { layout, kernel, operationId } = artifacts;
 const payload = layoutArtifactPayload(layout);
-const kernel = await verifyKernelArtifact({
-  schema: "browsergrad.kernel",
-  version: { major: 1, minor: 0 },
-  producer: { id: "fresh-consumer", version: "1" },
-  artifactId: "transpose-kernel",
-  requiredExtensions: [],
-  payload: {
-    layoutSemanticHash: await hashSemanticArtifact(layout),
-    operations: [{
-      operationId: "transposeCopy",
-      kind: "view-copy",
-      version: { major: 1, minor: 0 },
-      dtype: "f32",
-      source: { viewId: payload.views[0].viewId, access: "read", invalidSource: { kind: "reject" } },
-      destination: { viewId: payload.views[1].viewId, access: "write" },
-      overlap: { kind: "forbid" },
-    }],
-  },
-}, { layout });
-const operationId = kernelArtifactPayload(kernel).operations[0].operationId;
 const cpu = await prepareViewCopyCpu(layout, kernel, { operationId });
 const wgsl = await prepareSemanticViewCopyWgsl(layout, kernel, { operationId });
 const compilerBinding = await prepareCudaLiteLayoutBindings(layout, [{
