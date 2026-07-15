@@ -6,6 +6,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import {
+  checkFrozenCompilerPointerScalarMemorySource,
   checkFrozenCuteStaticLayoutSource,
   checkFrozenTensorGpuPlanSource,
   checkWorkspaceImportSpecifier,
@@ -13,6 +14,7 @@ import {
   extractModuleSpecifiers,
   extractPythonCustomLabels,
   runSemanticArchitectureCheck,
+  validateCompilerPointerBehaviorFixture,
   validateSemanticFreezeManifest,
 } from "../../../scripts/semantic-architecture-check.mjs";
 
@@ -55,6 +57,57 @@ describe("semantic architecture guardrails", () => {
     );
     expect(checkFrozenTensorGpuPlanSource(ts, source, freeze("tensor-gpu-plan")))
       .toContainEqual(expect.stringContaining("TensorPlanOp operations changed"));
+  });
+
+  it("rejects compiler pointer/scalar schema widening and readonly loss", () => {
+    const definitionFile = join(repoRoot, "packages/browsergrad-compiler/src/semantic_ir_types.ts");
+    const publicBarrelFile = join(repoRoot, "packages/browsergrad-compiler/src/index.ts");
+    const baseline = readFileSync(definitionFile, "utf8");
+    const publicBarrel = readFileSync(publicBarrelFile, "utf8");
+    const pointerFreeze = freeze("compiler-pointer-scalar-memory");
+
+    expect(checkFrozenCompilerPointerScalarMemorySource(
+      ts,
+      baseline.replace('  | "unknown";', '  | "unknown"\n  | "new-space";'),
+      publicBarrel,
+      pointerFreeze,
+    )).toContainEqual(expect.stringContaining("SemanticAddressSpace values changed"));
+    expect(checkFrozenCompilerPointerScalarMemorySource(
+      ts,
+      baseline.replace("export interface SemanticPointerAlias {", "export interface SemanticPointerAlias {\n  readonly sourceShapedOffset?: number;"),
+      publicBarrel,
+      pointerFreeze,
+    )).toContainEqual(expect.stringContaining("SemanticPointerAlias changed"));
+    expect(checkFrozenCompilerPointerScalarMemorySource(
+      ts,
+      baseline.replace("  readonly pointerRoot?: SemanticMemoryId;", "  pointerRoot?: SemanticMemoryId;"),
+      publicBarrel,
+      pointerFreeze,
+    )).toContainEqual(expect.stringContaining("pointerRoot must remain readonly"));
+    expect(checkFrozenCompilerPointerScalarMemorySource(
+      ts,
+      baseline.replace('readonly kind: "pointer-rebind"; readonly target:', 'readonly kind: "pointer-rebind"; readonly hidden?: number; readonly target:'),
+      publicBarrel,
+      pointerFreeze,
+    )).toContainEqual(expect.stringContaining("operation pointer-rebind changed"));
+  });
+
+  it("rejects compiler pointer/scalar public-export and behavior-fixture drift", () => {
+    const definitionFile = join(repoRoot, "packages/browsergrad-compiler/src/semantic_ir_types.ts");
+    const publicBarrelFile = join(repoRoot, "packages/browsergrad-compiler/src/index.ts");
+    const fixtureFile = join(repoRoot, "packages/browsergrad-compiler/tests/fixtures/pointer-scalar-memory.v0.json");
+    const pointerFreeze = freeze("compiler-pointer-scalar-memory");
+    expect(checkFrozenCompilerPointerScalarMemorySource(
+      ts,
+      readFileSync(definitionFile, "utf8"),
+      readFileSync(publicBarrelFile, "utf8").replace("  type SemanticMemoryRef,\n", ""),
+      pointerFreeze,
+    )).toContainEqual(expect.stringContaining("public export SemanticMemoryRef is missing"));
+
+    const fixture = JSON.parse(readFileSync(fixtureFile, "utf8")) as { cases: unknown[] };
+    fixture.cases.pop();
+    expect(validateCompilerPointerBehaviorFixture(fixture, pointerFreeze))
+      .toContainEqual(expect.stringContaining("behavior fixture IDs changed"));
   });
 
   it("rejects union widening, inheritance, and readonly loss", () => {

@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 1 closure; Gate 0 inventory remains active
+- **Current implementation slice:** Gate 0 remaining behavior and vocabulary freezes
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -30,7 +30,7 @@ test does not make a gate verified unless every exit criterion is covered.
 
 | Gate | Status | Current result | Missing before `verified` | Evidence |
 |---|---|---|---|---|
-| Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and three highest-risk legacy adapters are machine-frozen. The check runs in root, compiler, CI, release, and publish gates; mutation tests cover representative bypasses. | Add stable capability IDs and a machine-readable dtype/view/materialization inventory; freeze pointer/scalar memory, Grad view/bf16, runtime capability labels, and adapter behavior beyond surface shape. | `pnpm architecture:check`; compiler semantic-architecture tests. |
+| Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and four legacy adapters are machine-frozen. Compiler pointer/scalar memory now has an exact public/schema freeze plus five executable CPU-reference/WGSL eligibility fixtures. The check runs in root, compiler, CI, release, and publish gates; mutation tests cover representative bypasses. | Add stable diagnostic and semantic capability IDs; add separate machine-readable semantic capability, assignment-requirement, and dtype/view/materialization/opaque-operation inventories; freeze Grad view/bf16, runtime routing labels, and exact JIT opaque-operation decisions. | `pnpm architecture:check`; compiler semantic-architecture and pointer/scalar freeze tests. |
 | Gate 1 — value/layout core and wire foundation | `verified` | The private package implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None for Gate 1. Public-package adoption still requires the separate packed/release-tested `0.x` transition recorded in D-004. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check. |
 | Gate 2 — multi-frontend, multi-backend view slice | `not-started` | No implementation in this workstream. | All Gate 2 exit criteria. | None. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
@@ -51,10 +51,10 @@ shells or another frontend-shaped execution path.
 
 | Work item | Status | Notes |
 |---|---|---|
-| Frozen-adapter inventory | `partial` | Baselines recorded and machine-enforced for `cute_static_layout`, 44-op shape/f32 `TensorGpuPlan`, and 36 executable `OP_CUSTOM` constructors. Lower-level behavior and remaining public surfaces still need freezes. |
+| Frozen-adapter inventory | `partial` | Baselines recorded and machine-enforced for compiler pointer/scalar memory, `cute_static_layout`, 44-op shape/f32 `TensorGpuPlan`, and 36 executable `OP_CUSTOM` constructors. The pointer/scalar baseline includes exact public/type shapes and five executable behavior cases; Grad, runtime, and exact opaque-operation decisions remain. |
 | Semantic-core seam audit | `partial` | Existing compiler/JIT/kernels types must adapt into the core; none can be moved wholesale. Exact initial package split is selected. |
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
-| Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, required legacy freezes, and representative mutation tests are implemented and wired into delivery gates. Stable capability inventory remains. |
+| Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, four required legacy freezes, behavior-fixture IDs, and representative mutation tests are implemented and wired into delivery gates. Stable vocabulary and remaining compatibility inventories remain. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
 
 ### Audit findings recorded so far
@@ -72,7 +72,22 @@ shells or another frontend-shaped execution path.
   direction, frozen adapters, stable capability IDs, or core `CUSTOM` growth.
 - `cute_static_layout` is rank-one parser sugar; `TensorGpuPlan` is a 44-op
   shape-only/f32 backend compatibility plan; JIT has 36 executable
-  `OP_CUSTOM` construction sites. None currently has a machine freeze.
+  `OP_CUSTOM` construction sites. At initial audit, none had a machine freeze.
+- Compiler pointer/scalar behavior is spread across source-shaped symbol,
+  alias, memory-reference, expression, and operation records. Its canonical IR
+  does not retain every source local or emit `pointer-rebind` for every source
+  pointer update; behavior fixtures must assert emitted store/copy/memory facts
+  and outputs rather than imagined source-shaped nodes.
+- Runtime assignment labels mix semantic features, runtime facilities, device
+  features, oracles, simulators, external services, and policy. They are legacy
+  routing requirements, not all `CapabilityDefinition` values or lowering
+  decisions. Current repository-owned usage is 53 labels: 51 in profiles plus
+  `shader-f16` and `subgroups` emitted by the browser mapping.
+- Grad's current `bf16`/`bfloat16` path is f32 substitution. View/materialize
+  behavior follows NumPy details: reshape/transpose/permute are conditional
+  aliases, expand copies, and `contiguous()` currently returns `self` even for
+  a non-contiguous transpose. These facts must be labeled compatibility debt,
+  not advertised as real bf16 storage or a universal view contract.
 - Compiler semantic types remain CUDA/source-shaped, kernels plan types mix
   scheduling and execution, and JIT plan types own framework scheduling. They
   are adapter inputs, not semantic-core source material.
@@ -225,6 +240,23 @@ affected implementation slice is marked complete.
 - Gate 1 is `verified`: its serialized fixtures now have one verified meaning
   and pinned deterministic hashes across TypeScript and Python.
 
+### 2026-07-15 — Compiler pointer/scalar memory freeze
+
+- Promoted `compiler.pointer-scalar-memory.v0` from documentary metadata to a
+  required architecture freeze accepted by ADR-0001.
+- Froze the exact 12-value address-space union; complete symbol, pointer alias,
+  pointer selection, and memory-reference interfaces; the pointer-bearing
+  index expression; nine memory operation shapes; and six root public exports.
+- Added five versioned behavior cases for storage rebasing, byte-root vector
+  reinterpretation, shared multidimensional byte addresses, cross-root
+  selection, and pointer-array rebinding. Each case records only normalized IR
+  facts, semantic CPU-reference output, and WGSL eligibility; source offsets,
+  generated IDs, and WGSL text are intentionally excluded.
+- Added mutation coverage for address-space widening, interface-field addition,
+  readonly loss, operation widening, public-export removal, and missing fixture
+  IDs. Gate 0 remains `partial` pending Grad, runtime/vocabulary, diagnostic ID,
+  and exact opaque-operation inventories.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -242,6 +274,7 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Layout normalization | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: 5 files, 50 tests; build/typecheck/lint clean. | None. |
 | 2026-07-15 | Verified layout artifacts and traces | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: 6 files, 59 tests; build/typecheck/lint clean. | Add cross-language parity. |
 | 2026-07-15 | Gate 1 cross-language exit | `pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: architecture check; 8 files, 68 tests; typecheck/build/lint clean. Python source also parsed through `ast.parse`. | Gate 1 verified; resume Gate 0 inventory before Gate 2. |
+| 2026-07-15 | Compiler pointer/scalar freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test` | Passed: script syntax, architecture check, compiler typecheck, 28 files and 938 tests. | None. |
 
 ## Failure and Recovery Log
 
@@ -293,6 +326,13 @@ whether any files may be left partially changed.
   `__bg_coordinate_*` evaluator namespace and be accepted only by TypeScript.
   Wire dimension references now reject all reserved `__bg_` names, with a
   differential regression case.
+- The first compiler pointer behavior fixture assumed source pointer rebases
+  would always survive as `pointer-rebind` operations and local pointer names
+  would remain module symbols. The focused test rejected four of five cases.
+  Inspection showed the canonical IR truth: the tested rebases are reflected
+  in store address expressions, packed reinterpretation lowers to `copy`, and
+  some locals are consumed during lowering. The fixture now freezes emitted
+  operation/memory facts plus outputs instead of source-shaped expectations.
 
 ## Quick Resume Checklist
 
@@ -307,7 +347,7 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Finish Gate 0's stable diagnostic/capability IDs and machine-readable
-dtype/view/materialization/opaque-operation inventory. Extend freeze coverage
-to pointer/scalar memory, Grad view and bf16 behavior, runtime capability
-labels, and behavior-level adapter fixtures before beginning Gate 2 adoption.
+Finish Gate 0's stable diagnostic and semantic-capability IDs plus separate
+machine-readable dtype/view/materialization/opaque-operation and legacy
+assignment-requirement inventories. Extend freeze coverage to Grad view/bf16,
+runtime routing labels, and exact JIT opaque-operation decisions before Gate 2.

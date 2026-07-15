@@ -16,6 +16,7 @@ const cliRepoRoot = option("--repo-root");
 const repoRoot = cliRepoRoot === undefined ? defaultRepoRoot : path.resolve(cliRepoRoot);
 const jsonOutput = process.argv.includes("--json");
 const REQUIRED_FREEZES = new Map([
+  ["compiler.pointer-scalar-memory.v0", "compiler-pointer-scalar-memory"],
   ["compiler.cute-static-layout.v0", "cute-static-layout"],
   ["kernels.tensor-gpu-plan.v0", "tensor-gpu-plan"],
   ["jit.core-custom-ops.v0", "jit-op-custom"],
@@ -46,6 +47,9 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
   for (const adapter of adapters) {
     if (!isRecord(adapter) || !isRecord(adapter.freeze)) continue;
     switch (adapter.freeze.kind) {
+      case "compiler-pointer-scalar-memory":
+        checkCompilerPointerScalarMemory(root, ts, adapter.freeze, failures);
+        break;
       case "cute-static-layout":
         checkCuteStaticLayout(root, ts, adapter.freeze, failures);
         break;
@@ -110,6 +114,63 @@ export function validateSemanticFreezeManifest(root, manifest) {
 export function extractModuleSpecifiers(ts, source, filename = "source.ts") {
   const sourceFile = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   return moduleSpecifiers(ts, sourceFile);
+}
+
+export function checkFrozenCompilerPointerScalarMemorySource(
+  ts,
+  source,
+  publicBarrelSource,
+  freeze,
+  filename = "semantic_ir_types.ts",
+  publicBarrelFilename = "index.ts",
+) {
+  const failures = [];
+  const sourceFile = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
+  const declarations = new Map();
+  const addressSpaces = [];
+
+  for (const statement of sourceFile.statements) {
+    if (statement.name?.text) declarations.set(statement.name.text, [...(declarations.get(statement.name.text) ?? []), statement]);
+    if (ts.isTypeAliasDeclaration(statement) && statement.name.text === "SemanticAddressSpace") {
+      if (!ts.isUnionTypeNode(statement.type) || statement.type.types.some((type) => !ts.isLiteralTypeNode(type) || !ts.isStringLiteral(type.literal))) {
+        failures.push("SemanticAddressSpace must remain a closed string-literal union");
+      } else {
+        addressSpaces.push(...statement.type.types.map((type) => type.literal.text));
+      }
+    }
+  }
+
+  compareStringSets("SemanticAddressSpace values", addressSpaces, freeze.addressSpaces, failures);
+  checkExactInterfaceShapes(ts, sourceFile, declarations, freeze.interfaces, "compiler pointer/scalar interface", failures);
+  checkExactTaggedUnionShapes(ts, sourceFile, declarations, "SemanticExpression", freeze.expressionVariants, "compiler pointer/scalar expression", failures);
+  checkExactTaggedUnionShapes(ts, sourceFile, declarations, "SemanticKernelIrOperation", freeze.operationVariants, "compiler pointer/scalar operation", failures);
+
+  const publicBarrel = ts.createSourceFile(publicBarrelFilename, publicBarrelSource, ts.ScriptTarget.Latest, true);
+  const publicExports = new Set();
+  for (const statement of publicBarrel.statements) {
+    if (!ts.isExportDeclaration(statement) || statement.exportClause === undefined || !ts.isNamedExports(statement.exportClause)) continue;
+    for (const element of statement.exportClause.elements) publicExports.add(element.name.text);
+  }
+  for (const name of freeze.publicExports ?? []) {
+    if (!publicExports.has(name)) failures.push(`compiler pointer/scalar public export ${name} is missing`);
+  }
+
+  return failures;
+}
+
+export function validateCompilerPointerBehaviorFixture(fixture, freeze, filename = "pointer-scalar-memory.v0.json") {
+  const failures = [];
+  if (!isRecord(fixture) || fixture.schemaVersion !== 1 || fixture.adapterId !== "compiler.pointer-scalar-memory.v0" || !Array.isArray(fixture.cases)) {
+    failures.push(`${filename} must be a schemaVersion 1 compiler.pointer-scalar-memory.v0 fixture`);
+    return failures;
+  }
+  const ids = fixture.cases.map((entry) => isRecord(entry) ? entry.id : undefined);
+  if (ids.some((id) => typeof id !== "string") || new Set(ids).size !== ids.length) {
+    failures.push(`${filename} case IDs must be unique strings`);
+    return failures;
+  }
+  compareStringSets("compiler pointer/scalar behavior fixture IDs", ids, freeze.behaviorFixtureIds, failures);
+  return failures;
 }
 
 function validateManifest(root, manifest, failures) {
@@ -318,6 +379,92 @@ function checkTensorGpuPlan(root, ts, freeze, failures) {
   if (definitionFile === undefined) return;
   const source = fs.readFileSync(definitionFile, "utf8");
   failures.push(...checkFrozenTensorGpuPlanSource(ts, source, freeze, definitionFile));
+}
+
+function checkCompilerPointerScalarMemory(root, ts, freeze, failures) {
+  const definitionFile = resolveManifestPath(root, freeze.definitionFile, failures);
+  const publicBarrel = resolveManifestFile(root, freeze.publicBarrel, "publicBarrel", failures);
+  const behaviorFixture = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
+  if (definitionFile === undefined || publicBarrel === undefined || behaviorFixture === undefined) return;
+
+  failures.push(...checkFrozenCompilerPointerScalarMemorySource(
+    ts,
+    fs.readFileSync(definitionFile, "utf8"),
+    fs.readFileSync(publicBarrel, "utf8"),
+    freeze,
+    definitionFile,
+    publicBarrel,
+  ));
+
+  const fixture = readJson(behaviorFixture, failures);
+  failures.push(...validateCompilerPointerBehaviorFixture(fixture, freeze, relative(root, behaviorFixture)));
+}
+
+function checkExactInterfaceShapes(ts, sourceFile, declarations, expectedInterfaces, label, failures) {
+  for (const [name, expected] of Object.entries(expectedInterfaces ?? {})) {
+    const matches = (declarations.get(name) ?? []).filter(ts.isInterfaceDeclaration);
+    if (matches.length !== 1) {
+      failures.push(`${label} ${name} must have exactly one declaration; got ${matches.length}`);
+      continue;
+    }
+    const declaration = matches[0];
+    if ((declaration.heritageClauses?.length ?? 0) > 0) failures.push(`${label} ${name} must not extend another interface`);
+    const actual = exactPropertyShape(ts, sourceFile, declaration.members, `${label} ${name}`, failures);
+    compareExactShape(`${label} ${name}`, actual, expected, failures);
+  }
+}
+
+function checkExactTaggedUnionShapes(ts, sourceFile, declarations, aliasName, expectedVariants, label, failures) {
+  const aliases = (declarations.get(aliasName) ?? []).filter(ts.isTypeAliasDeclaration);
+  if (aliases.length !== 1) {
+    failures.push(`${label} owner ${aliasName} must have exactly one declaration; got ${aliases.length}`);
+    return;
+  }
+  const type = aliases[0].type;
+  if (!ts.isUnionTypeNode(type)) {
+    failures.push(`${label} owner ${aliasName} must remain a union`);
+    return;
+  }
+  const byKind = new Map();
+  for (const member of type.types) {
+    if (!ts.isTypeLiteralNode(member)) continue;
+    const kind = member.members.find((entry) => ts.isPropertySignature(entry) && entry.name.getText(sourceFile) === "kind");
+    if (!kind || !ts.isPropertySignature(kind) || kind.type === undefined || !ts.isLiteralTypeNode(kind.type) || !ts.isStringLiteral(kind.type.literal)) continue;
+    byKind.set(kind.type.literal.text, [...(byKind.get(kind.type.literal.text) ?? []), member]);
+  }
+  for (const [kind, expected] of Object.entries(expectedVariants ?? {})) {
+    const matches = byKind.get(kind) ?? [];
+    if (matches.length !== 1) {
+      failures.push(`${label} ${kind} must have exactly one variant; got ${matches.length}`);
+      continue;
+    }
+    const actual = exactPropertyShape(ts, sourceFile, matches[0].members, `${label} ${kind}`, failures);
+    compareExactShape(`${label} ${kind}`, actual, expected, failures);
+  }
+}
+
+function exactPropertyShape(ts, sourceFile, members, label, failures) {
+  const properties = {};
+  for (const member of members) {
+    if (!ts.isPropertySignature(member) || member.type === undefined) {
+      failures.push(`${label} may contain property signatures only`);
+      continue;
+    }
+    const property = member.name.getText(sourceFile);
+    if (member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword) !== true) {
+      failures.push(`${label}.${property} must remain readonly`);
+    }
+    const name = `${property}${member.questionToken === undefined ? "" : "?"}`;
+    properties[name] = normalizeTypeText(member.type.getText(sourceFile));
+  }
+  return properties;
+}
+
+function compareExactShape(label, actual, expected, failures) {
+  const normalizedExpected = Object.fromEntries(Object.entries(expected ?? {}).map(([key, value]) => [key, normalizeTypeText(value)]));
+  if (JSON.stringify(sortRecord(actual)) !== JSON.stringify(sortRecord(normalizedExpected))) {
+    failures.push(`${label} changed; compatibility schema is frozen`);
+  }
 }
 
 export function checkFrozenTensorGpuPlanSource(ts, source, freeze, filename = "tensor_plan.ts") {
@@ -694,13 +841,17 @@ function walk(directory, predicate) {
 }
 
 function resolveManifestPath(root, value, failures) {
+  return resolveManifestFile(root, value, "definitionFile", failures);
+}
+
+function resolveManifestFile(root, value, field, failures) {
   if (typeof value !== "string") {
-    failures.push("freeze definitionFile must be a string");
+    failures.push(`freeze ${field} must be a string`);
     return undefined;
   }
   const file = path.resolve(root, value);
   if (!file.startsWith(`${path.resolve(root)}${path.sep}`) || !fs.existsSync(file)) {
-    failures.push(`freeze definitionFile is missing or outside the repository: ${value}`);
+    failures.push(`freeze ${field} is missing or outside the repository: ${value}`);
     return undefined;
   }
   return file;

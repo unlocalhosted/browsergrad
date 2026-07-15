@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "compiler.pointer-scalar-memory.v0",
+  "cases": [
+    {
+      "id": "compiler.pointer-scalar-memory.storage-rebase.v0",
+      "source": "__global__ void pointer_rebase(uint* x, uint* out, int offset) {\n  x += offset;\n  if (threadIdx.x == 0) {\n    out[0] = x[0];\n    x -= 1;\n    out[1] = x[0];\n    x++;\n    out[2] = *x;\n  }\n}",
+      "workgroupSize": [1, 1, 1],
+      "operationKinds": ["store", "branch", "store", "store", "store", "store", "store"],
+      "requiredSymbolFacts": [
+        {
+          "name": "x",
+          "pointer": true
+        }
+      ],
+      "scenarios": [
+        {
+          "buffers": {
+            "x": { "type": "Uint32Array", "values": [10, 20, 30, 40] },
+            "out": { "type": "Uint32Array", "values": [0, 0, 0] }
+          },
+          "scalars": { "offset": 2 },
+          "expectedBuffers": { "out": [30, 20, 30] },
+          "referenceTiers": ["semantic-cpu-reference"]
+        }
+      ],
+      "wgslEligible": true
+    },
+    {
+      "id": "compiler.pointer-scalar-memory.byte-root-reinterpret.v0",
+      "source": "__global__ void packed_shared_copy(const int* input, int* out) {\n  __shared__ uchar bytes[16];\n  *((int4*)&bytes[0]) = *((int4*)&input[0]);\n  __syncthreads();\n  *((int4*)&out[0]) = *((int4*)&bytes[0]);\n}",
+      "workgroupSize": [1, 1, 1],
+      "operationKinds": ["declare", "copy", "barrier", "copy"],
+      "requiredMemoryFacts": [
+        {
+          "base": "bytes",
+          "addressSpace": "shared",
+          "containerValueType": "uchar",
+          "pointerBaseUnitBytes": 16
+        }
+      ],
+      "scenarios": [
+        {
+          "buffers": {
+            "input": { "type": "Int32Array", "values": [67305985, 134678021, 202050057, 269422093] },
+            "out": { "type": "Int32Array", "values": [0, 0, 0, 0] }
+          },
+          "expectedBuffers": { "out": [67305985, 134678021, 202050057, 269422093] },
+          "referenceTiers": ["semantic-cpu-reference"]
+        }
+      ],
+      "wgslEligible": true
+    },
+    {
+      "id": "compiler.pointer-scalar-memory.shared-local-address.v0",
+      "source": "__global__ void shared_2d_address(uint *out) {\n  __shared__ uint tile[2][4];\n  out[0] = __cvta_generic_to_shared(&tile[1][2]);\n}",
+      "workgroupSize": [1, 1, 1],
+      "operationKinds": ["declare", "store"],
+      "requiredMemoryFacts": [
+        {
+          "base": "out",
+          "addressSpace": "storage",
+          "valueType": "uint"
+        }
+      ],
+      "scenarios": [
+        {
+          "buffers": {
+            "out": { "type": "Uint32Array", "values": [0] }
+          },
+          "expectedBuffers": { "out": [24] },
+          "referenceTiers": ["semantic-cpu-reference"]
+        }
+      ],
+      "wgslEligible": true
+    },
+    {
+      "id": "compiler.pointer-scalar-memory.cross-root-selection.v0",
+      "source": "__global__ void selected_packed_copy(const uchar* left, const uchar* right, int* out, int chooseRight) {\n  __shared__ uchar bytes[16];\n  const uchar* selected = chooseRight ? right : left;\n  *((int4*)&bytes[0]) = *((int4*)selected);\n  __syncthreads();\n  *((int4*)&out[0]) = *((int4*)&bytes[0]);\n}",
+      "workgroupSize": [1, 1, 1],
+      "operationKinds": ["declare", "declare", "branch", "copy", "copy", "barrier", "copy"],
+      "requiredMemoryFacts": [
+        {
+          "base": "left",
+          "addressSpace": "storage"
+        },
+        {
+          "base": "right",
+          "addressSpace": "storage"
+        }
+      ],
+      "scenarios": [
+        {
+          "buffers": {
+            "left": { "type": "Uint32Array", "values": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] },
+            "right": { "type": "Uint32Array", "values": [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1] },
+            "out": { "type": "Int32Array", "values": [0, 0, 0, 0] }
+          },
+          "scalars": { "chooseRight": 0 },
+          "expectedBuffers": { "out": [67305985, 134678021, 202050057, 269422093] },
+          "referenceTiers": ["semantic-cpu-reference"]
+        },
+        {
+          "buffers": {
+            "left": { "type": "Uint32Array", "values": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] },
+            "right": { "type": "Uint32Array", "values": [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1] },
+            "out": { "type": "Int32Array", "values": [0, 0, 0, 0] }
+          },
+          "scalars": { "chooseRight": 1 },
+          "expectedBuffers": { "out": [219025168, 151653132, 84281096, 16909060] },
+          "referenceTiers": ["semantic-cpu-reference"]
+        }
+      ],
+      "wgslEligible": true
+    },
+    {
+      "id": "compiler.pointer-scalar-memory.pointer-array-rebind.v0",
+      "source": "__global__ void conditional_pointer_array_rebind(uint *left, uint *right, uint *out, int select) {\n  uint *ptrs[2];\n  ptrs[0] = left;\n  ptrs[1] = right;\n  ptrs[select != 0 ? 1 : 0] = select != 0 ? left : right;\n  *ptrs[select != 0 ? 1 : 0] = 7u;\n  out[0] = left[0];\n  out[1] = right[0];\n}",
+      "workgroupSize": [1, 1, 1],
+      "operationKinds": [
+        "declare",
+        "pointer-array-rebind",
+        "pointer-array-rebind",
+        "branch",
+        "pointer-array-rebind",
+        "pointer-array-rebind",
+        "store",
+        "store",
+        "store"
+      ],
+      "requiredSymbolFacts": [
+        {
+          "name": "ptrs",
+          "pointer": true,
+          "pointerArrayAliasCount": 2
+        }
+      ],
+      "scenarios": [
+        {
+          "buffers": {
+            "left": { "type": "Uint32Array", "values": [10] },
+            "right": { "type": "Uint32Array", "values": [20] },
+            "out": { "type": "Uint32Array", "values": [0, 0] }
+          },
+          "scalars": { "select": 1 },
+          "expectedBuffers": { "left": [7], "right": [20], "out": [7, 20] },
+          "referenceTiers": ["semantic-cpu-reference"]
+        },
+        {
+          "buffers": {
+            "left": { "type": "Uint32Array", "values": [10] },
+            "right": { "type": "Uint32Array", "values": [20] },
+            "out": { "type": "Uint32Array", "values": [0, 0] }
+          },
+          "scalars": { "select": 0 },
+          "expectedBuffers": { "left": [10], "right": [7], "out": [10, 7] },
+          "referenceTiers": ["semantic-cpu-reference"]
+        }
+      ],
+      "wgslEligible": true
+    }
+  ]
+}

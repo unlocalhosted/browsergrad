@@ -23,6 +23,21 @@ export function extractModuleSpecifiers(
   filename?: string,
 ): string[];
 
+export function checkFrozenCompilerPointerScalarMemorySource(
+  typescript: typeof ts,
+  source: string,
+  publicBarrelSource: string,
+  freeze: Record<string, unknown>,
+  filename?: string,
+  publicBarrelFilename?: string,
+): string[];
+
+export function validateCompilerPointerBehaviorFixture(
+  fixture: unknown,
+  freeze: Record<string, unknown>,
+  filename?: string,
+): string[];
+
 export function checkFrozenCuteStaticLayoutSource(
   typescript: typeof ts,
   source: string,

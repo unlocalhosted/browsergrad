@@ -14,7 +14,184 @@
       ],
       "newUseProhibition": "No new view, layout, dtype, or alias feature may add source-shaped memory fields.",
       "retirementGate": "CPU reference and WGSL consume shared offsets, bounds, and alias facts.",
-      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-compiler@1.0.0"
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-compiler@1.0.0",
+      "baselineDecision": "docs/adr/0001-freeze-legacy-semantic-adapters.md",
+      "freeze": {
+        "kind": "compiler-pointer-scalar-memory",
+        "definitionFile": "packages/browsergrad-compiler/src/semantic_ir_types.ts",
+        "publicBarrel": "packages/browsergrad-compiler/src/index.ts",
+        "addressSpaces": [
+          "builtin",
+          "constant",
+          "device-global",
+          "function",
+          "local",
+          "pool",
+          "shared",
+          "storage",
+          "surface",
+          "texture",
+          "uniform",
+          "unknown"
+        ],
+        "interfaces": {
+          "CudaLiteSemanticSymbol": {
+            "addressSpace": "SemanticAddressSpace",
+            "constant?": "boolean",
+            "cooperativeGroupKind?": "CudaLiteParam[\"cooperativeGroupKind\"]",
+            "dimensions": "readonly number[]",
+            "dynamicShared?": "boolean",
+            "id": "SemanticSymbolId",
+            "init?": "SemanticExpression",
+            "initialized?": "boolean",
+            "kind": "| \"param\" | \"local\" | \"shared\" | \"constant\" | \"device-global\" | \"external-pool\" | \"texture\" | \"function\" | \"builtin\"",
+            "matrixTile?": "MatrixTileResolvedSpec",
+            "matrixTileArrayDimensions?": "readonly number[]",
+            "name": "string",
+            "packedByteLanes?": "2 | 3 | 4",
+            "pointer?": "boolean",
+            "pointerAddressSpace?": "SemanticAddressSpace",
+            "pointerArrayAliases?": "readonly (SemanticPointerAlias | undefined)[]",
+            "pointerBaseIndices?": "readonly SemanticExpression[]",
+            "pointerBaseIsScalarLane?": "boolean",
+            "pointerBaseUnitBytes?": "number",
+            "pointerCarrierValueType?": "CudaLiteScalarType",
+            "pointerMayBeNull?": "boolean",
+            "pointerMemoryAlias?": "SemanticMemoryId",
+            "pointerParamAlias?": "SemanticSymbolId",
+            "pointerRoot?": "SemanticMemoryId",
+            "pointerRuntimeState?": "boolean",
+            "pointerSelection?": "SemanticPointerSelection",
+            "pointerValid?": "SemanticExpression",
+            "span": "SourceSpan",
+            "tileSize?": "number",
+            "valueType?": "CudaLiteScalarType"
+          },
+          "SemanticMemoryRef": {
+            "addressSpace": "SemanticAddressSpace",
+            "base": "string",
+            "baseId": "SemanticMemoryId",
+            "containerValueType?": "CudaLiteScalarType",
+            "fields": "readonly string[]",
+            "indices": "readonly SemanticExpression[]",
+            "packedByteLanes?": "2 | 3 | 4",
+            "pointerBaseIsScalarLane?": "boolean",
+            "pointerBaseUnitBytes?": "number",
+            "span": "SourceSpan",
+            "valueType": "SemanticValueType"
+          },
+          "SemanticPointerAlias": {
+            "pointerAddressSpace?": "SemanticAddressSpace",
+            "pointerBaseIndices?": "readonly SemanticExpression[]",
+            "pointerBaseIsScalarLane?": "boolean",
+            "pointerBaseUnitBytes?": "number",
+            "pointerRoot?": "SemanticMemoryId",
+            "pointerSelection?": "SemanticPointerSelection",
+            "pointerValid?": "SemanticExpression"
+          },
+          "SemanticPointerSelection": {
+            "alternate": "SemanticPointerAlias",
+            "condition": "SemanticExpression",
+            "consequent": "SemanticPointerAlias"
+          }
+        },
+        "expressionVariants": {
+          "index": {
+            "addressSpace": "SemanticAddressSpace",
+            "index": "SemanticExpression",
+            "kind": "\"index\"",
+            "packedByteLanes?": "2 | 3 | 4",
+            "pointerBaseIsScalarLane?": "boolean",
+            "pointerBaseUnitBytes?": "number",
+            "span": "SourceSpan",
+            "target": "SemanticExpression",
+            "valueType": "SemanticValueType"
+          }
+        },
+        "operationVariants": {
+          "atomic": {
+            "args": "readonly SemanticExpression[]",
+            "callee": "string",
+            "kind": "\"atomic\"",
+            "span": "SourceSpan",
+            "target?": "SemanticMemoryRef"
+          },
+          "call": {
+            "args": "readonly SemanticExpression[]",
+            "callee": "string",
+            "calleeId": "SemanticSymbolId",
+            "kind": "\"call\"",
+            "reads": "readonly SemanticMemoryRef[]",
+            "result?": "Extract<SemanticExpression, { readonly kind: \"symbol\" }>",
+            "span": "SourceSpan"
+          },
+          "copy": {
+            "bytes": "number",
+            "kind": "\"copy\"",
+            "source": "SemanticMemoryRef",
+            "span": "SourceSpan",
+            "target": "SemanticMemoryRef"
+          },
+          "load": {
+            "kind": "\"load\"",
+            "source": "SemanticMemoryRef",
+            "span": "SourceSpan"
+          },
+          "matrix-load": {
+            "fragment": "SemanticMatrixTileRef",
+            "kind": "\"matrix-load\"",
+            "layout": "MatrixTileLayout",
+            "source": "SemanticMemoryRef",
+            "span": "SourceSpan",
+            "stride": "SemanticExpression"
+          },
+          "matrix-store": {
+            "fragment": "SemanticMatrixTileRef",
+            "kind": "\"matrix-store\"",
+            "layout": "MatrixTileLayout",
+            "span": "SourceSpan",
+            "stride": "SemanticExpression",
+            "target": "SemanticMemoryRef"
+          },
+          "pointer-array-rebind": {
+            "kind": "\"pointer-array-rebind\"",
+            "slot": "SemanticExpression",
+            "source": "SemanticMemoryRef",
+            "span": "SourceSpan",
+            "target": "CudaLiteSemanticSymbol"
+          },
+          "pointer-rebind": {
+            "kind": "\"pointer-rebind\"",
+            "source": "SemanticMemoryRef",
+            "span": "SourceSpan",
+            "target": "CudaLiteSemanticSymbol"
+          },
+          "store": {
+            "kind": "\"store\"",
+            "operator": "string",
+            "reads": "readonly SemanticMemoryRef[]",
+            "span": "SourceSpan",
+            "target": "SemanticMemoryRef",
+            "value": "SemanticExpression"
+          }
+        },
+        "publicExports": [
+          "CudaLiteSemanticSymbol",
+          "SemanticAddressSpace",
+          "SemanticExpression",
+          "SemanticKernelIrModule",
+          "SemanticKernelIrOperation",
+          "SemanticMemoryRef"
+        ],
+        "behaviorFixtureFile": "packages/browsergrad-compiler/tests/fixtures/pointer-scalar-memory.v0.json",
+        "behaviorFixtureIds": [
+          "compiler.pointer-scalar-memory.byte-root-reinterpret.v0",
+          "compiler.pointer-scalar-memory.cross-root-selection.v0",
+          "compiler.pointer-scalar-memory.pointer-array-rebind.v0",
+          "compiler.pointer-scalar-memory.shared-local-address.v0",
+          "compiler.pointer-scalar-memory.storage-rebase.v0"
+        ]
+      }
     },
     {
       "id": "compiler.cute-static-layout.v0",
