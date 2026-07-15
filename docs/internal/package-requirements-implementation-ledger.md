@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 0 enforcement and Gate 1 wire/value foundation
+- **Current implementation slice:** Gate 1 closure; Gate 0 inventory remains active
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -31,7 +31,7 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate | Status | Current result | Missing before `verified` | Evidence |
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and three highest-risk legacy adapters are machine-frozen. The check runs in root, compiler, CI, release, and publish gates; mutation tests cover representative bypasses. | Add stable capability IDs and a machine-readable dtype/view/materialization inventory; freeze pointer/scalar memory, Grad view/bf16, runtime capability labels, and adapter behavior beyond surface shape. | `pnpm architecture:check`; compiler semantic-architecture tests. |
-| Gate 1 — value/layout core and wire foundation | `partial` | Private package now implements pre-decode byte limits and fatal UTF-8, bounded duplicate-aware JSON decoding, canonical JSON/SHA-256 domains, opaque verified hash inputs, exact artifact-budgeted dimension/index arithmetic, the closed dtype registry, deterministic layout normalization, a closed `browsergrad.layout@1` verifier with content-scoped ID remapping, and coordinate/address/alias traces that preserve OOB addresses without clamping. | Add cross-language TypeScript/Python fixtures and property generators; prove deterministic canonical/hash/trace parity and compatibility behavior before evaluating the remaining Gate 1 exit criteria. | Semantic-core typecheck, build, lint, and 59 focused tests. |
+| Gate 1 — value/layout core and wire foundation | `verified` | The private package implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None for Gate 1. Public-package adoption still requires the separate packed/release-tested `0.x` transition recorded in D-004. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check. |
 | Gate 2 — multi-frontend, multi-backend view slice | `not-started` | No implementation in this workstream. | All Gate 2 exit criteria. | None. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
@@ -55,7 +55,7 @@ shells or another frontend-shaped execution path.
 | Semantic-core seam audit | `partial` | Existing compiler/JIT/kernels types must adapt into the core; none can be moved wholesale. Exact initial package split is selected. |
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
 | Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, required legacy freezes, and representative mutation tests are implemented and wired into delivery gates. Stable capability inventory remains. |
-| Gate 1 schema/value core | `partial` | `/schema` and `/layout` only; bounded canonical wire processing, exact dimension/value foundations, layout normalization, closed verification, opaque artifacts, and public coordinate/address/alias traces are implemented. Cross-language parity and property proof remain. |
+| Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
 
 ### Audit findings recorded so far
 
@@ -110,6 +110,7 @@ shells or another frontend-shaped execution path.
 | D-009 | 2026-07-15 | accepted | Enforce integer-bit and arithmetic-operation budgets; deep-freeze normalized artifacts before placing them in an immutable opaque verified wrapper. | Closes BigInt denial-of-service and impossible post-freeze mutation paths. |
 | D-010 | 2026-07-15 | accepted | V1 uses a closed byte-addressable scalar dtype registry and an affine/strided index algebra; swizzles and sub-byte storage require named extensions. | Prevents strings and backend spellings from becoming dtype/layout semantics before their bit rules exist. |
 | D-011 | 2026-07-15 | accepted | Minor additions are restricted to open bags with lossless unknown-field preservation; closed semantic records change only by major version or required extension. | Keeps old-reader canonical hashes stable instead of silently dropping new payload meaning. |
+| D-012 | 2026-07-15 | accepted | Keep the dependency-free Python implementation as an independent conformance oracle for the closed layout wire schema, synchronized atomically with TypeScript, fixtures, pinned goldens, and this ledger. | Provides cross-language drift detection without creating a second runtime or implying a stable Python package API. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -196,6 +197,34 @@ affected implementation slice is marked complete.
 - Added nine verification/trace scenarios; Gate 1 remains `partial` pending
   TypeScript/Python parity and property-generated proof.
 
+### 2026-07-15 — Gate 1 cross-language closure
+
+- Bound opaque layout wrappers to a private schema authority so a generic or
+  foreign verifier cannot forge an executable layout artifact.
+- Tightened static and runtime range/alignment checks, made alias overlap
+  unknown for invalid accesses, and deep-froze all nested trace evidence.
+- Added a dependency-free Python reference for the complete current closed
+  `browsergrad.layout@1` schema. It independently decodes, validates,
+  normalizes, canonicalizes, hashes, and traces artifacts under the same
+  structural, resource, divisor, range, alignment, and predicate rules.
+- Added pinned static rank-2/element and symbolic constrained
+  rank-3/byte-addressed golden fixtures. Full canonical artifacts, semantic
+  hashes, normalized payloads, trace outcomes, UTF-16 astral-key ordering, and
+  Python-to-TypeScript normalized re-encoding are checked.
+- Added 14 verifier-only rejection mutations plus dynamic trace rejection and
+  dominating-predicate acceptance parity. The verifier corpus uses empty trace
+  cases so a later trace failure cannot mask an incorrectly accepted artifact.
+- Added 96 deterministic generated rank-1 through rank-4 samples covering
+  contiguous, signed/non-contiguous, permutation, positive/negative slice,
+  explicit composition, singleton/leading broadcast, padding, boundary, and
+  OOB invariants. All 36 coordinate pairs in the canonical rank-2 fixture also
+  prove valid-access byte-overlap alias invariants.
+- Bounded divisor lower-bound proof before BigInt multiplication in both
+  languages and added a differential integer-growth bomb. This closes the last
+  resource path found by the principal-level exit review.
+- Gate 1 is `verified`: its serialized fixtures now have one verified meaning
+  and pinned deterministic hashes across TypeScript and Python.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -212,6 +241,7 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Workspace integration | `pnpm -r run typecheck` | Semantic core and all packages before runtime passed; runtime failed on three pre-existing optional-value checks in `assignment-javascript-profile-e2e.test.ts`. | Keep as unrelated workspace evidence; semantic-core focused typecheck is green. |
 | 2026-07-15 | Layout normalization | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: 5 files, 50 tests; build/typecheck/lint clean. | None. |
 | 2026-07-15 | Verified layout artifacts and traces | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: 6 files, 59 tests; build/typecheck/lint clean. | Add cross-language parity. |
+| 2026-07-15 | Gate 1 cross-language exit | `pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: architecture check; 8 files, 68 tests; typecheck/build/lint clean. Python source also parsed through `ast.parse`. | Gate 1 verified; resume Gate 0 inventory before Gate 2. |
 
 ## Failure and Recovery Log
 
@@ -242,6 +272,27 @@ whether any files may be left partially changed.
   intentionally opaque JSON-model cast that needed an explicit `unknown`
   boundary. The first trace typecheck also caught three absent optional limits
   forwarded as `undefined`; all were corrected before tests and build passed.
+- Exit review found that generic verified wrappers shared one runtime registry
+  with layout artifacts. Schema-specific authority identity is now required,
+  and foreign-authority forgery has an adversarial test.
+- The first Python parity oracle structurally validated the positive fixture
+  but did not mirror TypeScript's semantic range, divisor, alignment, and
+  dynamic trace checks. The reference now implements the complete current
+  closed layout-v1 verification path and a differential rejection corpus.
+- Exit review found lower-bound positivity analysis could construct integers
+  beyond the configured bit budget before the normal evaluator ran. Both
+  TypeScript and Python now estimate multiplication width, budget lower-bound
+  operations, and fail proof before oversized multiplication; an adversarial
+  repeated-product divisor is rejected by both.
+- The first rejection harness used non-empty trace cases, which could hide a
+  Python verifier acceptance behind a later trace failure. Verifier mutations
+  now always run with an empty cases file. The first Unicode ordering probe was
+  also a literal spelling rather than an astral key; it now compares actual
+  U+1F600 against U+E000.
+- Final cross-language review found a wire `dimension` could name the internal
+  `__bg_coordinate_*` evaluator namespace and be accepted only by TypeScript.
+  Wire dimension references now reject all reserved `__bg_` names, with a
+  differential regression case.
 
 ## Quick Resume Checklist
 
@@ -256,6 +307,7 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Add Python canonicalization/hash/trace fixtures plus deterministic generated
-TypeScript cases, then evaluate every Gate 1 exit criterion without promoting
-the gate on test count alone.
+Finish Gate 0's stable diagnostic/capability IDs and machine-readable
+dtype/view/materialization/opaque-operation inventory. Extend freeze coverage
+to pointer/scalar memory, Grad view and bf16 behavior, runtime capability
+labels, and behavior-level adapter fixtures before beginning Gate 2 adoption.

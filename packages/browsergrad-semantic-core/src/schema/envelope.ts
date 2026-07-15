@@ -47,11 +47,16 @@ export interface VerifiedArtifact<T extends JsonValue> {
   readonly [verifiedArtifactBrand]: T;
 }
 
-const VERIFIED_ENVELOPES = new WeakMap<object, WireEnvelope<JsonValue>>();
+interface VerifiedEnvelopeRecord {
+  readonly envelope: WireEnvelope<JsonValue>;
+  readonly authority: object;
+}
+
+const VERIFIED_ENVELOPES = new WeakMap<object, VerifiedEnvelopeRecord>();
 
 class VerifiedArtifactValue {
-  constructor(envelope: WireEnvelope<JsonValue>) {
-    VERIFIED_ENVELOPES.set(this, envelope);
+  constructor(envelope: WireEnvelope<JsonValue>, authority: object) {
+    VERIFIED_ENVELOPES.set(this, { envelope, authority });
     Object.freeze(this);
   }
 }
@@ -123,18 +128,20 @@ export function validateWireEnvelope<T extends JsonValue = JsonValue>(
 export function verifyWireArtifact<T extends JsonValue>(
   value: unknown,
   options: ArtifactVerificationOptions<T>,
+  authority: object,
 ): VerifiedArtifact<T> {
-  return new VerifiedArtifactValue(validateWireEnvelope(value, options)) as unknown as VerifiedArtifact<T>;
+  return new VerifiedArtifactValue(validateWireEnvelope(value, options), authority) as unknown as VerifiedArtifact<T>;
 }
 
 /** @internal Package hashing and verified evaluators only. */
 export function unwrapVerifiedArtifact<T extends JsonValue>(
   artifact: VerifiedArtifact<T>,
+  authority?: object,
 ): WireEnvelope<T> {
   if (typeof artifact !== "object" || artifact === null) unverifiedArtifact();
-  const envelope = VERIFIED_ENVELOPES.get(artifact as object);
-  if (envelope === undefined) unverifiedArtifact();
-  return envelope as WireEnvelope<T>;
+  const record = VERIFIED_ENVELOPES.get(artifact as object);
+  if (record === undefined || (authority !== undefined && record.authority !== authority)) unverifiedArtifact();
+  return record.envelope as WireEnvelope<T>;
 }
 
 function unverifiedArtifact(): never {

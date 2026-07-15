@@ -1,0 +1,90 @@
+{
+  "schema": "browsergrad.layout",
+  "version": { "major": 1, "minor": 0 },
+  "producer": { "id": "golden-fixture", "version": "1" },
+  "artifactId": "transport-row-major-rank2",
+  "requiredExtensions": [],
+  "optionalMetadata": { "purpose": "cross-language-parity" },
+  "payload": {
+    "symbols": [],
+    "constraints": [],
+    "allocations": [
+      {
+        "allocationId": "inputAllocation",
+        "byteLength": { "kind": "const", "value": "24" },
+        "memorySpace": { "kind": "global" },
+        "alignmentBytes": 4,
+        "aliasSetId": "inputAliasSet"
+      }
+    ],
+    "indexMaps": [
+      {
+        "indexMapId": "rowMajorMap",
+        "coordinateRank": 2,
+        "locationUnit": "element",
+        "location": {
+          "kind": "add",
+          "terms": [
+            {
+              "kind": "mul",
+              "lhs": { "kind": "coordinate", "axis": 0 },
+              "rhs": { "kind": "const", "value": "3" }
+            },
+            { "kind": "coordinate", "axis": 1 }
+          ]
+        },
+        "inBounds": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "lessEqual",
+              "lhs": { "kind": "const", "value": "0" },
+              "rhs": { "kind": "coordinate", "axis": 0 }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": {
+                "kind": "add",
+                "terms": [
+                  { "kind": "coordinate", "axis": 0 },
+                  { "kind": "const", "value": "1" }
+                ]
+              },
+              "rhs": { "kind": "const", "value": "2" }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": { "kind": "const", "value": "0" },
+              "rhs": { "kind": "coordinate", "axis": 1 }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": {
+                "kind": "add",
+                "terms": [
+                  { "kind": "coordinate", "axis": 1 },
+                  { "kind": "const", "value": "1" }
+                ]
+              },
+              "rhs": { "kind": "const", "value": "3" }
+            }
+          ]
+        }
+      }
+    ],
+    "views": [
+      {
+        "viewId": "matrixView",
+        "allocationId": "inputAllocation",
+        "dtype": "f32",
+        "byteOffset": { "kind": "const", "value": "0" },
+        "shape": [
+          { "kind": "const", "value": "2" },
+          { "kind": "const", "value": "3" }
+        ],
+        "indexMapId": "rowMajorMap",
+        "requiredAlignmentBytes": 4
+      }
+    ]
+  }
+}

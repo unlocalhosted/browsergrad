@@ -13,8 +13,10 @@ import {
   LAYOUT_DIAGNOSTIC_CODES,
   SemanticSchemaError,
   hashSemanticArtifact,
+  parseWireJson,
   parseWireI64,
 } from "../../src/schema";
+import { verifyWireArtifact } from "../../src/schema/envelope";
 
 function artifact(local = { allocation: "alloc", alias: "alias", indexMap: "map", view: "view" }): Record<string, unknown> {
   return {
@@ -173,6 +175,10 @@ describe("verified layout artifacts", () => {
       allocationInBounds: true,
       accessInBounds: true,
     });
+    expect(Object.isFrozen(inBounds)).toBe(true);
+    expect(Object.isFrozen(inBounds.logicalCoordinates)).toBe(true);
+    expect(Object.isFrozen(inBounds.logicalShape)).toBe(true);
+    expect(Object.isFrozen(inBounds.mapLocation)).toBe(true);
 
     const negative = traceViewCoordinate(verified, {
       viewId,
@@ -229,6 +235,18 @@ describe("verified layout artifacts", () => {
       byteRangesOverlap: true,
       relation: "same-allocation",
     });
+    expect(Object.isFrozen(sameRootTrace)).toBe(true);
+    expect(Object.isFrozen(sameRootTrace.left)).toBe(true);
+    expect(Object.isFrozen(sameRootTrace.left.logicalCoordinates)).toBe(true);
+
+    const invalidSameBytes = traceViewAlias(sameRoot, {
+      left: { viewId: sameRootViews[0]?.viewId ?? "", coordinates: [parseWireI64("0"), parseWireI64("3")] },
+      right: { viewId: sameRootViews[1]?.viewId ?? "", coordinates: [parseWireI64("1"), parseWireI64("0")] },
+    });
+    expect(invalidSameBytes).toMatchObject({
+      sameAllocation: true,
+      byteRangesOverlap: null,
+    });
 
     const mayAliasValue = artifact();
     const mayAliasPayload = mutablePayload(mayAliasValue);
@@ -252,6 +270,25 @@ describe("verified layout artifacts", () => {
       byteRangesOverlap: null,
       relation: "may-alias",
     });
+  });
+
+  it("preserves generated valid-access alias invariants across the row-major fixture", async () => {
+    const verified = await verifyLayoutArtifact(artifact());
+    const viewId = layoutArtifactPayload(verified).views[0]?.viewId ?? "";
+    const coordinates = Array.from({ length: 6 }, (_, linearIndex) => ([
+      parseWireI64(String(Math.floor(linearIndex / 3))),
+      parseWireI64(String(linearIndex % 3)),
+    ] as const));
+    for (const [leftIndex, left] of coordinates.entries()) {
+      for (const [rightIndex, right] of coordinates.entries()) {
+        const trace = traceViewAlias(verified, {
+          left: { viewId, coordinates: left },
+          right: { viewId, coordinates: right },
+        });
+        expect(trace.sameAllocation).toBe(true);
+        expect(trace.byteRangesOverlap).toBe(leftIndex === rightIndex);
+      }
+    }
   });
 
   it("requires complete in-domain dynamic bindings at trace time", async () => {
@@ -283,8 +320,46 @@ describe("verified layout artifacts", () => {
     }).accessInBounds).toBe(true);
   });
 
+  it("rejects static and dynamically resolved extents above u64", async () => {
+    const staticOverflow = artifact();
+    (mutablePayload(staticOverflow).views[0] as Record<string, unknown>).shape = [{
+      kind: "mul",
+      lhs: { kind: "const", value: "4294967296" },
+      rhs: { kind: "const", value: "4294967296" },
+    }, { kind: "const", value: "3" }];
+    expect((await diagnostic(() => verifyLayoutArtifact(staticOverflow))).diagnostic.code)
+      .toBe(LAYOUT_DIAGNOSTIC_CODES.fieldRange);
+
+    const dynamicOverflow = artifact();
+    const payload = mutablePayload(dynamicOverflow);
+    payload.symbols.push({ id: "n", domain: { min: "1", max: "9223372036854775807" } });
+    (payload.views[0] as Record<string, unknown>).shape = [{
+      kind: "mul",
+      lhs: { kind: "symbol", id: "n" },
+      rhs: { kind: "symbol", id: "n" },
+    }, { kind: "const", value: "3" }];
+    const verified = await verifyLayoutArtifact(dynamicOverflow);
+    const viewId = layoutArtifactPayload(verified).views[0]?.viewId ?? "";
+    expect(() => traceViewCoordinate(verified, {
+      viewId,
+      coordinates: [parseWireI64("0"), parseWireI64("0")],
+      bindings: { n: parseWireI64("4294967296") },
+    })).toThrowError(/BG-LAYOUT-FIELD-RANGE/u);
+  });
+
   it("does not accept a structurally forged layout wrapper", () => {
     expect(() => unwrapLayoutArtifact(artifact() as unknown as VerifiedLayoutArtifact))
+      .toThrowError(/BG-SCHEMA-UNVERIFIED-ARTIFACT/u);
+  });
+
+  it("does not accept a wrapper verified by a foreign schema authority", () => {
+    const foreign = verifyWireArtifact(parseWireJson(JSON.stringify(artifact())), {
+      schema: "browsergrad.layout",
+      supportedMajor: 1,
+      supportedMinor: 0,
+      validatePayload: (value) => value,
+    }, Object.freeze({ schema: "foreign-test-verifier" }));
+    expect(() => layoutArtifactPayload(foreign as unknown as VerifiedLayoutArtifact))
       .toThrowError(/BG-SCHEMA-UNVERIFIED-ARTIFACT/u);
   });
 });

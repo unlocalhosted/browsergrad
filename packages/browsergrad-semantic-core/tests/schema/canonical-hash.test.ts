@@ -14,13 +14,15 @@ import {
 } from "../../src/schema";
 import { verifyWireArtifact } from "../../src/schema/envelope";
 
+const TEST_ARTIFACT_AUTHORITY = Object.freeze({ test: true });
+
 function envelope(source: string): VerifiedArtifact<JsonValue> {
   return verifyWireArtifact(parseWireJson(source), {
     schema: "browsergrad.layout",
     supportedMajor: 1,
     supportedMinor: 0,
     validatePayload: (value) => value,
-  });
+  }, TEST_ARTIFACT_AUTHORITY);
 }
 
 describe("canonical JSON and hashing", () => {

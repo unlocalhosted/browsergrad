@@ -1,0 +1,5 @@
+[
+  { "viewOrdinal": 0, "coordinates": ["3", "1", "2"], "bindings": { "n": "4" } },
+  { "viewOrdinal": 0, "coordinates": ["4", "0", "0"], "bindings": { "n": "4" } },
+  { "viewOrdinal": 1, "coordinates": ["7"], "bindings": { "n": "2" } }
+]

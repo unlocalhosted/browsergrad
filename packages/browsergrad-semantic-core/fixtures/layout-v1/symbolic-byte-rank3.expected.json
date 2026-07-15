@@ -1,0 +1,33 @@
+{
+  "semanticHash": "3dd01eea8830cb09cf7f85c5250151a1709f30e4f21a5e7256e1096761e22ab6",
+  "canonicalArtifactSha256": "90bb73ffe88ac88d5a2b9020167d11d7cff08756c7376628fe892572d0a02d41",
+  "traces": [
+    {
+      "mapLocation": "92",
+      "rootByteStart": "92",
+      "rootByteEndExclusive": "96",
+      "logicalInBounds": true,
+      "predicateInBounds": true,
+      "allocationInBounds": true,
+      "accessInBounds": true
+    },
+    {
+      "mapLocation": "96",
+      "rootByteStart": "96",
+      "rootByteEndExclusive": "100",
+      "logicalInBounds": false,
+      "predicateInBounds": false,
+      "allocationInBounds": false,
+      "accessInBounds": false
+    },
+    {
+      "mapLocation": "7",
+      "rootByteStart": "14",
+      "rootByteEndExclusive": "16",
+      "logicalInBounds": true,
+      "predicateInBounds": true,
+      "allocationInBounds": true,
+      "accessInBounds": true
+    }
+  ]
+}

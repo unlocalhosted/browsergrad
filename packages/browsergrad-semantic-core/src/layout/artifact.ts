@@ -20,6 +20,7 @@ import type { AllocationSpec, IndexExpr, IndexMap, MemorySpace, PredicateExpr, T
 export const LAYOUT_ARTIFACT_SCHEMA = "browsergrad.layout";
 export const LAYOUT_ARTIFACT_MAJOR = 1;
 export const LAYOUT_ARTIFACT_MINOR = 0;
+const LAYOUT_ARTIFACT_AUTHORITY = Object.freeze({ schema: LAYOUT_ARTIFACT_SCHEMA, major: LAYOUT_ARTIFACT_MAJOR });
 
 export type LayoutArtifactPayloadV1 = JsonObject & {
   readonly symbols: readonly DimSymbol[];
@@ -46,6 +47,15 @@ interface RawLayoutArtifact {
 interface ParseState {
   readonly limits: DecodeLimits;
   nodes: number;
+}
+
+interface LowerBoundContext {
+  readonly minima: ReadonlyMap<string, bigint>;
+  readonly limits: DecodeLimits;
+}
+
+interface LowerBoundBudget extends LowerBoundContext {
+  operations: number;
 }
 
 export async function verifyLayoutArtifact(
@@ -83,7 +93,7 @@ export async function verifyLayoutArtifact(
     knownRequiredExtensions: new Set(),
     limits,
     validatePayload: (payload) => payload,
-  }) as VerifiedLayoutArtifact;
+  }, LAYOUT_ARTIFACT_AUTHORITY) as VerifiedLayoutArtifact;
 }
 
 export async function decodeLayoutArtifact(
@@ -95,7 +105,7 @@ export async function decodeLayoutArtifact(
 
 /** @internal Trace implementation uses the already-verified frozen payload. */
 export function unwrapLayoutArtifact(artifact: VerifiedLayoutArtifact): LayoutArtifactPayloadV1 {
-  const envelope = unwrapVerifiedArtifact(artifact);
+  const envelope = unwrapVerifiedArtifact(artifact, LAYOUT_ARTIFACT_AUTHORITY);
   if (envelope.schema !== LAYOUT_ARTIFACT_SCHEMA || envelope.version.major !== LAYOUT_ARTIFACT_MAJOR) {
     invalid(LAYOUT_DIAGNOSTIC_CODES.invalidArtifact, "$", "verified artifact is not a browsergrad.layout@1 artifact");
   }
@@ -293,9 +303,14 @@ function parseIndexExpr(value: JsonValue, rank: number, state: ParseState, path:
       if (axis >= rank) invalid(LAYOUT_DIAGNOSTIC_CODES.rankMismatch, `${path}.axis`, `coordinate axis ${axis} is outside rank ${rank}`);
       return { kind: "coordinate", axis };
     }
-    case "dimension":
+    case "dimension": {
       exactFields(object, ["kind", "symbolId"], path);
-      return { kind: "dimension", symbolId: localId(field(object, "symbolId", path), `${path}.symbolId`) };
+      const symbolId = localId(field(object, "symbolId", path), `${path}.symbolId`);
+      if (symbolId.startsWith("__bg_")) {
+        invalid(LAYOUT_DIAGNOSTIC_CODES.invalidArtifact, `${path}.symbolId`, "dimension references must not use the reserved __bg_ namespace");
+      }
+      return { kind: "dimension", symbolId };
+    }
     case "add": {
       exactFields(object, ["kind", "terms"], path);
       const terms = arrayField(object, "terms", path);
@@ -413,13 +428,16 @@ function verifySemantics(payload: LayoutArtifactPayloadV1, limits: DecodeLimits)
   if (constraintResult.kind === "violated") {
     invalid(LAYOUT_DIAGNOSTIC_CODES.constraintViolation, `$.payload.constraints[${constraintResult.constraintIndex}]`, "statically violated shape constraint");
   }
-  const symbolMinimum = new Map(payload.symbols.map((symbol) => [symbol.id, BigInt(symbol.domain.min)]));
+  const lowerBounds: LowerBoundContext = {
+    minima: new Map(payload.symbols.map((symbol) => [symbol.id, BigInt(symbol.domain.min)])),
+    limits,
+  };
   for (const [index, constraint] of payload.constraints.entries()) {
-    if (constraint.kind === "divisible") requireProvablyPositive(constraint.divisor, symbolMinimum, `$.payload.constraints[${index}].divisor`);
-    validateDimDivisorsInConstraint(constraint, symbolMinimum, `$.payload.constraints[${index}]`);
+    if (constraint.kind === "divisible") requireProvablyPositive(constraint.divisor, lowerBounds, `$.payload.constraints[${index}].divisor`);
+    validateDimDivisorsInConstraint(constraint, lowerBounds, `$.payload.constraints[${index}]`);
   }
   for (const [index, allocation] of payload.allocations.entries()) {
-    validateDimDivisors(allocation.byteLength, symbolMinimum, `$.payload.allocations[${index}].byteLength`);
+    validateDimDivisors(allocation.byteLength, lowerBounds, `$.payload.allocations[${index}].byteLength`);
     const result = evaluateDimExpr(allocation.byteLength, environment, { limits });
     if (result.kind === "resolved" && (result.value < 0n || result.value > ((1n << 64n) - 1n))) {
       invalid(LAYOUT_DIAGNOSTIC_CODES.fieldRange, `$.payload.allocations[${index}].byteLength`, "allocation byte length must resolve to u64");
@@ -427,8 +445,8 @@ function verifySemantics(payload: LayoutArtifactPayloadV1, limits: DecodeLimits)
   }
   const allocations = new Map(payload.allocations.map((entry) => [entry.allocationId, entry]));
   for (const [index, indexMap] of payload.indexMaps.entries()) {
-    validateIndexDivisors(indexMap.location, symbolMinimum, `$.payload.indexMaps[${index}].location`);
-    validatePredicateDivisors(indexMap.inBounds, symbolMinimum, `$.payload.indexMaps[${index}].inBounds`);
+    validateIndexDivisors(indexMap.location, lowerBounds, `$.payload.indexMaps[${index}].location`);
+    validatePredicateDivisors(indexMap.inBounds, lowerBounds, `$.payload.indexMaps[${index}].inBounds`);
     const coordinates = Array.from({ length: indexMap.coordinateRank }, () => 0n);
     evaluateIndexExpr(indexMap.location, { coordinateRank: indexMap.coordinateRank, coordinates, dimensions: environment }, { limits });
     evaluatePredicateExpr(indexMap.inBounds, { coordinateRank: indexMap.coordinateRank, coordinates, dimensions: environment }, { limits });
@@ -445,7 +463,7 @@ function verifySemantics(payload: LayoutArtifactPayloadV1, limits: DecodeLimits)
     if (allocation.alignmentBytes < view.requiredAlignmentBytes || allocation.alignmentBytes % view.requiredAlignmentBytes !== 0) {
       invalid(LAYOUT_DIAGNOSTIC_CODES.invalidAlignment, `$.payload.views[${index}].requiredAlignmentBytes`, "allocation alignment does not satisfy view alignment");
     }
-    validateDimDivisors(view.byteOffset, symbolMinimum, `$.payload.views[${index}].byteOffset`);
+    validateDimDivisors(view.byteOffset, lowerBounds, `$.payload.views[${index}].byteOffset`);
     const offset = evaluateDimExpr(view.byteOffset, environment, { limits });
     if (offset.kind === "resolved" && (offset.value < 0n || offset.value > ((1n << 64n) - 1n))) {
       invalid(LAYOUT_DIAGNOSTIC_CODES.fieldRange, `$.payload.views[${index}].byteOffset`, "view byte offset must resolve to u64");
@@ -458,159 +476,191 @@ function verifySemantics(payload: LayoutArtifactPayloadV1, limits: DecodeLimits)
       invalid(LAYOUT_DIAGNOSTIC_CODES.fieldRange, `$.payload.views[${index}].byteOffset`, "view offset exceeds allocation byte length");
     }
     for (const [axis, dimension] of view.shape.entries()) {
-      validateDimDivisors(dimension, symbolMinimum, `$.payload.views[${index}].shape[${axis}]`);
+      validateDimDivisors(dimension, lowerBounds, `$.payload.views[${index}].shape[${axis}]`);
       const result = evaluateDimExpr(dimension, environment, { limits });
-      if (result.kind === "resolved" && result.value < 0n) {
-        invalid(LAYOUT_DIAGNOSTIC_CODES.fieldRange, `$.payload.views[${index}].shape[${axis}]`, "view extent must be non-negative");
+      if (result.kind === "resolved" && (result.value < 0n || result.value > ((1n << 64n) - 1n))) {
+        invalid(LAYOUT_DIAGNOSTIC_CODES.fieldRange, `$.payload.views[${index}].shape[${axis}]`, "view extent must resolve to u64");
       }
     }
   }
 }
 
-function validateDimDivisorsInConstraint(constraint: ShapeConstraint, minima: ReadonlyMap<string, bigint>, path: string): void {
+function validateDimDivisorsInConstraint(constraint: ShapeConstraint, context: LowerBoundContext, path: string): void {
   switch (constraint.kind) {
     case "equal":
     case "lessEqual":
-      validateDimDivisors(constraint.lhs, minima, `${path}.lhs`);
-      validateDimDivisors(constraint.rhs, minima, `${path}.rhs`);
+      validateDimDivisors(constraint.lhs, context, `${path}.lhs`);
+      validateDimDivisors(constraint.rhs, context, `${path}.rhs`);
       break;
     case "nonNegative":
-    case "positive": validateDimDivisors(constraint.value, minima, `${path}.value`); break;
+    case "positive": validateDimDivisors(constraint.value, context, `${path}.value`); break;
     case "divisible":
-      validateDimDivisors(constraint.value, minima, `${path}.value`);
-      validateDimDivisors(constraint.divisor, minima, `${path}.divisor`);
+      validateDimDivisors(constraint.value, context, `${path}.value`);
+      validateDimDivisors(constraint.divisor, context, `${path}.divisor`);
       break;
   }
 }
 
-function validateDimDivisors(expression: DimExpr, minima: ReadonlyMap<string, bigint>, path: string): void {
+function validateDimDivisors(expression: DimExpr, context: LowerBoundContext, path: string): void {
   switch (expression.kind) {
     case "floorDiv":
     case "ceilDiv":
     case "mod":
-      requireProvablyPositive(expression.divisor, minima, `${path}.divisor`);
-      validateDimDivisors(expression.value, minima, `${path}.value`);
-      validateDimDivisors(expression.divisor, minima, `${path}.divisor`);
+      requireProvablyPositive(expression.divisor, context, `${path}.divisor`);
+      validateDimDivisors(expression.value, context, `${path}.value`);
+      validateDimDivisors(expression.divisor, context, `${path}.divisor`);
       break;
-    case "add": expression.terms.forEach((term, index) => validateDimDivisors(term, minima, `${path}.terms[${index}]`)); break;
+    case "add": expression.terms.forEach((term, index) => validateDimDivisors(term, context, `${path}.terms[${index}]`)); break;
     case "mul":
-      validateDimDivisors(expression.lhs, minima, `${path}.lhs`);
-      validateDimDivisors(expression.rhs, minima, `${path}.rhs`);
+      validateDimDivisors(expression.lhs, context, `${path}.lhs`);
+      validateDimDivisors(expression.rhs, context, `${path}.rhs`);
       break;
     case "min":
-    case "max": expression.values.forEach((value, index) => validateDimDivisors(value, minima, `${path}.values[${index}]`)); break;
+    case "max": expression.values.forEach((value, index) => validateDimDivisors(value, context, `${path}.values[${index}]`)); break;
     case "const":
     case "symbol": break;
   }
 }
 
-function validateIndexDivisors(expression: IndexExpr, minima: ReadonlyMap<string, bigint>, path: string): void {
+function validateIndexDivisors(expression: IndexExpr, context: LowerBoundContext, path: string): void {
   switch (expression.kind) {
     case "floorDiv":
     case "ceilDiv":
     case "mod":
-      requireProvablyPositiveIndex(expression.divisor, minima, `${path}.divisor`);
-      validateIndexDivisors(expression.value, minima, `${path}.value`);
-      validateIndexDivisors(expression.divisor, minima, `${path}.divisor`);
+      requireProvablyPositiveIndex(expression.divisor, context, `${path}.divisor`);
+      validateIndexDivisors(expression.value, context, `${path}.value`);
+      validateIndexDivisors(expression.divisor, context, `${path}.divisor`);
       break;
-    case "add": expression.terms.forEach((term, index) => validateIndexDivisors(term, minima, `${path}.terms[${index}]`)); break;
+    case "add": expression.terms.forEach((term, index) => validateIndexDivisors(term, context, `${path}.terms[${index}]`)); break;
     case "mul":
-      validateIndexDivisors(expression.lhs, minima, `${path}.lhs`);
-      validateIndexDivisors(expression.rhs, minima, `${path}.rhs`);
+      validateIndexDivisors(expression.lhs, context, `${path}.lhs`);
+      validateIndexDivisors(expression.rhs, context, `${path}.rhs`);
       break;
     case "min":
-    case "max": expression.values.forEach((value, index) => validateIndexDivisors(value, minima, `${path}.values[${index}]`)); break;
+    case "max": expression.values.forEach((value, index) => validateIndexDivisors(value, context, `${path}.values[${index}]`)); break;
     case "const":
     case "coordinate":
     case "dimension": break;
   }
 }
 
-function validatePredicateDivisors(expression: PredicateExpr, minima: ReadonlyMap<string, bigint>, path: string): void {
+function validatePredicateDivisors(expression: PredicateExpr, context: LowerBoundContext, path: string): void {
   switch (expression.kind) {
     case "equal":
     case "lessEqual":
-      validateIndexDivisors(expression.lhs, minima, `${path}.lhs`);
-      validateIndexDivisors(expression.rhs, minima, `${path}.rhs`);
+      validateIndexDivisors(expression.lhs, context, `${path}.lhs`);
+      validateIndexDivisors(expression.rhs, context, `${path}.rhs`);
       break;
     case "and":
-    case "or": expression.values.forEach((value, index) => validatePredicateDivisors(value, minima, `${path}.values[${index}]`)); break;
-    case "not": validatePredicateDivisors(expression.value, minima, `${path}.value`); break;
+    case "or": expression.values.forEach((value, index) => validatePredicateDivisors(value, context, `${path}.values[${index}]`)); break;
+    case "not": validatePredicateDivisors(expression.value, context, `${path}.value`); break;
     case "bool": break;
   }
 }
 
-function requireProvablyPositive(expression: DimExpr, minima: ReadonlyMap<string, bigint>, path: string): void {
-  const minimum = dimLowerBound(expression, minima);
+function requireProvablyPositive(expression: DimExpr, context: LowerBoundContext, path: string): void {
+  const minimum = dimLowerBound(expression, { ...context, operations: 0 });
   if (minimum === undefined || minimum <= 0n) {
     invalid(LAYOUT_DIAGNOSTIC_CODES.nonpositiveDivisor, path, "divisor positivity must be statically proved from constants and symbol domains");
   }
 }
 
-function requireProvablyPositiveIndex(expression: IndexExpr, minima: ReadonlyMap<string, bigint>, path: string): void {
-  const minimum = indexLowerBound(expression, minima);
+function requireProvablyPositiveIndex(expression: IndexExpr, context: LowerBoundContext, path: string): void {
+  const minimum = indexLowerBound(expression, { ...context, operations: 0 });
   if (minimum === undefined || minimum <= 0n) {
     invalid(LAYOUT_DIAGNOSTIC_CODES.nonpositiveDivisor, path, "index divisor positivity must be statically proved without coordinate dependence");
   }
 }
 
-function dimLowerBound(expression: DimExpr, minima: ReadonlyMap<string, bigint>): bigint | undefined {
+function dimLowerBound(expression: DimExpr, budget: LowerBoundBudget): bigint | undefined {
   switch (expression.kind) {
     case "const": return BigInt(expression.value);
-    case "symbol": return minima.get(expression.id);
+    case "symbol": return budget.minima.get(expression.id);
     case "add": {
-      const values = expression.terms.map((term) => dimLowerBound(term, minima));
-      return values.every((value): value is bigint => value !== undefined)
-        ? values.reduce((total, value) => total + value, 0n)
-        : undefined;
+      const values = expression.terms.map((term) => dimLowerBound(term, budget));
+      return values.every((value): value is bigint => value !== undefined) ? boundedSum(values, budget) : undefined;
     }
     case "mul": {
-      const lhs = dimLowerBound(expression.lhs, minima);
-      const rhs = dimLowerBound(expression.rhs, minima);
-      return lhs !== undefined && rhs !== undefined && lhs >= 0n && rhs >= 0n ? lhs * rhs : undefined;
+      const lhs = dimLowerBound(expression.lhs, budget);
+      const rhs = dimLowerBound(expression.rhs, budget);
+      return lhs !== undefined && rhs !== undefined && lhs >= 0n && rhs >= 0n ? boundedProduct(lhs, rhs, budget) : undefined;
     }
     case "min":
     case "max": {
-      const values = expression.values.map((value) => dimLowerBound(value, minima));
+      const values = expression.values.map((value) => dimLowerBound(value, budget));
       if (!values.every((value): value is bigint => value !== undefined)) return undefined;
-      return expression.kind === "min"
-        ? values.reduce((result, value) => value < result ? value : result)
-        : values.reduce((result, value) => value > result ? value : result);
+      return boundedExtreme(values, expression.kind, budget);
     }
-    case "mod": return dimLowerBound(expression.divisor, minima) !== undefined ? 0n : undefined;
+    case "mod": return dimLowerBound(expression.divisor, budget) !== undefined ? 0n : undefined;
     case "floorDiv":
     case "ceilDiv": return undefined;
   }
 }
 
-function indexLowerBound(expression: IndexExpr, minima: ReadonlyMap<string, bigint>): bigint | undefined {
+function indexLowerBound(expression: IndexExpr, budget: LowerBoundBudget): bigint | undefined {
   switch (expression.kind) {
     case "const": return BigInt(expression.value);
-    case "dimension": return minima.get(expression.symbolId);
+    case "dimension": return budget.minima.get(expression.symbolId);
     case "coordinate": return undefined;
     case "add": {
-      const values = expression.terms.map((term) => indexLowerBound(term, minima));
-      return values.every((value): value is bigint => value !== undefined)
-        ? values.reduce((total, value) => total + value, 0n)
-        : undefined;
+      const values = expression.terms.map((term) => indexLowerBound(term, budget));
+      return values.every((value): value is bigint => value !== undefined) ? boundedSum(values, budget) : undefined;
     }
     case "mul": {
-      const lhs = indexLowerBound(expression.lhs, minima);
-      const rhs = indexLowerBound(expression.rhs, minima);
-      return lhs !== undefined && rhs !== undefined && lhs >= 0n && rhs >= 0n ? lhs * rhs : undefined;
+      const lhs = indexLowerBound(expression.lhs, budget);
+      const rhs = indexLowerBound(expression.rhs, budget);
+      return lhs !== undefined && rhs !== undefined && lhs >= 0n && rhs >= 0n ? boundedProduct(lhs, rhs, budget) : undefined;
     }
     case "min":
     case "max": {
-      const values = expression.values.map((value) => indexLowerBound(value, minima));
+      const values = expression.values.map((value) => indexLowerBound(value, budget));
       if (!values.every((value): value is bigint => value !== undefined)) return undefined;
-      return expression.kind === "min"
-        ? values.reduce((result, value) => value < result ? value : result)
-        : values.reduce((result, value) => value > result ? value : result);
+      return boundedExtreme(values, expression.kind, budget);
     }
-    case "mod": return indexLowerBound(expression.divisor, minima) !== undefined ? 0n : undefined;
+    case "mod": return indexLowerBound(expression.divisor, budget) !== undefined ? 0n : undefined;
     case "floorDiv":
     case "ceilDiv": return undefined;
   }
+}
+
+function boundedSum(values: readonly bigint[], budget: LowerBoundBudget): bigint | undefined {
+  let result = values[0];
+  if (result === undefined) return undefined;
+  for (let index = 1; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === undefined || !consumeLowerBoundOperation(budget)) return undefined;
+    result += value;
+    if (integerBits(result) > budget.limits.maxIntegerBits) return undefined;
+  }
+  return result;
+}
+
+function boundedProduct(lhs: bigint, rhs: bigint, budget: LowerBoundBudget): bigint | undefined {
+  if (!consumeLowerBoundOperation(budget)) return undefined;
+  if (lhs !== 0n && rhs !== 0n && integerBits(lhs) + integerBits(rhs) - 1 > budget.limits.maxIntegerBits) return undefined;
+  const result = lhs * rhs;
+  return integerBits(result) <= budget.limits.maxIntegerBits ? result : undefined;
+}
+
+function boundedExtreme(values: readonly bigint[], kind: "min" | "max", budget: LowerBoundBudget): bigint | undefined {
+  let result = values[0];
+  if (result === undefined) return undefined;
+  for (let index = 1; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === undefined || !consumeLowerBoundOperation(budget)) return undefined;
+    result = kind === "min" ? (value < result ? value : result) : (value > result ? value : result);
+  }
+  return result;
+}
+
+function consumeLowerBoundOperation(budget: LowerBoundBudget): boolean {
+  budget.operations += 1;
+  return budget.operations <= budget.limits.maxArithmeticOperations;
+}
+
+function integerBits(value: bigint): number {
+  const absolute = value < 0n ? -value : value;
+  return absolute === 0n ? 1 : absolute.toString(2).length;
 }
 
 function closedObject(

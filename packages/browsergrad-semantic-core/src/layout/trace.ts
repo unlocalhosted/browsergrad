@@ -1,4 +1,5 @@
 import { LAYOUT_DIAGNOSTIC_CODES, SemanticSchemaError } from "../schema/diagnostics.js";
+import { deepFreezeJson, type JsonValue } from "../schema/json.js";
 import {
   I64_MIN,
   U64_MAX,
@@ -118,7 +119,7 @@ export function traceViewCoordinate(
   if (logicalInBounds && predicateInBounds && allocationInBounds && rootByteStart % BigInt(getBuiltinDType(view.dtype).alignmentBytes) !== 0n) {
     invalid(LAYOUT_DIAGNOSTIC_CODES.invalidAlignment, "$.trace.rootByteStart", "resolved access violates dtype alignment");
   }
-  return Object.freeze({
+  return deepFreezeJson({
     viewId: view.viewId,
     allocationId: allocation.allocationId,
     aliasSetId: allocation.aliasSetId,
@@ -134,7 +135,7 @@ export function traceViewCoordinate(
     predicateInBounds,
     allocationInBounds,
     accessInBounds: logicalInBounds && predicateInBounds && allocationInBounds,
-  });
+  } as unknown as JsonValue) as unknown as LayoutCoordinateTrace;
 }
 
 export function traceViewAlias(
@@ -149,17 +150,17 @@ export function traceViewAlias(
   const right = traceViewCoordinate(artifact, { ...request.right, ...shared });
   const sameAllocation = left.allocationId === right.allocationId;
   const sameAliasSet = left.aliasSetId === right.aliasSetId;
-  const byteRangesOverlap = sameAllocation
+  const byteRangesOverlap = sameAllocation && left.accessInBounds && right.accessInBounds
     ? BigInt(left.rootByteStart) < BigInt(right.rootByteEndExclusive) && BigInt(right.rootByteStart) < BigInt(left.rootByteEndExclusive)
     : null;
-  return Object.freeze({
+  return deepFreezeJson({
     left,
     right,
     sameAllocation,
     sameAliasSet,
     byteRangesOverlap,
     relation: sameAllocation ? "same-allocation" : sameAliasSet ? "may-alias" : "disjoint",
-  });
+  } as unknown as JsonValue) as unknown as LayoutAliasTrace;
 }
 
 function resolveDim(

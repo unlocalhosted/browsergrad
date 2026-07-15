@@ -1,0 +1,181 @@
+{
+  "schema": "browsergrad.layout",
+  "version": { "major": 1, "minor": 0 },
+  "producer": { "id": "golden-fixture", "version": "1" },
+  "artifactId": "transport-symbolic-byte-rank3",
+  "requiredExtensions": [],
+  "optionalMetadata": { "purpose": "dynamic-cross-language-parity" },
+  "payload": {
+    "symbols": [
+      { "id": "n", "domain": { "min": "2", "max": "4" } }
+    ],
+    "constraints": [
+      { "kind": "positive", "value": { "kind": "symbol", "id": "n" } },
+      {
+        "kind": "lessEqual",
+        "lhs": { "kind": "symbol", "id": "n" },
+        "rhs": { "kind": "const", "value": "4" }
+      },
+      {
+        "kind": "divisible",
+        "value": {
+          "kind": "mul",
+          "lhs": { "kind": "symbol", "id": "n" },
+          "rhs": { "kind": "const", "value": "24" }
+        },
+        "divisor": { "kind": "const", "value": "8" }
+      }
+    ],
+    "allocations": [
+      {
+        "allocationId": "mainAllocation",
+        "byteLength": {
+          "kind": "mul",
+          "lhs": { "kind": "symbol", "id": "n" },
+          "rhs": { "kind": "const", "value": "24" }
+        },
+        "memorySpace": { "kind": "host" },
+        "alignmentBytes": 8,
+        "aliasSetId": "mainAliasSet"
+      },
+      {
+        "allocationId": "scratchAllocation",
+        "byteLength": { "kind": "const", "value": "64" },
+        "memorySpace": { "kind": "shared", "scope": "workgroup" },
+        "alignmentBytes": 8,
+        "aliasSetId": "scratchAliasSet"
+      }
+    ],
+    "indexMaps": [
+      {
+        "indexMapId": "byteMap",
+        "coordinateRank": 3,
+        "locationUnit": "byte",
+        "location": {
+          "kind": "add",
+          "terms": [
+            {
+              "kind": "mul",
+              "lhs": { "kind": "coordinate", "axis": 0 },
+              "rhs": { "kind": "const", "value": "24" }
+            },
+            {
+              "kind": "mul",
+              "lhs": { "kind": "coordinate", "axis": 1 },
+              "rhs": { "kind": "const", "value": "12" }
+            },
+            {
+              "kind": "mul",
+              "lhs": { "kind": "coordinate", "axis": 2 },
+              "rhs": { "kind": "const", "value": "4" }
+            }
+          ]
+        },
+        "inBounds": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "lessEqual",
+              "lhs": { "kind": "const", "value": "0" },
+              "rhs": { "kind": "coordinate", "axis": 0 }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": {
+                "kind": "add",
+                "terms": [
+                  { "kind": "coordinate", "axis": 0 },
+                  { "kind": "const", "value": "1" }
+                ]
+              },
+              "rhs": { "kind": "dimension", "symbolId": "n" }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": { "kind": "const", "value": "0" },
+              "rhs": { "kind": "coordinate", "axis": 1 }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": {
+                "kind": "add",
+                "terms": [
+                  { "kind": "coordinate", "axis": 1 },
+                  { "kind": "const", "value": "1" }
+                ]
+              },
+              "rhs": { "kind": "const", "value": "2" }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": { "kind": "const", "value": "0" },
+              "rhs": { "kind": "coordinate", "axis": 2 }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": {
+                "kind": "add",
+                "terms": [
+                  { "kind": "coordinate", "axis": 2 },
+                  { "kind": "const", "value": "1" }
+                ]
+              },
+              "rhs": { "kind": "const", "value": "3" }
+            }
+          ]
+        }
+      },
+      {
+        "indexMapId": "scratchMap",
+        "coordinateRank": 1,
+        "locationUnit": "element",
+        "location": { "kind": "coordinate", "axis": 0 },
+        "inBounds": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "lessEqual",
+              "lhs": { "kind": "const", "value": "0" },
+              "rhs": { "kind": "coordinate", "axis": 0 }
+            },
+            {
+              "kind": "lessEqual",
+              "lhs": {
+                "kind": "add",
+                "terms": [
+                  { "kind": "coordinate", "axis": 0 },
+                  { "kind": "const", "value": "1" }
+                ]
+              },
+              "rhs": { "kind": "const", "value": "8" }
+            }
+          ]
+        }
+      }
+    ],
+    "views": [
+      {
+        "viewId": "mainView",
+        "allocationId": "mainAllocation",
+        "dtype": "f32",
+        "byteOffset": { "kind": "const", "value": "0" },
+        "shape": [
+          { "kind": "symbol", "id": "n" },
+          { "kind": "const", "value": "2" },
+          { "kind": "const", "value": "3" }
+        ],
+        "indexMapId": "byteMap",
+        "requiredAlignmentBytes": 8
+      },
+      {
+        "viewId": "scratchView",
+        "allocationId": "scratchAllocation",
+        "dtype": "i16",
+        "byteOffset": { "kind": "const", "value": "0" },
+        "shape": [{ "kind": "const", "value": "8" }],
+        "indexMapId": "scratchMap",
+        "requiredAlignmentBytes": 2
+      }
+    ]
+  }
+}

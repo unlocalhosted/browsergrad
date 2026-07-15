@@ -10,3 +10,5 @@ npm-debug.log*
 .env
 .env.local
 .wibey-test/
+__pycache__/
+*.py[cod]

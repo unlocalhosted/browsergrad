@@ -15,3 +15,15 @@ at runtime, this package must become a packed and release-tested `0.x` package.
 
 Current status and evidence live in
 [`docs/internal/package-requirements-implementation-ledger.md`](../../docs/internal/package-requirements-implementation-ledger.md).
+
+## Cross-language reference
+
+`python/browsergrad_semantic_core.py` is the dependency-free Python reference
+for the current closed `browsergrad.layout@1` wire contract. It independently
+decodes, validates, normalizes, canonicalizes, hashes, and traces the golden
+fixtures under `fixtures/layout-v1/`; it is a parity and review oracle, not a
+second runtime implementation or a stable Python package API.
+
+The Vitest parity suite runs both implementations over positive fixtures and a
+differential rejection corpus. Any schema change must update both references,
+their fixtures, and the implementation ledger in the same coherent change.
