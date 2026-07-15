@@ -1,10 +1,30 @@
 import type { CompileCudaLiteOptions } from "./types.js";
+import {
+  CUDA_LITE_LAYOUT_BINDING_PROFILE,
+  unwrapPreparedCudaLiteLayoutBindings,
+  type PreparedCudaLiteLayoutBindings,
+} from "./semantic_layout_bindings.js";
 
 export function createCudaLiteCompileCacheKey(
   source: string,
   options: CompileCudaLiteOptions = {},
 ): string {
   return stableStringify([source, stableNormalize(options)]);
+}
+
+export function createCudaLiteLayoutBindingCompileCacheKey(
+  source: string,
+  prepared: PreparedCudaLiteLayoutBindings,
+  options: CompileCudaLiteOptions = {},
+): string {
+  unwrapPreparedCudaLiteLayoutBindings(prepared);
+  return stableStringify({
+    profile: CUDA_LITE_LAYOUT_BINDING_PROFILE,
+    source,
+    options,
+    layoutSemanticHash: prepared.layoutSemanticHash,
+    bindingProjectionHash: prepared.bindingProjectionHash,
+  });
 }
 
 function stableStringify(value: unknown): string {

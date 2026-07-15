@@ -94,7 +94,8 @@
     "prepublishOnly": "pnpm run verify:compiler"
   },
   "dependencies": {
-    "@unlocalhosted/browsergrad-kernels": "workspace:*"
+    "@unlocalhosted/browsergrad-kernels": "workspace:*",
+    "@unlocalhosted/browsergrad-semantic-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

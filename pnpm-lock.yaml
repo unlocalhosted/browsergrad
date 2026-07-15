@@ -13,6 +13,9 @@ importers:
       '@unlocalhosted/browsergrad-kernels':
         specifier: workspace:*
         version: link:../browsergrad-kernels
+      '@unlocalhosted/browsergrad-semantic-core':
+        specifier: workspace:*
+        version: link:../browsergrad-semantic-core
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

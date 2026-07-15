@@ -229,11 +229,22 @@ export {
 } from "./semantic_wgsl.js";
 export {
   createCudaLiteCompileCacheKey,
+  createCudaLiteLayoutBindingCompileCacheKey,
   createCudaLiteCompilerCache,
   type CudaLiteCompilerCache,
   type CudaLiteCompilerCacheOptions,
   type CudaLiteCompilerCacheStats,
 } from "./cache.js";
+export {
+  CUDA_LITE_LAYOUT_BINDING_PROFILE,
+  CudaLiteLayoutBindingError,
+  prepareCudaLiteLayoutBindings,
+  type CudaLiteLayoutBindingErrorCode,
+  type CudaLiteLayoutBindingRequest,
+  type PrepareCudaLiteLayoutBindingsOptions,
+  type PreparedCudaLiteLayoutBinding,
+  type PreparedCudaLiteLayoutBindings,
+} from "./semantic_layout_bindings.js";
 export {
   mapCudaLiteDiagnosticToSourceProvenance,
   prepareCudaLiteCompilationUnit,

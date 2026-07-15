@@ -13,6 +13,8 @@ try {
   const kernels = packAndExtract("browsergrad-kernels");
   const compiler = packAndExtract("browsergrad-compiler");
   linkPackedDependency(kernels, "@unlocalhosted/browsergrad-semantic-core", semanticCore);
+  linkPackedDependency(compiler, "@unlocalhosted/browsergrad-kernels", kernels);
+  linkPackedDependency(compiler, "@unlocalhosted/browsergrad-semantic-core", semanticCore);
 
   const semanticCorePkg = readPackage(semanticCore);
   const workspaceSemanticCoreVersion = readPackage(join(root, "packages/browsergrad-semantic-core")).version;
@@ -190,7 +192,7 @@ try {
   assert(packedWgsl.program.wgsl.includes("var<storage, read> source_words: array<u32>"), "packed WGSL lowering lost bit-exact source words");
   assert(packedWgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits"), "packed WGSL lowering lost destination copy");
   assert(!packedWgsl.program.wgsl.includes("select("), "packed WGSL lowering used eager select for guarded copy");
-  const installedConsumer = installPackedConsumer(["browsergrad-semantic-core", "browsergrad-kernels"]);
+  const installedConsumer = installPackedConsumer(["browsergrad-semantic-core", "browsergrad-kernels", "browsergrad-compiler"]);
   verifyInstalledSemanticViewCopyConsumer(installedConsumer);
 
   const compilerPkg = readPackage(compiler);
@@ -200,6 +202,34 @@ try {
   assert(
     kernelsRange === workspaceKernelsVersion,
     `compiler package kernels dependency should be ${workspaceKernelsVersion}, got ${kernelsRange}`,
+  );
+  const compilerSemanticCoreRange = compilerPkg.dependencies?.["@unlocalhosted/browsergrad-semantic-core"];
+  assert(compilerSemanticCoreRange, "compiler package missing semantic-core dependency");
+  assert(!compilerSemanticCoreRange.includes("workspace:"), `compiler package leaked semantic-core workspace dependency: ${compilerSemanticCoreRange}`);
+  assert(
+    compilerSemanticCoreRange === workspaceSemanticCoreVersion,
+    `compiler package semantic-core dependency should be ${workspaceSemanticCoreVersion}, got ${compilerSemanticCoreRange}`,
+  );
+  const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
+  for (const exportName of [
+    "prepareCudaLiteLayoutBindings",
+    "createCudaLiteLayoutBindingCompileCacheKey",
+  ]) {
+    assert(exportName in compilerRoot, `compiler root export missing ${exportName}`);
+  }
+  const packedCompilerBinding = await compilerRoot.prepareCudaLiteLayoutBindings(packedLayout, [{
+    parameter: "input",
+    viewId: packedLayoutPayload.views[0].viewId,
+    access: "read",
+    indexing: "row-major-flat",
+  }]);
+  assert(
+    packedCompilerBinding.layoutSemanticHash === await semanticSchema.hashSemanticArtifact(packedLayout),
+    "packed compiler binding lost semantic layout identity",
+  );
+  assert(
+    compilerRoot.createCudaLiteLayoutBindingCompileCacheKey("source", packedCompilerBinding).includes(packedCompilerBinding.bindingProjectionHash),
+    "packed compiler cache key lost binding projection identity",
   );
 
   console.log("release package tests ok");
@@ -239,7 +269,14 @@ function installPackedConsumer(packageNames) {
     private: true,
     type: "module",
     dependencies,
-    pnpm: { overrides: { "@unlocalhosted/browsergrad-semantic-core": dependencies["@unlocalhosted/browsergrad-semantic-core"] } },
+    pnpm: {
+      overrides: {
+        "@unlocalhosted/browsergrad-semantic-core": dependencies["@unlocalhosted/browsergrad-semantic-core"],
+        ...(dependencies["@unlocalhosted/browsergrad-kernels"] === undefined
+          ? {}
+          : { "@unlocalhosted/browsergrad-kernels": dependencies["@unlocalhosted/browsergrad-kernels"] }),
+      },
+    },
   }));
   run("pnpm", ["install", "--offline", "--ignore-scripts"], consumer);
   return consumer;
@@ -251,6 +288,7 @@ import { layoutArtifactPayload, verifyLayoutArtifact } from "@unlocalhosted/brow
 import { kernelArtifactPayload, prepareViewCopyCpu, verifyKernelArtifact } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { hashSemanticArtifact } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
+import { createCudaLiteLayoutBindingCompileCacheKey, prepareCudaLiteLayoutBindings } from "@unlocalhosted/browsergrad-compiler";
 
 const layout = await verifyLayoutArtifact({
   schema: "browsergrad.layout",
@@ -310,8 +348,16 @@ const kernel = await verifyKernelArtifact({
 const operationId = kernelArtifactPayload(kernel).operations[0].operationId;
 const cpu = await prepareViewCopyCpu(layout, kernel, { operationId });
 const wgsl = await prepareSemanticViewCopyWgsl(layout, kernel, { operationId });
+const compilerBinding = await prepareCudaLiteLayoutBindings(layout, [{
+  parameter: "input",
+  viewId: payload.views[0].viewId,
+  access: "read",
+  indexing: "row-major-flat",
+}]);
 if (cpu.specializationHash !== wgsl.semantic.specializationHash) throw new Error("fresh consumer CPU/WGSL specialization mismatch");
 if (!wgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits")) throw new Error("fresh consumer lowering missing copy");
+if (compilerBinding.layoutSemanticHash !== await hashSemanticArtifact(layout)) throw new Error("fresh consumer compiler binding lost semantic layout identity");
+if (!createCudaLiteLayoutBindingCompileCacheKey("source", compilerBinding).includes(compilerBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler cache key lost binding identity");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);

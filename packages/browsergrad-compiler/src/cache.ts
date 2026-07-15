@@ -5,7 +5,10 @@ import type {
   CompileCudaLiteOptions,
 } from "./types.js";
 
-export { createCudaLiteCompileCacheKey } from "./cache-key.js";
+export {
+  createCudaLiteCompileCacheKey,
+  createCudaLiteLayoutBindingCompileCacheKey,
+} from "./cache-key.js";
 
 export interface CudaLiteCompilerCacheStats {
   readonly hits: number;
