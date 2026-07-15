@@ -55,19 +55,28 @@
     "codegen": "node scripts/build-python-sources.mjs",
     "build": "pnpm codegen && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:browser:semantic-permute": "tsc -p tsconfig.browser-semantic-permute.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:browser:semantic-permute": "vitest run --config vitest.browser.config.ts tests-browser/semantic_permute_webgpu.test.ts",
+    "test:browser:semantic-permute:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_permute_webgpu.test.ts",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test"
+    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run typecheck:browser:semantic-permute && pnpm run lint && pnpm run test && node scripts/require_semantic_permute_publish_gate.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@unlocalhosted/browsergrad-kernels": "workspace:*",
+    "@unlocalhosted/browsergrad-semantic-core": "workspace:*",
+    "@vitest/browser": "^4.1.7",
+    "@vitest/browser-playwright": "^4.1.7",
     "@webgpu/types": "^0.1.50",
     "oxlint": "^1.0.0",
     "pyodide": "^0.26.4",
+    "playwright": "^1.60.0",
     "typescript": "~6.0.0",
+    "vite": "^8.0.14",
     "vitest": "^4.0.0"
   },
   "optionalPeerDependencies": {

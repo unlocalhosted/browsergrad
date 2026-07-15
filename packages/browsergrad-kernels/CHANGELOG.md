@@ -7,6 +7,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Resident semantic dispatch and materialization now issue all synchronous GPU
+  work under production validation, out-of-memory, and internal error scopes;
+  all LIFO pops start before the first await and race operation completion with
+  device loss. Diagnostic failures destroy roots, clear pipeline/output pools,
+  settle profiles, and cannot mint bridge handles or re-pool poisoned buffers.
+- Direct callers use an async scoped resident API. Tensor-plan execution alone
+  receives a private, non-exported synchronous issue capability so future
+  consumers cannot bypass diagnostic ownership accidentally.
+- Kernels publication runs build/typecheck/lint/tests before its final clean-
+  commit gate and requires both kernels view-copy and JIT semantic-permutation
+  evidence markers for the exact source revision.
+
 ## [0.2.0] - 2026-07-15
 
 ### Added
@@ -37,6 +51,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   tables. Routing identity is authority-bound but excluded from layout,
   kernel, specialization, and WGSL hashes; semantic-route `PERMUTE` never calls
   the legacy shape/axes kernel.
+- Prepared JIT semantic requests expose immutable backend profile/version and
+  planned logical/workgroup topology. Live semantic bridge handles expose the
+  exact authority-bound preparation plus settled dispatch profiles, separating
+  planned topology from workgroups actually submitted without exposing offsets.
 - Exact packed dependency on `@unlocalhosted/browsergrad-semantic-core@0.2.0`
   and a public `./semantic_view_copy` subpath. Publishing is blocked unless the
   required-device evidence marker names the exact current commit.

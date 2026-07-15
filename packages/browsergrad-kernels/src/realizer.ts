@@ -50,6 +50,7 @@ import { runTensorGpuPlan, runTensorGpuPlanResident, type TensorPlanInput } from
 import {
   runTensorGpuPlanResidentSemantic,
   runTensorGpuPlanSemantic,
+  type PreparedTensorPlanSemanticRequests,
 } from "./tensor_plan_semantics.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
@@ -60,6 +61,17 @@ interface BufferRecord {
   byteLength: number;
   shape: readonly number[];
   dtype: string;
+  semanticExecution?: Readonly<{
+    preparation: PreparedTensorPlanSemanticRequests;
+    profiles: readonly Promise<DirectDispatchProfile>[];
+  }>;
+}
+
+export interface SemanticTensorPlanExecutionTrace {
+  /** Exact authority-bound preparation used by the live execution. */
+  readonly preparation: PreparedTensorPlanSemanticRequests;
+  /** Settled profiles for the exact dispatches owned by this live handle. */
+  readonly dispatchProfiles: readonly DirectDispatchProfile[];
 }
 
 export interface WebGpuRealizerBridge {
@@ -257,6 +269,8 @@ export interface WebGpuRealizerBridge {
     inputs: readonly unknown[],
     dtype: string,
   ): Promise<Handle>;
+  /** Await exact semantic execution metadata without materializing the root. */
+  semanticTensorPlanExecutionTrace(handle: Handle): Promise<SemanticTensorPlanExecutionTrace>;
   /** Diagnostic — number of GPU buffers currently alive. */
   aliveHandleCount(): number;
   /** Correctness-labeled BrowserGrad-owned WebGPU resource snapshot. */
@@ -281,6 +295,16 @@ export interface WebGpuResourceSnapshot {
   readonly logicalTensorPlanPeakBytes?: number;
   readonly pendingProfileCount: number;
   readonly passProfiles: readonly DirectDispatchProfile[];
+}
+
+function freezeDispatchProfile(
+  profile: DirectDispatchProfile,
+): DirectDispatchProfile {
+  return Object.freeze({
+    ...profile,
+    dispatchCount: Object.freeze([...profile.dispatchCount]) as readonly [number, number, number],
+    workgroupSize: Object.freeze([...profile.workgroupSize]) as readonly [number, number, number],
+  });
 }
 
 function assertF32(dtype: string, op: string): void {
@@ -896,9 +920,16 @@ export function createWebGpuRealizerBridge(
     byteLength: number,
     shape: readonly number[],
     dtype: string,
+    semanticExecution?: BufferRecord["semanticExecution"],
   ): Handle => {
     const id = nextId++;
-    handles.set(id, { buffer, byteLength, shape, dtype });
+    handles.set(id, {
+      buffer,
+      byteLength,
+      shape,
+      dtype,
+      ...(semanticExecution === undefined ? {} : { semanticExecution }),
+    });
     currentOwnedGpuBytes += byteLength;
     totalAllocatedGpuBytes += byteLength;
     peakOwnedGpuBytes = Math.max(peakOwnedGpuBytes, currentOwnedGpuBytes);
@@ -1608,7 +1639,32 @@ export function createWebGpuRealizerBridge(
       if (profilingEnabled) {
         for (const profile of result.profiles) trackProfilePromise(profile);
       }
-      return mint(result.buffer, result.byteLength, result.shape, dtype);
+      return mint(
+        result.buffer,
+        result.byteLength,
+        result.shape,
+        dtype,
+        Object.freeze({
+          preparation: result.semanticPreparation,
+          profiles: Object.freeze([...result.profiles]),
+        }),
+      );
+    },
+
+    async semanticTensorPlanExecutionTrace(
+      handle: Handle,
+    ): Promise<SemanticTensorPlanExecutionTrace> {
+      const record = get(handle, "semanticTensorPlanExecutionTrace");
+      if (record.semanticExecution === undefined) {
+        throw new KernelError(
+          `WebGPU bridge: handle ${handle} has no semantic tensor-plan execution trace`,
+        );
+      }
+      const dispatchProfiles = await Promise.all(record.semanticExecution.profiles);
+      return Object.freeze({
+        preparation: record.semanticExecution.preparation,
+        dispatchProfiles: Object.freeze(dispatchProfiles.map(freezeDispatchProfile)),
+      });
     },
 
     aliveHandleCount(): number {

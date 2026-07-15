@@ -14,14 +14,17 @@ import {
 import {
   normalizeTensorGpuPlan,
   runTensorGpuPlanResidentWithPreparedSemanticViewCopies,
-  runTensorGpuPlanWithPreparedSemanticViewCopies,
   type TensorGpuPlan,
   type TensorPlanInput,
   type TensorPlanResidentResult,
   type TensorPlanRunResult,
   type TensorPlanStep,
 } from "./tensor_plan.js";
+import { materializeFloat32, releaseDirectBuffer } from "./runner.js";
 import { KernelError, type KernelDevice } from "./types.js";
+import {
+  issueWithWebGpuErrorScopes,
+} from "./webgpu_error_scope.js";
 
 export const TENSOR_PLAN_SEMANTIC_REQUEST_SCHEMA =
   "browsergrad.jit.tensor-plan-semantic-requests";
@@ -60,12 +63,23 @@ export interface PreparedTensorPlanSemanticRequest {
   readonly kernelSemanticHash: string;
   readonly semanticSpecializationHash: string;
   readonly wgslModuleHash: string;
+  readonly backendProfile: PreparedSemanticViewCopyWgsl["backendProfile"];
+  readonly backendVersion: PreparedSemanticViewCopyWgsl["backendVersion"];
+  readonly workgroupSize: number;
+  readonly logicalInvocationCount: readonly [number, number, number];
+  /** Planned workgroups. Actual submitted workgroups come from execution profiles. */
+  readonly plannedWorkgroupCount: readonly [number, number, number];
 }
 
 export interface PreparedTensorPlanSemanticRequests {
   readonly schema: typeof TENSOR_PLAN_SEMANTIC_REQUEST_SCHEMA;
   readonly version: typeof TENSOR_PLAN_SEMANTIC_REQUEST_VERSION;
   readonly requests: readonly PreparedTensorPlanSemanticRequest[];
+}
+
+export interface TensorPlanResidentSemanticResult extends TensorPlanResidentResult {
+  /** Exact authority-bound preparation consumed by this execution. */
+  readonly semanticPreparation: PreparedTensorPlanSemanticRequests;
 }
 
 interface PreparedPermutation {
@@ -123,6 +137,16 @@ export async function prepareTensorPlanSemanticRequests(
       semanticCache.set(semanticKey, preparation);
     }
     const { artifacts, wgsl } = await preparation;
+    const logicalInvocationCount = Object.freeze([
+      wgsl.launch.dispatchCount[0],
+      wgsl.launch.dispatchCount[1],
+      wgsl.launch.dispatchCount[2],
+    ] as const);
+    const plannedWorkgroupCount = Object.freeze([
+      Math.max(Math.ceil(logicalInvocationCount[0] / wgsl.program.workgroupSize[0]), 1),
+      Math.max(Math.ceil(logicalInvocationCount[1] / wgsl.program.workgroupSize[1]), 1),
+      Math.max(Math.ceil(logicalInvocationCount[2] / wgsl.program.workgroupSize[2]), 1),
+    ] as const);
     preparedByValueId.set(request.valueId, wgsl);
     preparedRequests.push(Object.freeze({
       kind: request.kind,
@@ -134,6 +158,11 @@ export async function prepareTensorPlanSemanticRequests(
       kernelSemanticHash: artifacts.kernelSemanticHash,
       semanticSpecializationHash: wgsl.semantic.specializationHash,
       wgslModuleHash: wgsl.wgslModuleHash,
+      backendProfile: wgsl.backendProfile,
+      backendVersion: wgsl.backendVersion,
+      workgroupSize: wgsl.workgroupSize,
+      logicalInvocationCount,
+      plannedWorkgroupCount,
     }));
   }
 
@@ -152,14 +181,31 @@ export async function runTensorGpuPlanSemantic(
   rawRequests: unknown,
   inputs: readonly TensorPlanInput[],
 ): Promise<TensorPlanRunResult> {
-  const prepared = await prepareTensorPlanSemanticRequests(rawPlan, rawRequests);
-  const viewCopies = requirePreparedMap(prepared);
-  return runTensorGpuPlanWithPreparedSemanticViewCopies(
+  const resident = await runTensorGpuPlanResidentSemantic(
     device,
     rawPlan,
+    rawRequests,
     inputs,
-    viewCopies,
   );
+  try {
+    const data = await materializeFloat32(device, resident.buffer, resident.byteLength);
+    const result = Object.freeze({
+      data,
+      shape: resident.shape,
+      peakLiveBytes: resident.peakLiveBytes,
+      materializedValueId: resident.residentValueId,
+      earlyReleasedBuffers: resident.earlyReleasedBuffers,
+      earlyReleasedBytes: resident.earlyReleasedBytes,
+      profiles: resident.profiles,
+    });
+    releaseDirectBuffer(device, resident.buffer, resident.byteLength);
+    return result;
+  } catch (error) {
+    resident.buffer.destroy();
+    device.clearCache();
+    await Promise.allSettled(resident.profiles);
+    throw error;
+  }
 }
 
 export async function runTensorGpuPlanResidentSemantic(
@@ -167,15 +213,37 @@ export async function runTensorGpuPlanResidentSemantic(
   rawPlan: TensorGpuPlan | unknown,
   rawRequests: unknown,
   inputs: readonly TensorPlanInput[],
-): Promise<TensorPlanResidentResult> {
+): Promise<TensorPlanResidentSemanticResult> {
   const prepared = await prepareTensorPlanSemanticRequests(rawPlan, rawRequests);
   const viewCopies = requirePreparedMap(prepared);
-  return runTensorGpuPlanResidentWithPreparedSemanticViewCopies(
-    device,
-    rawPlan,
-    inputs,
-    viewCopies,
-  );
+  let result: TensorPlanResidentResult;
+  try {
+    result = await issueWithWebGpuErrorScopes(
+      device.gpu,
+      "$.tensorPlan.semanticDispatch",
+      () => runTensorGpuPlanResidentWithPreparedSemanticViewCopies(
+        device,
+        rawPlan,
+        inputs,
+        viewCopies,
+      ),
+      {
+        cleanup: (failed) => {
+          failed.buffer.destroy();
+          void Promise.allSettled(failed.profiles);
+        },
+      },
+    );
+  } catch (error) {
+    // A late scope/device failure invalidates both the produced root and any
+    // pipeline/output-pool state touched by the issue phase.
+    device.clearCache();
+    throw error;
+  }
+  return Object.freeze({
+    ...result,
+    semanticPreparation: prepared,
+  });
 }
 
 export function assertPreparedTensorPlanSemanticRequests(

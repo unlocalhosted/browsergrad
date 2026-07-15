@@ -1,7 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { SEMANTIC_PERMUTE_EVIDENCE_SOURCE_PATHS } from "../../../scripts/semantic-permute-evidence-source.mjs";
 
-export function validateViewCopyPublishGate({ evidenceCommit, githubSha, head, relevantStatus }) {
+export function validateViewCopyPublishGate({
+  evidenceCommit,
+  jitEvidenceCommit,
+  githubSha,
+  head,
+  relevantStatus,
+}) {
   if (!evidenceCommit) {
     throw new Error(
       "kernels publish blocked: run test:browser:view-copy:required for this commit and set BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT to its full commit SHA",
@@ -10,6 +17,16 @@ export function validateViewCopyPublishGate({ evidenceCommit, githubSha, head, r
   if (!/^[0-9a-f]{40}$/u.test(evidenceCommit) || evidenceCommit !== head) {
     throw new Error(
       `kernels publish blocked: evidence commit ${evidenceCommit || "<missing>"} does not match HEAD ${head}`,
+    );
+  }
+  if (!jitEvidenceCommit) {
+    throw new Error(
+      "kernels publish blocked: run test:browser:semantic-permute:required for this commit and set BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT to its full commit SHA",
+    );
+  }
+  if (!/^[0-9a-f]{40}$/u.test(jitEvidenceCommit) || jitEvidenceCommit !== head) {
+    throw new Error(
+      `kernels publish blocked: JIT semantic-permute evidence commit ${jitEvidenceCommit || "<missing>"} does not match HEAD ${head}`,
     );
   }
   if (githubSha && githubSha !== head) {
@@ -32,6 +49,7 @@ function main() {
   }).trim();
   validateViewCopyPublishGate({
     evidenceCommit: process.env.BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT?.trim(),
+    jitEvidenceCommit: process.env.BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT?.trim(),
     githubSha: process.env.GITHUB_SHA?.trim(),
     head: git("rev-parse", "HEAD"),
     relevantStatus: git(
@@ -39,9 +57,7 @@ function main() {
       "--porcelain",
       "--untracked-files=all",
       "--",
-      "packages/browsergrad-kernels",
-      "packages/browsergrad-semantic-core",
-      "pnpm-lock.yaml",
+      ...SEMANTIC_PERMUTE_EVIDENCE_SOURCE_PATHS,
     ),
   });
 }

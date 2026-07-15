@@ -18,6 +18,7 @@
 
 import { asImpl } from "./device.js";
 import { KernelError, type KernelDevice } from "./types.js";
+import { issueWithWebGpuErrorScopes } from "./webgpu_error_scope.js";
 
 export interface KernelDescriptor {
   /** Unique kernel name (used as cache key prefix). */
@@ -542,22 +543,40 @@ export async function materializeFloat32(
   const gpu = impl.gpu;
   validateFloat32ByteLength(byteLength, "byteLength");
   const aligned = alignTo(byteLength, 4);
-  const readBuffer = gpu.createBuffer({
-    size: aligned,
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-  });
+  let readBuffer: GPUBuffer | undefined;
   try {
-    const encoder = gpu.createCommandEncoder({ label: "bg-materialize" });
-    encoder.copyBufferToBuffer(buffer, 0, readBuffer, 0, aligned);
-    gpu.queue.submit([encoder.finish()]);
-    await readBuffer.mapAsync(GPUMapMode.READ);
+    const issued = await issueWithWebGpuErrorScopes(
+      gpu,
+      "$.materialize",
+      () => {
+        const scopedReadBuffer = gpu.createBuffer({
+          size: aligned,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+        readBuffer = scopedReadBuffer;
+        const encoder = gpu.createCommandEncoder({ label: "bg-materialize" });
+        encoder.copyBufferToBuffer(buffer, 0, scopedReadBuffer, 0, aligned);
+        gpu.queue.submit([encoder.finish()]);
+        // mapAsync must be initiated before the scope pops. Its settlement is
+        // awaited together with the pops and device-loss race by the helper.
+        const mapping = scopedReadBuffer.mapAsync(GPUMapMode.READ);
+        return Object.freeze({ readBuffer: scopedReadBuffer, mapping });
+      },
+      {
+        completion: ({ mapping }) => mapping,
+        cleanup: ({ readBuffer: failedReadBuffer }) => {
+          failedReadBuffer.destroy();
+          if (readBuffer === failedReadBuffer) readBuffer = undefined;
+        },
+      },
+    );
     try {
-      return new Float32Array(readBuffer.getMappedRange(0, byteLength).slice(0));
+      return new Float32Array(issued.readBuffer.getMappedRange(0, byteLength).slice(0));
     } finally {
-      readBuffer.unmap();
+      issued.readBuffer.unmap();
     }
   } finally {
-    readBuffer.destroy();
+    readBuffer?.destroy();
   }
 }
 

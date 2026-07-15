@@ -74,6 +74,24 @@ jobs:
           path: compiler-layout-bindings-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Run required JIT-emitted semantic-permute WebGPU gate
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-jit test:browser:semantic-permute:required 2>&1 | tee jit-semantic-permute-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Verify JIT semantic-permute retained terminal record
+        run: node packages/browsergrad-jit/scripts/verify_semantic_permute_evidence_log.mjs jit-semantic-permute-webgpu-evidence.log "${GITHUB_SHA}"
+
+      - name: Retain JIT semantic-permute WebGPU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jit-semantic-permute-webgpu-evidence-${{ github.sha }}
+          path: jit-semantic-permute-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Run compiler real-world CUDA gate
         run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu
 
@@ -82,3 +100,4 @@ jobs:
         env:
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_LAYOUT_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}

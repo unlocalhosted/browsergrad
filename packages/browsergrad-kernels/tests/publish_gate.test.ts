@@ -7,6 +7,15 @@ describe("kernels publish evidence gate", () => {
   it("rejects missing or stale evidence commits", () => {
     expect(() => validate(undefined)).toThrow(/run test:browser:view-copy:required/u);
     expect(() => validate("0000000000000000000000000000000000000000")).toThrow(/does not match HEAD/u);
+    expect(() => validateViewCopyPublishGate({
+      evidenceCommit: head,
+      jitEvidenceCommit: undefined,
+      githubSha: undefined,
+      head,
+      relevantStatus: "",
+    })).toThrow(/semantic-permute:required/u);
+    expect(() => validate(head, "", undefined, "0000000000000000000000000000000000000000"))
+      .toThrow(/JIT semantic-permute evidence commit/u);
   });
 
   it("accepts only the exact clean evidenced commit", () => {
@@ -16,9 +25,15 @@ describe("kernels publish evidence gate", () => {
   });
 });
 
-function validate(evidenceCommit: string | undefined, relevantStatus = "", githubSha?: string) {
+function validate(
+  evidenceCommit: string | undefined,
+  relevantStatus = "",
+  githubSha?: string,
+  jitEvidenceCommit: string | undefined = evidenceCommit,
+) {
   return validateViewCopyPublishGate({
     evidenceCommit,
+    jitEvidenceCommit,
     githubSha,
     head,
     relevantStatus,

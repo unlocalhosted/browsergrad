@@ -6,13 +6,19 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { parseWireI64, type WireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { createDevice } from "../src/device";
+import { createWebGpuRealizerBridge } from "../src/realizer";
 import {
   prepareSemanticViewCopyWgsl,
   runPreparedSemanticViewCopyResident,
   type PreparedSemanticViewCopyWgsl,
   type SemanticViewCopyResidentSource,
 } from "../src/semantic_view_copy";
-import { runTensorGpuPlanResidentSemantic } from "../src/tensor_plan_semantics";
+import {
+  assertPreparedTensorPlanSemanticRequests,
+  preparedSemanticViewCopyForValue,
+  runTensorGpuPlanSemantic,
+  runTensorGpuPlanResidentSemantic,
+} from "../src/tensor_plan_semantics";
 
 const wire = (value: string): WireI64 => parseWireI64(value);
 const constant = (value: string) => ({ kind: "const" as const, value: wire(value) });
@@ -55,6 +61,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.stubGlobal("GPUBufferUsage", { STORAGE: 1, COPY_DST: 2, COPY_SRC: 4, MAP_READ: 8 });
+  vi.stubGlobal("GPUMapMode", { READ: 1 });
   vi.stubGlobal("GPUShaderStage", { COMPUTE: 1 });
 });
 
@@ -68,7 +75,7 @@ describe("resident semantic view-copy", () => {
     const device = await createDevice({ device: fake.device });
     const source = fake.buffer(24, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
 
-    const result = runPreparedSemanticViewCopyResident(device, prepared, {
+    const result = await runPreparedSemanticViewCopyResident(device, prepared, {
       buffer: source,
       byteLength: 24,
     });
@@ -81,6 +88,50 @@ describe("resident semantic view-copy", () => {
     expect(fake.submitCount()).toBe(1);
     expect(fake.writeCount()).toBe(0);
     expect(fake.copyCount()).toBe(0);
+  });
+
+  it("keeps exact semantic preparation and dispatch profiles with the live bridge handle", async () => {
+    const fake = createFakeGpu();
+    const device = await createDevice({ device: fake.device });
+    const bridge = createWebGpuRealizerBridge(device, { profiling: true });
+    const handle = await bridge.run_tensor_plan_resident_semantic(
+      permutationPlan(),
+      JSON.stringify(permutationRequests()),
+      [{ value_id: 0, data: new Uint8Array(24) }],
+      "float32",
+    );
+
+    const trace = await bridge.semanticTensorPlanExecutionTrace(handle);
+    expect(trace.preparation.requests).toHaveLength(1);
+    expect(trace.preparation.requests[0]).toMatchObject({
+      valueId: 1,
+      layoutSemanticHash: prepared.semantic.layoutSemanticHash,
+      kernelSemanticHash: prepared.semantic.kernelSemanticHash,
+      wgslModuleHash: prepared.wgslModuleHash,
+      logicalInvocationCount: [6, 1, 1],
+      plannedWorkgroupCount: [1, 1, 1],
+    });
+    expect(trace.dispatchProfiles).toHaveLength(1);
+    expect(trace.dispatchProfiles[0]?.dispatchCount).toEqual(fake.dispatches[0]);
+    expect(trace.dispatchProfiles[0]?.workgroupSize).toEqual([64, 1, 1]);
+    expect(Object.isFrozen(trace)).toBe(true);
+    expect(Object.isFrozen(trace.dispatchProfiles)).toBe(true);
+    expect(Object.isFrozen(trace.dispatchProfiles[0]?.dispatchCount)).toBe(true);
+
+    const flushed = await bridge.flushProfiles();
+    expect(flushed.pendingProfileCount).toBe(0);
+    expect(flushed.passProfiles).toHaveLength(1);
+    bridge.release(handle);
+    await expect(bridge.semanticTensorPlanExecutionTrace(handle)).rejects.toThrow(
+      /unknown handle/,
+    );
+
+    const ordinary = bridge.upload(new Uint8Array(24), [2, 3], "float32");
+    await expect(bridge.semanticTensorPlanExecutionTrace(ordinary)).rejects.toThrow(
+      /has no semantic tensor-plan execution trace/,
+    );
+    bridge.release(ordinary);
+    expect(bridge.resourceSnapshot().currentOwnedGpuBytes).toBe(0);
   });
 
   it("routes tensor-plan PERMUTE through the prepared semantic WGSL", async () => {
@@ -103,6 +154,93 @@ describe("resident semantic view-copy", () => {
     expect(fake.submitCount()).toBe(1);
     expect(fake.writeCount()).toBe(0);
     expect(fake.copyCount()).toBe(0);
+    assertPreparedTensorPlanSemanticRequests(result.semanticPreparation);
+    const executedPreparation = preparedSemanticViewCopyForValue(
+      result.semanticPreparation,
+      1,
+    );
+    expect(executedPreparation?.program.wgsl).toBe(fake.shaderSources[0]);
+    const dispatchProfiles = await Promise.all(result.profiles);
+    expect(dispatchProfiles).toHaveLength(1);
+    expect(dispatchProfiles[0]?.dispatchCount).toEqual(fake.dispatches[0]);
+    expect(dispatchProfiles[0]?.dispatchCount).toEqual([1, 1, 1]);
+    expect(dispatchProfiles[0]?.workgroupSize).toEqual([64, 1, 1]);
+  });
+
+  it("settles delayed LIFO scopes before minting a semantic resident handle", async () => {
+    const fake = createFakeGpu({ deferredErrorScopes: true });
+    const device = await createDevice({ device: fake.device });
+    const bridge = createWebGpuRealizerBridge(device, { profiling: true });
+    const pending = bridge.run_tensor_plan_resident_semantic(
+      permutationPlan(),
+      JSON.stringify(permutationRequests()),
+      [{ value_id: 0, data: new Uint8Array(24) }],
+      "float32",
+    );
+
+    await vi.waitFor(() => {
+      expect(fake.scopeEvents).toEqual([
+        "push:internal",
+        "push:out-of-memory",
+        "push:validation",
+        "pop:validation",
+        "pop:out-of-memory",
+        "pop:internal",
+      ]);
+    });
+    expect(bridge.aliveHandleCount()).toBe(0);
+
+    fake.settleErrorScopes("validation", "delayed validation failure");
+    await expect(pending).rejects.toThrow(/validation.*delayed validation failure/u);
+    expect(bridge.aliveHandleCount()).toBe(0);
+    expect(fake.destroyCount()).toBeGreaterThan(0);
+    expect(device.getStats()).toMatchObject({
+      pipelineCacheSize: 0,
+      outputBufferPoolBuffers: 0,
+      outputBufferPoolBytes: 0,
+    });
+
+    const retry = bridge.run_tensor_plan_resident_semantic(
+      permutationPlan(),
+      JSON.stringify(permutationRequests()),
+      [{ value_id: 0, data: new Uint8Array(24) }],
+      "float32",
+    );
+    await vi.waitFor(() => expect(fake.scopeEvents).toHaveLength(12));
+    fake.settleErrorScopes();
+    const retryHandle = await retry;
+    expect(bridge.aliveHandleCount()).toBe(1);
+    bridge.release(retryHandle);
+    expect(bridge.aliveHandleCount()).toBe(0);
+  });
+
+  it("destroys a failed materialization root and admits a clean nonresident retry", async () => {
+    const fake = createFakeGpu();
+    const device = await createDevice({ device: fake.device });
+    const source = fake.buffer(24, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+    fake.setMaterializeMapFailure("map failed");
+
+    await expect(runTensorGpuPlanSemantic(
+      device,
+      permutationPlan(),
+      permutationRequests(),
+      [{ valueId: 0, resident: { buffer: source, byteLength: 24 } }],
+    )).rejects.toThrow(/map failed/u);
+    expect(device.getStats()).toMatchObject({
+      pipelineCacheSize: 0,
+      outputBufferPoolBuffers: 0,
+      outputBufferPoolBytes: 0,
+    });
+
+    fake.setMaterializeMapFailure();
+    const retry = await runTensorGpuPlanSemantic(
+      device,
+      permutationPlan(),
+      permutationRequests(),
+      [{ valueId: 0, resident: { buffer: source, byteLength: 24 } }],
+    );
+    expect(retry.data).toHaveLength(6);
+    expect(device.getStats().outputBufferPoolBuffers).toBe(1);
   });
 
   it("rejects forged prepared objects before touching the device", async () => {
@@ -110,13 +248,13 @@ describe("resident semantic view-copy", () => {
     const device = await createDevice({ device: fake.device });
     const forged = { ...prepared } as PreparedSemanticViewCopyWgsl;
 
-    expect(() => runPreparedSemanticViewCopyResident(device, forged, {
+    await expect(runPreparedSemanticViewCopyResident(device, forged, {
       buffer: fake.buffer(24, GPUBufferUsage.STORAGE),
       byteLength: 24,
-    })).toThrow(expect.objectContaining({
+    })).rejects.toMatchObject({
       code: "BG-WEBGPU-VIEW-COPY-INVALID-BINDING",
       path: "$.prepared",
-    }));
+    });
     expect(fake.submitCount()).toBe(0);
   });
 
@@ -127,34 +265,34 @@ describe("resident semantic view-copy", () => {
   ] as const)("rejects a resident source with invalid %s", async (_label, source, path) => {
     const fake = createFakeGpu();
     const device = await createDevice({ device: fake.device });
-    expect(() => runPreparedSemanticViewCopyResident(device, prepared, source(fake)))
-      .toThrow(expect.objectContaining({ code: "BG-WEBGPU-VIEW-COPY-INVALID-BINDING", path }));
+    await expect(runPreparedSemanticViewCopyResident(device, prepared, source(fake)))
+      .rejects.toMatchObject({ code: "BG-WEBGPU-VIEW-COPY-INVALID-BINDING", path });
     expect(fake.submitCount()).toBe(0);
   });
 
   it("refuses to allocate an uninitialized partial destination root", async () => {
     const fake = createFakeGpu();
     const device = await createDevice({ device: fake.device });
-    expect(() => runPreparedSemanticViewCopyResident(device, offsetDestination, {
+    await expect(runPreparedSemanticViewCopyResident(device, offsetDestination, {
       buffer: fake.buffer(24, GPUBufferUsage.STORAGE),
       byteLength: 24,
-    })).toThrow(expect.objectContaining({
+    })).rejects.toMatchObject({
       code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
       path: "$.destination",
-    }));
+    });
     expect(fake.submitCount()).toBe(0);
   });
 
   it("applies device allocation limits before dispatch", async () => {
     const fake = createFakeGpu({ maxBufferSize: 16 });
     const device = await createDevice({ device: fake.device });
-    expect(() => runPreparedSemanticViewCopyResident(device, prepared, {
+    await expect(runPreparedSemanticViewCopyResident(device, prepared, {
       buffer: fake.buffer(24, GPUBufferUsage.STORAGE),
       byteLength: 24,
-    })).toThrow(expect.objectContaining({
+    })).rejects.toMatchObject({
       code: "BG-WEBGPU-VIEW-COPY-DEVICE-LIMIT",
       path: "$.device.limits.maxBufferSize",
-    }));
+    });
     expect(fake.submitCount()).toBe(0);
   });
 });
@@ -163,22 +301,42 @@ interface FakeGpuControl {
   readonly device: GPUDevice;
   readonly shaderSources: string[];
   readonly dispatches: Array<[number, number, number]>;
+  readonly scopeEvents: string[];
   buffer(size: number, usage: GPUBufferUsageFlags): GPUBuffer;
   submitCount(): number;
   writeCount(): number;
   copyCount(): number;
+  destroyCount(): number;
+  settleErrorScopes(scope?: GPUErrorFilter, message?: string): void;
+  setMaterializeMapFailure(message?: string): void;
 }
 
-function createFakeGpu(options: { readonly maxBufferSize?: number } = {}): FakeGpuControl {
+function createFakeGpu(options: {
+  readonly maxBufferSize?: number;
+  readonly deferredErrorScopes?: boolean;
+} = {}): FakeGpuControl {
   const shaderSources: string[] = [];
   const dispatches: Array<[number, number, number]> = [];
   let submits = 0;
   let writes = 0;
   let copies = 0;
+  let destroys = 0;
+  let materializeMapFailure: string | undefined;
+  const scopeStack: GPUErrorFilter[] = [];
+  const scopeEvents: string[] = [];
+  const pendingScopes: Array<{
+    readonly scope: GPUErrorFilter;
+    readonly resolve: (error: GPUError | null) => void;
+  }> = [];
   const buffer = (size: number, usage: GPUBufferUsageFlags) => ({
     size,
     usage,
-    destroy: () => undefined,
+    destroy: () => { destroys += 1; },
+    mapAsync: () => materializeMapFailure === undefined
+      ? Promise.resolve()
+      : Promise.reject(new Error(materializeMapFailure)),
+    getMappedRange: () => new ArrayBuffer(size),
+    unmap: () => undefined,
   } as unknown as GPUBuffer);
   const device = {
     features: new Set<string>(),
@@ -192,6 +350,17 @@ function createFakeGpu(options: { readonly maxBufferSize?: number } = {}): FakeG
       maxStorageBuffersPerShaderStage: 8,
     },
     lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+    pushErrorScope: (scope: GPUErrorFilter) => {
+      scopeEvents.push(`push:${scope}`);
+      scopeStack.push(scope);
+    },
+    popErrorScope: () => {
+      const scope = scopeStack.pop();
+      if (scope === undefined) return Promise.reject(new Error("scope stack underflow"));
+      scopeEvents.push(`pop:${scope}`);
+      if (!options.deferredErrorScopes) return Promise.resolve(null);
+      return new Promise<GPUError | null>((resolve) => pendingScopes.push({ scope, resolve }));
+    },
     queue: {
       writeBuffer: () => { writes += 1; },
       submit: () => { submits += 1; },
@@ -221,10 +390,22 @@ function createFakeGpu(options: { readonly maxBufferSize?: number } = {}): FakeG
     device,
     shaderSources,
     dispatches,
+    scopeEvents,
     buffer,
     submitCount: () => submits,
     writeCount: () => writes,
     copyCount: () => copies,
+    destroyCount: () => destroys,
+    settleErrorScopes: (failedScope, message = "GPU error") => {
+      for (const pending of pendingScopes.splice(0)) {
+        pending.resolve(pending.scope === failedScope
+          ? { message } as GPUError
+          : null);
+      }
+    },
+    setMaterializeMapFailure: (message) => {
+      materializeMapFailure = message;
+    },
   };
 }
 

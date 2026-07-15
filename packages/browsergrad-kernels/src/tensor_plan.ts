@@ -10,9 +10,9 @@ import {
   type DirectDispatchResult,
 } from "./runner.js";
 import {
-  runPreparedSemanticViewCopyResident,
   type PreparedSemanticViewCopyWgsl,
 } from "./semantic_view_copy.js";
+import { issuePreparedSemanticViewCopyResidentUnchecked } from "./semantic_view_copy_internal.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
 export type TensorPlanOp =
@@ -507,7 +507,7 @@ function executeStep(
         }
         return fromPreparedSemanticViewCopy(
           prepared,
-          runPreparedSemanticViewCopyResident(device, prepared, {
+          issuePreparedSemanticViewCopyResidentUnchecked(device, prepared, {
             buffer: src.buffer,
             byteLength: src.byteLength,
           }),

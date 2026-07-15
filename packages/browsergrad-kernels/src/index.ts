@@ -63,6 +63,7 @@ export {
   createWebGpuRealizerBridge,
   type WebGpuRealizerBridgeOptions,
   type WebGpuRealizerBridge,
+  type SemanticTensorPlanExecutionTrace,
   type WebGpuResourceSnapshot,
   type WebGpuTimingMode,
 } from "./realizer.js";
@@ -165,6 +166,7 @@ export {
   runTensorGpuPlanSemantic,
   type PreparedTensorPlanSemanticRequest,
   type PreparedTensorPlanSemanticRequests,
+  type TensorPlanResidentSemanticResult,
 } from "./tensor_plan_semantics.js";
 
 export {

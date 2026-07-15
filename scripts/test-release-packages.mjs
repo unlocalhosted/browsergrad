@@ -128,9 +128,13 @@ try {
   ]) {
     assert(existsSync(join(kernels, file)), `kernels tarball missing ${file}`);
   }
+  const kernelsPrepublishCommands = workspaceKernelsPkg.scripts?.prepublishOnly
+    ?.split("&&")
+    .map((command) => command.trim());
   assert(
-    workspaceKernelsPkg.scripts?.prepublishOnly?.includes("require_view_copy_publish_gate.mjs"),
-    "kernels workspace package must retain the exact-commit publish gate",
+    Array.isArray(kernelsPrepublishCommands)
+      && kernelsPrepublishCommands.at(-1) === "node scripts/require_view_copy_publish_gate.mjs",
+    "kernels exact-commit evidence gate must be the final prepublish command",
   );
   assert(
     existsSync(join(root, "packages/browsergrad-kernels/scripts/require_view_copy_publish_gate.mjs")),
@@ -198,15 +202,20 @@ try {
     compilerSemanticCoreRange === workspaceSemanticCoreVersion,
     `compiler package semantic-core dependency should be ${workspaceSemanticCoreVersion}, got ${compilerSemanticCoreRange}`,
   );
+  const compilerPrepublishCommands = workspaceCompilerPkg.scripts?.prepublishOnly
+    ?.split("&&")
+    .map((command) => command.trim());
   assert(
-    workspaceCompilerPkg.scripts?.prepublishOnly?.includes("require_layout_bindings_publish_gate.mjs"),
-    "compiler workspace package must retain the exact-commit layout-binding publish gate",
+    Array.isArray(compilerPrepublishCommands)
+      && compilerPrepublishCommands.at(-1) === "node scripts/require_layout_bindings_publish_gate.mjs",
+    "compiler exact-commit layout evidence gate must be the final prepublish command",
   );
   assert(
     existsSync(join(root, "packages/browsergrad-compiler/scripts/require_layout_bindings_publish_gate.mjs")),
     "compiler workspace package is missing the exact-commit layout-binding publish gate implementation",
   );
   const releaseWorkflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
+  const publishWorkflow = readFileSync(join(root, ".github/workflows/publish-npm.yml"), "utf8");
   assert(
     releaseWorkflow.includes("Verify compiler dependencies are published (compiler release)"),
     "compiler release workflow must verify its published dependency chain",
@@ -216,6 +225,64 @@ try {
       releaseWorkflow.includes(`npm view "@unlocalhosted/${dependency}@$`),
       `compiler release workflow must query the published ${dependency} version`,
     );
+  }
+  const workspaceJitPkg = readPackage(join(root, "packages/browsergrad-jit"));
+  const jitPrepublishCommands = workspaceJitPkg.scripts?.prepublishOnly
+    ?.split("&&")
+    .map((command) => command.trim());
+  assert(
+    Array.isArray(jitPrepublishCommands)
+      && jitPrepublishCommands.at(-1) === "node scripts/require_semantic_permute_publish_gate.mjs",
+    "JIT exact-commit semantic-permute publish gate must be the final prepublish command",
+  );
+  assert(
+    workspaceJitPkg.scripts?.prepublishOnly?.includes("typecheck:browser:semantic-permute"),
+    "JIT prepublish must typecheck the semantic-permute browser evidence lane",
+  );
+  assert(
+    existsSync(join(root, "packages/browsergrad-jit/scripts/require_semantic_permute_publish_gate.mjs")),
+    "JIT workspace package is missing the exact-commit semantic-permute publish gate implementation",
+  );
+  assert(
+    existsSync(join(root, "packages/browsergrad-jit/scripts/verify_semantic_permute_evidence_log.mjs")),
+    "JIT workspace package is missing the retained terminal-record verifier",
+  );
+  const jitBrowserConfig = readFileSync(
+    join(root, "packages/browsergrad-jit/vitest.browser.config.ts"),
+    "utf8",
+  );
+  const jitBrowserEvidence = readFileSync(
+    join(root, "packages/browsergrad-jit/tests-browser/semantic_permute_webgpu.test.ts"),
+    "utf8",
+  );
+  const jitEvidenceValidator = readFileSync(
+    join(root, "packages/browsergrad-jit/tests-browser/semantic_permute_evidence.ts"),
+    "utf8",
+  );
+  assert(
+    jitBrowserConfig.includes("captureJitSemanticPermuteSubmissions")
+      && jitBrowserConfig.includes("__BG_JIT_SEMANTIC_PERMUTE_CAPTURE_JSON__"),
+    "JIT browser evidence config must capture the production GpuExecutionSubmission",
+  );
+  assert(
+    jitBrowserEvidence.includes("__BG_JIT_SEMANTIC_PERMUTE_CAPTURE_JSON__")
+      && jitBrowserEvidence.includes("preparedCase.semanticRequestsJson")
+      && !jitBrowserEvidence.includes("function createPlan("),
+    "JIT browser evidence must execute the exact captured plan/wire without a synthetic plan",
+  );
+  assert(
+    jitBrowserEvidence.includes("semanticTensorPlanExecutionTrace")
+      && jitBrowserEvidence.includes("prepared-case-set"),
+    "JIT browser evidence must bind actual preparation/topology and the complete case set",
+  );
+  assert(
+    jitBrowserEvidence.includes("finalizeTerminalEvidence")
+      && jitEvidenceValidator.includes("terminalManifestHash")
+      && jitEvidenceValidator.includes("TERMINAL_MANIFEST_HASH_DOMAIN"),
+    "JIT retained evidence must carry a validated domain-separated whole-record digest",
+  );
+  for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
+    assertJitEvidenceWorkflowOrder(workflowName, workflow);
   }
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
   for (const exportName of [
@@ -409,6 +476,104 @@ function run(cmd, args, cwd) {
     throw new Error(`${cmd} ${args.join(" ")} failed\n${result.stdout}\n${result.stderr}`);
   }
   return result;
+}
+
+function assertJitEvidenceWorkflowOrder(workflowName, workflow) {
+  const steps = workflowSteps(workflow);
+  const names = workflowName === "release"
+    ? {
+      evidence: "Required JIT-emitted semantic-permute WebGPU gate (JIT or kernels release)",
+      verify: "Verify JIT semantic-permute retained terminal record (JIT or kernels release)",
+      upload: "Retain JIT semantic-permute WebGPU evidence (JIT or kernels release)",
+      publish: "Publish to npm",
+    }
+    : {
+      evidence: "Run required JIT-emitted semantic-permute WebGPU gate",
+      verify: "Verify JIT semantic-permute retained terminal record",
+      upload: "Retain JIT semantic-permute WebGPU evidence",
+      publish: "Publish missing versions",
+    };
+  const indexes = Object.fromEntries(Object.entries(names).map(([role, name]) => {
+    const matches = steps
+      .map((step, index) => ({ step, index }))
+      .filter(({ step }) => step.name === name);
+    assert(matches.length === 1, `${workflowName} workflow must contain exactly one ${role} step`);
+    return [role, matches[0].index];
+  }));
+  assert(
+    indexes.evidence >= 0
+      && indexes.evidence < indexes.verify
+      && indexes.verify < indexes.upload
+      && indexes.upload < indexes.publish,
+    `${workflowName} workflow must order JIT evidence, verifier, upload, then publish`,
+  );
+  assert(
+    steps[indexes.evidence].body.includes("set -o pipefail")
+      && steps[indexes.evidence].body.includes("test:browser:semantic-permute:required"),
+    `${workflowName} JIT evidence step must run the required browser lane`,
+  );
+  assert(
+    steps[indexes.verify].body.includes(
+      "verify_semantic_permute_evidence_log.mjs jit-semantic-permute-webgpu-evidence.log \"${GITHUB_SHA}\"",
+    ),
+    `${workflowName} JIT verifier step must validate the retained log against GITHUB_SHA`,
+  );
+  assert(
+    steps[indexes.upload].body.includes("jit-semantic-permute-webgpu-evidence-${{ github.sha }}"),
+    `${workflowName} JIT upload step must retain evidence by exact SHA`,
+  );
+  assert(
+    steps[indexes.publish].body.includes(
+      "BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+    ),
+    `${workflowName} publish step must authorize only the evidenced SHA`,
+  );
+  for (const role of ["evidence", "verify"]) {
+    assert(
+      !/^        continue-on-error:/mu.test(steps[indexes[role]].body),
+      `${workflowName} JIT ${role} step cannot continue on error`,
+    );
+  }
+  const evidenceCondition = stepField(steps[indexes.evidence], "if");
+  const verifierCondition = stepField(steps[indexes.verify], "if");
+  const uploadCondition = stepField(steps[indexes.upload], "if");
+  if (workflowName === "release") {
+    const releaseCondition = "contains(fromJSON('[\"jit\",\"kernels\"]'), steps.parse.outputs.shortname)";
+    assert(
+      evidenceCondition === releaseCondition && verifierCondition === releaseCondition,
+      "release JIT evidence and verifier conditions must cover identical JIT/kernels package set",
+    );
+    assert(
+      uploadCondition === `always() && ${releaseCondition}`,
+      "release JIT evidence upload must always run for identical JIT/kernels package set",
+    );
+  } else {
+    assert(
+      evidenceCondition === undefined && verifierCondition === undefined,
+      "publish JIT evidence and verifier steps must be unconditional",
+    );
+    assert(uploadCondition === "always()", "publish JIT evidence upload must always run");
+  }
+}
+
+function stepField(step, field) {
+  const match = new RegExp(`^        ${field}: (.+)$`, "mu").exec(step.body);
+  return match?.[1];
+}
+
+function workflowSteps(workflow) {
+  const steps = [];
+  let current;
+  for (const line of workflow.split(/\r?\n/)) {
+    const match = /^      - name: (.+)$/u.exec(line);
+    if (match) {
+      current = { name: match[1], body: line };
+      steps.push(current);
+    } else if (current) {
+      current.body += `\n${line}`;
+    }
+  }
+  return steps;
 }
 
 function assert(condition, message) {

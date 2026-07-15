@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "tests-browser/semantic_permute_webgpu.test.ts",
+    "vitest.browser.config.ts",
+    "tests-integration/semantic-permute-emission-capture.ts",
+    "tests-integration/pyodide-host.ts",
+    "../../test-support/dense-permutation-view-copy-fixtures.ts",
+    "../../test-support/webgpu-evidence.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}

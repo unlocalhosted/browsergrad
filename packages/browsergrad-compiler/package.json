@@ -93,7 +93,7 @@
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "node scripts/require_layout_bindings_publish_gate.mjs && pnpm run verify:compiler"
+    "prepublishOnly": "pnpm run verify:compiler && node scripts/require_layout_bindings_publish_gate.mjs"
   },
   "dependencies": {
     "@unlocalhosted/browsergrad-kernels": "workspace:*",

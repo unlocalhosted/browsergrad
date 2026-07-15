@@ -16,6 +16,17 @@ contract in the README](README.md#compatibility-contract).
 - Separate materializing and resident semantic tensor-plan bridge methods.
   Eligible permutations now require kernels to construct verified
   semantic-core artifacts and execute their canonical WGSL.
+- Required-device rank-2/rank-3 semantic-permutation conformance captures the
+  exact production JIT submission, executes it through the resident kernels
+  bridge, records the authority-bound preparation and actual dispatch profile,
+  then performs one bit-exact complete-root readback against shared fixtures.
+- Domain-separated terminal manifests now bind exact producer versions, source
+  revision, environment/device provenance, closed outcome state, ordered case
+  observations, diagnostics, and timestamp without changing deterministic
+  semantic artifact identity.
+- Retained-log verification accepts exactly one compact reporter-prefixed
+  terminal record, recomputes its digest, requires the exact clean producing
+  source scope and package versions, and runs before evidence upload/publish.
 
 ### Changed
 
@@ -24,6 +35,13 @@ contract in the README](README.md#compatibility-contract).
 - Semantic-route plans erase legacy permutation args; scheduling/liveness
   remains in the frozen plan while view meaning lives only in the side table.
   A bridge lacking semantic methods fails before legacy execution.
+- Publishing now builds and regenerates Python sources before checking retained
+  WebGPU evidence from the exact clean commit; any generated-source drift
+  invalidates the evidence gate. JIT and kernels release workflows run and
+  retain this lane by commit SHA.
+- Required evidence accepts only `timestamp-query/exact` or
+  `queue-completion/coarse` dispatch profiles; unavailable or mismatched timing
+  fails before a case can enter the completed prefix.
 
 ## [0.8.2] — 2026-06-25
 

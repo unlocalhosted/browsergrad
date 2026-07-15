@@ -30,6 +30,8 @@ import {
   type DirectDispatchProfileOptions,
   type DirectDispatchResult,
 } from "./runner.js";
+import { issueWithWebGpuErrorScopes } from "./webgpu_error_scope.js";
+import { registerPreparedSemanticViewCopyResidentIssuer } from "./semantic_view_copy_internal.js";
 import {
   emitSemanticViewCopyWgsl,
   SemanticViewCopyWgslLoweringError,
@@ -257,12 +259,66 @@ export async function prepareSemanticViewCopyWgsl(
  * complete, zero-offset dense root allocation; broader destination views need
  * an explicitly initialized resident destination binding.
  */
-export function runPreparedSemanticViewCopyResident(
+export async function runPreparedSemanticViewCopyResident(
+  device: KernelDevice,
+  prepared: PreparedSemanticViewCopyWgsl,
+  source: SemanticViewCopyResidentSource,
+  options: SemanticViewCopyResidentRunOptions = {},
+): Promise<DirectDispatchResult> {
+  validatePreparedSemanticViewCopyResident(device, prepared, source);
+  try {
+    return await issueWithWebGpuErrorScopes(
+      device.gpu,
+      "$.semanticViewCopy.residentDispatch",
+      () => issueValidatedPreparedSemanticViewCopyResident(
+        device,
+        prepared,
+        source.buffer,
+        options,
+      ),
+      {
+        cleanup: (failed) => {
+          failed.buffer.destroy();
+          if (failed.profile !== undefined) void Promise.allSettled([failed.profile]);
+        },
+      },
+    );
+  } catch (error) {
+    device.clearCache();
+    throw error;
+  }
+}
+
+/**
+ * @internal Synchronous GPU issue seam. Call only while an owning operation
+ * has already pushed validation/OOM/internal scopes and will settle them
+ * before exposing this result. Public/direct callers must use the async
+ * `runPreparedSemanticViewCopyResident` wrapper.
+ */
+function issuePreparedSemanticViewCopyResidentUnchecked(
   device: KernelDevice,
   prepared: PreparedSemanticViewCopyWgsl,
   source: SemanticViewCopyResidentSource,
   options: SemanticViewCopyResidentRunOptions = {},
 ): DirectDispatchResult {
+  validatePreparedSemanticViewCopyResident(device, prepared, source);
+  return issueValidatedPreparedSemanticViewCopyResident(
+    device,
+    prepared,
+    source.buffer,
+    options,
+  );
+}
+
+registerPreparedSemanticViewCopyResidentIssuer(
+  issuePreparedSemanticViewCopyResidentUnchecked,
+);
+
+function validatePreparedSemanticViewCopyResident(
+  device: KernelDevice,
+  prepared: PreparedSemanticViewCopyWgsl,
+  source: SemanticViewCopyResidentSource,
+): void {
   if (!PREPARED_VIEW_COPIES.has(prepared as object)) {
     fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.prepared", "prepared plan was not produced by prepareSemanticViewCopyWgsl in this module instance");
   }
@@ -273,14 +329,21 @@ export function runPreparedSemanticViewCopyResident(
   readAndVerifyDeviceFacts(device.gpu, prepared);
   verifyResidentFullWriteDestination(prepared);
   validateResidentSource(source, prepared.semantic.source.allocationByteLength);
+}
 
+function issueValidatedPreparedSemanticViewCopyResident(
+  device: KernelDevice,
+  prepared: PreparedSemanticViewCopyWgsl,
+  sourceBuffer: GPUBuffer,
+  options: SemanticViewCopyResidentRunOptions,
+): DirectDispatchResult {
   const outputWords = prepared.semantic.destination.allocationByteLength / 4n;
   return runDirect(device, {
     name: prepared.program.name,
     wgsl: prepared.program.wgsl,
     workgroupSize: prepared.program.workgroupSize,
   }, {
-    inputBuffers: [source.buffer],
+    inputBuffers: [sourceBuffer],
     outputLength: Number(outputWords),
     params: new Uint32Array(0),
     dispatchCount: prepared.launch.dispatchCount,

@@ -98,8 +98,8 @@ jobs:
         if: contains(fromJSON('["jit","grad"]'), steps.parse.outputs.shortname)
         run: pnpm --filter "${{ steps.parse.outputs.npmname }}" run test:integration
 
-      - name: Install Playwright Chromium (compiler or kernels release)
-        if: contains(fromJSON('["compiler","kernels"]'), steps.parse.outputs.shortname)
+      - name: Install Playwright Chromium (compiler, kernels, or JIT release)
+        if: contains(fromJSON('["compiler","kernels","jit"]'), steps.parse.outputs.shortname)
         run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
 
       - name: Verify semantic-core dependency is published (kernels release)
@@ -152,6 +152,26 @@ jobs:
           path: compiler-layout-bindings-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Required JIT-emitted semantic-permute WebGPU gate (JIT or kernels release)
+        if: contains(fromJSON('["jit","kernels"]'), steps.parse.outputs.shortname)
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-jit test:browser:semantic-permute:required 2>&1 | tee jit-semantic-permute-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Verify JIT semantic-permute retained terminal record (JIT or kernels release)
+        if: contains(fromJSON('["jit","kernels"]'), steps.parse.outputs.shortname)
+        run: node packages/browsergrad-jit/scripts/verify_semantic_permute_evidence_log.mjs jit-semantic-permute-webgpu-evidence.log "${GITHUB_SHA}"
+
+      - name: Retain JIT semantic-permute WebGPU evidence (JIT or kernels release)
+        if: always() && contains(fromJSON('["jit","kernels"]'), steps.parse.outputs.shortname)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jit-semantic-permute-webgpu-evidence-${{ github.sha }}
+          path: jit-semantic-permute-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Publish to npm
         working-directory: packages/${{ steps.parse.outputs.package }}
         run: pnpm publish --access public --provenance --no-git-checks
@@ -159,6 +179,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_LAYOUT_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
 
       - name: Extract changelog excerpt
         working-directory: packages/${{ steps.parse.outputs.package }}

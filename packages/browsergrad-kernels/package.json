@@ -80,7 +80,7 @@
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "node scripts/require_view_copy_publish_gate.mjs && pnpm run build && pnpm run typecheck && pnpm run typecheck:browser:view-copy && pnpm run lint && pnpm run test"
+    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run typecheck:browser:view-copy && pnpm run lint && pnpm run test && node scripts/require_view_copy_publish_gate.mjs"
   },
   "dependencies": {
     "@unlocalhosted/browsergrad-semantic-core": "workspace:*"

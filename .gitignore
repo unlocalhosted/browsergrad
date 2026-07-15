@@ -14,5 +14,7 @@ packages/browsergrad-kernels/.vitest-attachments/
 packages/browsergrad-kernels/tests-browser/__screenshots__/
 packages/browsergrad-compiler/tests-browser/__screenshots__/
 packages/browsergrad-compiler/.vitest-attachments/
+packages/browsergrad-jit/.vitest-attachments/
+packages/browsergrad-jit/tests-browser/__screenshots__/
 __pycache__/
 *.py[cod]

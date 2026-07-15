@@ -11,7 +11,8 @@
   arithmetic, alignment failures, and integer overflow.
 - Adds required actual-device layout conformance and exact-commit publish
   evidence, plus concrete packed dependencies on semantic-core and kernels
-  `0.2.0`.
+  `0.2.0`. The evidence/cleanliness guard is the final prepublish command, after
+  all verification that can regenerate or mutate publish inputs.
 
 ## 0.1.2
 
