@@ -134,6 +134,26 @@ jobs:
           path: compiler-layout-bindings-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Required compiler view-copy-binding WebGPU gate (compiler release)
+        if: steps.parse.outputs.shortname == 'compiler'
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-compiler test:browser:view-copy-bindings:required 2>&1 | tee compiler-view-copy-bindings-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Verify compiler view-copy-binding retained terminal record (compiler release)
+        if: steps.parse.outputs.shortname == 'compiler'
+        run: node packages/browsergrad-compiler/scripts/verify_view_copy_bindings_evidence_log.mjs compiler-view-copy-bindings-webgpu-evidence.log "${GITHUB_SHA}"
+
+      - name: Retain compiler view-copy-binding WebGPU evidence (compiler release)
+        if: always() && steps.parse.outputs.shortname == 'compiler'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compiler-view-copy-bindings-webgpu-evidence-${{ github.sha }}
+          path: compiler-view-copy-bindings-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Required JIT-emitted semantic-permute WebGPU gate (JIT or kernels release)
         if: contains(fromJSON('["jit","kernels"]'), steps.parse.outputs.shortname)
         run: |
@@ -159,6 +179,7 @@ jobs:
         env:
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_LAYOUT_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_COMPILER_VIEW_COPY_BINDINGS_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
 
       - name: Retain immutable npm artifact

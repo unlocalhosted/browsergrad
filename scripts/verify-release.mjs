@@ -30,6 +30,7 @@ const gates = [
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-kernels", "test:browser:view-copy:required"], repoRoot],
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:browser"], repoRoot],
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:browser:layout-bindings:required"], repoRoot],
+  ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:browser:view-copy-bindings:required"], repoRoot],
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:source-normalizer"], repoRoot],
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:audit-corpus"], repoRoot],
   [

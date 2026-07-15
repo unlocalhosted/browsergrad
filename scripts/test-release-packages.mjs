@@ -314,12 +314,48 @@ try {
     .map((command) => command.trim());
   assert(
     Array.isArray(compilerPrepublishCommands)
-      && compilerPrepublishCommands.at(-1) === "node scripts/require_layout_bindings_publish_gate.mjs",
-    "compiler exact-commit layout evidence gate must be the final prepublish command",
+      && compilerPrepublishCommands.at(-1) === "node scripts/require_compiler_evidence_publish_gate.mjs",
+    "compiler combined exact-commit evidence gate must be the final prepublish command",
   );
   assert(
-    existsSync(join(root, "packages/browsergrad-compiler/scripts/require_layout_bindings_publish_gate.mjs")),
-    "compiler workspace package is missing the exact-commit layout-binding publish gate implementation",
+    existsSync(join(root, "packages/browsergrad-compiler/scripts/require_compiler_evidence_publish_gate.mjs")),
+    "compiler workspace package is missing the combined exact-commit publish gate implementation",
+  );
+  for (const [script, command] of [
+    ["test:browser:view-copy-bindings", "semantic_view_copy_bindings_webgpu.test.ts"],
+    ["test:browser:view-copy-bindings:required", "--mode webgpu-required"],
+  ]) {
+    assert(
+      workspaceCompilerPkg.scripts?.[script]?.includes(command),
+      `compiler workspace package is missing ${script}`,
+    );
+  }
+  for (const relativePath of [
+    "packages/browsergrad-compiler/scripts/verify_view_copy_bindings_evidence_log.mjs",
+    "packages/browsergrad-compiler/scripts/verify_view_copy_bindings_evidence_log.d.mts",
+    "scripts/compiler-view-copy-evidence-source.mjs",
+    "scripts/compiler-view-copy-evidence-source.d.mts",
+  ]) {
+    assert(existsSync(join(root, relativePath)), `compiler L2 evidence surface missing ${relativePath}`);
+  }
+  const compilerBrowserConfig = readFileSync(
+    join(root, "packages/browsergrad-compiler/vitest.browser.config.ts"),
+    "utf8",
+  );
+  assert(
+    compilerBrowserConfig.includes('execFileSync("git", ["rev-parse", "HEAD"]')
+      && compilerBrowserConfig.includes("__BG_SOURCE_REVISION__"),
+    "compiler browser evidence config must inject exact git HEAD",
+  );
+  const compilerLayoutEvidence = readFileSync(
+    join(root, "packages/browsergrad-compiler/tests-browser/semantic_layout_bindings_webgpu.test.ts"),
+    "utf8",
+  );
+  assert(
+    compilerLayoutEvidence.includes("layout-bindings.webgpu-conformance@2")
+      && compilerLayoutEvidence.includes("plannedWorkgroupCount")
+      && !compilerLayoutEvidence.includes("submittedWorkgroupCount"),
+    "compiler layout evidence must label plan-derived topology as planned",
   );
   const releaseWorkflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish-npm.yml"), "utf8");
@@ -644,12 +680,15 @@ try {
     "JIT retained evidence must carry a validated domain-separated whole-record digest",
   );
   for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
+    assertCompilerViewCopyEvidenceWorkflowOrder(workflowName, workflow);
     assertJitEvidenceWorkflowOrder(workflowName, workflow);
   }
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
   for (const exportName of [
     "prepareCudaLiteLayoutBindings",
     "createCudaLiteLayoutBindingCompileCacheKey",
+    "prepareCudaLiteViewCopyBinding",
+    "compileCudaLiteKernelWithViewCopyBinding",
   ]) {
     assert(exportName in compilerRoot, `compiler root export missing ${exportName}`);
   }
@@ -695,6 +734,50 @@ __global__ void packed_layout_copy(const float* input, float* output) {
     packedCompiledView.wgslProgram.name.includes(packedCompilerBinding.layoutSemanticHash) &&
       packedCompiledView.wgslProgram.name.includes(packedCompilerBinding.bindingProjectionHash),
     "packed compiler WGSL program identity lost layout proof hashes",
+  );
+  const packedViewCopyBinding = await compilerRoot.prepareCudaLiteViewCopyBinding(
+    packedLayout,
+    packedKernel,
+    {
+      operationId: packedOperationId,
+      sourceParameter: "input",
+      destinationParameter: "output",
+      indexing: "row-major-flat",
+    },
+  );
+  const packedCompiledViewCopy = compilerRoot.compileCudaLiteKernelWithViewCopyBinding(
+    packedCompilerSource,
+    packedViewCopyBinding,
+    { workgroupSize: [4, 1, 1] },
+  );
+  const packedViewCopyResult = compilerRoot.runCompiledKernelSemanticReference(
+    packedCompiledViewCopy,
+    {
+      buffers: {
+        input: new Uint32Array([0x3f800000, 0x40000000, 0x40400000, 0x40800000]),
+        output: new Uint32Array(4),
+      },
+    },
+    { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+  );
+  assert(
+    [0x3f800000, 0x40400000, 0x40000000, 0x40800000]
+      .every((value, index) => packedViewCopyResult.buffers.output[index] === value),
+    "packed compiler L2 view-copy lowering produced the wrong raw-word transpose",
+  );
+  assert(
+    packedCompiledViewCopy.preparedViewCopyBinding === packedViewCopyBinding
+      && packedCompiledViewCopy.viewCopyBindingCompileCacheKey.includes(
+        packedViewCopyBinding.bindingProjectionHash,
+      ),
+    "packed compiler L2 result lost prepared binding authority",
+  );
+  assert(
+    packedCompiledViewCopy.wgslProgram.name.includes(packedViewCopyBinding.layoutSemanticHash)
+      && packedCompiledViewCopy.wgslProgram.name.includes(packedViewCopyBinding.kernelSemanticHash)
+      && packedCompiledViewCopy.wgslProgram.name.includes(packedViewCopyBinding.specializationHash)
+      && packedCompiledViewCopy.wgslProgram.name.includes(packedViewCopyBinding.bindingProjectionHash),
+    "packed compiler L2 WGSL identity lost semantic binding hashes",
   );
 
   console.log("release package tests ok");
@@ -889,8 +972,10 @@ import densePermutationFixtures from "@unlocalhosted/browsergrad-semantic-core/f
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
 import {
   compileCudaLiteKernelWithLayoutBindings,
+  compileCudaLiteKernelWithViewCopyBinding,
   createCudaLiteLayoutBindingCompileCacheKey,
   prepareCudaLiteLayoutBindings,
+  prepareCudaLiteViewCopyBinding,
   runCompiledKernelSemanticReference,
 } from "@unlocalhosted/browsergrad-compiler";
 
@@ -925,6 +1010,27 @@ const compiledResult = runCompiledKernelSemanticReference(
   { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
   { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
 );
+const viewCopyBinding = await prepareCudaLiteViewCopyBinding(layout, kernel, {
+  operationId,
+  sourceParameter: "input",
+  destinationParameter: "output",
+  indexing: "row-major-flat",
+});
+const compiledViewCopy = compileCudaLiteKernelWithViewCopyBinding(
+  compilerSource,
+  viewCopyBinding,
+  { workgroupSize: [4, 1, 1] },
+);
+const compiledViewCopyResult = runCompiledKernelSemanticReference(
+  compiledViewCopy,
+  {
+    buffers: {
+      input: new Uint32Array([0x3f800000, 0x40000000, 0x40400000, 0x40800000]),
+      output: new Uint32Array(4),
+    },
+  },
+  { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+);
 if (cpu.specializationHash !== wgsl.semantic.specializationHash) throw new Error("fresh consumer CPU/WGSL specialization mismatch");
 if (!wgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits")) throw new Error("fresh consumer lowering missing copy");
 if (compilerBinding.layoutSemanticHash !== await hashSemanticArtifact(layout)) throw new Error("fresh consumer compiler binding lost semantic layout identity");
@@ -932,6 +1038,9 @@ if (!createCudaLiteLayoutBindingCompileCacheKey("source", compilerBinding).inclu
 if (![1, 3, 2, 4].every((value, index) => compiledResult.buffers.output[index] === value)) throw new Error("fresh consumer compiler layout lowering produced the wrong transpose");
 if (compiledView.preparedLayoutBindings !== compilerBinding || !compiledView.layoutBindingCompileCacheKey.includes(compilerBinding.bindingProjectionHash)) throw new Error("fresh consumer compiled result lost layout proof identity");
 if (!compiledView.wgslProgram?.name.includes(compilerBinding.layoutSemanticHash) || !compiledView.wgslProgram.name.includes(compilerBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler WGSL identity lost layout proof hashes");
+if (![0x3f800000, 0x40400000, 0x40000000, 0x40800000].every((value, index) => compiledViewCopyResult.buffers.output[index] === value)) throw new Error("fresh consumer compiler L2 view-copy produced wrong raw-word transpose");
+if (compiledViewCopy.preparedViewCopyBinding !== viewCopyBinding || !compiledViewCopy.viewCopyBindingCompileCacheKey.includes(viewCopyBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler L2 result lost prepared binding authority");
+if (!compiledViewCopy.wgslProgram?.name.includes(viewCopyBinding.layoutSemanticHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.kernelSemanticHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.specializationHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler L2 WGSL identity lost semantic binding hashes");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);
@@ -1087,6 +1196,90 @@ function assertCommandFails(cmd, args, cwd, expectedMessage) {
     output.includes(expectedMessage),
     `${cmd} ${args.join(" ")} failed without expected diagnostic ${JSON.stringify(expectedMessage)}:\n${output}`,
   );
+}
+
+function assertCompilerViewCopyEvidenceWorkflowOrder(workflowName, workflow) {
+  const steps = workflowSteps(workflow);
+  const names = workflowName === "release"
+    ? {
+      dependency: "Verify selected package dependency closure is published and equivalent",
+      evidence: "Required compiler view-copy-binding WebGPU gate (compiler release)",
+      verify: "Verify compiler view-copy-binding retained terminal record (compiler release)",
+      upload: "Retain compiler view-copy-binding WebGPU evidence (compiler release)",
+      stage: "Stage immutable npm artifact",
+      publish: "Publish immutable artifact to npm",
+    }
+    : {
+      dependency: "Verify publication plan and existing dependency artifacts",
+      evidence: "Run required compiler view-copy-binding WebGPU gate",
+      verify: "Verify compiler view-copy-binding retained terminal record",
+      upload: "Retain compiler view-copy-binding WebGPU evidence",
+      stage: "Stage immutable npm artifacts",
+      publish: "Publish immutable artifacts",
+    };
+  const indexes = Object.fromEntries(Object.entries(names).map(([role, name]) => {
+    const matches = steps
+      .map((step, index) => ({ step, index }))
+      .filter(({ step }) => step.name === name);
+    assert(matches.length === 1, `${workflowName} workflow must contain exactly one compiler L2 ${role} step`);
+    return [role, matches[0].index];
+  }));
+  assert(
+    indexes.dependency < indexes.evidence
+      && indexes.evidence < indexes.verify
+      && indexes.verify < indexes.upload
+      && indexes.upload < indexes.stage
+      && indexes.stage < indexes.publish,
+    `${workflowName} workflow must order dependency preflight, compiler L2 evidence, immutable staging, then publish`,
+  );
+  assert(
+    steps[indexes.evidence].body.includes("set -o pipefail")
+      && steps[indexes.evidence].body.includes("test:browser:view-copy-bindings:required")
+      && steps[indexes.evidence].body.includes("compiler-view-copy-bindings-webgpu-evidence.log"),
+    `${workflowName} compiler L2 evidence step must run and retain the required browser lane`,
+  );
+  assert(
+    steps[indexes.verify].body.includes(
+      'verify_view_copy_bindings_evidence_log.mjs compiler-view-copy-bindings-webgpu-evidence.log "${GITHUB_SHA}"',
+    ),
+    `${workflowName} compiler L2 verifier must bind the retained log to GITHUB_SHA`,
+  );
+  assert(
+    steps[indexes.upload].body.includes("compiler-view-copy-bindings-webgpu-evidence-${{ github.sha }}"),
+    `${workflowName} compiler L2 upload must retain evidence by exact SHA`,
+  );
+  assert(
+    steps[indexes.stage].body.includes(
+      "BG_REQUIRED_COMPILER_VIEW_COPY_BINDINGS_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+    ),
+    `${workflowName} staging must authorize only the compiler L2 evidenced SHA`,
+  );
+  for (const role of ["evidence", "verify"]) {
+    assert(
+      !/^        continue-on-error:/mu.test(steps[indexes[role]].body),
+      `${workflowName} compiler L2 ${role} step cannot continue on error`,
+    );
+  }
+  const evidenceCondition = stepField(steps[indexes.evidence], "if");
+  const verifierCondition = stepField(steps[indexes.verify], "if");
+  const uploadCondition = stepField(steps[indexes.upload], "if");
+  if (workflowName === "release") {
+    const releaseCondition = "steps.parse.outputs.shortname == 'compiler'";
+    assert(
+      evidenceCondition === releaseCondition && verifierCondition === releaseCondition,
+      "release compiler L2 evidence and verifier conditions must be compiler-only and identical",
+    );
+    assert(
+      uploadCondition === `always() && ${releaseCondition}`,
+      "release compiler L2 upload must always run for compiler releases",
+    );
+  } else {
+    assert(
+      evidenceCondition === undefined && verifierCondition === undefined,
+      "publish compiler L2 evidence and verifier steps must be unconditional",
+    );
+    assert(uploadCondition === "always()", "publish compiler L2 upload must always run");
+  }
 }
 
 function assertJitEvidenceWorkflowOrder(workflowName, workflow) {
