@@ -8,7 +8,7 @@ import {
   type PredicateExpr,
 } from "../../src/layout";
 import { evaluateIndexExpr, evaluatePredicateExpr } from "../../src/layout/index-eval";
-import { encodeWireI64, SemanticSchemaError } from "../../src/schema";
+import { canonicalizeJson, encodeWireI64, SemanticSchemaError } from "../../src/schema";
 
 const constant = (value: bigint): DimExpr => ({ kind: "const", value: encodeWireI64(value) });
 const coordinate = (axis: number): IndexExpr => ({ kind: "coordinate", axis });
@@ -52,6 +52,7 @@ describe("layout normalization", () => {
     expect(result.shape).toEqual([constant(3n), constant(2n)]);
     expect(evaluateLocation(result.location, 2, [2n, 1n])).toBe(5n);
     expect(evaluateBounds(result.inBounds, 2, [2n, 1n])).toBe(true);
+    expect(() => canonicalizeJson(result)).not.toThrow();
   });
 
   it("normalizes strided slices, including signed source coordinates", () => {
@@ -127,5 +128,45 @@ describe("layout normalization", () => {
       low: [constant(-1n)],
       high: [constant(0n)],
     })).toThrowError(/BG-LAYOUT-INVALID-LAYOUT-EXPR/u);
+  });
+
+  it("budgets coordinate substitution before a compose chain can expand exponentially", () => {
+    let expression = strided([1n], [1n]);
+    for (let index = 0; index < 12; index += 1) {
+      expression = {
+        kind: "compose",
+        source: expression,
+        shape: [constant(1n)],
+        sourceCoordinates: [{ kind: "add", terms: [coordinate(0), coordinate(0)] }],
+      };
+    }
+
+    try {
+      normalizeLayoutExpr(expression, { limits: { maxNodes: 1_000 } });
+      throw new Error("expected normalization to exhaust its node budget");
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(SemanticSchemaError);
+      expect((caught as SemanticSchemaError).diagnostic.code).toBe("BG-LAYOUT-RESOURCE-LIMIT");
+    }
+  });
+
+  it("uses caller-provided limits when comparing structural broadcast extents", () => {
+    const deeplyNestedExtent = (): DimExpr => {
+      let result = constant(1n);
+      for (let index = 0; index < 70; index += 1) {
+        result = { kind: "add", terms: [constant(1n), result] };
+      }
+      return result;
+    };
+
+    expect(() => normalizeLayoutExpr({
+      kind: "broadcast",
+      source: {
+        kind: "strided",
+        shape: [deeplyNestedExtent()],
+        strides: [constant(1n)],
+      },
+      shape: [deeplyNestedExtent()],
+    }, { limits: { maxDepth: 220, maxNodes: 10_000 } })).not.toThrow();
   });
 });

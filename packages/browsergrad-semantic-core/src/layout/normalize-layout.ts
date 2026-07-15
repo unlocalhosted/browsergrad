@@ -28,6 +28,10 @@ export function normalizeLayoutExpr(
     nodes: 0,
   };
   const normalized = normalize(expression, state, "$", 1);
+  // Generated trees must obey the same structural limits as decoded input.
+  // Substitution is budgeted while it runs; this final pass covers the other
+  // linear helpers and asserts that the result is a canonical JSON tree.
+  canonicalizeJson(normalized as unknown as JsonValue, { limits: state.limits });
   return deepFreezeJson(normalized as unknown as JsonValue) as unknown as NormalizedLayout;
 }
 
@@ -63,8 +67,11 @@ function normalize(
       ));
       return layout(
         shape,
-        substituteIndex(source.location, sourceCoordinates),
-        andExpr([logicalBounds(shape), substitutePredicate(source.inBounds, sourceCoordinates)]),
+        substituteIndex(source.location, sourceCoordinates, state, `${path}.normalized.location`, depth + 1),
+        andExpr([
+          logicalBounds(shape),
+          substitutePredicate(source.inBounds, sourceCoordinates, state, `${path}.normalized.inBounds`, depth + 1),
+        ]),
       );
     }
     case "permute": {
@@ -76,8 +83,11 @@ function normalize(
       const shape = axes.map((sourceAxis) => source.shape[sourceAxis] as DimExpr);
       return layout(
         shape,
-        substituteIndex(source.location, sourceCoordinates),
-        andExpr([logicalBounds(shape), substitutePredicate(source.inBounds, sourceCoordinates)]),
+        substituteIndex(source.location, sourceCoordinates, state, `${path}.normalized.location`, depth + 1),
+        andExpr([
+          logicalBounds(shape),
+          substitutePredicate(source.inBounds, sourceCoordinates, state, `${path}.normalized.inBounds`, depth + 1),
+        ]),
       );
     }
     case "slice": {
@@ -98,8 +108,12 @@ function normalize(
       const nonZeroSteps = steps.map((step) => notExpr(equalExpr(dimExprToIndexExpr(step), integer(0n))));
       return layout(
         shape,
-        substituteIndex(source.location, sourceCoordinates),
-        andExpr([logicalBounds(shape), ...nonZeroSteps, substitutePredicate(source.inBounds, sourceCoordinates)]),
+        substituteIndex(source.location, sourceCoordinates, state, `${path}.normalized.location`, depth + 1),
+        andExpr([
+          logicalBounds(shape),
+          ...nonZeroSteps,
+          substitutePredicate(source.inBounds, sourceCoordinates, state, `${path}.normalized.inBounds`, depth + 1),
+        ]),
       );
     }
     case "broadcast": {
@@ -113,15 +127,18 @@ function normalize(
         const outputAxis = leading + sourceAxis;
         const outputDim = shape[outputAxis] as DimExpr;
         if (isConstant(sourceDim, 1n)) return integer(0n);
-        if (!sameDimExpr(sourceDim, outputDim)) {
+        if (!sameDimExpr(sourceDim, outputDim, state.limits)) {
           invalid(`${path}.shape[${outputAxis}]`, "broadcast requires a source extent of one or a structurally equal target extent");
         }
         return coordinate(outputAxis);
       });
       return layout(
         shape,
-        substituteIndex(source.location, sourceCoordinates),
-        andExpr([logicalBounds(shape), substitutePredicate(source.inBounds, sourceCoordinates)]),
+        substituteIndex(source.location, sourceCoordinates, state, `${path}.normalized.location`, depth + 1),
+        andExpr([
+          logicalBounds(shape),
+          substitutePredicate(source.inBounds, sourceCoordinates, state, `${path}.normalized.inBounds`, depth + 1),
+        ]),
       );
     }
     case "pad": {
@@ -142,8 +159,12 @@ function normalize(
       const validPadding = [...low, ...high].map((value) => lessEqualExpr(integer(0n), dimExprToIndexExpr(value)));
       return layout(
         shape,
-        substituteIndex(source.location, sourceCoordinates),
-        andExpr([logicalBounds(shape), ...validPadding, substitutePredicate(source.inBounds, sourceCoordinates)]),
+        substituteIndex(source.location, sourceCoordinates, state, `${path}.normalized.location`, depth + 1),
+        andExpr([
+          logicalBounds(shape),
+          ...validPadding,
+          substitutePredicate(source.inBounds, sourceCoordinates, state, `${path}.normalized.inBounds`, depth + 1),
+        ]),
       );
     }
   }
@@ -271,33 +292,117 @@ function cloneIndexExpr(
   }
 }
 
-function substituteIndex(expression: IndexExpr, coordinates: readonly IndexExpr[]): IndexExpr {
+function substituteIndex(
+  expression: IndexExpr,
+  coordinates: readonly IndexExpr[],
+  state: NormalizationState,
+  path: string,
+  depth: number,
+): IndexExpr {
+  consume(state, path, depth);
   switch (expression.kind) {
-    case "coordinate": return coordinates[expression.axis] as IndexExpr;
-    case "const":
-    case "dimension": return expression;
-    case "add": return addExpr(expression.terms.map((term) => substituteIndex(term, coordinates)));
-    case "mul": return mulExpr(substituteIndex(expression.lhs, coordinates), substituteIndex(expression.rhs, coordinates));
+    // A source-coordinate expression can be substituted into location and
+    // multiple predicate branches. Return a fresh tree per occurrence so the
+    // normalized result remains a canonical JSON tree rather than an object
+    // graph with hidden shared references.
+    case "coordinate": return copyIndexExpr(
+      coordinates[expression.axis] as IndexExpr,
+      state,
+      `${path}.coordinate[${expression.axis}]`,
+      depth,
+      false,
+    );
+    case "const": return { kind: "const", value: expression.value };
+    case "dimension": return { kind: "dimension", symbolId: expression.symbolId };
+    case "add": return addExpr(expression.terms.map((term, index) => (
+      substituteIndex(term, coordinates, state, `${path}.terms[${index}]`, depth + 1)
+    )));
+    case "mul": return mulExpr(
+      substituteIndex(expression.lhs, coordinates, state, `${path}.lhs`, depth + 1),
+      substituteIndex(expression.rhs, coordinates, state, `${path}.rhs`, depth + 1),
+    );
     case "floorDiv":
     case "ceilDiv":
     case "mod": return {
       kind: expression.kind,
-      value: substituteIndex(expression.value, coordinates),
-      divisor: substituteIndex(expression.divisor, coordinates),
+      value: substituteIndex(expression.value, coordinates, state, `${path}.value`, depth + 1),
+      divisor: substituteIndex(expression.divisor, coordinates, state, `${path}.divisor`, depth + 1),
     };
     case "min":
-    case "max": return { kind: expression.kind, values: expression.values.map((value) => substituteIndex(value, coordinates)) };
+    case "max": return {
+      kind: expression.kind,
+      values: expression.values.map((value, index) => (
+        substituteIndex(value, coordinates, state, `${path}.values[${index}]`, depth + 1)
+      )),
+    };
   }
 }
 
-function substitutePredicate(expression: PredicateExpr, coordinates: readonly IndexExpr[]): PredicateExpr {
+function substitutePredicate(
+  expression: PredicateExpr,
+  coordinates: readonly IndexExpr[],
+  state: NormalizationState,
+  path: string,
+  depth: number,
+): PredicateExpr {
+  consume(state, path, depth);
   switch (expression.kind) {
-    case "bool": return expression;
-    case "equal": return equalExpr(substituteIndex(expression.lhs, coordinates), substituteIndex(expression.rhs, coordinates));
-    case "lessEqual": return lessEqualExpr(substituteIndex(expression.lhs, coordinates), substituteIndex(expression.rhs, coordinates));
-    case "and": return andExpr(expression.values.map((value) => substitutePredicate(value, coordinates)));
-    case "or": return orExpr(expression.values.map((value) => substitutePredicate(value, coordinates)));
-    case "not": return notExpr(substitutePredicate(expression.value, coordinates));
+    case "bool": return { kind: "bool", value: expression.value };
+    case "equal": return equalExpr(
+      substituteIndex(expression.lhs, coordinates, state, `${path}.lhs`, depth + 1),
+      substituteIndex(expression.rhs, coordinates, state, `${path}.rhs`, depth + 1),
+    );
+    case "lessEqual": return lessEqualExpr(
+      substituteIndex(expression.lhs, coordinates, state, `${path}.lhs`, depth + 1),
+      substituteIndex(expression.rhs, coordinates, state, `${path}.rhs`, depth + 1),
+    );
+    case "and": return andExpr(expression.values.map((value, index) => (
+      substitutePredicate(value, coordinates, state, `${path}.values[${index}]`, depth + 1)
+    )));
+    case "or": return orExpr(expression.values.map((value, index) => (
+      substitutePredicate(value, coordinates, state, `${path}.values[${index}]`, depth + 1)
+    )));
+    case "not": return notExpr(substitutePredicate(expression.value, coordinates, state, `${path}.value`, depth + 1));
+  }
+}
+
+function copyIndexExpr(
+  expression: IndexExpr,
+  state: NormalizationState,
+  path: string,
+  depth: number,
+  consumeRoot = true,
+): IndexExpr {
+  if (consumeRoot) consume(state, path, depth);
+  switch (expression.kind) {
+    case "const": return { kind: "const", value: expression.value };
+    case "coordinate": return { kind: "coordinate", axis: expression.axis };
+    case "dimension": return { kind: "dimension", symbolId: expression.symbolId };
+    case "add": return {
+      kind: "add",
+      terms: expression.terms.map((term, index) => (
+        copyIndexExpr(term, state, `${path}.terms[${index}]`, depth + 1)
+      )),
+    };
+    case "mul": return {
+      kind: "mul",
+      lhs: copyIndexExpr(expression.lhs, state, `${path}.lhs`, depth + 1),
+      rhs: copyIndexExpr(expression.rhs, state, `${path}.rhs`, depth + 1),
+    };
+    case "floorDiv":
+    case "ceilDiv":
+    case "mod": return {
+      kind: expression.kind,
+      value: copyIndexExpr(expression.value, state, `${path}.value`, depth + 1),
+      divisor: copyIndexExpr(expression.divisor, state, `${path}.divisor`, depth + 1),
+    };
+    case "min":
+    case "max": return {
+      kind: expression.kind,
+      values: expression.values.map((value, index) => (
+        copyIndexExpr(value, state, `${path}.values[${index}]`, depth + 1)
+      )),
+    };
   }
 }
 
@@ -393,8 +498,8 @@ function isIndexConstant(value: IndexExpr, expected: bigint): boolean {
   return value.kind === "const" && wireIntegerToBigInt(value.value) === expected;
 }
 
-function sameDimExpr(left: DimExpr, right: DimExpr): boolean {
-  return canonicalizeJson(left) === canonicalizeJson(right);
+function sameDimExpr(left: DimExpr, right: DimExpr, limits: DecodeLimits): boolean {
+  return canonicalizeJson(left, { limits }) === canonicalizeJson(right, { limits });
 }
 
 function invalid(path: string, message: string): never {

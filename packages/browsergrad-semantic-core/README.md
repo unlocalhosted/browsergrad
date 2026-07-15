@@ -23,6 +23,17 @@ destination-write effects, disjoint alias sets, and either reject or exact-bit
 fill behavior for invalid source coordinates. Generic operation verification
 is separate from this lowering profile.
 
+Frontends construct the operation through one `/kernel` sink rather than
+assembling allocation, alias, index-map, view, and operation IDs themselves.
+`createVerifiedViewCopyArtifacts` accepts layout construction algebra plus
+explicit allocation geometry, snapshots it as canonical JSON, normalizes both
+layouts, fixes source/destination role order, verifies both artifacts, and
+returns their semantic hashes and canonical role IDs. The
+`createVerifiedDensePermutationViewCopyArtifacts` wrapper accepts only source
+shape, axes, and dtype; output shape, row-major strides, storage size, effects,
+and disjoint materialization are derived. Transport producer/artifact metadata
+is passed separately and cannot affect semantic hashes.
+
 The backend-neutral specialization step resolves bindings and hashes once,
 compiles the canonical index evaluators, proves guarded source access and a
 dense injective destination, and derives a binding-sensitive specialization
@@ -34,11 +45,12 @@ exact allocation lengths, declared alignment, overlap, and shared-memory
 exclusion; it never turns an invalid address into clamping or implicit
 zero-fill.
 
-This is the semantic/reference contract, not a GPU-support claim. Gate 2 still
-requires kernels-owned WGSL lowering, mandatory real-device evidence, and two
-frontend adapters consuming the same artifact hashes. Version `0.2.0` is
-locally packed and tested but must not be published as a completed Gate 2
-release before those consumers land.
+This is the semantic/reference contract, not a blanket GPU-support claim.
+Kernels-owned WGSL and the compiler read-only adapter have strict actual-device
+evidence for their declared profiles. Gate 2 still requires the typed JIT
+permutation adapter, identical compiler/JIT artifact hashes, and exact-release-
+commit reruns. Version `0.2.0` is locally packed and tested but must not be
+published as a completed Gate 2 release before those consumers land.
 
 Current status and evidence live in
 [`docs/internal/package-requirements-implementation-ledger.md`](../../docs/internal/package-requirements-implementation-ledger.md).

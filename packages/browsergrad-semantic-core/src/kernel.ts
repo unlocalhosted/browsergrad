@@ -21,6 +21,17 @@ export {
   type PrepareViewCopySpecializationRequest,
 } from "./kernel/prepare.js";
 export {
+  createVerifiedDensePermutationViewCopyArtifacts,
+  createVerifiedViewCopyArtifacts,
+  type CreateVerifiedDensePermutationViewCopyArtifactsRequest,
+  type CreateVerifiedViewCopyArtifactsRequest,
+  type VerifiedViewCopyArtifactRole,
+  type VerifiedViewCopyArtifacts,
+  type ViewCopyArtifactAllocationDraft,
+  type ViewCopyArtifactConstructionOptions,
+  type ViewCopyArtifactViewDraft,
+} from "./kernel/construction.js";
+export {
   prepareViewCopyCpu,
   type PreparedViewCopyCpu,
   type PrepareViewCopyCpuRequest,

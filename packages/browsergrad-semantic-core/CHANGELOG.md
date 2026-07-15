@@ -27,6 +27,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Backend-neutral prepared view-copy specializations shared by the CPU
   reference and device backends, with source-offset caching enabled only for
   interpreters that consume it.
+- Canonical view-copy artifact construction plus a dense-permutation wrapper;
+  frontends provide no entity IDs, output shape, strides, effects, or alias
+  policy, and provenance metadata cannot affect semantic hashes.
+- Canonical-JSON-safe, resource-bounded layout substitution that expands
+  repeated coordinates into independent tree nodes instead of hidden aliases.
 - Explicit `/kernel` package export; the package still has no root barrel or
   runtime dependencies.
 
