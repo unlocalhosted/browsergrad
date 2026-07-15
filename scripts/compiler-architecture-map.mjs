@@ -87,7 +87,7 @@ function featureBucket(file) {
   if (/\/semantic_/u.test(normalized) || normalized.endsWith("/semantic_ir.ts")) return "semantic-ir";
   if (/\/wgsl/u.test(normalized)) return "wgsl-backend";
   if (/\/reference/u.test(normalized)) return "reference";
-  if (/analyzer|parser|lexer|diagnostics/u.test(normalized)) return "frontend";
+  if (/analyzer|parser|lexer|diagnostics|cpp_cute_frontend/u.test(normalized)) return "frontend";
   if (/runtime|dynamic_launch|peer_copy|webgpu_orchestration|runner/u.test(normalized)) return "runtime-orchestration";
   return "support";
 }
@@ -224,6 +224,36 @@ function semanticIrRepresentationLeaks(rows) {
   return leaks;
 }
 
+function cppCuteFrontendLegacyLeaks(rows) {
+  const forbidden = new Set([
+    "analyzer.ts",
+    "cute_static_layout.ts",
+    "parser.ts",
+    "semantic_ir.ts",
+    "semantic_ir_types.ts",
+    "semantic_ir_walk.ts",
+    "semantic_layout_bindings.ts",
+    "semantic_layout_lowering.ts",
+    "semantic_view_copy_bindings.ts",
+    "semantic_view_copy_lowering.ts",
+  ]);
+  const leaks = [];
+  for (const row of rows) {
+    const sourceRelativeFile = path.relative(compilerSrc, row.file);
+    if (!sourceRelativeFile.startsWith("cpp_cute_frontend_")) continue;
+    const importedTargets = importsOf(row.file, row.source)
+      .map((entry) => resolveLocalImport(row.file, entry.specifier))
+      .filter((target) => target !== undefined);
+    for (const target of importedTargets) {
+      const targetRelativeFile = path.relative(compilerSrc, target);
+      if (forbidden.has(targetRelativeFile)) {
+        leaks.push(`${row.relativeFile} imports frozen CUDA-lite path ${targetRelativeFile}`);
+      }
+    }
+  }
+  return leaks;
+}
+
 const sourceRows = moduleRows([compilerSrc]);
 const testRows = includeTests ? moduleRows([compilerTests]) : [];
 const allRows = [...sourceRows, ...testRows];
@@ -235,6 +265,7 @@ const report = {
   cycles,
   legacyBackendLeaks: legacyBackendLeaks(sourceRows),
   semanticIrRepresentationLeaks: semanticIrRepresentationLeaks(sourceRows),
+  cppCuteFrontendLegacyLeaks: cppCuteFrontendLegacyLeaks(sourceRows),
   limits: { maxSourceLines, maxTestLines },
 };
 
@@ -260,6 +291,8 @@ if (json) {
   for (const leak of report.legacyBackendLeaks) console.log(`  ${leak}`);
   console.log(`Semantic IR representation leaks: ${report.semanticIrRepresentationLeaks.length}`);
   for (const leak of report.semanticIrRepresentationLeaks) console.log(`  ${leak}`);
+  console.log(`C++/CuTe frontend legacy leaks: ${report.cppCuteFrontendLegacyLeaks.length}`);
+  for (const leak of report.cppCuteFrontendLegacyLeaks) console.log(`  ${leak}`);
 }
 
 if (check) {
@@ -273,6 +306,7 @@ if (check) {
     ...cycles.map((cycle) => `dependency cycle: ${cycle.join(" -> ")}`),
     ...report.legacyBackendLeaks,
     ...report.semanticIrRepresentationLeaks,
+    ...report.cppCuteFrontendLegacyLeaks,
   ];
   if (failures.length > 0) {
     console.error("Compiler architecture check failed:");
