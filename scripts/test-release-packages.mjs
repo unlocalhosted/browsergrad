@@ -354,7 +354,9 @@ try {
   assert(
     compilerLayoutEvidence.includes("layout-bindings.webgpu-conformance@2")
       && compilerLayoutEvidence.includes("plannedWorkgroupCount")
-      && !compilerLayoutEvidence.includes("submittedWorkgroupCount"),
+      && compilerLayoutEvidence.includes("plannedPipelineCount")
+      && !compilerLayoutEvidence.includes("submittedWorkgroupCount")
+      && !/\bpipelineCount\b/u.test(compilerLayoutEvidence),
     "compiler layout evidence must label plan-derived topology as planned",
   );
   const releaseWorkflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");

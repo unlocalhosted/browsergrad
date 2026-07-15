@@ -121,7 +121,7 @@ interface CaseObservation extends JsonObject {
   readonly programName: string;
   readonly planKind: string;
   readonly stepCount: number;
-  readonly pipelineCount: number;
+  readonly plannedPipelineCount: number;
   readonly logicalInvocationCount: readonly number[];
   readonly plannedWorkgroupCount: readonly number[];
   readonly comparisonPolicyId: typeof COMPARISON_POLICY_ID;
@@ -270,8 +270,8 @@ it("executes verified compiler layout bindings on a required real GPUDevice", as
           `${preparedCase.id} expected one single-dispatch step; got ${plan.kind}/${plan.steps.length}`,
         );
       }
-      const pipelineCount = new Set(plan.steps.map((step) => `${step.program.name}:${step.program.wgsl}`)).size;
-      if (pipelineCount !== 1) throw new EvidenceLaneError("BG-WEBGPU-EVIDENCE-PLAN", `${preparedCase.id} expected one unique pipeline`);
+      const plannedPipelineCount = new Set(plan.steps.map((step) => `${step.program.name}:${step.program.wgsl}`)).size;
+      if (plannedPipelineCount !== 1) throw new EvidenceLaneError("BG-WEBGPU-EVIDENCE-PLAN", `${preparedCase.id} expected one unique pipeline`);
 
       stage = "webgpu-preparation";
       let prepared: PreparedCompiledKernelWebGpu | undefined;
@@ -317,7 +317,7 @@ it("executes verified compiler layout bindings on a required real GPUDevice", as
           programName: preparedCase.compiled.wgslProgram!.name,
           planKind: plan.kind,
           stepCount: prepared.stepCount,
-          pipelineCount,
+          plannedPipelineCount,
           logicalInvocationCount,
           plannedWorkgroupCount,
           comparisonPolicyId: COMPARISON_POLICY_ID,
