@@ -26,6 +26,11 @@ import {
   type WgslKernelRunResult,
 } from "./wgsl_program.js";
 import {
+  runDirect,
+  type DirectDispatchProfileOptions,
+  type DirectDispatchResult,
+} from "./runner.js";
+import {
   emitSemanticViewCopyWgsl,
   SemanticViewCopyWgslLoweringError,
   type IntegerRange,
@@ -75,6 +80,16 @@ export interface PreparedSemanticViewCopyWgsl {
 export interface SemanticViewCopyWebGpuBuffers {
   readonly sourceWords: Uint32Array;
   readonly destinationWords: Uint32Array;
+}
+
+/** Whole-root resident source allocation. Suballocation offsets are semantic expressions. */
+export interface SemanticViewCopyResidentSource {
+  readonly buffer: GPUBuffer;
+  readonly byteLength: number;
+}
+
+export interface SemanticViewCopyResidentRunOptions {
+  readonly profile?: DirectDispatchProfileOptions;
 }
 
 export interface SemanticViewCopyWebGpuRunOptions {
@@ -234,6 +249,46 @@ export async function prepareSemanticViewCopyWgsl(
   return prepared;
 }
 
+/**
+ * Dispatch an authorized semantic view-copy over a resident source allocation.
+ *
+ * This path performs no upload, readback, or host-side offset reconstruction.
+ * It is deliberately limited to destinations that provably overwrite one
+ * complete, zero-offset dense root allocation; broader destination views need
+ * an explicitly initialized resident destination binding.
+ */
+export function runPreparedSemanticViewCopyResident(
+  device: KernelDevice,
+  prepared: PreparedSemanticViewCopyWgsl,
+  source: SemanticViewCopyResidentSource,
+  options: SemanticViewCopyResidentRunOptions = {},
+): DirectDispatchResult {
+  if (!PREPARED_VIEW_COPIES.has(prepared as object)) {
+    fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.prepared", "prepared plan was not produced by prepareSemanticViewCopyWgsl in this module instance");
+  }
+  watchDeviceLoss(device);
+  if (LOST_VIEW_COPY_DEVICES.has(device.gpu)) {
+    fail("BG-WEBGPU-VIEW-COPY-DEVICE-LOST", "$.device", "WebGPU device was previously lost and cannot execute this prepared plan");
+  }
+  readAndVerifyDeviceFacts(device.gpu, prepared);
+  verifyResidentFullWriteDestination(prepared);
+  validateResidentSource(source, prepared.semantic.source.allocationByteLength);
+
+  const outputWords = prepared.semantic.destination.allocationByteLength / 4n;
+  return runDirect(device, {
+    name: prepared.program.name,
+    wgsl: prepared.program.wgsl,
+    workgroupSize: prepared.program.workgroupSize,
+  }, {
+    inputBuffers: [source.buffer],
+    outputLength: Number(outputWords),
+    params: new Uint32Array(0),
+    dispatchCount: prepared.launch.dispatchCount,
+    cacheKeySuffix: prepared.wgslModuleHash,
+    ...(options.profile === undefined ? {} : { profile: options.profile }),
+  });
+}
+
 export async function runSemanticViewCopyWebGpu(
   device: KernelDevice,
   prepared: PreparedSemanticViewCopyWgsl,
@@ -332,6 +387,75 @@ function verifyStaticWebGpuProfile(prepared: PreparedViewCopySpecialization): vo
     if (accessor.allocationByteLength > 2_147_483_647n) {
       fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "initial signed-address WGSL profile is limited to i32-sized allocations");
     }
+  }
+}
+
+function verifyResidentFullWriteDestination(prepared: PreparedSemanticViewCopyWgsl): void {
+  const destination = prepared.semantic.destination;
+  if (prepared.semantic.elementCount === 0n) {
+    fail(
+      "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      "$.destination",
+      "resident view-copy requires a nonempty destination root allocation",
+    );
+  }
+  const expectedBytes = prepared.semantic.elementCount * BigInt(destination.dtypeBytes);
+  const locationScale = destination.locationUnit === "element"
+    ? BigInt(destination.dtypeBytes)
+    : 1n;
+  const firstByte = destination.viewByteOffset
+    + (prepared.destinationLocationRange.minimum * locationScale);
+  const lastByteExclusive = destination.viewByteOffset
+    + (prepared.destinationLocationRange.maximum * locationScale)
+    + BigInt(destination.dtypeBytes);
+  if (
+    destination.viewByteOffset !== 0n
+    || destination.allocationByteLength !== expectedBytes
+    || firstByte !== 0n
+    || lastByteExclusive !== destination.allocationByteLength
+  ) {
+    fail(
+      "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      "$.destination",
+      "resident view-copy requires a dense, zero-offset destination that overwrites the complete root allocation",
+    );
+  }
+}
+
+function validateResidentSource(
+  source: SemanticViewCopyResidentSource,
+  expectedBytes: bigint,
+): void {
+  if (source === null || typeof source !== "object" || Array.isArray(source)) {
+    fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.source", "resident source must be an object");
+  }
+  if (!Number.isSafeInteger(source.byteLength) || source.byteLength <= 0) {
+    fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.source.byteLength", "resident source byte length must be a positive safe integer");
+  }
+  if (BigInt(source.byteLength) !== expectedBytes) {
+    fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.source.byteLength", `resident source byte length ${source.byteLength} does not equal declared root allocation length ${expectedBytes}`);
+  }
+  if (source.buffer === null || typeof source.buffer !== "object") {
+    fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.source.buffer", "resident source buffer must be a GPUBuffer");
+  }
+  let size: number;
+  let usage: GPUBufferUsageFlags;
+  try {
+    size = source.buffer.size;
+    usage = source.buffer.usage;
+  } catch (error) {
+    throw new SemanticViewCopyWebGpuError(
+      "BG-WEBGPU-VIEW-COPY-INVALID-BINDING",
+      "$.source.buffer",
+      "resident source buffer does not expose native GPUBuffer slots",
+      { cause: error },
+    );
+  }
+  if (!Number.isSafeInteger(size) || BigInt(size) !== expectedBytes) {
+    fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.source.buffer.size", `resident GPUBuffer size ${size} does not equal declared root allocation length ${expectedBytes}`);
+  }
+  if ((usage & GPUBufferUsage.STORAGE) === 0) {
+    fail("BG-WEBGPU-VIEW-COPY-INVALID-BINDING", "$.source.buffer.usage", "resident source GPUBuffer is missing STORAGE usage");
   }
 }
 

@@ -29,6 +29,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   bounded host/GPU working sets, one-in-flight device ownership, timeout/abort
   stale-result suppression, scoped LIFO error drainage, distinct shader and
   pipeline diagnostics, and cache invalidation on device loss.
+- Resident prepared view-copy dispatch through the exact canonical WGSL with
+  no upload/readback or offset reconstruction. It validates whole-root source
+  bytes and permits only dense zero-offset destinations that overwrite their
+  complete allocation.
 - Exact packed dependency on `@unlocalhosted/browsergrad-semantic-core@0.2.0`
   and a public `./semantic_view_copy` subpath. Publishing is blocked unless the
   required-device evidence marker names the exact current commit.
