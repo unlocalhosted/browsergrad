@@ -1,5 +1,18 @@
 # @unlocalhosted/browsergrad-compiler Changelog
 
+## 0.2.0
+
+- Adds authority-bound read-only CUDA-lite layout bindings over verified
+  `browsergrad.layout@1` artifacts, including stable preparation, compile-cache
+  identity, CPU-reference execution, and WGSL/WebGPU lowering APIs.
+- Accepts only nonempty rank-2/3 global `f32` views in the initial profile,
+  proves index-map predicates true over the complete logical domain, and fails
+  closed on conditional predicates, aliases, writes, rebasing, unsupported
+  arithmetic, alignment failures, and integer overflow.
+- Adds required actual-device layout conformance and exact-commit publish
+  evidence, plus concrete packed dependencies on semantic-core and kernels
+  `0.2.0`.
+
 ## 0.1.2
 
 - Republishes the compiler against rebuilt `@unlocalhosted/browsergrad-kernels`

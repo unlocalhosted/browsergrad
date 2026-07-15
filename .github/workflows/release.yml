@@ -5,7 +5,7 @@
 #   runtime-v0.1.2
 #   kernels-v0.1.0
 #   grad-v0.5.0
-#   compiler-v0.1.0
+#   compiler-v0.2.0
 #   semantic-core-v0.2.0
 #
 # To cut a release:
@@ -107,6 +107,14 @@ jobs:
         run: |
           VERSION=$(node -p "require('./packages/browsergrad-semantic-core/package.json').version")
           npm view "@unlocalhosted/browsergrad-semantic-core@$VERSION" version
+
+      - name: Verify compiler dependencies are published (compiler release)
+        if: steps.parse.outputs.shortname == 'compiler'
+        run: |
+          SEMANTIC_CORE_VERSION=$(node -p "require('./packages/browsergrad-semantic-core/package.json').version")
+          KERNELS_VERSION=$(node -p "require('./packages/browsergrad-kernels/package.json').version")
+          npm view "@unlocalhosted/browsergrad-semantic-core@$SEMANTIC_CORE_VERSION" version
+          npm view "@unlocalhosted/browsergrad-kernels@$KERNELS_VERSION" version
 
       - name: Required semantic view-copy WebGPU gate (kernels release)
         if: steps.parse.outputs.shortname == 'kernels'

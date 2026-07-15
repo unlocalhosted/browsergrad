@@ -4,6 +4,7 @@ This is the workspace-level changelog. Per-package changelogs are at:
 
 - [`packages/browsergrad-runtime/CHANGELOG.md`](./packages/browsergrad-runtime/CHANGELOG.md)
 - [`packages/browsergrad-kernels/CHANGELOG.md`](./packages/browsergrad-kernels/CHANGELOG.md)
+- [`packages/browsergrad-semantic-core/CHANGELOG.md`](./packages/browsergrad-semantic-core/CHANGELOG.md)
 - [`packages/browsergrad-compiler/CHANGELOG.md`](./packages/browsergrad-compiler/CHANGELOG.md)
 - [`packages/browsergrad-jit/CHANGELOG.md`](./packages/browsergrad-jit/CHANGELOG.md)
 - [`packages/browsergrad-grad/CHANGELOG.md`](./packages/browsergrad-grad/CHANGELOG.md)
@@ -12,6 +13,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## 2026-07 — semantic-core, kernels, and compiler 0.2.0
+
+- Adds the bounded canonical semantic wire/layout/kernel foundation and one
+  constructor-owned materializing view-copy contract shared across frontends.
+- Adds kernels-owned WGSL view-copy lowering with strict CPU/actual-WebGPU
+  evidence and exact-commit publish authorization.
+- Adds compiler verified-layout bindings, semantic/cache identity, guarded
+  read-only lowering through the existing CPU and WGSL backends, and a required
+  actual-device conformance lane.
 
 ## 2026-07 — browsergrad-kernels/compiler 0.1.2
 

@@ -88,8 +88,8 @@ git tag semantic-core-v0.2.0
 git push origin semantic-core-v0.2.0
 git tag kernels-v0.2.0
 git push origin kernels-v0.2.0
-git tag compiler-v0.1.2
-git push origin compiler-v0.1.2
+git tag compiler-v0.2.0
+git push origin compiler-v0.2.0
 ```
 
 For dependent releases, publish dependency tags first and verify npm before

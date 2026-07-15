@@ -182,6 +182,17 @@ try {
     existsSync(join(root, "packages/browsergrad-compiler/scripts/require_layout_bindings_publish_gate.mjs")),
     "compiler workspace package is missing the exact-commit layout-binding publish gate implementation",
   );
+  const releaseWorkflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
+  assert(
+    releaseWorkflow.includes("Verify compiler dependencies are published (compiler release)"),
+    "compiler release workflow must verify its published dependency chain",
+  );
+  for (const dependency of ["browsergrad-semantic-core", "browsergrad-kernels"]) {
+    assert(
+      releaseWorkflow.includes(`npm view "@unlocalhosted/${dependency}@$`),
+      `compiler release workflow must query the published ${dependency} version`,
+    );
+  }
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
   for (const exportName of [
     "prepareCudaLiteLayoutBindings",
