@@ -236,6 +236,32 @@
       }
     },
     {
+      "id": "compiler.cute-source-normalizers.v0",
+      "owner": "@unlocalhosted/browsergrad-compiler",
+      "permittedCallers": [
+        "scripts/cuda-lite-source-normalizer.mjs",
+        "scripts/test-cuda-lite-source-normalizer-part-1.mjs"
+      ],
+      "newUseProhibition": "No new CuTe/WGMMA source motifs, spelling recognizers, replacement bodies, exception files, or production call sites.",
+      "retirementGate": "Pinned resolved C++/CuTe frontend artifacts lower every retained fixture through shared layout/kernel semantics, then these normalizers are deleted.",
+      "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-compiler@1.0.0",
+      "baselineDecision": "docs/adr/0001-freeze-legacy-semantic-adapters.md",
+      "freeze": {
+        "kind": "cute-source-normalizers",
+        "exceptionFiles": [
+          "scripts/cuda-lite-source-normalizer-cute-flash.mjs",
+          "scripts/cuda-lite-source-normalizer-cute-la.mjs",
+          "scripts/cuda-lite-source-normalizer-wgmma.mjs"
+        ],
+        "files": {
+          "scripts/cuda-lite-source-normalizer-cute-flash.mjs": "77025e55c64783db5b41b112deffa463ca69c745a53e53f817021f9066d909b3",
+          "scripts/cuda-lite-source-normalizer-cute-la.mjs": "e571015f9022e184714fcd47962ba1182e6aaeff67626dfa69b7daa932566d62",
+          "scripts/cuda-lite-source-normalizer-wgmma.mjs": "e0e7c5ecdfd8bdeb6e7b8b669c52fde5fb074dcde82a3352a0bdb578624b26fc",
+          "scripts/cuda-lite-source-normalizer.mjs": "2adaabe8ad6387516c4bf929eb7cd2d71dfc4aa7321247a75940f84ab447e930"
+        }
+      }
+    },
+    {
       "id": "kernels.tensor-gpu-plan.v0",
       "owner": "@unlocalhosted/browsergrad-kernels",
       "permittedCallers": [

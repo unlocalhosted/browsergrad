@@ -9,6 +9,7 @@ import {
   checkFrozenCompilerPointerScalarMemorySource,
   checkFrozenGradCompatibilitySources,
   checkFrozenRuntimeAssignmentRequirementsSource,
+  checkFrozenCuteSourceNormalizerFiles,
   checkFrozenCuteStaticLayoutSource,
   checkFrozenTensorGpuPlanSource,
   checkWorkspaceImportSpecifier,
@@ -355,6 +356,38 @@ describe("semantic architecture guardrails", () => {
         cuteFreeze,
       ),
     ).toContainEqual(expect.stringContaining("exports changed"));
+  });
+
+  it("rejects CuTe source-normalizer drift", () => {
+    const normalizerFreeze = freeze("cute-source-normalizers");
+    const files = normalizerFreeze.files as Record<string, string>;
+    const sources = Object.fromEntries(
+      Object.keys(files).map((file) => [file, readFileSync(join(repoRoot, file), "utf8")]),
+    );
+    expect(checkFrozenCuteSourceNormalizerFiles(sources, normalizerFreeze)).toEqual([]);
+    const target = "scripts/cuda-lite-source-normalizer-cute-la.mjs";
+    expect(
+      checkFrozenCuteSourceNormalizerFiles(
+        { ...sources, [target]: `${sources[target]}\nexport function normalizeCuteNewMotif(source) { return source; }\n` },
+        normalizerFreeze,
+      ),
+    ).toContainEqual(expect.stringContaining(`${target} CuTe source normalizer changed`));
+  });
+
+  it("rejects missing or newly split CuTe source-normalizer files", () => {
+    const normalizerFreeze = freeze("cute-source-normalizers");
+    const files = normalizerFreeze.files as Record<string, string>;
+    const sources = Object.fromEntries(
+      Object.keys(files).map((file) => [file, readFileSync(join(repoRoot, file), "utf8")]),
+    );
+    const missing = { ...sources };
+    delete missing[Object.keys(files)[0] as string];
+    expect(checkFrozenCuteSourceNormalizerFiles(missing, normalizerFreeze))
+      .toContainEqual(expect.stringContaining("CuTe source-normalizer files changed"));
+    expect(checkFrozenCuteSourceNormalizerFiles(
+      { ...sources, "scripts/cuda-lite-source-normalizer-cute-new.mjs": "export const replacement = true;" },
+      normalizerFreeze,
+    )).toContainEqual(expect.stringContaining("CuTe source-normalizer files changed"));
   });
 
   it("counts executable custom constructors but ignores comments and strings", () => {

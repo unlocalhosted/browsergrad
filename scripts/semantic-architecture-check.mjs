@@ -19,6 +19,7 @@ const jsonOutput = process.argv.includes("--json");
 const REQUIRED_FREEZES = new Map([
   ["compiler.pointer-scalar-memory.v0", "compiler-pointer-scalar-memory"],
   ["compiler.cute-static-layout.v0", "cute-static-layout"],
+  ["compiler.cute-source-normalizers.v0", "cute-source-normalizers"],
   ["grad.view-bf16-compat.v0", "grad-view-bf16"],
   ["kernels.tensor-gpu-plan.v0", "tensor-gpu-plan"],
   ["jit.core-custom-ops.v0", "jit-op-custom"],
@@ -56,6 +57,9 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
         break;
       case "cute-static-layout":
         checkCuteStaticLayout(root, ts, adapter.freeze, failures);
+        break;
+      case "cute-source-normalizers":
+        checkCuteSourceNormalizers(root, adapter.freeze, failures);
         break;
       case "grad-view-bf16":
         checkGradViewBf16(root, adapter.freeze, failures);
@@ -143,6 +147,26 @@ export function extractPythonCustomLabelFields(source) {
 export function validateSemanticFreezeManifest(root, manifest) {
   const failures = [];
   validateManifest(path.resolve(root), manifest, failures);
+  return failures;
+}
+
+export function checkFrozenCuteSourceNormalizerFiles(
+  sources,
+  freeze,
+) {
+  const failures = [];
+  const expectedFiles = Object.keys(freeze.files ?? {}).sort();
+  const actualFiles = Object.keys(sources ?? {}).sort();
+  compareStringSets("CuTe source-normalizer files", actualFiles, expectedFiles, failures);
+  for (const file of expectedFiles) {
+    const source = sources?.[file];
+    if (typeof source !== "string") continue;
+    const actual = createHash("sha256").update(source, "utf8").digest("hex");
+    const expected = freeze.files?.[file];
+    if (actual !== expected) {
+      failures.push(`${file} CuTe source normalizer changed; expected SHA-256 ${stringValue(expected)}, got ${actual}`);
+    }
+  }
   return failures;
 }
 
@@ -914,6 +938,28 @@ function checkCuteStaticLayout(root, ts, freeze, failures) {
     const count = countToken(parserSource, token);
     if (count > maximum) failures.push(`packages/browsergrad-compiler/src/parser.ts uses ${token} ${count} times; frozen maximum is ${maximum}`);
   }
+}
+
+function checkCuteSourceNormalizers(root, freeze, failures) {
+  const scriptsRoot = path.join(root, "scripts");
+  const expectedExceptionFiles = [...(freeze.exceptionFiles ?? [])].sort();
+  const actualExceptionFiles = walk(
+    scriptsRoot,
+    (candidate) => /^cuda-lite-source-normalizer-(?:cute-.+|wgmma)\.mjs$/u.test(path.basename(candidate)),
+  ).map((file) => relative(root, file)).sort();
+  compareStringSets(
+    "CuTe source-normalizer exception files",
+    actualExceptionFiles,
+    expectedExceptionFiles,
+    failures,
+  );
+
+  const sources = {};
+  for (const file of Object.keys(freeze.files ?? {})) {
+    const resolved = resolveManifestFile(root, file, "files", failures);
+    if (resolved !== undefined) sources[file] = fs.readFileSync(resolved, "utf8");
+  }
+  failures.push(...checkFrozenCuteSourceNormalizerFiles(sources, freeze));
 }
 
 export function checkFrozenCuteStaticLayoutSource(ts, source, freeze, filename = "cute_static_layout.ts") {
