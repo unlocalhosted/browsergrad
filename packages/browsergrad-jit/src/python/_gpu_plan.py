@@ -49,6 +49,12 @@ _DTYPE_BYTES: Dict[str, int] = {
 }
 
 
+TENSOR_PLAN_SEMANTIC_REQUEST_SCHEMA = "browsergrad.jit.tensor-plan-semantic-requests"
+TENSOR_PLAN_SEMANTIC_REQUEST_VERSION = (1, 0)
+DENSE_PERMUTATION_VIEW_COPY_REQUEST = "dense-permutation-view-copy"
+_WIRE_I64_MAX = (1 << 63) - 1
+
+
 PRIMITIVE_GPU_IR_OPS = frozenset({
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
@@ -142,6 +148,50 @@ class GpuExecutionPlan:
                 }
                 for buf in self.buffers
             ],
+        }
+
+
+@dataclass(frozen=True)
+class DensePermutationViewCopyRequest:
+    """Semantic-core construction request plus plan-local routing identity.
+
+    ``value_id`` correlates the verified side-table entry with one frozen plan
+    step. It is deliberately excluded from the semantic constructor inputs.
+    """
+
+    value_id: int
+    input_shape: Tuple[str, ...]
+    axes: Tuple[int, ...]
+    dtype: str
+
+    def summary(self) -> Dict[str, Any]:
+        return {
+            "kind": DENSE_PERMUTATION_VIEW_COPY_REQUEST,
+            "valueId": self.value_id,
+            "inputShape": list(self.input_shape),
+            "axes": list(self.axes),
+            "dtype": self.dtype,
+        }
+
+
+@dataclass(frozen=True)
+class GpuExecutionSubmission:
+    """One frozen legacy plan and its separately versioned semantic requests."""
+
+    plan: GpuExecutionPlan
+    semantic_requests: Tuple[DensePermutationViewCopyRequest, ...]
+
+    def plan_summary(self) -> Dict[str, Any]:
+        return self.plan.summary()
+
+    def semantic_request_summary(self) -> Dict[str, Any]:
+        return {
+            "schema": TENSOR_PLAN_SEMANTIC_REQUEST_SCHEMA,
+            "version": {
+                "major": TENSOR_PLAN_SEMANTIC_REQUEST_VERSION[0],
+                "minor": TENSOR_PLAN_SEMANTIC_REQUEST_VERSION[1],
+            },
+            "requests": [request.summary() for request in self.semantic_requests],
         }
 
 
@@ -252,12 +302,107 @@ def gpu_plan_summary(root: UOp, *, allow_custom: bool = False) -> Dict[str, Any]
     return build_gpu_execution_plan(root, allow_custom=allow_custom).summary()
 
 
+def build_gpu_execution_submission(
+    root: UOp,
+    *,
+    allow_custom: bool = False,
+) -> GpuExecutionSubmission:
+    """Build the frozen plan once and emit semantic requests beside it.
+
+    The side table is produced at the JIT boundary, before the kernels package
+    sees the legacy tensor plan. Kernels must use the verified artifacts built
+    from these requests as semantic authority; plan fields remain scheduling
+    and liveness compatibility data only.
+    """
+    plan = build_gpu_execution_plan(root, allow_custom=allow_custom)
+    steps_by_value_id = {step.value_id: step for step in plan.steps}
+    requests = tuple(
+        _dense_permutation_request(step, steps_by_value_id)
+        for step in plan.steps
+        if step.op == OP_PERMUTE
+    )
+    return GpuExecutionSubmission(plan=plan, semantic_requests=requests)
+
+
+def _dense_permutation_request(
+    step: PlanStep,
+    steps_by_value_id: Dict[int, PlanStep],
+) -> DensePermutationViewCopyRequest:
+    path = f"PERMUTE value_id={step.value_id}"
+    if len(step.input_ids) != 1:
+        _semantic_request_unsupported(path, "requires exactly one input")
+    source_value_id = step.input_ids[0]
+    source = steps_by_value_id.get(source_value_id)
+    if source is None:
+        _semantic_request_unsupported(
+            path,
+            f"references missing source value_id={source_value_id}",
+        )
+    if step.dtype != "float32" or source.dtype != "float32":
+        _semantic_request_unsupported(
+            path,
+            "initial semantic view-copy lowering requires float32 source and destination",
+        )
+
+    input_shape = tuple(source.shape)
+    rank = len(input_shape)
+    if rank not in (2, 3):
+        _semantic_request_unsupported(path, f"initial semantic view-copy lowering requires rank 2 or 3, got {rank}")
+    for axis, extent in enumerate(input_shape):
+        if type(extent) is not int or extent <= 0:
+            _semantic_request_unsupported(
+                path,
+                f"input shape axis {axis} must be a positive static integer, got {extent!r}",
+            )
+        if extent > _WIRE_I64_MAX:
+            _semantic_request_unsupported(
+                path,
+                f"input shape axis {axis} exceeds canonical signed-64 wire range",
+            )
+
+    if type(step.arg) is not dict or set(step.arg) != {"axes"}:
+        _semantic_request_unsupported(path, "arg must be the closed record {'axes': tuple[int, ...]}")
+    raw_axes = step.arg["axes"]
+    if type(raw_axes) is not tuple:
+        _semantic_request_unsupported(path, "axes must be a canonical tuple")
+    axes = tuple(raw_axes)
+    if (
+        len(axes) != rank
+        or any(type(axis) is not int or axis < 0 or axis >= rank for axis in axes)
+        or len(set(axes)) != rank
+    ):
+        _semantic_request_unsupported(path, f"axes must be an exact permutation of [0, {rank})")
+
+    expected_output_shape = tuple(input_shape[axis] for axis in axes)
+    if tuple(step.shape) != expected_output_shape:
+        _semantic_request_unsupported(
+            path,
+            f"declared output shape {tuple(step.shape)!r} does not match derived shape {expected_output_shape!r}",
+        )
+    return DensePermutationViewCopyRequest(
+        value_id=step.value_id,
+        input_shape=tuple(str(extent) for extent in input_shape),
+        axes=axes,
+        dtype="f32",
+    )
+
+
+def _semantic_request_unsupported(path: str, message: str) -> None:
+    raise GpuPlanUnsupported(f"GPU semantic request {path}: {message}")
+
+
 __all__ = [
     "PRIMITIVE_GPU_IR_OPS",
     "PlanBuffer",
     "PlanStep",
     "GpuExecutionPlan",
+    "DensePermutationViewCopyRequest",
+    "GpuExecutionSubmission",
     "GpuPlanUnsupported",
     "build_gpu_execution_plan",
+    "build_gpu_execution_submission",
     "gpu_plan_summary",
+    "TENSOR_PLAN_SEMANTIC_REQUEST_SCHEMA",
+    "TENSOR_PLAN_SEMANTIC_REQUEST_VERSION",
+    "DENSE_PERMUTATION_VIEW_COPY_REQUEST",
 ]

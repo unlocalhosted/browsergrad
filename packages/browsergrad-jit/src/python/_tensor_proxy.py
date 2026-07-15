@@ -36,6 +36,7 @@ P0-4. Concrete arrays are looked up via the BufferTable at backward time.
 
 from __future__ import annotations
 from dataclasses import dataclass
+import operator
 from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -1257,12 +1258,45 @@ class TensorProxy:
         return self.reshape(self.shape[:dim] + self.shape[dim + 1:])
 
     def transpose(self, dim0: int, dim1: int) -> "TensorProxy":
+        dim0 = _normalize_dim(dim0, self.ndim, "transpose")
+        dim1 = _normalize_dim(dim1, self.ndim, "transpose")
         axes = list(range(self.ndim))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return self.permute(*axes)
 
     def permute(self, *axes: int) -> "TensorProxy":
-        axes_t = tuple(axes)
+        if len(axes) != self.ndim:
+            raise ShapeError(
+                f"permute: expected {self.ndim} axes for shape {self.shape}, "
+                f"got {len(axes)}"
+            )
+        normalized = []
+        seen = set()
+        for position, axis in enumerate(axes):
+            if isinstance(axis, (bool, np.bool_)):
+                raise ShapeError(
+                    f"permute: axis {position} must be an integer, got bool"
+                )
+            try:
+                value = operator.index(axis)
+            except TypeError as error:
+                raise ShapeError(
+                    f"permute: axis {position} must be an integer, got "
+                    f"{type(axis).__name__}"
+                ) from error
+            if value < 0:
+                value += self.ndim
+            if value < 0 or value >= self.ndim:
+                raise ShapeError(
+                    f"permute: axis {axis} out of range for rank {self.ndim}"
+                )
+            if value in seen:
+                raise ShapeError(
+                    f"permute: axis {axis} resolves to duplicate axis {value}"
+                )
+            seen.add(value)
+            normalized.append(value)
+        axes_t = tuple(normalized)
         new_shape = tuple(self._uop.shape[a] for a in axes_t)
         uop = UOp(op=OP_PERMUTE, inputs=(self._uop,), shape=new_shape,
                   dtype=self._uop.dtype, arg={"axes": axes_t})

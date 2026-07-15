@@ -142,6 +142,49 @@ result
     expect(err).toMatch(/non-negative/);
   });
 
+  it("normalizes permutation axes once and rejects malformed permutations before IR construction", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      axes: number[];
+      shape: number[];
+      duplicate: string;
+      missing: string;
+      outOfRange: string;
+      nonInteger: string;
+      transposeOutOfRange: string;
+    }>(`
+import browsergrad_jit as bg
+
+x = bg.tensor([[[1.0, 2.0], [3.0, 4.0]]])
+p = x.permute(-1, 0, 1)
+
+def capture(fn):
+    try:
+        fn()
+        return "no_error"
+    except Exception as error:
+        return type(error).__name__ + ": " + str(error)
+
+{
+    "axes": list(p._uop.arg["axes"]),
+    "shape": list(p.shape),
+    "duplicate": capture(lambda: x.permute(0, 0, 1)),
+    "missing": capture(lambda: x.permute(0, 1)),
+    "outOfRange": capture(lambda: x.permute(0, 1, 3)),
+    "nonInteger": capture(lambda: x.permute(0, 1, 2.0)),
+    "transposeOutOfRange": capture(lambda: x.transpose(0, 3)),
+}
+`);
+
+    expect(result.axes).toEqual([2, 0, 1]);
+    expect(result.shape).toEqual([2, 1, 2]);
+    expect(result.duplicate).toMatch(/ShapeError: permute:.*duplicate axis 0/);
+    expect(result.missing).toMatch(/ShapeError: permute: expected 3 axes/);
+    expect(result.outOfRange).toMatch(/ShapeError: permute: axis 3 out of range/);
+    expect(result.nonInteger).toMatch(/ShapeError: permute: axis 2 must be an integer/);
+    expect(result.transposeOutOfRange).toMatch(/ShapeError: transpose: dim 3 out of range/);
+  });
+
   it("refuses preposterously large allocations at construction", async () => {
     const target = await getJitTarget();
     const err = await target.run<string>(`

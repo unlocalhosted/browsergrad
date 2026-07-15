@@ -80,4 +80,95 @@ result
     expect(err).toMatch(/refuses CUSTOM/);
     expect(err).toMatch(/primitive IR/);
   });
+
+  it("emits one closed semantic PERMUTE request from the post-fusion plan", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      schema: string;
+      version: { major: number; minor: number };
+      envelopeKeys: string[];
+      requestKeys: string[];
+      request: {
+        kind: string;
+        valueId: number;
+        inputShape: string[];
+        axes: number[];
+        dtype: string;
+      };
+      permuteValueId: number;
+      ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+from browsergrad_jit._gpu_plan import build_gpu_execution_submission
+
+x = bg.from_numpy(np.arange(6, dtype=np.float32).reshape(2, 3))
+out = bg.exp(x + x).permute(1, 0)
+submission = build_gpu_execution_submission(out._uop)
+plan = submission.plan_summary()
+semantic = submission.semantic_request_summary()
+request = semantic["requests"][0]
+permute_step = next(step for step in plan["steps"] if step["op"] == "PERMUTE")
+{
+    "schema": semantic["schema"],
+    "version": semantic["version"],
+    "envelopeKeys": sorted(semantic.keys()),
+    "requestKeys": sorted(request.keys()),
+    "request": request,
+    "permuteValueId": int(permute_step["value_id"]),
+    "ops": plan["ops"],
+}
+`);
+
+    expect(result).toMatchObject({
+      schema: "browsergrad.jit.tensor-plan-semantic-requests",
+      version: { major: 1, minor: 0 },
+      envelopeKeys: ["requests", "schema", "version"],
+      requestKeys: ["axes", "dtype", "inputShape", "kind", "valueId"],
+      request: {
+        kind: "dense-permutation-view-copy",
+        inputShape: ["2", "3"],
+        axes: [1, 0],
+        dtype: "f32",
+      },
+    });
+    expect(result.ops).toContain("FUSED_ELEMENTWISE");
+    expect(result.ops).not.toContain("EXP");
+    expect(result.request.valueId).toBe(result.permuteValueId);
+  });
+
+  it("fail-closes PERMUTE requests outside the initial static f32 rank-2/3 profile", async () => {
+    const target = await getJitTarget();
+    const errors = await target.run<Record<string, string>>(`
+from browsergrad_jit._gpu_plan import build_gpu_execution_submission
+from browsergrad_jit._ir import UOp, buffer, load, OP_PERMUTE
+
+def source(name, shape, dtype="float32"):
+    return load(buffer(name, shape, dtype))
+
+cases = {
+    "dtype": UOp(OP_PERMUTE, (source("f16", (2, 3), "float16"),), (3, 2), "float16", arg={"axes": (1, 0)}),
+    "rank": UOp(OP_PERMUTE, (source("rank4", (1, 2, 3, 4)),), (4, 3, 2, 1), "float32", arg={"axes": (3, 2, 1, 0)}),
+    "zero": UOp(OP_PERMUTE, (source("zero", (0, 3)),), (3, 0), "float32", arg={"axes": (1, 0)}),
+    "axes": UOp(OP_PERMUTE, (source("axes", (2, 3)),), (2, 2), "float32", arg={"axes": (0, 0)}),
+    "shape": UOp(OP_PERMUTE, (source("shape", (2, 3)),), (2, 3), "float32", arg={"axes": (1, 0)}),
+    "closed": UOp(OP_PERMUTE, (source("closed", (2, 3)),), (3, 2), "float32", arg={"axes": (1, 0), "offset": 0}),
+}
+errors = {}
+for name, node in cases.items():
+    try:
+        build_gpu_execution_submission(node)
+        errors[name] = "no_error"
+    except Exception as exc:
+        errors[name] = type(exc).__name__ + ": " + str(exc)
+errors
+`);
+
+    expect(errors.dtype).toMatch(/GpuPlanUnsupported.*requires float32/);
+    expect(errors.rank).toMatch(/GpuPlanUnsupported.*requires rank 2 or 3/);
+    expect(errors.zero).toMatch(/GpuPlanUnsupported.*positive static integer/);
+    expect(errors.axes).toMatch(/GpuPlanUnsupported.*exact permutation/);
+    expect(errors.shape).toMatch(/GpuPlanUnsupported.*does not match derived shape/);
+    expect(errors.closed).toMatch(/GpuPlanUnsupported.*closed record/);
+  });
 });
