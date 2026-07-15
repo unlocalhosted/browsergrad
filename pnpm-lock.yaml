@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      '@unlocalhosted/browsergrad-semantic-core':
+        specifier: workspace:*
+        version: link:packages/browsergrad-semantic-core
 
   packages/browsergrad-compiler:
     dependencies:

@@ -25,5 +25,8 @@
     "url": "https://github.com/unlocalhosted/browsergrad.git"
   },
   "license": "MIT",
-  "author": "unlocalhosted"
+  "author": "unlocalhosted",
+  "devDependencies": {
+    "@unlocalhosted/browsergrad-semantic-core": "workspace:*"
+  }
 }

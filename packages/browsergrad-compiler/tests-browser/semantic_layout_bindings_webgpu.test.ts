@@ -41,7 +41,7 @@ declare const __BG_KERNELS_VERSION__: string;
 declare const __BG_SEMANTIC_CORE_VERSION__: string;
 
 const EVIDENCE_PREFIX = "[browsergrad-webgpu-evidence]";
-const SUITE_ID = "browsergrad.compiler.layout-bindings.webgpu-conformance@1";
+const SUITE_ID = "browsergrad.compiler.layout-bindings.webgpu-conformance@2";
 const CAPABILITY_ID = "browsergrad.compiler.verified-layout-read";
 const BACKEND_ID = "browsergrad.backend.webgpu.core";
 const COMPARISON_POLICY_ID = "browsergrad.comparison.bit-exact-f32-finite-complete-buffers.v1";
@@ -123,7 +123,7 @@ interface CaseObservation extends JsonObject {
   readonly stepCount: number;
   readonly pipelineCount: number;
   readonly logicalInvocationCount: readonly number[];
-  readonly submittedWorkgroupCount: readonly number[];
+  readonly plannedWorkgroupCount: readonly number[];
   readonly comparisonPolicyId: typeof COMPARISON_POLICY_ID;
 }
 
@@ -302,7 +302,7 @@ it("executes verified compiler layout bindings on a required real GPUDevice", as
         await raceDeviceLoss(withEvidenceTimeout(device.queue.onSubmittedWorkDone(), 10_000, "queue-drain"), deviceLoss);
         assertCompleteBufferBits(preparedCase, gpuResult.buffers);
         const logicalInvocationCount = Object.freeze([...plan.steps[0]!.launch.dispatchCount]);
-        const submittedWorkgroupCount = Object.freeze(logicalInvocationCount.map((count, axis) => (
+        const plannedWorkgroupCount = Object.freeze(logicalInvocationCount.map((count, axis) => (
           Math.max(Math.ceil(count / plan.steps[0]!.program.workgroupSize[axis]!), 1)
         )));
         completedCases.push(Object.freeze({
@@ -319,7 +319,7 @@ it("executes verified compiler layout bindings on a required real GPUDevice", as
           stepCount: prepared.stepCount,
           pipelineCount,
           logicalInvocationCount,
-          submittedWorkgroupCount,
+          plannedWorkgroupCount,
           comparisonPolicyId: COMPARISON_POLICY_ID,
         }));
       } finally {
