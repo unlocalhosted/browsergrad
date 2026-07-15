@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 2 verified view-copy contract and CPU reference
+- **Current implementation slice:** Gate 2 kernels-owned WGSL view-copy lowering
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -32,7 +32,7 @@ test does not make a gate verified unless every exit criterion is covered.
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
-| Gate 2 — multi-frontend, multi-backend view slice | `in-progress` | The ownership audit is complete. The selected seam is one verified L2 materializing view-copy operation over a verified layout artifact, with explicit read/write effects, exact padding-fill policy, fail-closed overlap, and a layout side table beside the frozen legacy plan. Rank-2 transpose is the first compiler/JIT tracer bullet. | Implement and verify the shared operation and CPU evaluator; add kernels-owned WGSL lowering with strict device evidence; lower compiler read-only flat-logical-index bindings and typed JIT permutation; extend unchanged operation shape to slice, broadcast, padding, dynamic rank-2/3 fixtures; derive/refuse the legacy plan without widening it. | Three read-only ownership audits; semantic-core package gate; existing JIT typed permutation/VJP/plan and kernels real-device tests traced. No implementation or WebGPU conformance claim yet. |
+| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` now has a closed, independently versioned `browsergrad.kernel@1` materializing view-copy operation, separate generic verification and positive-affine portable-profile legalization, compiled prepared accessors, binding-sensitive specialization hashes, and a bounded CPU reference. The same operation executes transpose, rank-3 permutation, strided slice, broadcast, exact-bit padding, dynamic shapes, byte-unit maps, nonzero offsets, and zero extents. | Add kernels-owned WGSL lowering and strict real-device evidence; lower compiler read-only flat-logical-index bindings and typed JIT permutation to identical artifacts/hashes; derive/refuse the frozen legacy plan without widening it. Registry publication remains blocked until a real cross-package consumer and the Gate 2 release lane exist. | Semantic-core typecheck/build/lint; 9 files/81 tests; packed `/kernel` import plus real transpose execution; architecture check; adversarial profile, bounds, alias, buffer, alignment, dynamic-specialization, and resource tests. No WebGPU or two-frontend claim yet. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
@@ -57,9 +57,10 @@ families extend the operation rather than add source-shaped execution paths.
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
 | Gate 0 architecture check | `verified` | Cross-package boundaries, generated-source parity, all six required freezes, exact runtime mapping/status unions, reviewed vocabulary, profile-usage parity, pinned inventories/harnesses, normalized definition fingerprints, and representative mutations are implemented and wired into delivery gates. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
-| Semantic-core package adoption gate | `verified` | `0.1.0` is public-package shaped, dependency-free, subpath-only, and locally packed with schema/layout imports, declarations, Python oracle, fixtures, license, and changelog verified. It has not been published. |
+| Semantic-core package adoption gate | `verified` | `0.2.0` is public-package shaped, dependency-free, subpath-only, and locally packed with schema/layout/kernel imports, declarations, Python oracle, fixtures, license, changelog, and real packed view-copy execution verified. It has not been published and `/kernel` is not release-complete without a cross-package consumer. |
 | Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus a compiler read-only flat-logical-index storage binding, starting with rank-2 transpose. Both must emit the same artifact hash; Gate 2 remains incomplete until the full required view matrix and strict WebGPU proof pass. |
-| L2 materializing view-copy contract | `in-progress` | Same-dtype f32 rank-2/3, source-read/destination-write effects, exact reject/fill invalid-source policy, and overlap forbidden initially. CPU and WGSL must consume the same verified maps or proved specializations. |
+| L2 materializing view-copy contract and CPU reference | `verified` | `view-copy@1.0` owns effects, exact reject/fill bits, and forbid-overlap semantics. Generic L2 verification stays backend-neutral; the shared initial profile legalizes positive-affine f32 rank-2/3 global views. Prepared CPU execution compiles maps once, proves guarded reads and dense destination writes, caches source offsets, derives binding-sensitive specialization hashes, and enforces element/step/scratch/wall-time budgets, cooperative browser yielding and abort, plus native buffer-slot, length, alignment, overlap, and shared-memory checks. |
+| Kernels-owned WGSL view-copy lowering | `not-started` | Must consume the same verified artifact/profile and specialization facts, use structured guarded loads for fill, and add a fail-on-skip required-device harness. |
 
 ### Audit findings recorded so far
 
@@ -131,6 +132,16 @@ families extend the operation rather than add source-shaped execution paths.
   compatibility schedule/liveness projection only. Verified layout/kernel
   artifacts live beside it; no semantics may be recovered from plan shapes or
   axes.
+- Principal/adversarial review of the first CPU draft found destination
+  self-overlap, SharedArrayBuffer alias/concurrency, spoofable typed-array
+  properties/methods, dynamic offset/alignment gaps, unbounded per-element AST
+  reconstruction, profile rules mixed into generic verification, unversioned
+  operations, ambiguous multi-operation ordering, and dynamic cache-key drift.
+  The landed contract closes each issue: dense destination proof, shared-memory
+  rejection, native internal-slot validation and direct byte copies, resolved
+  geometry/alignment checks, compiled evaluators with deterministic work and
+  scratch budgets, generic/profile separation, `view-copy@1.0`, one operation
+  per kernel-v1 artifact, and binding-sensitive specialization hashes.
 - The LLD's initial view model conflated geometry and effects and used constant
   offsets despite dynamic shape support. It now uses symbolic byte lengths and
   offsets, puts access mode in L2 effects, and makes normalized `IndexMap` the
@@ -171,6 +182,7 @@ families extend the operation rather than add source-shaped execution paths.
 | D-015 | 2026-07-15 | accepted | Model JIT opaque compatibility as 36 exact constructor-call records and 39 operation records using five closed decision policies; preserve `name` versus `op`, conditional reachability/effects, declared versus realized dtype behavior, replay, autograd/transform/export/residency, default versus inspection-only versus executable tensor-plan decisions, and constructor-only status. | Counts and one-way allowlists hid two ghost labels, grouped distinct calls, allowed same-count relabels, treated declared dtype as realized dtype, overstated tensor-plan/WebNN/transformer execution, and missed silent gradient disconnection plus conditional stateful callback replay. |
 | D-016 | 2026-07-15 | accepted | Promote semantic-core `0.1.0` from private incubation to a dependency-free public-package shape before adding compiler, kernels, or JIT runtime imports; keep only explicit `/schema` and `/layout` exports and prove the packed tarball locally. | BrowserGrad packages ship unbundled ESM. A workspace-only private dependency would pass locally and break external installs. `0.x`, narrow exports, publish ordering, and tarball gates communicate instability without creating an unavailable dependency. This decision does not claim npm publication. |
 | D-017 | 2026-07-15 | accepted | Gate 2 introduces one verified L2 materializing view-copy operation over verified L1 layouts. It owns explicit effects, exact reject/fill behavior for invalid source coordinates, and initially forbids overlap. Verified artifacts live in a side table; the frozen tensor plan is derived or refused and gains no semantic fields. The first tracer is rank-2 f32 transpose from typed JIT `PERMUTE` and a read-only compiler flat-logical-index binding through shared CPU and strict real-WebGPU execution. | All three ownership audits found independent offset reconstruction and disconnected proof paths. This seam makes padding and materialization explicit, prevents another source-shaped backend, preserves frozen schemas, and leaves signed/negative-stride semantics rejected until backend integer equivalence is proved. |
+| D-018 | 2026-07-15 | accepted | `browsergrad.kernel@1` contains exactly one independently versioned `view-copy@1.0`; host graphs own sequencing. Generic verification checks semantic validity, while the shared positive-affine portable profile and backend profiles own dtype/rank/space/integer limits. Prepared specializations include resolved bindings/guards in their hash and are bounded independently by elements, evaluation steps, and scratch bytes. The initial destination must be proved dense and injective; shared runtime memory is rejected without synchronization semantics. | Prevents backend limits from becoming wire meaning, ordinal arrays from becoming an accidental program, dynamic cache collisions, write races, buffer spoofing/concurrency, and browser hangs from valid but multiplicatively expensive artifacts. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -411,6 +423,34 @@ affected implementation slice is marked complete.
   `in-progress`; no implementation, GPU conformance, registry publish, push,
   or deployment is claimed by this audit.
 
+### 2026-07-15 — Gate 2 view-copy contract and CPU reference
+
+- Added the dependency-free `/kernel` subpath and `browsergrad.kernel@1` with
+  one independently versioned `view-copy@1.0` operation tied to the exact
+  verified layout hash and canonical view IDs.
+- Kept generic semantic verification separate from the shared initial portable
+  profile. The profile currently admits positive-affine f32 rank-2/3 global
+  views and rejects negative strides plus division/modulo until target integer
+  equivalence is proved.
+- Refactored coordinate traces through prepared accessors, compiled index-map
+  evaluators once per specialization, and kept dominating-predicate behavior
+  differential with the Python oracle.
+- Added a prepared CPU reference with guarded source preflight, exact f32 fill
+  bits, dense destination proof, cached source offsets, dynamic specialization
+  hashes, separate element/evaluation-step/scratch/wall-time budgets, and
+  cooperative scheduler yielding with abort checks.
+- Hardened runtime bindings against short, overlapping, misaligned, shared,
+  subclassed, proxied, or property-spoofed typed arrays. Copy execution uses
+  native indexed byte slots rather than overridable user methods.
+- Covered transpose, rank-3 permutation, positive strided slice, broadcast,
+  padded reads, dynamic and zero shapes, byte-unit maps, and nonzero source and
+  destination offsets. Negative/profile, geometry, access, alias, resource,
+  version, hash, and buffer mutations fail closed.
+- Bumped the locally packed package to `0.2.0` and made the release-package
+  harness execute a real transpose from the extracted tarball. No registry
+  publish, push, deployment, WebGPU conformance, or two-frontend support is
+  claimed.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -434,6 +474,7 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Exact JIT opaque-operation freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-jit typecheck && pnpm --filter @unlocalhosted/browsergrad-jit test && pnpm --filter @unlocalhosted/browsergrad-jit exec vitest run --config vitest.integration.config.ts tests-integration/gate0_opaque_operation_contract.test.ts && pnpm --filter @unlocalhosted/browsergrad-jit test:integration && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test` | Passed: script syntax, architecture check, JIT typecheck and 8 unit tests, focused 5-case Pyodide contract, full JIT integration 23 files/228 tests, compiler typecheck and 28 files/945 tests. | None. |
 | 2026-07-15 | Gate 0 cross-package closure | `pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-runtime test && pnpm --filter @unlocalhosted/browsergrad-grad typecheck && pnpm --filter @unlocalhosted/browsergrad-grad exec vitest run --config vitest.integration.config.ts tests-integration/gate0_dtype_view_contract.test.ts` | Passed: architecture check, 11 files/125 runtime tests, Grad typecheck, and blocking Grad contract 1 file/1 test. | Gate 0 verified. |
 | 2026-07-15 | Semantic-core package adoption gate | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint && pnpm test:release-packages && pnpm architecture:check` | Passed: semantic-core typecheck/build/lint, 8 files/68 tests, packed tarball metadata/content/runtime-import checks, existing kernels/compiler release-package checks, and architecture check. | Package is ready to become a workspace runtime dependency in a later coherent Gate 2 slice; npm publication is still pending the normal release workflow. |
+| 2026-07-15 | Gate 2 view-copy and CPU reference | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint && pnpm test:release-packages && pnpm architecture:check && git diff --check` | Passed: semantic-core typecheck/build/lint, 9 files/81 tests, packed `/schema`/`layout`/`kernel` imports and real extracted-tarball transpose, architecture check, and whitespace check. | Gate 2 remains partial; implement kernels-owned WGSL and strict actual-device proof next. |
 
 ## Failure and Recovery Log
 
@@ -540,6 +581,15 @@ whether any files may be left partially changed.
   prod as int32, while int32 sin/cos/var realize float64. The fixture and
   inventory now pin both dependency versions and record observed declared and
   realized dtypes instead of importing host-platform assumptions.
+- The first view-copy CPU draft passed positive cases but principal/adversarial
+  review found destination self-overlap, SharedArrayBuffer aliasing, spoofable
+  typed-array properties and methods, missing dynamic offset/binding alignment
+  checks, per-element AST rebuilding, multiplicative work and memory exposure,
+  generic/profile coupling, missing operation versioning, ambiguous operation
+  ordering, and dynamic specialization-key collision. The final slice moves
+  backend limits into a shared profile, compiles evaluators, preflights and
+  caches bounded offsets, requires a dense destination, validates native slots,
+  versions the single operation, and hashes resolved specialization facts.
 
 ## Quick Resume Checklist
 
@@ -554,9 +604,10 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Implement and commit the concrete semantic-core `/kernel` view-copy schema,
-verifier, shared CPU materializer, exact padding-fill behavior, and negative
-tests. Then add the kernels-owned WGSL lowering and strict device harness before
-frontend adoption. The first compiler and JIT adapters must produce the same
-rank-2 transpose artifact/hash and may only derive or refuse the frozen legacy
-tensor plan; they cannot widen it or reconstruct offsets independently.
+Implement and commit the kernels-owned WGSL lowering over the verified
+`view-copy@1.0` artifact and shared positive-affine profile. Padding must use a
+structured guarded load, destination writes must remain dense/injective, and
+the browser harness must fail on adapter/device absence while recording device
+facts and hashes. Then make the first compiler and JIT adapters produce the
+same rank-2 transpose artifact/hash; they may derive or refuse the frozen
+legacy tensor plan but cannot widen it or reconstruct offsets independently.

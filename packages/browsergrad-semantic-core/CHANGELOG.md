@@ -7,6 +7,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-15
+
+### Added
+
+- Closed `browsergrad.kernel@1` view-copy envelope tied to the exact semantic
+  hash and canonical view IDs of a verified layout artifact.
+- Explicit read/write effects, fail-closed overlap, reject-or-exact-f32-fill
+  behavior, and structured kernel diagnostics.
+- Independently versioned `view-copy@1.0` semantics, one-operation kernel-v1
+  envelopes, and a shared positive-affine portable-profile verifier.
+- Compiled canonical view accessors plus a bounded CPU reference materializer
+  covering transpose, permutation, strided slice, broadcast, padding, dynamic
+  shapes, and zero extents without per-element artifact verification or hashing.
+- Binding-sensitive specialization hashes; independent element, evaluation-step,
+  scratch-memory, and wall-time budgets; cooperative browser yielding and abort;
+  destination-injectivity proofs; native buffer-slot, alignment, overlap, and
+  shared-memory validation.
+- Explicit `/kernel` package export; the package still has no root barrel or
+  runtime dependencies.
+
 ## [0.1.0] - 2026-07-15
 
 ### Added

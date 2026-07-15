@@ -18,6 +18,7 @@ try {
   assert(semanticCorePkg.private !== true, "semantic-core tarball must be publishable");
   assert(semanticCorePkg.exports?.["./schema"], "semantic-core package missing ./schema export");
   assert(semanticCorePkg.exports?.["./layout"], "semantic-core package missing ./layout export");
+  assert(semanticCorePkg.exports?.["./kernel"], "semantic-core package missing ./kernel export");
   assert(!semanticCorePkg.exports?.["."], "semantic-core package must not add a root barrel");
   assert(Object.keys(semanticCorePkg.dependencies ?? {}).length === 0, "semantic-core package must remain dependency-free");
   for (const file of [
@@ -25,6 +26,8 @@ try {
     "dist/schema.d.ts",
     "dist/layout.js",
     "dist/layout.d.ts",
+    "dist/kernel.js",
+    "dist/kernel.d.ts",
     "python/browsergrad_semantic_core.py",
     "fixtures/layout-v1/row-major-rank2.input.json",
     "fixtures/layout-v1/symbolic-byte-rank3.input.json",
@@ -36,12 +39,83 @@ try {
   }
   const semanticSchema = await import(pathToFileURL(join(semanticCore, "dist/schema.js")));
   const semanticLayout = await import(pathToFileURL(join(semanticCore, "dist/layout.js")));
+  const semanticKernel = await import(pathToFileURL(join(semanticCore, "dist/kernel.js")));
   for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "validateWireEnvelope"]) {
     assert(exportName in semanticSchema, `semantic-core schema export missing ${exportName}`);
   }
   for (const exportName of ["normalizeLayoutExpr", "traceViewCoordinate", "verifyLayoutArtifact"]) {
     assert(exportName in semanticLayout, `semantic-core layout export missing ${exportName}`);
   }
+  for (const exportName of ["verifyKernelArtifact", "verifyInitialPortableViewCopyProfile", "prepareViewCopyCpu"]) {
+    assert(exportName in semanticKernel, `semantic-core kernel export missing ${exportName}`);
+  }
+  const packedLayout = await semanticLayout.verifyLayoutArtifact({
+    schema: "browsergrad.layout",
+    version: { major: 1, minor: 0 },
+    producer: { id: "release-test", version: "1" },
+    artifactId: "packed-layout",
+    requiredExtensions: [],
+    payload: {
+      symbols: [],
+      constraints: [],
+      allocations: [
+        { allocationId: "source", byteLength: { kind: "const", value: "16" }, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "sourceAlias" },
+        { allocationId: "destination", byteLength: { kind: "const", value: "16" }, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "destinationAlias" },
+      ],
+      indexMaps: [
+        {
+          indexMapId: "transpose",
+          coordinateRank: 2,
+          locationUnit: "element",
+          location: { kind: "add", terms: [{ kind: "mul", lhs: { kind: "coordinate", axis: 1 }, rhs: { kind: "const", value: "2" } }, { kind: "coordinate", axis: 0 }] },
+          inBounds: { kind: "bool", value: true },
+        },
+        {
+          indexMapId: "dense",
+          coordinateRank: 2,
+          locationUnit: "element",
+          location: { kind: "add", terms: [{ kind: "mul", lhs: { kind: "coordinate", axis: 0 }, rhs: { kind: "const", value: "2" } }, { kind: "coordinate", axis: 1 }] },
+          inBounds: { kind: "bool", value: true },
+        },
+      ],
+      views: [
+        { viewId: "sourceView", allocationId: "source", dtype: "f32", byteOffset: { kind: "const", value: "0" }, shape: [{ kind: "const", value: "2" }, { kind: "const", value: "2" }], indexMapId: "transpose", requiredAlignmentBytes: 4 },
+        { viewId: "destinationView", allocationId: "destination", dtype: "f32", byteOffset: { kind: "const", value: "0" }, shape: [{ kind: "const", value: "2" }, { kind: "const", value: "2" }], indexMapId: "dense", requiredAlignmentBytes: 4 },
+      ],
+    },
+  });
+  const packedLayoutPayload = semanticLayout.layoutArtifactPayload(packedLayout);
+  const packedKernel = await semanticKernel.verifyKernelArtifact({
+    schema: "browsergrad.kernel",
+    version: { major: 1, minor: 0 },
+    producer: { id: "release-test", version: "1" },
+    artifactId: "packed-kernel",
+    requiredExtensions: [],
+    payload: {
+      layoutSemanticHash: await semanticSchema.hashSemanticArtifact(packedLayout),
+      operations: [{
+        operationId: "transposeCopy",
+        kind: "view-copy",
+        version: { major: 1, minor: 0 },
+        dtype: "f32",
+        source: { viewId: packedLayoutPayload.views[0].viewId, access: "read", invalidSource: { kind: "reject" } },
+        destination: { viewId: packedLayoutPayload.views[1].viewId, access: "write" },
+        overlap: { kind: "forbid" },
+      }],
+    },
+  }, { layout: packedLayout });
+  const packedOperationId = semanticKernel.kernelArtifactPayload(packedKernel).operations[0].operationId;
+  const packedCopy = await semanticKernel.prepareViewCopyCpu(packedLayout, packedKernel, { operationId: packedOperationId });
+  const packedSource = new Uint8Array(16);
+  const packedDestination = new Uint8Array(16);
+  const packedSourceView = new DataView(packedSource.buffer);
+  [1, 2, 3, 4].forEach((value, index) => packedSourceView.setFloat32(index * 4, value, true));
+  packedCopy.execute({ source: packedSource, destination: packedDestination });
+  const packedDestinationView = new DataView(packedDestination.buffer);
+  assert(
+    [1, 3, 2, 4].every((value, index) => packedDestinationView.getFloat32(index * 4, true) === value),
+    "semantic-core packed /kernel view-copy execution produced the wrong transpose",
+  );
 
   const kernelsPkg = readPackage(kernels);
   const workspaceKernelsVersion = readPackage(join(root, "packages/browsergrad-kernels")).version;

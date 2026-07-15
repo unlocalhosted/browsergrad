@@ -1,10 +1,12 @@
 export {
   SCHEMA_DIAGNOSTIC_CODES,
   LAYOUT_DIAGNOSTIC_CODES,
+  KERNEL_DIAGNOSTIC_CODES,
   SemanticSchemaError,
   schemaError,
   type SchemaDiagnosticCode,
   type LayoutDiagnosticCode,
+  type KernelDiagnosticCode,
   type SemanticDiagnostic,
   type ValidationResult,
 } from "./schema/diagnostics.js";

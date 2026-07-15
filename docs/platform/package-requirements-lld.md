@@ -451,9 +451,12 @@ round-trip unknown optional metadata, but MUST NOT execute an unknown operation.
 The first concrete L2 operation is a verified, materializing view copy. Its
 wire contract references one verified layout artifact and names a source view,
 a destination view, an exact dtype, explicit source-read and destination-write
-effects, an invalid-source policy, and an overlap policy. The initial overlap
-policy is `forbid`; later in-place or overlapping copies require a separate
-operation or a proved traversal rule. The invalid-source policy is either
+effects, an invalid-source policy, and an overlap policy. The operation carries
+its own `1.0` version inside the `browsergrad.kernel@1` envelope. Kernel v1
+contains exactly one standalone operation; sequencing and dependencies belong
+to L4 host graphs rather than an ambiguous operation-array order. The initial
+overlap policy is `forbid`; later in-place or overlapping copies require a
+separate operation or a proved traversal rule. The invalid-source policy is either
 `reject` or `fill` with an exact scalar bit pattern matching the operation
 dtype. Padding fill is therefore operation meaning, not L1 view geometry.
 
@@ -466,12 +469,28 @@ conditional whose invalid load arm is still evaluated, and MUST NOT rely on
 robust-buffer zeroing, ignored writes, or other target behavior as padding
 semantics.
 
-The portable v1 slice begins with same-dtype `f32`, rank-2/rank-3,
-non-overlapping copies. That is a declared lowering profile, not a restriction
-of the L1 layout model. CPU reference and WGSL lowering consume the same
-verified normalized expressions or a specialization accompanied by a proof
-against the canonical evaluator. Artifact verification and specialization are
-cached outside per-element and per-dispatch hot paths.
+Generic L2 verification checks operation version, references, matching logical
+shapes and dtypes, writable destination space, exact fill dtype, and declared
+cross-allocation non-aliasing. Backend/profile legalization is separate. The
+initial portable profile is same-dtype `f32`, rank-2/rank-3, global memory,
+positive-affine indexing, and a dense injective destination. Signed strides and
+integer division/modulo remain unavailable until the target integer profile is
+proved. These are lowering decisions, not restrictions of the L1 or L2 model.
+
+CPU reference and WGSL lowering consume the same verified normalized
+expressions or a specialization accompanied by a differential proof against
+the canonical evaluator. Preparation compiles coordinate evaluators once,
+resolves bindings and guards, proves destination injectivity and every guarded
+source access, and emits a specialization hash over the layout hash, kernel
+hash, profile, operation, resolved bindings, shapes, offsets, and allocation
+sizes. Element count, aggregate evaluation steps, prepared scratch bytes, and
+preparation wall time have independent configurable hard limits. Long
+preparations yield to the browser scheduler with a timer fallback and recheck
+an abort signal after every yield. Runtime bindings validate native
+buffer slots, exact lengths, declared alignment, and overlap; shared memory is
+rejected until synchronization and ownership are explicit. Artifact hashing,
+expression compilation, and coordinate proofs stay outside per-dispatch copy
+loops.
 
 ### Logical tiles versus physical schedules
 

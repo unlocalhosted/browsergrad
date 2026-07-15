@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-semantic-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Versioned BrowserGrad semantic schemas, canonical wire formats, and value/layout verification.",
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,10 @@
     "./layout": {
       "types": "./dist/layout.d.ts",
       "import": "./dist/layout.js"
+    },
+    "./kernel": {
+      "types": "./dist/kernel.d.ts",
+      "import": "./dist/kernel.js"
     },
     "./package.json": "./package.json"
   },

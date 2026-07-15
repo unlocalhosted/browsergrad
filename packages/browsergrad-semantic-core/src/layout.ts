@@ -53,3 +53,9 @@ export {
   type LayoutCoordinateRequest,
   type LayoutCoordinateTrace,
 } from "./layout/trace.js";
+export {
+  prepareViewAccessor,
+  type PreparedViewAccess,
+  type PreparedViewAccessor,
+  type PreparedViewAccessorRequest,
+} from "./layout/prepare.js";

@@ -44,8 +44,26 @@ export const LAYOUT_DIAGNOSTIC_CODES = {
 export type LayoutDiagnosticCode =
   (typeof LAYOUT_DIAGNOSTIC_CODES)[keyof typeof LAYOUT_DIAGNOSTIC_CODES];
 
+export const KERNEL_DIAGNOSTIC_CODES = {
+  invalidArtifact: "BG-KERNEL-INVALID-ARTIFACT",
+  unknownField: "BG-KERNEL-UNKNOWN-FIELD",
+  duplicateId: "BG-KERNEL-DUPLICATE-ID",
+  danglingReference: "BG-KERNEL-DANGLING-REFERENCE",
+  layoutHashMismatch: "BG-KERNEL-LAYOUT-HASH-MISMATCH",
+  unsupportedProfile: "BG-KERNEL-UNSUPPORTED-PROFILE",
+  shapeMismatch: "BG-KERNEL-SHAPE-MISMATCH",
+  aliasConflict: "BG-KERNEL-ALIAS-CONFLICT",
+  invalidBinding: "BG-KERNEL-INVALID-BINDING",
+  invalidAccess: "BG-KERNEL-INVALID-ACCESS",
+  invalidFill: "BG-KERNEL-INVALID-FILL",
+  resourceLimit: "BG-KERNEL-RESOURCE-LIMIT",
+} as const;
+
+export type KernelDiagnosticCode =
+  (typeof KERNEL_DIAGNOSTIC_CODES)[keyof typeof KERNEL_DIAGNOSTIC_CODES];
+
 export interface SemanticDiagnostic {
-  readonly code: SchemaDiagnosticCode | LayoutDiagnosticCode | `BG-LAYOUT-${string}`;
+  readonly code: SchemaDiagnosticCode | LayoutDiagnosticCode | KernelDiagnosticCode | `BG-LAYOUT-${string}` | `BG-KERNEL-${string}`;
   readonly stage: "verification";
   readonly severity: "error" | "warning" | "note";
   readonly message: string;
