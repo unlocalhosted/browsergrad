@@ -12,6 +12,7 @@ import { createCudaLoweringPlan } from "./compatibility.js";
 import {
   createCudaLiteCompileCacheKey,
   createCudaLiteLayoutBindingCompileCacheKey,
+  createCudaLiteViewCopyBindingCompileCacheKey,
 } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
@@ -32,6 +33,12 @@ import {
   unwrapPreparedCudaLiteLayoutBindings,
   type PreparedCudaLiteLayoutBindings,
 } from "./semantic_layout_bindings.js";
+import { lowerCudaLiteViewCopyBinding } from "./semantic_view_copy_lowering.js";
+import {
+  CudaLiteViewCopyBindingError,
+  unwrapPreparedCudaLiteViewCopyBinding,
+  type PreparedCudaLiteViewCopyBinding,
+} from "./semantic_view_copy_bindings.js";
 import {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
@@ -68,10 +75,22 @@ interface CompiledLayoutBindingAuthority {
   readonly compileCacheKey: string;
 }
 
+interface CompiledViewCopyBindingAuthority {
+  readonly prepared: PreparedCudaLiteViewCopyBinding;
+  readonly compileCacheKey: string;
+}
+
 const COMPILED_LAYOUT_BINDING_AUTHORITIES = new WeakMap<object, CompiledLayoutBindingAuthority>();
+const COMPILED_VIEW_COPY_BINDING_AUTHORITIES = new WeakMap<object, CompiledViewCopyBindingAuthority>();
 const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Float32Array.prototype) as object;
 const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, "byteLength")?.get;
+const TYPED_ARRAY_BYTE_OFFSET_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, "byteOffset")?.get;
+const TYPED_ARRAY_BUFFER_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, "buffer")?.get;
 const TYPED_ARRAY_TAG_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, Symbol.toStringTag)?.get;
+const ARRAY_BUFFER_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength")?.get;
+const SHARED_ARRAY_BUFFER_BYTE_LENGTH_GETTER = typeof SharedArrayBuffer === "undefined"
+  ? undefined
+  : Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype, "byteLength")?.get;
 
 export interface CompiledKernelWebGpuExecutionOptions {
   readonly compileKernel?: (
@@ -99,6 +118,11 @@ export interface PreparedCompiledKernelWebGpu {
 export interface CompiledCudaLiteLayoutBoundKernel extends CompiledCudaLiteKernel {
   readonly preparedLayoutBindings: PreparedCudaLiteLayoutBindings;
   readonly layoutBindingCompileCacheKey: string;
+}
+
+export interface CompiledCudaLiteViewCopyBoundKernel extends CompiledCudaLiteKernel {
+  readonly preparedViewCopyBinding: PreparedCudaLiteViewCopyBinding;
+  readonly viewCopyBindingCompileCacheKey: string;
 }
 
 export type PrepareCompiledKernelWebGpuOptions = CompiledKernelWebGpuExecutionOptions;
@@ -148,10 +172,42 @@ export function compileCudaLiteKernelWithLayoutBindings(
   }
 }
 
+export function compileCudaLiteKernelWithViewCopyBinding(
+  source: string,
+  prepared: PreparedCudaLiteViewCopyBinding,
+  options: CompileCudaLiteOptions = {},
+): CompiledCudaLiteViewCopyBoundKernel {
+  try {
+    const compiled = compileCudaLiteKernelUnchecked(source, options, undefined, prepared);
+    const compileCacheKey = createCudaLiteViewCopyBindingCompileCacheKey(source, prepared, options);
+    const result = Object.freeze({
+      ...compiled,
+      preparedViewCopyBinding: prepared,
+      viewCopyBindingCompileCacheKey: compileCacheKey,
+    });
+    COMPILED_VIEW_COPY_BINDING_AUTHORITIES.set(result, { prepared, compileCacheKey });
+    return result;
+  } catch (error) {
+    if (error instanceof CudaLiteCompilerError) {
+      throw withCudaLiteDiagnosticSource(error, source);
+    }
+    if (error instanceof CudaLiteViewCopyBindingError) {
+      throw createCudaLiteCompilerError(error.message, [{
+        code: error.code,
+        severity: "error",
+        message: error.message,
+        span: error.span ?? { start: 0, end: source.length, line: 1, column: 1 },
+      }], source);
+    }
+    throw error;
+  }
+}
+
 function compileCudaLiteKernelUnchecked(
   source: string,
   options: CompileCudaLiteOptions,
   preparedLayoutBindings?: PreparedCudaLiteLayoutBindings,
+  preparedViewCopyBinding?: PreparedCudaLiteViewCopyBinding,
 ): CompiledCudaLiteKernel {
   validateTextureDescriptorOptions(options);
   const ast = parseCudaLite(source);
@@ -167,9 +223,11 @@ function compileCudaLiteKernelUnchecked(
   validateBindlessTextureOptions(options, analysis);
   const semantic = createCudaLiteSemanticModel(analysis);
   const runtimeKernelIr = lowerSemanticCudaRuntime(lowerSemanticModelToKernelIr(analysis, semantic, options));
-  const kernelIr = preparedLayoutBindings === undefined
-    ? runtimeKernelIr
-    : lowerCudaLiteLayoutBindings(runtimeKernelIr, preparedLayoutBindings, options);
+  const kernelIr = preparedLayoutBindings !== undefined
+    ? lowerCudaLiteLayoutBindings(runtimeKernelIr, preparedLayoutBindings, options)
+    : preparedViewCopyBinding !== undefined
+      ? lowerCudaLiteViewCopyBinding(runtimeKernelIr, preparedViewCopyBinding, options)
+      : runtimeKernelIr;
   const verifiedKernelIr = validateSemanticKernelIr(kernelIr);
   const typeCheckedKernelIr = typeCheckSemanticKernelIr(verifiedKernelIr);
   const wgslLegalizedKernelIr = legalizeSemanticKernelIrForWgsl(typeCheckedKernelIr);
@@ -192,15 +250,23 @@ function compileCudaLiteKernelUnchecked(
   const baseEmitted = preflightFailure === undefined
     ? emitSemanticKernelIrWgsl(wgslLegalizedKernelIr, semanticWgslOptions)
     : undefined;
-  const emitted = baseEmitted === undefined || preparedLayoutBindings === undefined
-    ? baseEmitted
-    : {
+  const emitted = baseEmitted === undefined
+    ? undefined
+    : preparedLayoutBindings !== undefined ? {
         ...baseEmitted,
         program: defineWgslKernelProgram({
           ...baseEmitted.program,
           name: layoutBoundProgramName(baseEmitted.program.name, preparedLayoutBindings),
         }),
-      };
+      }
+      : preparedViewCopyBinding !== undefined ? {
+          ...baseEmitted,
+          program: defineWgslKernelProgram({
+            ...baseEmitted.program,
+            name: viewCopyBoundProgramName(baseEmitted.program.name, preparedViewCopyBinding),
+          }),
+        }
+      : baseEmitted;
   const loweringPlan = createCudaLoweringPlan(diagnostics);
   return {
     ast,
@@ -232,6 +298,17 @@ function isLayoutBoundProgramName(name: string | undefined): boolean {
   return name !== undefined && /^__bg_layout_[0-9a-f]{64}_[0-9a-f]{64}_/u.test(name);
 }
 
+function viewCopyBoundProgramName(
+  baseName: string,
+  prepared: PreparedCudaLiteViewCopyBinding,
+): string {
+  return `__bg_view_copy_${prepared.layoutSemanticHash}_${prepared.kernelSemanticHash}_${prepared.specializationHash}_${prepared.bindingProjectionHash}_${baseName}`;
+}
+
+function isViewCopyBoundProgramName(name: string | undefined): boolean {
+  return name !== undefined && /^__bg_view_copy_(?:[0-9a-f]{64}_){4}/u.test(name);
+}
+
 function compiledLayoutBindingAuthority(
   compiled: CompiledCudaLiteKernel,
 ): CompiledLayoutBindingAuthority | undefined {
@@ -253,74 +330,246 @@ function compiledLayoutBindingAuthority(
   return undefined;
 }
 
+function compiledViewCopyBindingAuthority(
+  compiled: CompiledCudaLiteKernel,
+): CompiledViewCopyBindingAuthority | undefined {
+  const authority = COMPILED_VIEW_COPY_BINDING_AUTHORITIES.get(compiled);
+  if (authority !== undefined) return authority;
+  const candidate = compiled as Partial<CompiledCudaLiteViewCopyBoundKernel>;
+  if (
+    candidate.preparedViewCopyBinding !== undefined ||
+    candidate.viewCopyBindingCompileCacheKey !== undefined ||
+    isViewCopyBoundProgramName(compiled.wgslProgram?.name)
+  ) {
+    throwViewCopyRuntimeError(
+      compiled,
+      "BG-COMPILER-VIEW-COPY-BINDING-UNVERIFIED-COMPILED",
+      "view-copy-bound compiled kernel is not authorized by this compiler instance",
+      compiled.kernelIr.span,
+    );
+  }
+  return undefined;
+}
+
 function validateLayoutBoundRuntimeInput(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   backend: "cpu" | "webgpu",
 ): void {
   const authority = compiledLayoutBindingAuthority(compiled);
-  if (authority === undefined) return;
-  const record = unwrapPreparedCudaLiteLayoutBindings(authority.prepared);
-  for (const binding of record.bindings) {
-    const name = binding.summary.parameter;
-    const typed = input.buffers[name];
-    const resident = input.residentBuffers?.[name];
-    if (typed !== undefined && resident !== undefined) {
-      throwLayoutRuntimeError(
-        compiled,
-        "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
-        `layout-bound buffer '${name}' cannot be both typed and resident`,
-        bindingSourceSpan(compiled, name),
-      );
-    }
-    const expectedBytes = BigInt(binding.summary.allocationByteLength);
-    if (resident !== undefined) {
-      if (backend === "cpu") {
+  if (authority !== undefined) {
+    const record = unwrapPreparedCudaLiteLayoutBindings(authority.prepared);
+    for (const binding of record.bindings) {
+      const name = binding.summary.parameter;
+      const typed = input.buffers[name];
+      const resident = input.residentBuffers?.[name];
+      if (typed !== undefined && resident !== undefined) {
         throwLayoutRuntimeError(
           compiled,
           "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
-          `CPU reference requires a typed Float32Array for layout-bound buffer '${name}'`,
+          `layout-bound buffer '${name}' cannot be both typed and resident`,
           bindingSourceSpan(compiled, name),
         );
       }
-      if (
-        resident.valueType !== "f32" ||
-        !Number.isSafeInteger(resident.byteLength) ||
-        resident.byteLength < 0 ||
-        BigInt(resident.byteLength) < expectedBytes
-      ) {
+      const expectedBytes = BigInt(binding.summary.allocationByteLength);
+      if (resident !== undefined) {
+        if (backend === "cpu") {
+          throwLayoutRuntimeError(
+            compiled,
+            "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
+            `CPU reference requires a typed Float32Array for layout-bound buffer '${name}'`,
+            bindingSourceSpan(compiled, name),
+          );
+        }
+        if (
+          resident.valueType !== "f32" ||
+          !Number.isSafeInteger(resident.byteLength) ||
+          resident.byteLength < 0 ||
+          BigInt(resident.byteLength) < expectedBytes
+        ) {
+          throwLayoutRuntimeError(
+            compiled,
+            "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
+            `resident layout-bound buffer '${name}' must be f32 with at least ${expectedBytes} bytes`,
+            bindingSourceSpan(compiled, name),
+          );
+        }
+        continue;
+      }
+      const facts = typedArrayFacts(typed);
+      if (facts === undefined || facts.tag !== "Float32Array" || BigInt(facts.byteLength) < expectedBytes) {
         throwLayoutRuntimeError(
           compiled,
           "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
-          `resident layout-bound buffer '${name}' must be f32 with at least ${expectedBytes} bytes`,
+          `layout-bound buffer '${name}' must be a native Float32Array with at least ${expectedBytes} bytes`,
           bindingSourceSpan(compiled, name),
+        );
+      }
+    }
+  }
+  validateViewCopyBoundRuntimeInput(compiled, input, backend);
+}
+
+function validateViewCopyBoundRuntimeInput(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  backend: "cpu" | "webgpu",
+): void {
+  const authority = compiledViewCopyBindingAuthority(compiled);
+  if (authority === undefined) return;
+  const record = unwrapPreparedCudaLiteViewCopyBinding(authority.prepared);
+  const bindings = [
+    {
+      name: authority.prepared.sourceParameter,
+      expectedBytes: record.specialization.source.allocationByteLength,
+    },
+    {
+      name: authority.prepared.destinationParameter,
+      expectedBytes: record.specialization.destination.allocationByteLength,
+    },
+  ] as const;
+  const typedFacts = new Map<string, ReturnType<typeof typedArrayFacts>>();
+  for (const binding of bindings) {
+    const typed = input.buffers[binding.name];
+    const resident = input.residentBuffers?.[binding.name];
+    if (typed !== undefined && resident !== undefined) {
+      throwViewCopyRuntimeError(
+        compiled,
+        "BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER",
+        `view-copy buffer '${binding.name}' cannot be both typed and resident`,
+        bindingSourceSpan(compiled, binding.name),
+      );
+    }
+    if (resident !== undefined) {
+      if (backend === "cpu") {
+        throwViewCopyRuntimeError(
+          compiled,
+          "BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER",
+          `CPU reference requires a typed Uint32Array for view-copy buffer '${binding.name}'`,
+          bindingSourceSpan(compiled, binding.name),
+        );
+      }
+      if (
+        resident.valueType !== "u32" ||
+        !Number.isSafeInteger(resident.byteLength) ||
+        BigInt(resident.byteLength) !== binding.expectedBytes
+      ) {
+        throwViewCopyRuntimeError(
+          compiled,
+          "BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER",
+          `resident view-copy buffer '${binding.name}' must be u32 with exactly ${binding.expectedBytes} bytes`,
+          bindingSourceSpan(compiled, binding.name),
         );
       }
       continue;
     }
     const facts = typedArrayFacts(typed);
-    if (facts === undefined || facts.tag !== "Float32Array" || BigInt(facts.byteLength) < expectedBytes) {
-      throwLayoutRuntimeError(
+    typedFacts.set(binding.name, facts);
+    if (
+      facts === undefined ||
+      facts.tag !== "Uint32Array" ||
+      facts.byteOffset !== 0 ||
+      BigInt(facts.byteLength) !== binding.expectedBytes ||
+      facts.shared ||
+      BigInt(facts.bufferByteLength) !== binding.expectedBytes
+    ) {
+      throwViewCopyRuntimeError(
         compiled,
-        "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
-        `layout-bound buffer '${name}' must be a native Float32Array with at least ${expectedBytes} bytes`,
-        bindingSourceSpan(compiled, name),
+        "BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER",
+        `view-copy buffer '${binding.name}' must be a native Uint32Array with exactly ${binding.expectedBytes} bytes`,
+        bindingSourceSpan(compiled, binding.name),
       );
     }
   }
+  const sourceResident = input.residentBuffers?.[authority.prepared.sourceParameter];
+  const destinationResident = input.residentBuffers?.[authority.prepared.destinationParameter];
+  if (sourceResident !== undefined && sourceResident.buffer === destinationResident?.buffer) {
+    throwViewCopyRuntimeError(
+      compiled,
+      "BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER",
+      "view-copy source and destination resident buffers must be distinct",
+      compiled.kernelIr.span,
+    );
+  }
+  const sourceFacts = typedFacts.get(authority.prepared.sourceParameter);
+  const destinationFacts = typedFacts.get(authority.prepared.destinationParameter);
+  if (sourceFacts !== undefined && destinationFacts !== undefined && sourceFacts.buffer === destinationFacts.buffer) {
+    throwViewCopyRuntimeError(
+      compiled,
+      "BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER",
+      "view-copy source and destination typed buffers must have distinct roots",
+      compiled.kernelIr.span,
+    );
+  }
 }
 
-function typedArrayFacts(value: unknown): { readonly tag: string; readonly byteLength: number } | undefined {
-  if (value === undefined || TYPED_ARRAY_BYTE_LENGTH_GETTER === undefined || TYPED_ARRAY_TAG_GETTER === undefined) return undefined;
+function typedArrayFacts(value: unknown): {
+  readonly tag: string;
+  readonly byteLength: number;
+  readonly byteOffset: number;
+  readonly buffer: ArrayBufferLike;
+  readonly bufferByteLength: number;
+  readonly shared: boolean;
+} | undefined {
+  if (
+    value === undefined ||
+    TYPED_ARRAY_BYTE_LENGTH_GETTER === undefined ||
+    TYPED_ARRAY_BYTE_OFFSET_GETTER === undefined ||
+    TYPED_ARRAY_BUFFER_GETTER === undefined ||
+    TYPED_ARRAY_TAG_GETTER === undefined
+  ) return undefined;
   try {
     const tag = Reflect.apply(TYPED_ARRAY_TAG_GETTER, value, []) as unknown;
     const byteLength = Reflect.apply(TYPED_ARRAY_BYTE_LENGTH_GETTER, value, []) as unknown;
-    return typeof tag === "string" && typeof byteLength === "number" && Number.isSafeInteger(byteLength) && byteLength >= 0
-      ? { tag, byteLength }
+    const byteOffset = Reflect.apply(TYPED_ARRAY_BYTE_OFFSET_GETTER, value, []) as unknown;
+    const buffer = Reflect.apply(TYPED_ARRAY_BUFFER_GETTER, value, []) as unknown;
+    const bufferFacts = nativeBufferFacts(buffer);
+    return typeof tag === "string" && typeof byteLength === "number" && Number.isSafeInteger(byteLength) && byteLength >= 0 &&
+      typeof byteOffset === "number" && Number.isSafeInteger(byteOffset) && byteOffset >= 0 &&
+      bufferFacts !== undefined
+      ? { tag, byteLength, byteOffset, buffer: buffer as ArrayBufferLike, ...bufferFacts }
       : undefined;
   } catch {
     return undefined;
   }
+}
+
+function nativeBufferFacts(value: unknown): { readonly bufferByteLength: number; readonly shared: boolean } | undefined {
+  if (ARRAY_BUFFER_BYTE_LENGTH_GETTER !== undefined) {
+    try {
+      const byteLength = Reflect.apply(ARRAY_BUFFER_BYTE_LENGTH_GETTER, value, []) as unknown;
+      if (typeof byteLength === "number" && Number.isSafeInteger(byteLength) && byteLength >= 0) {
+        return { bufferByteLength: byteLength, shared: false };
+      }
+    } catch {
+      // Try SharedArrayBuffer's distinct internal-slot brand below.
+    }
+  }
+  if (SHARED_ARRAY_BUFFER_BYTE_LENGTH_GETTER !== undefined) {
+    try {
+      const byteLength = Reflect.apply(SHARED_ARRAY_BUFFER_BYTE_LENGTH_GETTER, value, []) as unknown;
+      if (typeof byteLength === "number" && Number.isSafeInteger(byteLength) && byteLength >= 0) {
+        return { bufferByteLength: byteLength, shared: true };
+      }
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function throwViewCopyRuntimeError(
+  compiled: CompiledCudaLiteKernel,
+  code: "BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER" | "BG-COMPILER-VIEW-COPY-BINDING-UNVERIFIED-COMPILED",
+  message: string,
+  span: CompiledCudaLiteKernel["kernelIr"]["span"],
+): never {
+  throw createCudaLiteCompilerError(`${code}: ${message}`, [{
+    code,
+    severity: "error",
+    message,
+    span,
+  }], compiled.ast.source);
 }
 
 function bindingSourceSpan(compiled: CompiledCudaLiteKernel, parameter: string) {

@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   createVerifiedViewCopyArtifacts,
+  prepareViewCopyCpu,
   type VerifiedViewCopyArtifacts,
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   CUDA_LITE_VIEW_COPY_BINDING_PROFILE,
+  CudaLiteCompilerError,
   CudaLiteViewCopyBindingError,
+  compileCudaLiteKernelWithViewCopyBinding,
   createCudaLiteViewCopyBindingCompileCacheKey,
   prepareCudaLiteViewCopyBinding,
+  runCompiledKernelSemanticReference,
   type PreparedCudaLiteViewCopyBinding,
 } from "../../src/index";
 import { unwrapPreparedCudaLiteViewCopyBinding } from "../../src/semantic_view_copy_bindings";
@@ -110,6 +114,236 @@ describe("prepared CUDA-lite view-copy bindings", () => {
   });
 });
 
+describe("CUDA-lite structured view-copy lowering", () => {
+  it("executes rank-2 padding as exact raw words behind a structured source guard", async () => {
+    const artifacts = await paddedRank2Artifacts("7fc01234");
+    const prepared = await prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts));
+    const sourceText = directViewCopySource(20);
+    const compiled = compileCudaLiteKernelWithViewCopyBinding(sourceText, prepared, { workgroupSize: [32, 1, 1] });
+    const source = Uint32Array.from([0x3f800000, 0x40000000, 0x40400000, 0x40800000, 0x40a00000, 0x40c00000]);
+    const originalSource = new Uint32Array(source);
+    const output = new Uint32Array(20);
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: source, output } },
+      { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+      { trace: "full" },
+    );
+    const canonicalDestination = new Uint8Array(80);
+    const canonical = await prepareViewCopyCpu(artifacts.layout, artifacts.kernel, {
+      operationId: artifacts.operationId,
+    });
+    const canonicalTrace = canonical.execute({
+      source: new Uint8Array(source.buffer),
+      destination: canonicalDestination,
+    });
+    const expected = paddedWords2d(source, 4, 5, 1, 1, 2, 3, 0x7fc01234);
+    const sourceReads = result.trace.flatMap((thread) => (
+      thread.reads.filter((read) => read.name === "input").map((read) => read.index)
+    ));
+
+    expect([...result.buffers.output as Uint32Array]).toEqual(expected);
+    expect([...result.buffers.output as Uint32Array]).toEqual([...new Uint32Array(canonicalDestination.buffer)]);
+    expect([...source]).toEqual([...originalSource]);
+    expect(sourceReads).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(canonicalTrace).toMatchObject({ readElements: "6", filledElements: "14" });
+    expect(compiled.kernelIr.params.map((parameter) => parameter.valueType)).toEqual(["uint", "uint"]);
+    expect(compiled.wgsl).toContain("array<u32>");
+    expect(compiled.wgsl).toContain("if (");
+    expect(compiled.wgsl).toContain("i32(");
+    const entryWgsl = mainWgsl(compiled.wgsl);
+    expect(entryWgsl).not.toContain("select(");
+    expect(entryWgsl).toContain("i32(0) <= i32(bitcast<i32>");
+    expect(entryWgsl).not.toContain("0u <= u32");
+    expect(entryWgsl.indexOf("input[")).toBeGreaterThan(entryWgsl.indexOf("if (", entryWgsl.indexOf("if (") + 1));
+    expect(entryWgsl).toContain("2143294004u");
+    expect(compiled.wgslProgram?.name).toContain(prepared.layoutSemanticHash);
+    expect(compiled.wgslProgram?.name).toContain(prepared.kernelSemanticHash);
+    expect(compiled.wgslProgram?.name).toContain(prepared.specializationHash);
+    expect(compiled.wgslProgram?.name).toContain(prepared.bindingProjectionHash);
+    expect(compiled.preparedViewCopyBinding).toBe(prepared);
+    expect(compiled.viewCopyBindingCompileCacheKey).toBe(
+      createCudaLiteViewCopyBindingCompileCacheKey(sourceText, prepared, { workgroupSize: [32, 1, 1] }),
+    );
+  });
+
+  it("executes rank-3 padding through the same artifact-specialized lowering", async () => {
+    const artifacts = await paddedRank3Artifacts("7fc05678");
+    const prepared = await prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts));
+    const compiled = compileCudaLiteKernelWithViewCopyBinding(directViewCopySource(64), prepared, {
+      workgroupSize: [64, 1, 1],
+    });
+    const source = Uint32Array.from({ length: 8 }, (_, index) => 0x3f800000 + index);
+    const output = new Uint32Array(64);
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: source, output } },
+      { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+      { trace: "full" },
+    );
+    const expected = paddedWords3d(source, 4, 4, 4, 1, 2, 2, 2, 0x7fc05678);
+    const sourceReads = result.trace.flatMap((thread) => (
+      thread.reads.filter((read) => read.name === "input").map((read) => read.index)
+    ));
+
+    expect([...result.buffers.output as Uint32Array]).toEqual(expected);
+    expect(sourceReads).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(expected.filter((word) => word === 0x7fc05678)).toHaveLength(56);
+    expect(mainWgsl(compiled.wgsl)).not.toContain("select(");
+  });
+
+  it("preserves nonzero allocation offsets and untouched root canaries", async () => {
+    const artifacts = await paddedRank2Artifacts("7fc0abcd", {
+      sourceOffsetWords: 1,
+      destinationOffsetWords: 1,
+    });
+    const prepared = await prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts));
+    const compiled = compileCudaLiteKernelWithViewCopyBinding(directViewCopySource(20), prepared, {
+      workgroupSize: [32, 1, 1],
+    });
+    const source = Uint32Array.from([
+      0xdeadbeef,
+      0x3f800000,
+      0x40000000,
+      0x40400000,
+      0x40800000,
+      0x40a00000,
+      0x40c00000,
+    ]);
+    const sourceBefore = new Uint32Array(source);
+    const destination = new Uint32Array(21);
+    destination.fill(0xa5a5a5a5);
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: source, output: destination } },
+      { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+      { trace: "full" },
+    );
+    const canonical = await prepareViewCopyCpu(artifacts.layout, artifacts.kernel, {
+      operationId: artifacts.operationId,
+    });
+    const canonicalDestination = new Uint8Array(destination.byteLength);
+    new Uint32Array(canonicalDestination.buffer).fill(0xa5a5a5a5);
+    canonical.execute({
+      source: new Uint8Array(source.buffer),
+      destination: canonicalDestination,
+    });
+    const output = result.buffers.output as Uint32Array;
+    const sourceReads = result.trace.flatMap((thread) => (
+      thread.reads.filter((read) => read.name === "input").map((read) => read.index)
+    ));
+
+    expect([...output]).toEqual([...new Uint32Array(canonicalDestination.buffer)]);
+    expect([...output]).toEqual([
+      0xa5a5a5a5,
+      ...paddedWords2d(source.subarray(1), 4, 5, 1, 1, 2, 3, 0x7fc0abcd),
+    ]);
+    expect([...source]).toEqual([...sourceBefore]);
+    expect(sourceReads).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("fills an always-false source map without issuing any source read", async () => {
+    const artifacts = await alwaysFalseArtifacts("7fc0beef");
+    const prepared = await prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts));
+    const compiled = compileCudaLiteKernelWithViewCopyBinding(directViewCopySource(4), prepared, {
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: Uint32Array.of(0xdeadbeef), output: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      { trace: "full" },
+    );
+    const sourceReads = result.trace.flatMap((thread) => (
+      thread.reads.filter((read) => read.name === "input")
+    ));
+
+    expect([...(result.buffers.output as Uint32Array)]).toEqual(Array(4).fill(0x7fc0beef));
+    expect(sourceReads).toEqual([]);
+    expect(mainWgsl(compiled.wgsl).indexOf("input[")).toBeGreaterThan(
+      mainWgsl(compiled.wgsl).indexOf("if (", mainWgsl(compiled.wgsl).indexOf("if (") + 1),
+    );
+  });
+
+  it("rejects possibly-invalid reads when the verified operation has reject policy", async () => {
+    const artifacts = await paddedRank2Artifacts();
+
+    await expect(prepareCudaLiteViewCopyBinding(
+      artifacts.layout,
+      artifacts.kernel,
+      request(artifacts),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-VIEW-COPY-BINDING-INVALID-ARTIFACT",
+      path: "$.operationId",
+    });
+  });
+
+  it("rejects semantic widening around the exact guarded materializing copy", async () => {
+    const artifacts = await paddedRank2Artifacts("7fc01234");
+    const prepared = await prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts));
+    const valid = directViewCopySource(20);
+    const cases = [
+      valid.replace("if (i < 20u) ", ""),
+      valid.replace("i < 20u", "i < 21u"),
+      valid.replace("output[i] = input[i]", "output[i] = input[i] + 1.0f"),
+      valid.replace("output[i] = input[i]", "output[0] = input[i]"),
+      valid.replace("if (i < 20u) output[i] = input[i];", "if (i < 20u) { output[i] = input[i]; output[i] = input[i]; }"),
+      valid.replace("if (i < 20u)", "if (i < 20u) if (threadIdx.x < 32u)"),
+      valid.replace("\n}", "\n  return;\n}"),
+    ];
+
+    for (const source of cases) {
+      expect(() => compileCudaLiteKernelWithViewCopyBinding(source, prepared, { workgroupSize: [32, 1, 1] }))
+        .toThrow(CudaLiteCompilerError);
+      expect(() => compileCudaLiteKernelWithViewCopyBinding(source, prepared, { workgroupSize: [32, 1, 1] }))
+        .toThrow(/BG-COMPILER-VIEW-COPY-BINDING-(?:MISSING-GUARD|UNSUPPORTED-SOURCE)/u);
+    }
+  });
+
+  it("requires exact non-aliased raw allocation roots at runtime", async () => {
+    const artifacts = await paddedRank2Artifacts("7fc01234");
+    const prepared = await prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts));
+    const compiled = compileCudaLiteKernelWithViewCopyBinding(directViewCopySource(20), prepared, {
+      workgroupSize: [32, 1, 1],
+    });
+    const launch = { gridDim: [1, 1, 1], blockDim: [32, 1, 1] } as const;
+    const root = new ArrayBuffer(104);
+
+    expect(() => runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Uint32Array(5), output: new Uint32Array(20) } },
+      launch,
+    )).toThrow(/BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER/u);
+    expect(() => runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Float32Array(6) as never, output: new Uint32Array(20) } },
+      launch,
+    )).toThrow(/BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER/u);
+    if (typeof SharedArrayBuffer !== "undefined") {
+      expect(() => runCompiledKernelSemanticReference(
+        compiled,
+        {
+          buffers: {
+            input: new Uint32Array(new SharedArrayBuffer(24)),
+            output: new Uint32Array(20),
+          },
+        },
+        launch,
+      )).toThrow(/BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER/u);
+    }
+    expect(() => runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Uint32Array(root, 0, 6), output: new Uint32Array(root, 24, 20) } },
+      launch,
+    )).toThrow(/BG-COMPILER-VIEW-COPY-BINDING-RUNTIME-BUFFER/u);
+    expect(() => runCompiledKernelSemanticReference(
+      { ...compiled },
+      { buffers: { input: new Uint32Array(6), output: new Uint32Array(20) } },
+      launch,
+    )).toThrow(/BG-COMPILER-VIEW-COPY-BINDING-UNVERIFIED-COMPILED/u);
+  });
+});
+
 function request(artifacts: VerifiedViewCopyArtifacts) {
   return {
     operationId: artifacts.operationId,
@@ -119,7 +353,12 @@ function request(artifacts: VerifiedViewCopyArtifacts) {
   };
 }
 
-async function paddedRank2Artifacts(fillBits: string): Promise<VerifiedViewCopyArtifacts> {
+async function paddedRank2Artifacts(
+  fillBits?: string,
+  offsets: { readonly sourceOffsetWords?: number; readonly destinationOffsetWords?: number } = {},
+): Promise<VerifiedViewCopyArtifacts> {
+  const sourceOffsetWords = offsets.sourceOffsetWords ?? 0;
+  const destinationOffsetWords = offsets.destinationOffsetWords ?? 0;
   return createVerifiedViewCopyArtifacts({
     dtype: "f32",
     symbols: [],
@@ -131,13 +370,42 @@ async function paddedRank2Artifacts(fillBits: string): Promise<VerifiedViewCopyA
         low: [constant(1), constant(1)],
         high: [constant(1), constant(1)],
       },
-      allocation: globalAllocation(24),
-      byteOffset: constant(0),
+      allocation: globalAllocation((sourceOffsetWords + 6) * 4),
+      byteOffset: constant(sourceOffsetWords * 4),
       requiredAlignmentBytes: 4,
     },
     destination: {
       layout: paddedDestination([2, 3]),
-      allocation: globalAllocation(80),
+      allocation: globalAllocation((destinationOffsetWords + 20) * 4),
+      byteOffset: constant(destinationOffsetWords * 4),
+      requiredAlignmentBytes: 4,
+    },
+    invalidSource: fillBits === undefined ? { kind: "reject" } : {
+      kind: "fill",
+      value: { kind: "float-bits", dtype: "f32", bits: fillBits },
+    },
+  }, { producer: { id: "compiler-view-copy-binding-test", version: "1" } });
+}
+
+async function alwaysFalseArtifacts(fillBits: string): Promise<VerifiedViewCopyArtifacts> {
+  return createVerifiedViewCopyArtifacts({
+    dtype: "f32",
+    symbols: [],
+    constraints: [],
+    source: {
+      layout: {
+        kind: "pad",
+        source: strided([0, 0]),
+        low: [constant(1), constant(1)],
+        high: [constant(1), constant(1)],
+      },
+      allocation: globalAllocation(4),
+      byteOffset: constant(0),
+      requiredAlignmentBytes: 4,
+    },
+    destination: {
+      layout: paddedDestination([0, 0]),
+      allocation: globalAllocation(16),
       byteOffset: constant(0),
       requiredAlignmentBytes: 4,
     },
@@ -212,4 +480,66 @@ function globalAllocation(byteLength: number) {
     memorySpace: { kind: "global" as const },
     alignmentBytes: 4,
   };
+}
+
+function directViewCopySource(elementCount: number): string {
+  return `
+__global__ void copy_view(const float* input, float* output) {
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < ${elementCount}u) output[i] = input[i];
+}`;
+}
+
+function paddedWords2d(
+  source: Uint32Array,
+  rows: number,
+  columns: number,
+  lowRow: number,
+  lowColumn: number,
+  sourceRows: number,
+  sourceColumns: number,
+  fill: number,
+): number[] {
+  return Array.from({ length: rows * columns }, (_, flat) => {
+    const row = Math.floor(flat / columns);
+    const column = flat % columns;
+    const sourceRow = row - lowRow;
+    const sourceColumn = column - lowColumn;
+    return sourceRow >= 0 && sourceRow < sourceRows && sourceColumn >= 0 && sourceColumn < sourceColumns
+      ? source[sourceRow * sourceColumns + sourceColumn]!
+      : fill;
+  });
+}
+
+function paddedWords3d(
+  source: Uint32Array,
+  depth: number,
+  rows: number,
+  columns: number,
+  low: number,
+  sourceDepth: number,
+  sourceRows: number,
+  sourceColumns: number,
+  fill: number,
+): number[] {
+  return Array.from({ length: depth * rows * columns }, (_, flat) => {
+    const outputDepth = Math.floor(flat / (rows * columns));
+    const outputRow = Math.floor(flat / columns) % rows;
+    const outputColumn = flat % columns;
+    const sourceZ = outputDepth - low;
+    const sourceY = outputRow - low;
+    const sourceX = outputColumn - low;
+    return sourceZ >= 0 && sourceZ < sourceDepth &&
+      sourceY >= 0 && sourceY < sourceRows &&
+      sourceX >= 0 && sourceX < sourceColumns
+      ? source[(sourceZ * sourceRows + sourceY) * sourceColumns + sourceX]!
+      : fill;
+  });
+}
+
+function mainWgsl(wgsl: string | undefined): string {
+  if (wgsl === undefined) throw new Error("expected WGSL output");
+  const start = wgsl.lastIndexOf("@compute");
+  if (start < 0) throw new Error("expected WGSL compute entry");
+  return wgsl.slice(start);
 }
