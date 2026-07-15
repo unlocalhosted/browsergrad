@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 2 entry audit and semantic-core package adoption gate
+- **Current implementation slice:** Gate 2 verified view-copy contract and CPU reference
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -32,7 +32,7 @@ test does not make a gate verified unless every exit criterion is covered.
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
-| Gate 2 — multi-frontend, multi-backend view slice | `audit` | Compiler, JIT, kernels, CPU-reference, and real-device ownership paths are under read-only audit. Semantic-core `0.1.0` is locally packed and release-tested so later public-package imports cannot depend on an unpublished private workspace package. | Select and implement the shared view-materialization contract; lower two frontends; execute the required rank-2/3 fixtures through CPU and required real WebGPU; derive the frozen legacy plan without widening it. | Semantic-core 8 files/68 tests, typecheck/build/lint, architecture check, and packed-tarball import/content gate. No npm publish performed. |
+| Gate 2 — multi-frontend, multi-backend view slice | `in-progress` | The ownership audit is complete. The selected seam is one verified L2 materializing view-copy operation over a verified layout artifact, with explicit read/write effects, exact padding-fill policy, fail-closed overlap, and a layout side table beside the frozen legacy plan. Rank-2 transpose is the first compiler/JIT tracer bullet. | Implement and verify the shared operation and CPU evaluator; add kernels-owned WGSL lowering with strict device evidence; lower compiler read-only flat-logical-index bindings and typed JIT permutation; extend unchanged operation shape to slice, broadcast, padding, dynamic rank-2/3 fixtures; derive/refuse the legacy plan without widening it. | Three read-only ownership audits; semantic-core package gate; existing JIT typed permutation/VJP/plan and kernels real-device tests traced. No implementation or WebGPU conformance claim yet. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
@@ -43,9 +43,10 @@ test does not make a gate verified unless every exit criterion is covered.
 
 ### Objective
 
-Gate 0 and Gate 1 are verified. The next slice is a read-only Gate 2 ownership
-audit followed by the smallest real two-frontend/two-backend view family that
-consumes the shared layout artifact without adding a second execution path.
+Gate 0 and Gate 1 are verified. Gate 2 begins with the verified materializing
+view-copy contract and CPU evaluator, then one rank-2 transpose tracer bullet
+from compiler and JIT through the same actual WebGPU lowering. Broader view
+families extend the operation rather than add source-shaped execution paths.
 
 ### Work in flight
 
@@ -57,7 +58,8 @@ consumes the shared layout artifact without adding a second execution path.
 | Gate 0 architecture check | `verified` | Cross-package boundaries, generated-source parity, all six required freezes, exact runtime mapping/status unions, reviewed vocabulary, profile-usage parity, pinned inventories/harnesses, normalized definition fingerprints, and representative mutations are implemented and wired into delivery gates. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
 | Semantic-core package adoption gate | `verified` | `0.1.0` is public-package shaped, dependency-free, subpath-only, and locally packed with schema/layout imports, declarations, Python oracle, fixtures, license, and changelog verified. It has not been published. |
-| Gate 2 view-family selection | `audit` | CUDA-lite, JIT, CPU reference, WGSL, and real-device evidence are being compared before selecting the first slice. |
+| Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus a compiler read-only flat-logical-index storage binding, starting with rank-2 transpose. Both must emit the same artifact hash; Gate 2 remains incomplete until the full required view matrix and strict WebGPU proof pass. |
+| L2 materializing view-copy contract | `in-progress` | Same-dtype f32 rank-2/3, source-read/destination-write effects, exact reject/fill invalid-source policy, and overlap forbidden initially. CPU and WGSL must consume the same verified maps or proved specializations. |
 
 ### Audit findings recorded so far
 
@@ -103,6 +105,32 @@ consumes the shared layout artifact without adding a second execution path.
   offsets independently. Gate 2 must not widen the frozen plan to paper over
   this mismatch; it needs one verified view-materialization contract and a
   shared index-expression lowering/evaluation path.
+- The typed JIT `PERMUTE` family is the strongest first frontend slice: public
+  construction, NumPy reference, inverse-permutation VJP, vmap, ONNX, tensor
+  plan, and real-WebGPU endpoints already exist. They are disconnected today,
+  and NumPy, mock-plan execution, and WGSL reconstruct permutation semantics
+  independently. Negative axes are accepted by NumPy but rejected by kernels;
+  the JIT boundary must normalize them exactly once and reject duplicates or
+  out-of-range axes before UOp construction.
+- The compiler's useful seam is after ordinary CUDA-lite semantic lowering and
+  before semantic-IR verification. A prepared, read-only global-storage
+  binding can rewrite a direct flat logical read into one canonical physical
+  index expression consumed unchanged by CPU and WGSL. Mutable pointer
+  rebasing, writes through the bound view, helpers, atomics, reinterpret casts,
+  dynamic dimensions, and possibly-false predicates remain fail-closed in the
+  first adapter slice; frozen pointer/scalar schemas gain no fields.
+- Current compiler out-of-range CPU reads return zero and writes are ignored;
+  current WGSL conditionals lower to eager `select`. Neither behavior can
+  implement padded views. Padding requires the L2 fill policy plus a structured
+  guarded load that never evaluates the invalid memory arm.
+- Existing browser tests may return early without an adapter, while kernels CI
+  is non-blocking. Gate 2 evidence needs a required-device mode that treats
+  adapter absence and skipped execution as environment failure, not success.
+- The frozen tensor plan cannot express offsets, aliases, predicates, dynamic
+  bindings, general rank, non-f32 dtype, or zero-extent truth. It remains a
+  compatibility schedule/liveness projection only. Verified layout/kernel
+  artifacts live beside it; no semantics may be recovered from plan shapes or
+  axes.
 - The LLD's initial view model conflated geometry and effects and used constant
   offsets despite dynamic shape support. It now uses symbolic byte lengths and
   offsets, puts access mode in L2 effects, and makes normalized `IndexMap` the
@@ -142,6 +170,7 @@ consumes the shared layout artifact without adding a second execution path.
 | D-014 | 2026-07-15 | accepted | Model Grad compatibility as a frozen, versioned observation inventory with inventory-scoped execution context and per-behavior dtype, alias, contiguity, materialization, autograd, condition, failure, evidence, reference-contract, and target-conformance facts. | Prevents verified debt from being mislabeled conformant, prevents f32-only observations from becoming universal view claims, and makes Pyodide/NumPy upgrades explicit baseline reviews. |
 | D-015 | 2026-07-15 | accepted | Model JIT opaque compatibility as 36 exact constructor-call records and 39 operation records using five closed decision policies; preserve `name` versus `op`, conditional reachability/effects, declared versus realized dtype behavior, replay, autograd/transform/export/residency, default versus inspection-only versus executable tensor-plan decisions, and constructor-only status. | Counts and one-way allowlists hid two ghost labels, grouped distinct calls, allowed same-count relabels, treated declared dtype as realized dtype, overstated tensor-plan/WebNN/transformer execution, and missed silent gradient disconnection plus conditional stateful callback replay. |
 | D-016 | 2026-07-15 | accepted | Promote semantic-core `0.1.0` from private incubation to a dependency-free public-package shape before adding compiler, kernels, or JIT runtime imports; keep only explicit `/schema` and `/layout` exports and prove the packed tarball locally. | BrowserGrad packages ship unbundled ESM. A workspace-only private dependency would pass locally and break external installs. `0.x`, narrow exports, publish ordering, and tarball gates communicate instability without creating an unavailable dependency. This decision does not claim npm publication. |
+| D-017 | 2026-07-15 | accepted | Gate 2 introduces one verified L2 materializing view-copy operation over verified L1 layouts. It owns explicit effects, exact reject/fill behavior for invalid source coordinates, and initially forbids overlap. Verified artifacts live in a side table; the frozen tensor plan is derived or refused and gains no semantic fields. The first tracer is rank-2 f32 transpose from typed JIT `PERMUTE` and a read-only compiler flat-logical-index binding through shared CPU and strict real-WebGPU execution. | All three ownership audits found independent offset reconstruction and disconnected proof paths. This seam makes padding and materialization explicit, prevents another source-shaped backend, preserves frozen schemas, and leaves signed/negative-stride semantics rejected until backend integer equivalence is proved. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -364,6 +393,24 @@ affected implementation slice is marked complete.
 - This is local package readiness only. No registry lookup, publish, push, or
   deployment occurred.
 
+### 2026-07-15 — Gate 2 ownership audit and contract selection
+
+- Completed three read-only traces across compiler, JIT, semantic-core,
+  kernels, CPU reference, plan bridging, and current browser evidence.
+- Selected one verified L2 materializing view-copy operation rather than
+  widening `TensorGpuPlan` or teaching separate source-shaped backends about
+  offsets. It owns explicit effects, exact reject/fill behavior, and an initial
+  no-overlap rule.
+- Selected typed JIT `PERMUTE` plus a compiler read-only flat-logical-index
+  storage binding for the first rank-2 transpose tracer. Both must converge on
+  one semantic hash before backend execution.
+- Recorded the padding hazard: compiler CPU zero-fill, ignored writes, eager
+  WGSL `select`, and target robust-buffer behavior are not valid guarded-load
+  semantics.
+- Recorded strict real-device evidence requirements and kept Gate 2
+  `in-progress`; no implementation, GPU conformance, registry publish, push,
+  or deployment is claimed by this audit.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -507,9 +554,9 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Commit the semantic-core package adoption gate, finish the three-lane Gate 2
-ownership audit, then record the selected shared view-materialization contract
-before implementation. The slice must cover compiler and JIT lowering plus CPU
-and required real-WebGPU execution from the same verified index-map fixtures;
-it must derive or refuse the frozen legacy tensor plan without widening its
-schema or adding a second offset-reconstruction path.
+Implement and commit the concrete semantic-core `/kernel` view-copy schema,
+verifier, shared CPU materializer, exact padding-fill behavior, and negative
+tests. Then add the kernels-owned WGSL lowering and strict device harness before
+frontend adoption. The first compiler and JIT adapters must produce the same
+rank-2 transpose artifact/hash and may only derive or refuse the frozen legacy
+tensor plan; they cannot widen it or reconstruct offsets independently.

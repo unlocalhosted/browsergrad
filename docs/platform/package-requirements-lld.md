@@ -446,6 +446,33 @@ Each operation has:
 Unknown required operations cause a version/capability failure. Readers MAY
 round-trip unknown optional metadata, but MUST NOT execute an unknown operation.
 
+#### Initial materializing view-copy operation
+
+The first concrete L2 operation is a verified, materializing view copy. Its
+wire contract references one verified layout artifact and names a source view,
+a destination view, an exact dtype, explicit source-read and destination-write
+effects, an invalid-source policy, and an overlap policy. The initial overlap
+policy is `forbid`; later in-place or overlapping copies require a separate
+operation or a proved traversal rule. The invalid-source policy is either
+`reject` or `fill` with an exact scalar bit pattern matching the operation
+dtype. Padding fill is therefore operation meaning, not L1 view geometry.
+
+Execution iterates the destination logical shape. The source and destination
+`IndexMap` records are the only coordinate-to-address truth. Broadcast means
+repeated reads from the source allocation; it never grants writable broadcast
+aliasing. A false source predicate must reject before memory access or take a
+structured guarded fill path. A backend MUST NOT express the guard as an eager
+conditional whose invalid load arm is still evaluated, and MUST NOT rely on
+robust-buffer zeroing, ignored writes, or other target behavior as padding
+semantics.
+
+The portable v1 slice begins with same-dtype `f32`, rank-2/rank-3,
+non-overlapping copies. That is a declared lowering profile, not a restriction
+of the L1 layout model. CPU reference and WGSL lowering consume the same
+verified normalized expressions or a specialization accompanied by a proof
+against the canonical evaluator. Artifact verification and specialization are
+cached outside per-element and per-dispatch hot paths.
+
 ### Logical tiles versus physical schedules
 
 `LogicalTile` describes a collective region and its observable operand,
@@ -1300,16 +1327,32 @@ across TypeScript and Python.
 
 ### Gate 2 — Multi-frontend, multi-backend view slice
 
-- Lower existing compiler pointer/view behavior into the shared model.
-- Lower at least one JIT view family through the same model so the design is not
-  CUDA/CuTe-shaped.
-- Execute transpose, strided slice, broadcast, and padded rank-2/3 views through
-  CPU reference and real WebGPU.
-- Derive the legacy tensor plan from verified semantics without extending its
-  unique schema.
+- Implement the verified L2 materializing view-copy operation with explicit
+  effects, exact padding-fill bits, fail-closed overlap policy, and a shared CPU
+  evaluator.
+- Start with rank-2 transpose as the tracer bullet. Lower a read-only compiler
+  storage-pointer binding and the typed JIT `PERMUTE` family into the same
+  verified layout/view-copy artifact and require identical semantic hashes.
+- Extend the unchanged operation shape to rank-3 permutation, positive strided
+  slice, read-only broadcast, nonzero byte offset, and padded rank-2/3 views.
+  Signed/negative-stride profiles remain rejected until backend integer
+  division/modulo semantics are proved equivalent to the canonical BigInt
+  rules.
+- Execute the exact same artifacts and buffers through CPU reference and real
+  WebGPU. Padding uses structured guarded loads; eager `select`, CPU zero-fill,
+  or robust-buffer behavior is not conformance evidence.
+- Keep verified layout/kernel artifacts in a side table keyed by stable
+  operation/value identity. Derive the legacy tensor plan only for compatible
+  scheduling/liveness facts; do not extend it or recover offsets, predicates,
+  aliasing, dtype, or view meaning from its shape/axes fields.
+- Make the conformance lane require a WebGPU adapter/device and fail on skips.
+  Evidence records the artifact hash, input hash, comparison policy, adapter,
+  features, limits, and environment failure when execution is unavailable.
 
 **Exit:** two frontend paths and two execution tiers consume the same view/index
-fixtures; reference and WebGPU do not reconstruct offsets independently.
+fixtures; reference and WebGPU do not reconstruct offsets independently;
+transpose, strided slice, broadcast, and padded rank-2/3 cases pass without
+widening the frozen tensor-plan schema or treating device absence as success.
 
 ### Gate 3 — Real C++/CuTe frontend slice
 
