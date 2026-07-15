@@ -890,6 +890,10 @@ affected implementation slice is marked complete.
   behavior, reject-policy refusal, cache/program identity, source-shape refusal,
   and cancellation-hidden integer overflow. Required actual-WebGPU and retained
   release evidence remain before Gate 2 can be verified.
+- Post-commit adversarial review strengthened both-end allocation canaries and
+  exact destination-write indices, canonical always-false CPU parity plus
+  source immutability/read/fill counts, padded-reject cause identity, dense
+  reject success, exact overflow code/path, and signed multiplication overflow.
 
 ## Verification Log
 
@@ -962,6 +966,7 @@ affected implementation slice is marked complete.
 | 2026-07-16 | Compiler L2 regression scope | `pnpm --filter @unlocalhosted/browsergrad-compiler exec vitest run tests/compiler/semantic_view_copy_bindings.test.ts tests/compiler/semantic_layout_bindings.test.ts tests/compiler/core.test.ts tests/compiler/control.test.ts` | Passed after localizing signed predicates: 4 files, 235 tests. | Re-run after final adversarial edits and as part of full compiler gate. |
 | 2026-07-16 | Compiler L2 types and lint | `pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler lint` | Passed before final SharedArrayBuffer/return adversarial edits. | Re-run before commit; this row does not authorize the final diff. |
 | 2026-07-16 | Compiler L2 full package gate | `pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler` | Passed on the final unit-slice diff: repository architecture; kernels/compiler builds; compiler typecheck/lint; 32 files and 982 tests; compiler dependency/cycle/representation architecture; synthetic input, source normalizer, WebGPU fixtures, test scope, bugbash status, real-world CLI, tool lock, and corpus-audit harnesses. | Commit the CPU/WGSL slice; actual-WebGPU L2 evidence remains separate. |
+| 2026-07-16 | Compiler L2 post-commit adversarial hardening | Focused view-copy/index-map Vitest plus compiler typecheck and whitespace check | Passed: 2 files, 14 tests; strict typecheck; clean diff whitespace. | Commit test hardening separately, then build required-device lane. |
 
 ## Failure and Recovery Log
 

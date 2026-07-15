@@ -195,7 +195,9 @@ describe("CUDA-lite structured view-copy lowering", () => {
   it("preserves nonzero allocation offsets and untouched root canaries", async () => {
     const artifacts = await paddedRank2Artifacts("7fc0abcd", {
       sourceOffsetWords: 1,
+      sourceSuffixWords: 1,
       destinationOffsetWords: 1,
+      destinationSuffixWords: 1,
     });
     const prepared = await prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts));
     const compiled = compileCudaLiteKernelWithViewCopyBinding(directViewCopySource(20), prepared, {
@@ -209,9 +211,10 @@ describe("CUDA-lite structured view-copy lowering", () => {
       0x40800000,
       0x40a00000,
       0x40c00000,
+      0xcafebabe,
     ]);
     const sourceBefore = new Uint32Array(source);
-    const destination = new Uint32Array(21);
+    const destination = new Uint32Array(22);
     destination.fill(0xa5a5a5a5);
     const result = runCompiledKernelSemanticReference(
       compiled,
@@ -232,14 +235,19 @@ describe("CUDA-lite structured view-copy lowering", () => {
     const sourceReads = result.trace.flatMap((thread) => (
       thread.reads.filter((read) => read.name === "input").map((read) => read.index)
     ));
+    const destinationWrites = result.trace.flatMap((thread) => (
+      thread.writes.filter((write) => write.name === "output").map((write) => write.index)
+    ));
 
     expect([...output]).toEqual([...new Uint32Array(canonicalDestination.buffer)]);
     expect([...output]).toEqual([
       0xa5a5a5a5,
-      ...paddedWords2d(source.subarray(1), 4, 5, 1, 1, 2, 3, 0x7fc0abcd),
+      ...paddedWords2d(source.subarray(1, 7), 4, 5, 1, 1, 2, 3, 0x7fc0abcd),
+      0xa5a5a5a5,
     ]);
     expect([...source]).toEqual([...sourceBefore]);
     expect(sourceReads).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(destinationWrites).toEqual(Array.from({ length: 20 }, (_, index) => index + 1));
   });
 
   it("fills an always-false source map without issuing any source read", async () => {
@@ -248,18 +256,33 @@ describe("CUDA-lite structured view-copy lowering", () => {
     const compiled = compileCudaLiteKernelWithViewCopyBinding(directViewCopySource(4), prepared, {
       workgroupSize: [4, 1, 1],
     });
+    const source = Uint32Array.of(0xdeadbeef);
+    const sourceBefore = new Uint32Array(source);
     const result = runCompiledKernelSemanticReference(
       compiled,
-      { buffers: { input: Uint32Array.of(0xdeadbeef), output: new Uint32Array(4) } },
+      { buffers: { input: source, output: new Uint32Array(4) } },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
       { trace: "full" },
     );
     const sourceReads = result.trace.flatMap((thread) => (
       thread.reads.filter((read) => read.name === "input")
     ));
+    const canonicalDestination = new Uint8Array(16);
+    const canonical = await prepareViewCopyCpu(artifacts.layout, artifacts.kernel, {
+      operationId: artifacts.operationId,
+    });
+    const canonicalTrace = canonical.execute({
+      source: new Uint8Array(source.buffer),
+      destination: canonicalDestination,
+    });
+    const specialization = unwrapPreparedCudaLiteViewCopyBinding(prepared).specialization;
 
     expect([...(result.buffers.output as Uint32Array)]).toEqual(Array(4).fill(0x7fc0beef));
+    expect([...(result.buffers.output as Uint32Array)]).toEqual([...new Uint32Array(canonicalDestination.buffer)]);
     expect(sourceReads).toEqual([]);
+    expect([...source]).toEqual([...sourceBefore]);
+    expect(specialization).toMatchObject({ readElements: 0n, filledElements: 4n });
+    expect(canonicalTrace).toMatchObject({ readElements: "0", filledElements: "4" });
     expect(mainWgsl(compiled.wgsl).indexOf("input[")).toBeGreaterThan(
       mainWgsl(compiled.wgsl).indexOf("if (", mainWgsl(compiled.wgsl).indexOf("if (") + 1),
     );
@@ -267,15 +290,38 @@ describe("CUDA-lite structured view-copy lowering", () => {
 
   it("rejects possibly-invalid reads when the verified operation has reject policy", async () => {
     const artifacts = await paddedRank2Artifacts();
-
-    await expect(prepareCudaLiteViewCopyBinding(
+    const caught = await prepareCudaLiteViewCopyBinding(
       artifacts.layout,
       artifacts.kernel,
       request(artifacts),
-    )).rejects.toMatchObject({
+    ).then(() => undefined, (error: unknown) => error);
+
+    expect(caught).toMatchObject({
       code: "BG-COMPILER-VIEW-COPY-BINDING-INVALID-ARTIFACT",
       path: "$.operationId",
     });
+    expect((caught as Error & { readonly cause?: unknown }).cause).toMatchObject({
+      diagnostic: {
+        code: "BG-KERNEL-INVALID-ACCESS",
+        path: "$.source[0,0]",
+      },
+    });
+
+    const dense = await denseRank2Artifacts();
+    const prepared = await prepareCudaLiteViewCopyBinding(dense.layout, dense.kernel, request(dense));
+    const compiled = compileCudaLiteKernelWithViewCopyBinding(directViewCopySource(6), prepared, {
+      workgroupSize: [8, 1, 1],
+    });
+    const source = Uint32Array.from([1, 2, 3, 4, 5, 6]);
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: source, output: new Uint32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      { trace: "full" },
+    );
+    expect([...(result.buffers.output as Uint32Array)]).toEqual([...source]);
+    expect(unwrapPreparedCudaLiteViewCopyBinding(prepared).specialization)
+      .toMatchObject({ readElements: 6n, filledElements: 0n });
   });
 
   it("rejects semantic widening around the exact guarded materializing copy", async () => {
@@ -355,10 +401,17 @@ function request(artifacts: VerifiedViewCopyArtifacts) {
 
 async function paddedRank2Artifacts(
   fillBits?: string,
-  offsets: { readonly sourceOffsetWords?: number; readonly destinationOffsetWords?: number } = {},
+  offsets: {
+    readonly sourceOffsetWords?: number;
+    readonly sourceSuffixWords?: number;
+    readonly destinationOffsetWords?: number;
+    readonly destinationSuffixWords?: number;
+  } = {},
 ): Promise<VerifiedViewCopyArtifacts> {
   const sourceOffsetWords = offsets.sourceOffsetWords ?? 0;
   const destinationOffsetWords = offsets.destinationOffsetWords ?? 0;
+  const sourceSuffixWords = offsets.sourceSuffixWords ?? 0;
+  const destinationSuffixWords = offsets.destinationSuffixWords ?? 0;
   return createVerifiedViewCopyArtifacts({
     dtype: "f32",
     symbols: [],
@@ -370,13 +423,13 @@ async function paddedRank2Artifacts(
         low: [constant(1), constant(1)],
         high: [constant(1), constant(1)],
       },
-      allocation: globalAllocation((sourceOffsetWords + 6) * 4),
+      allocation: globalAllocation((sourceOffsetWords + 6 + sourceSuffixWords) * 4),
       byteOffset: constant(sourceOffsetWords * 4),
       requiredAlignmentBytes: 4,
     },
     destination: {
       layout: paddedDestination([2, 3]),
-      allocation: globalAllocation((destinationOffsetWords + 20) * 4),
+      allocation: globalAllocation((destinationOffsetWords + 20 + destinationSuffixWords) * 4),
       byteOffset: constant(destinationOffsetWords * 4),
       requiredAlignmentBytes: 4,
     },
@@ -384,6 +437,27 @@ async function paddedRank2Artifacts(
       kind: "fill",
       value: { kind: "float-bits", dtype: "f32", bits: fillBits },
     },
+  }, { producer: { id: "compiler-view-copy-binding-test", version: "1" } });
+}
+
+async function denseRank2Artifacts(): Promise<VerifiedViewCopyArtifacts> {
+  return createVerifiedViewCopyArtifacts({
+    dtype: "f32",
+    symbols: [],
+    constraints: [],
+    source: {
+      layout: strided([2, 3]),
+      allocation: globalAllocation(24),
+      byteOffset: constant(0),
+      requiredAlignmentBytes: 4,
+    },
+    destination: {
+      layout: strided([2, 3]),
+      allocation: globalAllocation(24),
+      byteOffset: constant(0),
+      requiredAlignmentBytes: 4,
+    },
+    invalidSource: { kind: "reject" },
   }, { producer: { id: "compiler-view-copy-binding-test", version: "1" } });
 }
 
