@@ -1,0 +1,101 @@
+{
+  "schema": "browsergrad.semantic-core.dense-permutation-view-copy-fixtures",
+  "version": {
+    "major": 1,
+    "minor": 0
+  },
+  "cases": [
+    {
+      "id": "rank2-transpose",
+      "request": {
+        "kind": "dense-permutation-view-copy",
+        "inputShape": ["2", "3"],
+        "axes": [1, 0],
+        "dtype": "f32"
+      },
+      "outputShape": ["3", "2"],
+      "sourceWords": [
+        "3f800000",
+        "80000000",
+        "7fc01234",
+        "ff800000",
+        "00000001",
+        "c0200000"
+      ],
+      "expectedOutputWords": [
+        "3f800000",
+        "ff800000",
+        "80000000",
+        "00000001",
+        "7fc01234",
+        "c0200000"
+      ],
+      "layoutSemanticHash": "f204e22acb50681d6a52703131d9c13d0b1424da476dfd004b5a5bc3db25c1a2",
+      "kernelSemanticHash": "d189f64cb8d148fe242978e0657f1ecd3747383908b3316ee6d8aa31a65d699a"
+    },
+    {
+      "id": "rank3-permutation",
+      "request": {
+        "kind": "dense-permutation-view-copy",
+        "inputShape": ["2", "3", "4"],
+        "axes": [2, 0, 1],
+        "dtype": "f32"
+      },
+      "outputShape": ["4", "2", "3"],
+      "sourceWords": [
+        "00000000",
+        "00000001",
+        "00000002",
+        "00000003",
+        "00000004",
+        "00000005",
+        "00000006",
+        "00000007",
+        "00000008",
+        "00000009",
+        "0000000a",
+        "0000000b",
+        "0000000c",
+        "0000000d",
+        "0000000e",
+        "0000000f",
+        "00000010",
+        "00000011",
+        "00000012",
+        "00000013",
+        "00000014",
+        "00000015",
+        "00000016",
+        "00000017"
+      ],
+      "expectedOutputWords": [
+        "00000000",
+        "00000004",
+        "00000008",
+        "0000000c",
+        "00000010",
+        "00000014",
+        "00000001",
+        "00000005",
+        "00000009",
+        "0000000d",
+        "00000011",
+        "00000015",
+        "00000002",
+        "00000006",
+        "0000000a",
+        "0000000e",
+        "00000012",
+        "00000016",
+        "00000003",
+        "00000007",
+        "0000000b",
+        "0000000f",
+        "00000013",
+        "00000017"
+      ],
+      "layoutSemanticHash": "c3958ef086415100f23c8e489f6e5c80bdc8c507a4de9752814cc0920e0c5be2",
+      "kernelSemanticHash": "ae386728be7c49ef83ec64c8fc5c21e6314202cdd081e1ed31a1400ed16c85c9"
+    }
+  ]
+}

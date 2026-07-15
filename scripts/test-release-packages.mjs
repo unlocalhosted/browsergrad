@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -23,6 +24,11 @@ try {
   assert(semanticCorePkg.exports?.["./schema"], "semantic-core package missing ./schema export");
   assert(semanticCorePkg.exports?.["./layout"], "semantic-core package missing ./layout export");
   assert(semanticCorePkg.exports?.["./kernel"], "semantic-core package missing ./kernel export");
+  const densePermutationFixtureExport = "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json";
+  assert(
+    semanticCorePkg.exports?.[densePermutationFixtureExport] === densePermutationFixtureExport,
+    `semantic-core package missing exact ${densePermutationFixtureExport} export`,
+  );
   assert(!semanticCorePkg.exports?.["."], "semantic-core package must not add a root barrel");
   assert(Object.keys(semanticCorePkg.dependencies ?? {}).length === 0, "semantic-core package must remain dependency-free");
   for (const file of [
@@ -35,12 +41,30 @@ try {
     "python/browsergrad_semantic_core.py",
     "fixtures/layout-v1/row-major-rank2.input.json",
     "fixtures/layout-v1/symbolic-byte-rank3.input.json",
+    "fixtures/kernel-v1/dense-permutation-view-copy.cases.json",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
   ]) {
     assert(existsSync(join(semanticCore, file)), `semantic-core tarball missing ${file}`);
   }
+  const fixtureContracts = JSON.parse(readFileSync(join(root, "architecture/semantic-fixture-contracts.json"), "utf8"));
+  const densePermutationFixtureContract = fixtureContracts.contracts.find(
+    (contract) => contract.id === "semantic-core.dense-permutation-view-copy.kernel-v1",
+  );
+  assert(densePermutationFixtureContract, "dense-permutation fixture contract is missing");
+  const packedDensePermutationFixtureBytes = readFileSync(
+    join(semanticCore, "fixtures/kernel-v1/dense-permutation-view-copy.cases.json"),
+  );
+  assert(
+    createHash("sha256").update(packedDensePermutationFixtureBytes).digest("hex") === densePermutationFixtureContract.contentSha256,
+    "packed dense-permutation fixture differs from its architecture contract",
+  );
+  const packedDensePermutationFixture = JSON.parse(packedDensePermutationFixtureBytes);
+  assert(
+    JSON.stringify(packedDensePermutationFixture.cases.map(({ id }) => id)) === JSON.stringify(densePermutationFixtureContract.caseIds),
+    "packed dense-permutation fixture case coverage differs from its architecture contract",
+  );
   const semanticSchema = await import(pathToFileURL(join(semanticCore, "dist/schema.js")));
   const semanticLayout = await import(pathToFileURL(join(semanticCore, "dist/layout.js")));
   const semanticKernel = await import(pathToFileURL(join(semanticCore, "dist/kernel.js")));
@@ -299,6 +323,7 @@ function verifyInstalledSemanticViewCopyConsumer(consumer) {
 import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import { createVerifiedDensePermutationViewCopyArtifacts, prepareViewCopyCpu } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { hashSemanticArtifact, parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import densePermutationFixtures from "@unlocalhosted/browsergrad-semantic-core/fixtures/kernel-v1/dense-permutation-view-copy.cases.json" with { type: "json" };
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
 import {
   compileCudaLiteKernelWithLayoutBindings,
@@ -316,6 +341,7 @@ const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
   layoutArtifactId: "transpose-layout",
   kernelArtifactId: "transpose-kernel",
 });
+if (densePermutationFixtures.schema !== "browsergrad.semantic-core.dense-permutation-view-copy-fixtures" || densePermutationFixtures.cases.length !== 2) throw new Error("fresh consumer lost the versioned dense-permutation fixture export");
 const { layout, kernel, operationId } = artifacts;
 const payload = layoutArtifactPayload(layout);
 const cpu = await prepareViewCopyCpu(layout, kernel, { operationId });
@@ -354,6 +380,7 @@ if (!compiledView.wgslProgram?.name.includes(compilerBinding.layoutSemanticHash)
     "--target", "ES2022",
     "--module", "NodeNext",
     "--moduleResolution", "NodeNext",
+    "--resolveJsonModule",
     "--skipLibCheck",
     join(consumer, "consumer.ts"),
   ], root);

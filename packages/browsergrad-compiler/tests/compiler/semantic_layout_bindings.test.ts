@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  DENSE_PERMUTATION_VIEW_COPY_FIXTURES,
+  fixtureExtentNumbers,
+  fixtureWords,
+} from "../../../../test-support/dense-permutation-view-copy-fixtures";
+import {
   layoutArtifactPayload,
   traceViewCoordinate,
   verifyLayoutArtifact,
@@ -400,6 +405,37 @@ describe("CUDA-lite verified layout lowering", () => {
     expect(prepared.layoutSemanticHash).toBe(await hashSemanticArtifact(artifacts.layout));
     expect([...result.buffers.output as Float32Array]).toEqual([1, 4, 2, 5, 3, 6]);
   });
+
+  it.each(DENSE_PERMUTATION_VIEW_COPY_FIXTURES.cases)(
+    "consumes the shared $id semantic hashes and physical-word mapping",
+    async (fixture) => {
+      const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+        inputShape: fixture.request.inputShape.map((extent) => parseWireI64(extent)),
+        axes: fixture.request.axes,
+        dtype: fixture.request.dtype,
+      }, { producer: { id: "compiler-shared-fixture", version: "1" } });
+      const prepared = await preparedInput(artifacts.layout);
+      const payload = layoutArtifactPayload(artifacts.layout);
+      const sourceView = payload.views.find((view) => view.viewId === prepared.bindings[0]?.viewId);
+      if (sourceView === undefined) throw new Error("shared fixture source view missing");
+      const outputShape = fixtureExtentNumbers(fixture.outputShape);
+      const sourceWords = fixtureWords(fixture.sourceWords);
+      const tracedWords = Array.from({ length: fixture.expectedOutputWords.length }, (_, flat) => {
+        const coordinates = unflattenFlat(flat, outputShape);
+        const trace = traceViewCoordinate(artifacts.layout, {
+          viewId: sourceView.viewId,
+          coordinates: coordinates.map((value) => encodeWireI64(BigInt(value))),
+        });
+        expect(trace.accessInBounds).toBe(true);
+        return sourceWords[Number(BigInt(trace.rootByteStart) / 4n)]!;
+      });
+
+      expect(artifacts.layoutSemanticHash).toBe(fixture.layoutSemanticHash);
+      expect(artifacts.kernelSemanticHash).toBe(fixture.kernelSemanticHash);
+      expect(prepared.layoutSemanticHash).toBe(fixture.layoutSemanticHash);
+      expect(tracedWords).toEqual([...fixtureWords(fixture.expectedOutputWords)]);
+    },
+  );
 
   it("specializes dynamic dimension bindings into physical offsets and compile identity", async () => {
     const artifact = await layoutFixture();

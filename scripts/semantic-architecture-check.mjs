@@ -42,6 +42,7 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
   }
 
   validateManifest(root, manifest, failures);
+  checkSharedSemanticFixtureContracts(root, failures);
   checkWorkspaceDependencies(root, failures);
   checkWorkspaceImports(root, ts, failures);
   checkGeneratedPython(root, failures);
@@ -142,6 +143,12 @@ export function extractPythonCustomLabelFields(source) {
 export function validateSemanticFreezeManifest(root, manifest) {
   const failures = [];
   validateManifest(path.resolve(root), manifest, failures);
+  return failures;
+}
+
+export function validateSharedSemanticFixtureContracts(root, manifest) {
+  const failures = [];
+  validateSharedSemanticFixtureManifest(path.resolve(root), manifest, failures);
   return failures;
 }
 
@@ -681,6 +688,138 @@ function validateManifest(root, manifest, failures) {
     if (!isRecord(adapter) || !isRecord(adapter.freeze) || adapter.freeze.kind !== kind) {
       failures.push(`required freeze ${id} (${kind}) is missing`);
     }
+  }
+}
+
+function checkSharedSemanticFixtureContracts(root, failures) {
+  const manifestFile = path.join(root, "architecture/semantic-fixture-contracts.json");
+  const manifest = readJson(manifestFile, failures);
+  if (manifest !== undefined) validateSharedSemanticFixtureManifest(root, manifest, failures);
+}
+
+function validateSharedSemanticFixtureManifest(root, manifest, failures) {
+  if (!isRecord(manifest) || manifest.schemaVersion !== 1 || !Array.isArray(manifest.contracts) || manifest.contracts.length === 0) {
+    failures.push("architecture/semantic-fixture-contracts.json must be schemaVersion 1 with nonempty contracts");
+    return;
+  }
+  const ids = new Set();
+  for (const [index, contract] of manifest.contracts.entries()) {
+    const label = `architecture/semantic-fixture-contracts.json contracts[${index}]`;
+    if (!isRecord(contract)) {
+      failures.push(`${label} must be an object`);
+      continue;
+    }
+    const expectedFields = [
+      "caseIds",
+      "contentSha256",
+      "excludedRoutingFields",
+      "fixtureFile",
+      "id",
+      "owner",
+      "packageExport",
+      "schema",
+      "version",
+    ];
+    compareExactKeys(label, contract, expectedFields, failures);
+    for (const field of ["id", "owner", "fixtureFile", "packageExport", "schema", "contentSha256"]) {
+      if (typeof contract[field] !== "string" || contract[field].length === 0) failures.push(`${label}.${field} must be a nonempty string`);
+    }
+    if (typeof contract.id === "string") {
+      if (ids.has(contract.id)) failures.push(`${label}.id duplicates ${contract.id}`);
+      ids.add(contract.id);
+    }
+    if (!Array.isArray(contract.caseIds) || contract.caseIds.length === 0 || contract.caseIds.some((id) => typeof id !== "string" || id.length === 0)) {
+      failures.push(`${label}.caseIds must contain nonempty strings`);
+    }
+    if (!Array.isArray(contract.excludedRoutingFields) || contract.excludedRoutingFields.length === 0 || contract.excludedRoutingFields.some((field) => typeof field !== "string" || field.length === 0)) {
+      failures.push(`${label}.excludedRoutingFields must contain nonempty strings`);
+    }
+    if (!isRecord(contract.version) || contract.version.major !== 1 || contract.version.minor !== 0 || Object.keys(contract.version).sort().join(",") !== "major,minor") {
+      failures.push(`${label}.version must be the closed version 1.0 object`);
+    }
+    if (typeof contract.fixtureFile !== "string") continue;
+    const fixtureFile = path.resolve(root, contract.fixtureFile);
+    if (!fixtureFile.startsWith(`${path.resolve(root)}${path.sep}`) || !fs.existsSync(fixtureFile)) {
+      failures.push(`${label}.fixtureFile is missing or outside the repository`);
+      continue;
+    }
+    const contentSha256 = createHash("sha256").update(fs.readFileSync(fixtureFile)).digest("hex");
+    if (contentSha256 !== contract.contentSha256) {
+      failures.push(`${relative(root, fixtureFile)} content changed; expected SHA-256 ${stringValue(contract.contentSha256)}, got ${contentSha256}`);
+    }
+    const fixture = readJson(fixtureFile, failures);
+    if (!isRecord(fixture)) continue;
+    compareExactKeys(relative(root, fixtureFile), fixture, ["cases", "schema", "version"], failures);
+    if (fixture.schema !== contract.schema || JSON.stringify(fixture.version) !== JSON.stringify(contract.version)) {
+      failures.push(`${relative(root, fixtureFile)} schema/version differs from its contract`);
+    }
+    const fixtureCases = Array.isArray(fixture.cases) ? fixture.cases : [];
+    const fixtureCaseIds = fixtureCases.map((entry) => isRecord(entry) ? entry.id : undefined);
+    if (JSON.stringify(fixtureCaseIds) !== JSON.stringify(contract.caseIds)) {
+      failures.push(`${relative(root, fixtureFile)} case order/coverage changed; expected ${JSON.stringify(contract.caseIds)}, got ${JSON.stringify(fixtureCaseIds)}`);
+    }
+    for (const [caseIndex, fixtureCase] of fixtureCases.entries()) {
+      const caseLabel = `${relative(root, fixtureFile)} cases[${caseIndex}]`;
+      if (!isRecord(fixtureCase)) {
+        failures.push(`${caseLabel} must be an object`);
+        continue;
+      }
+      compareExactKeys(caseLabel, fixtureCase, [
+        "expectedOutputWords",
+        "id",
+        "kernelSemanticHash",
+        "layoutSemanticHash",
+        "outputShape",
+        "request",
+        "sourceWords",
+      ], failures);
+      if (!isRecord(fixtureCase.request)) {
+        failures.push(`${caseLabel}.request must be an object`);
+        continue;
+      }
+      compareExactKeys(`${caseLabel}.request`, fixtureCase.request, ["axes", "dtype", "inputShape", "kind"], failures);
+      for (const routingField of Array.isArray(contract.excludedRoutingFields) ? contract.excludedRoutingFields : []) {
+        if (typeof routingField === "string" && routingField in fixtureCase.request) {
+          failures.push(`${caseLabel}.request contains excluded routing field ${routingField}`);
+        }
+      }
+      for (const hashField of ["layoutSemanticHash", "kernelSemanticHash"]) {
+        if (typeof fixtureCase[hashField] !== "string" || !/^[0-9a-f]{64}$/u.test(fixtureCase[hashField])) {
+          failures.push(`${caseLabel}.${hashField} must be a full SHA-256 digest`);
+        }
+      }
+    }
+    if (typeof contract.owner !== "string" || typeof contract.packageExport !== "string") continue;
+    const packageJson = findWorkspacePackageJson(root, contract.owner);
+    if (packageJson === undefined) {
+      failures.push(`${label}.owner does not name a workspace package`);
+      continue;
+    }
+    const packageDirectory = path.dirname(packageJson);
+    const packageManifest = JSON.parse(fs.readFileSync(packageJson, "utf8"));
+    const expectedExportTarget = `./${relative(packageDirectory, fixtureFile)}`;
+    if (packageManifest.exports?.[contract.packageExport] !== expectedExportTarget) {
+      failures.push(`${label}.packageExport must map ${contract.packageExport} to ${expectedExportTarget}`);
+    }
+  }
+}
+
+function findWorkspacePackageJson(root, packageName) {
+  const packagesRoot = path.join(root, "packages");
+  if (!fs.existsSync(packagesRoot)) return undefined;
+  for (const directory of fs.readdirSync(packagesRoot, { withFileTypes: true })) {
+    if (!directory.isDirectory()) continue;
+    const packageJson = path.join(packagesRoot, directory.name, "package.json");
+    if (fs.existsSync(packageJson) && JSON.parse(fs.readFileSync(packageJson, "utf8")).name === packageName) return packageJson;
+  }
+  return undefined;
+}
+
+function compareExactKeys(label, value, expected, failures) {
+  const actualKeys = Object.keys(value).sort();
+  const expectedKeys = [...expected].sort();
+  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+    failures.push(`${label} fields changed; expected ${JSON.stringify(expectedKeys)}, got ${JSON.stringify(actualKeys)}`);
   }
 }
 

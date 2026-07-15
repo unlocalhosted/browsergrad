@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DENSE_PERMUTATION_VIEW_COPY_FIXTURES,
+  fixtureExtentNumbers,
+} from "../../../test-support/dense-permutation-view-copy-fixtures";
+
+import {
   assertPreparedTensorPlanSemanticRequests,
   prepareTensorPlanSemanticRequests,
 } from "../src/tensor_plan_semantics";
@@ -9,6 +14,28 @@ const LAYOUT_HASH = "f204e22acb50681d6a52703131d9c13d0b1424da476dfd004b5a5bc3db2
 const KERNEL_HASH = "d189f64cb8d148fe242978e0657f1ecd3747383908b3316ee6d8aa31a65d699a";
 
 describe("tensor-plan semantic request preparation", () => {
+  it.each(DENSE_PERMUTATION_VIEW_COPY_FIXTURES.cases)(
+    "constructs the shared $id artifacts solely from the request",
+    async (fixture) => {
+      const prepared = await prepareTensorPlanSemanticRequests(
+        fixturePermutationPlan(fixture.request.inputShape, fixture.outputShape, 20, 21),
+        {
+          schema: "browsergrad.jit.tensor-plan-semantic-requests",
+          version: { major: 1, minor: 0 },
+          requests: [{ ...fixture.request, valueId: 21 }],
+        },
+      );
+
+      expect(prepared.requests).toHaveLength(1);
+      expect(prepared.requests[0]).toMatchObject({
+        ...fixture.request,
+        valueId: 21,
+        layoutSemanticHash: fixture.layoutSemanticHash,
+        kernelSemanticHash: fixture.kernelSemanticHash,
+      });
+    },
+  );
+
   it("strictly prepares the canonical rank-2 transpose beside the frozen plan", async () => {
     const prepared = await prepareTensorPlanSemanticRequests(
       permutationPlan(10, 11),
@@ -175,6 +202,65 @@ function permutationPlan(
     root_id: outputValueId,
     materialization_boundary: "root",
     peak_live_bytes: 48,
+    has_custom_ops: false,
+  };
+}
+
+function fixturePermutationPlan(
+  inputShape: readonly string[],
+  outputShape: readonly string[],
+  inputValueId: number,
+  outputValueId: number,
+) {
+  const input = fixtureExtentNumbers(inputShape);
+  const output = fixtureExtentNumbers(outputShape);
+  const bytes = input.reduce((product, extent) => product * extent, 1) * 4;
+  return {
+    steps: [
+      {
+        step: 0,
+        value_id: inputValueId,
+        op: "BUFFER",
+        input_ids: [],
+        shape: input,
+        dtype: "float32",
+        arg: "buffer:x",
+      },
+      {
+        step: 1,
+        value_id: outputValueId,
+        op: "PERMUTE",
+        input_ids: [inputValueId],
+        shape: output,
+        dtype: "float32",
+        arg: null,
+      },
+    ],
+    buffers: [
+      {
+        value_id: inputValueId,
+        op: "BUFFER",
+        shape: input,
+        dtype: "float32",
+        bytes,
+        first_step: 0,
+        last_step: 1,
+        materialize: false,
+      },
+      {
+        value_id: outputValueId,
+        op: "PERMUTE",
+        shape: output,
+        dtype: "float32",
+        bytes,
+        first_step: 1,
+        last_step: 1,
+        materialize: true,
+      },
+    ],
+    root_id: outputValueId,
+    materialization_boundary: "root",
+    peak_live_bytes: bytes * 2,
     has_custom_ops: false,
   };
 }

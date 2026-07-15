@@ -17,6 +17,7 @@
       "types": "./dist/kernel.d.ts",
       "import": "./dist/kernel.js"
     },
+    "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json": "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json",
     "./package.json": "./package.json"
   },
   "files": [

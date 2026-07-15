@@ -48,6 +48,11 @@ export function validateSemanticFreezeManifest(
   manifest: unknown,
 ): string[];
 
+export function validateSharedSemanticFixtureContracts(
+  root: string,
+  manifest: unknown,
+): string[];
+
 export function extractModuleSpecifiers(
   typescript: typeof ts,
   source: string,

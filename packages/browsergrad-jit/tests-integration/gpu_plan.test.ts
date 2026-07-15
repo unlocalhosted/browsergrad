@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { DENSE_PERMUTATION_VIEW_COPY_FIXTURES } from "../../../test-support/dense-permutation-view-copy-fixtures";
 import { clearNamespace, getJitTarget } from "./pyodide-host";
 
 describe("GPU tensor plan scaffold", () => {
@@ -138,6 +139,65 @@ permute_step = next(step for step in plan["steps"] if step["op"] == "PERMUTE")
     expect(result.ops).not.toContain("EXP");
     expect(result.request.valueId).toBe(result.permuteValueId);
     expect(result.permuteArgErased).toBe(true);
+  });
+
+  it("emits every shared dense-permutation fixture without plan-owned meaning", async () => {
+    const target = await getJitTarget();
+    const casesJson = JSON.stringify(DENSE_PERMUTATION_VIEW_COPY_FIXTURES.cases.map((fixture) => ({
+      id: fixture.id,
+      request: fixture.request,
+      outputShape: fixture.outputShape.map(Number),
+    })));
+    const result = await target.run<Array<{
+      id: string;
+      request: {
+        kind: string;
+        inputShape: string[];
+        axes: number[];
+        dtype: string;
+        valueId: number;
+      };
+      permuteValueId: number;
+      permuteArgErased: boolean;
+      outputShape: number[];
+    }>>(`
+import browsergrad_jit as bg
+import json
+import numpy as np
+from browsergrad_jit._gpu_plan import build_gpu_execution_submission
+
+fixtures = json.loads(${JSON.stringify(casesJson)})
+result = []
+for fixture in fixtures:
+    request = fixture["request"]
+    shape = tuple(int(extent) for extent in request["inputShape"])
+    tensor = bg.from_numpy(np.arange(np.prod(shape), dtype=np.float32).reshape(shape))
+    output = tensor.permute(*request["axes"])
+    submission = build_gpu_execution_submission(output._uop)
+    plan = submission.plan_summary()
+    semantic = submission.semantic_request_summary()
+    permute_step = next(step for step in plan["steps"] if step["op"] == "PERMUTE")
+    result.append({
+        "id": fixture["id"],
+        "request": semantic["requests"][0],
+        "permuteValueId": int(permute_step["value_id"]),
+        "permuteArgErased": permute_step["arg"] is None,
+        "outputShape": list(permute_step["shape"]),
+    })
+result
+`);
+
+    expect(result.map(({ id }) => id)).toEqual(
+      DENSE_PERMUTATION_VIEW_COPY_FIXTURES.cases.map(({ id }) => id),
+    );
+    result.forEach((actual, index) => {
+      const fixture = DENSE_PERMUTATION_VIEW_COPY_FIXTURES.cases[index]!;
+      const { valueId, ...semanticProjection } = actual.request;
+      expect(semanticProjection).toEqual(fixture.request);
+      expect(valueId).toBe(actual.permuteValueId);
+      expect(actual.permuteArgErased).toBe(true);
+      expect(actual.outputShape).toEqual(fixture.outputShape.map(Number));
+    });
   });
 
   it("fail-closes PERMUTE requests outside the initial static f32 rank-2/3 profile", async () => {

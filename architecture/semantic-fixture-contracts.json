@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "contracts": [
+    {
+      "id": "semantic-core.dense-permutation-view-copy.kernel-v1",
+      "owner": "@unlocalhosted/browsergrad-semantic-core",
+      "fixtureFile": "packages/browsergrad-semantic-core/fixtures/kernel-v1/dense-permutation-view-copy.cases.json",
+      "packageExport": "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json",
+      "schema": "browsergrad.semantic-core.dense-permutation-view-copy-fixtures",
+      "version": {
+        "major": 1,
+        "minor": 0
+      },
+      "caseIds": [
+        "rank2-transpose",
+        "rank3-permutation"
+      ],
+      "contentSha256": "3052f12ca4d4ad9decd54da8369f3dfd54303080cc9b9b7215e932e01d2e0d40",
+      "excludedRoutingFields": [
+        "valueId"
+      ]
+    }
+  ]
+}

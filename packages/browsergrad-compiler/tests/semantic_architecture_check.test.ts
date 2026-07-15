@@ -23,6 +23,7 @@ import {
   validateJitOpaqueOperationInventory,
   validatePlatformVocabularySnapshot,
   validateSemanticFreezeManifest,
+  validateSharedSemanticFixtureContracts,
 } from "../../../scripts/semantic-architecture-check.mjs";
 
 const repoRoot = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
@@ -30,6 +31,15 @@ const freezeManifest = JSON.parse(
   readFileSync(join(repoRoot, "architecture/semantic-freeze.json"), "utf8"),
 ) as {
   adapters: Array<{ freeze?: { kind?: string } }>;
+};
+const fixtureContracts = JSON.parse(
+  readFileSync(join(repoRoot, "architecture/semantic-fixture-contracts.json"), "utf8"),
+) as {
+  contracts: Array<{
+    caseIds: string[];
+    contentSha256: string;
+    excludedRoutingFields: string[];
+  }>;
 };
 
 function freeze(kind: string): Record<string, unknown> {
@@ -41,6 +51,25 @@ function freeze(kind: string): Record<string, unknown> {
 describe("semantic architecture guardrails", () => {
   it("accepts the repository baseline", () => {
     expect(runSemanticArchitectureCheck(repoRoot)).toEqual([]);
+  });
+
+  it("rejects shared semantic fixture content, coverage, and routing drift", () => {
+    expect(validateSharedSemanticFixtureContracts(repoRoot, fixtureContracts)).toEqual([]);
+
+    const wrongHash = structuredClone(fixtureContracts);
+    wrongHash.contracts[0]!.contentSha256 = "0".repeat(64);
+    expect(validateSharedSemanticFixtureContracts(repoRoot, wrongHash))
+      .toContainEqual(expect.stringContaining("content changed"));
+
+    const missingCase = structuredClone(fixtureContracts);
+    missingCase.contracts[0]!.caseIds.pop();
+    expect(validateSharedSemanticFixtureContracts(repoRoot, missingCase))
+      .toContainEqual(expect.stringContaining("case order/coverage changed"));
+
+    const semanticRoutingCollision = structuredClone(fixtureContracts);
+    semanticRoutingCollision.contracts[0]!.excludedRoutingFields.push("axes");
+    expect(validateSharedSemanticFixtureContracts(repoRoot, semanticRoutingCollision))
+      .toContainEqual(expect.stringContaining("contains excluded routing field axes"));
   });
 
   it("rejects cross-package implementation imports", () => {

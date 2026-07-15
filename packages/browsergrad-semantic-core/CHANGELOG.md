@@ -7,6 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- Versioned rank-2/rank-3 dense-permutation fixtures with exact source/output
+  f32 bit patterns and pinned layout/kernel hashes. The exact JSON subpath is
+  release-packed, architecture-hash guarded, and excludes routing identity.
+
 ## [0.2.0] - 2026-07-15
 
 ### Added
