@@ -11,6 +11,8 @@ import {
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 1;
 export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 0;
+export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
+  "https://browsergrad.dev/provenance/cpp-cute-aot/v1";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const OCI_SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -21,6 +23,7 @@ const DEPENDENCY_ID = /^[a-z][a-z0-9._-]*$/u;
 const MACRO_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const WARNING_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
 const TARGET_ARCHITECTURE = /^(?:sm|compute)_[1-9][0-9][a-z]?$/u;
+const OCI_REPOSITORY = /^[a-z0-9.-]+(?::[1-9][0-9]*)?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/u;
 const PREPARED_PROFILES = new WeakMap<object, PreparedCppCuteFrontendProfileRecord>();
 
 const EXTRACTION_LIMIT_KEYS = [
@@ -30,7 +33,9 @@ const EXTRACTION_LIMIT_KEYS = [
   "maxHeaderBytes",
   "maxIncludeDepth",
   "maxMacroExpansions",
+  "maxPreprocessedTokens",
   "maxAstNodes",
+  "maxConstexprSteps",
   "maxTemplateInstantiations",
   "maxTemplateDepth",
   "maxDeclarations",
@@ -57,7 +62,9 @@ const MAXIMUM_EXTRACTION_LIMITS: Readonly<Record<CppCuteExtractionLimitName, num
   maxHeaderBytes: 512 * 1024 * 1024,
   maxIncludeDepth: 1_024,
   maxMacroExpansions: 10_000_000,
+  maxPreprocessedTokens: 100_000_000,
   maxAstNodes: 20_000_000,
+  maxConstexprSteps: 100_000_000,
   maxTemplateInstantiations: 5_000_000,
   maxTemplateDepth: 4_096,
   maxDeclarations: 5_000_000,
@@ -92,15 +99,34 @@ export interface CppCuteFrontendExtractorProfile extends JsonObject {
   readonly binarySha256: string;
 }
 
+export interface CppCuteFrontendRunnerProfile extends JsonObject {
+  readonly id: string;
+  readonly version: string;
+  readonly binarySha256: string;
+}
+
+export interface CppCuteFrontendContainerProfile extends JsonObject {
+  readonly runtime: "docker";
+  readonly repository: string;
+  readonly platform: "linux/amd64";
+  /** Resolved platform-manifest digest, never a mutable tag or multi-platform index. */
+  readonly manifestDigest: string;
+}
+
 export interface CppCuteFrontendProvenancePolicy extends JsonObject {
   readonly kind: "external-attestation";
-  readonly predicateType: string;
+  readonly predicateType: typeof CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE;
+  readonly trustStoreSha256: string;
   readonly builderIds: readonly string[];
 }
 
 export interface CppCuteFrontendDeploymentProfile extends JsonObject {
   readonly mode: "ahead-of-time";
+  readonly contractId: "browsergrad.compiler.cpp-cute.aot@1";
+  readonly sandboxPolicySha256: string;
   readonly extractor: CppCuteFrontendExtractorProfile;
+  readonly runner: CppCuteFrontendRunnerProfile;
+  readonly container: CppCuteFrontendContainerProfile;
   readonly provenance: CppCuteFrontendProvenancePolicy;
 }
 
@@ -144,7 +170,6 @@ export interface CppCuteFrontendCompilerProfile extends JsonObject {
   readonly version: string;
   readonly buildId: string;
   readonly binarySha256: string;
-  readonly containerImageDigest: string;
   readonly resourceDirectorySha256: string;
 }
 
@@ -324,8 +349,15 @@ function parseVersion(value: JsonValue, path: string): CppCuteFrontendProfileVer
 }
 
 function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploymentProfile {
-  const object = closedObject(value, ["mode", "extractor", "provenance"], path);
+  const object = closedObject(
+    value,
+    ["mode", "contractId", "sandboxPolicySha256", "extractor", "runner", "container", "provenance"],
+    path,
+  );
   if (object.mode !== "ahead-of-time") invalid(`${path}.mode`, "profile v1 supports ahead-of-time extraction only");
+  if (object.contractId !== "browsergrad.compiler.cpp-cute.aot@1") {
+    invalid(`${path}.contractId`, "profile v1 requires browsergrad.compiler.cpp-cute.aot@1 deployment contract");
+  }
   const extractorObject = closedObject(
     field(object, "extractor", path),
     ["id", "version", "buildId", "binarySha256"],
@@ -337,9 +369,40 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     buildId: boundedString(field(extractorObject, "buildId", `${path}.extractor`), `${path}.extractor.buildId`, 256),
     binarySha256: sha256(field(extractorObject, "binarySha256", `${path}.extractor`), `${path}.extractor.binarySha256`),
   };
+  const runnerObject = closedObject(
+    field(object, "runner", path),
+    ["id", "version", "binarySha256"],
+    `${path}.runner`,
+  );
+  const runner = {
+    id: boundedString(field(runnerObject, "id", `${path}.runner`), `${path}.runner.id`, 256),
+    version: boundedString(field(runnerObject, "version", `${path}.runner`), `${path}.runner.version`, 128),
+    binarySha256: sha256(field(runnerObject, "binarySha256", `${path}.runner`), `${path}.runner.binarySha256`),
+  };
+  const containerObject = closedObject(
+    field(object, "container", path),
+    ["runtime", "repository", "platform", "manifestDigest"],
+    `${path}.container`,
+  );
+  if (containerObject.runtime !== "docker" || containerObject.platform !== "linux/amd64") {
+    invalid(`${path}.container`, "profile v1 requires Docker with resolved linux/amd64 platform manifest");
+  }
+  const repository = stringValue(field(containerObject, "repository", `${path}.container`), `${path}.container.repository`);
+  if (!OCI_REPOSITORY.test(repository)) {
+    invalid(`${path}.container.repository`, "container repository must be a canonical lowercase OCI repository without tag");
+  }
+  const container: CppCuteFrontendContainerProfile = {
+    runtime: "docker",
+    repository,
+    platform: "linux/amd64",
+    manifestDigest: ociSha256(
+      field(containerObject, "manifestDigest", `${path}.container`),
+      `${path}.container.manifestDigest`,
+    ),
+  };
   const provenanceObject = closedObject(
     field(object, "provenance", path),
-    ["kind", "predicateType", "builderIds"],
+    ["kind", "predicateType", "trustStoreSha256", "builderIds"],
     `${path}.provenance`,
   );
   if (provenanceObject.kind !== "external-attestation") {
@@ -351,16 +414,32 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     256,
   );
   if (builderIds.length === 0) invalid(`${path}.provenance.builderIds`, "at least one allowlisted builder is required");
-  const provenance = {
-    kind: "external-attestation" as const,
-    predicateType: boundedString(
-      field(provenanceObject, "predicateType", `${path}.provenance`),
+  builderIds.forEach((builderId, index) =>
+    validateCanonicalHttpsIdentifier(builderId, `${path}.provenance.builderIds[${index}]`));
+  if (provenanceObject.predicateType !== CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE) {
+    invalid(
       `${path}.provenance.predicateType`,
-      512,
+      `profile v1 requires ${CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE}`,
+    );
+  }
+  const provenance: CppCuteFrontendProvenancePolicy = {
+    kind: "external-attestation" as const,
+    predicateType: CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE,
+    trustStoreSha256: sha256(
+      field(provenanceObject, "trustStoreSha256", `${path}.provenance`),
+      `${path}.provenance.trustStoreSha256`,
     ),
     builderIds,
   };
-  return { mode: "ahead-of-time", extractor, provenance };
+  return {
+    mode: "ahead-of-time",
+    contractId: "browsergrad.compiler.cpp-cute.aot@1",
+    sandboxPolicySha256: sha256(field(object, "sandboxPolicySha256", path), `${path}.sandboxPolicySha256`),
+    extractor,
+    runner,
+    container,
+    provenance,
+  };
 }
 
 function parseLanguage(value: JsonValue, path: string): CppCuteFrontendLanguageProfile {
@@ -454,7 +533,7 @@ function parseToolchain(value: JsonValue, path: string): CppCuteFrontendToolchai
   const object = closedObject(value, ["compiler", "dependencies"], path);
   const compilerObject = closedObject(
     field(object, "compiler", path),
-    ["id", "version", "buildId", "binarySha256", "containerImageDigest", "resourceDirectorySha256"],
+    ["id", "version", "buildId", "binarySha256", "resourceDirectorySha256"],
     `${path}.compiler`,
   );
   const compiler = {
@@ -462,10 +541,6 @@ function parseToolchain(value: JsonValue, path: string): CppCuteFrontendToolchai
     version: boundedString(field(compilerObject, "version", `${path}.compiler`), `${path}.compiler.version`, 128),
     buildId: boundedString(field(compilerObject, "buildId", `${path}.compiler`), `${path}.compiler.buildId`, 256),
     binarySha256: sha256(field(compilerObject, "binarySha256", `${path}.compiler`), `${path}.compiler.binarySha256`),
-    containerImageDigest: ociSha256(
-      field(compilerObject, "containerImageDigest", `${path}.compiler`),
-      `${path}.compiler.containerImageDigest`,
-    ),
     resourceDirectorySha256: sha256(
       field(compilerObject, "resourceDirectorySha256", `${path}.compiler`),
       `${path}.compiler.resourceDirectorySha256`,
@@ -594,6 +669,20 @@ function validateVirtualPath(value: string, path: string): void {
   const segments = value.split("/");
   if (segments.some((segment, index) => index > 0 && (segment.length === 0 || segment === "." || segment === ".."))) {
     invalid(path, "virtual path must be normalized and must not contain empty, . or .. segments");
+  }
+}
+
+function validateCanonicalHttpsIdentifier(value: string, path: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    invalid(path, "builder identity must be a canonical HTTPS URL");
+  }
+  if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" || parsed.search !== "" ||
+      parsed.hash !== "" || parsed.pathname === "/" || parsed.pathname.endsWith("/") ||
+      `${parsed.origin}${parsed.pathname}` !== value) {
+    invalid(path, "builder identity must be a canonical credential-free HTTPS URL without query, fragment, or trailing slash");
   }
 }
 

@@ -1,294 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeCppCuteFrontendArtifact,
-  deriveCppCuteFrontendArtifactId,
   deriveCppCuteStableId,
   unwrapVerifiedCppCuteFrontendArtifact,
   verifyCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
 } from "../../src/cpp_cute_frontend_artifact.js";
-import { computeCppCuteInputHashes } from "../../src/cpp_cute_frontend_verify.js";
-import type {
-  CppCuteFrontendArtifactV1,
-  CppCuteFrontendPayloadV1,
-} from "../../src/cpp_cute_frontend_types.js";
-
-const PROFILE_HASH = "a".repeat(64);
-const MAIN_FILE_ID = stableId("file", "1");
-const HEADER_FILE_ID = stableId("file", "e");
-const INCLUDE_ROOT_ID = stableId("include-root", "f");
-const INCLUDE_EDGE_ID = stableId("include-edge", "0");
-const SPAN_ID = stableId("span", "2");
-const INT_TYPE_ID = stableId("type", "3");
-const LAYOUT_TYPE_ID = stableId("type", "4");
-const TEMPLATE_DECLARATION_ID = stableId("declaration", "5");
-const RECORD_DECLARATION_ID = stableId("declaration", "6");
-const VARIABLE_DECLARATION_ID = stableId("declaration", "7");
-const INSTANTIATION_ID = stableId("template-instantiation", "8");
-const LAYOUT_FACT_ID = stableId("fact", "9");
-const INTRINSIC_FACT_ID = stableId("fact", "a");
-const ENTRY_ID = stableId("entry", "b");
-const DIAGNOSTIC_ID = stableId("diagnostic", "c");
-const ZERO_HASH = "0".repeat(64);
+import {
+  cloneCppCuteArtifactInput,
+  CPP_CUTE_FIXTURE_DIAGNOSTIC_ID,
+  CPP_CUTE_FIXTURE_PROFILE_HASH,
+  CPP_CUTE_FIXTURE_SPAN_ID,
+  createCppCuteArtifactInput,
+} from "./support/cpp_cute_frontend_fixtures.js";
 
 function stableId(kind: string, digit: string): string {
   return `bg.cpp.${kind}.sha256.${digit.repeat(64)}`;
 }
 
-function sourceOrigin(): { readonly kind: "source"; readonly spanId: string } {
-  return { kind: "source", spanId: SPAN_ID };
-}
-
-function qualifiers(): { readonly const: boolean; readonly volatile: boolean; readonly restrict: boolean } {
-  return { const: false, volatile: false, restrict: false };
-}
-
-async function payloadFixture(): Promise<CppCuteFrontendPayloadV1> {
-  const payload: CppCuteFrontendPayloadV1 = {
-    profileHash: PROFILE_HASH,
-    inputs: {
-      mainFileId: MAIN_FILE_ID,
-      includeRoots: [
-        {
-          includeRootId: INCLUDE_ROOT_ID,
-          ordinal: 0,
-          mode: "system",
-          virtualPath: "/toolchain/cutlass/include",
-          manifestSha256: "f".repeat(64),
-        },
-      ],
-      files: [
-        {
-          fileId: MAIN_FILE_ID,
-          role: "main-source",
-          virtualPath: "/src/layout.cu",
-          contentSha256: "d".repeat(64),
-          byteLength: "100" as never,
-          profileDependency: "none",
-        },
-        {
-          fileId: HEADER_FILE_ID,
-          role: "cute-header",
-          virtualPath: "/toolchain/cutlass/include/cute/layout.hpp",
-          contentSha256: "e".repeat(64),
-          byteLength: "200" as never,
-          profileDependency: "cute",
-        },
-      ],
-      includeEdges: [
-        {
-          includeEdgeId: INCLUDE_EDGE_ID,
-          includingFileId: MAIN_FILE_ID,
-          directiveSpanId: SPAN_ID,
-          spelling: "cute/layout.hpp",
-          mode: "angle",
-          resolution: {
-            kind: "resolved",
-            fileId: HEADER_FILE_ID,
-            includeRootId: INCLUDE_ROOT_ID,
-          },
-        },
-      ],
-      sourceSetSha256: ZERO_HASH,
-      headerSetSha256: ZERO_HASH,
-      closureSha256: ZERO_HASH,
-    },
-    spans: [
-      {
-        spanId: SPAN_ID,
-        spelling: { fileId: MAIN_FILE_ID, startByte: "0" as never, endByte: "100" as never },
-        expansion: { fileId: MAIN_FILE_ID, startByte: "0" as never, endByte: "100" as never },
-        macroExpansionId: null,
-      },
-    ],
-    macroExpansions: [],
-    types: [
-      {
-        typeId: INT_TYPE_ID,
-        kind: "builtin",
-        canonicalName: "int",
-        qualifiers: qualifiers(),
-        origin: sourceOrigin(),
-        builtin: "int",
-      },
-      {
-        typeId: LAYOUT_TYPE_ID,
-        kind: "template-specialization",
-        canonicalName: "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, cute::Stride<cute::Int<1>, cute::Int<3>>>",
-        qualifiers: qualifiers(),
-        origin: sourceOrigin(),
-        templateDeclarationId: TEMPLATE_DECLARATION_ID,
-        arguments: [],
-      },
-    ],
-    constants: [],
-    declarations: [
-      {
-        declarationId: TEMPLATE_DECLARATION_ID,
-        kind: "template",
-        canonicalUsr: "c:@N@cute@ST>1#T@Layout",
-        canonicalName: "cute::Layout",
-        lexicalParentId: null,
-        semanticParentId: null,
-        typeId: INT_TYPE_ID,
-        targetTypeId: null,
-        origin: sourceOrigin(),
-        definitionKind: "external",
-        linkage: "external",
-        storageDuration: "none",
-        memorySpace: "host",
-        mangledName: null,
-        cudaAttributes: { host: true, device: true, global: false, forceInline: true },
-      },
-      {
-        declarationId: RECORD_DECLARATION_ID,
-        kind: "record",
-        canonicalUsr: "c:@N@cute@S@Layout>#I#I",
-        canonicalName: "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, cute::Stride<cute::Int<1>, cute::Int<3>>>",
-        lexicalParentId: null,
-        semanticParentId: null,
-        typeId: LAYOUT_TYPE_ID,
-        targetTypeId: null,
-        origin: sourceOrigin(),
-        definitionKind: "external",
-        linkage: "external",
-        storageDuration: "none",
-        memorySpace: "host",
-        mangledName: null,
-        cudaAttributes: { host: true, device: true, global: false, forceInline: false },
-      },
-      {
-        declarationId: VARIABLE_DECLARATION_ID,
-        kind: "variable",
-        canonicalUsr: "c:@layout",
-        canonicalName: "layout",
-        lexicalParentId: null,
-        semanticParentId: null,
-        typeId: LAYOUT_TYPE_ID,
-        targetTypeId: null,
-        origin: sourceOrigin(),
-        definitionKind: "definition",
-        linkage: "internal",
-        storageDuration: "static",
-        memorySpace: "host",
-        mangledName: "_ZL6layout",
-        cudaAttributes: { host: true, device: false, global: false, forceInline: false },
-      },
-    ],
-    templateInstantiations: [
-      {
-        instantiationId: INSTANTIATION_ID,
-        templateDeclarationId: TEMPLATE_DECLARATION_ID,
-        specializationDeclarationId: RECORD_DECLARATION_ID,
-        arguments: [],
-        pointOfInstantiationSpanId: SPAN_ID,
-        parentInstantiationId: null,
-        depth: 0,
-      },
-    ],
-    overloadResolutions: [],
-    sourceAbi: { types: [], functions: [] },
-    functionBodies: [],
-    facts: [
-      {
-        factId: LAYOUT_FACT_ID,
-        kind: "affine-layout",
-        origin: sourceOrigin(),
-        resultDeclarationId: VARIABLE_DECLARATION_ID,
-        shape: {
-          kind: "tuple",
-          elements: [
-            { kind: "scalar", value: { kind: "integer", value: "3" as never } },
-            { kind: "scalar", value: { kind: "integer", value: "2" as never } },
-          ],
-        },
-        stride: {
-          kind: "tuple",
-          elements: [
-            { kind: "scalar", value: { kind: "integer", value: "1" as never } },
-            { kind: "scalar", value: { kind: "integer", value: "3" as never } },
-          ],
-        },
-        rank: 2,
-        leafRank: 2,
-        size: { kind: "integer", value: "6" as never },
-        cosize: { kind: "integer", value: "6" as never },
-      },
-      {
-        factId: INTRINSIC_FACT_ID,
-        kind: "target-intrinsic",
-        origin: sourceOrigin(),
-        familyId: "nvidia:wgmma@1",
-        operation: { kind: "capability", capabilityId: "nvidia:wgmma@1" },
-        operandExpressionIds: [],
-        resultTypeId: null,
-        effects: { readsMemory: false, writesMemory: false, synchronizes: true, convergent: true },
-        availability: { kind: "recognized-unsupported", diagnosticId: DIAGNOSTIC_ID },
-      },
-    ],
-    entries: [
-      {
-        entryId: ENTRY_ID,
-        kind: "layout",
-        layoutFactId: LAYOUT_FACT_ID,
-        selectedRootDeclarationIds: [VARIABLE_DECLARATION_ID],
-      },
-    ],
-    diagnostics: [
-      {
-        diagnosticId: DIAGNOSTIC_ID,
-        phase: "artifact-extraction",
-        severity: "warning",
-        code: "browsergrad.cpp-cute:recognized-unsupported-intrinsic",
-        renderedMessage: "WGMMA preserved as a typed unsupported target capability.",
-        primarySpanId: SPAN_ID,
-        subject: { kind: "fact", factId: INTRINSIC_FACT_ID },
-        parentDiagnosticId: null,
-        related: [],
-      },
-    ],
-    outcome: { kind: "accepted", selectedEntryIds: [ENTRY_ID] },
-    extraction: {
-      profileHash: PROFILE_HASH,
-      inputClosureSha256: ZERO_HASH,
-      appliedTransforms: [],
-    },
-  };
-  const hashes = await computeCppCuteInputHashes(payload);
-  return {
-    ...payload,
-    inputs: {
-      ...payload.inputs,
-      sourceSetSha256: hashes.sourceSetSha256,
-      headerSetSha256: hashes.headerSetSha256,
-      closureSha256: hashes.closureSha256,
-    },
-    extraction: {
-      ...payload.extraction,
-      inputClosureSha256: hashes.closureSha256,
-    },
-  };
-}
-
-async function artifactFixture(): Promise<CppCuteFrontendArtifactV1> {
-  const payload = await payloadFixture();
-  return {
-    schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
-    version: { major: 1, minor: 0 },
-    producer: { id: "browsergrad-tools/cpp-cute-frontend", version: "0.1.0" },
-    artifactId: await deriveCppCuteFrontendArtifactId(payload),
-    payload,
-    requiredExtensions: [],
-  };
-}
-
-async function cloneArtifact(): Promise<Record<string, unknown>> {
-  return structuredClone(await artifactFixture()) as unknown as Record<string, unknown>;
-}
-
 describe("C++/CuTe frontend artifact", () => {
   it("verifies one closed layout artifact with typed unsupported target fact", async () => {
-    const verified = await verifyCppCuteFrontendArtifact(await artifactFixture());
+    const verified = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput());
     const record = unwrapVerifiedCppCuteFrontendArtifact(verified);
 
     expect(verified.artifactId).toBe(`bg.artifact.cpp-cute-frontend.sha256.${verified.artifactHash}`);
@@ -304,25 +36,25 @@ describe("C++/CuTe frontend artifact", () => {
       inputClosureSha256: "36b44d4e6ef78c9696f9864407dcebbec7ff988394653a0cae1600a2662ab847",
     });
     expect(verified.transportHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(verified.profileHash).toBe(PROFILE_HASH);
+    expect(verified.profileHash).toBe(CPP_CUTE_FIXTURE_PROFILE_HASH);
     expect(verified.outcome).toBe("accepted");
     expect(record.envelope.payload.facts).toContainEqual(expect.objectContaining({
       kind: "target-intrinsic",
       familyId: "nvidia:wgmma@1",
-      availability: { kind: "recognized-unsupported", diagnosticId: DIAGNOSTIC_ID },
+      availability: { kind: "recognized-unsupported", diagnosticId: CPP_CUTE_FIXTURE_DIAGNOSTIC_ID },
     }));
     expect(Object.isFrozen(verified)).toBe(true);
     expect(Object.isFrozen(record.envelope.payload)).toBe(true);
   });
 
   it("decodes bounded UTF-8 bytes through the untrusted wire parser", async () => {
-    const bytes = new TextEncoder().encode(JSON.stringify(await artifactFixture()));
+    const bytes = new TextEncoder().encode(JSON.stringify(await createCppCuteArtifactInput()));
     const verified = await decodeCppCuteFrontendArtifact(bytes);
     expect(verified.outcome).toBe("accepted");
   });
 
   it("normalizes set-like record order before deriving identity", async () => {
-    const canonical = await artifactFixture();
+    const canonical = await createCppCuteArtifactInput();
     const permuted = structuredClone(canonical);
     const mutablePayload = permuted.payload as unknown as Record<string, unknown>;
     (mutablePayload["types"] as unknown[]).reverse();
@@ -336,7 +68,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("keeps transport producer outside semantic identity and trust", async () => {
-    const firstArtifact = await artifactFixture();
+    const firstArtifact = await createCppCuteArtifactInput();
     const secondArtifact = structuredClone(firstArtifact);
     (secondArtifact as unknown as Record<string, unknown>)["producer"] = {
       id: "untrusted/other-extractor",
@@ -350,7 +82,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("rejects structural copies without artifact authority", async () => {
-    const verified = await verifyCppCuteFrontendArtifact(await artifactFixture());
+    const verified = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput());
     const forged = { ...verified } as VerifiedCppCuteFrontendArtifact;
     expect(() => unwrapVerifiedCppCuteFrontendArtifact(forged)).toThrowError(expect.objectContaining({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-UNVERIFIED",
@@ -359,14 +91,14 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("rejects unknown closed payload fields and optional metadata", async () => {
-    const unknown = await cloneArtifact();
+    const unknown = await cloneCppCuteArtifactInput();
     (unknown["payload"] as Record<string, unknown>)["backendResult"] = { trusted: true };
     await expect(verifyCppCuteFrontendArtifact(unknown)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
       path: "$.payload",
     });
 
-    const metadata = await cloneArtifact();
+    const metadata = await cloneCppCuteArtifactInput();
     metadata["optionalMetadata"] = { trusted: true };
     await expect(verifyCppCuteFrontendArtifact(metadata)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
@@ -375,7 +107,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("binds artifactId to normalized semantic content", async () => {
-    const value = await cloneArtifact();
+    const value = await cloneCppCuteArtifactInput();
     value["artifactId"] = `bg.artifact.cpp-cute-frontend.sha256.${"f".repeat(64)}`;
     await expect(verifyCppCuteFrontendArtifact(value)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
@@ -384,7 +116,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("recomputes source, header, and closure hashes", async () => {
-    const value = await cloneArtifact();
+    const value = await cloneCppCuteArtifactInput();
     const payload = value["payload"] as Record<string, unknown>;
     const inputs = payload["inputs"] as Record<string, unknown>;
     const files = inputs["files"] as Record<string, unknown>[];
@@ -397,7 +129,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("rejects host paths, traversal, unreachable files, and dangling include roots", async () => {
-    const traversal = await cloneArtifact();
+    const traversal = await cloneCppCuteArtifactInput();
     const inputs = ((traversal["payload"] as Record<string, unknown>)["inputs"] as Record<string, unknown>);
     const files = inputs["files"] as Record<string, unknown>[];
     if (files[0] === undefined) throw new Error("fixture lost main source");
@@ -407,7 +139,7 @@ describe("C++/CuTe frontend artifact", () => {
       path: "$.payload.inputs.files[0].virtualPath",
     });
 
-    const dangling = await cloneArtifact();
+    const dangling = await cloneCppCuteArtifactInput();
     const danglingInputs = ((dangling["payload"] as Record<string, unknown>)["inputs"] as Record<string, unknown>);
     const edges = danglingInputs["includeEdges"] as Record<string, unknown>[];
     const resolution = edges[0]?.["resolution"] as Record<string, unknown> | undefined;
@@ -420,7 +152,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("rejects out-of-bounds spans and macro provenance cycles", async () => {
-    const range = await cloneArtifact();
+    const range = await cloneCppCuteArtifactInput();
     const spans = (range["payload"] as Record<string, unknown>)["spans"] as Record<string, unknown>[];
     const spelling = spans[0]?.["spelling"] as Record<string, unknown> | undefined;
     if (spelling === undefined) throw new Error("fixture lost span");
@@ -430,14 +162,14 @@ describe("C++/CuTe frontend artifact", () => {
       path: "$.payload.spans[0].spelling",
     });
 
-    const macro = await cloneArtifact();
+    const macro = await cloneCppCuteArtifactInput();
     const macroPayload = macro["payload"] as Record<string, unknown>;
     const macroId = stableId("macro", "d");
     macroPayload["macroExpansions"] = [{
       macroExpansionId: macroId,
       macroName: "LAYOUT",
-      definitionSpanId: SPAN_ID,
-      invocationSpanId: SPAN_ID,
+      definitionSpanId: CPP_CUTE_FIXTURE_SPAN_ID,
+      invocationSpanId: CPP_CUTE_FIXTURE_SPAN_ID,
       parentMacroExpansionId: macroId,
     }];
     const macroSpans = macroPayload["spans"] as Record<string, unknown>[];
@@ -450,7 +182,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("rejects dangling resolved facts and malformed static layout queries", async () => {
-    const dangling = await cloneArtifact();
+    const dangling = await cloneCppCuteArtifactInput();
     const facts = (dangling["payload"] as Record<string, unknown>)["facts"] as Record<string, unknown>[];
     const layout = facts.find((fact) => fact["kind"] === "affine-layout");
     if (layout === undefined) throw new Error("fixture lost layout fact");
@@ -459,7 +191,7 @@ describe("C++/CuTe frontend artifact", () => {
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-DANGLING-REFERENCE",
     });
 
-    const cosize = await cloneArtifact();
+    const cosize = await cloneCppCuteArtifactInput();
     const cosizeFacts = (cosize["payload"] as Record<string, unknown>)["facts"] as Record<string, unknown>[];
     const cosizeLayout = cosizeFacts.find((fact) => fact["kind"] === "affine-layout");
     if (cosizeLayout === undefined) throw new Error("fixture lost layout fact");
@@ -471,7 +203,7 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("rejects accepted outcomes with blocking diagnostics", async () => {
-    const value = await cloneArtifact();
+    const value = await cloneCppCuteArtifactInput();
     const diagnostics = (value["payload"] as Record<string, unknown>)["diagnostics"] as Record<string, unknown>[];
     if (diagnostics[0] === undefined) throw new Error("fixture lost diagnostic");
     diagnostics[0]["severity"] = "error";
@@ -486,14 +218,14 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("only permits artifact-specific resource limits to lower ceilings", async () => {
-    await expect(verifyCppCuteFrontendArtifact(await artifactFixture(), {
+    await expect(verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput(), {
       artifactLimits: { maxFiles: 1 },
     })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-RESOURCE-LIMIT",
       path: "$.payload.inputs.files",
     });
 
-    await expect(verifyCppCuteFrontendArtifact(await artifactFixture(), {
+    await expect(verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput(), {
       artifactLimits: { maxFiles: 4_097 },
     })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-RESOURCE-LIMIT",
@@ -504,7 +236,7 @@ describe("C++/CuTe frontend artifact", () => {
   it("honors cancellation and derives domain-separated stable IDs", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(verifyCppCuteFrontendArtifact(await artifactFixture(), { signal: controller.signal })).rejects.toMatchObject({
+    await expect(verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput(), { signal: controller.signal })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-CANCELLED",
       path: "$.signal",
     });
