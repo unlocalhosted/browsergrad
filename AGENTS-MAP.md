@@ -9,6 +9,7 @@ Use this as a fast navigation layer before diving into files.
 | `README.md` | Product overview, install snippets, package summary, test matrix. |
 | `ARCHITECTURE.md` | Package responsibilities, data flow, core seams, testing strategy. |
 | `DEVELOPMENT.md` | Development notes. |
+| `docs/platform/package-requirements-lld.md` | Normative multi-level semantic architecture, low-level contracts, migration gates, current-state corrections, and acceptance evidence. Read before compiler/kernel/JIT/dtype work. |
 | `docs/platform/consuming-browsergrad.md` | Production npm consumption guide and import matrix. |
 | `docs/platform/agent-consumption-guide.md` | Agent-facing package selection and import rules. |
 | `docs/platform/release-readiness.md` | Publish workflow, packed tarball checks, and npm verification. |
@@ -26,7 +27,7 @@ Use this as a fast navigation layer before diving into files.
 | `browsergrad-grad` | `packages/browsergrad-grad/README.md` | `src/python/tensor.py`, `src/python/functional.py`, `src/python/optim.py`, `src/python/nn_chunks/`, `src/python/_device.py`, `src/python/_torch_compat_*.py`, `src/kernel-device.ts` | `tests/`, `tests-integration/` |
 | `browsergrad-jit` | `packages/browsergrad-jit/README.md` | `src/python/_ir.py`, `_tensor_proxy.py`, `_realize.py`, `_vjp.py`, `_functional.py`, `_nn.py`, `_optim.py`, `_torch_compat.py` | `tests/`, `tests-integration/` |
 | `browsergrad-kernels` | `packages/browsergrad-kernels/README.md` | `src/realizer.ts`, `src/kernels/` | `tests/`, `tests-browser/` |
-| `browsergrad-compiler` | `packages/browsergrad-compiler/README.md`, `docs/platform/cuda-lite-compiler-architecture.md` | `src/parser.ts`, `src/analyzer.ts`, `src/semantic_ir_types.ts`, `src/semantic_ir.ts`, `src/semantic_reference.ts`, `src/semantic_wgsl.ts`, `src/runner.ts`, `scripts/cuda-lite-source-normalizer.mjs` | `tests/`, `tests-browser/`, corpus/e2e scripts |
+| `browsergrad-compiler` | `docs/platform/package-requirements-lld.md`, `packages/browsergrad-compiler/README.md`, `docs/platform/cuda-lite-compiler-architecture.md` | `src/parser.ts`, `src/analyzer.ts`, `src/semantic_ir_types.ts`, `src/semantic_ir.ts`, `src/semantic_reference.ts`, `src/semantic_wgsl.ts`, `src/runner.ts`, `scripts/cuda-lite-source-normalizer.mjs` | `tests/`, `tests-browser/`, corpus/e2e scripts |
 | `browsergrad-primitives` | `packages/browsergrad-primitives/README.md` | `src/index.ts`, `src/text.ts`, `src/data.ts`, `src/evaluation.ts`, `src/scaling.ts`, `src/simulation.ts`, `src/rl.ts` | `tests/` |
 | `browsergrad-dogfood` | `packages/browsergrad-dogfood/README.md` | `tests-node/`, `tests/` | cross-package published compatibility |
 
@@ -48,11 +49,22 @@ Use this as a fast navigation layer before diving into files.
 | `compileCudaLiteKernel*()` | Browser-native CUDA-lite frontend to Kernel IR/WGSL/reference/WebGPU. |
 | Lab manifest `requires_browsergrad` | Version gate for platform exercises. |
 
+The current compiler seam is a CUDA-lite frontend, not a generic C++/CuTe
+frontend. Before adding syntax support, read the semantic requirements: the
+target seam is a versioned C++ frontend lowering layouts, `Tensor<Engine,
+Layout>`, views, index maps, and tiles through the layered value/layout, kernel,
+schedule, and host-graph contracts defined by the platform LLD.
+Do not add source-spelling handlers as a substitute for that work.
+
 ## Curriculum Compatibility Pointers
 
 - Keep root package behavior course-agnostic.
+- Treat education and guided labs as consumers of exact platform semantics, not
+  as permission to replace them with assignment-specific emulation.
 - Read `docs/platform/curriculum-platform-architecture.md` before adding new course or lecture companion work.
 - Read `docs/platform/kernel-lab-foundation.md` before adding browser-native GPU/kernel lab work.
+- Read `docs/platform/package-requirements-lld.md` before changing compiler,
+  kernels, JIT realization, dtype/device behavior, or capability terminology.
 - Read `docs/platform/package-consolidation-audit.md` before proposing or adding
   a package.
 - Read `docs/platform/research-gated-prd-workflow.md` before creating or publishing PRDs.

@@ -1,126 +1,165 @@
-# Kernel Lab Foundation
+# Browser-Native Kernel and Compiler Foundation
 
-BrowserGrad should grow a tiny browser-native kernel core first, then mature it
-into more powerful GPU-programming features. The goal is progressive
-compatibility: start with the clean learning model of buffers, kernels,
-dispatch, synchronization, correctness oracles, and performance feedback, then
-keep expanding toward CUDA/Triton-style experimentation wherever the browser can
-support it honestly.
+BrowserGrad’s kernel platform is a serious execution and compiler effort that
+happens to be browser-native. Courses and labs are important consumers because
+they demand inspectable, deterministic behavior, but they do not define a
+weaker semantic target.
 
-## Decision
+The platform must be honest about WebGPU: a browser does not expose CUDA
+streams, Tensor Cores, WGMMA, TMA, peer memory, or NCCL. The answer is not to
+pretend those facilities exist, nor to reduce the source language to a
+collection of worksheet patterns. The answer is a shared semantic machine with
+portable and native execution tiers.
 
-Build a foundational `kernel-lab` layer around WebGPU/WGSL and BrowserGrad
-rubrics. Treat projects like `gpu.cpp` and HipScript as design references, not
-hard dependencies.
+The normative requirements are in
+[BrowserGrad Semantic Systems Architecture and Low-Level Requirements](./package-requirements-lld.md).
+This document describes how kernel/lab work follows that contract.
 
-## Clean Parts To Steal
+## Direction
 
-From `gpu.cpp`:
+```text
+actual source language and tensor/layout semantics
+  -> frontend facts -> value/layout semantics -> effectful kernel semantics
+  -> schedule IR + host execution graph
+  -> CPU conformance | portable WGSL/WebGPU | optional native companion
+  -> labs, notebooks, profiling, and rubric adapters
+```
 
-- Small nouns and verbs: context, tensor/buffer, kernel, bindings, dispatch,
-  copy-to-host.
-- Low boilerplate API where resource setup is explicit and dispatch is obvious.
-- Native Dawn runner as an optional test/benchmark companion.
-- Fast iteration and examples that expose the GPU model directly.
+The teaching surface must expose the real concepts of views, layouts, memory
+spaces, tiles, reductions, synchronization, masks, and numerical behavior.
+It may present these concepts progressively, but it cannot swap them for a
+different semantics behind an API that claims CUDA, CuTe, or tensor behavior.
 
-From HipScript:
+## Current Substrate
 
-- CUDA/HIP teaching concepts can map to WebGPU: grid, block, thread index,
-  shared memory, barriers, kernel launch.
-- A CUDA-like language can start with a small supported subset while keeping the
-  door open to broader compatibility as compiler/runtime pieces mature.
-- Browser compilation is possible, but a full LLVM toolchain is heavy and should
-  stay optional or future-facing.
+The following components are useful implementation substrate and remain
+supported with their current names and boundaries:
 
-## Initial Core
+- `@unlocalhosted/browsergrad-kernels` owns WGSL device resources, dispatch,
+  prepared sequences, resident buffers, and JavaScript reference execution.
+- `createKernelRubric()` provides structured CPU-oracle assertions for browser
+  rubrics. It is a rubric/reference facility, not a GPU execution substitute.
+- `runThreadGrid()` gives deterministic thread/block traces for concept and
+  correctness analysis. It is a simulator, not a CUDA performance runtime.
+- `defineKernel1DProgram()` has a browser-owned 1-D program representation
+  with CPU reference and WGSL lowering. It remains useful for direct WGSL and
+  introductory execution work, but is not the universal tensor/layout IR.
+- `@unlocalhosted/browsergrad-compiler` owns the current CUDA-lite frontend,
+  canonical Kernel IR, semantic CPU reference, WGSL emission, and WebGPU
+  execution planning.
 
-The first stable core should include:
+These components must converge on shared tensor/layout/tile semantics for
+advanced workloads. They must not become parallel, source-shaped compatibility
+stacks.
 
-- `KernelContext`: owns a WebGPU device/queue and cache.
-- `KernelBuffer`: typed storage buffer with explicit upload/download.
-- `KernelProgram`: WGSL source plus workgroup metadata and bind layout.
-- `dispatchKernel`: validates bindings, dispatches, awaits completion.
-- `KernelOracle`: CPU/JS reference for correctness checks.
-- `KernelRubric`: structured assertion helpers for output tolerance, dispatch
-  errors, forbidden APIs, and timing envelopes.
+## Required Compiler Shape
 
-First shipped BrowserGrad primitive: `@unlocalhosted/browsergrad-kernels`
-exports `createKernelRubric()`, a CPU-only assertion collector for JS/WebGPU
-rubrics. It checks tensor shape/value closeness with tolerances, records compact
-failure details, and can forward directly into BrowserGrad JS rubric callbacks.
-The same package now exports the BrowserGrad-owned thread-grid executor
-`runThreadGrid()`, which gives GPU Puzzles/CS149-style labs thread/block
-traces, guard diagnostics, and deterministic outputs before WGSL lowering.
-`simulateCuda1DGrid()` remains a compatibility alias for assignments that teach
-CUDA vocabulary directly.
-The next shipped primitive is `defineKernel1DProgram()`: one small Kernel1D
-program description can run through `runKernel1DProgramReference()` and
-`emitKernel1DProgramWgsl()`, then dispatch through `runKernel1DProgramWebGpu()`
-when a browser adapter exists. It now supports scalar params and `outputRead`
-expressions for SAXPY-like kernels. `defineCuda1DProgram()` and friends remain
-compatibility aliases. This keeps the HipScript direction alive by making
-CUDA/HIP-like syntax a frontend over our core, without making browser LLVM the
-first dependency.
+The current CUDA-lite parser is a shipping frontend with finite coverage. It
+is not the promised model for arbitrary C++ or CuTe source. For real CuTe and
+CUTLASS support, BrowserGrad requires a versioned, standards-aware C++ frontend
+that consumes the actual upstream headers and performs preprocessing, lookup,
+templates, overload resolution, and diagnostics before semantic lowering.
 
-PRD-019 adds the next layer: `@unlocalhosted/browsergrad-compiler`, a
-BrowserGrad-owned CUDA-lite compiler that parses learner source, validates a
-small supported subset, lowers into Kernel IR, emits WGSL, and runs both a
-lockstep CPU reference and real WebGPU dispatch. This is the default path for
-browser-native GPU programming. A HipScript-style LLVM backend remains a future
-power backend, not the first dependency.
-Use [CUDA-lite Compiler Architecture](./cuda-lite-compiler-architecture.md) for
-low-level extension invariants and evidence gates.
-The compiler package includes SAXPY, guarded-map, and tiled-matmul examples;
-profiles should declare `cuda-lite-compiler` when they depend on this authoring
-path rather than handwritten WGSL.
-Platforms can derive that label with `browserGpuCapabilities()` after calling
-`detectKernelFeatures()` so `shader-f16`, subgroup, WGSL, and CUDA-lite support
-come from one capability environment.
-Pass the same detected feature set through
-`compileCudaLiteOptionsFromKernelFeatures()` before compiling learner CUDA-lite
-source, so runtime preflight and compiler codegen use one source of browser GPU
-truth.
-For hot loops, the low-level WGSL runner exposes prepared sequences and resident
-storage buffers, while the compiler exposes `prepareCompiledKernelWebGpu()` over
-the same execution plans. Platform labs should use the prepared path when launch
-shape and scalar params are stable, then materialize only requested readbacks.
+The lowering target must distinguish:
 
-This core should be independent from Pyodide. Python assignments may call it
-through registered JS modules, but JS/WGSL labs should run without Python.
+| Semantic concept | Why it is necessary |
+| --- | --- |
+| `Layout` algebra | CuTe composition, hierarchy, slicing, coordinate mapping, and static swizzles cannot be represented safely as source patterns. |
+| `Tensor<Engine, Layout>` | A tensor combines addressability/engine information with a layout; the compiler must preserve both. |
+| `TensorView` | Dynamic pointers, offsets, rank/shape, stride/layout, element type, address space, alignment, and nullable/indirect bindings require an explicit runtime ABI. |
+| `IndexMap` | CPU reference and backends need the same typed coordinate program; affine maps are an important optimization subset, not the whole model. |
+| `Tile` and collective operations | Tiled copies, reductions, MMA, shared-memory staging, masks, and barriers need structured semantics and uniformity preconditions. |
+| `HostExecutionGraph` | Multi-dispatch launches, copies, events, and browser-hosted sequences are real program behavior and must not be hidden in emitter heuristics. |
 
-## Maturation Path
+Every frontend reports separate status for source acceptance, semantic
+representation, CPU reference execution, portable WebGPU execution, and native
+execution. “Supported” without a tier is not a valid platform claim.
 
-1. WGSL-first kernel labs with CPU oracles.
-2. CUDA-shaped 1D program IR with simulator and WGSL lowering.
-3. Native Dawn/gpu.cpp-style runner for CI and local benchmarking.
-4. Resident buffers plus prepared dispatch sequences for hot-loop timing.
-5. Kernel tracing artifacts: source, bindings, workgroups, timing, output
-   previews.
-6. CUDA-lite syntax for teaching simple kernels via PRD-019.
-7. Worker-mesh collectives for distributed systems labs.
-8. Pattern-specific kernels such as FlashAttention once the simple core is
-   boring and stable.
+## Portable and Native Backends
 
-## Compatibility Posture
+### Portable WebGPU
 
-The core should be ambitious about compatibility for learning and
-experimentation. Learners should be able to tinker with CUDA-like syntax,
-Triton-like ideas, handwritten WGSL, and native-runner workflows over time.
+The portable backend lowers the canonical program to WGSL and performs actual
+browser device execution. It may choose a correct workgroup-tiled algorithm
+when the source requests tiled MMA or attention. It must publish feature
+requirements (`shader-f16`, subgroup features, limits) and actual measurement
+availability.
 
-The first stable guarantee is smaller: WGSL kernels, explicit buffers,
-deterministic oracles, and transparent dispatch. Features like broad CUDA
-surface area, Triton-style kernels, GPU libraries, warp intrinsics, and richer
-compiler support are expansion targets, not abandoned goals.
+The direct attention kernel currently serves as a fused row-wise online-softmax
+baseline. It is useful correctness and performance substrate. It is not
+block-tiled FlashAttention until it stages K/V tiles (or proves an equivalent
+memory strategy), maps a query tile, synchronizes correctly, maintains online
+softmax across tiles, and passes tile-boundary conformance tests.
 
-Two constraints remain load-bearing:
+### Native companion
 
-- Do not hide WebGPU so thoroughly that learners cannot see the real GPU model.
-- Do not make Pyodide required for kernel labs.
+The native companion consumes the same verified value/layout, kernel, and host
+artifacts on CUDA/native environments. It is the appropriate product for
+hardware-specific atoms, Tensor-Core behavior, TMA/WGMMA pipelines, peer-memory
+experiments, and NCCL-like multi-device collectives. It may add specialized
+schedules and lowering; it may not change source/layout/index semantics and
+must state its preservation level.
 
-## Why This Matters
+### Distributed work
 
-For systems assignments like CS336 assignment 2, a browser-native kernel core
-lets BrowserGrad teach the real concepts without pretending a browser is a
-Linux CUDA box. We can capability-gate native-only tests, then replace them with
-labs that show the same systems ideas through WebGPU, deterministic simulators,
-and transparent rubrics.
+Browser worker meshes and native multi-device execution are separate products:
+
+- Browser labs use explicit message transport and deterministic collectives.
+- Native/remote environments use real devices, peer-memory topology, and
+  communication libraries.
+
+Do not describe one as the other.
+
+## Workload-Driven Development
+
+The platform’s capability tests are serious systems workloads, not an API
+checklist:
+
+1. Dynamic rank-2/3 views: transpose, strided slices, broadcasts, packed
+   attention heads, padded tensors, and NCHW/NHWC-style transformations.
+2. Actual upstream CuTe layout and `Tensor<Engine, Layout>` fixtures at pinned
+   versions.
+3. Tiled GEMM with explicit view/layout maps, shared-memory staging, masks,
+   vectorized paths where legal, and differential CPU/WebGPU checks.
+4. Attention progression: row-wise online baseline, tiled attention, online
+   softmax across tiles, then correctly named fused/block-tiled attention.
+5. A teaching-scale GPT stack: embedding, normalization, GEMM, attention,
+   residual, classifier, and optimizer steps, progressively fused only when
+   the canonical semantics and evidence exist.
+6. Multi-kernel host graphs, optimizer pipelines, and distributed collectives
+   with explicit dependency/order semantics.
+
+The first cross-cutting flagship is an unmodified pinned CuTe-style tiled
+attention source program. It forces C++ source compatibility, layout/tensor
+lowering, dynamic views, tile semantics, CPU conformance, WGSL execution, and
+honest performance comparison against the row-wise baseline.
+
+## Rules for Lab and Curriculum Authors
+
+- Use real WGSL, the current CUDA-lite frontend, or the eventual C++/CuTe
+  frontend according to the capability required by the task. Do not invent a
+  BrowserGrad-only tensor/layout syntax to stand in for CuTe.
+- A simulation or CPU oracle is valuable for explanation and debugging; label
+  it as such and do not count it as real WebGPU or native execution evidence.
+- Capability gates must describe the missing tier and provide a browser-safe
+  alternative only when the alternative’s semantics are named.
+- The platform remains Pyodide-optional for JavaScript/WGSL labs. Python is a
+  consumer of the kernel platform, not its ownership boundary.
+- Put broadly useful compiler, view, layout, tile, and backend work in
+  packages. Keep assignment-specific wording, fixture policy, and rubrics in
+  profiles or platform documentation.
+
+## Evidence Rules
+
+A kernel/compiler claim needs the evidence appropriate to its tier:
+
+| Claim | Minimum evidence |
+| --- | --- |
+| CuTe/CUTLASS source compatibility | Pinned upstream source fixture through the real C++ frontend and semantic inspection. |
+| Tensor/layout behavior | Coordinate-map/property tests plus CPU reference tests over offsets, strides, masks, broadcasts, and tile boundaries. |
+| Portable WebGPU execution | Actual device execution matching the CPU reference, with skipped environments reported as not run. |
+| Hardware-specific acceleration | Native test proving the named facility and matching the same canonical reference. |
+| Performance | Recorded hardware/browser configuration, named baseline, and separate correctness proof. |
+
+When a feature is absent, report the semantic or backend capability that is
+missing. Do not turn the limitation into a vague “lab subset” label.

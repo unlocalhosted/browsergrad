@@ -25,7 +25,7 @@ How the packages compose, what each layer owns, and why the calls were made the 
 │                            │  │                  │    │                                 │
 │  Tensor + closure backward │  │  TensorProxy +   │    │  matmul / matmulTiled /         │
 │  nn.{Linear, Conv, ...}    │  │  UOp IR (28 ops) │    │  softmax / layernorm /          │
-│  optim.{SGD, Adam, AdamW}  │  │  Fusion          │    │  attention / FA-v2 /            │
+│  optim.{SGD, Adam, AdamW}  │  │  Fusion          │    │  attention / online-softmax /   │
 │                            │◀─┤  Symbolic VJP    │    │  fusedElementwise (codegen)     │
 │                            │  │  AMP + GradScaler│    │                                 │
 │                            │  │  Checkpointing   │────▶  WebGPU realizer bridge         │
@@ -44,15 +44,46 @@ How the packages compose, what each layer owns, and why the calls were made the 
 ```
 
 The runtime knows nothing about tensors. The kernels package knows nothing about Python. The two ML libraries pick their own backends — grad is eager NumPy, jit is lazy IR with pluggable realizers. Each piece composes with the others but doesn't depend on them at runtime.
-The compiler owns CUDA-lite semantics and lowers learner kernels to Kernel IR,
-CPU reference execution, WGSL, and real WebGPU dispatch through the kernels
-package. It is course-agnostic; corpus support lives in generic source
-normalization, diagnostics, and compatibility gates.
+The compiler currently owns CUDA-lite semantics and lowers those kernels to
+Kernel IR, CPU reference execution, WGSL, and real WebGPU dispatch through the
+kernels package. It is course-agnostic; corpus support lives in generic source
+normalization, diagnostics, and compatibility gates. CUDA-lite is the shipping
+frontend, not the architectural destination: the next semantic layer is a
+versioned C++/CuTe frontend lowering actual layout/tensor meaning into the same
+canonical program.
 
 For the multi-course guided-lab layer that sits above these packages, see
 `docs/platform/curriculum-platform-architecture.md`.
 For the browser-native systems/kernel lab direction, see
 `docs/platform/kernel-lab-foundation.md`.
+For the normative semantics-first requirements and current-state corrections,
+see `docs/platform/package-requirements-lld.md`.
+
+## Semantics-first direction
+
+BrowserGrad's packages are designed to compose around facts that retain their
+meaning across execution tiers. The CPU reference proves canonical semantics;
+portable WebGPU executes the same semantics subject to browser capabilities;
+an optional native companion may add architecture-specific lowering. No tier
+may rename an approximation as the stronger capability.
+
+The target semantic stack is frontend-neutral and multi-level:
+
+```text
+CUDA-lite | versioned C++/CuTe | JIT graph | explicit eager/direct kernel
+  -> frontend semantic facts
+  -> DType + DimExpr + TensorView + IndexMap value/layout semantics
+  -> effectful kernel semantics
+  -> schedule IR + HostExecutionGraph
+  -> CPU reference | portable WGSL/WebGPU | native companion lowering
+```
+
+`TensorView`, `IndexMap`, and `Tile` are internal semantic concepts, not a
+new user language. They allow the platform to preserve source-level CuTe
+syntax while giving frontends and backends versioned contracts for view,
+layout, collective, synchronization, scheduling, and host behavior without
+collapsing them into one god IR. Existing CUDA-lite source support continues as
+a separately named frontend while this stack is implemented.
 
 ## Package responsibilities
 
@@ -60,15 +91,27 @@ For the browser-native systems/kernel lab direction, see
 Owns the lifecycle: Pyodide booted in a Worker, the wire protocol between host and Python (stdout / stderr / structured assertions / structured artifacts), interrupt + clearNamespace + fs. Ships a `LabManifest` schema + parser + semver gate for platforms that want to pin runtime versions on a per-resource basis. No tensor library dependency.
 
 ### `browsergrad-kernels` — GPU layer
-Owns the WGSL. Every kernel has a JS reference for conformance + a CPU fallback path. A primitives catalog — no tensor library dependency. Also ships `createWebGpuRealizerBridge`, the production WebGPU bridge that `browsergrad-jit` consumes for its WebGPU realizer tier.
+Owns WGSL and portable device execution. Every kernel has a JS reference for
+conformance and a CPU reference path; that reference is not a claim of GPU
+execution. The package also ships `createWebGpuRealizerBridge`, the production
+WebGPU bridge that `browsergrad-jit` consumes for its WebGPU realizer tier.
+`matmulTiled` is a workgroup-tiled GEMM. The current direct attention kernel is
+a fused row-wise online-softmax baseline; it must not be presented as
+block-tiled FlashAttention until it implements and proves that algorithm.
 
-### `browsergrad-compiler` — CUDA-lite compiler layer
-Owns CUDA-lite parsing, source/context normalization, semantic analysis,
-Kernel IR lowering, lockstep CPU reference execution, WGSL emission, and
-WebGPU runner orchestration. It consumes `browsergrad-kernels` dispatch helpers
-but keeps CUDA/C++ compatibility heuristics out of platform code. Its
+### `browsergrad-compiler` — compiler and semantic execution layer
+Owns the current CUDA-lite parser, source/context normalization, semantic
+analysis, Kernel IR lowering, lockstep CPU reference execution, WGSL emission,
+and WebGPU runner orchestration. It consumes `browsergrad-kernels` dispatch
+helpers but keeps frontend/C++ compatibility facts out of platform code. Its
 real-world corpus gates compile/codegen pinned CUDA corpora and execute selected
 fixtures in Chromium/WebGPU against CPU reference outputs.
+
+The required expansion is a versioned C++/CuTe source frontend plus layered
+value/layout, effectful-kernel, schedule, and host-graph domains. They must model
+`Tensor<Engine, Layout>`, dynamic `TensorView` bindings, general `IndexMap`
+composition, logical and physical tiles, uniformity, and host graphs. These are
+shared semantic requirements, not a set of parser aliases or one monolithic IR.
 
 ### `browsergrad-grad` — eager autograd
 Closure-based reverse-mode autograd in Python. Each op carries a closure that runs at `.backward()` time. NumPy-backed by default, no IR, no lazy semantics. Stable; designed to be readable source code. It now covers the classic eager teaching surface — Conv1d/2d/3d, ConvTranspose2d, pooling, BatchNorm1d/2d/3d, GroupNorm/InstanceNorm2d, LayerNorm, Dropout, Embedding, MultiHeadAttention, single-layer RNN/LSTM/GRU, optimizers, schedulers, state_dict, hooks, and torch-alias shims. A small explicit `device=` path can run forward matmul / softmax / layernorm / unmasked 2D attention through `browsergrad-kernels`; CPU autograd still owns backward.
@@ -76,7 +119,7 @@ Closure-based reverse-mode autograd in Python. Each op carries a closure that ru
 ### `browsergrad-jit` — lazy IR
 The UOp graph + lazy execution path. Every arithmetic op builds an IR node; nothing realizes until `.numpy()` / `.item()` / `.backward()` / `optimizer.step()`. The IR enables fusion, symbolic backward, AMP cast-insertion, gradient-checkpointing IR rewrites, functional transforms (vmap / grad / vjp / functional_call), custom WGSL kernels, ONNX export, and pluggable backends.
 
-### `browsergrad-primitives` — small primitive facade
+### `browsergrad-primitives` — browser-safe primitive facade
 Canonical public interface for browser-safe text, data, evaluation,
 simulation, hosted-training, and RL/math primitives. It keeps generic caller
 vocabulary such as references, comparators, fixtures, and simulators. The
@@ -149,8 +192,13 @@ Each layer fails over to the one below with a clear error. Never silently degrad
 ### 4. We own the codegen
 The fused-elementwise WGSL is assembled from a TypeScript walker over the ops list. No template engine. No WGSL parser. The hash of the ops sequence drives the pipeline cache. Same approach for the ONNX export: hand-rolled proto3 encoder (no protobuf wheel). When a library would have required a dependency unavailable in Pyodide, we wrote the encoder ourselves.
 
-### 5. Honest scope cuts
-Every major feature passes through a design review before implementation. Each review kills speculative scope and identifies the load-bearing piece. The verdicts live in commits; what shipped is the cut scope, not the original. See `docs/prd/` for the per-PRD design records.
+### 5. Scope discipline without semantic reduction
+Every major feature passes through a design review before implementation. A
+review may sequence delivery or set a backend boundary, but it must not replace
+the missing semantic model with source-pattern handlers, silent dtype changes,
+or renamed baselines. The load-bearing abstraction and its evidence gate belong
+in the design record. See `docs/prd/` for per-PRD records and
+`docs/platform/package-requirements-lld.md` for the normative direction.
 
 ## Seams
 
@@ -167,6 +215,7 @@ Every major feature passes through a design review before implementation. Each r
 | `bg.save_safetensors(state)` | bytes | Browser-friendly checkpoint format. |
 | `bg.onnx.export_inference(root)` | bytes | Pure-Python proto3 encoder. |
 | `parseManifest(json)` + `assertCompatibleRuntime` | A `LabManifest` object | Optional contract for platforms that pin runtime versions. |
+| `TensorView` / `IndexMap` / `Tile` *(required target)* | Backend-neutral tensor/layout/collective semantics | Future shared seam for CuTe/C++ source, CPU reference, WebGPU, and native lowering. |
 
 ## Testing strategy
 

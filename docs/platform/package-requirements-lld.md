@@ -1,582 +1,1206 @@
-# BrowserGrad Package Requirements And Low-Level Design
+# BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
-Last updated: 2026-07-06
+- **Status:** normative platform architecture; implementation status is not implied
+- **Last reviewed:** 2026-07-15
+- **Implementation ledger:**
+  [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
+- **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
+  scheduling, CPU reference execution, WebGPU execution, optional native
+  execution, JIT/eager integration, runtime capability contracts, wire formats,
+  and release evidence.
 
-This document is the package-by-package requirements map for BrowserGrad after
-the v0.5.x capability pass. It is intentionally explicit: each package owns a
-small production contract, a clear low-level design, and validation gates that
-prove the contract. It also names the research and platform facts behind the
-architecture so future work does not drift into assumption-led design.
+The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
+describe requirement strength. They are used deliberately rather than as
+general emphasis.
 
-## Research Basis
+## Purpose
 
-| Design pressure | External basis | BrowserGrad consequence |
+BrowserGrad is a browser-native, inspectable compiler and ML execution
+substrate. Multiple real frontends lower into shared, versioned semantic
+contracts. A deterministic CPU reference proves meaning; portable WebGPU is
+the primary accelerated execution product; optional native backends may add
+hardware-specific lowerings without changing the program's declared meaning.
+
+Guided labs, notebooks, courses, demos, and framework-shaped APIs are demanding
+consumers of this substrate. They are not permission to weaken language,
+tensor, numerical, memory, or execution semantics.
+
+A capability is not complete because an API name is accepted, a source string
+parses, a shader compiles, or a demo returns a plausible value. It is complete
+only at the exact tier for which representation, verification, execution,
+diagnostics, and evidence all agree.
+
+## Document Contract
+
+This document owns:
+
+- Stable architectural boundaries and dependency direction.
+- The semantic concepts that must remain consistent across packages.
+- Versioning, diagnostics, security, and operational requirements.
+- The migration gates required to reach the target architecture.
+- The evidence required before making a public capability claim.
+
+This document does not act as a hand-maintained feature-status dashboard.
+Current capability status MUST come from package tests and a generated
+capability manifest. Package READMEs describe the shipping public API. Mutable
+project sequencing MAY live in a roadmap, but it MUST reference the gates in
+this document rather than inventing a second completion definition.
+
+Changing a normative boundary in this document requires an architecture
+decision record that states the new invariant, migration path, compatibility
+impact, and deletion plan for the superseded design.
+
+## Product Goal and Non-Goals
+
+### Goal
+
+BrowserGrad aims to make serious systems and ML programs inspectable and
+executable in browser environments without confusing portable behavior with
+CUDA- or vendor-specific behavior. It should support several source and graph
+frontends through one coherent semantic stack:
+
+- The shipping CUDA-lite frontend for CUDA-shaped browser labs and user kernels.
+- A versioned CUDA-capable C++/CuTe frontend for real upstream source.
+- The lazy JIT tensor graph for framework operations and autograd.
+- Explicit eager-package bridges where their transfer/materialization behavior
+  is part of the API.
+- Direct WGSL or structured-kernel APIs for browser-native kernel authors.
+
+CuTe/CUTLASS compatibility is a flagship proof that the architecture preserves
+real layout, tensor, tiling, and hardware-boundary concepts. It is not
+BrowserGrad's sole product identity and MUST NOT shape the shared semantic model
+around CuTe source spellings.
+
+### Explicit non-goals
+
+The following are not required for the portable browser product:
+
+- Making WebGPU expose CUDA streams, PTX, Tensor Cores, WGMMA, TMA, peer memory,
+  or NCCL.
+- Executing arbitrary native C++ binaries in a browser.
+- Claiming schedule- or instruction-level fidelity when only observable tensor
+  results are preserved.
+- Supporting every CUTLASS header, architecture, example, or release under one
+  undifferentiated "CUTLASS support" label.
+- Turning `browsergrad-grad` into a GPU-resident eager framework through
+  incremental `device=` branches. That requires a separately approved storage
+  and autograd architecture.
+- Making native execution or distributed multi-device execution a release gate
+  for the portable WebGPU product.
+
+## Engineering Invariants
+
+1. **Build semantic machines, not syntax collections.** Frontends preserve real
+   user programs; shared IR represents their meaning. Source-spelling handlers
+   do not substitute for missing semantics.
+2. **Keep the architecture frontend-neutral.** CUDA-lite, C++/CuTe, JIT, eager,
+   and direct-kernel frontends converge on shared concepts without importing one
+   another's internal types.
+3. **Use multiple IR levels.** Source facts, value/layout meaning, effectful
+   kernel behavior, schedules, host orchestration, and backend plans change for
+   different reasons and MUST NOT be collapsed into one god IR.
+4. **No silent semantic substitution.** `bf16` is not `f32`; a CPU reference is
+   not WebGPU execution; a row-wise attention loop is not block-tiled
+   FlashAttention; an opaque host callback is not a portable kernel operation.
+5. **Correctness precedes acceleration, but CPU correctness is not acceleration
+   evidence.** CPU reference and actual-device tests prove different things.
+6. **Backend limits are data.** Feature requirements, limits, legalizations,
+   numerical differences, and unavailable states are structured results rather
+   than source-family guesses or free-form labels.
+7. **Materialization is explicit.** Host/device transfers, readbacks, view
+   materialization, dtype conversion, and host-lifted operations are observable
+   operations with ownership and cost.
+8. **Generated and serialized state is versioned.** Python/JS, worker/host, and
+   frontend/backend boundaries use validated, deterministic schemas.
+9. **Unsupported behavior fails at the true boundary.** A frontend may accept a
+   program whose backend cannot execute it, but the failure MUST name the
+   unsupported semantic or execution capability.
+10. **Education is a quality bar.** Coordinate traces, layouts, memory effects,
+    synchronization, numerical policy, and capability boundaries should be
+    explainable to users, not hidden behind compatibility shims.
+
+## Execution Tiers and Preservation Claims
+
+Execution tier and preservation level are independent axes. A backend claim
+MUST state both.
+
+### Execution tiers
+
+| Tier | Contract |
+| --- | --- |
+| **Semantic reference** | Deterministic or explicitly policy-controlled CPU execution of the verified semantic program. Used for conformance, traces, and diagnostics. |
+| **Portable WebGPU core** | Actual device execution using required WebGPU core behavior only. Device limits are still explicit. |
+| **Portable WebGPU enhanced** | Actual WebGPU execution that requires named optional features such as `shader-f16` or subgroups. |
+| **Native companion** | Optional CUDA/native lowering for named architectures and facilities. It consumes the same semantic artifact but may use target-specific scheduling and instructions. |
+| **Simulation** | An explicitly named teaching or analysis model. It is never execution evidence for another tier. |
+
+### Preservation levels
+
+| Level | Meaning |
+| --- | --- |
+| **observable-equivalent** | Values, allowed numerical error, memory effects, aliasing behavior, and synchronization-visible results satisfy the declared program contract. |
+| **portable-relegalized** | Observable behavior is preserved, but invocation mapping, memory placement, tiling, or algorithm schedule is changed to meet a portable backend. |
+| **schedule-preserving** | The backend preserves the declared logical tile/thread mapping and ordering constraints after a documented scope mapping. |
+| **native-facility** | The backend proves use of the named architecture-specific instruction, memory path, or collective facility. |
+
+A portable WebGPU implementation of a CUDA/CuTe program will often be
+`portable-relegalized`, not `schedule-preserving`. That is a valid product
+capability when named accurately.
+
+## Multi-Level Semantic Architecture
+
+```text
+frontends
+  CUDA-lite | CUDA-capable C++/CuTe | JIT graph | eager bridge | direct kernel
+      |
+      v
+L0: frontend semantic artifact
+  source spans, instantiated types/templates, source-language control flow,
+  source ABI facts, target intrinsics
+      |
+      v
+L1: value and layout semantics
+  DType + DimExpr + ConstraintSet + LayoutExpr + TensorView + IndexMap
+      |
+      v
+L2: kernel semantic IR
+  structured compute, reads/writes/atomics, reductions, collectives,
+  barriers, active masks, logical tiles
+      |
+      v
+L3: schedule IR
+  invocation mapping, workgroup/subgroup decomposition, staging,
+  vectorization, physical tiles, backend requirements
+      |
+      v
+L4: host execution graph
+  allocations, bindings, dispatches, copies, dependencies, materialization
+      |
+      v
+L5: backend execution plan
+  CPU interpreter plan | WGSL/resources/pipelines | native launch plan
+```
+
+No layer may reach upward. Lowering is explicit and produces a new verified
+artifact or a typed failure. Backends MUST NOT reconstruct missing layout,
+aliasing, bounds, or dtype meaning from source names or incidental plan fields.
+
+### Layer ownership
+
+| Layer | Owns | Must not own |
 | --- | --- | --- |
-| Eager autograd remains useful for teaching and debugging. | PyTorch autograd records a graph during forward execution and runs reverse-mode differentiation from that graph. See [PyTorch Autograd mechanics](https://docs.pytorch.org/docs/2.12/notes/autograd.html). | `browsergrad-grad` keeps closure-based eager autograd as the readable baseline. It should stay CPU-first and easy to inspect. |
-| Production acceleration needs staged graphs, not ad hoc per-op hacks. | JAX documents tracing to an IR, lowering to StableHLO, compiling for a target device, then executing; see [JAX AOT lowering and compilation](https://docs.jax.dev/en/latest/aot.html). PyTorch `torch.compile` similarly separates capture, graph breaks, guards, and backend compilation; see [torch.compile](https://docs.pytorch.org/docs/2.12/generated/torch.compile.html). | `browsergrad-jit` owns lazy UOp IR, VJP graph construction, fusion, AMP/checkpoint rewrites, ONNX export, and WebGPU realization. |
-| WebGPU kernels must respect browser GPU semantics, not CUDA folklore. | WGSL is statically typed, exposes storage/uniform/workgroup memory, requires uniformity for barriers, and does not share workgroup variables across workgroups. See [WGSL specification](https://www.w3.org/TR/WGSL/). | `browsergrad-kernels` and `browsergrad-compiler` must model address spaces, barriers, feature gates, and readback boundaries explicitly. |
-| Browser execution needs worker isolation and cooperative interrupt semantics. | Pyodide interrupts require a Web Worker plus `SharedArrayBuffer` and `pyodide.setInterruptBuffer()`. See [Pyodide interrupting execution](https://pyodide.org/en/stable/usage/keyboard-interrupts.html). | `browsergrad-runtime` owns Worker lifecycle, same-origin Pyodide assets, timeout/abort, and clear cancellation behavior. |
-| Conv performance should lower convolution to matrix multiply where simple. | Caffe documents `im2col` as image-to-column lowering used to perform convolution through matrix multiplication. See [Caffe im2col](https://caffe.berkeleyvision.org/tutorial/layers/im2col.html). | `browsergrad-grad` Conv2d uses im2col + batched matmul for correctness and readable performance. |
-| Attention acceleration must be IO-aware. | FlashAttention frames exact attention speed around tiling and reducing reads/writes between memory levels. See [FlashAttention](https://arxiv.org/abs/2205.14135). | `browsergrad-kernels` keeps JS reference attention plus WebGPU attention/FlashAttention paths; `jit` uses graph realization for throughput-oriented attention. |
-| Recurrent parity is shape/state heavy. | PyTorch RNN/LSTM APIs define `num_layers`, `dropout`, `bidirectional`, direction-expanded hidden state shapes, and layer-specific parameter names. See [torch.nn.RNN](https://docs.pytorch.org/docs/2.12/generated/torch.nn.RNN.html) and [torch.nn.LSTM](https://docs.pytorch.org/docs/2.12/generated/torch.nn.LSTM.html). | `browsergrad-grad` now covers stacked and bidirectional RNN/LSTM/GRU with explicit state-shape, state_dict-key, dropout, and backward tests. |
-| Export needs a stable graph format with operator/version semantics. | ONNX IR defines models, graphs, nodes, operators, tensor types, opsets, and versioning. See [ONNX IR specification](https://onnx.ai/onnx/repo-docs/IR.html). | `browsergrad-jit` ONNX export should remain an explicit supported-op subset with clear unmappable-op failures. |
-| Browser GPU feature availability changes by adapter/browser. | Chrome WebGPU notes expose feature-specific gates such as `shader-f16`; see [Chrome WebGPU updates](https://developer.chrome.com/blog/new-in-webgpu-120). | `kernels.detectKernelFeatures()` and compiler options must carry adapter facts instead of hard-coded platform assumptions. |
-| Browser-native ML must avoid accidental CPU round-trips. | WebGPU readback is asynchronous: `GPUBuffer.mapAsync()` returns a Promise and mapped buffers cannot be used by GPU commands while mapped; see [MDN GPUBuffer.mapAsync](https://developer.mozilla.org/en-US/docs/Web/API/GPUBuffer/mapAsync). Pyodide crosses Python/JS with `JsProxy`/`PyProxy` wrappers; see [Pyodide type translations](https://pyodide.org/en/stable/usage/type-conversions.html). | A GPU-native BrowserGrad path needs one canonical tensor IR, explicit storage/device ownership, GPU-resident parameters/activations/grads/optimizer state, and `.numpy()`/`.item()` as explicit materialization boundaries. |
+| Frontend semantic artifact | Source-language types, declarations, template arguments, spans, source ABI, and unresolved target intrinsics. | WGSL strings, `GPUBuffer`, framework tensors, or shared backend policy. |
+| Value/layout semantics | Pure shape, dtype, layout, view, binding-slot, alias, and coordinate meaning. | Source AST nodes, schedules, device resources, or host workflow. |
+| Kernel semantic IR | Observable computation, structured control flow, memory effects, collectives, and synchronization preconditions. | Source spellings, pipeline caches, or target instruction strings. |
+| Schedule IR | Mapping logical work to physical execution, staging, vectorization, and declared backend requirements. | User-facing tensor meaning or actual device objects. |
+| Host execution graph | Observable multi-dispatch order, allocations, copies, bindings, events, and materialization. | Hidden backend heuristics or course policy. |
+| Backend plan | Target-legal code, resources, pipelines, dispatch sizes, caches, and recovery metadata. | New semantic meaning not present in verified upper layers. |
 
-## Production Architecture
+The architecture MAY use several concrete TypeScript data structures rather
+than a general compiler framework. The required property is the layer boundary,
+not adoption of a particular compiler toolkit.
 
-```text
-Host app / lab platform
-  -> @unlocalhosted/browsergrad-runtime
-       Pyodide Worker, exec protocol, fs, cancellation, assertions/artifacts,
-       manifest/profile preflight
+## Core Value and Layout Contract
 
-  -> Python package installers
-       @unlocalhosted/browsergrad-grad
-         eager NumPy autograd, readable modules, optional explicit device bridge
+The following sketches define required information and illegal-state
+boundaries. Exact TypeScript names MAY change before the first schema version
+is frozen, but equivalent information MUST remain representable.
 
-       @unlocalhosted/browsergrad-jit
-         lazy UOp IR, symbolic VJP, transforms, fusion, ONNX, WebGPU realizer
+### Symbolic dimensions and constraints
 
-  -> GPU / compiler substrate
-       @unlocalhosted/browsergrad-kernels
-         WebGPU device helpers, WGSL catalog, JS references, resident buffers
+```ts
+type WireI64 = string; // canonical signed 64-bit base-10 integer
+type WireU64 = string; // canonical unsigned 64-bit base-10 integer
 
-       @unlocalhosted/browsergrad-compiler
-         CUDA-lite parser/analyzer -> Kernel IR -> CPU reference -> WGSL/WebGPU
+interface DimSymbol {
+  id: string;
+  domain: { min: WireI64; max?: WireI64 };
+}
 
-  -> Shared domain helpers
-       @unlocalhosted/browsergrad-primitives
-         browser-safe text/data/eval/simulation/RL helpers
+type DimExpr =
+  | { kind: "const"; value: WireI64 }
+  | { kind: "symbol"; id: string }
+  | { kind: "add"; terms: DimExpr[] }
+  | { kind: "mul"; lhs: DimExpr; rhs: DimExpr }
+  | { kind: "floorDiv"; value: DimExpr; divisor: DimExpr }
+  | { kind: "ceilDiv"; value: DimExpr; divisor: DimExpr }
+  | { kind: "mod"; value: DimExpr; divisor: DimExpr }
+  | { kind: "min" | "max"; values: DimExpr[] };
 
-  -> Release proof
-       @unlocalhosted/browsergrad-dogfood
-         published-tarball tests against real browser/Pyodide/WebGPU surfaces
+type ShapeConstraint =
+  | { kind: "equal"; lhs: DimExpr; rhs: DimExpr }
+  | { kind: "lessEqual"; lhs: DimExpr; rhs: DimExpr }
+  | { kind: "nonNegative"; value: DimExpr }
+  | { kind: "positive"; value: DimExpr }
+  | { kind: "divisible"; value: DimExpr; divisor: DimExpr };
 ```
 
-Non-negotiable boundaries:
+The expression language is data, never executable source. The verifier MUST
+bound expression depth and node count. Static analysis MAY recognize affine or
+other decidable subsets, but an optimization subset MUST NOT become the
+definition of general layout meaning.
 
-- Runtime stays tensor-agnostic.
-- Kernels stay Python-agnostic.
-- Grad stays eager and readable; it may call WebGPU only through explicit
-  `device=` forwarding.
-- JIT owns graph execution and throughput GPU work.
-- Compiler owns CUDA-lite semantics and diagnostics; platform code must not
-  duplicate its planning logic.
-- Primitives stay course-agnostic; assignment wrappers live above the package.
-- Dogfood tests published artifacts, not local workspace illusions.
+Wire integers reject leading `+`, leading zeroes, `-0`, whitespace, exponent
+notation, non-ASCII digits, and values outside their declared 64-bit range.
+Evaluation uses arbitrary-precision integers in both TypeScript and Python;
+field-specific verification applies signed or unsigned bounds to the result.
+The evaluator checks a configurable maximum integer bit width after every
+arithmetic operation and consumes an explicit arithmetic-operation budget;
+node/depth limits alone are insufficient against multiplicative BigInt growth.
+`add`, `min`, and `max` require at least one operand. Division, modulo, and the
+`divisible` constraint require a strictly positive evaluated divisor.
+`floorDiv` is mathematical floor,
+`ceilDiv(x, d) = -floorDiv(-x, d)`, and modulo is Euclidean in `[0, d)`. These
+rules apply equally for negative intermediate values and are wire-versioned
+semantics, not host-language defaults.
 
-## GPU-Native Target Architecture
+Dynamic symbols have declared domains and bindings. Unresolved constraints
+produce runtime guards or a lowering refusal; they MUST NOT become implicit
+assumptions. Shape specialization and pipeline caches MUST include the resolved
+symbol values and guard set in their cache keys.
 
-The long-term WebGPU-backed framework path is one GPU IR, not many escape
-hatches. `CUSTOM` callbacks are acceptable as migration scaffolding and for
-user kernels, but core framework ops should become primitive tensor IR nodes
-with CPU and WebGPU backends.
+### Dtype and numerical policy
 
-Target flow:
+`DType` identifies storage representation. Operations separately declare
+input, compute, accumulator, and output types. The numerical policy includes:
 
-```text
-Python API
-  -> eager/lazy tensor frontend
-  -> canonical tensor IR
-  -> autodiff over IR
-  -> optimizer/update IR
-  -> scheduler / memory planner
-  -> GPU codegen backend
-  -> WebGPU runtime
+- Rounding and conversion behavior.
+- Overflow and integer wrap/saturation behavior.
+- Denormal and flush-to-zero behavior where relevant.
+- Whether contraction, fusion, or reassociation is allowed.
+- Reduction/atomic order guarantees and determinism class.
+- NaN, infinity, and signed-zero expectations.
+- The comparison policy used by conformance tests.
+
+Each storage dtype also defines bit width, alignment, byte order, and canonical
+pack/unpack behavior. Serialized tensor bytes declare their byte order; canonical
+BrowserGrad fixtures use little-endian encoding. A backend legalization may
+change physical packing only through an explicit storage conversion.
+
+`bf16` means IEEE bfloat16 storage and conversion semantics. Because core WGSL
+does not currently expose a native `bf16` scalar type, the portable backend MAY
+use packed 16-bit storage with explicit conversion/rounding, MAY widen
+arithmetic under a declared policy, or MAY report unavailable. It MUST NOT
+rename f32 storage as bf16. `f16` requires the WebGPU `shader-f16` feature when
+native WGSL f16 operations are emitted.
+
+The CPU reference MUST implement the declared numerical policy rather than
+assuming host JavaScript or NumPy defaults automatically match WebGPU or native
+reduction behavior.
+
+Schema v1 has a closed builtin scalar storage-dtype registry: `bool`, `i8`,
+`u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `f16`, `bf16`, `f32`, and
+`f64`. Each ID resolves to one versioned definition; unknown builtin-looking IDs
+fail closed. Extension dtypes use a namespaced required extension and carry a
+complete storage definition. Vector values are scalar dtype plus lane count,
+not aliases such as `half2` or `float4`. V1 storage dtypes are byte-addressable
+(`storageBits % 8 === 0`); sub-byte storage requires a future schema extension
+and a `bit` location unit.
+
+### Allocation, binding, and view model
+
+```ts
+type MemorySpace =
+  | { kind: "host" }
+  | { kind: "global" }
+  | { kind: "shared"; scope: "subgroup" | "workgroup" | "cluster" }
+  | { kind: "local"; scope: "invocation" }
+  | { kind: "constant" }
+  | { kind: "target"; targetId: string; spaceId: string };
+
+interface AllocationSpec {
+  allocationId: string;
+  byteLength: DimExpr;
+  memorySpace: MemorySpace;
+  alignmentBytes: number;
+  aliasSetId: string;
+}
+
+interface TensorView {
+  viewId: string;
+  allocationId: string;
+  dtype: string;
+  byteOffset: DimExpr;
+  shape: DimExpr[];
+  indexMapId: string;
+  requiredAlignmentBytes: number;
+}
 ```
 
-Required properties:
+Actual `GPUBuffer`, NumPy array, native pointer, or PyProxy objects do not cross
+the semantic wire format. L1 `AllocationSpec` owns geometry, semantic memory
+space, alignment, and alias identity only. L4 owns lifecycle and binding:
 
-1. Tensor owns storage abstraction.
-   Storage is `CPU ndarray | GPUBuffer | pending graph value`. Shape, dtype,
-   device, layout, lifetime, aliasing, and materialization state are tracked
-   from creation.
-2. Ops build canonical IR.
-   Conv, matmul, norm, attention, elementwise, reductions, indexing, and
-   optimizer updates are IR ops, not Python callbacks.
-3. Autograd generates backward IR.
-   Backward is graph construction, not Python closures. Examples:
-   `conv2d_backward_input`, `conv2d_backward_weight`, norm backward, attention
-   backward, reduce-bias-grad.
-4. Tensor compiler lowers IR to WebGPU.
-   CUDA-lite compilation remains for labs and user-authored kernels. Framework
-   runtime ops need tensor-aware lowering: shape specialization, layout
-   planning, fusion, tiling, memory reuse, dispatch scheduling, and feature
-   gates.
-5. GPU residency is default.
-   Parameters, activations, gradients, and optimizer state stay in `GPUBuffer`.
-   CPU readback occurs only for explicit `.numpy()`, `.item()`, debug artifact,
-   assertion, or host export.
-6. Optimizers are GPU IR and kernels.
-   `SGD`, `Adam`, and `AdamW` update parameter buffers in place on GPU. No
-   `grad.numpy()` inside `step()`.
-7. WebGPU runtime owns execution.
-   It manages command encoders, pipeline cache, bind group cache, buffer pool,
-   device-loss recovery, adapter feature detection, and f16/subgroup gates.
-8. CPU backend remains reference.
-   Same IR runs on CPU for correctness/debug. Tests compare CPU reference vs
-   WebGPU output and gradients.
+```ts
+type BindingState =
+  | { kind: "slot"; slotId: string }
+  | { kind: "unbound" }
+  | { kind: "null"; permittedByAbi: true };
 
-Future package shape if BrowserGrad becomes a GPU-native framework:
-
-```text
-browsergrad-core
-  Tensor, Device, Storage, Graph IR
-
-browsergrad-autograd
-  VJP rules -> backward graph
-
-browsergrad-compiler
-  tensor IR -> WGSL pipelines
-
-browsergrad-runtime-webgpu
-  GPUBuffer pool, scheduler, pipeline cache
-
-browsergrad-nn
-  modules as thin IR builders
-
-browsergrad-reference
-  CPU NumPy backend
+interface AllocationBinding {
+  allocationId: string;
+  ownership: "owned" | "borrowed" | "external";
+  binding: BindingState;
+}
 ```
 
-This is a direction, not a renaming requirement for the current monorepo. In the
-current package split, the pragmatic correction is:
+Views reference a canonical L1 allocation table by ID so byte length,
+alignment, memory space, and alias metadata cannot diverge across duplicated
+view records. Host graphs reference a separate canonical binding table by the
+same allocation ID. Verified executable programs MUST NOT dereference an
+allocation with an `unbound` or `null` binding. Nullability is a tagged ABI
+state rather than a collection of booleans.
 
-- Keep `browsergrad-grad` educational CPU/reference-first.
-- Make `browsergrad-jit` the canonical tensor IR owner.
-- Stop expanding core GPU support through ad hoc `CUSTOM` paths.
-- Add primitive conv/norm/attention/optimizer IR.
-- Compile those IR ops to WebGPU through tensor-aware lowering.
-- Use `browsergrad-compiler` CUDA-lite for lab/user kernels, not core framework
-  ops.
-- Keep `.numpy()` and `.item()` as explicit materialization boundaries.
+Allocation byte length and view byte offset are symbolic because dynamic shapes
+can determine both. Before binding or execution they MUST resolve respectively
+to an unsigned 64-bit value and a non-negative in-allocation offset. Access mode
+does not belong to immutable view geometry; L2 memory effects declare whether a
+particular operation reads, writes, or atomically accesses the view.
 
-Conv target path:
+Backend lowering maps semantic spaces to target spaces—for example, semantic
+global/shared/local storage may become WGSL storage/workgroup/private or CUDA
+global/shared/register storage. The mapping and any unsupported scope are part
+of the lowering decision, not `TensorView` interpretation.
 
-```text
-nn.Conv2d.forward
-  -> IR: conv2d(input, weight, bias, stride, padding, dilation, groups)
-  -> GPU compiler:
-       choose direct/tiled/im2col/Winograd depending shape
-       emit WGSL
-       keep output GPU-resident
-  -> backward:
-       conv2d_backward_input
-       conv2d_backward_weight
-       reduce bias grad
-  -> optimizer:
-       adamw_update(weight, grad_weight, m, v)
+Rank is data. The canonical model has no product-level rank-4 cap. A backend
+may publish a narrower rank capability and legalize or reject accordingly.
+Artifact decoders may enforce configurable resource budgets, including rank
+limits, for denial-of-service protection; a budget result is distinct from
+saying the semantic model cannot represent that rank.
+
+### Layout and index semantics
+
+A `LayoutExpr` is construction algebra, not a second executable truth.
+Schema v1 supports affine/strided layouts, composition, permutation, slicing,
+broadcasting, and padding. Normalization produces the canonical `IndexMap`
+referenced by `TensorView`; executable wire artifacts MUST NOT carry an
+independent layout and index map that can disagree. Static swizzles, bit shifts,
+XOR/masks, and sub-byte addressing are deferred behind a required extension
+that defines exact bit width and signedness.
+
+`IndexExpr` has distinct tagged references for logical coordinate axes and for
+resolved dimension symbols. Its v1 operators are integer constant, coordinate,
+dimension, non-empty add, binary multiply, floor/ceil divide, Euclidean modulo,
+and non-empty min/max under the same signed BigInt/budget rules as `DimExpr`.
+`PredicateExpr` owns boolean literals, signed integer comparisons (`equal`,
+`lessEqual`), and non-empty `and`/`or` plus unary `not`. Neither expression
+domain reuses the generic `DimExpr.symbol` tag. An `IndexMap` declares coordinate
+rank, an explicit location unit (`element` or `byte` in v1), a location
+expression, and an in-bounds predicate. The canonical evaluator returns the
+logical coordinate, element/byte location, root-allocation location, and
+predicate result as a trace; it never silently clamps coordinates.
+
+The model MUST distinguish:
+
+- Logical coordinates from element offsets and byte offsets.
+- Shape from storage extent (`size` from `cosize`-like allocation reach).
+- A view transformation from a materializing copy.
+- A broadcasted read-only alias from writable unique storage.
+- Root-allocation bounds from view bounds.
+- Layout equivalence from layout structural identity.
+
+One canonical evaluator and verifier own coordinate meaning. CPU reference,
+schedule construction, and backend lowering consume its normalized result or a
+proved specialization. They MUST NOT independently reimplement offset/stride
+logic.
+
+### Memory effects, aliasing, and undefined behavior
+
+Every effectful operation declares read, write, or atomic regions over
+allocations plus ordering and synchronization requirements.
+
+- Overlapping non-atomic writes MUST be proved disjoint, ordered, or rejected.
+- Out-of-bounds access MUST be rejected or guarded according to declared source
+  semantics; it MUST NOT be silently clamped for convenience.
+- Alignment assumptions MUST be verified at binding or expressed as runtime
+  guards.
+- View aliases MUST retain a common root allocation and alias set.
+- Materialization MUST create a new allocation and an explicit copy operation.
+- Source-language undefined behavior MAY remain undefined only when the
+  compatibility profile says so. BrowserGrad MUST NOT accidentally turn it
+  into a stronger portable guarantee.
+
+## Kernel Semantics, Scheduling, and Host Graphs
+
+### Kernel semantic IR
+
+Kernel IR is effectful and structured. Its core operations include typed
+elementwise computation, loads/stores, reductions, gather/scatter,
+convolution/im2col, copies, MMA semantics, barriers, atomics, and explicit
+collectives. User-authored opaque kernels remain an escape hatch outside the
+portable core.
+
+Each operation has:
+
+- Stable operation identifier and version.
+- Operand/result types and shape constraints.
+- Memory effects and alias rules.
+- Numerical policy or inherited policy.
+- CPU reference semantics or a precise reference-unavailable reason.
+- Verification rules.
+- Differentiability/VJP status where it is exposed through JIT.
+
+Unknown required operations cause a version/capability failure. Readers MAY
+round-trip unknown optional metadata, but MUST NOT execute an unknown operation.
+
+### Logical tiles versus physical schedules
+
+`LogicalTile` describes a collective region and its observable operand,
+accumulation, reduction, mask, and synchronization semantics. `ScheduleTile`
+describes a chosen physical mapping to invocations, subgroups, workgroups,
+staging memory, or native atoms.
+
+This split prevents a portable backend from pretending that a changed workgroup
+mapping preserved a CUDA warp schedule. Architecture hints are namespaced,
+optional schedule inputs. They are never required to interpret logical tensor
+or kernel meaning.
+
+### Uniformity and active masks
+
+Barriers and collectives declare scope, participating invocations, memory
+semantics, and active-mask preconditions. Uniformity analysis proves their
+legality for the selected schedule.
+
+A conservative proof failure is a typed lowering failure. Emitters MUST NOT
+insert guessed barriers or rely on control-flow patterns that merely appear
+uniform in common fixtures.
+
+### Host execution graph
+
+The host graph represents observable work that cannot live inside one dispatch:
+allocations, binding, copies, dispatches, readback/materialization, events, and
+dependencies.
+
+Version 1 is a validated DAG. Cycles are illegal. Bounded repetition, dynamic
+launch, or conditional host control require explicit versioned node kinds and
+cancellation points rather than hidden emitter loops. The verifier performs
+resource lifetime and read/write hazard checks before execution.
+
+## Frontend Contracts
+
+### Frontend-neutral lowering contract
+
+Every frontend emits a versioned `FrontendArtifact` containing:
+
+- Frontend identity and version.
+- Source hashes, include/header hashes, flags, and target profile.
+- Source spans and stable declaration/node identifiers.
+- Resolved types, constants, overloads, and source ABI facts.
+- Structured control flow and memory-space meaning.
+- Instantiated template facts where applicable.
+- Typed target intrinsics that are represented but not yet portable.
+- Diagnostics produced before semantic-core lowering.
+
+Frontend artifacts are compiler-owned and MAY be frontend-specific. Shared
+semantic-core types begin only after explicit lowering. This prevents C++ AST
+concerns or JIT UOp implementation details from becoming cross-package APIs.
+
+### CUDA-capable C++/CuTe compatibility
+
+The compatibility target is actual, version-pinned source—not a CuTe-shaped
+mini-language. A standards-only C++ parser is insufficient for CUDA/CUTLASS
+translation units. The frontend profile MUST pin and report:
+
+- C++ language mode.
+- CUDA language/header/toolkit compatibility level.
+- Frontend/compiler build and flags.
+- CuTe/CUTLASS commit or release.
+- Include roots and header content hashes.
+- Requested source target architecture, when present.
+- Supported source features and typed unsupported-intrinsic families.
+
+The CUDA-capable frontend owns preprocessing, lookup, overload resolution,
+template instantiation, CUDA language extensions, and source diagnostics.
+BrowserGrad owns lowering of resolved facts into shared semantics.
+
+Compilation may use one of three explicit deployment modes:
+
+| Mode | Contract |
+| --- | --- |
+| **Browser-local frontend** | A pinned WASM/browser compiler processes source locally within declared memory/time limits. |
+| **Trusted compiler service** | A sandboxed service processes source and returns a signed or hash-addressed frontend/semantic artifact. Source-upload and retention policy are explicit. |
+| **Ahead-of-time artifact** | A build tool emits a versioned artifact consumed later by the browser. The artifact retains source maps and provenance. |
+
+"Browser-native" always promises browser execution for the portable backend.
+It promises browser-local compilation only for profiles that explicitly name
+the browser-local frontend mode.
+
+A content hash proves artifact identity and integrity relative to expected
+content; it does not establish producer trust. Profiles that require trusted
+provenance MUST verify a signature or an equivalent allowlisted attestation.
+
+The compiler service or WASM frontend MUST treat input as untrusted. It MUST
+use an allowlisted virtual filesystem, bounded preprocessing/template work,
+bounded output, cancellation, and no execution or linking of user-produced
+native binaries during semantic extraction.
+
+### CuTe/CUTLASS requirements
+
+- **CUTE-001 — Versioned compatibility profile.** Unmodified fixtures are pinned
+  by source and dependency hashes. "CuTe support" without a profile is invalid.
+- **CUTE-002 — Real source semantics.** No source-spelling handler substitutes
+  for C++ lookup, templates, overloads, or CuTe layout evaluation.
+- **CUTE-003 — Layout algebra.** Shape/stride hierarchy, composition, slicing,
+  products/divides, coordinate mapping, size/cosize, and supported swizzles
+  lower to the general layout/index model.
+- **CUTE-004 — Dynamic tensor views.** Rank-2 and rank-3 transpose, strided
+  slice, broadcast, packed-head, padded, NCHW, and NHWC layouts use the runtime
+  view ABI rather than source-generated special cases.
+- **CUTE-005 — Tensor objects.** `Tensor<Engine, Layout>`, pointer arrays,
+  rebinding, indirect tensors, nullable boundary views, and device helper
+  arguments lower through explicit binding and alias rules.
+- **CUTE-006 — Target intrinsics.** Architecture-specific copy/MMA/pipeline
+  facilities remain typed operations or capability requirements; they do not
+  degrade into opaque strings or parser rejection when their surrounding
+  program is otherwise representable.
+- **CUTE-007 — Tiered outcome.** Frontend acceptance, semantic lowering,
+  reference execution, portable lowering, schedule preservation, and native
+  facility evidence are reported separately.
+
+### Conformance workload ladder
+
+The first C++/CuTe proof is deliberately smaller than tiled attention:
+
+1. Unmodified pinned layout-only fixtures produce expected coordinate traces.
+2. `Tensor<Engine, Layout>` views bind dynamic rank-2/3 storage and execute copy,
+   transpose, strided slice, and broadcast through CPU reference.
+3. The same view operations execute on real WebGPU.
+4. Tiled GEMM proves logical tile, schedule, mask, staging, and boundary behavior.
+5. Tiled attention proves online softmax across K/V tiles and is compared with
+   the existing fused row-wise baseline.
+
+Tiled attention is the flagship milestone, not the first tracer bullet.
+
+### Cross-cutting platform workload suite
+
+The architecture is not accepted on CuTe fixtures alone. Shared capability is
+also driven by:
+
+1. General dynamic view/layout transformations from CUDA-lite and JIT frontends.
+2. Tiled GEMM and convolution/im2col with irregular dimensions and layouts.
+3. Reductions, normalization, optimizer updates, and explicit materialization.
+4. A teaching-scale transformer forward/backward/update step that audits
+   residency and hidden readbacks.
+5. Multi-kernel host graphs with allocation lifetime and dependency hazards.
+6. Browser-worker collectives whose transport/failure contract remains distinct
+   from native distributed execution.
+
+Each workload adds reusable semantic and backend capability. None may add an
+assignment-local execution path to make the workload pass.
+
+## Backend Contracts
+
+### CPU semantic reference
+
+The reference backend consumes verified L1/L2/L4 semantics. It MUST share the
+same coordinate evaluator, dtype definitions, memory-effect rules, and host
+graph ordering contract as other backends.
+
+It SHOULD optimize enough to keep conformance practical, but reference
+optimizations MUST preserve traceability. A coordinate/effect trace can identify
+which semantic node produced a value or failure.
+
+### Portable WebGPU
+
+The WebGPU backend lowers verified kernel semantics plus a selected schedule to
+WGSL, resource bindings, pipelines, and dispatches. It MUST:
+
+- Negotiate features and limits on the created `GPUDevice`, not infer them from
+  browser names or adapter presence.
+- Validate workgroup size, workgroup memory, binding count, binding alignment,
+  buffer range, dispatch dimensions, and storage limits before submission.
+- Distinguish WebGPU core from optional-feature profiles.
+- Treat shader creation, pipeline creation, validation, out-of-memory, and
+  device-loss failures as distinct diagnostic codes.
+- Keep readback explicit and asynchronous.
+- Invalidate all device-owned resources and caches on device loss; recovery
+  requires a new device and resource recreation.
+- Include semantic-program hash, schedule hash, backend version, feature set,
+  relevant limits, and numerical policy in pipeline cache keys.
+
+The current direct attention implementation remains a fused row-wise
+online-softmax baseline. It may be named block-tiled FlashAttention only after
+the implementation stages K/V tiles or proves an equivalent declared memory
+strategy, maps query tiles, satisfies uniformity/barrier rules, maintains online
+softmax across tiles, and passes boundary and real-device conformance.
+
+### Native companion
+
+The native companion is optional and separately deployable. It consumes a
+versioned semantic artifact and MAY lower typed intrinsics to CUDA facilities.
+It MUST report compiler/toolkit versions, target architecture, facility use,
+and preservation level. It MUST NOT redefine layout/index/numerical meaning to
+match a convenient native implementation.
+
+Browser worker meshes and native multi-device execution are separate products.
+They may share collective semantics, but transport, failure, topology, and
+performance claims remain distinct.
+
+## Capability, Lowering, and Evidence Model
+
+Capability, a lowering decision, and execution evidence are different facts.
+They MUST NOT be flattened into five booleans or one `supported` label.
+
+```ts
+type PreservationLevel =
+  | "observable-equivalent"
+  | "portable-relegalized"
+  | "schedule-preserving"
+  | "native-facility";
+
+type ExecutionTier =
+  | "semantic-reference"
+  | "webgpu-core"
+  | "webgpu-enhanced"
+  | "native-companion"
+  | "simulation";
+
+interface CapabilityDefinition {
+  featureId: string;
+  semanticVersion: string;
+  operationVersion?: string;
+  preservationLevels: PreservationLevel[];
+}
+
+type SupportState =
+  | "supported"
+  | "conditional"
+  | "unsupported"
+  | "unknown"
+  | "not-applicable";
+
+interface LoweringDecision {
+  featureId: string;
+  backendId: string;
+  executionTier: ExecutionTier;
+  state: SupportState;
+  preservationLevel?: PreservationLevel;
+  requiredFeatures: string[];
+  requiredLimits: Record<string, number>;
+  runtimeGuardIds: string[];
+  legalizationIds: string[];
+  numericalPolicyId?: string;
+  reasonCode?: string;
+}
+
+type EvidenceOutcome = "not-run" | "passed" | "failed";
+
+interface ExecutionEvidence {
+  featureId: string;
+  artifactHash: string;
+  backendId: string;
+  environmentId: string;
+  producerVersions: Record<string, string>;
+  deviceProfileHash?: string;
+  recordedAt: string;
+  outcome: EvidenceOutcome;
+  comparisonPolicyId?: string;
+  diagnosticCodes: string[];
+}
 ```
 
-Browser constraints that make this mandatory:
+Static capability does not contain `passed` or `not-run`. Test evidence does not
+decide whether the current user's device supports a feature. Runtime scheduling
+uses a fresh lowering decision derived from the actual program, device profile,
+and declared policy.
 
-- WebGPU readback is async and synchronization-heavy.
-- `GPUBuffer` lifetime must be explicit.
-- WGSL has strict address-space, typing, and uniformity rules; compiler code
-  must own layout and memory semantics.
-- Pyodide/Python crossing is expensive enough that per-op Python callback
-  dispatch is the wrong hot path.
-- f16/subgroups and limits vary by browser/device, so backend must feature-gate
-  instead of assuming CUDA-like capabilities.
+`environmentId` identifies an immutable environment record containing the
+observable producer, runtime, browser, feature, and limit facts used by the
+test. Unknown support fails closed for execution. Conditional support proceeds
+only after every referenced runtime guard is evaluated successfully.
 
-## Package Requirements
+Capability records MUST be monotonic in meaning: adding evidence may strengthen
+confidence, but it cannot silently redefine what a feature identifier means.
 
-### `@unlocalhosted/browsergrad-runtime`
+## Wire Format and Schema Evolution
 
-Purpose: production host for browser Python labs.
+Create an initially private workspace package
+`@unlocalhosted/browsergrad-semantic-core`. Its target subpaths are:
 
-Requirements:
+- `/layout` — value, dtype, shape, constraints, layouts, views, and index maps.
+- `/kernel` — kernel semantic operations, effects, collectives, and verifier
+  interfaces.
+- `/schedule` — schedule representation and verification, not schedule-selection
+  policy.
+- `/host` — host-graph representation, resource hazards, and verification.
+- `/schema` — wire envelopes, canonical serialization, and validators.
+- `/capability` — capability, lowering-decision, and evidence schemas only.
 
-| ID | Requirement | Current status | Acceptance gate |
-| --- | --- | --- | --- |
-| RT-001 | Create and dispose Pyodide Worker sessions with same-origin Pyodide assets. | In | `packages/browsergrad-runtime` unit/integration tests |
-| RT-002 | Execute Python with stdout/stderr, timeout, AbortSignal, and explicit interrupt. | In | timeout/cancel tests; manual browser smoke where interrupt depends on `SharedArrayBuffer` |
-| RT-003 | Emit structured assertion/artifact events without interpreting course semantics. | In | assertion/artifact protocol tests |
-| RT-004 | Validate lab manifests and semver runtime gates. | In | manifest + semver adversarial tests |
-| RT-005 | Validate assignment profiles and produce preflight/run plans. | In | profile parser/planner tests |
-| RT-006 | Keep ML/tensor library installation pluggable through public installer calls. | In | grad/jit integration tests |
+Gate 1 exports only `/schema`, `/layout`, and `/package.json`. `/kernel`,
+`/schedule`, `/host`, and `/capability` are added only when concrete contracts
+and real consumers exist; empty placeholder barrels are prohibited.
 
-LLD:
+The package is justified by live compiler, kernels, JIT bridge, and runtime
+protocol consumers. `private` describes only its initial standalone Gate 1
+incubation state; it is not a permitted unpublished runtime dependency of a
+published, unbundled package. Before compiler, kernels, JIT, or runtime ships a
+runtime import from semantic-core, semantic-core MUST either become a packed,
+release-tested `0.x` package or the consumer MUST have an explicitly verified
+bundling strategy that preserves one schema implementation. BrowserGrad's
+current unbundled `tsc` packages therefore require the packed-package path.
+Internal API status is communicated by `0.x` versioning, narrow subpaths, and
+release policy—not by leaving downstream installations with an unavailable
+dependency. Promotion to `1.0` still requires one major schema version to
+survive two frontend and two backend integrations. Runtime may import only
+`/capability`; architecture checks MUST prevent it from importing tensor
+evaluation or kernel lowering code.
 
-- `createSession()` owns Worker boot, Pyodide package loading, namespace state,
-  and the message protocol.
-- Python receives a small `browsergrad` module for assertions, artifacts,
-  oracle lookup, and assignment context.
-- Cancellation path is layered: cooperative interrupt when isolation allows it,
-  worker termination fallback otherwise.
-- Manifest/profile validation is TypeScript-side and dependency-light so host
-  platforms can preflight before launching Python.
+### Envelope and version rules
 
-Production hardening required:
+Every serialized artifact begins with an envelope equivalent to:
 
-- Keep every protocol message versioned or backward-compatible.
-- Never load Pyodide from an uncontrolled CDN in production docs.
-- Add browser smoke tests for cross-origin-isolated interrupt behavior before
-  calling cancellation fully production-grade across browsers.
+```ts
+interface WireEnvelope<T> {
+  schema: string;
+  version: { major: number; minor: number };
+  producer: { id: string; version: string };
+  artifactId: string;
+  payload: T;
+  requiredExtensions: string[];
+  optionalMetadata?: JsonObject;
+}
+```
 
-### `@unlocalhosted/browsergrad-grad`
+`JsonObject` and `JsonValue` are closed JSON-safe recursive types. `unknown`,
+`undefined`, functions, symbols, `bigint`, sparse arrays, cycles, accessors,
+class instances, and non-finite JSON numbers are not canonicalizable values.
 
-Purpose: readable eager NumPy autograd for curriculum content.
+- Unknown major versions are rejected.
+- Minor versions may add optional fields without changing existing meaning,
+  but only inside declared open metadata/extension bags whose unknown JSON
+  fields are preserved losslessly for canonical re-encoding and hashing.
+  Closed semantic records reject unknown fields; adding a semantic field to a
+  closed record requires a new major version or required extension.
+- Unknown required extensions are rejected; unknown optional metadata may be
+  preserved or ignored but never executed.
+- Deprecated fields have a producer window, reader window, migration fixture,
+  and removal major version.
+- Stable node IDs are deterministic within canonical serialization; random IDs
+  do not participate in hashes or cache keys.
+- Signed/unsigned integers that may exceed JavaScript's safe integer range are
+  canonical decimal strings on the wire.
+- Floating constants that require bit identity are encoded as validated bit
+  patterns, not JSON numbers. NaN payloads, infinities, and negative zero are
+  therefore not lost through JSON normalization.
+- Hashing uses SHA-256 over UTF-8 canonical JSON bytes and lowercase hexadecimal
+  digests. Canonical JSON follows RFC 8785 object-key ordering and JSON string
+  escaping. BrowserGrad semantic wire payloads permit JSON numbers only for
+  safe integers; lexical `-0`, decimal, and exponent JSON-number forms are
+  rejected even when their parsed numerical value is an integer. Lone UTF-16
+  surrogates are rejected. Python canonicalization implements RFC 8785 UTF-16
+  property ordering explicitly. Semantic floating-point values use bit-pattern
+  records. This deliberately removes cross-language float-to-decimal drift.
+- Hash inputs include schema version and semantic content. Compiler flags,
+  frontend/header revisions, target profile, schedule, and backend policy are
+  separate named hash components rather than undocumented cache salt.
 
-Requirements:
+The semantic artifact hash projects exactly `domain`, `schema`, `version`,
+sorted unique `requiredExtensions`, and the normalized semantic `payload`, with
+`domain` fixed to `browsergrad.semantic-artifact.v1`. It excludes
+`artifactId`, producer, optional metadata, evidence, timestamps, and random or
+transport IDs. `artifactId` MAY be the domain-separated semantic digest but
+never participates in its own digest. Composite cache keys hash canonical JSON
+of `{ domain: "browsergrad.cache-key.v1", components: { ... } }`; component
+names are mandatory and sorted canonically. Pure immutable value nodes MAY use
+the full domain-separated SHA-256 digest of normalized ID-free content.
+Entity IDs—allocations, views, operations, and other records where two
+structurally identical instances remain distinct—MUST NOT be content-addressed
+by content alone. They derive deterministically from artifact scope plus entity
+kind and canonical declaration/path/ordinal, or from a frontend-stable scoped
+ID. Full digests are used when hashing IDs; truncated digests are not canonical
+IDs.
 
-| ID | Requirement | Current status | Acceptance gate |
-| --- | --- | --- | --- |
-| GR-001 | Closure-based reverse-mode autograd over core tensor ops. | In | surface tests + Pyodide integration |
-| GR-002 | CNN layer set: Conv1d/2d/3d, ConvTranspose2d, pooling, im2col Conv2d, tuple shapes, dilation, groups. | In | conv integration tests |
-| GR-003 | Norm layer set: BatchNorm1d/2d/3d, LayerNorm, GroupNorm, InstanceNorm2d with stats-aware backward where implemented. | In | norm integration tests |
-| GR-004 | Transformer/sequence basics: Embedding, MultiHeadAttention, RNN/LSTM/GRU. | In | kitchen-sink and sequence tests |
-| GR-005 | Module ergonomics: `train`, `eval`, hooks, buffers, `state_dict`, `load_state_dict`. | In | module/state tests |
-| GR-006 | Torch compatibility shim that covers common tutorial code and refuses unsupported APIs loudly. | In | torch alias tests |
-| GR-007 | Explicit WebGPU forward dispatch through `device=` for matmul, softmax, layernorm, attention. | In | kernel device bridge unit + Pyodide tests |
-| GR-008 | Multi-layer/bidirectional RNN/LSTM/GRU parity. | In | recurrent integration tests for direction ordering, state shapes, state_dict keys, dropout, and backward |
-| GR-009 | GPU-resident eager autograd. | Out of current scope | Device tensor storage + GPU backward kernels + optimizer residency |
+Decoders operate in the order byte-budget check, duplicate-key-aware JSON parse,
+envelope/schema/extension/version validation, raw structural and reference
+validation, normalization plus deterministic ID remapping, normalized semantic
+verification, deep freeze, and opaque verified-wrapper construction. The
+wrapper holds the already-frozen artifact through a private constructor and is
+itself immutable; code never mutates a frozen object to add a brand. Only opaque,
+deeply immutable verified artifacts may enter evaluators or hashes used for
+execution. Unknown fields in declared open bags are preserved as JSON or
+discarded only where the schema explicitly excludes them from semantic hashes;
+they are never interpreted by an old reader.
 
-LLD:
+Every decoder validates schema, nesting depth, node count, string/array sizes,
+identifier uniqueness, reference integrity, integer bounds, and extension
+requirements before allocating backend resources.
 
-- Python sources under `src/python/` are edited directly and codegen embeds them
-  into TypeScript.
-- Tensor ops save backward closures and update leaf gradients on `.backward()`.
-- Conv2d lowers patches through im2col and batched matmul to avoid unreadable
-  nested-loop hot paths while preserving educational clarity.
-- `device=` calls pass concrete arrays to a JS bridge, run selected kernels, and
-  materialize results back into CPU tensors. CPU autograd remains the gradient
-  authority.
+Cross-language golden fixtures MUST prove TypeScript and Python encode, decode,
+validate, canonicalize, and hash the same artifacts.
 
-Production hardening required:
+## Package Ownership and Dependency Direction
 
-- For each new PyTorch-shaped op, add PyTorch parity fixtures where PyTorch is
-  the oracle and BrowserGrad failures are explicit.
-- Keep unsupported CUDA/distributed/compile/fx/quantization APIs as clear
-  refusals.
-- Do not expand eager GPU by accident. If tensors can remain GPU-resident, that
-  is a new storage/backend project, not a small `device=` extension.
+| Package | Owns | Must stop owning or inferring |
+| --- | --- | --- |
+| `browsergrad-semantic-core` *(private during standalone incubation; packed `0.x` before public-package adoption)* | Pure shared value/layout/kernel/schedule/host schemas, verifiers, canonical wire format, coordinate evaluation, and capability protocol subpath. | Source parsing, framework APIs, actual device resources, schedule-selection policy, course policy. |
+| `browsergrad-compiler` | CUDA-lite and C++/CuTe frontends, frontend artifacts, semantic lowering, compiler-owned schedule/host-graph construction, compiler reference orchestration, and source diagnostics. | A private second view/layout model; source-spelling CuTe compatibility; direct device resource ownership; framework/JIT scheduling. |
+| `browsergrad-kernels` | WebGPU schedule legalization/selection, backend plans, WGSL, device resources, resident storage, pipeline/buffer caches, device profiling, and actual-device conformance. | Primary tensor/layout semantics; source parsing; Python/framework rules. |
+| `browsergrad-jit` | PyTorch-shaped lazy graph, symbolic VJP, transforms, fusion intent, and framework-owned lowering into shared kernel/schedule/host representations. | Compiler internals; WGSL layout rules; permanent `CUSTOM` implementations for advertised portable core operations. |
+| `browsergrad-grad` | Readable NumPy eager reference/autograd and explicit bridge behavior. | Naming-only dtype/device/view compatibility; accidental GPU-resident architecture. |
+| `browsergrad-runtime` | Worker lifecycle, profile/rubric orchestration, cancellation, structured events, and presentation/scheduling from capability data. | Tensor evaluation, index-map interpretation, backend heuristics, or compiler policy. |
+| `browsergrad-primitives` | Browser-safe text, data, evaluation, simulation, hosted-training, and RL/math helpers. | Tensor/layout semantics or actual distributed/device execution. |
+| `browsergrad-dogfood` | Packed/published-package and cross-package compatibility proof. | Reimplementation of package internals as test-only glue. |
 
-### `@unlocalhosted/browsergrad-jit`
+Permitted dependency direction:
 
-Purpose: lazy PyTorch-shaped IR layer for graph transforms and acceleration.
+```text
+compiler frontends -> compiler-owned lowering --+
+                                                 |
+JIT graph -> JIT-owned lowering -----------------+-> shared schedule/host artifacts
+                                                 |       -> kernels WebGPU legalization/execution
+explicit eager adapters -> validated bridge -----+
 
-Requirements:
+shared artifact representation and verification:
+  semantic-core/layout + semantic-core/kernel + semantic-core/schema
+  semantic-core/schedule + semantic-core/host where applicable
 
-| ID | Requirement | Current status | Acceptance gate |
-| --- | --- | --- | --- |
-| JIT-001 | TensorProxy builds UOp graphs lazily and realizes on explicit boundaries. | In | integration tests for `.numpy`, `.item`, `.backward`, optimizer step |
-| JIT-002 | NumPy realizer remains universal correctness backend. | In | integration parity tests |
-| JIT-003 | Symbolic VJP path with closure fallback where rules are absent. | In | VJP/backward tests |
-| JIT-004 | Fusion, AMP, GradScaler, checkpoint rewrites, and functional transforms operate over IR. | In | PRD-specific tests |
-| JIT-005 | `vmap`, `grad`, `vjp`, `functional_call` compose without hidden module state. | In | transform tests |
-| JIT-006 | WebGPU realizer bridge supports forward opcodes and materializes at boundaries. | In | bridge/mock + real WebGPU tests through kernels |
-| JIT-007 | Custom WGSL kernels are cache-keyed, forward-only, and explicit. | In | custom kernel tests |
-| JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
-| JIT-009 | GPU-resident backward/optimizer steps. | In | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, explicit resident tensor-plan roots, liveness-based early buffer release, reusable direct-output pooling, elementwise-chain fusion, and softmax fusion lower through WebGPU |
-| JIT-010 | Heavy CNN family parity with grad. | In | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback |
-| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, elementwise-chain and softmax plan fusion, SDPA-shaped graph lowering, WebGPU lowering, refusal tests |
-| JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | In | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, tensor-plan runtime releases dead owned buffers by liveness, returns reusable direct outputs to the device pool, and supported resident paths materialize only on `.numpy()` / `.item()` |
+runtime -> semantic-core/capability only
+primitives remains outside the tensor/compiler dependency chain
+dogfood consumes public or explicitly private test contracts only
+```
 
-LLD:
+`browsergrad-kernels` MUST NOT import compiler internals.
+`browsergrad-compiler` MUST NOT import JIT or Grad internals.
+`browsergrad-jit` MUST NOT import compiler internals.
+JIT Python MUST NOT encode WGSL layout rules.
+Runtime MUST remain tensor-agnostic.
 
-- `_ir.py` defines opcodes and UOp structure.
-- Tensor dunders create IR nodes, not data.
-- `_realize.py` topologically executes UOps through backend handlers.
-- `_vjp.py` emits gradient UOps for symbolic backward.
-- `_fusion.py`, `_amp.py`, checkpointing, and `func` passes rewrite IR.
-- `_gpu_plan.py` builds a compiler-facing tensor-IR execution plan with
-  liveness/materialization metadata and refuses `CUSTOM` by default. This is
-  the path future WebGPU codegen/scheduling should consume instead of growing
-  one bridge method per framework op. Plan value IDs are stable schedule-local
-  integers so payloads can cross Pyodide/JS without Python object identity.
-  Linear elementwise chains are scheduled as `FUSED_ELEMENTWISE` plan steps;
-  canonical softmax DAGs are scheduled as `FUSED_SOFTMAX` plan steps.
-- `_realize_webgpu.py` talks only to a bridge protocol; `browsergrad-kernels`
-  owns actual WebGPU resources. `realize_tensor_plan_webgpu(tensor)` now sends
-  one canonical plan plus seed buffers to `bridge.run_tensor_plan(...)`.
-  `realize_tensor_plan_webgpu_resident(tensor)` sends the same plan to
-  `bridge.run_tensor_plan_resident(...)`, registers the root handle in the
-  GPU buffer table, and defers CPU bytes until `.numpy()` / `.item()`. The
-  older `realize_webgpu(tensor)` path remains legacy per-op bridge coverage.
-- Conv1d, Conv2d, ConvTranspose2d, and Conv3d forward are primitive IR ops with
-  NumPy handlers, explicit vmap refusals, and ONNX refusals. Their symbolic
-  backwards emit input/weight/bias gradient UOps with CPU reference handlers.
-  These CNN forward/backward roots lower through `runTensorGpuPlan()` as generic
-  plan ops. `loss.backward(device="webgpu")` realizes symbolic leaf-gradient
-  roots through that same bridge and refuses closure-only graphs.
-  `loss.backward(device="webgpu", resident=True)` registers leaf `.grad`
-  tensors as GPU-resident TensorProxy buffers until explicit materialization.
-  Default `.backward()` selects the same resident WebGPU path when the graph
-  reads GPU-owned buffers; CPU-owned graphs keep CPU semantics.
-- `nn.LayerNorm` / `F.layer_norm(...)` emit primitive `LAYER_NORM` IR and
-  `LAYER_NORM_BACKWARD_*` symbolic gradient roots. CPU handlers remain the
-  reference; forward/input-grad/weight-grad/bias-grad lower through
-  `runTensorGpuPlan()` with real browser WebGPU parity tests.
-- `nn.functional.scaled_dot_product_attention(...)` decomposes into primitive
-  tensor IR (`MATMUL` -> scale -> `FUSED_SOFTMAX` -> `MATMUL`) and lowers
-  through `runTensorGpuPlan()` without a `CUSTOM` callback. Browser tests cover
-  the same SDPA-shaped graph with real WebGPU.
-- `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
-  `bg.optim.adamw_update(...)` emit primitive optimizer/update IR with NumPy
-  handlers, vmap/ONNX refusals, tensor-plan lowering, and real WebGPU kernels.
-  `Optimizer.step(device="webgpu")` uses those same update IR nodes for SGD
-  without momentum, Adam, and AdamW, then writes the materialized result back to
-  CPU parameter/state buffers. `SGD.step(device="webgpu", resident=True)` uses
-  resident tensor-plan roots to rebind no-momentum parameter buffers to WebGPU
-  handles without CPU readback. `Adam.step(device="webgpu", resident=True)` and
-  `AdamW.step(device="webgpu", resident=True)` keep parameter, first-moment, and
-  second-moment buffers resident.
-- `Optimizer.step()` defaults to the resident WebGPU path when any parameter or
-  gradient buffer is already GPU-owned; CPU-owned training keeps CPU semantics.
-- New core GPU work must promote ops out of `CUSTOM` into primitive tensor IR.
-  `CUSTOM` remains for user-authored WGSL/lab kernels and explicitly labeled
-  migration scaffolding, not the final path for framework ops.
-- Existing per-op bridge methods are legacy/interim bridge coverage. Do not
-  keep expanding GPU support by adding one JS/Python bridge method per new
-  framework op. New core GPU work should add tensor-IR lowering and runtime
-  scheduling so op families compile through one backend path.
+### Existing product contracts retained
 
-Production hardening required:
+The semantic migration does not weaken established package responsibilities:
 
-- Keep public errors stable and specific.
-- Any new opcode requires: IR declaration, NumPy handler, VJP or clear no-backward
-  refusal, vmap rule or clear transform refusal, ONNX/export decision, and
-  optional WebGPU lowering.
-- Preserve graph-break-like behavior: unsupported dynamic Python behavior should
-  refuse or realize explicitly, never silently change semantics.
+- Runtime retains same-origin Pyodide loading, Worker isolation, stdout/stderr,
+  timeouts, `AbortSignal`, cooperative interrupt where available, termination
+  fallback, filesystem lifecycle, assertions/artifacts, and versioned
+  manifest/profile validation.
+- Grad remains readable closure-based eager autograd, NumPy-backed by default,
+  with explicit forward-only bridge behavior and clear unsupported APIs.
+- JIT remains lazy until explicit realization/materialization boundaries and
+  keeps NumPy/CPU as reference while moving advertised core ops away from opaque
+  callbacks. Its framework hot path does not depend on the source compiler
+  package.
+- Kernels remains Python-agnostic and owns actual WebGPU resources, resident
+  buffers, prepared execution, feature/limit detection, and explicit readback.
+- Compiler retains the shipping CUDA-lite frontend, stable source diagnostics,
+  CPU reference, WGSL/WebGPU path, corpus gates, and prepared execution.
+- Primitives remains course-agnostic and dependency-light.
+- Dogfood continues to prove packed and published artifacts rather than
+  workspace-link behavior.
 
-### `@unlocalhosted/browsergrad-kernels`
+## Diagnostics and Failure Semantics
 
-Purpose: WebGPU/WGSL kernel catalog and GPU resource substrate.
+All public compiler/execution failures use stable diagnostic codes and a
+structured record:
 
-Requirements:
+```ts
+interface Diagnostic {
+  code: string;
+  stage:
+    | "preprocess"
+    | "frontend"
+    | "semantic-lowering"
+    | "verification"
+    | "scheduling"
+    | "backend-lowering"
+    | "device-validation"
+    | "execution"
+    | "evidence";
+  severity: "error" | "warning" | "note";
+  message: string;
+  sourceSpan?: { fileId: string; start: number; end: number };
+  semanticNodeId?: string;
+  backendId?: string;
+  capabilityId?: string;
+  remediation?: string;
+}
+```
 
-| ID | Requirement | Current status | Acceptance gate |
-| --- | --- | --- | --- |
-| KER-001 | Ship JS reference implementations for every public kernel. | In | unit conformance tests |
-| KER-002 | Provide real WebGPU paths for matmul, softmax, layernorm, attention, fused elementwise, Conv1d/Conv2d explicit bridge kernels, Conv1d/Conv2d/ConvTranspose2d/Conv3d generic tensor plans, and generic WGSL programs. | In | browser tests |
-| KER-003 | Provide bridge protocol implementation for `browsergrad-jit`. | In | dogfood bridge lifecycle/method/concurrency tests |
-| KER-004 | Provide public resident buffer helpers and prepared sequence APIs. | In | browser hot-loop tests |
-| KER-005 | Expose feature detection for adapter-gated behavior such as f16/subgroups. | In | feature detection tests |
-| KER-006 | Keep tensor-library dependency at zero. | In | package/dependency check |
-| KER-007 | Production FlashAttention forward across supported browsers/devices. | In | strict real-WebGPU parity test against composed attention reference |
+Tests assert codes and structured fields, not complete prose. Messages remain
+human-readable and may improve without becoming a breaking API. A backend
+limitation must identify the semantic operation, target profile, failed guard,
+or missing device feature/limit.
 
-LLD:
+## Security, Reliability, and Operational Requirements
 
-- Kernels expose both host-tensor convenience APIs and lower-level
-  `GPUBuffer`-resident APIs.
-- `runDirect()` is the realizer-tier fast path: GPUBuffer in, GPUBuffer out.
-  Owned outputs are drawn from a per-device reusable output pool unless the
-  caller provides explicit output storage; `device.getStats()` exposes pool
-  buffers, bytes, hits, and misses.
-- `runTensorGpuPlan()` is the first generic tensor-plan executor: it consumes
-  scheduled primitive plan steps, including the snake_case payload emitted by
-  `browsergrad-jit`'s `gpu_plan_summary`, keeps intermediates in `GPUBuffer`,
-  supports f32 BUFFER/LOAD/MATMUL, elementwise chains, RESHAPE, PERMUTE,
-  BROADCAST_TO, REDUCE(sum/mean) for rank <= 4, `FUSED_ELEMENTWISE` runtime
-  WGSL codegen, `FUSED_SOFTMAX` last-axis direct softmax, Conv1d/Conv2d/
-  ConvTranspose2d/Conv3d forward/backward, LayerNorm forward/backward,
-  functional SGD/Adam/AdamW updates, materializes only the root, and uses plan
-  liveness to return dead direct-dispatch outputs to the device pool while
-  destroying uploaded host input buffers before the root boundary. Runtime
-  results expose early-release counts/bytes for profiling and regression tests.
-- `runTensorGpuPlanResident()` shares that executor but returns an owned root
-  `GPUBuffer`; `createWebGpuRealizerBridge(...).run_tensor_plan_resident(...)`
-  mints a bridge handle so later plans can consume resident roots without
-  readback.
-- `createWebGpuRealizerBridge(...).run_tensor_plan(plan, inputs, dtype)` exposes
-  that executor through the Pyodide bridge as one graph-level call. This is the
-  preferred framework GPU direction; new core ops should lower into tensor
-  plans/runtime kernels instead of adding one bridge method per op.
-- `prepareWgslKernelProgramSequence()` caches pipelines/bind groups for repeated
-  dispatch.
-- JS references are correctness oracles and CPU fallback, not performance paths.
+### Untrusted input and resource bounds
 
-Production hardening required:
+Source, semantic artifacts, schemas, shapes, and runtime bindings are untrusted
+inputs. The platform MUST bound:
 
-- Every WGSL program must have shape validation, bounds safety, and reference
-  parity.
-- Device loss, validation errors, and feature-missing cases must report stable
-  errors.
-- Keep readback explicit. Hidden readbacks destroy the performance model.
+- Source/include bytes and include depth.
+- Preprocessor expansion and template-instantiation work.
+- Diagnostic count and size.
+- IR nodes, nesting, symbols, rank, and expression depth per artifact.
+- Integer bit width and arithmetic-operation count during symbolic evaluation.
+- CPU reference steps, allocations, and wall time.
+- WGSL size, pipeline count, buffer bytes, dispatch dimensions, and queued work.
+- Host-graph nodes, edges, materializations, and retained evidence.
 
-### `@unlocalhosted/browsergrad-compiler`
+Budgets are explicit configuration with safe defaults. Budget exhaustion is a
+stable diagnostic, not an internal crash or browser hang.
 
-Purpose: CUDA-lite source compiler for browser-native GPU labs.
+### Cancellation and lifecycle
 
-Requirements:
+- Compiler passes and CPU reference execution poll cooperative cancellation at
+  bounded intervals.
+- Worker termination is the fallback when cooperation is unavailable.
+- WebGPU command submission cannot be retroactively cancelled; cancellation
+  stops future submissions, suppresses stale results, and releases owned
+  resources when safe.
+- Every session, device, resident buffer, prepared plan, compiler service job,
+  and artifact cache has a documented owner and disposal path.
+- Device loss invalidates device-scoped handles and caches. Reuse after loss is
+  impossible by type/state or rejected by validation.
 
-| ID | Requirement | Current status | Acceptance gate |
-| --- | --- | --- | --- |
-| CMP-001 | Parse CUDA-lite/CUDA-shaped source without semantic rewrites in the parser. | In | parser unit tests |
-| CMP-002 | Analyze symbols, types, memory spaces, feature gates, safety, and unsupported diagnostics. | In | analyzer/diagnostic tests |
-| CMP-003 | Lower to backend-neutral Kernel IR. | In | Kernel IR snapshot/semantic tests |
-| CMP-004 | Execute CPU reference from the same semantic facts as WGSL. | In | reference parity tests |
-| CMP-005 | Emit WGSL and run WebGPU plans through kernels package. | In | browser/WebGPU tests |
-| CMP-006 | Support execution plans: single dispatch, grid-sync phases, host dynamic launch, host copy, unsupported. | In | orchestration tests |
-| CMP-007 | Support resident buffers and prepared compiled kernels for hot paths. | In | prepared/resident tests |
-| CMP-008 | Expose execution-plan summaries and blocker codes for platform UI. | In | summary tests |
-| CMP-009 | Grow CUDA compatibility by semantic families, not assignment patches. | In | corpus audit and compatibility map tests |
-| CMP-010 | Production compiler-backed GPU labs. | In | canonical examples + compiler verify + browser WebGPU + published dogfood tests |
-| CMP-011 | Keep CUDA-lite compiler out of the core tensor runtime hot path. | In | Framework ops lower from tensor IR; CUDA-lite remains lab/user-kernel path |
+### Determinism, caching, and reproducibility
 
-LLD:
+- Semantic verification and canonical serialization are deterministic.
+- CPU reference randomness requires an explicit algorithm and seed.
+- Cache keys name every semantic, schedule, backend, feature, limit, and
+  numerical-policy input that can change output or legality.
+- Performance measurements are never included in correctness hashes.
+- Reproducing a failure requires artifact hash, producer versions, target
+  profile, input hashes or seeds, device/browser facts, and diagnostic codes.
 
-- Pipeline: source -> lexer/parser -> analyzer -> Kernel IR -> CPU reference ->
-  WGSL -> WebGPU execution plan -> kernels dispatch.
-- Parser owns syntax only.
-- Analyzer owns semantics, feature gates, and deterministic diagnostics.
-- `semantic_ir.ts` is the target for new compiler passes.
-- `runtime_plan.ts` and `webgpu_orchestration.ts` decide whether a kernel can
-  become real WebGPU work.
-- `prepareCompiledKernelWebGpu()` must reuse the same plan path as one-shot
+### Observability
+
+Compile and execution stages emit structured timing and resource events with
+artifact and stage IDs. Runtime wall time, compiler phase time, host estimates,
+and WebGPU-owned measurements remain separate. The metrics contract in
+`docs/platform/resource-metrics.md` applies; unavailable measurements are not
+synthesized.
+
+### Operational budgets
+
+Each production profile publishes safety limits and regression budgets rather
+than relying on one machine-specific global number. At minimum it records:
+
+- Source, header, semantic-artifact, and generated-WGSL size limits.
+- Cold and warm frontend/lowering/pipeline-creation latency.
+- Peak worker, host, and device-owned bytes.
+- First-result latency and steady-state dispatch/readback latency where claimed.
+- Package and optional compiler-asset transfer size.
+
+Safety-limit failure is a typed capability/budget result. Performance-budget
+regression requires a recorded benchmark comparison and explicit acceptance;
+it is never hidden by widening the budget in the same change without evidence.
+
+## Extensibility and Debt-Prevention Rules
+
+### Admission test for a new core semantic operation
+
+A new core operation is admitted only when all are true:
+
+1. Its observable semantics can be defined without source spelling or backend
+   code fragments.
+2. Operand/result, shape, dtype, numerical, memory-effect, and alias rules are
+   specified.
+3. The verifier and CPU reference behavior exist, or reference-unavailable has
+   an approved architectural reason.
+4. At least one real frontend lowers to it and one real backend consumes it.
+5. JIT transformation/VJP/export decisions are explicit when the operation is
+   framework-visible.
+6. Negative tests prove illegal states and unsupported targets fail at the
+   intended boundary.
+
+If those conditions are absent, keep the behavior frontend-specific or
+backend-specific until the common semantics are understood. Duplication during
+discovery is preferable to freezing the wrong shared abstraction.
+
+### Extension rules
+
+- Core unions are closed and versioned. Extension operation IDs are namespaced.
+- Required extensions fail closed when unknown.
+- Backend hints are optional, namespaced schedule inputs. They do not affect
+  semantic interpretation.
+- Public compatibility surfaces have deprecation windows and migration
+  fixtures; private adapters still require an exit gate.
+- New package proposals must pass the repository package-consolidation deletion
+  test. `semantic-core` passes because deleting it after adoption would force
+  duplicated wire schemas and semantic validators across compiler, kernels,
+  JIT, and runtime.
+
+### Architecture checks
+
+Automated architecture checks MUST enforce:
+
+- No dependency cycles across semantic layers or packages.
+- Representation/schema modules do not import passes, emitters, device APIs, or
+  source frontends.
+- Runtime imports only the capability subpath.
+- Kernels do not import compiler internals.
+- No new uses of frozen adapters from newly added features.
+- No source-spelling CuTe handlers outside the frozen compatibility adapter.
+- No advertised portable JIT operation lowers through opaque `CUSTOM`.
+- Generated Python bundles match editable Python sources.
+- Public imports use package exports rather than `src/` or `dist/` paths.
+
+### Adapter ledger
+
+Every adapter has an owner, permitted callers, new-use prohibition, retirement
+gate, and compatibility-removal version. An adapter is not "temporary" without
+all five.
+
+| Existing adapter/debt | Owner | Permitted callers | New-use prohibition | Retirement gate | Compatibility-removal version |
+| --- | --- | --- | --- | --- | --- |
+| Compiler pointer/scalar memory fields | Compiler | Existing CUDA-lite semantic lowering and the Gate 2 adapter only. | No new view, layout, dtype, or alias feature may add fields. | CPU reference and WGSL consume shared offsets, bounds, and alias facts. | Compiler `1.0.0`. |
+| `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
+| `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
+| JIT `OP_CUSTOM` for core framework ops | JIT | Existing `_tensor_proxy.py`, `_functional.py`, `_nn.py`, `_webnn.py`, explicit user-kernel code, and embedded legacy wrappers only. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions. | JIT `1.0.0`. |
+| Eager view materialization and bf16 aliasing | Grad | Existing Tensor/torch compatibility adapters only where accurately documented. | No new API may claim view aliasing or bf16 storage through these paths. | View/alias fixtures agree or reject; bf16 is real storage/conversion or rejected. | Grad `1.0.0`. |
+| `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
+| Generic runtime backend labels | Runtime | Existing assignment capability compatibility mapping only. | New readiness features use canonical capability definitions and lowering decisions. | All readiness UI consumes emitted capability/lowering records. | Runtime `1.0.0`. |
+
+Each migration stage MUST delete an adapter, narrow its allowed callers, or make
+its retirement gate measurably closer. Adding only new handlers, special cases,
+or capability errors is not migration progress.
+
+## Current-State Corrections
+
+This is a migration snapshot reviewed on 2026-07-15, not the generated
+capability manifest.
+
+These are gaps in the current implementation, not achievements to paper over
+with broader acceptance or better wording:
+
+| Area | Current state | Required before stronger claim |
+| --- | --- | --- |
+| Shared semantic core | No `browsergrad-semantic-core` package or canonical cross-package wire schema exists. | L1/L2 schemas, validators, canonical serialization, and two-consumer adoption. |
+| C++/CuTe | Shipping compiler is CUDA-lite with limited scalar/static-layout handling, not a CUDA-capable C++/CuTe frontend. | CUTE-001 through CUTE-007. |
+| Tensor layouts | Pointer/scalar memory semantics exist, but no canonical general `TensorView`/`IndexMap` model exists. | Value/layout contract plus differential CPU/WebGPU tests. |
+| Scheduling | Existing Kernel IR and tensor plans mix useful semantics with backend-shaped constraints. | Explicit L2 semantic to L3 schedule boundary and frozen adapter rules. |
+| Attention | Direct attention is fused row-wise online softmax, without proved workgroup K/V tiling. | Tiled attention workload gate and accurate naming. |
+| JIT | Core primitive paths exist, but many public operations still use opaque `CUSTOM` NumPy closures. | Operation-by-operation typed IR and capability ledger. |
+| Eager bf16/views | bf16 aliases normalize to f32 and some view behavior materializes. | Numerical/view conformance or early rejection. |
+| Capability reporting | Status is spread across summaries, backend labels, and tests. | Generated capability definitions plus runtime lowering decisions and evidence records. |
+| Real-device gate | Browser GPU suites may skip unavailable adapters and are not a required lane for every WebGPU claim. | Stable required actual-device lane for each released WebGPU capability. |
+
+Existing compiler semantic IR, CPU references, tensor-plan execution, tiled
+GEMM, WebGPU orchestration, resident buffers, JIT primitives, runtime rubrics,
+and release dogfood are valuable substrate. The migration extends these seams;
+it does not replace them with a second source-shaped stack.
+
+## Authoritative Migration Sequence
+
+This is the only normative delivery order in this document. Work MAY proceed in
+parallel after its dependencies are satisfied, but a later gate cannot be used
+to claim an earlier gate complete.
+
+### Gate 0 — Truth, vocabulary, and freeze lines
+
+- Freeze new `cute_static_layout`, shape-only `TensorGpuPlan`, and core
+  `OP_CUSTOM` expansion.
+- Define stable diagnostic-stage and capability identifiers.
+- Inventory public dtype/view/materialization behavior and opaque operations.
+- Add architecture checks for forbidden new dependencies and frozen adapters.
+
+**Exit:** no new feature can extend a frozen adapter without an explicit
+architecture exception.
+
+### Gate 1 — Value/layout core and wire foundation
+
+- Create the private semantic-core package and narrow subpaths.
+- Implement `DimExpr`, constraints, dtype/numerical policy, allocation/view,
+  layout/index, verifier, canonical serialization, hashing, and resource limits.
+- Add cross-language TypeScript/Python fixtures and property generators.
+- Add coordinate/address/alias traces and stable schema diagnostics. Effect
+  traces begin with the concrete L2 `/kernel` contract rather than being
+  invented by L1.
+
+**Exit:** serialized fixtures have one verified meaning and deterministic hash
+across TypeScript and Python.
+
+### Gate 2 — Multi-frontend, multi-backend view slice
+
+- Lower existing compiler pointer/view behavior into the shared model.
+- Lower at least one JIT view family through the same model so the design is not
+  CUDA/CuTe-shaped.
+- Execute transpose, strided slice, broadcast, and padded rank-2/3 views through
+  CPU reference and real WebGPU.
+- Derive the legacy tensor plan from verified semantics without extending its
+  unique schema.
+
+**Exit:** two frontend paths and two execution tiers consume the same view/index
+fixtures; reference and WebGPU do not reconstruct offsets independently.
+
+### Gate 3 — Real C++/CuTe frontend slice
+
+- Pin one CUDA-capable compiler profile and CuTe/CUTLASS revision.
+- Prove layout-only fixtures, then dynamic `Tensor<Engine, Layout>` binding and
+  copy/view operations.
+- Preserve source spans and typed unsupported target intrinsics.
+- Exercise the selected browser-local, service, or AOT artifact deployment
+  contract with sandbox and provenance tests.
+
+**Exit:** unmodified pinned source produces the same verified view/index
+semantics as Gate 2 and runs its portable subset on real WebGPU.
+
+### Gate 4 — Tiled GEMM and schedule separation
+
+- Add logical tile and schedule IR separation.
+- Implement workgroup staging, active masks, uniformity analysis, and portable
+  tiled MMA accumulation policy.
+- Compare CPU reference and real WebGPU across boundary tiles, irregular sizes,
+  alignments, and supported dtypes.
+
+**Exit:** tiled GEMM is lowered without source handlers or backend strings in
+semantic IR, and its preservation level is accurately reported.
+
+### Gate 5 — Tiled attention flagship
+
+- Keep the row-wise online-softmax implementation as a named baseline.
+- Implement tiled Q/K/V views, K/V staging, online softmax across tiles,
+  boundary masks, and synchronization legality.
+- Validate causal/non-causal and declared dtype/numerical policies.
+- Record correctness separately from performance on named devices/browsers.
+
+**Exit:** the block-tiled/FlashAttention claim is allowed only for the exact
+proved algorithm and execution profiles.
+
+### Gate 6 — Framework convergence
+
+- Migrate advertised JIT core operations off opaque callbacks and direct
+  backend layout ownership.
+- Give each migrated operation typed semantics, CPU handler, VJP or refusal,
+  transform/export decision, WebGPU decision, and residency/materialization
+  behavior.
+- Make Grad view/dtype behavior agree with conformance fixtures or reject before
   execution.
-- Canonical lab examples live in `packages/browsergrad-compiler/examples/README.md`
-  and are exercised through workspace compiler tests plus published-package
-  dogfood tests.
-- CUDA-lite is not the main framework compiler. It is the right package for
-  CUDA-shaped labs, diagnostics, source-to-Kernel-IR examples, and user kernels.
-  Core `nn`/autograd/optimizer ops should lower from canonical tensor IR.
+- Make runtime/profile UI consume capability and lowering records.
 
-Production hardening required:
+**Exit:** framework-facing support tables are generated from the same contracts
+used to compile and execute.
 
-- Every emitted diagnostic/blocker needs stable code + source span + compatibility
-  family.
-- Every claimed feature needs unit + reference + WGSL/browser coverage, or a
-  written reason browser coverage is impossible.
-- Real-world CUDA claims require corpus audit gates, not hand-picked examples.
+### Gate 7 — Host graphs and optional systems expansion
 
-### `@unlocalhosted/browsergrad-primitives`
+- Generalize multi-dispatch host graphs, bounded dynamic control, pipelines,
+  and explicit collectives.
+- Add native companion lowerings only for named facilities and profiles.
+- Keep browser worker meshes and native distributed systems as separate
+  execution products with shared high-level collective meaning where valid.
 
-Purpose: course-agnostic browser-safe ML helper facade.
+**Exit:** each systems claim names failure model, transport/topology, semantic
+preservation, and actual execution evidence.
 
-Requirements:
+## Proof Matrix and Release Gates
 
-| ID | Requirement | Current status | Acceptance gate |
-| --- | --- | --- | --- |
-| PRM-001 | Expose stable small helpers for text, data, evaluation, simulation, scaling, RL. | In | unit tests |
-| PRM-002 | Keep names generic: reference, comparator, fixture, simulator. | In | API review |
-| PRM-003 | Avoid assignment-specific public APIs. | In | package review |
-| PRM-004 | Provide subpath exports for bundle-sensitive consumers. | In | package export tests |
+| Claim | Required minimum evidence |
+| --- | --- |
+| Wire/schema compatibility | Cross-language golden fixtures, canonical-hash fixtures, old-reader/new-writer and new-reader/old-writer tests, malformed/adversarial decode tests. |
+| Layout/view behavior | Property tests and coordinate traces over hierarchy, offsets, strides, slices, broadcasts, aliases, bounds, and rank-2/3 dynamic cases. |
+| Source compatibility | Pinned unmodified source through the real compatibility profile, with source spans and semantic artifact inspection. |
+| CPU reference | Numerical, memory-effect, alias, bounds, and host-order tests against declared policy. |
+| Portable WebGPU | Actual device execution matching reference under an explicit comparison policy; feature/limit and device-loss paths tested. |
+| Native facility | Native test proving the named facility and matching the same semantic contract. |
+| JIT framework op | Typed IR, CPU handler, VJP/refusal, transform/export decisions, backend decision, residency/materialization tests. |
+| Performance | Named implementation and baseline, recorded hardware/browser/configuration, warmup/statistical method, and separate correctness proof. |
+| Package release | Build, typecheck, lint, package tests, packed-tarball verification, public export checks, and dogfood against installed artifacts. |
 
-LLD:
+Evidence outcomes are `not-run`, `passed`, or `failed`. A skipped adapter is an
+environment result, not a passing WebGPU test. Release notes and docs MUST state
+the exact capability profile proven by required actual-device lanes.
 
-- One top-level facade plus domain subpaths.
-- Helpers are pure TypeScript where possible.
-- Course/profile adapters wrap primitives outside this package.
-
-Production hardening required:
-
-- Do not add a new primitive until two consumers or one durable platform need
-  proves it is generic.
-- Keep fixtures deterministic and browser-safe.
-
-### `@unlocalhosted/browsergrad-dogfood`
-
-Purpose: post-publish verification against real npm artifacts.
-
-Requirements:
-
-| ID | Requirement | Current status | Acceptance gate |
-| --- | --- | --- | --- |
-| DOG-001 | Install exact npm-published packages, not workspace links. | In | dependency pins |
-| DOG-002 | Test browser/WebGPU public surfaces in Chromium. | In | browser test suite |
-| DOG-003 | Test Pyodide/Node package installation and cross-package coexistence. | In | node test suite |
-| DOG-004 | Cover adversarial package failures: missing files, export drift, lifecycle leaks, numerical edge cases. | In | hypotheses-derived tests |
-
-LLD:
-
-- Private workspace package.
-- Depends on exact published versions.
-- Browser suite proves real WebGPU and public exports.
-- Node suite proves Pyodide installation, grad/jit coexistence, and runtime
-  manifest compatibility.
-
-Production hardening required:
-
-- Bump dogfood dependencies only after npm publish.
-- Add dogfood coverage for every new public subpath.
-
-## Cross-Package Requirements
-
-| ID | Requirement | Owner | Acceptance |
-| --- | --- | --- | --- |
-| X-001 | Public imports use package exports only; no `src/` or `dist/` deep imports. | All | pack/dogfood tests |
-| X-002 | Generated Python bundles match source. | grad, jit | `pnpm --filter ... codegen` during build |
-| X-003 | Unsupported APIs fail loudly with stable errors. | grad, jit, compiler | refusal tests |
-| X-004 | WebGPU claims require real browser tests, not unit tests only. | kernels, compiler, jit bridge | Vitest browser/Playwright gates |
-| X-005 | Release tarballs contain built output and rewrite workspace dependencies. | all published packages | `pnpm pack`, `test:release-packages`, `npm view` |
-| X-006 | Platform-facing capability labels match executable truth. | docs + package owners | docs update + tests in same change |
-| X-007 | Browser/device feature gates flow from detection to compile/run. | kernels + compiler | feature matrix tests |
-| X-008 | Readback/materialization boundaries are explicit. | kernels, grad, jit, compiler | API review + perf tests |
-| X-009 | Core framework GPU ops must be tensor IR ops, not permanent `CUSTOM` callbacks. | jit + kernels | IR/VJP/WebGPU tests per op family |
-| X-010 | CPU backend remains reference for every GPU-native core op. | jit + reference/backend owners | CPU-vs-WebGPU forward/backward parity tests |
-
-## Remaining Limits And Removal Requirements
-
-These are deliberate non-goals for the current package requirements. They do
-not block the validated WebGPU-native `jit` path above.
-
-### Direct eager GPU scope
-
-Current limit: `grad` has explicit forward-only `device=` dispatch. It does not
-make eager tensors GPU-resident.
-
-Remove the limit only through a dedicated device-aware tensor project:
-
-- Add tensor storage abstraction:
-  - CPU ndarray,
-  - GPUBuffer handle,
-  - materialization state,
-  - ownership/lifetime rules.
-- Add device-aware autograd:
-  - backward kernels for supported GPU forward ops,
-  - CPU fallback with explicit transfer,
-  - no hidden readbacks inside training loops.
-- Add optimizer residency:
-  - GPU parameter buffers,
-  - GPU gradient buffers,
-  - update kernels for SGD/Adam/AdamW.
-- Add memory planner:
-  - temporary buffer reuse,
-  - release strategy,
-  - device-loss cleanup.
-- Add async execution semantics:
-  - command ordering,
-  - explicit synchronization/readback,
-  - deterministic test hooks.
-- Add parity/perf tests:
-  - CPU vs GPU numerical parity,
-  - backward parity,
-  - no-readback hot-loop perf gates,
-  - browser/device feature matrix.
-
-Recommendation: do not put this in `browsergrad-grad` unless the product goal
-changes. Keep serious GPU graph execution in `browsergrad-jit`; keep `grad`
-explicit and teachable.
-
-### JIT WebGPU Performance Hardening
-
-Current status: `browsergrad-jit` has primitive Conv1d/Conv2d/ConvTranspose2d/
-Conv3d forward/backward IR with CPU reference handlers. Those CNN roots lower
-through generic tensor-plan WebGPU. Explicit `loss.backward(device="webgpu")`
-can populate leaf `.grad` values by realizing symbolic gradient roots through
-the tensor-plan bridge. For GPU-owned graphs, default `.backward()` selects the
-resident WebGPU path and keeps `.grad` GPU-resident. LayerNorm backward roots,
-functional SGD/Adam/AdamW updates, and explicit `Optimizer.step(device="webgpu")`
-can run as tensor-plan WebGPU. `Optimizer.step(device="webgpu", resident=True)`
-and default `.step()` on GPU-owned params/grads keep SGD/Adam/AdamW params/state
-GPU-resident; non-resident `Optimizer.step(device="webgpu")` still materializes
-params/state back to CPU buffers after the GPU update.
-Explicit `realize_tensor_plan_webgpu_resident(...)` can keep tensor-plan roots
-GPU-resident across follow-on tensor-plan calls until `.numpy()` / `.item()`;
-CPU-owned training storage still uses CPU by default.
-
-Next perf hardening, not required for current LLD completion:
-
-- Broaden scheduler/codegen beyond direct kernels and current elementwise-chain
-  / softmax / SDPA-shaped graph fusion when throughput matters.
-
-## Validation Matrix
-
-Use narrow package gates for development and broad gates before release.
+Use narrow gates during development:
 
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-runtime test
@@ -587,18 +1211,61 @@ pnpm --filter @unlocalhosted/browsergrad-jit test:integration
 pnpm --filter @unlocalhosted/browsergrad-kernels test
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
 pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler
-pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:fast
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 pnpm --filter @unlocalhosted/browsergrad-primitives test
-pnpm --dir packages/browsergrad-dogfood test
+pnpm --filter @unlocalhosted/browsergrad-dogfood test:node
+```
+
+Before release-level confidence:
+
+```sh
+pnpm -r run build
+pnpm -r run typecheck
+pnpm -r run test
 pnpm test:release-packages
 ```
 
-Production-ready means:
+Production-ready means package gates, Pyodide integration, claimed actual-device
+WebGPU lanes, compiler corpus gates, packed-artifact tests, and documentation
+all match the same capability manifest. No aggregate green check can override a
+missing tier-specific gate.
 
-- package-level build/typecheck/lint/test pass,
-- Pyodide integration passes for Python packages,
-- browser WebGPU passes for shader claims,
-- compiler corpus gates pass for CUDA compatibility claims,
-- packed tarball checks pass,
-- dogfood passes after publish,
-- docs status matches the exact validated surface.
+## Terminology Rules
+
+| Avoid as a product claim | Use instead |
+| --- | --- |
+| "toy compiler", "just a lab compiler", "small supported subset" | The exact frontend, semantic family, and executable backend tier. |
+| "CuTe support" | Compatibility profile: compiler/CUDA/CuTe revisions, frontend outcome, semantic coverage, backend tiers, and preservation level. |
+| "same semantics" | Name observable, numerical, memory/effect, schedule, and native-facility preservation separately. |
+| "FlashAttention v2" | "fused row-wise online-softmax baseline" until the tiled-attention gate is proven. |
+| "bf16 support" for f32 values | "bf16 storage/conversion with widened arithmetic" when true, or reject. |
+| "GPU supported" | Operation + execution tier + backend profile + residency/materialization behavior. |
+| "fallback" | The named behavior: CPU reference, explicit conversion, materializing transfer, host-lifted operation, or unavailable capability. |
+| "passed" for a skipped GPU environment | `not-run` with the environment reason. |
+
+Historical documents may describe the shipping CUDA-lite API or an older
+release. They MUST label that scope and MUST NOT present it as BrowserGrad's
+architectural destination.
+
+## External Technical Anchors
+
+This architecture is informed by, but does not copy, the following upstream
+contracts:
+
+- [WebGPU specification](https://www.w3.org/TR/webgpu/) for device features,
+  limits, validation, asynchronous operation, and device loss.
+- [WGSL specification](https://www.w3.org/TR/WGSL/) for types, memory/address
+  spaces, uniformity, barriers, and floating-point accuracy.
+- [NVIDIA CUTLASS/CuTe documentation](https://docs.nvidia.com/cutlass/latest/overview.html)
+  for hierarchical layouts, `Tensor<Engine, Layout>`, tiled copy/MMA concepts,
+  and architecture-specific facilities.
+- [LLVM CUDA compilation documentation](https://llvm.org/docs/CompileCudaWithLLVM.html)
+  for the distinction between ordinary C++ compilation and CUDA-capable source
+  compilation.
+- [MLIR rationale](https://mlir.llvm.org/docs/Rationale/Rationale/) and
+  [Transform dialect](https://mlir.llvm.org/docs/Dialects/Transform/) as design
+  evidence for progressive lowering and separation of payload semantics from
+  transformation/scheduling control.
+- [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html) as a reference for
+  deterministic JSON canonicalization; BrowserGrad additionally uses explicit
+  encodings for large integers and floating bit patterns.

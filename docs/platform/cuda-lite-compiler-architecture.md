@@ -1,8 +1,17 @@
 # CUDA-lite Compiler Architecture
 
-This doc is the low-level design map for extending
-`@unlocalhosted/browsergrad-compiler` without turning it into a pile of
-assignment patches.
+This document is the low-level design map for the **current CUDA-lite
+frontend** in `@unlocalhosted/browsergrad-compiler`. It protects the shipping
+pipeline from assignment patches and keeps its parser, semantic IR, CPU
+reference, WGSL emitter, and WebGPU planner in agreement.
+
+It is not the architecture target for generic C++ or CuTe compatibility.
+BrowserGrad’s normative direction is the
+[Semantic Systems Architecture and Low-Level Requirements](./package-requirements-lld.md):
+a versioned C++ frontend lowers real `cute::Layout` and
+`Tensor<Engine, Layout>` semantics into shared `TensorView`, `IndexMap`,
+`Tile`, uniformity, and host-graph semantics. Do not extend this parser with
+CuTe-shaped spelling handlers as a substitute for that work.
 
 ## Spine
 
@@ -22,9 +31,37 @@ CUDA-lite source
   -> kernels package dispatch
 ```
 
-The compiler owns CUDA-shaped semantics. `@unlocalhosted/browsergrad-kernels`
-owns WebGPU device resources, WGSL program validation, prepared sequences,
-resident buffers, and readback mechanics.
+The current frontend owns CUDA-lite semantics.
+`@unlocalhosted/browsergrad-kernels` owns WebGPU device resources, WGSL program
+validation, prepared sequences, resident buffers, and readback mechanics. The
+canonical semantics must remain backend-neutral: CPU reference, portable
+WebGPU, and an optional native companion report their execution capability
+separately.
+
+## Boundary and expansion rule
+
+For a feature that is genuinely part of the current CUDA-lite language, extend
+this pipeline in full. For dynamic tensor views, rank-2/3 layouts, CuTe layout
+composition, `cute::Tensor` objects, tiled collective semantics, or C++
+templates, stop and design the shared semantic abstraction named in the LLD.
+Those are not syntax additions.
+
+The required target boundary is:
+
+```text
+versioned C++ / CuTe frontend
+  -> frontend semantic artifact
+  -> DType + DimExpr + TensorView + IndexMap value/layout semantics
+  -> effectful kernel semantics
+  -> schedule IR + HostExecutionGraph
+  -> existing verifier/reference/planner/WGSL seams and native lowering
+```
+
+The current `CompiledCudaLiteKernel.kernelIr` remains the sole executable IR
+contract for the shipping frontend. The expanded semantic layers must be
+represented explicitly and lowered into that execution contract (or its
+versioned successor) before backend code sees it. AST-shaped reference or WGSL
+execution remains prohibited.
 
 ## Source Of Truth
 
