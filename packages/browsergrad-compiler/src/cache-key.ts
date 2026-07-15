@@ -4,6 +4,11 @@ import {
   unwrapPreparedCudaLiteLayoutBindings,
   type PreparedCudaLiteLayoutBindings,
 } from "./semantic_layout_bindings.js";
+import {
+  CUDA_LITE_VIEW_COPY_BINDING_PROFILE,
+  unwrapPreparedCudaLiteViewCopyBinding,
+  type PreparedCudaLiteViewCopyBinding,
+} from "./semantic_view_copy_bindings.js";
 
 export function createCudaLiteCompileCacheKey(
   source: string,
@@ -23,6 +28,24 @@ export function createCudaLiteLayoutBindingCompileCacheKey(
     source,
     options,
     layoutSemanticHash: prepared.layoutSemanticHash,
+    bindingProjectionHash: prepared.bindingProjectionHash,
+  });
+}
+
+export function createCudaLiteViewCopyBindingCompileCacheKey(
+  source: string,
+  prepared: PreparedCudaLiteViewCopyBinding,
+  options: CompileCudaLiteOptions = {},
+): string {
+  unwrapPreparedCudaLiteViewCopyBinding(prepared);
+  return stableStringify({
+    profile: CUDA_LITE_VIEW_COPY_BINDING_PROFILE,
+    source,
+    options,
+    operationId: prepared.operationId,
+    layoutSemanticHash: prepared.layoutSemanticHash,
+    kernelSemanticHash: prepared.kernelSemanticHash,
+    specializationHash: prepared.specializationHash,
     bindingProjectionHash: prepared.bindingProjectionHash,
   });
 }

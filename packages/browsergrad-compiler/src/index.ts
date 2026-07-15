@@ -230,6 +230,7 @@ export {
 export {
   createCudaLiteCompileCacheKey,
   createCudaLiteLayoutBindingCompileCacheKey,
+  createCudaLiteViewCopyBindingCompileCacheKey,
   createCudaLiteCompilerCache,
   type CudaLiteCompilerCache,
   type CudaLiteCompilerCacheOptions,
@@ -245,6 +246,15 @@ export {
   type PreparedCudaLiteLayoutBinding,
   type PreparedCudaLiteLayoutBindings,
 } from "./semantic_layout_bindings.js";
+export {
+  CUDA_LITE_VIEW_COPY_BINDING_PROFILE,
+  CudaLiteViewCopyBindingError,
+  prepareCudaLiteViewCopyBinding,
+  type CudaLiteViewCopyBindingErrorCode,
+  type PrepareCudaLiteViewCopyBindingOptions,
+  type PrepareCudaLiteViewCopyBindingRequest,
+  type PreparedCudaLiteViewCopyBinding,
+} from "./semantic_view_copy_bindings.js";
 export {
   mapCudaLiteDiagnosticToSourceProvenance,
   prepareCudaLiteCompilationUnit,

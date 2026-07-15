@@ -8,6 +8,7 @@ import type {
 export {
   createCudaLiteCompileCacheKey,
   createCudaLiteLayoutBindingCompileCacheKey,
+  createCudaLiteViewCopyBindingCompileCacheKey,
 } from "./cache-key.js";
 
 export interface CudaLiteCompilerCacheStats {
