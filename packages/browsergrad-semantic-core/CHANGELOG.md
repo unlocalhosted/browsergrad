@@ -24,6 +24,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   scratch-memory, and wall-time budgets; cooperative browser yielding and abort;
   destination-injectivity proofs; native buffer-slot, alignment, overlap, and
   shared-memory validation.
+- Backend-neutral prepared view-copy specializations shared by the CPU
+  reference and device backends, with source-offset caching enabled only for
+  interpreters that consume it.
 - Explicit `/kernel` package export; the package still has no root barrel or
   runtime dependencies.
 

@@ -16,6 +16,11 @@ export {
   type VerifiedKernelArtifact,
 } from "./kernel/artifact.js";
 export {
+  prepareViewCopySpecialization,
+  type PreparedViewCopySpecialization,
+  type PrepareViewCopySpecializationRequest,
+} from "./kernel/prepare.js";
+export {
   prepareViewCopyCpu,
   type PreparedViewCopyCpu,
   type PrepareViewCopyCpuRequest,

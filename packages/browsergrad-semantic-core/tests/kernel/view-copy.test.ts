@@ -4,6 +4,7 @@ import {
   KERNEL_ARTIFACT_SCHEMA,
   kernelArtifactPayload,
   prepareViewCopyCpu,
+  prepareViewCopySpecialization,
   verifyKernelArtifact,
   type VerifiedKernelArtifact,
 } from "../../src/kernel";
@@ -542,7 +543,13 @@ describe("verified materializing view-copy", () => {
     const first = await prepare(layout, kernel, { bindings: { n: parseWireI64("2"), m: parseWireI64("2") } });
     const reordered = await prepare(layout, kernel, { bindings: { m: parseWireI64("2"), n: parseWireI64("2") } });
     const resized = await prepare(layout, kernel, { bindings: { n: parseWireI64("3"), m: parseWireI64("2") } });
+    const backendNeutral = await prepareViewCopySpecialization(layout, kernel, {
+      operationId: first.operationId,
+      bindings: { n: parseWireI64("2"), m: parseWireI64("2") },
+    });
     expect(first.specializationHash).toBe(reordered.specializationHash);
+    expect(first.specializationHash).toBe(backendNeutral.specializationHash);
+    expect(backendNeutral.sourceByteOffsets).toBeUndefined();
     expect(first.specializationHash).not.toBe(resized.specializationHash);
     expect(first.specializationHash).toMatch(/^[0-9a-f]{64}$/u);
 

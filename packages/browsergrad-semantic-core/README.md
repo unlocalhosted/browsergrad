@@ -23,12 +23,13 @@ destination-write effects, disjoint alias sets, and either reject or exact-bit
 fill behavior for invalid source coordinates. Generic operation verification
 is separate from this lowering profile.
 
-The CPU reference resolves bindings and hashes once during preparation,
+The backend-neutral specialization step resolves bindings and hashes once,
 compiles the canonical index evaluators, proves guarded source access and a
 dense injective destination, and derives a binding-sensitive specialization
-hash. Independent element, aggregate-evaluation-step, and prepared-scratch
-budgets bound work; wall-time and abort checks yield through the browser
-scheduler with a timer fallback. Execution checks native typed-array slots,
+hash shared by CPU and device backends. Independent element,
+aggregate-evaluation-step, and optional prepared-scratch budgets bound work;
+wall-time and abort checks yield through the browser scheduler with a timer
+fallback. CPU execution checks native typed-array slots,
 exact allocation lengths, declared alignment, overlap, and shared-memory
 exclusion; it never turns an invalid address into clamping or implicit
 zero-fill.
