@@ -1,4 +1,13 @@
 import { it } from "vitest";
+import {
+  EXECUTION_ENVIRONMENT_SCHEMA,
+  EXECUTION_EVIDENCE_SCHEMA,
+  acquireWebGpuEvidenceDevice,
+  createTerminalEvidenceEmitter,
+  requiredEvidenceFailure,
+  requiresWebGpuEvidence,
+  validateTerminalExecutionEvidence,
+} from "../../../test-support/webgpu-evidence";
 
 import {
   layoutArtifactPayload,
@@ -32,19 +41,14 @@ import {
   type PreparedSemanticViewCopyWgsl,
   type SemanticViewCopyWebGpuTrace,
 } from "../src/semantic_view_copy";
-import {
-  acquireWebGpuEvidenceDevice,
-  requiredEvidenceFailure,
-  requiresWebGpuEvidence,
-} from "./webgpu_evidence";
 
 declare const __BG_KERNELS_VERSION__: string;
 declare const __BG_SEMANTIC_CORE_VERSION__: string;
 
 const TRUE: PredicateExpr = { kind: "bool", value: true };
 const EVIDENCE_PREFIX = "[browsergrad-webgpu-evidence]";
-const EVIDENCE_SCHEMA = "browsergrad.execution-evidence@1";
-const ENVIRONMENT_SCHEMA = "browsergrad.execution-environment@1";
+const EVIDENCE_SCHEMA = EXECUTION_EVIDENCE_SCHEMA;
+const ENVIRONMENT_SCHEMA = EXECUTION_ENVIRONMENT_SCHEMA;
 const SUITE_ID = "browsergrad.kernels.view-copy.webgpu-conformance@1";
 const CAPABILITY_ID = "browsergrad.kernel.view-copy";
 const BACKEND_ID = "browsergrad.backend.webgpu.core";
@@ -65,6 +69,14 @@ const PRODUCER_VERSIONS = Object.freeze({
   "@unlocalhosted/browsergrad-semantic-core": __BG_SEMANTIC_CORE_VERSION__,
   "browsergrad.backend.webgpu.view-copy": SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
 });
+const TERMINAL_EXPECTATION = Object.freeze({
+  suiteId: SUITE_ID,
+  capabilityId: CAPABILITY_ID,
+  backendId: BACKEND_ID,
+  comparisonPolicyId: COMPARISON_POLICY_ID,
+  requireDeviceProfile: true,
+});
+const TERMINAL_EMITTER = createTerminalEvidenceEmitter(EVIDENCE_PREFIX, TERMINAL_EXPECTATION);
 
 interface LayoutInput {
   readonly shape: readonly DimExpr[];
@@ -835,6 +847,7 @@ function emitTerminalEvidence(input: Readonly<{
 }
 
 function validateTerminalEvidence(record: TerminalEvidenceRecord): void {
+  validateTerminalExecutionEvidence(record, TERMINAL_EXPECTATION);
   if (record.schema !== EVIDENCE_SCHEMA || record.kind !== "terminal" || record.suiteId !== SUITE_ID) {
     throw new EvidenceLaneError("BG-WEBGPU-EVIDENCE-SCHEMA", "terminal evidence envelope identity is invalid");
   }
@@ -936,6 +949,5 @@ class EvidenceLaneError extends Error {
 }
 
 function emitEvidence(record: TerminalEvidenceRecord): void {
-  const line = `${EVIDENCE_PREFIX} ${JSON.stringify(record)}`;
-  console.warn(line);
+  TERMINAL_EMITTER.emit(record);
 }

@@ -17,6 +17,7 @@
 import { defineConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 function packageVersion(url: URL): string {
   const parsed = JSON.parse(readFileSync(url, "utf8")) as { readonly version?: unknown };
@@ -71,5 +72,8 @@ export default defineConfig(({ mode }) => ({
         },
       ],
     },
+  },
+  server: {
+    fs: { allow: [fileURLToPath(new URL("../..", import.meta.url))] },
   },
 }));
