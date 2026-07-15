@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-primitives",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generic browser-safe ML primitives for tokenization, data cleaning, evaluation, simulation, scaling, and RL math.",
   "type": "module",
   "license": "MIT",

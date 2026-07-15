@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 2 typed JIT permutation adapter
+- **Current implementation slice:** Gate 2 immutable release artifacts; structured compiler padding next
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -32,7 +32,7 @@ test does not make a gate verified unless every exit criterion is covered.
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
-| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` owns verified view-copy meaning, shared specialization, and the sole canonical frontend construction sink. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix on Apple Metal 3. The compiler prepares and lowers guarded read-only flat-logical-index bindings without changing frozen IR schemas and passes a six-case CPU/actual-WebGPU matrix over the supported non-padded rank-2/3 profile on the same adapter tier. JIT emits a separate closed typed permutation request; kernels strictly constructs and prepares its artifacts; materializing/resident JIT bridge routes use canonical WGSL without reading semantic args from the frozen plan. The required JIT lane now captures the exact production `GpuExecutionSubmission`, executes it resident on Apple Metal 3, and binds actual preparation/dispatch evidence to the complete shared rank-2/rank-3 case manifest. | Add structured compiler padding only through the L2 guard/fill contract. Align the JIT release version/packed consumer, then re-run strict lanes on the exact release commit. Registry publication remains separate. | Semantic-core 99 tests; compiler 30 files/969 tests; kernels semantic preparation/residency and required nine-case lane; JIT production-emission/bridge tests plus a validated two-case required-device `passed` terminal record; packed bare-import runtime/typecheck; architecture guard. Compiler padding remains open. |
+| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` owns verified view-copy meaning, shared specialization, and the sole canonical frontend construction sink. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix on Apple Metal 3. The compiler prepares and lowers guarded read-only flat-logical-index bindings without changing frozen IR schemas and passes a six-case CPU/actual-WebGPU matrix over the supported non-padded rank-2/3 profile on the same adapter tier. JIT `0.9.0` emits a separate closed typed permutation request; kernels strictly constructs and prepares its artifacts; materializing/resident JIT bridge routes use canonical WGSL without reading semantic args from the frozen plan. The required JIT lane captures the exact production `GpuExecutionSubmission`, executes it resident on Apple Metal 3, and binds actual preparation/dispatch evidence to the complete shared rank-2/rank-3 case manifest. Its packed core/source/Node-adapter surfaces work without optional peers, while an integrated packed consumer resolves kernels and semantic-core. | Add structured compiler padding only through the L2 guard/fill contract, then re-run strict lanes on the exact release commit. Registry publication remains separate. | Semantic-core 99 tests; compiler 30 files/969 tests; kernels semantic preparation/residency and required nine-case lane; JIT production-emission/bridge tests plus exact-commit retained evidence at `09d868d0`; isolated and integrated packed JIT runtime/declaration consumers; deterministic dependency-first release guard; architecture guard. Compiler padding remains open. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
@@ -43,10 +43,11 @@ test does not make a gate verified unless every exit criterion is covered.
 
 ### Objective
 
-Gate 0 and Gate 1 are verified. Gate 2 begins with the verified materializing
-view-copy contract and CPU evaluator, then one rank-2 transpose tracer bullet
-from compiler and JIT through the same actual WebGPU lowering. Broader view
-families extend the operation rather than add source-shaped execution paths.
+Gate 0 and Gate 1 are verified. Gate 2 has one shared materializing view-copy
+contract, CPU evaluator, canonical WGSL lowering, and compiler/JIT tracer
+bullets through actual WebGPU. Next work adds structured compiler padding
+through that operation's existing guard/fill semantics. Broader view families
+must extend the operation rather than add source-shaped execution paths.
 
 ### Work in flight
 
@@ -69,8 +70,11 @@ families extend the operation rather than add source-shaped execution paths.
 | Typed JIT permutation request emission | `verified` | One `GpuExecutionSubmission` builds the frozen plan once, then emits a separate `browsergrad.jit.tensor-plan-semantic-requests@1.0` envelope for every post-fusion `PERMUTE`. Requests contain only `inputShape`, normalized `axes`, canonical `f32`, and plan-local `valueId`; malformed dtype/rank/extent/axis/output-shape/arg cases fail before bridge execution. Public `permute` and `transpose` normalize negative axes and reject missing, duplicate, non-integer, or out-of-range axes before UOp construction. | No initial-profile work remains; broader view families require new typed request variants, not plan reinterpretation. | Shared rank-2/rank-3 emission fixture plus focused JIT integration; typecheck/lint/diff-check clean; generated Python source synchronized. |
 | Resident semantic view-copy dispatch | `verified` | Kernels executes a module-authorized prepared view-copy directly from a resident whole-root `GPUBuffer` through the exact prepared WGSL. The route performs no host upload, readback, or index reconstruction; validates declared and physical source bytes, storage usage, device/dispatch limits, and permits only a nonempty dense zero-offset destination that overwrites its complete root. Direct callers use an async production-scoped API; tensor-plan execution alone receives a private, non-exported synchronous issue capability under its owning scopes. Semantic preparation preserves liveness/release accounting, and failed dispatch/materialization destroys roots and clears pools rather than re-pooling invalid buffers. | No initial-profile work remains; partial destinations still require an explicit initialized-destination contract. | Deterministic fakes prove LIFO validation/OOM/internal scope initiation, delayed loss, synchronous issue/pop/completion failures, no pre-scope handle mint, no upload/readback/legacy dispatch, poisoned-pool rejection, and clean retry. The JIT required-device lane proves resident roots followed by exactly one explicit complete-root materialization. |
 | JIT semantic request consumption and execution | `verified` | Kernels accepts only the closed JSON request envelope, requires exact one-for-one ordered `PERMUTE` coverage, constructs artifacts solely through semantic-core, excludes `valueId` from every semantic hash, and authority-binds prepared WGSL. JIT sends one fused submission and chooses separate semantic materializing/resident methods; missing methods fail before legacy dispatch. The semantic schedule projection erases PERMUTE args, so execution cannot recover axes from the frozen plan. Live semantic handles retain the exact authority-bound preparation and its per-dispatch profile promises until release. | Re-run required evidence on the exact future release commit. | Shared fixture tests; mock legacy refusal/no-readback selection; per-handle preparation/profile lifecycle tests; advisory/required environment behavior; validated two-case Apple Metal 3 terminal pass with one actual submitted workgroup profile and one explicit readback per resident root. |
-| JIT required-device semantic-permute conformance | `verified` | Before Chromium starts, the JIT lane runs production `_tensor_plan_submission` over each shared fixture and captures its exact plan plus canonical request JSON. The browser executes those captured submissions through `run_tensor_plan_resident_semantic`, compares the bridge's authority-bound execution trace with the prepared manifest, requires one settled actual dispatch profile with an exact legal timing/confidence pair, verifies one resident complete root, performs exactly one explicit materialization, compares every u32 bit, drains queue/late errors, races loss/timeouts, and emits one validated terminal record. Planned and submitted topology are separate. The artifact hash is recomputed from the complete ordered plan/request/input/expected/backend manifest; a separate domain-separated terminal-manifest hash binds the full outcome, environment, source revision, stage, diagnostics, errors, observations, and timestamp without a hash cycle. | Release CI must repeat and retain the terminal log for the exact clean commit. | Latest implementation run on Apple Metal 3 passed rank-2/rank-3 with artifact `5de13ee553a25bb45fdfe198267c64c0ac505903c8f44946c58a34ae7b5121a3`, case set `962280999544fc424e23205ec9bd40e7ec5186d32d72027c0fd0239321d556cc`, terminal manifest `7dd44831892ca92595522f6d1428c0dbb46853ab19f9d561f3a4918c99b827ac`, actual queue-completion dispatch profiles, one pipeline/invocation, and exact raw-u32 outputs. Because relevant source was dirty, the retained-log verifier correctly refuses this run as release authorization. Exact-SHA/clean-source prepublish and JIT/kernels workflow gates are implemented. |
-| Compiler Gate 2 release-version alignment | `verified` | Compiler is `0.2.0`, matching the public layout-binding API boundary and its semantic-core/kernels `0.2.0` dependency chain. Package and workspace changelogs describe the change, release docs use the matching tag, and compiler tag releases query both exact dependency versions from npm before publish. | Publish remains an explicit release operation after exact-commit device evidence; no package was published here. | Packed-tarball version/dependency checks, fresh-consumer runtime/declaration proof, workflow syntax parse, and release-workflow prerequisite assertions. |
+| JIT required-device semantic-permute conformance | `verified` | Before Chromium starts, the JIT lane runs production `_tensor_plan_submission` over each shared fixture and captures its exact plan plus canonical request JSON. The browser executes those captured submissions through `run_tensor_plan_resident_semantic`, compares the bridge's authority-bound execution trace with the prepared manifest, requires one settled actual dispatch profile with an exact legal timing/confidence pair, verifies one resident complete root, performs exactly one explicit materialization, compares every u32 bit, drains queue/late errors, races loss/timeouts, and emits one validated terminal record. Planned and submitted topology are separate. The artifact hash is recomputed from the complete ordered plan/request/input/expected/backend manifest; a separate domain-separated terminal-manifest hash binds the full outcome, environment, source revision, stage, diagnostics, errors, observations, and timestamp without a hash cycle. | Release CI must repeat and retain the terminal log for the exact clean release commit after the `0.9.0` metadata alignment. | Exact clean-source retained-log verification passed on Apple Metal 3 for source revision `09d868d077e02b8f8727d9b65923d19969650761`, artifact `5de13ee553a25bb45fdfe198267c64c0ac505903c8f44946c58a34ae7b5121a3`, case set `962280999544fc424e23205ec9bd40e7ec5186d32d72027c0fd0239321d556cc`, device profile `0ef434a09b4cc9919ba30c92e791dc2a2138ef42a6f02cc282d1ce1d07d22b63`, and terminal manifest `1d2055f8b0602d18ad957344f04787f81842c5fe76674f477bd27bdf52381250`. Exact-SHA/clean-source prepublish and JIT/kernels workflow gates remain implemented. |
+| Compiler Gate 2 release-version alignment | `verified` | Compiler is `0.2.0`, matching the public layout-binding API boundary and its semantic-core/kernels `0.2.0` dependency chain. Package and workspace changelogs describe the change. One generic closure preflight now verifies every transitive public workspace dependency before any selected-package device evidence. | Publish remains an explicit release operation after exact-commit device evidence; no package was published here. | Packed-tarball version/dependency checks, fresh-consumer runtime/declaration proof, generic closure/order tests, workflow syntax, and release-workflow prerequisite assertions. |
+| JIT Gate 2 release-version alignment | `verified` | JIT is `0.9.0`, matching its new public semantic-request/bridge boundary. Kernels `^0.2.0` and Pyodide `^0.26.4` are standard optional peers; semantic-core remains kernels-owned. `pnpm pack` removes every workspace protocol. Both pnpm and npm JIT-only offline consumers import/typecheck root, source, and Node-adapter surfaces without either optional peer; an integrated packed consumer resolves kernels and semantic-core. Publish-all uses a deterministic cycle-checked dependency graph over runtime, optional, and peer edges and rejects private workspace targets under any range. | Publish and exact-release-commit device evidence remain explicit release operations; no package was published here. | JIT build, both typechecks, 4 files/24 unit tests, 23 files/234 integration tests, lint; publish-order tests; packed pnpm/npm runtime and declaration consumers; frozen lockfile install. |
+| Grad `0.5.2` release metadata alignment | `verified` | Grad now uses standard optional Pyodide peer metadata, preserves kernels as its required runtime dependency, and leaves semantic-core ownership with kernels. Its version moved from immutable published `0.5.1` to `0.5.2`; no runtime/API behavior changed. | Registry publication remains an explicit release operation. | Full Grad build/codegen/typecheck/lint, 30 unit and 322 integration tests, frozen install, packed exact dependency/peer assertions, and fresh npm Grad/kernels/semantic-core consumer. |
+| Immutable npm release pipeline | `in-progress` | Validation and every target `prepublishOnly` run without npm credentials/OIDC after all target baselines are captured. Staging rejects tracked changes and every untracked source except its declared output directory. pnpm then packs once with lifecycle scripts disabled; raw bounded gzip/tar preflight rejects extension metadata, links, specials, decompression bombs, nonportable collisions, and file/ancestor ambiguity before semantic parsing. Protected publication copies only the exact closure into a private single-link artifact directory, strips auth/password/user/cert/key/token and OIDC authority plus user/global npm configs from every verification child, and rechecks identity/SRI immediately before scripts-disabled publication. npm `>=11.12.0` must cryptographically verify the exact returned attestation bundle; only that bundle's single SLSA statement can establish subject/workflow/ref/repository/commit identity. Manual batch mode stages/audits all seven current versions and publishes only missing versions; selected-tag resume requires exact current identity, while batch/prior dependencies require an approved workflow/ref and an attested commit reachable from `origin/main`. Exact dependencies are rechecked immediately before each registry mutation. Runtime `0.1.2` and primitives `0.1.1` replace locally drifted immutable versions. | Commit the owned release infrastructure, run clean-worktree staging from that exact commit, then mark verified and record the staged manifest/SRI evidence. | 19 adversarial tar tests; 35 Node release-security tests including 15 provenance, 9 state/order, 6 staged-manifest, 2 version-floor, 2 credential-boundary, and 1 tree-equivalence cases; all-seven-package packed/fresh-consumer release suite; workflow YAML/static security assertions; architecture check; frozen install; seven-version live dry-run. |
 
 ### Audit findings recorded so far
 
@@ -211,6 +215,12 @@ families extend the operation rather than add source-shaped execution paths.
 | D-034 | 2026-07-15 | accepted | The JIT `prepublishOnly` lifecycle runs mutating build/codegen before the exact-commit cleanliness/evidence guard, and release tests pin that ordering. | Checking the marker first allowed generated Python to drift after evidence validation and before packing. Running the guard last makes any post-evidence codegen change dirty and blocks publication. |
 | D-035 | 2026-07-15 | accepted | Every production semantic resident dispatch and materialization issue phase pushes `internal`, `out-of-memory`, then `validation`; synchronously issues all GPU calls; initiates every pop in reverse order before the first await; and races pop/operation settlement against device loss. Public direct dispatch is async and scoped; the tensor-plan synchronous issuer is private and unexported. Any diagnostic failure destroys the produced root/readback, clears pipeline/output pools, settles profiles, and cannot mint a handle or return a poisoned buffer to a pool. | `uncapturederror` and a later queue tick are telemetry, not authoritative error ownership. Without scopes at the exact synchronous issue site, late validation could false-pass; without private ownership, future callers could bypass the contract; without failure-specific pool handling, dead or invalid roots could be reused. |
 | D-036 | 2026-07-15 | accepted | Release authorization requires one bounded regular retained log containing exactly one compact reporter-prefixed terminal record whose whole-record digest, exact producer versions, full source revision, legal successful state, and canonical cases validate. A shared source-scope list must be clean for the verifier and final JIT/kernels publish guards. Evidence, verifier, always-upload, and publish steps have pinned order/conditions; JIT, kernels, and compiler publish guards run last after every mutating verifier, and kernels also requires the exact JIT semantic evidence marker. | A digest proves integrity, not commit authority; HEAD alone can label dirty bytes as committed; post-gate build/codegen can mutate publish inputs; unbounded or non-regular logs can exhaust/block the verifier; and mismatched workflow conditions can let kernels publish without the JIT lane. The combined contract closes those bypasses while retaining failure logs for diagnosis. |
+| D-037 | 2026-07-15 | accepted | Release the JIT semantic-request boundary as `0.9.0`. Model kernels `workspace:^` and Pyodide `^0.26.4` as standard optional peers through `peerDependenciesMeta`; do not add a direct semantic-core dependency or peer. Pack only through pnpm. Derive publish-all order from every public workspace runtime, optional, and peer edge regardless of source or packed range; reject private/missing workspace targets and cycles. Before downstream evidence, require exact published kernels/semantic-core versions, the kernels-to-semantic-core edge, and byte/mode/path-equivalent unpacked local and immutable registry artifacts. Publication is restricted to a protected environment and a SHA reachable from `main`; an existing equivalent npm version and GitHub release are resumable rather than fatal. | JIT core/source installation is backend-neutral, while kernels owns semantic preparation and its semantic-core version. Nonstandard optional-peer metadata was not enforced by package managers; npm pack preserves workspace protocols; dependency-only sorting could publish JIT before kernels; version existence alone could certify locally drifted dependency bytes. Standard metadata, isolated/integrated packed consumers, deterministic graphing, registry-tree equality, and source/ref constraints prevent workspace-only success or broken/resumed releases without forcing optional backends onto core-only consumers. |
+| D-038 | 2026-07-15 | accepted | A production npm release is one immutable pnpm-packed tarball created after all mutating validation in a credential-free job, identified by exact spec, source SHA, SHA-512 SRI, and a bounded canonical file snapshot. The protected job may run no workspace install or package lifecycle script; it publishes only that tarball with npm scripts disabled. Success and resume both require exact registry integrity/tree equality, registry signature verification, one SLSA v1 provenance statement, and exact subject/repository/workflow/ref/commit identity. | Publishing a live package directory could rerun lifecycle code and produce bytes never tested. Job-wide tokens/OIDC exposed write authority to dependency installs and browser tests. Tree equality alone could resume a package published without valid provenance. Two-phase staging, least authority, strict archive inspection, and post-publication cryptographic/semantic verification close those gaps. |
+| D-039 | 2026-07-15 | accepted | Release Grad's packaging-only correction as `0.5.2`: use standard optional Pyodide peer metadata, retain kernels as the required runtime dependency, and do not add semantic-core directly. Generic release closure must therefore enforce semantic-core → kernels → Grad before a Grad tag can proceed. | Local Grad `0.5.1` bytes had drifted from the immutable registry version and its nonstandard peer field was not enforceable. A new patch version preserves npm immutability and package ownership without claiming runtime behavior changed. |
+| D-040 | 2026-07-15 | accepted | A staged release manifest must name targets in deterministic dependency order, bind selected-package mode to exactly one matching target, and contain exactly the computed dependency closure. Downloaded artifacts are capped, single-link regular files copied through open descriptors into a private `0700` directory, hashed while copied, identity-checked, and reverified immediately before publish. Every validation/registry-read child receives isolated tokenless user/global npm configs with token, auth, password, username, OTP, cert, key, GitHub, and OIDC authority removed; only the exact `npm publish <tarball>` child inherits publication authority. A fresh batch after partial publication must stage/audit every current public target, apply approved-workflow/ref plus protected-main-reachability provenance to existing versions, and publish only missing versions. Selected-tag resume alone requires exact current workflow/tag/commit identity. | Manifest labels are not authority, downloaded artifacts can be swapped between validation and `npm publish`, project/global config and non-token npm credentials can bypass token-only stripping, and filtering an already-published package out of a fresh batch could bypass resume proof. Exact plan equality, private immutable copies, isolated npm config, complete credential removal, and explicit batch-versus-tag provenance states close these gaps without falsely requiring every prior batch target to have been produced by the current release commit. |
+| D-041 | 2026-07-15 | accepted | Require npm `>=11.12.0` for provenance verification and decode semantic identity only from the exact `attestationBundles` entry returned by `npm audit signatures --include-attestations` for the installed root package. Pin `11.12.1` in protected jobs, install it with scripts disabled and OIDC request variables blank, and compare all three semver components. | Validating a separately fetched DSSE document beside a successful signature audit does not prove that npm cryptographically verified that same statement. npm versions before `11.12.0` do not expose the verified bundle required to bind those facts. |
+| D-042 | 2026-07-15 | accepted | Release the accumulated additive runtime assignment/platform surface as `0.1.2` and reissue unchanged primitives behavior as packaging-only `0.1.1`. Never treat local bytes that differ from immutable runtime `0.1.1` or primitives `0.1.0` as resumable. | The all-target batch audit exposed real registry drift hidden by the former missing-only filter. Reusing published versions would either fail immutable equivalence or encourage a bypass; explicit new versions preserve npm immutability and make the staged artifact contract reproducible. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -748,6 +758,114 @@ affected implementation slice is marked complete.
   and compiler evidence gates now run last; kernels also requires the exact JIT
   semantic evidence marker.
 
+### 2026-07-15 — JIT `0.9.0` release alignment
+
+- Bumped JIT to `0.9.0` for the semantic-request/production-bridge boundary.
+  Replaced nonstandard optional-peer metadata with standard optional kernels
+  and Pyodide peers; kept semantic-core exclusively behind kernels.
+- Added isolated packed proof that root, source, and Node-adapter imports plus
+  declarations work offline without either optional peer. Added an integrated
+  packed JIT/kernels/semantic-core consumer that prepares the same canonical
+  semantic operation. Packed metadata must contain no workspace protocol.
+- Extracted a side-effect-free deterministic publish sorter over public
+  runtime, optional, and peer dependencies. It rejects duplicate names,
+  malformed maps, missing workspace targets, and cycles; focused tests pin all
+  three workspace protocol variants and the repository's real ordering.
+- JIT tag releases now verify exact semantic-core and kernels registry
+  versions, including the published kernels-to-semantic-core dependency, before
+  Playwright/device evidence. They also unpack locally pnpm-packed and registry
+  tarballs and require the same path, mode, and bytes, so an immutable
+  same-version dependency cannot drift behind local evidence.
+- Release and manual-publish workflows require a protected `npm-production`
+  environment and a SHA reachable from `main`. Existing versions are skipped
+  only after registry-tree equality, GitHub release creation is idempotent, and
+  provenance remains enabled. Release docs replace removed legacy token advice
+  with trusted publishing plus a short-lived granular fallback.
+- Release docs disallow package-local npm publish and document dependency order
+  plus evidence-gated manual dispatch.
+- Historical exact-commit proof for `09d868d0` is recorded above. `0.9.0`
+  release metadata changes require a new exact-clean-commit device record after
+  this slice commits; registry publication remains separate.
+
+### 2026-07-15 — Immutable npm artifact and Grad release hardening
+
+- Bumped Grad to `0.5.2` because its local `0.5.1` package tree no longer
+  matched the immutable published version. Replaced nonstandard Pyodide peer
+  metadata, preserved kernels ownership, and added packed plus fresh-npm
+  consumer proof without changing runtime code.
+- Added the repository metadata semantic-core needs for trusted publishing.
+  Every public package now has one exact monorepo repository/directory identity
+  and a complete `prepublishOnly` gate; artifact-mutating pack/publish lifecycle
+  hooks are rejected.
+- Replaced live-directory publication with a two-job artifact protocol.
+  Validation has no token or OIDC permission, runs all semantic/device gates,
+  packs once, and uploads tarballs plus an exact source/SRI manifest. Protected
+  publication installs no workspace dependency, invokes no lifecycle code, and
+  has read-only repository access. A third contents-only job creates the GitHub
+  Release after npm publication without receiving npm/OIDC authority.
+- Replaced package-specific release prerequisites with one transitive closure
+  over runtime, optional, and peer edges. Both workflows share
+  `browsergrad-npm-production` concurrency with `queue: max`, so pending release
+  attempts serialize rather than overwrite each other.
+- Added bounded tarball inspection without extraction: raw gzip/tar preflight
+  rejects extension metadata before allocation, enforces compressed and full
+  decompressed-stream limits, and admits only regular files/directories. The
+  semantic pass enforces canonical `package/` paths, portable Unicode/case
+  uniqueness, no file/ancestor ambiguity, exact package identity, and canonical
+  path/mode/size/SHA-512 snapshots.
+- Staged publication now rejects oversized or hardlinked manifests/artifacts,
+  copies exact closure artifacts through open descriptors into a private
+  directory, hashes while copying, and revalidates SRI plus package identity
+  immediately before `npm publish`. Selected-package labels cannot disagree
+  with targets, and artifacts cannot fall outside or omit the computed closure.
+- Validation, tar inspection, registry reads, fresh npm installs, and signature
+  audit children receive a fixed tokenless npm config with token/OIDC variables
+  removed. The publisher admits ambient authority only for the single exact
+  `npm publish <staged-tarball>` child.
+- Added post-publication proof that exact staged SRI equals registry integrity,
+  the registry tree is identical, npm signature audit succeeds, and exactly one
+  SLSA v1 statement binds the npm subject digest to the expected GitHub-hosted
+  repository, workflow, ref, commit, and invocation. Resume uses the same proof;
+  dependencies from a prior release require an allowlisted workflow and an
+  attested commit reachable from protected main before any mutation.
+- `pnpm test:release-packages` now includes 18 hostile archive cases, 12
+  provenance boundary/mutation cases, 4 staged-manifest boundary cases, exact
+  coverage of all seven public packages, fresh npm runtime/primitives/Grad/JIT
+  consumers, workflow least-authority/order/concurrency assertions, and generic
+  release graph assertions. Exact clean-worktree staging remains the final check
+  after the release implementation commit.
+
+### 2026-07-15 — Immutable release exit-audit closure
+
+- Bound provenance identity to npm's exact cryptographically verified
+  attestation bundle and raised the protected npm floor to `11.12.0` with
+  pinned `11.12.1` installation. Mocked tests now distinguish trusted npm audit
+  output from raw registry payloads and reject root, location, registry, URL,
+  bundle, workflow/ref, and statement mutations.
+- Replaced missing-only batch target filtering with an explicit publication
+  state machine. Manual dispatch stages/audits all seven current targets,
+  publishes only missing versions, uses prior approved provenance for existing
+  batch targets, and reserves exact current identity for selected-tag resume or
+  newly published artifacts.
+- Captured every target's packed baseline before the first mutating lifecycle
+  command, descriptor-bound the staged-manifest read, and rechecks exact
+  workspace dependencies immediately before each `npm publish` mutation.
+  Cleanliness now rejects untracked package inputs while permitting only the
+  declared staging-output directory.
+- Isolated every read-only npm child from project/user/global npm credential
+  config and removed token, auth, password, username, OTP, certificate, key,
+  GitHub, and OIDC authority. The fallback token remains visible only to the
+  exact publish child.
+- The new all-target dry-run exposed immutable drift that the missing-only plan
+  had hidden. Runtime's large additive assignment/platform surface moves to
+  `0.1.2`; primitives' unchanged behavior moves to packaging-only `0.1.1`.
+  Live registry planning now reports all seven current versions as missing;
+  nothing was published.
+- Focused and packed release gates now pass 19 hostile-archive tests and 35
+  Node release-security tests, all seven packed/fresh-consumer checks, frozen
+  pnpm install, architecture enforcement, workflow YAML parsing, and whitespace
+  validation. Exact clean-commit staging remains the only open exit criterion.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -808,6 +926,12 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Latest actual-device implementation run and dirty-source refusal | `pnpm --filter @unlocalhosted/browsergrad-jit test:browser:semantic-permute:required` then retained-log verifier | Browser execution passed both raw-u32 cases on Apple Metal 3 with terminal manifest `7dd44831892ca92595522f6d1428c0dbb46853ab19f9d561f3a4918c99b827ac`. The verifier then rejected release authorization with `relevant source differs from expected git HEAD`, as required for the uncommitted implementation tree. | After commit, rerun required lane and verifier without modifying the evidenced source. |
 | 2026-07-15 | Final scoped Gate 2 package regression | Kernels full typecheck/browser-typecheck/test/build/lint; JIT full typecheck/browser-typecheck/unit/integration/build/lint; compiler `verify:compiler` | Passed: kernels 17 files/127 tests; JIT 4 files/24 unit tests and 23 files/234 Pyodide integration tests; compiler 30 files/969 tests plus architecture and all synthetic/fixture/scope/status/CLI/tool-lock/corpus gates. Builds and lints passed; kernels retains one pre-existing `realizer.ts` no-useless-spread warning. | None before release/architecture gates. |
 | 2026-07-15 | Final retained-evidence/release/architecture gates | workflow YAML parse; `pnpm test:release-packages`; `pnpm architecture:check`; `git diff --check`; staged diff check | Passed: workflow syntax, unique/order/condition/pipefail/no-bypass assertions, gate-last assertions for JIT/kernels/compiler, packed/fresh-consumer checks, semantic architecture guard, and whitespace checks. | Stage only owned files, audit, and commit this coherent slice. |
+| 2026-07-15 | Exact-commit JIT retained evidence after `09d868d0` | `pnpm --filter @unlocalhosted/browsergrad-jit test:browser:semantic-permute:required 2>&1 \| tee /tmp/browsergrad-jit-semantic-permute-09d868d0.log` then `node packages/browsergrad-jit/scripts/verify_semantic_permute_evidence_log.mjs /tmp/browsergrad-jit-semantic-permute-09d868d0.log "$(git rev-parse HEAD)"` | Passed on Apple Metal 3. Verifier accepted exact source revision `09d868d077e02b8f8727d9b65923d19969650761` with artifact `5de13e...`, case set `962280...`, device `0ef434...`, and terminal manifest `1d2055...`. | Historical proof remains valid for that commit; rerun after `0.9.0` release-alignment commit. |
+| 2026-07-15 | JIT `0.9.0` release alignment | `pnpm install --frozen-lockfile`; JIT build/typecheck/browser-typecheck/unit/integration/lint; `pnpm test:release-packages`; registry-equivalence `--allow-missing`; `pnpm architecture:check`; workflow YAML parse; `git diff --check` | Passed: frozen lockfile; generated-source build; both typechecks; 4 files/24 unit tests; 23 files/234 Pyodide integration tests; lint; six publish-order tests plus packed-tree mutation test; packed JIT-only and integrated runtime/declaration consumers; workflow registry/source/order/resume assertions; architecture and YAML checks. Live npm query truthfully reported semantic-core `0.2.0` and kernels `0.2.0` are not published, so no equivalence or publication claim is made. | Commit owned files, rerun exact-clean-commit required-device lane, then begin compiler structured padding. |
+| 2026-07-15 | Immutable release hardening focused gate | `python3 scripts/snapshot-package-tar.test.py`; provenance/order/tree Node tests; syntax checks; `node scripts/publish-missing-npm.mjs --dry-run` | Passed: 12 bounded hostile-archive cases, 17 focused Node tests, all script syntax, and deterministic five-package missing-version plan in semantic-core → kernels → compiler/Grad/JIT order. No publication occurred. | Run exact staging from a clean committed worktree. |
+| 2026-07-15 | Immutable release hardening integration gate | `pnpm test:release-packages`; `pnpm install --frozen-lockfile`; `pnpm architecture:check`; Ruby workflow YAML parse; `git diff --check` | Passed: complete packed consumers including fresh npm Grad and JIT installs, lifecycle/repository/workflow guards, 10 provenance tests, 12 tar tests, frozen pnpm `10.34.5` install, semantic architecture, workflow syntax, and whitespace. | Commit release infrastructure, then stage semantic-core from a separate clean worktree before marking the pipeline verified. |
+| 2026-07-15 | Adversarial immutable-release exit gate | `pnpm install --frozen-lockfile`; `pnpm test:release-packages`; `pnpm architecture:check`; `node scripts/publish-missing-npm.mjs --dry-run`; Ruby workflow YAML parse; script syntax/compile checks; `git diff --check` | Passed: frozen pnpm `10.34.5`; 18 raw/semantic hostile-tar tests; 25 Node tests including 4 staged-manifest, 12 provenance, 6 dependency-order, 2 credential-boundary, and 1 tree-equivalence cases; all seven public tarballs and fresh runtime/primitives/Grad/JIT consumers; architecture and workflow syntax. Registry plan contains exactly the five missing versions in semantic-core → kernels → compiler/Grad/JIT order. No publication occurred. | Commit only owned release infrastructure, then stage one exact package from a separate clean worktree and record its manifest/SRI before marking this row verified. |
+| 2026-07-15 | Immutable-release exit-audit closure | `pnpm install --frozen-lockfile && pnpm test:release-packages && pnpm architecture:check`; workflow YAML parse; `node scripts/publish-missing-npm.mjs --dry-run`; `git diff --check` | Passed: frozen pnpm `10.34.5`; 19 hostile tar tests; 35 Node release-security tests; all-seven packed/fresh-consumer suite; architecture and workflow syntax. Live dry-run plans all seven current versions in dependency-first order as missing after the required runtime `0.1.2` and primitives `0.1.1` bumps. No publication occurred. | Commit owned files, then stage an exact package from a separate clean worktree and record manifest/SRI evidence. |
 
 ## Failure and Recovery Log
 
@@ -815,6 +939,21 @@ Record failures that may matter after context loss. Include the exact failing
 command, concise error, suspected cause, resolution or next experiment, and
 whether any files may be left partially changed.
 
+- Initial JIT packed-consumer typecheck failed because an empty observation
+  array inferred implicit `any[]`; replaced it with a structurally typed scalar
+  observation record shared by the runtime and strict declaration check.
+- First integrated packed-consumer runtime/typecheck used string literals where
+  `WireI64` brands were required and read `operationId` one level above its
+  prepared specialization owner. It now imports `parseWireI64` from the packed
+  schema subpath and checks `prepared.semantic.operation.operationId`; both
+  runtime and strict declaration checks pass.
+- Node-based workflow parsing failed because root has no direct `yaml` module.
+  Repository validation uses Ruby's installed YAML parser instead; workflow
+  static semantics remain covered by the release harness.
+- Registry-equivalence hardening first passed unsupported
+  `pnpm pack --ignore-scripts`; pnpm rejected the option. The verified form is
+  `--config.ignore-scripts=true`, which preserves pnpm workspace-range rewriting
+  without allowing package lifecycle scripts to mutate evidence inputs.
 - Adversarial staged review invalidated the first JIT device proof: the browser
   test synthesized plan/request data instead of invoking JIT, called a planned
   ceil-division submitted topology, prepared evidence separately from the
@@ -1075,6 +1214,38 @@ whether any files may be left partially changed.
   attachments by design. Compiler-local generated evidence artifacts are now
   ignored just like kernels screenshots; no failure artifact is staged as
   source.
+- Release-path audit found that the first resumable publisher interleaved
+  equivalence checks with mutations, published live directories, extracted
+  untrusted registry tarballs, exposed the fallback token job-wide, omitted
+  Grad from hard-coded dependency checks, and accepted tree-equivalent versions
+  without provenance. Publication now precomputes a generic closure, stages all
+  exact artifacts before mutation, uses a bounded non-extracting snapshotter,
+  separates authority into a protected job, and applies identical integrity,
+  signature, provenance, and identity checks to new and resumed versions.
+- The first provenance integration call used the asynchronous verifier inside
+  a synchronous retry helper, which would have logged success before npm audit
+  completed. The publisher now uses top-level await plus a dedicated bounded
+  async retry path; focused tests exercise cleanup and proof failures.
+- An initial local experiment combined CommonJS `require` with top-level await
+  and Node rejected the ambiguous module format. The corrected inspection used
+  explicit ESM imports; no source file was affected.
+- `npm audit signatures` against a package-lock-only install reported no
+  installed supported-registry dependencies. Provenance verification now does
+  a fresh real install with scripts and optional peers omitted, then audits the
+  installed exact spec in an isolated cache/project.
+- Exit audit found that a separately fetched DSSE statement could be validated
+  while npm cryptographically audited a different installed bundle. The
+  verifier now requires npm `>=11.12.0`, requests attestation-inclusive audit
+  output, and decodes only the exact verified root bundle.
+- The first all-target dry-run correctly failed on immutable primitives
+  `0.1.0`, then runtime `0.1.1` drift. Primitives differed because the new pnpm
+  artifact contract omits the packed `prepublishOnly` field; runtime also ships
+  substantial new assignment/platform files. Both are new versions (`0.1.1`
+  and `0.1.2`) rather than equivalence exceptions.
+- The first package-identity extension referenced `relative_path` before it was
+  assigned in the tar stream loop. Direct Python compilation/tests caught it
+  before integration; the canonical path is now derived before payload capture,
+  with invalid/missing package-manifest and symlink-input regressions.
 
 ## Quick Resume Checklist
 
@@ -1089,9 +1260,8 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Align the JIT release version with its new semantic request/bridge behavior;
-pack JIT plus its optional kernels integration into a fresh consumer and
-enforce release metadata/workflow ordering. Then implement compiler padded
-rank-2/rank-3 reads only through the existing structured L2 guard/fill
-contract. Re-run retained strict lanes for the exact release commit; current
-local evidence does not prove a future publish.
+Commit the immutable release pipeline, stage one exact package from that clean
+commit, and record the manifest/SRI evidence. Then implement compiler padded
+rank-2/rank-3 reads only through the existing structured L2 guard/fill contract.
+Re-run retained strict lanes for the exact release commit; current local
+evidence does not prove a future publish.

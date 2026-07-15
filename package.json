@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "description": "Workspace root for the @unlocalhosted/browsergrad-* library family. Not published — install individual packages from npm.",
   "type": "module",
-  "packageManager": "pnpm@10.29.3",
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm run architecture:check && pnpm -r run test",
@@ -13,7 +13,7 @@
     "architecture:check": "node scripts/semantic-architecture-check.mjs",
     "architecture:generate-requirements": "node scripts/generate-assignment-requirement-usage.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "test:release-packages": "node scripts/test-release-packages.mjs",
+    "test:release-packages": "python3 scripts/snapshot-package-tar.test.py && node --test scripts/npm-read-only-environment.test.mjs scripts/package-publish-order.test.mjs scripts/publish-missing-npm.test.mjs scripts/require-npm-version.test.mjs scripts/verify-published-package-equivalence.test.mjs scripts/verify-npm-provenance.test.mjs && node scripts/test-release-packages.mjs",
     "validate:prd": "node scripts/validate-research-gated-prd.mjs",
     "clean": "pnpm -r run clean && rm -rf node_modules"
   },

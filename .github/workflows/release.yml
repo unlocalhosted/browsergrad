@@ -1,32 +1,7 @@
-# Release — publish ONE package to npm when its tag is pushed.
-#
-# Tag format: <package>-v<semver>
-#   jit-v0.8.1
-#   runtime-v0.1.2
-#   kernels-v0.1.0
-#   grad-v0.5.0
-#   compiler-v0.2.0
-#   semantic-core-v0.2.0
-#
-# To cut a release:
-#   1. Bump the version in packages/<pkg>/package.json
-#   2. Update packages/<pkg>/CHANGELOG.md (and the top-level CHANGELOG.md)
-#   3. Commit and push to main (CI will run)
-#   4. Create and push the tag:
-#        git tag jit-v0.8.1
-#        git push --tags
-#
-# The workflow:
-#   - Parses the tag → package name + version
-#   - Verifies package.json version matches the tag
-#   - Runs full build + tests (no shortcut — same gates as CI)
-#   - Publishes via `pnpm publish --access public`
-#   - Creates a GitHub Release with the changelog excerpt as the body
-#
-# Required secret:
-#   NPM_TOKEN — npm automation token, "Publish" scope.
-#               Create at https://www.npmjs.com/settings/<user>/tokens
-#               Add as repo secret in GitHub.
+# Release one package from a protected-main tag: <package>-v<semver>.
+# Example: git tag jit-v0.9.0 && git push origin jit-v0.9.0
+# Validation and packing run without npm credentials or OIDC. Protected publish
+# receives only the immutable staged artifacts and publishes with scripts off.
 
 name: Release
 
@@ -35,40 +10,59 @@ on:
     tags:
       - 'jit-v*'
       - 'runtime-v*'
+      - 'primitives-v*'
       - 'kernels-v*'
       - 'grad-v*'
       - 'compiler-v*'
       - 'semantic-core-v*'
 
+concurrency:
+  group: browsergrad-npm-production
+  queue: max
+
 jobs:
-  publish:
+  validate:
+    name: Validate and stage immutable package
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # required for `gh release create`
-      id-token: write   # required for npm provenance
+      contents: read
     timeout-minutes: 45
+    outputs:
+      shortname: ${{ steps.parse.outputs.shortname }}
+      version: ${{ steps.parse.outputs.version }}
+      package: ${{ steps.parse.outputs.package }}
+      npmname: ${{ steps.parse.outputs.npmname }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0  # need full history for the release notes step
+          fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - name: Verify release commit is reachable from main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::Release SHA must be reachable from protected main"
+            exit 1
+          }
 
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.34.5
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
-          registry-url: 'https://registry.npmjs.org'
+          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Parse tag → package + version
+      - name: Parse tag to package and version
         id: parse
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          # jit-v0.8.1 → jit, 0.8.1
-          SHORTNAME="${TAG%-v*}"          # everything before -v
-          VERSION="${TAG#*-v}"            # everything after -v
+          SHORTNAME="${TAG%-v*}"
+          VERSION="${TAG#*-v}"
           PACKAGE="browsergrad-$SHORTNAME"
           NPMNAME="@unlocalhosted/$PACKAGE"
           PKG_VERSION=$(jq -r .version "packages/$PACKAGE/package.json")
@@ -80,9 +74,8 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
           echo "npmname=$NPMNAME" >> "$GITHUB_OUTPUT"
-          echo "Releasing $NPMNAME@$VERSION"
 
-      - name: Build (all packages — handles inter-package types)
+      - name: Build workspace
         run: pnpm -r build
 
       - name: Verify semantic architecture boundaries
@@ -94,27 +87,16 @@ jobs:
       - name: Surface tests
         run: pnpm --filter "${{ steps.parse.outputs.npmname }}" run test
 
-      - name: Integration tests (jit / grad only)
+      - name: Integration tests (JIT or Grad release)
         if: contains(fromJSON('["jit","grad"]'), steps.parse.outputs.shortname)
         run: pnpm --filter "${{ steps.parse.outputs.npmname }}" run test:integration
+
+      - name: Verify selected package dependency closure is published and equivalent
+        run: node scripts/publish-missing-npm.mjs --preflight --package "${{ steps.parse.outputs.npmname }}"
 
       - name: Install Playwright Chromium (compiler, kernels, or JIT release)
         if: contains(fromJSON('["compiler","kernels","jit"]'), steps.parse.outputs.shortname)
         run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
-
-      - name: Verify semantic-core dependency is published (kernels release)
-        if: steps.parse.outputs.shortname == 'kernels'
-        run: |
-          VERSION=$(node -p "require('./packages/browsergrad-semantic-core/package.json').version")
-          npm view "@unlocalhosted/browsergrad-semantic-core@$VERSION" version
-
-      - name: Verify compiler dependencies are published (compiler release)
-        if: steps.parse.outputs.shortname == 'compiler'
-        run: |
-          SEMANTIC_CORE_VERSION=$(node -p "require('./packages/browsergrad-semantic-core/package.json').version")
-          KERNELS_VERSION=$(node -p "require('./packages/browsergrad-kernels/package.json').version")
-          npm view "@unlocalhosted/browsergrad-semantic-core@$SEMANTIC_CORE_VERSION" version
-          npm view "@unlocalhosted/browsergrad-kernels@$KERNELS_VERSION" version
 
       - name: Required semantic view-copy WebGPU gate (kernels release)
         if: steps.parse.outputs.shortname == 'kernels'
@@ -126,7 +108,7 @@ jobs:
 
       - name: Retain semantic view-copy WebGPU evidence (kernels release)
         if: always() && steps.parse.outputs.shortname == 'kernels'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: semantic-view-copy-webgpu-evidence-${{ github.sha }}
           path: semantic-view-copy-webgpu-evidence.log
@@ -146,7 +128,7 @@ jobs:
 
       - name: Retain compiler layout-binding WebGPU evidence (compiler release)
         if: always() && steps.parse.outputs.shortname == 'compiler'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: compiler-layout-bindings-webgpu-evidence-${{ github.sha }}
           path: compiler-layout-bindings-webgpu-evidence.log
@@ -166,37 +148,104 @@ jobs:
 
       - name: Retain JIT semantic-permute WebGPU evidence (JIT or kernels release)
         if: always() && contains(fromJSON('["jit","kernels"]'), steps.parse.outputs.shortname)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: jit-semantic-permute-webgpu-evidence-${{ github.sha }}
           path: jit-semantic-permute-webgpu-evidence.log
           if-no-files-found: error
 
-      - name: Publish to npm
-        working-directory: packages/${{ steps.parse.outputs.package }}
-        run: pnpm publish --access public --provenance --no-git-checks
+      - name: Stage immutable npm artifact
+        run: node scripts/publish-missing-npm.mjs --stage-dir npm-release-artifacts --package "${{ steps.parse.outputs.npmname }}"
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_LAYOUT_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
 
-      - name: Extract changelog excerpt
-        working-directory: packages/${{ steps.parse.outputs.package }}
+      - name: Retain immutable npm artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-release-artifacts-${{ github.sha }}
+          path: npm-release-artifacts
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish protected immutable package
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install attestation-capable npm CLI
+        run: npm install --global npm@11.12.1 --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org/
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_URL: ''
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
+          NPM_CONFIG_USERCONFIG: /dev/null
+          NPM_CONFIG_GLOBALCONFIG: /dev/null
+
+      - name: Require attestation-capable npm CLI
+        run: node scripts/require-npm-version.mjs 11.12.0
+
+      - name: Download immutable npm artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-release-artifacts-${{ github.sha }}
+          path: npm-release-artifacts
+
+      - name: Verify release commit is still reachable from main
         run: |
-          # Pull the most recent versioned section out of CHANGELOG.md and
-          # write to a file. We use --notes-file (not --notes) so the
-          # changelog body — which contains backticks, ${...}, and other
-          # shell-meaningful characters — never gets re-interpreted by bash.
-          awk -v version="${{ steps.parse.outputs.version }}" '/^## / {if(found) exit; found=($0 ~ version)} found' CHANGELOG.md > /tmp/release-notes.md
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::Release SHA must remain reachable from protected main"
+            exit 1
+          }
+
+      - name: Publish immutable artifact to npm
+        run: node scripts/publish-missing-npm.mjs --publish-staged npm-release-artifacts --package "${{ needs.validate.outputs.npmname }}" --provenance
+
+  github-release:
+    name: Create or update GitHub Release
+    needs: [validate, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Extract changelog excerpt
+        working-directory: packages/${{ needs.validate.outputs.package }}
+        run: |
+          awk -v version="${{ needs.validate.outputs.version }}" '/^## / {if(found) exit; found=($0 ~ version)} found' CHANGELOG.md > /tmp/release-notes.md
           if [ ! -s /tmp/release-notes.md ]; then
             echo "See CHANGELOG.md for details." > /tmp/release-notes.md
           fi
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "${{ steps.parse.outputs.npmname }} v${{ steps.parse.outputs.version }}" \
-            --notes-file /tmp/release-notes.md
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "${{ needs.validate.outputs.npmname }} v${{ needs.validate.outputs.version }}" \
+              --notes-file /tmp/release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "${{ needs.validate.outputs.npmname }} v${{ needs.validate.outputs.version }}" \
+              --notes-file /tmp/release-notes.md
+          fi

@@ -37,23 +37,36 @@ record is useful local evidence but is not a release pass.
 
 ## Workspace Dependency Rule
 
-Use `pnpm publish`, not `npm publish`, for workspace packages. `pnpm publish`
-rewrites `workspace:*` dependency ranges to concrete package versions in the
-packed tarball. `npm publish` does not, and can publish an unusable package with
-raw `workspace:*` metadata. Tag-triggered CI runs on a detached HEAD, so release
-workflows pass `--no-git-checks` while still relying on GitHub tag/version
-validation.
+Do not invoke package-local `npm publish` or `pnpm publish`. Publication is only
+available through an explicit staged mode in the protected workflows. The
+validation job runs `pnpm pack` after `prepublishOnly`; pnpm rewrites workspace
+ranges in that tarball. The protected job receives that exact tarball, verifies
+its recorded SHA-512 and identity, then invokes `npm publish <tarball>` with
+lifecycle scripts disabled. No source tree is rebuilt or repacked beside npm
+credentials.
 
-`scripts/publish-missing-npm.mjs` intentionally uses `pnpm publish` and
-topologically publishes workspace dependencies before dependents. The semantic
-view-copy release chain is semantic-core, then kernels, then compiler. Verify
-each dependency version on npm before publishing the next package.
+`scripts/publish-missing-npm.mjs --dry-run` is read-only metadata evidence.
+`--stage-dir` requires a clean tracked worktree and has no publication
+authority. `--publish-staged` requires the protected workflow, explicit
+provenance, exact source revision, and the immutable staged manifest. There is
+no direct non-staged publication mode.
 
-Do not run the non-dry-run `publish-missing-npm.mjs` path manually when it
-would publish kernels unless the required WebGPU lane has passed for the exact
-commit and its terminal evidence log will be retained. Prefer the guarded
-workflow dispatch. The script's dry run is metadata evidence only; it does not
-prove device execution.
+Protected publication pins npm `11.12.1` and rejects npm older than `11.12.0`.
+That floor is required because provenance identity is decoded only from the
+exact attestation bundle returned as cryptographically verified by
+`npm audit signatures --include-attestations`; a separately fetched registry
+statement is not accepted as proof.
+
+The script derives a deterministic dependency-first order over runtime,
+optional, and peer workspace edges. The semantic view-copy release chain is
+semantic-core, then kernels, then compiler. Every already-published dependency
+must match the staged tarball before the first registry mutation.
+Manual batch mode stages and audits all current public package versions and
+publishes only missing ones, so rerunning after a partial publication cannot
+filter a failed target out of the proof path. Selected tag mode requires exact
+current tag/workflow/commit provenance for an existing target; batch resumes
+accept prior provenance only from the approved tag or protected-main workflow,
+with the attested commit reachable from `origin/main`.
 
 Kernels' `prepublishOnly` hook also requires
 `BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT` to equal the full current `HEAD`. Official

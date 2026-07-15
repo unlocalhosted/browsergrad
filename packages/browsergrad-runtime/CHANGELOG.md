@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-07-15
+
 ### Added
 
 - `browsergrad.oracle(name)` for Python rubrics. It imports a JS module

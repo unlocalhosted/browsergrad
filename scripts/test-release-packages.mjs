@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,16 +10,120 @@ const tmp = mkdtempSync(join(tmpdir(), "browsergrad-release-pack-"));
 const packedTarballs = new Map();
 
 try {
+  const primitives = packAndExtract("browsergrad-primitives");
+  const runtime = packAndExtract("browsergrad-runtime");
   const semanticCore = packAndExtract("browsergrad-semantic-core");
   const kernels = packAndExtract("browsergrad-kernels");
+  const grad = packAndExtract("browsergrad-grad");
+  const jit = packAndExtract("browsergrad-jit");
   const compiler = packAndExtract("browsergrad-compiler");
   linkPackedDependency(kernels, "@unlocalhosted/browsergrad-semantic-core", semanticCore);
+  linkPackedDependency(grad, "@unlocalhosted/browsergrad-kernels", kernels);
   linkPackedDependency(compiler, "@unlocalhosted/browsergrad-kernels", kernels);
   linkPackedDependency(compiler, "@unlocalhosted/browsergrad-semantic-core", semanticCore);
+
+  const workspacePrimitivesPkg = readPackage(join(root, "packages/browsergrad-primitives"));
+  const primitivesPkg = readPackage(primitives);
+  assert(
+    primitivesPkg.version === workspacePrimitivesPkg.version,
+    `primitives version mismatch: ${primitivesPkg.version}`,
+  );
+  assertRepositoryMetadata(primitivesPkg, "browsergrad-primitives");
+  assert(primitivesPkg.private !== true, "primitives tarball must be publishable");
+  assertNoWorkspaceProtocol(primitivesPkg, "primitives packed manifest");
+  assert(
+    Object.keys(primitivesPkg.dependencies ?? {}).length === 0
+      && Object.keys(primitivesPkg.optionalDependencies ?? {}).length === 0
+      && Object.keys(primitivesPkg.peerDependencies ?? {}).length === 0,
+    "primitives packed package must remain dependency-free",
+  );
+  for (const subpath of [
+    ".",
+    "./data",
+    "./evaluation",
+    "./rl",
+    "./scaling",
+    "./simulation",
+    "./text",
+    "./package.json",
+  ]) {
+    assert(primitivesPkg.exports?.[subpath], `primitives package missing ${subpath} export`);
+  }
+  for (const file of [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/data.js",
+    "dist/data.d.ts",
+    "dist/evaluation.js",
+    "dist/evaluation.d.ts",
+    "dist/rl.js",
+    "dist/rl.d.ts",
+    "dist/scaling.js",
+    "dist/scaling.d.ts",
+    "dist/simulation.js",
+    "dist/simulation.d.ts",
+    "dist/text.js",
+    "dist/text.d.ts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+  ]) {
+    assert(existsSync(join(primitives, file)), `primitives tarball missing ${file}`);
+  }
+  const primitivesRoot = await import(pathToFileURL(join(primitives, "dist/index.js")));
+  for (const namespace of ["data", "evaluation", "rl", "scaling", "simulation", "text"]) {
+    assert(typeof primitivesRoot[namespace] === "object", `primitives packed root missing ${namespace} namespace`);
+  }
+  const npmPrimitivesConsumer = installPackedNpmConsumer("primitives", ["browsergrad-primitives"]);
+  verifyInstalledPrimitivesConsumer(npmPrimitivesConsumer, workspacePrimitivesPkg.version);
+
+  const workspaceRuntimePkg = readPackage(join(root, "packages/browsergrad-runtime"));
+  const runtimePkg = readPackage(runtime);
+  assert(runtimePkg.version === workspaceRuntimePkg.version, `runtime version mismatch: ${runtimePkg.version}`);
+  assertRepositoryMetadata(runtimePkg, "browsergrad-runtime");
+  assert(runtimePkg.private !== true, "runtime tarball must be publishable");
+  assertNoWorkspaceProtocol(runtimePkg, "runtime packed manifest");
+  assert(
+    Object.keys(runtimePkg.dependencies ?? {}).length === 0
+      && Object.keys(runtimePkg.optionalDependencies ?? {}).length === 0,
+    "runtime packed package must have no install-time dependencies",
+  );
+  assert(
+    runtimePkg.peerDependencies?.pyodide === "^0.26.0"
+      && runtimePkg.peerDependenciesMeta?.pyodide?.optional === false,
+    "runtime packed package must retain its required Pyodide peer contract",
+  );
+  for (const subpath of [".", "./worker", "./package.json"]) {
+    assert(runtimePkg.exports?.[subpath], `runtime package missing ${subpath} export`);
+  }
+  for (const file of [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/worker/index.js",
+    "dist/worker/index.d.ts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+  ]) {
+    assert(existsSync(join(runtime, file)), `runtime tarball missing ${file}`);
+  }
+  const runtimeRoot = await import(pathToFileURL(join(runtime, "dist/index.js")));
+  for (const exportName of ["BrowsergradError", "createSession", "parseManifest", "isSemverCompatible"]) {
+    assert(exportName in runtimeRoot, `runtime packed root missing ${exportName}`);
+  }
+  const pyodidePeer = join(root, "packages/browsergrad-runtime/node_modules/pyodide");
+  assert(existsSync(pyodidePeer), "runtime fresh npm consumer requires the installed Pyodide peer fixture");
+  const npmRuntimeConsumer = installPackedNpmConsumer(
+    "runtime",
+    ["browsergrad-runtime"],
+    { pyodide: `file:${pyodidePeer}` },
+  );
+  verifyInstalledRuntimeConsumer(npmRuntimeConsumer, workspaceRuntimePkg.version);
 
   const semanticCorePkg = readPackage(semanticCore);
   const workspaceSemanticCoreVersion = readPackage(join(root, "packages/browsergrad-semantic-core")).version;
   assert(semanticCorePkg.version === workspaceSemanticCoreVersion, `semantic-core version mismatch: ${semanticCorePkg.version}`);
+  assertRepositoryMetadata(semanticCorePkg, "browsergrad-semantic-core");
   assert(semanticCorePkg.private !== true, "semantic-core tarball must be publishable");
   assert(semanticCorePkg.exports?.["./schema"], "semantic-core package missing ./schema export");
   assert(semanticCorePkg.exports?.["./layout"], "semantic-core package missing ./layout export");
@@ -183,7 +287,10 @@ try {
   assert(packedWgsl.program.wgsl.includes("var<storage, read> source_words: array<u32>"), "packed WGSL lowering lost bit-exact source words");
   assert(packedWgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits"), "packed WGSL lowering lost destination copy");
   assert(!packedWgsl.program.wgsl.includes("select("), "packed WGSL lowering used eager select for guarded copy");
-  const installedConsumer = installPackedConsumer(["browsergrad-semantic-core", "browsergrad-kernels", "browsergrad-compiler"]);
+  const installedConsumer = installPackedConsumer(
+    "semantic-view-copy",
+    ["browsergrad-semantic-core", "browsergrad-kernels", "browsergrad-compiler"],
+  );
   verifyInstalledSemanticViewCopyConsumer(installedConsumer);
 
   const compilerPkg = readPackage(compiler);
@@ -216,17 +323,272 @@ try {
   );
   const releaseWorkflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish-npm.yml"), "utf8");
+  const workspaceRootPkg = readPackage(root);
   assert(
-    releaseWorkflow.includes("Verify compiler dependencies are published (compiler release)"),
-    "compiler release workflow must verify its published dependency chain",
+    workspaceRootPkg.packageManager === "pnpm@10.34.5",
+    `release tooling requires pinned pnpm@10.34.5, got ${workspaceRootPkg.packageManager}`,
   );
-  for (const dependency of ["browsergrad-semantic-core", "browsergrad-kernels"]) {
+  for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
+    assert(workflow.includes("environment: npm-production"), `${workflowName} workflow must use protected npm environment`);
     assert(
-      releaseWorkflow.includes(`npm view "@unlocalhosted/${dependency}@$`),
-      `compiler release workflow must query the published ${dependency} version`,
+      workflow.includes('git merge-base --is-ancestor "$GITHUB_SHA" origin/main'),
+      `${workflowName} workflow must reject commits outside main`,
+    );
+    assert(
+      workflow.includes("concurrency:\n  group: browsergrad-npm-production\n  queue: max"),
+      `${workflowName} workflow must serialize every production publication without dropping queued releases`,
+    );
+    assert(workflow.includes("version: 10.34.5"), `${workflowName} workflow pnpm must match packageManager`);
+    const actionRefs = [...workflow.matchAll(/uses: [^@\s]+@([^\s#]+)/gu)].map((match) => match[1]);
+    assert(actionRefs.length > 0, `${workflowName} workflow must use pinned actions`);
+    assert(
+      actionRefs.every((ref) => /^[0-9a-f]{40}$/u.test(ref)),
+      `${workflowName} workflow actions must use immutable full commit SHAs`,
+    );
+    assert(
+      workflow.includes("--stage-dir npm-release-artifacts")
+        && workflow.includes("actions/upload-artifact@")
+        && workflow.includes("actions/download-artifact@")
+        && workflow.includes("--publish-staged npm-release-artifacts")
+        && workflow.includes("--provenance"),
+      `${workflowName} workflow must transfer one immutable staged artifact into protected publication`,
+    );
+    const publishJob = workflow.slice(workflow.indexOf("\n  publish:\n"));
+    const validateJob = workflow.slice(
+      workflow.indexOf("\n  validate:\n"),
+      workflow.indexOf("\n  publish:\n"),
+    );
+    assert(publishJob.length > 0, `${workflowName} workflow must define a distinct publish job`);
+    assert(
+      !validateJob.includes("id-token: write") && !validateJob.includes("NODE_AUTH_TOKEN"),
+      `${workflowName} validation and lifecycle job cannot receive npm credentials or OIDC authority`,
+    );
+    assert(!publishJob.includes("pnpm install"), `${workflowName} protected publish job cannot install workspace dependencies`);
+    assert(!publishJob.includes("prepublishOnly"), `${workflowName} protected publish job cannot run package lifecycle scripts`);
+    assert(
+      publishJob.includes("id-token: write")
+        && publishJob.includes("npm install --global npm@11.12.1 --ignore-scripts")
+        && publishJob.includes("node scripts/require-npm-version.mjs 11.12.0")
+        && publishJob.includes("ACTIONS_ID_TOKEN_REQUEST_URL: ''")
+        && publishJob.includes("ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''"),
+      `${workflowName} protected publish job must install a pinned attestation-capable npm CLI without OIDC authority`,
+    );
+    assert(
+      (workflow.match(/NODE_AUTH_TOKEN:/gu) ?? []).length === (workflowName === "release" ? 0 : 1),
+      `${workflowName} workflow must keep trusted publishing tokenless and scope fallback token to one protected step`,
     );
   }
+  assert(
+    releaseWorkflow.includes('--preflight --package "${{ steps.parse.outputs.npmname }}"')
+      && releaseWorkflow.includes('--publish-staged npm-release-artifacts --package "${{ needs.validate.outputs.npmname }}" --provenance'),
+    "release workflow must preflight and publish the exact selected package closure",
+  );
+  assert(
+    releaseWorkflow.includes('gh release view "$GITHUB_REF_NAME"')
+      && releaseWorkflow.includes('gh release edit "$GITHUB_REF_NAME"'),
+    "release workflow must resume after an already-created npm version or GitHub release",
+  );
+  const releaseNpmJob = releaseWorkflow.slice(
+    releaseWorkflow.indexOf("\n  publish:\n"),
+    releaseWorkflow.indexOf("\n  github-release:\n"),
+  );
+  const githubReleaseJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  github-release:\n"));
+  assert(
+    releaseNpmJob.includes("contents: read") && !releaseNpmJob.includes("contents: write"),
+    "npm publication job must not receive repository write authority",
+  );
+  assert(
+    githubReleaseJob.includes("contents: write")
+      && !githubReleaseJob.includes("id-token: write")
+      && !githubReleaseJob.includes("--publish-staged"),
+    "GitHub Release job must hold only repository authority after npm publication",
+  );
+  assert(
+    publishWorkflow.includes("Run Grad integration suite")
+      && publishWorkflow.includes("Run JIT integration suite")
+      && publishWorkflow.includes("publish-missing-npm.mjs --preflight")
+      && publishWorkflow.includes('if [ "$GITHUB_REF" != "refs/heads/main" ]')
+      && !publishWorkflow.includes("NPM_CONFIG_PROVENANCE: false"),
+    "manual publish validation must cover integration, main-ref enforcement, generic dependency preflight, and provenance",
+  );
+  assert(
+    !releaseWorkflow.includes("Verify JIT dependencies are published")
+      && !releaseWorkflow.includes("Verify compiler dependencies are published")
+      && !releaseWorkflow.includes("Verify semantic-core dependency is published"),
+    "release workflow must not regress to package-specific dependency checks",
+  );
+  const publicPackageDirectories = readdirSync(join(root, "packages"))
+    .filter((directory) => existsSync(join(root, "packages", directory, "package.json")))
+    .map((directory) => ({ directory, pkg: readPackage(join(root, "packages", directory)) }))
+    .filter(({ pkg }) => pkg.private !== true && pkg.name?.startsWith("@unlocalhosted/"));
+  const expectedPackedPackages = publicPackageDirectories
+    .map(({ directory }) => directory)
+    .sort();
+  const actualPackedPackages = [...packedTarballs.keys()].sort();
+  assert(
+    JSON.stringify(actualPackedPackages) === JSON.stringify(expectedPackedPackages),
+    `packed release coverage must exactly match every public workspace package; expected ${expectedPackedPackages.join(", ")}, got ${actualPackedPackages.join(", ")}`,
+  );
+  for (const { directory, pkg } of publicPackageDirectories) {
+    const shortname = directory.slice("browsergrad-".length);
+    assert(
+      releaseWorkflow.includes(`- '${shortname}-v*'`),
+      `${pkg.name} is missing its release tag trigger`,
+    );
+    assertRepositoryMetadata(pkg, directory);
+    assert(
+      typeof pkg.scripts?.prepublishOnly === "string" && pkg.scripts.prepublishOnly.length > 0,
+      `${pkg.name} must define its complete validation gate in prepublishOnly`,
+    );
+    for (const lifecycle of ["prepublish", "prepare", "prepack", "postpack", "publish", "postpublish", "dependencies"]) {
+      assert(pkg.scripts?.[lifecycle] === undefined, `${pkg.name} cannot mutate the frozen release artifact through ${lifecycle}`);
+    }
+  }
+  assertCommandFails(
+    process.execPath,
+    [join(root, "scripts/publish-missing-npm.mjs")],
+    root,
+    "exactly one of --dry-run, --preflight, --stage-dir, or --publish-staged is required",
+  );
+  const publisherSource = readFileSync(join(root, "scripts/publish-missing-npm.mjs"), "utf8");
+  assert(
+    publisherSource.indexOf("const baselineIdentityByName = new Map()")
+      < publisherSource.indexOf('console.log(`prepare ${exactSpec(manifest)}`)'),
+    "publisher must capture every target baseline before running the first mutating prepublish gate",
+  );
+  assert(
+    publisherSource.includes('["ls-files", "--others", "--exclude-standard", "-z"]')
+      && publisherSource.includes("Untracked source files cannot enter staged release artifacts"),
+    "publisher must reject untracked source while allowing only its declared staging directory",
+  );
+  assertCommandFails(
+    process.execPath,
+    [join(root, "scripts/publish-missing-npm.mjs"), "--preflight", "--provenance"],
+    root,
+    "--provenance is valid only with --publish-staged",
+  );
+
+  const workspaceGradPkg = readPackage(join(root, "packages/browsergrad-grad"));
+  const gradPkg = readPackage(grad);
+  assert(gradPkg.version === workspaceGradPkg.version, `Grad version mismatch: ${gradPkg.version}`);
+  assert(gradPkg.optionalPeerDependencies === undefined, "Grad tarball must not use nonstandard optionalPeerDependencies");
+  assert(
+    gradPkg.dependencies?.["@unlocalhosted/browsergrad-kernels"] === workspaceKernelsVersion,
+    `Grad kernels dependency should pack as ${workspaceKernelsVersion}`,
+  );
+  assert(
+    gradPkg.peerDependencies?.pyodide === "^0.26.4"
+      && gradPkg.peerDependenciesMeta?.pyodide?.optional === true,
+    "Grad Pyodide peer must use standard optional peer metadata",
+  );
+  assert(
+    gradPkg.dependencies?.["@unlocalhosted/browsergrad-semantic-core"] === undefined
+      && gradPkg.peerDependencies?.["@unlocalhosted/browsergrad-semantic-core"] === undefined,
+    "Grad must depend on semantic-core only through kernels",
+  );
+  assertNoWorkspaceProtocol(gradPkg, "Grad packed manifest");
+  for (const file of [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/python/index.js",
+    "dist/python/index.d.ts",
+    "dist/node-adapter.js",
+    "dist/node-adapter.d.ts",
+    "dist/kernel-device.js",
+    "dist/kernel-device.d.ts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+  ]) {
+    assert(existsSync(join(grad, file)), `Grad tarball missing ${file}`);
+  }
+  const npmGradConsumer = installPackedNpmConsumer(
+    "grad-kernels-semantic-core",
+    ["browsergrad-semantic-core", "browsergrad-kernels", "browsergrad-grad"],
+  );
+  verifyInstalledGradConsumer(npmGradConsumer, workspaceGradPkg.version);
+
   const workspaceJitPkg = readPackage(join(root, "packages/browsergrad-jit"));
+  const jitPkg = readPackage(jit);
+  assert(jitPkg.version === workspaceJitPkg.version, `JIT version mismatch: ${jitPkg.version}`);
+  assert(jitPkg.optionalPeerDependencies === undefined, "JIT tarball must not use nonstandard optionalPeerDependencies");
+  assert(Object.keys(jitPkg.dependencies ?? {}).length === 0, "JIT tarball must have no install-time dependencies");
+  assert(Object.keys(jitPkg.optionalDependencies ?? {}).length === 0, "JIT tarball must have no optionalDependencies");
+  assert(
+    JSON.stringify(Object.keys(jitPkg.peerDependencies ?? {}).sort())
+      === JSON.stringify(["@unlocalhosted/browsergrad-kernels", "pyodide"].sort()),
+    "JIT tarball must expose exactly kernels and Pyodide as peers",
+  );
+  assert(
+    jitPkg.peerDependencies?.["@unlocalhosted/browsergrad-kernels"] === `^${workspaceKernelsVersion}`,
+    `JIT kernels peer must pack as ^${workspaceKernelsVersion}`,
+  );
+  assert(
+    jitPkg.peerDependencies?.pyodide === "^0.26.4",
+    `JIT Pyodide peer must remain ^0.26.4, got ${jitPkg.peerDependencies?.pyodide}`,
+  );
+  for (const peerName of ["@unlocalhosted/browsergrad-kernels", "pyodide"]) {
+    assert(
+      jitPkg.peerDependenciesMeta?.[peerName]?.optional === true,
+      `JIT peer ${peerName} must be explicitly optional`,
+    );
+  }
+  assert(
+    jitPkg.dependencies?.["@unlocalhosted/browsergrad-semantic-core"] === undefined
+      && jitPkg.peerDependencies?.["@unlocalhosted/browsergrad-semantic-core"] === undefined,
+    "JIT package must remain semantic-core bridge-neutral; kernels owns semantic-core",
+  );
+  assertNoWorkspaceProtocol(jitPkg, "JIT packed manifest");
+  for (const file of [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/python/index.js",
+    "dist/python/index.d.ts",
+    "dist/node-adapter.js",
+    "dist/node-adapter.d.ts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+  ]) {
+    assert(existsSync(join(jit, file)), `JIT tarball missing ${file}`);
+  }
+  const jitRoot = await import(pathToFileURL(join(jit, "dist/index.js")));
+  const jitSource = await import(pathToFileURL(join(jit, "dist/python/index.js")));
+  const jitNodeAdapter = await import(pathToFileURL(join(jit, "dist/node-adapter.js")));
+  assert(typeof jitRoot.installJit === "function", "JIT packed root missing installJit");
+  assert(typeof jitRoot.JitInstallError === "function", "JIT packed root missing JitInstallError");
+  assert(
+    jitSource.MOUNT_ROOT === "/lib/browsergrad_jit_src"
+      && Array.isArray(jitSource.SOURCE_FILES)
+      && jitSource.SOURCE_FILES.some(({ path }) => path === "browsergrad_jit/__init__.py"),
+    "JIT packed source export lost mount root or Python package sources",
+  );
+  assert(
+    typeof jitNodeAdapter.createNodePyodideTarget === "function",
+    "JIT packed Node adapter missing createNodePyodideTarget",
+  );
+  const jitOnlyConsumer = installPackedConsumer("jit-only", ["browsergrad-jit"]);
+  assert(
+    !existsSync(join(jitOnlyConsumer, "node_modules/@unlocalhosted/browsergrad-kernels")),
+    "JIT-only consumer must not auto-install optional kernels peer",
+  );
+  assert(
+    !existsSync(join(jitOnlyConsumer, "node_modules/pyodide")),
+    "JIT-only consumer must not auto-install optional Pyodide peer",
+  );
+  verifyInstalledJitConsumer(jitOnlyConsumer, false, workspaceJitPkg.version);
+  const npmJitOnlyConsumer = installPackedNpmConsumer("jit-only", ["browsergrad-jit"]);
+  assert(
+    !existsSync(join(npmJitOnlyConsumer, "node_modules/@unlocalhosted/browsergrad-kernels"))
+      && !existsSync(join(npmJitOnlyConsumer, "node_modules/pyodide")),
+    "fresh npm JIT-only consumer must not auto-install optional peers",
+  );
+  verifyInstalledJitConsumer(npmJitOnlyConsumer, false, workspaceJitPkg.version);
+  const integratedJitConsumer = installPackedConsumer(
+    "jit-kernels-semantic-core",
+    ["browsergrad-semantic-core", "browsergrad-kernels", "browsergrad-jit"],
+  );
+  verifyInstalledJitConsumer(integratedJitConsumer, true, workspaceJitPkg.version);
   const jitPrepublishCommands = workspaceJitPkg.scripts?.prepublishOnly
     ?.split("&&")
     .map((command) => command.trim());
@@ -358,8 +720,8 @@ function packAndExtract(packageDirName) {
   return join(extractDir, "package");
 }
 
-function installPackedConsumer(packageNames) {
-  const consumer = join(tmp, "consumer");
+function installPackedConsumer(consumerId, packageNames) {
+  const consumer = join(tmp, `consumer-${consumerId}`);
   mkdirSync(consumer, { recursive: true });
   const dependencies = {};
   for (const name of packageNames) {
@@ -373,16 +735,149 @@ function installPackedConsumer(packageNames) {
     type: "module",
     dependencies,
     pnpm: {
-      overrides: {
-        "@unlocalhosted/browsergrad-semantic-core": dependencies["@unlocalhosted/browsergrad-semantic-core"],
-        ...(dependencies["@unlocalhosted/browsergrad-kernels"] === undefined
-          ? {}
-          : { "@unlocalhosted/browsergrad-kernels": dependencies["@unlocalhosted/browsergrad-kernels"] }),
-      },
+      overrides: dependencies,
     },
   }));
-  run("pnpm", ["install", "--offline", "--ignore-scripts"], consumer);
+  run("pnpm", [
+    "install",
+    "--offline",
+    "--ignore-scripts",
+    "--strict-peer-dependencies",
+    "--config.auto-install-peers=false",
+  ], consumer);
   return consumer;
+}
+
+function installPackedNpmConsumer(consumerId, packageNames, additionalDependencies = {}) {
+  const consumer = join(tmp, `npm-consumer-${consumerId}`);
+  mkdirSync(consumer, { recursive: true });
+  const dependencies = { ...additionalDependencies };
+  for (const name of packageNames) {
+    const tarball = packedTarballs.get(name);
+    assert(tarball, `missing packed tarball for ${name}`);
+    dependencies[`@unlocalhosted/${name}`] = `file:${tarball}`;
+  }
+  writeFileSync(join(consumer, "package.json"), JSON.stringify({
+    name: "browsergrad-npm-release-consumer",
+    private: true,
+    type: "module",
+    dependencies,
+  }));
+  run("npm", [
+    "install",
+    "--offline",
+    "--ignore-scripts",
+    "--omit=optional",
+    "--no-audit",
+    "--no-fund",
+  ], consumer);
+  return consumer;
+}
+
+function verifyInstalledPrimitivesConsumer(consumer, expectedVersion) {
+  const source = `
+import { data, evaluation, rl, scaling, simulation, text } from "@unlocalhosted/browsergrad-primitives";
+import { createDataCleaningReference } from "@unlocalhosted/browsergrad-primitives/data";
+import { compareSnapshot } from "@unlocalhosted/browsergrad-primitives/evaluation";
+import { computePerInstanceDpoLoss } from "@unlocalhosted/browsergrad-primitives/rl";
+import { fitPowerLawScalingLaw } from "@unlocalhosted/browsergrad-primitives/scaling";
+import { partitionStaticWork } from "@unlocalhosted/browsergrad-primitives/simulation";
+import { createStreamingGate } from "@unlocalhosted/browsergrad-primitives/text";
+import primitivesPackage from "@unlocalhosted/browsergrad-primitives/package.json" with { type: "json" };
+
+if (primitivesPackage.version !== ${JSON.stringify(expectedVersion)}) throw new Error("unexpected packed primitives version");
+if (typeof data.createDataCleaningReference !== "function" || typeof evaluation.compareSnapshot !== "function") throw new Error("packed primitives root namespaces invalid");
+if (typeof rl.computePerInstanceDpoLoss !== "function" || typeof scaling.fitPowerLawScalingLaw !== "function") throw new Error("packed primitives root math namespaces invalid");
+if (typeof simulation.partitionStaticWork !== "function" || typeof text.createStreamingGate !== "function") throw new Error("packed primitives root platform namespaces invalid");
+if (typeof createDataCleaningReference().extractVisibleTextFromHtml !== "function") throw new Error("packed primitives data export invalid");
+if (!compareSnapshot({ value: 3 }, { value: 3 }).ok) throw new Error("packed primitives evaluation export invalid");
+const dpoLoss = computePerInstanceDpoLoss({
+  beta: 0.1,
+  policyChosenLogProbability: -0.2,
+  policyRejectedLogProbability: -1.2,
+  referenceChosenLogProbability: -0.4,
+  referenceRejectedLogProbability: -0.9,
+});
+if (!Number.isFinite(dpoLoss)) throw new Error("packed primitives RL export invalid");
+const fit = fitPowerLawScalingLaw([{ size: 1, loss: 4 }, { size: 2, loss: 2 }], { x: "size", y: "loss" });
+if (!Number.isFinite(fit.predict(4))) throw new Error("packed primitives scaling export invalid");
+const partitions = partitionStaticWork({ items: 5, workers: 2 });
+if (partitions.length !== 2 || partitions.flatMap(({ ranges }) => ranges).length !== 2) throw new Error("packed primitives simulation export invalid");
+const gate = createStreamingGate({ chunkCount: 1, maxChunksBeforeFirstYield: 1 });
+gate.noteChunkConsumed();
+gate.noteFirstYield();
+gate.assertAllowed();
+`;
+  writeFileSync(join(consumer, "consumer.mjs"), source);
+  writeFileSync(join(consumer, "consumer.ts"), source);
+  run("node", ["consumer.mjs"], consumer);
+  run(join(root, "packages/browsergrad-kernels/node_modules/typescript/bin/tsc"), [
+    "--noEmit",
+    "--strict",
+    "--target", "ES2022",
+    "--module", "NodeNext",
+    "--moduleResolution", "NodeNext",
+    "--resolveJsonModule",
+    "--skipLibCheck",
+    join(consumer, "consumer.ts"),
+  ], root);
+}
+
+function verifyInstalledRuntimeConsumer(consumer, expectedVersion) {
+  const source = `
+import {
+  BrowsergradError,
+  createSession,
+  isSemverCompatible,
+  parseManifest,
+} from "@unlocalhosted/browsergrad-runtime";
+import runtimePackage from "@unlocalhosted/browsergrad-runtime/package.json" with { type: "json" };
+
+if (runtimePackage.version !== ${JSON.stringify(expectedVersion)}) throw new Error("unexpected packed runtime version");
+if (typeof BrowsergradError !== "function" || typeof createSession !== "function") throw new Error("packed runtime root exports invalid");
+if (!isSemverCompatible("^0.1.0", runtimePackage.version)) throw new Error("packed runtime semver export invalid");
+const parsed = parseManifest({
+  id: "release-consumer",
+  version: "1.0.0",
+  requires_browsergrad: "^0.1.0",
+  required_ops: [],
+  rubric_path: "rubric.py",
+  starter_path: "starter.py",
+  reference_path: "reference.py",
+});
+if (!parsed.ok || parsed.manifest.id !== "release-consumer") throw new Error("packed runtime manifest export invalid");
+Object.defineProperty(globalThis, "self", {
+  configurable: true,
+  value: {
+    addEventListener() {},
+    postMessage() {},
+  },
+});
+await import("@unlocalhosted/browsergrad-runtime/worker");
+`;
+  writeFileSync(join(consumer, "consumer.mjs"), source);
+  writeFileSync(join(consumer, "consumer.ts"), source);
+  run("node", ["consumer.mjs"], consumer);
+  typecheckConsumer(consumer);
+}
+
+function verifyInstalledGradConsumer(consumer, expectedVersion) {
+  const source = `
+import { GradInstallError, installGrad } from "@unlocalhosted/browsergrad-grad";
+import { MOUNT_ROOT, SOURCE_FILES } from "@unlocalhosted/browsergrad-grad/source";
+import { createNodePyodideTarget } from "@unlocalhosted/browsergrad-grad/node-adapter";
+import { createGradKernelDeviceBridge } from "@unlocalhosted/browsergrad-grad/kernel-device";
+import gradPackage from "@unlocalhosted/browsergrad-grad/package.json" with { type: "json" };
+
+if (gradPackage.version !== ${JSON.stringify(expectedVersion)}) throw new Error("unexpected packed Grad version");
+if (typeof installGrad !== "function" || !(new GradInstallError("test") instanceof Error)) throw new Error("packed Grad root exports invalid");
+if (MOUNT_ROOT !== "/lib/browsergrad_grad_src" || !SOURCE_FILES.some(({ path }) => path === "browsergrad_grad/__init__.py")) throw new Error("packed Grad source export invalid");
+if (typeof createNodePyodideTarget !== "function" || typeof createGradKernelDeviceBridge !== "function") throw new Error("packed Grad adapters missing");
+`;
+  writeFileSync(join(consumer, "consumer.mjs"), source);
+  writeFileSync(join(consumer, "consumer.ts"), source);
+  run("node", ["consumer.mjs"], consumer);
+  typecheckConsumer(consumer);
 }
 
 function verifyInstalledSemanticViewCopyConsumer(consumer) {
@@ -453,8 +948,108 @@ if (!compiledView.wgslProgram?.name.includes(compilerBinding.layoutSemanticHash)
   ], root);
 }
 
+function verifyInstalledJitConsumer(consumer, integrated, expectedVersion) {
+  const integrationImports = integrated
+    ? `
+import { createVerifiedDensePermutationViewCopyArtifacts } from "@unlocalhosted/browsergrad-semantic-core/kernel";
+import { parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
+`
+    : "";
+  const integrationChecks = integrated
+    ? `
+const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+  inputShape: [parseWireI64("2"), parseWireI64("3")],
+  axes: [1, 0],
+  dtype: "f32",
+}, {
+  producer: { id: "packed-jit-consumer", version: "1" },
+  layoutArtifactId: "packed-jit-layout",
+  kernelArtifactId: "packed-jit-kernel",
+});
+const prepared = await prepareSemanticViewCopyWgsl(artifacts.layout, artifacts.kernel, {
+  operationId: artifacts.operationId,
+});
+if (prepared.semantic.operation.operationId !== artifacts.operationId) throw new Error("integrated packed JIT consumer lost semantic operation identity");
+`
+    : "";
+  const source = `
+import { installJit, JitInstallError } from "@unlocalhosted/browsergrad-jit";
+import { MOUNT_ROOT, SOURCE_FILES } from "@unlocalhosted/browsergrad-jit/source";
+import { createNodePyodideTarget } from "@unlocalhosted/browsergrad-jit/node-adapter";
+import jitPackage from "@unlocalhosted/browsergrad-jit/package.json" with { type: "json" };
+${integrationImports}
+
+if (jitPackage.version !== ${JSON.stringify(expectedVersion)}) throw new Error(\`unexpected packed JIT version: \${jitPackage.version}\`);
+if (typeof installJit !== "function" || !(new JitInstallError("test") instanceof Error)) throw new Error("packed JIT root exports invalid");
+if (MOUNT_ROOT !== "/lib/browsergrad_jit_src" || !SOURCE_FILES.some(({ path }) => path === "browsergrad_jit/__init__.py")) throw new Error("packed JIT source export invalid");
+
+const observation = { writeCount: 0, executionCount: 0, lastCode: "" };
+const target = createNodePyodideTarget({
+  runPythonAsync: async (code) => {
+    observation.executionCount += 1;
+    observation.lastCode = code;
+  },
+  FS: {
+    mkdirTree: () => {},
+    writeFile: () => { observation.writeCount += 1; },
+  },
+});
+await installJit(target, { skipImportCheck: true });
+if (observation.writeCount !== SOURCE_FILES.length) throw new Error("packed JIT install did not write complete source set");
+if (observation.executionCount !== 1 || !observation.lastCode.includes(MOUNT_ROOT)) throw new Error("packed JIT install did not mount source root");
+${integrationChecks}
+`;
+  writeFileSync(join(consumer, "consumer.mjs"), source);
+  writeFileSync(join(consumer, "consumer.ts"), source);
+  run("node", ["consumer.mjs"], consumer);
+  run(join(root, "packages/browsergrad-kernels/node_modules/typescript/bin/tsc"), [
+    "--noEmit",
+    "--strict",
+    "--target", "ES2022",
+    "--module", "NodeNext",
+    "--moduleResolution", "NodeNext",
+    "--resolveJsonModule",
+    "--skipLibCheck",
+    join(consumer, "consumer.ts"),
+  ], root);
+}
+
+function typecheckConsumer(consumer) {
+  run(join(root, "packages/browsergrad-kernels/node_modules/typescript/bin/tsc"), [
+    "--noEmit",
+    "--strict",
+    "--target", "ES2022",
+    "--module", "NodeNext",
+    "--moduleResolution", "NodeNext",
+    "--resolveJsonModule",
+    "--skipLibCheck",
+    join(consumer, "consumer.ts"),
+  ], root);
+}
+
 function readPackage(packageDir) {
   return JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+}
+
+function assertRepositoryMetadata(pkg, packageDirectory) {
+  assert(
+    pkg.repository?.type === "git"
+      && pkg.repository?.url === "https://github.com/unlocalhosted/browsergrad.git"
+      && pkg.repository?.directory === `packages/${packageDirectory}`,
+    `${pkg.name} repository metadata must bind npm provenance to its exact monorepo directory`,
+  );
+}
+
+function assertNoWorkspaceProtocol(pkg, label) {
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+    for (const [name, range] of Object.entries(pkg[field] ?? {})) {
+      assert(
+        typeof range === "string" && !range.includes("workspace:"),
+        `${label} leaked ${field}.${name}: ${String(range)}`,
+      );
+    }
+  }
 }
 
 function linkPackedDependency(packageDir, specifier, dependencyDir) {
@@ -478,20 +1073,40 @@ function run(cmd, args, cwd) {
   return result;
 }
 
+function assertCommandFails(cmd, args, cwd, expectedMessage) {
+  const result = spawnSync(cmd, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+    env: process.env,
+  });
+  assert(result.error === undefined, `${cmd} ${args.join(" ")} could not execute`);
+  assert(result.status !== 0, `${cmd} ${args.join(" ")} unexpectedly succeeded`);
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  assert(
+    output.includes(expectedMessage),
+    `${cmd} ${args.join(" ")} failed without expected diagnostic ${JSON.stringify(expectedMessage)}:\n${output}`,
+  );
+}
+
 function assertJitEvidenceWorkflowOrder(workflowName, workflow) {
   const steps = workflowSteps(workflow);
   const names = workflowName === "release"
     ? {
+      dependency: "Verify selected package dependency closure is published and equivalent",
       evidence: "Required JIT-emitted semantic-permute WebGPU gate (JIT or kernels release)",
       verify: "Verify JIT semantic-permute retained terminal record (JIT or kernels release)",
       upload: "Retain JIT semantic-permute WebGPU evidence (JIT or kernels release)",
-      publish: "Publish to npm",
+      stage: "Stage immutable npm artifact",
+      publish: "Publish immutable artifact to npm",
     }
     : {
+      dependency: "Verify publication plan and existing dependency artifacts",
       evidence: "Run required JIT-emitted semantic-permute WebGPU gate",
       verify: "Verify JIT semantic-permute retained terminal record",
       upload: "Retain JIT semantic-permute WebGPU evidence",
-      publish: "Publish missing versions",
+      stage: "Stage immutable npm artifacts",
+      publish: "Publish immutable artifacts",
     };
   const indexes = Object.fromEntries(Object.entries(names).map(([role, name]) => {
     const matches = steps
@@ -501,11 +1116,12 @@ function assertJitEvidenceWorkflowOrder(workflowName, workflow) {
     return [role, matches[0].index];
   }));
   assert(
-    indexes.evidence >= 0
+    indexes.dependency < indexes.evidence
       && indexes.evidence < indexes.verify
       && indexes.verify < indexes.upload
-      && indexes.upload < indexes.publish,
-    `${workflowName} workflow must order JIT evidence, verifier, upload, then publish`,
+      && indexes.upload < indexes.stage
+      && indexes.stage < indexes.publish,
+    `${workflowName} workflow must order dependency preflight, JIT evidence, immutable staging, then publish`,
   );
   assert(
     steps[indexes.evidence].body.includes("set -o pipefail")
@@ -523,10 +1139,15 @@ function assertJitEvidenceWorkflowOrder(workflowName, workflow) {
     `${workflowName} JIT upload step must retain evidence by exact SHA`,
   );
   assert(
-    steps[indexes.publish].body.includes(
+    steps[indexes.stage].body.includes(
       "BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
     ),
-    `${workflowName} publish step must authorize only the evidenced SHA`,
+    `${workflowName} staging step must authorize only the evidenced SHA`,
+  );
+  assert(
+    steps[indexes.publish].body.includes("--publish-staged npm-release-artifacts")
+      && steps[indexes.publish].body.includes("--provenance"),
+    `${workflowName} publish step must publish only staged immutable artifacts with provenance`,
   );
   for (const role of ["evidence", "verify"]) {
     assert(
@@ -540,6 +1161,11 @@ function assertJitEvidenceWorkflowOrder(workflowName, workflow) {
   if (workflowName === "release") {
     const releaseCondition = "contains(fromJSON('[\"jit\",\"kernels\"]'), steps.parse.outputs.shortname)";
     assert(
+      stepField(steps[indexes.dependency], "if") === undefined
+        && steps[indexes.dependency].body.includes('--preflight --package "${{ steps.parse.outputs.npmname }}"'),
+      "release dependency prerequisite must generically verify every selected package closure",
+    );
+    assert(
       evidenceCondition === releaseCondition && verifierCondition === releaseCondition,
       "release JIT evidence and verifier conditions must cover identical JIT/kernels package set",
     );
@@ -549,8 +1175,11 @@ function assertJitEvidenceWorkflowOrder(workflowName, workflow) {
     );
   } else {
     assert(
-      evidenceCondition === undefined && verifierCondition === undefined,
-      "publish JIT evidence and verifier steps must be unconditional",
+      stepField(steps[indexes.dependency], "if") === undefined
+        && steps[indexes.dependency].body.includes("publish-missing-npm.mjs --preflight")
+        && evidenceCondition === undefined
+        && verifierCondition === undefined,
+      "publish dependency preflight, JIT evidence, and verifier steps must be unconditional",
     );
     assert(uploadCondition === "always()", "publish JIT evidence upload must always run");
   }
