@@ -76,6 +76,9 @@ jobs:
       - name: Run jit integration suite
         run: pnpm --filter @unlocalhosted/browsergrad-jit test:integration
 
+      - name: Run blocking Grad Gate 0 contract
+        run: pnpm --filter @unlocalhosted/browsergrad-grad exec vitest run --config vitest.integration.config.ts tests-integration/gate0_dtype_view_contract.test.ts
+
       - name: Run grad integration suite
         # grad ships its own integration tests; pnpm -r picks them up
         run: pnpm --filter @unlocalhosted/browsergrad-grad test:integration

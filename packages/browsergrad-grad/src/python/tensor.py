@@ -140,9 +140,6 @@ class Tensor:
     def bool(self) -> "Tensor":
         return Tensor(self.data.astype(np.bool_), dtype="bool")
 
-    def to(self, dtype) -> "Tensor":
-        return Tensor(self.data, dtype=dtype)
-
     @property
     def shape(self):
         return self.data.shape
@@ -373,7 +370,7 @@ class Tensor:
         return int(self.data.size)
 
     def contiguous(self) -> "Tensor":
-        """No-op: NumPy-backed tensors are always contiguous."""
+        """Compatibility no-op; does not make non-contiguous storage contiguous."""
         return self
 
     def flatten(self, start_dim: int = 0, end_dim: int = -1) -> "Tensor":

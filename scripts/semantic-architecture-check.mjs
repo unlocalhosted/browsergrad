@@ -19,6 +19,7 @@ const jsonOutput = process.argv.includes("--json");
 const REQUIRED_FREEZES = new Map([
   ["compiler.pointer-scalar-memory.v0", "compiler-pointer-scalar-memory"],
   ["compiler.cute-static-layout.v0", "cute-static-layout"],
+  ["grad.view-bf16-compat.v0", "grad-view-bf16"],
   ["kernels.tensor-gpu-plan.v0", "tensor-gpu-plan"],
   ["jit.core-custom-ops.v0", "jit-op-custom"],
   ["runtime.generic-backend-labels.v0", "runtime-assignment-requirements"],
@@ -54,6 +55,9 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
         break;
       case "cute-static-layout":
         checkCuteStaticLayout(root, ts, adapter.freeze, failures);
+        break;
+      case "grad-view-bf16":
+        checkGradViewBf16(root, adapter.freeze, failures);
         break;
       case "tensor-gpu-plan":
         checkTensorGpuPlan(root, ts, adapter.freeze, failures);
@@ -261,6 +265,169 @@ export function checkFrozenRuntimeAssignmentRequirementsSource(
 export function validatePlatformVocabularySnapshot(root, vocabulary, profileIds, browserMappings) {
   const failures = [];
   validatePlatformVocabulary(path.resolve(root), vocabulary, profileIds, browserMappings, failures);
+  return failures;
+}
+
+export function extractPythonDefinitionTokenDigests(source) {
+  const definitions = pythonDefinitions(source);
+  const digests = {};
+  for (const definition of definitions) {
+    const tokens = normalizedPythonDefinitionTokens(definition.source);
+    const encoded = JSON.stringify(tokens.map((token) => [token.kind, token.value]));
+    const digest = createHash("sha256").update(encoded, "utf8").digest("hex");
+    (digests[definition.qualifiedName] ??= []).push(digest);
+  }
+  return sortRecord(digests);
+}
+
+export function checkFrozenGradCompatibilitySources(tensorSource, torchCompatSource, freeze) {
+  const failures = [];
+  const actualDefinitions = {
+    "tensor.py": extractPythonDefinitionTokenDigests(tensorSource),
+    "_torch_compat_real.py": extractPythonDefinitionTokenDigests(torchCompatSource),
+  };
+  for (const [file, expectedDefinitions] of Object.entries(freeze.definitionTokenDigests ?? {})) {
+    const fileDefinitions = actualDefinitions[file];
+    if (!isRecord(fileDefinitions)) {
+      failures.push(`Grad compatibility freeze names unsupported source ${file}`);
+      continue;
+    }
+    for (const [qualifiedName, expectedDigests] of Object.entries(expectedDefinitions ?? {})) {
+      const actualDigests = fileDefinitions[qualifiedName];
+      if (JSON.stringify(actualDigests) !== JSON.stringify(expectedDigests)) {
+        failures.push(`Grad compatibility definition ${file}:${qualifiedName} changed; expected ${JSON.stringify(expectedDigests)}, got ${JSON.stringify(actualDigests)}`);
+      }
+    }
+  }
+
+  const torchTokens = pythonAttributeStringAssignments(torchCompatSource, "torch_mod");
+  if (JSON.stringify(sortRecord(torchTokens)) !== JSON.stringify(sortRecord(freeze.torchDtypeTokens ?? {}))) {
+    failures.push(`Grad torch dtype tokens changed; expected ${JSON.stringify(sortRecord(freeze.torchDtypeTokens ?? {}))}, got ${JSON.stringify(sortRecord(torchTokens))}`);
+  }
+  return failures;
+}
+
+export function validateGradCompatibilityInventory(inventory, fixture, freeze, filename = "grad-compatibility-inventory.json") {
+  const failures = [];
+  const exactKeys = (label, value, expected) => {
+    if (!isRecord(value)) {
+      failures.push(`${label} must be an object`);
+      return;
+    }
+    compareStringSets(`${label} keys`, Object.keys(value), expected, failures);
+  };
+
+  exactKeys(filename, inventory, ["schemaVersion", "inventoryId", "owner", "evidenceTier", "environment", "executionContext", "dtypeResolution", "behaviors"]);
+  if (!isRecord(inventory) || inventory.schemaVersion !== 1 || inventory.inventoryId !== "browsergrad.grad.compatibility.v0" || inventory.owner !== "@unlocalhosted/browsergrad-grad" || inventory.evidenceTier !== "pyodide-numpy-reference") {
+    failures.push(`${filename} must identify the schemaVersion 1 BrowserGrad Grad Pyodide/NumPy compatibility inventory`);
+    return failures;
+  }
+  exactKeys(`${filename}.environment`, inventory.environment, ["pyodide", "numpy"]);
+  exactKeys(`${filename}.executionContext`, inventory.executionContext, ["residency", "backendDecision", "transformDecision", "exportDecision"]);
+  if (!isRecord(inventory.executionContext) || inventory.executionContext.residency !== "pyodide-wasm-linear-memory" || inventory.executionContext.backendDecision !== "numpy-reference-only" || inventory.executionContext.transformDecision !== "not-applicable-eager" || inventory.executionContext.exportDecision !== "not-applicable-eager") {
+    failures.push(`${filename}.executionContext changed`);
+  }
+  exactKeys(`${filename}.dtypeResolution`, inventory.dtypeResolution, ["defaultTensorStorageDtype", "defaultTorchIntegerStorageDtype", "unknownStringPolicy", "nonStringPolicy", "storageByteWidths", "substitutionComputeDtypes", "aliases", "torchTokens"]);
+  if (!isRecord(inventory.dtypeResolution)) return failures;
+  if (inventory.dtypeResolution.defaultTensorStorageDtype !== "float32" || inventory.dtypeResolution.defaultTorchIntegerStorageDtype !== "int64" || inventory.dtypeResolution.unknownStringPolicy !== "delegate-to-numpy-dtype" || inventory.dtypeResolution.nonStringPolicy !== "delegate-to-numpy-dtype") {
+    failures.push(`${filename}.dtypeResolution policies changed`);
+  }
+  const expectedStorageByteWidths = { bool: 1, float16: 2, float32: 4, float64: 8, int8: 1, int16: 2, int32: 4, int64: 8, uint8: 1 };
+  const expectedSubstitutionComputeDtypes = { bf16: "float32", bfloat16: "float32" };
+  if (JSON.stringify(sortRecord(inventory.dtypeResolution.storageByteWidths ?? {})) !== JSON.stringify(sortRecord(expectedStorageByteWidths))) failures.push(`${filename}.dtypeResolution.storageByteWidths changed`);
+  if (JSON.stringify(sortRecord(inventory.dtypeResolution.substitutionComputeDtypes ?? {})) !== JSON.stringify(sortRecord(expectedSubstitutionComputeDtypes))) failures.push(`${filename}.dtypeResolution.substitutionComputeDtypes changed`);
+  for (const field of ["aliases", "torchTokens"]) {
+    const values = inventory.dtypeResolution[field];
+    if (!isRecord(values) || Object.keys(values).length === 0 || Object.values(values).some((value) => typeof value !== "string" || value.length === 0)) {
+      failures.push(`${filename}.dtypeResolution.${field} must be a non-empty string map`);
+    }
+  }
+  if (JSON.stringify(sortRecord(inventory.dtypeResolution.aliases ?? {})) !== JSON.stringify(sortRecord(freeze.dtypeAliases ?? {}))) {
+    failures.push(`${filename}.dtypeResolution.aliases differs from the frozen source alias map`);
+  }
+  if (JSON.stringify(sortRecord(inventory.dtypeResolution.torchTokens ?? {})) !== JSON.stringify(sortRecord(freeze.torchDtypeTokens ?? {}))) {
+    failures.push(`${filename}.dtypeResolution.torchTokens differs from the frozen source assignment map`);
+  }
+
+  if (!Array.isArray(inventory.behaviors) || inventory.behaviors.length === 0) {
+    failures.push(`${filename}.behaviors must be a non-empty array`);
+    return failures;
+  }
+  const behaviorKeys = ["id", "surface", "class", "observationStatus", "targetConformance", "referenceContract", "dtypeEffect", "condition", "failurePolicy", "aliasing", "contiguity", "materialization", "autograd", "truth", "sourceDefinitions", "fixtureCaseIds"];
+  const classes = new Set(["conversion", "dtype-resolution", "dtype-substitution", "interop", "materialization", "view"]);
+  const observationStatuses = new Set(["verified"]);
+  const targetConformance = new Set(["browsergrad-defined", "compatibility-debt", "pytorch-compatible"]);
+  const referenceContracts = new Set(["browsergrad-grad-explicit", "numpy-array-protocol", "pytorch-shaped-compatibility"]);
+  const dtypeEffects = new Set(["coerces-float32", "preserves", "preserves-float32-otherwise-coerces-float32", "resolved-target", "substitutes-float32-token", "surface-dependent"]);
+  const conditions = new Set(["all-inputs", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "no-requested-dtype", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-differs-from-storage-dtype", "requested-dtype-equals-storage-dtype", "surface-and-input-dependent", "torch-bfloat16-token", "unrecognized-string"]);
+  const failurePolicies = new Set(["delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "unrecognized-dtype-treated-as-device-noop"]);
+  const aliasing = new Set(["conditional", "must-alias", "must-not-alias", "not-applicable", "same-object"]);
+  const contiguity = new Set(["contiguous", "input-dependent", "not-applicable", "preserved"]);
+  const materialization = new Set(["always", "conditional", "none", "not-applicable"]);
+  const autograd = new Set(["constructor-policy", "detached", "graph-edge", "not-applicable", "preserved"]);
+  const behaviorIds = [];
+  const referencedFixtureIds = [];
+  const referencedSourceDefinitions = [];
+  for (const [index, behavior] of inventory.behaviors.entries()) {
+    const label = `${filename}.behaviors[${index}]`;
+    exactKeys(label, behavior, behaviorKeys);
+    if (!isRecord(behavior)) continue;
+    for (const field of ["id", "surface", "truth"]) {
+      if (typeof behavior[field] !== "string" || behavior[field].trim() === "") failures.push(`${label}.${field} must be a non-empty string`);
+    }
+    if (!classes.has(behavior.class)) failures.push(`${label}.class is not registered`);
+    if (!observationStatuses.has(behavior.observationStatus)) failures.push(`${label}.observationStatus is not registered`);
+    if (!targetConformance.has(behavior.targetConformance)) failures.push(`${label}.targetConformance is not registered`);
+    if (!referenceContracts.has(behavior.referenceContract)) failures.push(`${label}.referenceContract is not registered`);
+    if (!dtypeEffects.has(behavior.dtypeEffect)) failures.push(`${label}.dtypeEffect is not registered`);
+    if (!conditions.has(behavior.condition)) failures.push(`${label}.condition is not registered`);
+    if (!failurePolicies.has(behavior.failurePolicy)) failures.push(`${label}.failurePolicy is not registered`);
+    if (!aliasing.has(behavior.aliasing)) failures.push(`${label}.aliasing is not registered`);
+    if (!contiguity.has(behavior.contiguity)) failures.push(`${label}.contiguity is not registered`);
+    if (!materialization.has(behavior.materialization)) failures.push(`${label}.materialization is not registered`);
+    if (!autograd.has(behavior.autograd)) failures.push(`${label}.autograd is not registered`);
+    if (!Array.isArray(behavior.sourceDefinitions) || behavior.sourceDefinitions.length === 0 || behavior.sourceDefinitions.some((entry) => typeof entry !== "string" || !/^(?:tensor|_torch_compat_real)\.py:[A-Za-z_][A-Za-z0-9_.]*$/u.test(entry))) {
+      failures.push(`${label}.sourceDefinitions must name Grad Python definitions`);
+    } else {
+      referencedSourceDefinitions.push(...behavior.sourceDefinitions);
+    }
+    if (!Array.isArray(behavior.fixtureCaseIds) || behavior.fixtureCaseIds.length === 0 || behavior.fixtureCaseIds.some((entry) => typeof entry !== "string")) {
+      failures.push(`${label}.fixtureCaseIds must contain strings`);
+    } else {
+      referencedFixtureIds.push(...behavior.fixtureCaseIds);
+    }
+    if (typeof behavior.id === "string") behaviorIds.push(behavior.id);
+  }
+  if (new Set(behaviorIds).size !== behaviorIds.length) failures.push(`${filename} behavior IDs must be unique`);
+  compareStringSets("Grad compatibility behavior IDs", behaviorIds, freeze.behaviorIds, failures);
+  const frozenSourceDefinitions = Object.entries(freeze.definitionTokenDigests ?? {}).flatMap(([file, definitions]) =>
+    Object.keys(definitions ?? {}).map((qualifiedName) => `${file}:${qualifiedName}`));
+  const frozenTorchTokens = Object.keys(freeze.torchDtypeTokens ?? {}).map((name) => `_torch_compat_real.py:torch_mod.${name}`);
+  const knownSourceDefinitions = new Set([...frozenSourceDefinitions, ...frozenTorchTokens]);
+  for (const reference of new Set(referencedSourceDefinitions)) {
+    if (!knownSourceDefinitions.has(reference)) failures.push(`Grad compatibility inventory references unfrozen source definition ${reference}`);
+  }
+  compareStringSets(
+    "Grad compatibility source definition references",
+    [...new Set(referencedSourceDefinitions.filter((reference) => !reference.includes(":torch_mod.")))],
+    frozenSourceDefinitions,
+    failures,
+  );
+
+  validateNamedFixture(fixture, "grad.view-bf16-compat.v0", freeze.behaviorFixtureIds, stringValue(freeze.behaviorFixtureFile), "Grad compatibility", failures);
+  const fixtureIds = isRecord(fixture) && Array.isArray(fixture.cases)
+    ? fixture.cases.filter(isRecord).map((entry) => entry.id).filter((id) => typeof id === "string")
+    : [];
+  compareStringSets("Grad compatibility inventory fixture references", referencedFixtureIds, fixtureIds, failures);
+  if (isRecord(fixture)) {
+    exactKeys("Grad compatibility fixture", fixture, ["schemaVersion", "adapterId", "environment", "cases"]);
+    if (JSON.stringify(fixture.environment) !== JSON.stringify(inventory.environment)) failures.push("Grad compatibility fixture environment differs from inventory environment");
+    const fixtureCases = Array.isArray(fixture.cases) ? fixture.cases : [];
+    for (const [index, testCase] of fixtureCases.entries()) {
+      exactKeys(`Grad compatibility fixture cases[${index}]`, testCase, ["id", "expected"]);
+      if (!isRecord(testCase) || !isRecord(testCase.expected) || Object.keys(testCase.expected).length === 0) failures.push(`Grad compatibility fixture cases[${index}].expected must be a non-empty object`);
+    }
+  }
   return failures;
 }
 
@@ -650,6 +817,33 @@ function checkJitCustomOps(root, ts, freeze, failures) {
   const allowedLabels = new Set(freeze.labels ?? []);
   for (const label of [...labels].sort()) {
     if (!allowedLabels.has(label)) failures.push(`JIT OP_CUSTOM path introduces unregistered label ${label}`);
+  }
+}
+
+function checkGradViewBf16(root, freeze, failures) {
+  const tensorFile = resolveManifestFile(root, freeze.tensorFile, "tensorFile", failures);
+  const torchCompatFile = resolveManifestFile(root, freeze.torchCompatFile, "torchCompatFile", failures);
+  const inventoryFile = resolveManifestFile(root, freeze.inventoryFile, "inventoryFile", failures);
+  const behaviorFixtureFile = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
+  const behaviorTestFile = resolveManifestFile(root, freeze.behaviorTestFile, "behaviorTestFile", failures);
+  if ([tensorFile, torchCompatFile, inventoryFile, behaviorFixtureFile, behaviorTestFile].some((value) => value === undefined)) return;
+
+  failures.push(...checkFrozenGradCompatibilitySources(
+    fs.readFileSync(tensorFile, "utf8"),
+    fs.readFileSync(torchCompatFile, "utf8"),
+    freeze,
+  ));
+  const inventory = readJson(inventoryFile, failures);
+  const fixture = readJson(behaviorFixtureFile, failures);
+  failures.push(...validateGradCompatibilityInventory(inventory, fixture, freeze, relative(root, inventoryFile)));
+
+  for (const [file, expected] of [
+    [inventoryFile, freeze.inventorySha256],
+    [behaviorFixtureFile, freeze.behaviorFixtureSha256],
+    [behaviorTestFile, freeze.behaviorTestSha256],
+  ]) {
+    const actual = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    if (actual !== expected) failures.push(`${relative(root, file)} content changed; expected SHA-256 ${stringValue(expected)}, got ${actual}`);
   }
 }
 
@@ -1076,6 +1270,69 @@ function pythonTokens(source) {
     index += 1;
   }
   return tokens;
+}
+
+function pythonDefinitions(source) {
+  const lines = source.split(/\r?\n/u);
+  const definitions = [];
+  const stack = [];
+  const significant = (line) => line.trim() !== "" && !line.trimStart().startsWith("#");
+  const indentation = (line) => {
+    const prefix = line.match(/^[\t ]*/u)?.[0] ?? "";
+    return [...prefix].reduce((total, char) => total + (char === "\t" ? 8 - (total % 8) : 1), 0);
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!significant(line)) continue;
+    const indent = indentation(line);
+    while (stack.length > 0 && indent <= stack.at(-1).indent) stack.pop();
+    const match = line.match(/^\s*(?:async\s+)?(class|def)\s+([A-Za-z_][A-Za-z0-9_]*)\b/u);
+    if (match === null) continue;
+    const qualifiedName = [...stack.map((entry) => entry.name), match[2]].join(".");
+    let end = lines.length;
+    for (let candidate = index + 1; candidate < lines.length; candidate += 1) {
+      if (!significant(lines[candidate])) continue;
+      if (indentation(lines[candidate]) <= indent) {
+        end = candidate;
+        break;
+      }
+    }
+    let start = index;
+    while (start > 0 && indentation(lines[start - 1]) === indent && lines[start - 1].trimStart().startsWith("@")) start -= 1;
+    definitions.push({
+      qualifiedName,
+      source: lines.slice(start, end).join("\n"),
+    });
+    stack.push({ indent, name: match[2] });
+  }
+  return definitions;
+}
+
+function normalizedPythonDefinitionTokens(source) {
+  const tokens = pythonTokens(source);
+  const defIndex = tokens.findIndex((token) => token.kind === "identifier" && token.value === "def");
+  if (defIndex < 0) return tokens;
+  let depth = 0;
+  for (let index = defIndex + 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.value === "(" || token.value === "[" || token.value === "{") depth += 1;
+    if (token.value === ")" || token.value === "]" || token.value === "}") depth -= 1;
+    if (depth === 0 && token.value === ":" && tokens[index + 1]?.kind === "string") {
+      return [...tokens.slice(0, index + 1), ...tokens.slice(index + 2)];
+    }
+  }
+  return tokens;
+}
+
+function pythonAttributeStringAssignments(source, objectName) {
+  const tokens = pythonTokens(source);
+  const assignments = {};
+  for (let index = 0; index < tokens.length - 4; index += 1) {
+    if (tokens[index].kind !== "identifier" || tokens[index].value !== objectName || tokens[index + 1]?.value !== "." || tokens[index + 2]?.kind !== "identifier" || tokens[index + 3]?.value !== "=" || tokens[index + 4]?.kind !== "string") continue;
+    assignments[tokens[index + 2].value] = tokens[index + 4].value;
+  }
+  return assignments;
 }
 
 function readPythonString(source, start) {

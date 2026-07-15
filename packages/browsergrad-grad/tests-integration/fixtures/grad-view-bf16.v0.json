@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "grad.view-bf16-compat.v0",
+  "environment": {
+    "pyodide": "0.26.4",
+    "numpy": "1.26.4"
+  },
+  "cases": [
+    {
+      "id": "grad.dtype.alias-registry.v0",
+      "expected": {
+        "bf16": ["float32", 4],
+        "bfloat16": ["float32", 4],
+        "bool": ["bool", 1],
+        "double": ["float64", 8],
+        "float": ["float32", 4],
+        "float16": ["float16", 2],
+        "float32": ["float32", 4],
+        "float64": ["float64", 8],
+        "fp16": ["float16", 2],
+        "half": ["float16", 2],
+        "int": ["int32", 4],
+        "int16": ["int16", 2],
+        "int32": ["int32", 4],
+        "int64": ["int64", 8],
+        "int8": ["int8", 1],
+        "long": ["int64", 8],
+        "short": ["int16", 2],
+        "uint8": ["uint8", 1]
+      }
+    },
+    {
+      "id": "grad.dtype.numpy-string-fallback.v0",
+      "expected": {
+        "dtype": "complex64",
+        "itemsize": 8
+      }
+    },
+    {
+      "id": "grad.dtype.constructor-defaults.v0",
+      "expected": {
+        "tensorInteger": "float32",
+        "tensorFloat": "float32",
+        "torchInteger": "int64",
+        "torchFloat": "float32"
+      }
+    },
+    {
+      "id": "grad.dtype.bf16-is-f32.v0",
+      "expected": {
+        "dtype": "float32",
+        "itemsize": 4,
+        "storedValue": 1.00390625
+      }
+    },
+    {
+      "id": "grad.dtype.torch-bfloat16-token-is-f32.v0",
+      "expected": {
+        "token": "float32",
+        "distinctFromFloat32": false
+      }
+    },
+    {
+      "id": "grad.interop.from-numpy-f32-alias.v0",
+      "expected": {
+        "sharesMemory": true,
+        "sourceMutationVisible": true,
+        "tensorMutationVisible": true,
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": "grad.interop.from-numpy-f64-materializes.v0",
+      "expected": {
+        "sharesMemory": false,
+        "sourceMutationVisible": false,
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": "grad.view.reshape-contiguous-alias.v0",
+      "expected": {
+        "sharesMemory": true,
+        "cContiguous": true,
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "sourceMutationVisible": true,
+        "resultMutationVisible": true,
+        "backwardGradient": [[1, 1, 1], [1, 1, 1]]
+      }
+    },
+    {
+      "id": "grad.view.view-direct-alias.v0",
+      "expected": {
+        "sharesMemory": true,
+        "parentIdentity": true,
+        "backwardGradient": [[1, 1, 1], [1, 1, 1]]
+      }
+    },
+    {
+      "id": "grad.view.reshape-noncontiguous-materializes.v0",
+      "expected": {
+        "sharesMemory": false,
+        "cContiguous": true,
+        "requiresGrad": true,
+        "graphEdge": true
+      }
+    },
+    {
+      "id": "grad.view.reshape-float16-materializes-f32.v0",
+      "expected": {
+        "sharesMemory": false,
+        "sourceDtype": "float16",
+        "resultDtype": "float32"
+      }
+    },
+    {
+      "id": "grad.view.transpose-alias.v0",
+      "expected": {
+        "sharesMemory": true,
+        "cContiguous": false,
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "sourceMutationVisible": true,
+        "resultMutationVisible": true,
+        "backwardGradient": [[1, 1, 1], [1, 1, 1]]
+      }
+    },
+    {
+      "id": "grad.view.transpose-float16-materializes-f32.v0",
+      "expected": {
+        "sharesMemory": false,
+        "sourceDtype": "float16",
+        "resultDtype": "float32"
+      }
+    },
+    {
+      "id": "grad.view.transpose-bool-materializes-f32.v0",
+      "expected": {
+        "sharesMemory": false,
+        "sourceDtype": "bool",
+        "resultDtype": "float32"
+      }
+    },
+    {
+      "id": "grad.view.permute-alias.v0",
+      "expected": {
+        "sharesMemory": true,
+        "cContiguous": false,
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "sourceMutationVisible": true,
+        "resultMutationVisible": true,
+        "backwardGradientSum": 24
+      }
+    },
+    {
+      "id": "grad.view.permute-float16-materializes-f32.v0",
+      "expected": {
+        "sharesMemory": false,
+        "sourceDtype": "float16",
+        "resultDtype": "float32"
+      }
+    },
+    {
+      "id": "grad.materialization.expand-copy.v0",
+      "expected": {
+        "sharesMemory": false,
+        "cContiguous": true,
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "backwardGradient": [[3], [3]]
+      }
+    },
+    {
+      "id": "grad.materialization.expand-float16-to-f32.v0",
+      "expected": {
+        "sourceDtype": "float16",
+        "resultDtype": "float32"
+      }
+    },
+    {
+      "id": "grad.view.basic-slice-alias.v0",
+      "expected": {
+        "sharesMemory": true,
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "sourceMutationVisible": true,
+        "resultMutationVisible": true,
+        "backwardGradient": [[0, 1, 1], [0, 1, 1]]
+      }
+    },
+    {
+      "id": "grad.view.fancy-index-materializes.v0",
+      "expected": {
+        "sharesMemory": false,
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "backwardGradient": [[2, 2, 2], [0, 0, 0]]
+      }
+    },
+    {
+      "id": "grad.view.basic-slice-int64-materializes-f32.v0",
+      "expected": {
+        "sharesMemory": false,
+        "sourceDtype": "int64",
+        "resultDtype": "float32"
+      }
+    },
+    {
+      "id": "grad.materialization.contiguous-noncontiguous-noop.v0",
+      "expected": {
+        "sameObject": true,
+        "cContiguousBefore": false,
+        "cContiguousAfter": false,
+        "graphPreserved": true
+      }
+    },
+    {
+      "id": "grad.materialization.detach-copy.v0",
+      "expected": {
+        "sharesMemory": false,
+        "requiresGrad": false,
+        "graphEdge": false
+      }
+    },
+    {
+      "id": "grad.materialization.detach-float16-to-f32.v0",
+      "expected": {
+        "sourceDtype": "float16",
+        "resultDtype": "float32",
+        "requiresGrad": false
+      }
+    },
+    {
+      "id": "grad.interop.numpy-copy.v0",
+      "expected": {
+        "sharesMemory": false,
+        "sourceMutationVisible": false,
+        "arrayMutationVisible": false
+      }
+    },
+    {
+      "id": "grad.interop.array-protocol-alias.v0",
+      "expected": {
+        "sharesMemory": true,
+        "sourceMutationVisible": true,
+        "arrayMutationVisible": true
+      }
+    },
+    {
+      "id": "grad.conversion.to-same-dtype-identity.v0",
+      "expected": {
+        "sameObject": true,
+        "requiresGrad": true,
+        "graphPreserved": true
+      }
+    },
+    {
+      "id": "grad.conversion.to-cross-dtype-detaches.v0",
+      "expected": {
+        "sharesMemory": false,
+        "dtype": "float64",
+        "requiresGrad": false,
+        "graphEdge": false
+      }
+    },
+    {
+      "id": "grad.conversion.to-cross-dtype-preserves-layout-order.v0",
+      "expected": {
+        "cContiguous": false,
+        "fContiguous": true,
+        "dtype": "float64"
+      }
+    },
+    {
+      "id": "grad.conversion.to-unrecognized-string-noop.v0",
+      "expected": {
+        "sameObject": true,
+        "dtype": "float32",
+        "requiresGrad": true
+      }
+    }
+  ]
+}

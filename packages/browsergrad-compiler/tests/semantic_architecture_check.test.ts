@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkFrozenCompilerPointerScalarMemorySource,
+  checkFrozenGradCompatibilitySources,
   checkFrozenRuntimeAssignmentRequirementsSource,
   checkFrozenCuteStaticLayoutSource,
   checkFrozenTensorGpuPlanSource,
@@ -16,6 +17,7 @@ import {
   extractPythonCustomLabels,
   runSemanticArchitectureCheck,
   validateCompilerPointerBehaviorFixture,
+  validateGradCompatibilityInventory,
   validatePlatformVocabularySnapshot,
   validateSemanticFreezeManifest,
 } from "../../../scripts/semantic-architecture-check.mjs";
@@ -143,6 +145,68 @@ describe("semantic architecture guardrails", () => {
       typesSource.replace('export type AssignmentCapabilityMode = "browser" | "simulated" | "external";', 'export type AssignmentCapabilityMode = "browser" | "simulated" | "external" | "native";'),
       runtimeFreeze,
     )).toContainEqual(expect.stringContaining("AssignmentCapabilityMode values changed"));
+  });
+
+  it("rejects Grad dtype/view source drift", () => {
+    const tensorSource = readFileSync(join(repoRoot, "packages/browsergrad-grad/src/python/tensor.py"), "utf8");
+    const torchCompatSource = readFileSync(join(repoRoot, "packages/browsergrad-grad/src/python/_torch_compat_real.py"), "utf8");
+    const gradFreeze = freeze("grad-view-bf16");
+
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace('"bfloat16": np.float32, "bf16": np.float32', '"bfloat16": np.float16, "bf16": np.float16'),
+      torchCompatSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("tensor.py:_resolve_dtype changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource,
+      torchCompatSource.replace('torch_mod.bfloat16 = "float32"', 'torch_mod.bfloat16 = "bfloat16"'),
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Grad torch dtype tokens changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace('        return self\n\n    def flatten', '        return Tensor(self.data.copy())\n\n    def flatten'),
+      torchCompatSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Tensor.contiguous changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace('"""Compatibility no-op; does not make non-contiguous storage contiguous."""', '"""Equivalent compatibility wording."""'),
+      torchCompatSource,
+      gradFreeze,
+    )).toEqual([]);
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace("    def contiguous(self)", "    @staticmethod\n    def contiguous(self)"),
+      torchCompatSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Tensor.contiguous changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace("if _GRAD_ENABLED and any(p.requires_grad for p in parents):", "if True and any(p.requires_grad for p in parents):"),
+      torchCompatSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("tensor.py:_build_ctx changed"));
+  });
+
+  it("rejects Grad compatibility inventory and behavior-fixture drift", () => {
+    const inventory = JSON.parse(readFileSync(join(repoRoot, "architecture/grad-compatibility-inventory.json"), "utf8")) as {
+      dtypeResolution: { aliases: Record<string, string> };
+      behaviors: Array<Record<string, unknown>>;
+    };
+    const fixture = JSON.parse(readFileSync(join(repoRoot, "packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json"), "utf8")) as {
+      cases: Array<Record<string, unknown>>;
+    };
+    const gradFreeze = freeze("grad-view-bf16");
+
+    const widened = structuredClone(inventory);
+    widened.behaviors[0]!.backendHint = "numpy";
+    expect(validateGradCompatibilityInventory(widened, fixture, gradFreeze))
+      .toContainEqual(expect.stringContaining("behaviors[0] keys changed"));
+
+    const changedAlias = structuredClone(inventory);
+    changedAlias.dtypeResolution.aliases.bf16 = "float16";
+    expect(validateGradCompatibilityInventory(changedAlias, fixture, gradFreeze))
+      .toContainEqual(expect.stringContaining("differs from the frozen source alias map"));
+    const changedFixture = structuredClone(fixture);
+    changedFixture.cases.splice(3, 1);
+    expect(validateGradCompatibilityInventory(inventory, changedFixture, gradFreeze))
+      .toContainEqual(expect.stringContaining("behavior fixture IDs changed"));
   });
 
   it("rejects static capability outcomes and unregistered assignment requirements", () => {
@@ -301,5 +365,13 @@ describe("semantic architecture guardrails", () => {
     if (runtimeAdapter !== undefined) delete runtimeAdapter.freeze;
     expect(validateSemanticFreezeManifest(repoRoot, runtimeMutated))
       .toContainEqual(expect.stringContaining("required freeze runtime.generic-backend-labels.v0"));
+
+    const gradMutated = structuredClone(freezeManifest) as {
+      adapters: Array<{ id?: string; freeze?: { kind?: string } }>;
+    };
+    const gradAdapter = gradMutated.adapters.find((entry) => entry.id === "grad.view-bf16-compat.v0");
+    if (gradAdapter !== undefined) delete gradAdapter.freeze;
+    expect(validateSemanticFreezeManifest(repoRoot, gradMutated))
+      .toContainEqual(expect.stringContaining("required freeze grad.view-bf16-compat.v0"));
   });
 });

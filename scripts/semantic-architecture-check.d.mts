@@ -12,6 +12,23 @@ export function countPythonCustomConstructors(source: string): number;
 
 export function extractPythonCustomLabels(source: string): string[];
 
+export function extractPythonDefinitionTokenDigests(
+  source: string,
+): Record<string, readonly string[]>;
+
+export function checkFrozenGradCompatibilitySources(
+  tensorSource: string,
+  torchCompatSource: string,
+  freeze: Record<string, unknown>,
+): string[];
+
+export function validateGradCompatibilityInventory(
+  inventory: unknown,
+  fixture: unknown,
+  freeze: Record<string, unknown>,
+  filename?: string,
+): string[];
+
 export function validateSemanticFreezeManifest(
   root: string,
   manifest: unknown,

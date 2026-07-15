@@ -1114,8 +1114,67 @@ Automated architecture checks MUST enforce:
 - No new uses of frozen adapters from newly added features.
 - No source-spelling CuTe handlers outside the frozen compatibility adapter.
 - No advertised portable JIT operation lowers through opaque `CUSTOM`.
+- Compatibility inventories and their executable fixtures remain complete,
+  mutually referenced, and pinned to the reviewed source definitions.
 - Generated Python bundles match editable Python sources.
 - Public imports use package exports rather than `src/` or `dist/` paths.
+
+### Compatibility behavior inventories
+
+A compatibility inventory records current observable behavior that must not be
+mistaken for target architecture. It is not a semantic-capability registry and
+does not make compatibility debt normative for new code. The freeze manifest
+owns permission to retain or change the adapter; the inventory explains the
+behavior; executable fixtures prove it. None of those three substitutes for
+the others.
+
+Every dtype, view, materialization, interop, conversion, or opaque-operation
+record MUST state the dimensions that vary by behavior. A closed
+inventory-level execution context MAY state residency, backend, transform, and
+export decisions once only when they are invariant for every record; an
+individual record cannot override those values implicitly:
+
+- Public surface and behavior class.
+- Observation/evidence status separately from target conformance and the named
+  reference contract. “Verified current behavior” does not mean “conformant.”
+- Logical dtype/token identity versus physical storage dtype, compute dtype,
+  and byte width where dtype is relevant, including the exact condition under
+  which dtype preservation changes.
+- Storage relationship (`must-alias`, `must-not-alias`, `same-object`, or a
+  named condition), contiguity, and materialization behavior.
+- Autograd/VJP, transform, export, backend, and residency decisions where the
+  surface participates in those systems. `not-applicable` is explicit; a
+  missing field is not a decision.
+- Failure policy, source definitions including shared graph/context builders,
+  fixture case IDs, and evidence tier.
+- Environment versions whenever behavior is delegated to Pyodide, NumPy, a
+  browser API, a native toolchain, or another independently versioned system.
+
+Conditional behavior MUST name and test both sides of the condition. For
+example, “reshape is a view” is invalid if aliasing depends on input strides;
+“bf16 is supported” is invalid when the public token resolves to four-byte f32
+storage and f32 computation. Normalized source-definition hashes detect
+implementation drift, but exclude comments and leading docstrings and are
+never sufficient evidence without the observable fixture. Decorator lines
+directly attached to definitions, signatures, executable statements, and
+behaviorally relevant string literals remain fingerprinted.
+
+Inventory schemas and enum vocabularies are closed and versioned. Every
+fixture case is referenced by exactly one inventory behavior, every recorded
+source definition is frozen, and every frozen definition that owns the
+behavior is referenced by the inventory. Changing an environment version,
+source behavior, physical dtype, alias relation, autograd decision, or fixture
+result is an adapter-baseline change under ADR-0001, even when the public
+method signature does not change.
+
+The current Grad baseline is
+`architecture/grad-compatibility-inventory.json`, with executable Pyodide
+evidence in `packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json`.
+It explicitly records NumPy-dependent dtype fallback, the full alias registry,
+Tensor versus torch constructor defaults, conditional reshape/index aliasing,
+copying expand/detach/numpy behavior, live NumPy array-protocol exposure,
+`contiguous()` as a non-materializing compatibility no-op, and cross-dtype
+`to()` graph detachment.
 
 ### Adapter ledger
 
@@ -1178,7 +1237,10 @@ to claim an earlier gate complete.
   legacy assignment requirement labels with explicit classifications.
 - Add architecture checks for forbidden new dependencies and frozen adapters.
 
-**Exit:** no new feature can extend a frozen adapter without an explicit
+**Exit:** every frozen adapter has an owner, caller boundary, retirement gate,
+machine-readable behavior inventory where applicable, source guard, and
+executable fixture; stable vocabularies are registered; no new feature can
+extend or silently reinterpret a frozen adapter without an accepted
 architecture exception.
 
 ### Gate 1 — Value/layout core and wire foundation
