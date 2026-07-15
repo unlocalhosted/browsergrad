@@ -1,4 +1,4 @@
-import { SemanticSchemaError } from "../schema/diagnostics.js";
+import { LAYOUT_DIAGNOSTIC_CODES, SemanticSchemaError } from "../schema/diagnostics.js";
 import type { DecodeLimits } from "../schema/limits.js";
 import {
   createDimEvaluationBudget,
@@ -69,7 +69,7 @@ function evaluateConstraint(
       const divisor = evaluateDimExprWithBudget(constraint.divisor, budget, `${path}.divisor`);
       if (divisor.kind === "resolved" && divisor.value <= 0n) {
         throw new SemanticSchemaError({
-          code: "BG-LAYOUT-NONPOSITIVE-DIVISOR",
+          code: LAYOUT_DIAGNOSTIC_CODES.nonpositiveDivisor,
           stage: "verification",
           severity: "error",
           message: "divisible constraint divisor must be strictly positive",

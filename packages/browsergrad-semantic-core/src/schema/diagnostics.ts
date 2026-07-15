@@ -16,8 +16,26 @@ export const SCHEMA_DIAGNOSTIC_CODES = {
 export type SchemaDiagnosticCode =
   (typeof SCHEMA_DIAGNOSTIC_CODES)[keyof typeof SCHEMA_DIAGNOSTIC_CODES];
 
+export const LAYOUT_DIAGNOSTIC_CODES = {
+  invalidDimExpr: "BG-LAYOUT-INVALID-DIM-EXPR",
+  invalidIndexExpr: "BG-LAYOUT-INVALID-INDEX-EXPR",
+  invalidLayoutExpr: "BG-LAYOUT-INVALID-LAYOUT-EXPR",
+  resourceLimit: "BG-LAYOUT-RESOURCE-LIMIT",
+  nonpositiveDivisor: "BG-LAYOUT-NONPOSITIVE-DIVISOR",
+  undeclaredSymbol: "BG-LAYOUT-UNDECLARED-SYMBOL",
+  duplicateSymbol: "BG-LAYOUT-DUPLICATE-SYMBOL",
+  invalidSymbolDomain: "BG-LAYOUT-INVALID-SYMBOL-DOMAIN",
+  symbolDomain: "BG-LAYOUT-SYMBOL-DOMAIN",
+  invalidBindings: "BG-LAYOUT-INVALID-BINDINGS",
+  undeclaredBinding: "BG-LAYOUT-UNDECLARED-BINDING",
+  unknownDType: "BG-LAYOUT-UNKNOWN-DTYPE",
+} as const;
+
+export type LayoutDiagnosticCode =
+  (typeof LAYOUT_DIAGNOSTIC_CODES)[keyof typeof LAYOUT_DIAGNOSTIC_CODES];
+
 export interface SemanticDiagnostic {
-  readonly code: SchemaDiagnosticCode | `BG-LAYOUT-${string}`;
+  readonly code: SchemaDiagnosticCode | LayoutDiagnosticCode | `BG-LAYOUT-${string}`;
   readonly stage: "verification";
   readonly severity: "error" | "warning" | "note";
   readonly message: string;

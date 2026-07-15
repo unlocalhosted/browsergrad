@@ -53,7 +53,13 @@ export interface IndexMap {
 
 export type LayoutExpr =
   | { readonly kind: "strided"; readonly shape: readonly DimExpr[]; readonly strides: readonly DimExpr[] }
-  | { readonly kind: "compose"; readonly outer: LayoutExpr; readonly inner: LayoutExpr }
+  | {
+      readonly kind: "compose";
+      readonly source: LayoutExpr;
+      readonly shape: readonly DimExpr[];
+      /** Source coordinates expressed over this composition's logical coordinates. */
+      readonly sourceCoordinates: readonly IndexExpr[];
+    }
   | { readonly kind: "permute"; readonly source: LayoutExpr; readonly axes: readonly number[] }
   | { readonly kind: "slice"; readonly source: LayoutExpr; readonly offsets: readonly DimExpr[]; readonly sizes: readonly DimExpr[]; readonly steps: readonly DimExpr[] }
   | { readonly kind: "broadcast"; readonly source: LayoutExpr; readonly shape: readonly DimExpr[] }

@@ -1,4 +1,4 @@
-import { SemanticSchemaError } from "../schema/diagnostics.js";
+import { LAYOUT_DIAGNOSTIC_CODES, SemanticSchemaError } from "../schema/diagnostics.js";
 
 export type BuiltinDTypeId =
   | "bool"
@@ -42,7 +42,7 @@ export const BUILTIN_DTYPES: Readonly<Record<BuiltinDTypeId, DTypeDefinition>> =
 export function getBuiltinDType(id: string, path = "$.dtype"): DTypeDefinition {
   if (!Object.hasOwn(BUILTIN_DTYPES, id)) {
     throw new SemanticSchemaError({
-      code: "BG-LAYOUT-UNKNOWN-DTYPE",
+      code: LAYOUT_DIAGNOSTIC_CODES.unknownDType,
       stage: "verification",
       severity: "error",
       message: `unknown builtin dtype ${JSON.stringify(id)}`,

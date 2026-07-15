@@ -1,4 +1,4 @@
-import { SemanticSchemaError } from "../schema/diagnostics.js";
+import { LAYOUT_DIAGNOSTIC_CODES, SemanticSchemaError } from "../schema/diagnostics.js";
 import { type DecodeLimits, resolveDecodeLimits } from "../schema/limits.js";
 import { parseWireI64, wireIntegerToBigInt, type WireI64 } from "../schema/integers.js";
 
@@ -108,12 +108,12 @@ function evaluate(
     case "symbol": {
       validateSymbolId(expression.id, `${path}.id`);
       const symbol = state.symbols.get(expression.id);
-      if (symbol === undefined) layoutError("BG-LAYOUT-UNDECLARED-SYMBOL", `undeclared dimension symbol ${expression.id}`, `${path}.id`);
+      if (symbol === undefined) layoutError(LAYOUT_DIAGNOSTIC_CODES.undeclaredSymbol, `undeclared dimension symbol ${expression.id}`, `${path}.id`);
       const binding = state.bindings.get(expression.id);
       if (binding === undefined) return unresolved([expression.id]);
       checkIntegerBits(state, binding, `$.bindings.${expression.id}`);
       if (binding < symbol.min || (symbol.max !== undefined && binding > symbol.max)) {
-        layoutError("BG-LAYOUT-SYMBOL-DOMAIN", `binding for ${expression.id} is outside its declared domain`, `$.bindings.${expression.id}`);
+        layoutError(LAYOUT_DIAGNOSTIC_CODES.symbolDomain, `binding for ${expression.id} is outside its declared domain`, `$.bindings.${expression.id}`);
       }
       return resolved(binding);
     }
@@ -226,7 +226,7 @@ function integerBits(value: bigint): number {
 }
 
 function requirePositiveDivisor(value: bigint, path: string): void {
-  if (value <= 0n) layoutError("BG-LAYOUT-NONPOSITIVE-DIVISOR", "divisor must be strictly positive", path);
+  if (value <= 0n) layoutError(LAYOUT_DIAGNOSTIC_CODES.nonpositiveDivisor, "divisor must be strictly positive", path);
 }
 
 function normalizeSymbols(
@@ -241,7 +241,7 @@ function normalizeSymbols(
     const path = `$.symbols[${index}]`;
     validateSymbolId(declaration.id, `${path}.id`);
     if (symbols.has(declaration.id)) {
-      layoutError("BG-LAYOUT-DUPLICATE-SYMBOL", `duplicate dimension symbol ${declaration.id}`, `${path}.id`);
+      layoutError(LAYOUT_DIAGNOSTIC_CODES.duplicateSymbol, `duplicate dimension symbol ${declaration.id}`, `${path}.id`);
     }
     const min = wireIntegerToBigInt(parseWireI64(declaration.domain.min, `${path}.domain.min`));
     const max = declaration.domain.max === undefined
@@ -251,7 +251,7 @@ function normalizeSymbols(
       resourceLimit(`${path}.domain`, `symbol domain exceeds ${limits.maxIntegerBits} integer bits`);
     }
     if (max !== undefined && max < min) {
-      layoutError("BG-LAYOUT-INVALID-SYMBOL-DOMAIN", "symbol domain maximum must be greater than or equal to its minimum", `${path}.domain.max`);
+      layoutError(LAYOUT_DIAGNOSTIC_CODES.invalidSymbolDomain, "symbol domain maximum must be greater than or equal to its minimum", `${path}.domain.max`);
     }
     symbols.set(declaration.id, max === undefined ? { min } : { min, max });
   }
@@ -265,17 +265,17 @@ function normalizeBindings(
 ): ReadonlyMap<string, bigint> {
   const prototype = Object.getPrototypeOf(bindings);
   if (prototype !== Object.prototype && prototype !== null) {
-    layoutError("BG-LAYOUT-INVALID-BINDINGS", "dimension bindings must be a plain data object", "$.bindings");
+    layoutError(LAYOUT_DIAGNOSTIC_CODES.invalidBindings, "dimension bindings must be a plain data object", "$.bindings");
   }
   const descriptors = Object.getOwnPropertyDescriptors(bindings);
   const normalized = new Map<string, bigint>();
   for (const key of Reflect.ownKeys(bindings)) {
-    if (typeof key !== "string") layoutError("BG-LAYOUT-INVALID-BINDINGS", "dimension binding keys must be strings", "$.bindings");
+    if (typeof key !== "string") layoutError(LAYOUT_DIAGNOSTIC_CODES.invalidBindings, "dimension binding keys must be strings", "$.bindings");
     validateSymbolId(key, `$.bindings.${key}`);
-    if (!symbols.has(key)) layoutError("BG-LAYOUT-UNDECLARED-BINDING", `binding provided for undeclared symbol ${key}`, `$.bindings.${key}`);
+    if (!symbols.has(key)) layoutError(LAYOUT_DIAGNOSTIC_CODES.undeclaredBinding, `binding provided for undeclared symbol ${key}`, `$.bindings.${key}`);
     const descriptor = descriptors[key];
     if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
-      layoutError("BG-LAYOUT-INVALID-BINDINGS", "dimension bindings must be enumerable data properties without accessors", `$.bindings.${key}`);
+      layoutError(LAYOUT_DIAGNOSTIC_CODES.invalidBindings, "dimension bindings must be enumerable data properties without accessors", `$.bindings.${key}`);
     }
     const raw = descriptor.value as unknown;
     const value = typeof raw === "bigint"
@@ -287,7 +287,7 @@ function normalizeBindings(
     const symbol = symbols.get(key);
     if (symbol === undefined) throw new Error("internal: binding declaration disappeared");
     if (value < symbol.min || (symbol.max !== undefined && value > symbol.max)) {
-      layoutError("BG-LAYOUT-SYMBOL-DOMAIN", `binding for ${key} is outside its declared domain`, `$.bindings.${key}`);
+      layoutError(LAYOUT_DIAGNOSTIC_CODES.symbolDomain, `binding for ${key} is outside its declared domain`, `$.bindings.${key}`);
     }
     normalized.set(key, value);
   }
@@ -299,11 +299,11 @@ function validateSymbolId(value: string, path: string): void {
 }
 
 function invalidExpr(path: string, message: string): never {
-  layoutError("BG-LAYOUT-INVALID-DIM-EXPR", message, path);
+  layoutError(LAYOUT_DIAGNOSTIC_CODES.invalidDimExpr, message, path);
 }
 
 function resourceLimit(path: string, message: string): never {
-  layoutError("BG-LAYOUT-RESOURCE-LIMIT", message, path);
+  layoutError(LAYOUT_DIAGNOSTIC_CODES.resourceLimit, message, path);
 }
 
 function layoutError(code: `BG-LAYOUT-${string}`, message: string, path: string): never {

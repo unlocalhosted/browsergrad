@@ -30,3 +30,7 @@ export type {
   PredicateExpr,
   TensorView,
 } from "./layout/model.js";
+export {
+  normalizeLayoutExpr,
+  type NormalizedLayout,
+} from "./layout/normalize-layout.js";

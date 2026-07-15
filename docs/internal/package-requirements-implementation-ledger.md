@@ -31,7 +31,7 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate | Status | Current result | Missing before `verified` | Evidence |
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and three highest-risk legacy adapters are machine-frozen. The check runs in root, compiler, CI, release, and publish gates; mutation tests cover representative bypasses. | Add stable capability IDs and a machine-readable dtype/view/materialization inventory; freeze pointer/scalar memory, Grad view/bf16, runtime capability labels, and adapter behavior beyond surface shape. | `pnpm architecture:check`; compiler semantic-architecture tests. |
-| Gate 1 — value/layout core and wire foundation | `partial` | Private package now implements pre-decode byte limits and fatal UTF-8, bounded duplicate-aware JSON decoding, canonical JSON/SHA-256 domains, opaque verified hash inputs, wire integers/floats/envelopes, exact artifact-budgeted dimension arithmetic with declared symbol domains, constraints, the closed dtype registry, numerical policy, allocation/view records, and v1 layout/index expression types. | Add layout normalization and the schema-specific semantic verifier that creates verified wrappers; add cross-language canonical fixtures; prove coordinate/address/alias traces, deterministic parity, extension round-tripping, and all Gate 1 exit criteria. | Semantic-core typecheck, build, lint, and 43 focused tests. |
+| Gate 1 — value/layout core and wire foundation | `partial` | Private package now implements pre-decode byte limits and fatal UTF-8, bounded duplicate-aware JSON decoding, canonical JSON/SHA-256 domains, opaque verified hash inputs, wire integers/floats/envelopes, exact artifact-budgeted dimension arithmetic with declared symbol domains, constraints, the closed dtype registry, numerical policy, allocation/view records, stable layout diagnostic IDs, and deterministic normalization of strided/compose/permute/slice/broadcast/pad construction into one index/predicate truth. | Add the schema-specific layout verifier that creates verified wrappers; add cross-language canonical fixtures; prove coordinate/address/alias traces, deterministic parity, extension round-tripping, and all Gate 1 exit criteria. | Semantic-core typecheck, build, lint, and 50 focused tests. |
 | Gate 2 — multi-frontend, multi-backend view slice | `not-started` | No implementation in this workstream. | All Gate 2 exit criteria. | None. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
@@ -55,7 +55,7 @@ shells or another frontend-shaped execution path.
 | Semantic-core seam audit | `partial` | Existing compiler/JIT/kernels types must adapt into the core; none can be moved wholesale. Exact initial package split is selected. |
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
 | Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, required legacy freezes, and representative mutation tests are implemented and wired into delivery gates. Stable capability inventory remains. |
-| Gate 1 schema/value core | `partial` | `/schema` and `/layout` only; bounded canonical wire processing and exact dimension/value foundations are implemented. Normalization, verification, and cross-language parity remain. |
+| Gate 1 schema/value core | `partial` | `/schema` and `/layout` only; bounded canonical wire processing, exact dimension/value foundations, layout normalization, and a shared exact index/predicate evaluator are implemented. Schema-specific verification, public traces, and cross-language parity remain. |
 
 ### Audit findings recorded so far
 
@@ -161,6 +161,20 @@ affected implementation slice is marked complete.
   systems architecture`).
 - Recorded architecture enforcement in commit `6985611d` and the truthful
   row-wise attention naming correction in commit `aa632f98`.
+- Recorded the bounded wire/value foundation in commit `d292595c`.
+
+### 2026-07-15 — Gate 1 layout normalization
+
+- Defined composition through an explicit source-coordinate map, removing the
+  ambiguous scalar-layout composition interpretation.
+- Normalized strided, permutation, slice, broadcast, padding, and composition
+  builders into one element-location expression plus one in-bounds predicate.
+- Added exact shared-budget index and predicate evaluation; logical out-of-
+  bounds coordinates retain their computed address and return a false predicate
+  instead of being clamped.
+- Added stable layout diagnostic constants and seven focused normalization
+  scenarios. Gate 1 remains `partial` until the normalized layout artifact
+  verifier, address/alias traces, and cross-language proof land.
 
 ## Verification Log
 
@@ -171,11 +185,12 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Compiler types | `pnpm --filter @unlocalhosted/browsergrad-compiler typecheck` | Passed. | None. |
 | 2026-07-15 | Kernels attention truth correction | `pnpm --filter @unlocalhosted/browsergrad-kernels typecheck` and `pnpm --filter @unlocalhosted/browsergrad-kernels test` | Passed: typecheck and 10 files, 71 tests. | Re-run before commit. |
 | 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck` | Passed. | None. |
-| 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core test` | Passed: 4 files, 43 tests. | None. |
+| 2026-07-15 | Semantic core foundation | `pnpm --filter @unlocalhosted/browsergrad-semantic-core test` | Passed: 4 files, 43 tests. | Superseded by the current 50-test run. |
 | 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core build` | Passed. | None. |
 | 2026-07-15 | Semantic core | `pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed with no warnings after replacing the control-character regex with explicit code-point comparisons. | None. |
 | 2026-07-15 | Workspace integration | `pnpm -r run build` | Passed for 7 of 8 workspace projects, including semantic core. | None. |
 | 2026-07-15 | Workspace integration | `pnpm -r run typecheck` | Semantic core and all packages before runtime passed; runtime failed on three pre-existing optional-value checks in `assignment-javascript-profile-e2e.test.ts`. | Keep as unrelated workspace evidence; semantic-core focused typecheck is green. |
+| 2026-07-15 | Layout normalization | `pnpm --filter @unlocalhosted/browsergrad-semantic-core typecheck && pnpm --filter @unlocalhosted/browsergrad-semantic-core test && pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-semantic-core lint` | Passed: 5 files, 50 tests; build/typecheck/lint clean. | None. |
 
 ## Failure and Recovery Log
 
@@ -199,6 +214,9 @@ whether any files may be left partially changed.
   `packages/browsergrad-runtime/tests/assignment-javascript-profile-e2e.test.ts`
   because `compiled.wgsl` / `compiled.wgslProgram` may be undefined. Semantic
   core is not consumed there; no runtime files were changed in this slice.
+- The first layout-normalizer typecheck found two `noUncheckedIndexedAccess`
+  errors when indexing already rank-validated stride/step arrays. Explicit
+  post-validation casts document the invariant; all focused gates pass.
 
 ## Quick Resume Checklist
 
@@ -213,5 +231,6 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Implement layout normalization plus the verified semantic wrapper, then add
-Python/TypeScript canonical fixtures and coordinate/address/alias traces.
+Implement the closed layout-artifact schema verifier and deterministic local-ID
+remapping, then add coordinate/address/alias traces over its opaque verified
+wrapper.
