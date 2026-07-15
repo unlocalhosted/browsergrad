@@ -1,0 +1,481 @@
+{
+  "schemaVersion": 1,
+  "inventoryId": "browsergrad.jit.opaque-operations.v0",
+  "owner": "@unlocalhosted/browsergrad-jit",
+  "irOpcode": "CUSTOM",
+  "observationStatus": "verified-current-behavior",
+  "executionContext": {
+    "pythonRuntime": "pyodide",
+    "pyodideVersion": "0.26.4",
+    "cpuReference": "numpy-wasm",
+    "numpyVersion": "1.26.4",
+    "legacyWebgpu": "registered-bridge-with-root-materialization",
+    "tensorGpuPlanDefault": "refuses-custom",
+    "tensorGpuPlanAllowCustom": "admits-custom-plan-structure-only",
+    "tensorGpuPlanExecution": "refuses-custom"
+  },
+  "policies": [
+    {
+      "id": "cpu-callback-with-closure",
+      "category": "legacy-numpy-callback",
+      "cpuRealization": "numpy-callback",
+      "closureAutograd": "implemented",
+      "symbolicVjp": "refused-no-custom-rule",
+      "functionalGrad": "refused-missing-symbolic-vjp",
+      "vmap": "refused-custom",
+      "onnxExport": "refused-custom",
+      "tensorGpuPlanDefault": "refused-custom",
+      "tensorGpuPlanAllowCustom": "admitted-plan-structure-only",
+      "tensorGpuPlanExecution": "refused-custom",
+      "legacyWebgpu": "refused-name-field",
+      "residency": "host-materialized",
+      "realizedResultValidation": "ndarray-only-shape-and-dtype-unchecked",
+      "failurePolicy": "cpu-callback-only",
+      "targetConformance": "compatibility-debt"
+    },
+    {
+      "id": "cpu-callback-with-conditional-closure",
+      "category": "legacy-numpy-callback",
+      "cpuRealization": "numpy-callback",
+      "closureAutograd": "nearest-implemented-bilinear-refused",
+      "symbolicVjp": "refused-no-custom-rule",
+      "functionalGrad": "refused-missing-symbolic-vjp",
+      "vmap": "refused-custom",
+      "onnxExport": "refused-custom",
+      "tensorGpuPlanDefault": "refused-custom",
+      "tensorGpuPlanAllowCustom": "admitted-plan-structure-only",
+      "tensorGpuPlanExecution": "refused-custom",
+      "legacyWebgpu": "refused-name-field",
+      "residency": "host-materialized",
+      "realizedResultValidation": "ndarray-only-shape-and-dtype-unchecked",
+      "failurePolicy": "bilinear-backward-raises-not-implemented",
+      "targetConformance": "compatibility-debt"
+    },
+    {
+      "id": "cpu-callback-forward-only",
+      "category": "legacy-numpy-callback",
+      "cpuRealization": "numpy-callback",
+      "closureAutograd": "disconnected-requires-grad-false",
+      "symbolicVjp": "refused-no-custom-rule",
+      "functionalGrad": "returns-zero-for-disconnected-input",
+      "vmap": "refused-custom",
+      "onnxExport": "refused-custom",
+      "tensorGpuPlanDefault": "refused-custom",
+      "tensorGpuPlanAllowCustom": "admitted-plan-structure-only",
+      "tensorGpuPlanExecution": "refused-custom",
+      "legacyWebgpu": "refused-name-field",
+      "residency": "host-materialized",
+      "realizedResultValidation": "ndarray-only-shape-and-dtype-unchecked",
+      "failurePolicy": "silent-autograd-disconnection",
+      "targetConformance": "compatibility-debt"
+    },
+    {
+      "id": "legacy-webgpu-forward-only",
+      "category": "explicit-accelerator-kernel",
+      "cpuRealization": "refused-missing-fn",
+      "closureAutograd": "disconnected-requires-grad-false",
+      "symbolicVjp": "refused-no-custom-rule",
+      "functionalGrad": "returns-zero-for-disconnected-input",
+      "vmap": "refused-custom",
+      "onnxExport": "refused-custom",
+      "tensorGpuPlanDefault": "refused-custom",
+      "tensorGpuPlanAllowCustom": "admitted-plan-structure-only",
+      "tensorGpuPlanExecution": "refused-custom",
+      "legacyWebgpu": "supported-op-dispatch",
+      "residency": "legacy-webgpu-root-materialized-to-host",
+      "realizedResultValidation": "materialized-by-declared-shape-and-dtype",
+      "failurePolicy": "cpu-path-refuses",
+      "targetConformance": "operation-specific"
+    },
+    {
+      "id": "constructor-only-forward-only",
+      "category": "constructor-only",
+      "cpuRealization": "refused-missing-fn",
+      "closureAutograd": "disconnected-requires-grad-false",
+      "symbolicVjp": "refused-no-custom-rule",
+      "functionalGrad": "returns-zero-for-disconnected-input",
+      "vmap": "refused-custom",
+      "onnxExport": "refused-custom",
+      "tensorGpuPlanDefault": "refused-custom",
+      "tensorGpuPlanAllowCustom": "admitted-plan-structure-only",
+      "tensorGpuPlanExecution": "refused-custom",
+      "legacyWebgpu": "refused-unsupported-op-field",
+      "residency": "not-realizable",
+      "realizedResultValidation": "not-realizable",
+      "failurePolicy": "all-realizers-refuse",
+      "targetConformance": "compatibility-debt"
+    }
+  ],
+  "constructorSites": [
+    {
+      "id": "custom-kernel.builder",
+      "file": "packages/browsergrad-jit/src/python/_custom_kernel.py",
+      "definition": "builder",
+      "constructorCount": 1,
+      "labelBinding": "static-op-in-arg-record",
+      "operationIds": ["jit.custom.user.v0"]
+    },
+    {
+      "id": "functional.cross-entropy",
+      "file": "packages/browsergrad-jit/src/python/_functional.py",
+      "definition": "cross_entropy",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.cross-entropy.v0"]
+    },
+    {
+      "id": "functional.nll-loss",
+      "file": "packages/browsergrad-jit/src/python/_functional.py",
+      "definition": "nll_loss",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.nll-loss.v0"]
+    },
+    {
+      "id": "functional.elementwise-loss-helper",
+      "file": "packages/browsergrad-jit/src/python/_functional.py",
+      "definition": "_custom_elementwise_loss",
+      "constructorCount": 1,
+      "labelBinding": "dynamic-reviewed-name",
+      "operationIds": [
+        "jit.custom.binary-cross-entropy.v0",
+        "jit.custom.kl-div.v0",
+        "jit.custom.l1-loss.v0",
+        "jit.custom.smooth-l1-loss.v0"
+      ]
+    },
+    {
+      "id": "functional.binary-cross-entropy-with-logits",
+      "file": "packages/browsergrad-jit/src/python/_functional.py",
+      "definition": "binary_cross_entropy_with_logits",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.binary-cross-entropy-with-logits.v0"]
+    },
+    {
+      "id": "functional.dropout",
+      "file": "packages/browsergrad-jit/src/python/_functional.py",
+      "definition": "dropout",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.dropout.v0"]
+    },
+    {
+      "id": "functional.pad",
+      "file": "packages/browsergrad-jit/src/python/_functional.py",
+      "definition": "pad",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.pad.v0"]
+    },
+    {
+      "id": "functional.interpolate",
+      "file": "packages/browsergrad-jit/src/python/_functional.py",
+      "definition": "interpolate",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.interpolate.v0"]
+    },
+    {
+      "id": "nn.batch-norm-1d-forward",
+      "file": "packages/browsergrad-jit/src/python/_nn.py",
+      "definition": "BatchNorm1d.forward",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.batch-norm-1d.v0"]
+    },
+    {
+      "id": "tensor.abs",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.abs",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.abs.v0"]
+    },
+    {
+      "id": "tensor.sin",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.sin",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.sin.v0"]
+    },
+    {
+      "id": "tensor.cos",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.cos",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.cos.v0"]
+    },
+    {
+      "id": "tensor.sign",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.sign",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.sign.v0"]
+    },
+    {
+      "id": "tensor.clamp",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.clamp",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.clamp.v0"]
+    },
+    {
+      "id": "tensor.expand",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.expand",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.expand.v0"]
+    },
+    {
+      "id": "tensor.repeat",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.repeat",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.repeat.v0"]
+    },
+    {
+      "id": "tensor.flip",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.flip",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.flip.v0"]
+    },
+    {
+      "id": "tensor.prod",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.prod",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.prod.v0"]
+    },
+    {
+      "id": "tensor.gather",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.gather",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.gather.v0"]
+    },
+    {
+      "id": "tensor.repeat-interleave",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.repeat_interleave",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.repeat-interleave.v0"]
+    },
+    {
+      "id": "tensor.var",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.var",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.var.v0"]
+    },
+    {
+      "id": "tensor.masked-fill",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.masked_fill",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.masked-fill.v0"]
+    },
+    {
+      "id": "tensor.scatter",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "TensorProxy.scatter",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.scatter.v0"]
+    },
+    {
+      "id": "tensor.cat",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "cat",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.cat.v0"]
+    },
+    {
+      "id": "tensor.stack",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "stack",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.stack.v0"]
+    },
+    {
+      "id": "tensor.cumsum",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "cumsum",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.cumsum.v0"]
+    },
+    {
+      "id": "tensor.sort-values",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "sort",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.sort-values.v0"]
+    },
+    {
+      "id": "tensor.sort-indices",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "sort",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.sort-indices.v0"]
+    },
+    {
+      "id": "tensor.topk-values",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "_topk",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.topk-values.v0"]
+    },
+    {
+      "id": "tensor.topk-indices",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "_topk",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.topk-indices.v0"]
+    },
+    {
+      "id": "tensor.triu",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "triu",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.triu.v0"]
+    },
+    {
+      "id": "tensor.tril",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "tril",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.tril.v0"]
+    },
+    {
+      "id": "tensor.einsum",
+      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
+      "definition": "einsum",
+      "constructorCount": 1,
+      "labelBinding": "static-name",
+      "operationIds": ["jit.custom.einsum.v0"]
+    },
+    {
+      "id": "webnn.matmul",
+      "file": "packages/browsergrad-jit/src/python/_webnn.py",
+      "definition": "matmul",
+      "constructorCount": 1,
+      "labelBinding": "static-op-in-arg-record",
+      "operationIds": ["jit.custom.webnn-matmul.v0"]
+    },
+    {
+      "id": "embedded.flash-attention",
+      "file": "packages/browsergrad-jit/src/python/index.ts",
+      "definition": "flash_attention",
+      "constructorCount": 1,
+      "labelBinding": "static-op-in-arg-record",
+      "operationIds": ["jit.custom.flash-attention.v0"]
+    },
+    {
+      "id": "embedded.transformer-block",
+      "file": "packages/browsergrad-jit/src/python/index.ts",
+      "definition": "transformer_block",
+      "constructorCount": 1,
+      "labelBinding": "static-op-in-arg-record",
+      "operationIds": ["jit.custom.transformer-block.v0"]
+    }
+  ],
+  "decisionSourceDefinitions": [
+    "packages/browsergrad-jit/src/python/_func.py:_symbolic_vjp_walk",
+    "packages/browsergrad-jit/src/python/_func.py:grad",
+    "packages/browsergrad-jit/src/python/_gpu_plan.py:build_gpu_execution_plan",
+    "packages/browsergrad-jit/src/python/_onnx.py:export_inference",
+    "packages/browsergrad-jit/src/python/_realize.py:_h_custom",
+    "packages/browsergrad-jit/src/python/_realize_webgpu.py:_h_custom",
+    "packages/browsergrad-jit/src/python/_realize_webgpu.py:realize_tensor_plan_webgpu",
+    "packages/browsergrad-jit/src/python/_realize_webgpu.py:realize_webgpu",
+    "packages/browsergrad-jit/src/python/_tensor_proxy.py:TensorProxy.backward",
+    "packages/browsergrad-jit/src/python/_vjp.py:get_rule",
+    "packages/browsergrad-jit/src/python/_vjp.py:list_registered",
+    "packages/browsergrad-jit/src/python/_vmap.py:_refuse"
+  ],
+  "operations": [
+    {"id":"jit.custom.abs.v0","label":"abs","labelField":"name","constructorSite":"tensor.abs","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.batch-norm-1d.v0","label":"batch_norm1d","labelField":"name","constructorSite":"nn.batch-norm-1d-forward","policy":"cpu-callback-with-closure","constructorReachability":"always-after-shape-validation","effectCondition":"arity-three-when-affine-else-one;running-stats-mutate-only-when-training-and-tracked;batch-stats-used-when-training-or-untracked","effectClass":"module-stateful","replayContract":"tracked-training-reexecution-mutates-running-stats-and-captured-state","inputArity":"one-without-affine-or-three-with-affine","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"tracked training closure realization may update running statistics more than once","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.binary-cross-entropy.v0","label":"binary_cross_entropy","labelField":"name","constructorSite":"functional.elementwise-loss-helper","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.binary-cross-entropy-with-logits.v0","label":"binary_cross_entropy_with_logits","labelField":"name","constructorSite":"functional.binary-cross-entropy-with-logits","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.cat.v0","label":"cat","labelField":"name","constructorSite":"tensor.cat","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"variadic","shapeRule":"concatenate-selected-axis","declaredDtypeRule":"promote-inputs","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.clamp.v0","label":"clamp","labelField":"name","constructorSite":"tensor.clamp","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.cos.v0","label":"cos","labelField":"name","constructorSite":"tensor.cos","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.cross-entropy.v0","label":"cross_entropy","labelField":"name","constructorSite":"functional.cross-entropy","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.cumsum.v0","label":"cumsum","labelField":"name","constructorSite":"tensor.cumsum","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.dropout.v0","label":"dropout","labelField":"name","constructorSite":"functional.dropout","policy":"cpu-callback-with-closure","constructorReachability":"training-and-zero-less-than-p-less-than-one","effectCondition":"rng-mask-resampled-on-every-callback-realization","effectClass":"rng-and-captured-state","replayContract":"reexecution-resamples-mask-and-replaces-backward-state","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"observed forward and backward may use different masks after replay","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.einsum.v0","label":"einsum","labelField":"name","constructorSite":"tensor.einsum","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"numpy-shape-probe-executes-during-construction","effectClass":"host-shape-probe","replayContract":"construction-executes-numpy-sample-and-forward-reexecutes","inputArity":"variadic","shapeRule":"host-sample-evaluation","declaredDtypeRule":"promote-inputs","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"construction can allocate and execute proportional to output shape; autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.expand.v0","label":"expand","labelField":"name","constructorSite":"tensor.expand","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"resolved-broadcast-shape","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.flash-attention.v0","label":"flash_attention","labelField":"op","constructorSite":"embedded.flash-attention","policy":"legacy-webgpu-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"legacy-webgpu-bridge-required","effectClass":"accelerator-kernel","replayContract":"forward-only-root-materialization","inputArity":"3-or-4","shapeRule":"preserve-query-shape","declaredDtypeRule":"preserve-query-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"flash-attention","currentFailure":"CPU and portable tensor plan refuse; input relationships are only partially validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze","legacy-webgpu-flash"]},
+    {"id":"jit.custom.flip.v0","label":"flip","labelField":"name","constructorSite":"tensor.flip","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.gather.v0","label":"gather","labelField":"name","constructorSite":"tensor.gather","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"index-shape","declaredDtypeRule":"preserve-data-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.interpolate.v0","label":"interpolate","labelField":"name","constructorSite":"functional.interpolate","policy":"cpu-callback-with-conditional-closure","constructorReachability":"supported-nearest-or-bilinear-four-dimensional-input","effectCondition":"nearest-has-closure;bilinear-backward-refused","effectClass":"captured-state","replayContract":"nearest-deterministic-bilinear-backward-refused","inputArity":"1","shapeRule":"resized-four-dimensional-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"bilinear forward builds a graph whose backward fails only at execution","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.kl-div.v0","label":"kl_div","labelField":"name","constructorSite":"functional.elementwise-loss-helper","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.l1-loss.v0","label":"l1_loss","labelField":"name","constructorSite":"functional.elementwise-loss-helper","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.masked-fill.v0","label":"masked_fill","labelField":"name","constructorSite":"tensor.masked-fill","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"broadcast-result","declaredDtypeRule":"preserve-data-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.nll-loss.v0","label":"nll_loss","labelField":"name","constructorSite":"functional.nll-loss","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.pad.v0","label":"pad","labelField":"name","constructorSite":"functional.pad","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"constant-padding-shape","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.prod.v0","label":"prod","labelField":"name","constructorSite":"tensor.prod","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"full reduction returns a NumPy scalar rejected by the CPU realizer; portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.repeat.v0","label":"repeat","labelField":"name","constructorSite":"tensor.repeat","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"tile-multipliers","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.repeat-interleave.v0","label":"repeat_interleave","labelField":"name","constructorSite":"tensor.repeat-interleave","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"selected-axis-times-repeat-count","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.scatter.v0","label":"scatter","labelField":"name","constructorSite":"tensor.scatter","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"3","shapeRule":"preserve-target-shape","declaredDtypeRule":"preserve-target-dtype","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.sign.v0","label":"sign","labelField":"name","constructorSite":"tensor.sign","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.sin.v0","label":"sin","labelField":"name","constructorSite":"tensor.sin","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.smooth-l1-loss.v0","label":"smooth_l1_loss","labelField":"name","constructorSite":"functional.elementwise-loss-helper","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.sort-indices.v0","label":"sort_indices","labelField":"name","constructorSite":"tensor.sort-indices","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"int64","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.sort-values.v0","label":"sort_values","labelField":"name","constructorSite":"tensor.sort-values","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.stack.v0","label":"stack","labelField":"name","constructorSite":"tensor.stack","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"variadic","shapeRule":"insert-selected-axis","declaredDtypeRule":"promote-inputs","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.topk-indices.v0","label":"topk_indices","labelField":"name","constructorSite":"tensor.topk-indices","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"selected-axis-becomes-k","declaredDtypeRule":"int64","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.topk-values.v0","label":"topk_values","labelField":"name","constructorSite":"tensor.topk-values","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"selected-axis-becomes-k","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.transformer-block.v0","label":"transformer_block","labelField":"op","constructorSite":"embedded.transformer-block","policy":"constructor-only-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-realizer-support","effectClass":"constructor-only","replayContract":"not-realizable","inputArity":"5","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"not-realizable","webgpuRoute":"none","currentFailure":"CPU and WebGPU realizers both refuse; weights, dtype agreement, and head divisibility are not validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.tril.v0","label":"tril","labelField":"name","constructorSite":"tensor.tril","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.triu.v0","label":"triu","labelField":"name","constructorSite":"tensor.triu","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.user.v0","label":"user","labelField":"op","constructorSite":"custom-kernel.builder","policy":"legacy-webgpu-forward-only","constructorReachability":"registered-decorator-builder-invoked","effectCondition":"legacy-webgpu-bridge-and-live-kernel-registry-entry-required","effectClass":"user-authored-kernel","replayContract":"forward-only-root-materialization","inputArity":"decorator-num-inputs","shapeRule":"decorator-output-shape-function","declaredDtypeRule":"decorator-output-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"user-kernel","currentFailure":"CPU and portable tensor plan refuse; autograd is explicitly disconnected","targetConformance":"intentional-extension","evidence":["gate0-contract","source-freeze","legacy-webgpu-user"]},
+    {"id":"jit.custom.var.v0","label":"var","labelField":"name","constructorSite":"tensor.var","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"full reduction returns a NumPy scalar rejected by the CPU realizer; portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
+    {"id":"jit.custom.webnn-matmul.v0","label":"webnn_matmul","labelField":"op","constructorSite":"webnn.matmul","policy":"constructor-only-forward-only","constructorReachability":"two-dimensional-inputs-only","effectCondition":"no-realizer-support","effectClass":"constructor-only","replayContract":"not-realizable","inputArity":"2","shapeRule":"matrix-product-two-dimensional","declaredDtypeRule":"preserve-left-input-without-equality-validation","realizedDtypeRule":"not-realizable","webgpuRoute":"none","currentFailure":"CPU and WebGPU realizers both refuse; advertised f32 and fallback contracts are absent","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]}
+  ],
+  "evidenceDefinitions": [
+    {
+      "id": "gate0-contract",
+      "kind": "executable-pyodide-contract",
+      "path": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts"
+    },
+    {
+      "id": "legacy-webgpu-flash",
+      "kind": "executable-pyodide-contract",
+      "path": "packages/browsergrad-jit/tests-integration/webgpu_realizer.test.ts"
+    },
+    {
+      "id": "legacy-webgpu-user",
+      "kind": "executable-pyodide-contract",
+      "path": "packages/browsergrad-jit/tests-integration/custom_kernel.test.ts"
+    },
+    {
+      "id": "source-freeze",
+      "kind": "normalized-source-and-mutation-guard",
+      "path": "packages/browsergrad-compiler/tests/semantic_architecture_check.test.ts"
+    }
+  ]
+}

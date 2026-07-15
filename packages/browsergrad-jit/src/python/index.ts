@@ -214,11 +214,10 @@ def flash_attention(q, k, v, mask=None, scale=None):
                          (use -inf for blocked positions, 0 for allowed)
     Returns a TensorProxy of shape (B, H, Sq, D).
 
-    NOTE: backward is not implemented. Calling .backward() on a tensor
-    downstream of flash_attention falls off the symbolic VJP path
-    because OP_CUSTOM has no registered VJP rule — the closure path
-    fires and there is no closure, raising NoBackwardError. Use only
-    for forward/inference paths in v0.
+    NOTE: backward is not implemented. The result has requires_grad=False
+    and no autograd context, so it silently disconnects the input chain;
+    NoBackwardError is not currently raised. Use only for forward/inference
+    paths in v0.
     """
     if scale is None:
         scale = 1.0 / _math.sqrt(q.shape[-1])
@@ -257,8 +256,8 @@ _sys.modules["browsergrad_jit.func"] = func
 
 
 # bg.custom_kernel — user-supplied WGSL (PRD-015). Forward-only;
-# downstream .backward() raises NoBackwardError because OP_CUSTOM has
-# no registered VJP rule. Realize via bg.realize_webgpu.
+# its result has requires_grad=False and disconnects autograd. Realize via
+# bg.realize_webgpu.
 custom_kernel = _custom_kernel_mod.custom_kernel
 
 
@@ -340,9 +339,9 @@ def gpu_plan_summary(tensor, *, allow_custom=False):
 
 # bg.kernels.transformer_block — opt-in megakernel constructor (PRD-012c).
 # Forward-only; user explicitly opts in via this constructor. Builds an
-# OP_CUSTOM tagged "transformer_block" — the bridge dispatches one fused
-# WGSL kernel. Bridge support is best-effort; absent → falls back to
-# bg.kernels.flash_attention + Linear (which the user can also compose).
+# OP_CUSTOM tagged "transformer_block". This is constructor-only today:
+# neither current realizer dispatches it and no automatic decomposition or
+# fallback exists.
 def transformer_block(x, w_qkv, w_o, w_ff1, w_ff2, *, num_heads=8, eps=1e-5):
     """Single transformer block: LayerNorm -> Attention -> Residual ->
     LayerNorm -> FFN -> Residual. Forward only.

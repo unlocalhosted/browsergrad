@@ -935,9 +935,8 @@ def _h_custom(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     """Opaque escape hatch. The `arg` carries a callable that receives the
     input ndarrays and returns the output ndarray.
 
-    Used in PRD-005 v0 to express Conv2d / Pool / MultiHeadAttention without
-    decomposing them into the primitive op set — PRD-006 lifts those into
-    real opcodes."""
+    Kept for the reviewed legacy NumPy-callback inventory while those public
+    operations migrate to typed IR. Nodes without `arg["fn"]` fail here."""
     fn = node.arg.get("fn")
     if fn is None:
         raise RealizationError(

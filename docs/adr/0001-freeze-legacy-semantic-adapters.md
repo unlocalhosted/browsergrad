@@ -22,6 +22,14 @@ The baselines in `architecture/semantic-freeze.json` are frozen. No new feature
 may widen a frozen surface, caller set, operation set, label set, dtype/view
 substitution, or unique semantic field.
 
+The JIT baseline is the exact 36-constructor-call/39-operation inventory, not
+the former token-derived allowlist. Its label field, constructor definition,
+conditional reachability/effects, declared-versus-realized dtype behavior,
+autograd and transform decisions, default/inspection/execution plan decisions,
+realization route, and materialization boundary are part of the reviewed
+baseline. Token strings from non-`CUSTOM` operations do not acquire
+compatibility status.
+
 An intentional baseline change requires all of:
 
 1. A new accepted ADR naming the exact invariant changed.

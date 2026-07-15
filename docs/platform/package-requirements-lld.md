@@ -1150,6 +1150,45 @@ individual record cannot override those values implicitly:
 - Environment versions whenever behavior is delegated to Pyodide, NumPy, a
   browser API, a native toolchain, or another independently versioned system.
 
+An opaque-operation inventory has additional mandatory structure because an
+opcode count or label allowlist cannot describe executable semantics. It MUST
+record every constructor site and every reachable label separately, including:
+
+- The exact label field (`name` for a CPU callback versus `op` for backend
+  dispatch), enclosing definition, one record per constructor call,
+  input-arity rule, shape rule, and constructor reachability condition.
+  Multiple calls in one definition are separate records even when they form
+  one public return value. Dynamic label helpers require a closed set of
+  reviewed callers.
+- Declared IR dtype rules separately from realized-result dtype behavior and
+  validation. If a callback result is only checked to be an array, the
+  inventory MUST say that shape and dtype are delegated and unvalidated; a
+  declared dtype is not evidence of realized dtype. Version-pinned cross-dtype
+  fixtures MUST cover the delegated behavior.
+- Callback presence, effect class, determinism, and replay contract. RNG use,
+  captured backward state, module-state mutation, and construction-time host
+  shape probes are distinct effects; none may be called “pure.”
+- CPU realization, closure backward, symbolic VJP, functional-grad, vmap,
+  export, legacy backend, residency, and materialization decisions. Portable
+  tensor-plan decisions MUST distinguish default admission, any explicit
+  inspection/serialization opt-in, and executable backend admission. A plan
+  builder accepting an opaque node behind `allowCustom` does not prove that an
+  executor can run it. Forward-only results that set `requires_grad=false` are
+  recorded as graph disconnection, not as a loud unsupported-gradient failure.
+- Current failure boundary and target conformance. A constructor accepted by a
+  frontend but rejected by every realizer is `constructor-only`, not supported.
+
+The guard compares the executable label set exactly in both directions and
+keeps `name` and `op` namespaces distinct. It MUST reject same-count site moves,
+relabels to an already registered label, label removal, callback/arity/shape/
+dtype/context changes, a new dynamic-helper caller, and stale generated Python.
+Stateful callbacks also require replay evidence: a realization or backward walk
+may not be assumed single-shot merely because the public API was invoked once.
+Conditional construction and effects require fixtures on both sides: identity
+or primitive fast paths do not inherit the callback record, and module state
+mutation is recorded only for the exact mode and configuration that performs
+it.
+
 Conditional behavior MUST name and test both sides of the condition. For
 example, “reshape is a view” is invalid if aliasing depends on input strides;
 “bf16 is supported” is invalid when the public token resolves to four-byte f32
@@ -1235,6 +1274,9 @@ to claim an earlier gate complete.
   requirement identifiers without deriving one namespace from another.
 - Inventory public dtype/view/materialization behavior, opaque operations, and
   legacy assignment requirement labels with explicit classifications.
+- For JIT opaque operations, close the exact constructor-site/label matrix and
+  record CPU, autograd, transform, export, backend, residency, effect, and
+  replay decisions operation by operation; remove token-scan false positives.
 - Add architecture checks for forbidden new dependencies and frozen adapters.
 
 **Exit:** every frozen adapter has an owner, caller boundary, retirement gate,

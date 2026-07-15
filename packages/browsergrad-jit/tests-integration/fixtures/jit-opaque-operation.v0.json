@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "jit.core-custom-ops.v0",
+  "cases": [
+    {
+      "id": "jit.custom.shared-refusals.v0",
+      "expected": {
+        "label": "abs",
+        "labelField": "name",
+        "cpuValues": [1, 2],
+        "cpuGradient": [-1, 1],
+        "symbolicVjpRegistered": false,
+        "functionalGradError": "JitNotImplementedError",
+        "vmapError": "JitNotImplementedError",
+        "onnxError": "OnnxUnmappableOp",
+        "tensorPlanError": "GpuPlanUnsupported",
+        "tensorPlanAllowCustom": {
+          "hasCustomOps": true,
+          "rootOp": "CUSTOM"
+        },
+        "tensorPlanExecutionError": "GpuPlanUnsupported",
+        "legacyWebgpuError": "JitNotImplementedError"
+      }
+    },
+    {
+      "id": "jit.custom.conditional-and-disconnected.v0",
+      "expected": {
+        "nearestGradient": [4],
+        "bilinearBackwardError": "NotImplementedError",
+        "forwardOnlyLabels": [
+          "einsum",
+          "scatter",
+          "sort_indices",
+          "sort_values",
+          "topk_indices",
+          "topk_values"
+        ],
+        "forwardOnlyRequiresGrad": [false, false, false, false, false, false],
+        "functionalDisconnectedGradient": [0, 0, 0, 0]
+      }
+    },
+    {
+      "id": "jit.custom.stateful-replay.v0",
+      "expected": {
+        "dropoutCallbackMinimum": 2,
+        "dropoutBranches": {
+          "activeOpcode": "CUSTOM",
+          "evalReturnsInput": true,
+          "p0ReturnsInput": true,
+          "p1Opcode": "MUL"
+        },
+        "batchNormRunningMeanChangedDuringBackward": true,
+        "batchNormBranches": {
+          "trackedTrainingInputArity": 1,
+          "affineEvalInputArity": 3,
+          "trackedEvalStatsChanged": false,
+          "untrackedEvalHasRunningStats": false,
+          "untrackedEvalUsesBatchStats": true
+        }
+      }
+    },
+    {
+      "id": "jit.custom.accelerator-and-constructor-only.v0",
+      "expected": {
+        "labels": ["flash_attention", "transformer_block", "user", "webnn_matmul"],
+        "requiresGrad": [false, false, false, false],
+        "cpuErrors": ["RealizationError", "RealizationError", "RealizationError", "RealizationError"],
+        "flashLegacyRoute": "flash-ok",
+        "userLegacyRoute": "user-ok",
+        "webnnLegacyError": "JitNotImplementedError",
+        "transformerLegacyError": "JitNotImplementedError",
+        "functionalDisconnectedGradient": [0, 0, 0, 0, 0, 0, 0, 0]
+      }
+    },
+    {
+      "id": "jit.custom.all-callback-labels-and-dtypes.v0",
+      "expected": {
+        "environment": {"pyodide": "0.26.4", "numpy": "1.26.4"},
+        "observedLabels": [
+          "abs",
+          "batch_norm1d",
+          "binary_cross_entropy",
+          "binary_cross_entropy_with_logits",
+          "cat",
+          "clamp",
+          "cos",
+          "cross_entropy",
+          "cumsum",
+          "dropout",
+          "expand",
+          "flip",
+          "gather",
+          "interpolate",
+          "kl_div",
+          "l1_loss",
+          "masked_fill",
+          "nll_loss",
+          "pad",
+          "prod",
+          "repeat",
+          "repeat_interleave",
+          "sign",
+          "sin",
+          "smooth_l1_loss",
+          "stack",
+          "tril",
+          "triu",
+          "var"
+        ],
+        "allLabelsMatch": true,
+        "closureGradientLabels": [
+          "abs",
+          "batch_norm1d",
+          "binary_cross_entropy",
+          "binary_cross_entropy_with_logits",
+          "cat",
+          "clamp",
+          "cos",
+          "cross_entropy",
+          "cumsum",
+          "dropout",
+          "expand",
+          "flip",
+          "gather",
+          "interpolate",
+          "kl_div",
+          "l1_loss",
+          "masked_fill",
+          "nll_loss",
+          "pad",
+          "prod",
+          "repeat",
+          "repeat_interleave",
+          "sign",
+          "sin",
+          "smooth_l1_loss",
+          "stack",
+          "tril",
+          "triu",
+          "var"
+        ],
+        "allClosureGradientsPresent": true,
+        "realizedDtypeDrift": {
+          "cos-int32": {"declared": "int32", "realized": "float64"},
+          "cumsum-bool": {"declared": "bool", "realized": "int32"},
+          "cumsum-int32": {"declared": "int32", "realized": "int32"},
+          "prod-int32": {"declared": "int32", "realized": "int32"},
+          "sin-int32": {"declared": "int32", "realized": "float64"},
+          "var-int32": {"declared": "int32", "realized": "float64"}
+        },
+        "scalarReductionErrors": {
+          "prod": "RealizationError",
+          "var": "RealizationError"
+        }
+      }
+    }
+  ]
+}

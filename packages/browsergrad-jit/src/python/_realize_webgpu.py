@@ -337,8 +337,9 @@ def _h_custom(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
         )
     raise JitNotImplementedError(
         f"WebGPU realizer: CUSTOM op {op_name!r} is not supported in "
-        f"v0. Supported: 'flash_attention', 'user'. Fall back to "
-        f"bg.realize() for anything else."
+        f"v0. Supported: 'flash_attention', 'user'. Legacy name-labeled "
+        f"NumPy callbacks can use bg.realize(); constructor-only op-labeled "
+        f"nodes remain unsupported."
     )
 
 

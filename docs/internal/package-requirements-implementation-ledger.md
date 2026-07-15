@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-15
-- **Current implementation slice:** Gate 0 remaining behavior and vocabulary freezes
+- **Current implementation slice:** Gate 0 closure; Gate 2 entry audit next
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -30,7 +30,7 @@ test does not make a gate verified unless every exit criterion is covered.
 
 | Gate | Status | Current result | Missing before `verified` | Evidence |
 |---|---|---|---|---|
-| Gate 0 — freeze and inventory | `partial` | Workspace dependency/import direction and six legacy adapters are machine-frozen. Stable diagnostic stages, the implemented layout/index-map semantic capability ID, three backend IDs, and 53 classified legacy assignment requirements are registered separately. Compiler pointer/scalar, runtime requirement, and Grad dtype/view/materialization behavior have executable fixtures. | Replace the count/label-only JIT `OP_CUSTOM` baseline with an exact site and operation-decision inventory. | `pnpm architecture:check`; compiler semantic-architecture and pointer/scalar tests; runtime assignment-requirement tests; blocking Grad Gate 0 Pyodide contract. |
+| Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | The private package implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None for Gate 1. Public-package adoption still requires the separate packed/release-tested `0.x` transition recorded in D-004. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check. |
 | Gate 2 — multi-frontend, multi-backend view slice | `not-started` | No implementation in this workstream. | All Gate 2 exit criteria. | None. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
@@ -43,19 +43,20 @@ test does not make a gate verified unless every exit criterion is covered.
 
 ### Objective
 
-Establish a trustworthy Gate 0 baseline, then land the smallest Gate 1
-foundation that owns shared value/layout semantics without creating empty IR
-shells or another frontend-shaped execution path.
+Gate 0 and Gate 1 are verified. The next slice is a read-only Gate 2 ownership
+audit followed by the smallest real two-frontend/two-backend view family that
+consumes the shared layout artifact without adding a second execution path.
 
 ### Work in flight
 
 | Work item | Status | Notes |
 |---|---|---|
-| Frozen-adapter inventory | `partial` | Baselines recorded and machine-enforced for compiler pointer/scalar memory, `cute_static_layout`, 44-op shape/f32 `TensorGpuPlan`, 36 executable `OP_CUSTOM` constructors, runtime assignment requirement mapping, and 17 Grad dtype/view/materialization behaviors. Exact opaque-operation decisions remain. |
+| Frozen-adapter inventory | `verified` | Baselines are machine-enforced for compiler pointer/scalar memory, `cute_static_layout`, the 44-op shape/f32 `TensorGpuPlan`, 36 JIT constructors/39 real opaque labels and their decisions, runtime requirement mapping, and 17 Grad dtype/view/materialization behaviors. |
 | Semantic-core seam audit | `partial` | Existing compiler/JIT/kernels types must adapt into the core; none can be moved wholesale. Exact initial package split is selected. |
 | Test-topology analysis | `verified` | TypeScript + Vitest; no specialized catalog match, so native focused Vitest route is recorded locally. |
-| Gate 0 architecture check | `partial` | Cross-package boundaries, generated-source parity, six required legacy freezes, exact runtime mapping/status unions, reviewed vocabulary, generated profile-usage parity, pinned behavior fixtures/harnesses, and representative mutation tests are implemented and wired into delivery gates. Exact JIT site/decision inventory remains. |
+| Gate 0 architecture check | `verified` | Cross-package boundaries, generated-source parity, all six required freezes, exact runtime mapping/status unions, reviewed vocabulary, profile-usage parity, pinned inventories/harnesses, normalized definition fingerprints, and representative mutations are implemented and wired into delivery gates. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
+| Gate 2 view-family selection | `not-started` | Audit CUDA-lite, JIT, CPU reference, WGSL, and real-device evidence before selecting the first slice. |
 
 ### Audit findings recorded so far
 
@@ -72,7 +73,8 @@ shells or another frontend-shaped execution path.
   direction, frozen adapters, stable capability IDs, or core `CUSTOM` growth.
 - `cute_static_layout` is rank-one parser sugar; `TensorGpuPlan` is a 44-op
   shape-only/f32 backend compatibility plan; JIT has 36 executable
-  `OP_CUSTOM` construction sites. At initial audit, none had a machine freeze.
+  `OP_CUSTOM` construction sites producing 39 real labels. The original
+  41-label scan falsely included `gt` and `sum` from non-CUSTOM dictionaries.
 - Compiler pointer/scalar behavior is spread across source-shaped symbol,
   alias, memory-reference, expression, and operation records. Its canonical IR
   does not retain every source local or emit `pointer-rebind` for every source
@@ -130,6 +132,7 @@ shells or another frontend-shaped execution path.
 | D-012 | 2026-07-15 | accepted | Keep the dependency-free Python implementation as an independent conformance oracle for the closed layout wire schema, synchronized atomically with TypeScript, fixtures, pinned goldens, and this ledger. | Provides cross-language drift detection without creating a second runtime or implying a stable Python package API. |
 | D-013 | 2026-07-15 | accepted | Separate semantic capabilities/lowering/evidence from assignment requirements/resolutions and universal diagnostics; register legacy assignment strings as routing requirements rather than promoting them to semantic capabilities. | Prevents device facts, simulators, oracles, policies, and external services from receiving fictitious preservation levels or lowering decisions. Runtime may eventually consume only the narrow diagnostic, capability, and requirement protocol subpaths. |
 | D-014 | 2026-07-15 | accepted | Model Grad compatibility as a frozen, versioned observation inventory with inventory-scoped execution context and per-behavior dtype, alias, contiguity, materialization, autograd, condition, failure, evidence, reference-contract, and target-conformance facts. | Prevents verified debt from being mislabeled conformant, prevents f32-only observations from becoming universal view claims, and makes Pyodide/NumPy upgrades explicit baseline reviews. |
+| D-015 | 2026-07-15 | accepted | Model JIT opaque compatibility as 36 exact constructor-call records and 39 operation records using five closed decision policies; preserve `name` versus `op`, conditional reachability/effects, declared versus realized dtype behavior, replay, autograd/transform/export/residency, default versus inspection-only versus executable tensor-plan decisions, and constructor-only status. | Counts and one-way allowlists hid two ghost labels, grouped distinct calls, allowed same-count relabels, treated declared dtype as realized dtype, overstated tensor-plan/WebNN/transformer execution, and missed silent gradient disconnection plus conditional stateful callback replay. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -313,6 +316,33 @@ affected implementation slice is marked complete.
 - Removed the dead shadowed `Tensor.to` definition and corrected the false
   `contiguous()` docstring, then regenerated the embedded Python source.
 
+### 2026-07-15 — Exact JIT opaque-operation freeze and Gate 0 closure
+
+- Replaced the count/allowlist-only JIT baseline with a closed inventory of 36
+  constructor-call records, 39 executable labels, five decision policies, and exact
+  normalized fingerprints for constructors plus shared realization, backward,
+  transform, export, and plan decisions.
+- Removed `gt` and `sum`: both were token-scanner false positives from ordinary
+  CMP/REDUCE argument dictionaries, not `CUSTOM` labels.
+- Distinguished CPU `name` callbacks from backend-dispatched `op` nodes and
+  froze the four reviewed callers of the dynamic elementwise-loss helper.
+- Recorded six silent autograd disconnections, conditional interpolate
+  backward, legacy WebGPU-only flash/user routes, constructor-only WebNN and
+  transformer nodes, dropout RNG replay, BatchNorm state replay, and einsum's
+  construction-time host shape evaluation.
+- Split sort/top-k value and index constructors into four exact call records;
+  separated default tensor-plan refusal, inspection-only `allow_custom`
+  admission, and executable-plan refusal; and separated declared dtype from
+  version-pinned realized NumPy dtype observations.
+- Added a five-case Pyodide contract that directly executes all 39 labels,
+  proves closure gradients for all 29 callback-with-closure labels, covers both
+  sides of Dropout/BatchNorm reachability and effects, and pins shared
+  refusals, disconnected gradients, legacy WebGPU routing, and
+  constructor-only failures. Corrected source comments that falsely promised
+  NoBackwardError, WebNN fallback, or transformer fallback.
+- Gate 0 is `verified`; Gate 1 was already `verified`. Gate 2 is the next
+  implementation gate.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -333,6 +363,8 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Compiler pointer/scalar freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test` | Passed: script syntax, architecture check, compiler typecheck, 28 files and 938 tests. | None. |
 | 2026-07-15 | Vocabulary and runtime requirement freeze | `pnpm architecture:generate-requirements && node --check scripts/semantic-architecture-check.mjs && node --check scripts/generate-assignment-requirement-usage.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test && pnpm --filter @unlocalhosted/browsergrad-runtime test` | Passed: deterministic 51-ID usage generation, script syntax, architecture check, compiler typecheck, 28 files/940 compiler tests, and 11 files/125 runtime tests. | Runtime repo-wide typecheck remains blocked by the recorded pre-existing optional-WGSL errors. |
 | 2026-07-15 | Grad dtype/view/materialization freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test && pnpm --filter @unlocalhosted/browsergrad-grad typecheck && pnpm --filter @unlocalhosted/browsergrad-grad test && pnpm --filter @unlocalhosted/browsergrad-grad exec vitest run --config vitest.integration.config.ts tests-integration/gate0_dtype_view_contract.test.ts && pnpm --filter @unlocalhosted/browsergrad-grad test:integration` | Passed: script syntax, architecture check, compiler typecheck and 28 files/942 tests, Grad typecheck and 2 files/30 unit tests, blocking contract 1 file/1 test, and full Grad integration 33 files/322 tests. | Exact JIT opaque-operation inventory remains for Gate 0. |
+| 2026-07-15 | Exact JIT opaque-operation freeze | `node --check scripts/semantic-architecture-check.mjs && pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-jit typecheck && pnpm --filter @unlocalhosted/browsergrad-jit test && pnpm --filter @unlocalhosted/browsergrad-jit exec vitest run --config vitest.integration.config.ts tests-integration/gate0_opaque_operation_contract.test.ts && pnpm --filter @unlocalhosted/browsergrad-jit test:integration && pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test` | Passed: script syntax, architecture check, JIT typecheck and 8 unit tests, focused 5-case Pyodide contract, full JIT integration 23 files/228 tests, compiler typecheck and 28 files/945 tests. | None. |
+| 2026-07-15 | Gate 0 cross-package closure | `pnpm architecture:check && pnpm --filter @unlocalhosted/browsergrad-runtime test && pnpm --filter @unlocalhosted/browsergrad-grad typecheck && pnpm --filter @unlocalhosted/browsergrad-grad exec vitest run --config vitest.integration.config.ts tests-integration/gate0_dtype_view_contract.test.ts` | Passed: architecture check, 11 files/125 runtime tests, Grad typecheck, and blocking Grad contract 1 file/1 test. | Gate 0 verified. |
 
 ## Failure and Recovery Log
 
@@ -410,6 +442,35 @@ whether any files may be left partially changed.
   numerical behavior was changed in this slice; keep the full suite result
   distinct from the blocking deterministic Gate 0 contract. A subsequent full
   rerun passed all 33 files and 322 tests.
+- The first exact-label mutation test exposed that the scanner treated keyword
+  arguments named `arg={...}` as reusable local dictionaries, reintroducing
+  non-CUSTOM `gt` and `sum` labels. Dictionary-label propagation now accepts
+  actual assignments only; the exact `name`/`op` test and repository baseline
+  both pass.
+- The JIT freeze exit review rejected the first draft on five P1 gaps: 34
+  grouped site records for 36 constructor calls, one collapsed tensor-plan
+  decision, declared dtype presented as realized dtype, incomplete
+  Dropout/BatchNorm branch reachability, and `gate0-contract` evidence claimed
+  by operations the test did not execute. Resolution split the four sort/top-k
+  calls, added three plan decisions, added version-pinned realized dtype
+  observations and conditional-effect fields, and made the fifth fixture case
+  directly execute all 29 closure callbacks. The other ten labels remain
+  directly covered by the disconnected and accelerator/constructor cases.
+- The first focused JIT command omitted `--config
+  vitest.integration.config.ts`; Vitest searched only `tests/**/*.test.ts` and
+  reported no test files. Re-running the same path with the integration config
+  executed the intended contract. No source or fixture change was needed.
+- The first exhaustive callback run used scalar `prod()`. Its NumPy callback
+  returned `np.float32`, while `_h_custom` accepts only `np.ndarray`, so the
+  test failed at the existing realization boundary. The inventory already
+  records ndarray-only validation; the coverage case now uses a dimension
+  reduction returning an array. Scalar callback behavior was not relabeled as
+  supported.
+- The first dtype fixture assumed native 64-bit NumPy integer accumulation.
+  Pyodide 0.26.4 with NumPy 1.26.4/WASM realizes bool/int32 cumsum and int32
+  prod as int32, while int32 sin/cos/var realize float64. The fixture and
+  inventory now pin both dependency versions and record observed declared and
+  realized dtypes instead of importing host-platform assumptions.
 
 ## Quick Resume Checklist
 
@@ -424,7 +485,8 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Finish Gate 0's exact JIT opaque-operation site and decision matrix. Replace
-count/label-only enforcement with source-site, CPU, VJP/backward, transform,
-export, backend, and materialization decisions, then run the full
-architecture/compiler/runtime/JIT/Grad focused gates before beginning Gate 2.
+Commit Gate 0 closure after the unchanged runtime and Grad focused gates, then
+begin Gate 2 with a read-only ownership audit of one view/layout family across
+CUDA-lite, JIT, CPU reference, WGSL, and real-device evidence. Select the
+smallest two-frontend/two-backend slice that consumes the verified Gate 1
+layout artifact without introducing a second execution path.

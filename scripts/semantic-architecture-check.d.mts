@@ -12,6 +12,13 @@ export function countPythonCustomConstructors(source: string): number;
 
 export function extractPythonCustomLabels(source: string): string[];
 
+export function extractPythonCustomLabelFields(source: string): {
+  readonly name: string[];
+  readonly op: string[];
+  readonly dynamicName: string[];
+  readonly dynamicOp: string[];
+};
+
 export function extractPythonDefinitionTokenDigests(
   source: string,
 ): Record<string, readonly string[]>;
@@ -23,6 +30,13 @@ export function checkFrozenGradCompatibilitySources(
 ): string[];
 
 export function validateGradCompatibilityInventory(
+  inventory: unknown,
+  fixture: unknown,
+  freeze: Record<string, unknown>,
+  filename?: string,
+): string[];
+
+export function validateJitOpaqueOperationInventory(
   inventory: unknown,
   fixture: unknown,
   freeze: Record<string, unknown>,

@@ -14,10 +14,13 @@ import {
   checkWorkspaceImportSpecifier,
   countPythonCustomConstructors,
   extractModuleSpecifiers,
+  extractPythonCustomLabelFields,
   extractPythonCustomLabels,
+  extractPythonDefinitionTokenDigests,
   runSemanticArchitectureCheck,
   validateCompilerPointerBehaviorFixture,
   validateGradCompatibilityInventory,
+  validateJitOpaqueOperationInventory,
   validatePlatformVocabularySnapshot,
   validateSemanticFreezeManifest,
 } from "../../../scripts/semantic-architecture-check.mjs";
@@ -337,6 +340,93 @@ describe("semantic architecture guardrails", () => {
       node = UOp(op=OP_CUSTOM, arg={"name": "real_label"})
     `;
     expect(extractPythonCustomLabels(source)).toEqual(["real_label"]);
+  });
+
+  it("separates CUSTOM name/op dispatch fields and excludes non-CUSTOM arg strings", () => {
+    const source = `
+      helper = UOp(op=OP_CMP, arg={"op": "gt"})
+      reduced = UOp(op=OP_REDUCE, arg={"op": "sum"})
+      name_node = UOp(op=OP_CUSTOM, arg={"name": "abs"})
+      arg = {"op": "flash_attention"}
+      op_node = UOp(op=OP_CUSTOM, arg=arg)
+      dynamic_node = UOp(op=OP_CUSTOM, arg={"name": op_name})
+    `;
+    expect(extractPythonCustomLabels(source)).toEqual(["abs", "flash_attention"]);
+    expect(extractPythonCustomLabelFields(source)).toEqual({
+      name: ["abs"],
+      op: ["flash_attention"],
+      dynamicName: ["op_name"],
+      dynamicOp: [],
+    });
+  });
+
+  it("fingerprints same-count CUSTOM relabels and constructor decision changes", () => {
+    const baseline = `
+def op(x):
+    return UOp(op=OP_CUSTOM, inputs=(x,), shape=x.shape, dtype=x.dtype,
+               arg={"fn": callback, "name": "abs"})
+`;
+    const relabeled = baseline.replace('"abs"', '"sin"');
+    const changedDtype = baseline.replace("dtype=x.dtype", 'dtype="float32"');
+    expect(extractPythonDefinitionTokenDigests(relabeled).op)
+      .not.toEqual(extractPythonDefinitionTokenDigests(baseline).op);
+    expect(extractPythonDefinitionTokenDigests(changedDtype).op)
+      .not.toEqual(extractPythonDefinitionTokenDigests(baseline).op);
+  });
+
+  it("rejects JIT opaque-operation inventory widening, missing coverage, and field drift", () => {
+    const inventory = JSON.parse(readFileSync(join(repoRoot, "architecture/jit-opaque-operation-inventory.json"), "utf8")) as {
+      operations: Array<Record<string, unknown>>;
+      constructorSites: Array<Record<string, unknown>>;
+    };
+    const fixture = JSON.parse(readFileSync(join(repoRoot, "packages/browsergrad-jit/tests-integration/fixtures/jit-opaque-operation.v0.json"), "utf8"));
+    const jitFreeze = freeze("jit-op-custom");
+
+    const widened = structuredClone(inventory);
+    widened.operations[0]!.backendHint = "webgpu";
+    expect(validateJitOpaqueOperationInventory(widened, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("operations[0] keys changed"));
+
+    const missing = structuredClone(inventory);
+    missing.operations.pop();
+    expect(validateJitOpaqueOperationInventory(missing, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("opaque-operation IDs changed"));
+
+    const changedField = structuredClone(inventory);
+    changedField.operations[0]!.labelField = "op";
+    expect(validateJitOpaqueOperationInventory(changedField, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("labelField disagrees"));
+
+    const extraDynamicCaller = structuredClone(inventory);
+    const helper = extraDynamicCaller.constructorSites.find((site) => site.id === "functional.elementwise-loss-helper");
+    if (helper === undefined || !Array.isArray(helper.operationIds)) throw new Error("missing elementwise helper fixture");
+    helper.operationIds.push("jit.custom.unreviewed-loss.v0");
+    expect(validateJitOpaqueOperationInventory(extraDynamicCaller, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("constructor-site operation coverage changed"));
+
+    const groupedCalls = structuredClone(inventory);
+    groupedCalls.constructorSites[0]!.constructorCount = 2;
+    groupedCalls.constructorSites.pop();
+    const groupedFailures = validateJitOpaqueOperationInventory(groupedCalls, fixture, jitFreeze);
+    expect(groupedFailures).toContainEqual(expect.stringContaining("36 exact CUSTOM constructor calls"));
+    expect(groupedFailures).toContainEqual(expect.stringContaining("constructorCount must be exactly 1"));
+
+    const collapsedPlanDecision = structuredClone(inventory) as typeof inventory & {
+      executionContext: Record<string, unknown>;
+    };
+    delete collapsedPlanDecision.executionContext.tensorGpuPlanExecution;
+    expect(validateJitOpaqueOperationInventory(collapsedPlanDecision, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("executionContext keys changed"));
+
+    const missingRealizedDtype = structuredClone(inventory);
+    delete missingRealizedDtype.operations[0]!.realizedDtypeRule;
+    expect(validateJitOpaqueOperationInventory(missingRealizedDtype, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("operations[0] keys changed"));
+
+    const missingReachability = structuredClone(inventory);
+    missingReachability.operations[0]!.constructorReachability = "";
+    expect(validateJitOpaqueOperationInventory(missingReachability, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("constructorReachability must be a non-empty string"));
   });
 
   it("discovers dynamic, require, and import-equals dependencies", () => {

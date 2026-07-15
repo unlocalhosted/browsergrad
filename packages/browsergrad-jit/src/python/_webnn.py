@@ -9,8 +9,8 @@ day and unblocks PRD-019's future "NPU dispatch" story.
 
 This module:
   * Detects `navigator.ml` via Pyodide's `js` import.
-  * Constructs OP_CUSTOM("webnn_matmul") UOps that the WebGPU realizer
-    bridge can dispatch via WebNN if available, or refuse otherwise.
+  * Constructs OP_CUSTOM("webnn_matmul") UOps as a constructor-only spike.
+    No current CPU, WebGPU, or WebNN realizer handles this label.
   * Lives behind `bg.experimental` to signal instability.
 
 What this is NOT:
@@ -45,14 +45,12 @@ def is_available() -> bool:
 
 
 def matmul(a: Any, b: Any) -> Any:
-    """Build a CUSTOM(webnn_matmul) UOp. Realize via bg.realize_webgpu;
-    the bridge dispatches through WebNN if the registered bridge has
-    a webnn_matmul method, otherwise falls back to standard matmul.
+    """Build a constructor-only CUSTOM(webnn_matmul) UOp.
 
-    Shapes: 2-D only in v0. f32 only.
-
-    This is the spike entry point — when the bridge's webnn_matmul
-    method materialises, we get NPU dispatch on supported devices.
+    Shapes are restricted to 2-D, but dtype equality and an f32-only
+    contract are not yet validated. Both current realization paths reject
+    this node. A future WebNN backend must add explicit validation, lowering,
+    fallback, and capability evidence before this can claim execution support.
     """
     from ._tensor_proxy import TensorProxy
     if not isinstance(a, TensorProxy) or not isinstance(b, TensorProxy):

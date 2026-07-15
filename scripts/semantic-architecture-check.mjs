@@ -118,6 +118,16 @@ export function extractPythonCustomLabels(source) {
   return [...pythonCallFacts(source).labels].sort();
 }
 
+export function extractPythonCustomLabelFields(source) {
+  const facts = pythonCallFacts(source);
+  return {
+    name: [...facts.labelFields.name].sort(),
+    op: [...facts.labelFields.op].sort(),
+    dynamicName: [...facts.dynamicLabelFields.name].sort(),
+    dynamicOp: [...facts.dynamicLabelFields.op].sort(),
+  };
+}
+
 export function validateSemanticFreezeManifest(root, manifest) {
   const failures = [];
   validateManifest(path.resolve(root), manifest, failures);
@@ -426,6 +436,183 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
     for (const [index, testCase] of fixtureCases.entries()) {
       exactKeys(`Grad compatibility fixture cases[${index}]`, testCase, ["id", "expected"]);
       if (!isRecord(testCase) || !isRecord(testCase.expected) || Object.keys(testCase.expected).length === 0) failures.push(`Grad compatibility fixture cases[${index}].expected must be a non-empty object`);
+    }
+  }
+  return failures;
+}
+
+export function validateJitOpaqueOperationInventory(inventory, fixture, freeze, filename = "jit-opaque-operation-inventory.json") {
+  const failures = [];
+  const exactKeys = (label, value, expected) => {
+    if (!isRecord(value)) {
+      failures.push(`${label} must be an object`);
+      return;
+    }
+    compareStringSets(`${label} keys`, Object.keys(value), expected, failures);
+  };
+  const nonEmptyString = (label, value) => {
+    if (typeof value !== "string" || value.trim() === "") failures.push(`${label} must be a non-empty string`);
+  };
+
+  exactKeys(filename, inventory, ["schemaVersion", "inventoryId", "owner", "irOpcode", "observationStatus", "executionContext", "policies", "constructorSites", "decisionSourceDefinitions", "operations", "evidenceDefinitions"]);
+  if (!isRecord(inventory) || inventory.schemaVersion !== 1 || inventory.inventoryId !== "browsergrad.jit.opaque-operations.v0" || inventory.owner !== "@unlocalhosted/browsergrad-jit" || inventory.irOpcode !== "CUSTOM" || inventory.observationStatus !== "verified-current-behavior") {
+    failures.push(`${filename} must identify the schemaVersion 1 BrowserGrad JIT CUSTOM inventory`);
+    return failures;
+  }
+
+  exactKeys(`${filename}.executionContext`, inventory.executionContext, ["pythonRuntime", "pyodideVersion", "cpuReference", "numpyVersion", "legacyWebgpu", "tensorGpuPlanDefault", "tensorGpuPlanAllowCustom", "tensorGpuPlanExecution"]);
+  const expectedExecutionContext = {
+    pythonRuntime: "pyodide",
+    pyodideVersion: "0.26.4",
+    cpuReference: "numpy-wasm",
+    numpyVersion: "1.26.4",
+    legacyWebgpu: "registered-bridge-with-root-materialization",
+    tensorGpuPlanDefault: "refuses-custom",
+    tensorGpuPlanAllowCustom: "admits-custom-plan-structure-only",
+    tensorGpuPlanExecution: "refuses-custom",
+  };
+  if (JSON.stringify(inventory.executionContext) !== JSON.stringify(expectedExecutionContext)) failures.push(`${filename}.executionContext changed`);
+
+  const policyKeys = ["id", "category", "cpuRealization", "closureAutograd", "symbolicVjp", "functionalGrad", "vmap", "onnxExport", "tensorGpuPlanDefault", "tensorGpuPlanAllowCustom", "tensorGpuPlanExecution", "legacyWebgpu", "residency", "realizedResultValidation", "failurePolicy", "targetConformance"];
+  const policyEnums = {
+    category: new Set(["constructor-only", "explicit-accelerator-kernel", "legacy-numpy-callback"]),
+    cpuRealization: new Set(["numpy-callback", "refused-missing-fn"]),
+    closureAutograd: new Set(["disconnected-requires-grad-false", "implemented", "nearest-implemented-bilinear-refused"]),
+    symbolicVjp: new Set(["refused-no-custom-rule"]),
+    functionalGrad: new Set(["refused-missing-symbolic-vjp", "returns-zero-for-disconnected-input"]),
+    vmap: new Set(["refused-custom"]),
+    onnxExport: new Set(["refused-custom"]),
+    tensorGpuPlanDefault: new Set(["refused-custom"]),
+    tensorGpuPlanAllowCustom: new Set(["admitted-plan-structure-only"]),
+    tensorGpuPlanExecution: new Set(["refused-custom"]),
+    legacyWebgpu: new Set(["refused-name-field", "refused-unsupported-op-field", "supported-op-dispatch"]),
+    residency: new Set(["host-materialized", "legacy-webgpu-root-materialized-to-host", "not-realizable"]),
+    realizedResultValidation: new Set(["materialized-by-declared-shape-and-dtype", "ndarray-only-shape-and-dtype-unchecked", "not-realizable"]),
+    failurePolicy: new Set(["all-realizers-refuse", "bilinear-backward-raises-not-implemented", "cpu-callback-only", "cpu-path-refuses", "silent-autograd-disconnection"]),
+    targetConformance: new Set(["compatibility-debt", "operation-specific"]),
+  };
+  const policyIds = [];
+  const policyById = new Map();
+  if (!Array.isArray(inventory.policies) || inventory.policies.length === 0) failures.push(`${filename}.policies must be a non-empty array`);
+  for (const [index, policy] of (Array.isArray(inventory.policies) ? inventory.policies : []).entries()) {
+    const label = `${filename}.policies[${index}]`;
+    exactKeys(label, policy, policyKeys);
+    if (!isRecord(policy)) continue;
+    nonEmptyString(`${label}.id`, policy.id);
+    for (const [field, values] of Object.entries(policyEnums)) {
+      if (!values.has(policy[field])) failures.push(`${label}.${field} is not registered`);
+    }
+    if (typeof policy.id === "string") {
+      policyIds.push(policy.id);
+      policyById.set(policy.id, policy);
+    }
+  }
+  if (new Set(policyIds).size !== policyIds.length) failures.push(`${filename} policy IDs must be unique`);
+  compareStringSets("JIT opaque-operation policy IDs", policyIds, freeze.policyIds, failures);
+
+  const siteKeys = ["id", "file", "definition", "constructorCount", "labelBinding", "operationIds"];
+  const siteIds = [];
+  const siteById = new Map();
+  const siteOperationIds = [];
+  const sourceDefinitions = [];
+  const labelBindings = new Set(["dynamic-reviewed-name", "static-name", "static-op-in-arg-record"]);
+  if (!Array.isArray(inventory.constructorSites) || inventory.constructorSites.length !== 36) failures.push(`${filename}.constructorSites must contain the 36 exact CUSTOM constructor calls`);
+  for (const [index, site] of (Array.isArray(inventory.constructorSites) ? inventory.constructorSites : []).entries()) {
+    const label = `${filename}.constructorSites[${index}]`;
+    exactKeys(label, site, siteKeys);
+    if (!isRecord(site)) continue;
+    for (const field of ["id", "file", "definition"]) nonEmptyString(`${label}.${field}`, site[field]);
+    if (site.constructorCount !== 1) failures.push(`${label}.constructorCount must be exactly 1; each record names one constructor call`);
+    if (!labelBindings.has(site.labelBinding)) failures.push(`${label}.labelBinding is not registered`);
+    if (!Array.isArray(site.operationIds) || site.operationIds.length === 0 || site.operationIds.some((entry) => typeof entry !== "string")) failures.push(`${label}.operationIds must contain strings`);
+    if (typeof site.id === "string") {
+      siteIds.push(site.id);
+      siteById.set(site.id, site);
+    }
+    if (typeof site.file === "string" && typeof site.definition === "string") sourceDefinitions.push(`${site.file}:${site.definition}`);
+    if (Array.isArray(site.operationIds)) siteOperationIds.push(...site.operationIds.filter((entry) => typeof entry === "string"));
+  }
+  if (new Set(siteIds).size !== siteIds.length) failures.push(`${filename} constructor site IDs must be unique`);
+  compareStringSets("JIT opaque-operation constructor site IDs", siteIds, freeze.constructorSiteIds, failures);
+  const frozenDefinitions = Object.entries(freeze.definitionTokenDigests ?? {}).flatMap(([file, definitions]) => Object.keys(definitions ?? {}).map((definition) => `${file}:${definition}`));
+  for (const reference of sourceDefinitions) {
+    if (!new Set(frozenDefinitions).has(reference)) failures.push(`${filename} references unfrozen constructor definition ${reference}`);
+  }
+  if (!Array.isArray(inventory.decisionSourceDefinitions) || inventory.decisionSourceDefinitions.length === 0 || inventory.decisionSourceDefinitions.some((entry) => typeof entry !== "string")) {
+    failures.push(`${filename}.decisionSourceDefinitions must contain strings`);
+  } else {
+    if (new Set(inventory.decisionSourceDefinitions).size !== inventory.decisionSourceDefinitions.length) failures.push(`${filename}.decisionSourceDefinitions must be unique`);
+    compareStringSets("JIT opaque-operation decision source definitions", inventory.decisionSourceDefinitions, freeze.decisionSourceDefinitions, failures);
+    for (const reference of inventory.decisionSourceDefinitions) {
+      if (!new Set(frozenDefinitions).has(reference)) failures.push(`${filename} references unfrozen decision definition ${reference}`);
+    }
+  }
+
+  const operationKeys = ["id", "label", "labelField", "constructorSite", "policy", "constructorReachability", "effectCondition", "effectClass", "replayContract", "inputArity", "shapeRule", "declaredDtypeRule", "realizedDtypeRule", "webgpuRoute", "currentFailure", "targetConformance", "evidence"];
+  const operationIds = [];
+  const operationLabels = [];
+  const policyReferences = [];
+  const evidenceReferences = [];
+  const effectClasses = new Set(["accelerator-kernel", "captured-state", "constructor-only", "host-shape-probe", "module-stateful", "pure", "rng-and-captured-state", "user-authored-kernel"]);
+  const realizedDtypeRules = new Set(["bridge-materialized-as-declared", "callback-result-unvalidated", "not-realizable"]);
+  const targetConformance = new Set(["compatibility-debt", "intentional-extension"]);
+  if (!Array.isArray(inventory.operations) || inventory.operations.length === 0) failures.push(`${filename}.operations must be a non-empty array`);
+  for (const [index, operation] of (Array.isArray(inventory.operations) ? inventory.operations : []).entries()) {
+    const label = `${filename}.operations[${index}]`;
+    exactKeys(label, operation, operationKeys);
+    if (!isRecord(operation)) continue;
+    for (const field of ["id", "label", "constructorSite", "policy", "constructorReachability", "effectCondition", "replayContract", "inputArity", "shapeRule", "declaredDtypeRule", "realizedDtypeRule", "webgpuRoute", "currentFailure"]) nonEmptyString(`${label}.${field}`, operation[field]);
+    if (!new Set(["name", "op"]).has(operation.labelField)) failures.push(`${label}.labelField must be name or op`);
+    if (!effectClasses.has(operation.effectClass)) failures.push(`${label}.effectClass is not registered`);
+    if (!realizedDtypeRules.has(operation.realizedDtypeRule)) failures.push(`${label}.realizedDtypeRule is not registered`);
+    if (!targetConformance.has(operation.targetConformance)) failures.push(`${label}.targetConformance is not registered`);
+    if (!Array.isArray(operation.evidence) || operation.evidence.length === 0 || operation.evidence.some((entry) => typeof entry !== "string")) failures.push(`${label}.evidence must contain strings`);
+    const site = siteById.get(operation.constructorSite);
+    if (site === undefined) failures.push(`${label}.constructorSite is not registered`);
+    else {
+      if (!site.operationIds.includes(operation.id)) failures.push(`${label} is absent from its constructor site's operationIds`);
+      const expectedField = site.labelBinding.includes("name") ? "name" : "op";
+      if (operation.labelField !== expectedField) failures.push(`${label}.labelField disagrees with ${site.id}.labelBinding`);
+    }
+    if (!new Set(policyIds).has(operation.policy)) failures.push(`${label}.policy is not registered`);
+    else {
+      const policy = policyById.get(operation.policy);
+      if (policy?.targetConformance !== "operation-specific" && policy?.targetConformance !== operation.targetConformance) failures.push(`${label}.targetConformance disagrees with policy ${operation.policy}`);
+    }
+    if (typeof operation.id === "string") operationIds.push(operation.id);
+    if (typeof operation.label === "string") operationLabels.push(operation.label);
+    if (typeof operation.policy === "string") policyReferences.push(operation.policy);
+    if (Array.isArray(operation.evidence)) evidenceReferences.push(...operation.evidence.filter((entry) => typeof entry === "string"));
+  }
+  if (new Set(operationIds).size !== operationIds.length) failures.push(`${filename} operation IDs must be unique`);
+  if (new Set(operationLabels).size !== operationLabels.length) failures.push(`${filename} operation labels must be unique`);
+  compareStringSets("JIT opaque-operation IDs", operationIds, freeze.operationIds, failures);
+  compareStringSets("JIT opaque-operation labels", operationLabels, freeze.labels, failures);
+  compareStringSets("JIT constructor-site operation coverage", siteOperationIds, operationIds, failures);
+  compareStringSets("JIT opaque-operation policy coverage", [...new Set(policyReferences)], policyIds, failures);
+
+  const evidenceKeys = ["id", "kind", "path"];
+  const evidenceIds = [];
+  if (!Array.isArray(inventory.evidenceDefinitions) || inventory.evidenceDefinitions.length === 0) failures.push(`${filename}.evidenceDefinitions must be a non-empty array`);
+  for (const [index, evidence] of (Array.isArray(inventory.evidenceDefinitions) ? inventory.evidenceDefinitions : []).entries()) {
+    const label = `${filename}.evidenceDefinitions[${index}]`;
+    exactKeys(label, evidence, evidenceKeys);
+    if (!isRecord(evidence)) continue;
+    for (const field of evidenceKeys) nonEmptyString(`${label}.${field}`, evidence[field]);
+    if (typeof evidence.id === "string") evidenceIds.push(evidence.id);
+  }
+  if (new Set(evidenceIds).size !== evidenceIds.length) failures.push(`${filename} evidence IDs must be unique`);
+  for (const reference of new Set(evidenceReferences)) {
+    if (!new Set(evidenceIds).has(reference)) failures.push(`${filename} references unknown evidence ${reference}`);
+  }
+  compareStringSets("JIT opaque-operation evidence coverage", [...new Set(evidenceReferences)], evidenceIds, failures);
+
+  validateNamedFixture(fixture, "jit.core-custom-ops.v0", freeze.behaviorFixtureIds, stringValue(freeze.behaviorFixtureFile), "JIT opaque-operation", failures);
+  if (isRecord(fixture)) {
+    exactKeys("JIT opaque-operation fixture", fixture, ["schemaVersion", "adapterId", "cases"]);
+    for (const [index, testCase] of (Array.isArray(fixture.cases) ? fixture.cases : []).entries()) {
+      exactKeys(`JIT opaque-operation fixture cases[${index}]`, testCase, ["id", "expected"]);
+      if (!isRecord(testCase) || !isRecord(testCase.expected) || Object.keys(testCase.expected).length === 0) failures.push(`JIT opaque-operation fixture cases[${index}].expected must be a non-empty object`);
     }
   }
   return failures;
@@ -778,16 +965,26 @@ export function checkFrozenTensorGpuPlanSource(ts, source, freeze, filename = "t
 }
 
 function checkJitCustomOps(root, ts, freeze, failures) {
+  const inventoryFile = resolveManifestFile(root, freeze.inventoryFile, "inventoryFile", failures);
+  const behaviorFixtureFile = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
+  const behaviorTestFile = resolveManifestFile(root, freeze.behaviorTestFile, "behaviorTestFile", failures);
+  if ([inventoryFile, behaviorFixtureFile, behaviorTestFile].some((value) => value === undefined)) return;
+
   const expectedCounts = freeze.constructorCounts ?? {};
   const actualCounts = {};
   const labels = new Set();
   const aliases = new Set();
+  const labelFieldsByFile = {};
   const pythonRoot = path.join(root, "packages/browsergrad-jit/src/python");
 
   for (const file of walk(pythonRoot, (candidate) => candidate.endsWith(".py"))) {
     const source = fs.readFileSync(file, "utf8");
     const facts = pythonCallFacts(source);
-    if (facts.customConstructors > 0) actualCounts[relative(root, file)] = facts.customConstructors;
+    if (facts.customConstructors > 0) {
+      const rel = relative(root, file);
+      actualCounts[rel] = facts.customConstructors;
+      labelFieldsByFile[rel] = customLabelFieldsRecord(facts);
+    }
     for (const label of facts.labels) labels.add(label);
     for (const alias of facts.aliases) aliases.add(`${relative(root, file)}:${alias}`);
   }
@@ -795,7 +992,11 @@ function checkJitCustomOps(root, ts, freeze, failures) {
   const indexFile = path.join(pythonRoot, "index.ts");
   const indexSource = fs.readFileSync(indexFile, "utf8");
   const indexFacts = pythonCallFacts(indexSource);
-  if (indexFacts.customConstructors > 0) actualCounts[relative(root, indexFile)] = indexFacts.customConstructors;
+  if (indexFacts.customConstructors > 0) {
+    const rel = relative(root, indexFile);
+    actualCounts[rel] = indexFacts.customConstructors;
+    labelFieldsByFile[rel] = customLabelFieldsRecord(indexFacts);
+  }
   for (const label of indexFacts.labels) labels.add(label);
   for (const alias of indexFacts.aliases) aliases.add(`${relative(root, indexFile)}:${alias}`);
 
@@ -803,21 +1004,61 @@ function checkJitCustomOps(root, ts, freeze, failures) {
     failures.push(`JIT OP_CUSTOM constructor sites changed; expected ${JSON.stringify(sortRecord(expectedCounts))}, got ${JSON.stringify(sortRecord(actualCounts))}`);
   }
 
-  for (const [file, tokenCounts] of Object.entries(freeze.maxTokenCounts ?? {})) {
+  for (const [file, tokenCounts] of Object.entries(freeze.exactTokenCounts ?? {})) {
     const source = fs.readFileSync(path.join(root, file), "utf8");
     const tokens = pythonTokens(source);
-    for (const [token, maximum] of Object.entries(tokenCounts)) {
+    for (const [token, expected] of Object.entries(tokenCounts)) {
       const count = tokens.filter((entry) => entry.kind === "identifier" && entry.value === token).length;
-      if (count > maximum) failures.push(`${file} uses ${token} ${count} times; frozen maximum is ${maximum}`);
+      if (count !== expected) failures.push(`${file} uses ${token} ${count} times; frozen exact count is ${expected}`);
     }
   }
 
   for (const alias of [...aliases].sort()) failures.push(`JIT OP_CUSTOM alias is forbidden: ${alias}`);
 
-  const allowedLabels = new Set(freeze.labels ?? []);
-  for (const label of [...labels].sort()) {
-    if (!allowedLabels.has(label)) failures.push(`JIT OP_CUSTOM path introduces unregistered label ${label}`);
+  compareStringSets("JIT OP_CUSTOM executable labels", labels, freeze.labels, failures);
+  if (JSON.stringify(sortRecord(labelFieldsByFile)) !== JSON.stringify(sortRecord(freeze.labelFieldsByFile ?? {}))) {
+    failures.push(`JIT OP_CUSTOM label fields changed; expected ${JSON.stringify(sortRecord(freeze.labelFieldsByFile ?? {}))}, got ${JSON.stringify(sortRecord(labelFieldsByFile))}`);
   }
+
+  for (const [file, expectedDefinitions] of Object.entries(freeze.definitionTokenDigests ?? {})) {
+    const source = fs.readFileSync(path.join(root, file), "utf8");
+    const actualDefinitions = extractPythonDefinitionTokenDigests(source);
+    const selected = {};
+    for (const definition of Object.keys(expectedDefinitions ?? {})) {
+      if (actualDefinitions[definition] !== undefined) selected[definition] = actualDefinitions[definition];
+    }
+    if (JSON.stringify(sortRecord(selected)) !== JSON.stringify(sortRecord(expectedDefinitions ?? {}))) {
+      failures.push(`${file} JIT opaque-operation definitions changed`);
+    }
+  }
+
+  const inventory = readJson(inventoryFile, failures);
+  const fixture = readJson(behaviorFixtureFile, failures);
+  failures.push(...validateJitOpaqueOperationInventory(inventory, fixture, freeze, relative(root, inventoryFile)));
+
+  if (isRecord(inventory) && Array.isArray(inventory.evidenceDefinitions)) {
+    for (const evidence of inventory.evidenceDefinitions) {
+      if (!isRecord(evidence) || typeof evidence.path !== "string") continue;
+      resolveManifestFile(root, evidence.path, `JIT evidence ${stringValue(evidence.id)}`, failures);
+    }
+  }
+  for (const [file, expected] of [
+    [inventoryFile, freeze.inventorySha256],
+    [behaviorFixtureFile, freeze.behaviorFixtureSha256],
+    [behaviorTestFile, freeze.behaviorTestSha256],
+  ]) {
+    const actual = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    if (actual !== expected) failures.push(`${relative(root, file)} content changed; expected SHA-256 ${stringValue(expected)}, got ${actual}`);
+  }
+}
+
+function customLabelFieldsRecord(facts) {
+  return {
+    name: [...facts.labelFields.name].sort(),
+    op: [...facts.labelFields.op].sort(),
+    dynamicName: [...facts.dynamicLabelFields.name].sort(),
+    dynamicOp: [...facts.dynamicLabelFields.op].sort(),
+  };
 }
 
 function checkGradViewBf16(root, freeze, failures) {
@@ -1157,17 +1398,26 @@ function pythonCallFacts(source) {
   let customConstructors = 0;
   const labels = new Set();
   const aliases = new Set();
-  const dictLabels = new Map();
+  const labelFields = { name: new Set(), op: new Set() };
+  const dynamicLabelFields = { name: new Set(), op: new Set() };
+  const dictLabelFacts = new Map();
 
   for (let index = 0; index < tokens.length - 2; index += 1) {
     if (tokens[index].kind !== "identifier" || tokens[index + 1]?.value !== "=") continue;
     const rightIndex = skipParentheses(tokens, index + 2);
     if (tokens[rightIndex]?.value === "OP_CUSTOM" && tokens[index].value !== "op") aliases.add(tokens[index].value);
-    if (tokens[index + 2]?.value === "{") {
+    const previous = tokens[index - 1]?.value;
+    if (tokens[index + 2]?.value === "{" && previous !== "(" && previous !== ",") {
       const close = matchingDelimiter(tokens, index + 2, "{", "}");
       if (close === undefined) continue;
-      const values = labelsInTokens(tokens.slice(index + 3, close));
-      if (values.size > 0) dictLabels.set(tokens[index].value, values);
+      const facts = labelBindingsInTokens(tokens.slice(index + 3, close));
+      if (facts.name.size > 0 || facts.op.size > 0 || facts.dynamicName.size > 0 || facts.dynamicOp.size > 0) {
+        const combined = dictLabelFacts.get(tokens[index].value) ?? emptyLabelBindings();
+        for (const field of ["name", "op", "dynamicName", "dynamicOp"]) {
+          for (const value of facts[field]) combined[field].add(value);
+        }
+        dictLabelFacts.set(tokens[index].value, combined);
+      }
     }
   }
 
@@ -1182,12 +1432,13 @@ function pythonCallFacts(source) {
       const isCustom = opValue === "OP_CUSTOM" || (opValue !== undefined && aliases.has(opValue));
       if (isCustom) {
         customConstructors += 1;
-        for (const label of labelsInTokens(body)) labels.add(label);
+        mergeLabelBindings(labelBindingsInTokens(body), labels, labelFields, dynamicLabelFields);
         for (let bodyIndex = 0; bodyIndex < body.length - 2; bodyIndex += 1) {
           if (body[bodyIndex].value !== "arg" || body[bodyIndex + 1]?.value !== "=") continue;
           const variable = body[bodyIndex + 2];
           if (variable?.kind !== "identifier") continue;
-          for (const label of dictLabels.get(variable.value) ?? []) labels.add(label);
+          const facts = dictLabelFacts.get(variable.value);
+          if (facts !== undefined) mergeLabelBindings(facts, labels, labelFields, dynamicLabelFields);
         }
       }
       index = close;
@@ -1200,12 +1451,15 @@ function pythonCallFacts(source) {
       for (const entry of tokens.slice(index + 2, close)) {
         if (entry.value === "(" || entry.value === "[" || entry.value === "{") depth += 1;
         if (entry.value === ")" || entry.value === "]" || entry.value === "}") depth -= 1;
-        if (depth === 0 && entry.kind === "string") labels.add(entry.value);
+        if (depth === 0 && entry.kind === "string") {
+          labels.add(entry.value);
+          labelFields.name.add(entry.value);
+        }
       }
       index = close;
     }
   }
-  return { customConstructors, labels, aliases };
+  return { customConstructors, labels, aliases, labelFields, dynamicLabelFields };
 }
 
 function uopOperationValue(body) {
@@ -1223,15 +1477,38 @@ function uopOperationValue(body) {
   return firstTopLevel;
 }
 
-function labelsInTokens(tokens) {
-  const labels = new Set();
+function labelBindingsInTokens(tokens) {
+  const facts = emptyLabelBindings();
   for (let index = 0; index < tokens.length - 2; index += 1) {
     const key = tokens[index];
-    if (key.kind === "string" && (key.value === "name" || key.value === "op") && tokens[index + 1]?.value === ":" && tokens[index + 2]?.kind === "string") {
-      labels.add(tokens[index + 2].value);
+    if (key.kind !== "string" || (key.value !== "name" && key.value !== "op") || tokens[index + 1]?.value !== ":") continue;
+    const value = tokens[index + 2];
+    const staticKey = key.value;
+    const dynamicKey = key.value === "name" ? "dynamicName" : "dynamicOp";
+    if (value?.kind === "string") facts[staticKey].add(value.value);
+    else if (value?.kind === "identifier") facts[dynamicKey].add(value.value);
+  }
+  return facts;
+}
+
+function emptyLabelBindings() {
+  return {
+    name: new Set(),
+    op: new Set(),
+    dynamicName: new Set(),
+    dynamicOp: new Set(),
+  };
+}
+
+function mergeLabelBindings(facts, labels, labelFields, dynamicLabelFields) {
+  for (const field of ["name", "op"]) {
+    for (const value of facts[field]) {
+      labels.add(value);
+      labelFields[field].add(value);
     }
   }
-  return labels;
+  for (const value of facts.dynamicName) dynamicLabelFields.name.add(value);
+  for (const value of facts.dynamicOp) dynamicLabelFields.op.add(value);
 }
 
 function skipParentheses(tokens, start) {

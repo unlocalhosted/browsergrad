@@ -3,9 +3,8 @@
 INTERNAL. Public surface: `@bg.custom_kernel(wgsl=..., name=..., ...)`.
 
 Design (per the DL/GPU review's cut):
-  * Forward-only. No backward registration in v0. Calling .backward()
-    on a tensor downstream of a user kernel raises NoBackwardError
-    (OP_CUSTOM has no registered VJP rule — same as flash_attention).
+  * Forward-only. The output has requires_grad=False and no context, so it
+    disconnects autograd. It does not currently raise NoBackwardError.
   * The decorator produces a callable that builds an OP_CUSTOM UOp
     tagged "user" with the kernel hash. The WebGPU realizer dispatches
     via bridge.run_user_kernel().
@@ -99,7 +98,8 @@ def custom_kernel(
     -------
     A callable `kernel(*inputs) -> TensorProxy`. The callable constructs
     an OP_CUSTOM UOp tagged "user" with the kernel hash; realize via
-    bg.realize_webgpu (NumPy realizer refuses).
+    bg.realize_webgpu (NumPy realizer refuses). Its result disconnects
+    autograd in v0.
     """
     if not isinstance(wgsl, str) or not wgsl.strip():
         raise ValueError("custom_kernel: wgsl must be a non-empty string")
