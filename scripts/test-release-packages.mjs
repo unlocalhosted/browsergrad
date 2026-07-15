@@ -231,6 +231,35 @@ try {
     compilerRoot.createCudaLiteLayoutBindingCompileCacheKey("source", packedCompilerBinding).includes(packedCompilerBinding.bindingProjectionHash),
     "packed compiler cache key lost binding projection identity",
   );
+  const packedCompilerSource = `
+__global__ void packed_layout_copy(const float* input, float* output) {
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < 4u) output[i] = input[i];
+}`;
+  const packedCompiledView = compilerRoot.compileCudaLiteKernelWithLayoutBindings(
+    packedCompilerSource,
+    packedCompilerBinding,
+    { workgroupSize: [4, 1, 1] },
+  );
+  const packedCompilerResult = compilerRoot.runCompiledKernelSemanticReference(
+    packedCompiledView,
+    { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
+    { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+  );
+  assert(
+    [1, 3, 2, 4].every((value, index) => packedCompilerResult.buffers.output[index] === value),
+    "packed compiler layout lowering produced the wrong transpose",
+  );
+  assert(
+    packedCompiledView.preparedLayoutBindings === packedCompilerBinding &&
+      packedCompiledView.layoutBindingCompileCacheKey.includes(packedCompilerBinding.bindingProjectionHash),
+    "packed compiler result lost prepared layout proof identity",
+  );
+  assert(
+    packedCompiledView.wgslProgram.name.includes(packedCompilerBinding.layoutSemanticHash) &&
+      packedCompiledView.wgslProgram.name.includes(packedCompilerBinding.bindingProjectionHash),
+    "packed compiler WGSL program identity lost layout proof hashes",
+  );
 
   console.log("release package tests ok");
 } finally {
@@ -288,7 +317,12 @@ import { layoutArtifactPayload, verifyLayoutArtifact } from "@unlocalhosted/brow
 import { kernelArtifactPayload, prepareViewCopyCpu, verifyKernelArtifact } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { hashSemanticArtifact } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
-import { createCudaLiteLayoutBindingCompileCacheKey, prepareCudaLiteLayoutBindings } from "@unlocalhosted/browsergrad-compiler";
+import {
+  compileCudaLiteKernelWithLayoutBindings,
+  createCudaLiteLayoutBindingCompileCacheKey,
+  prepareCudaLiteLayoutBindings,
+  runCompiledKernelSemanticReference,
+} from "@unlocalhosted/browsergrad-compiler";
 
 const layout = await verifyLayoutArtifact({
   schema: "browsergrad.layout",
@@ -354,10 +388,24 @@ const compilerBinding = await prepareCudaLiteLayoutBindings(layout, [{
   access: "read",
   indexing: "row-major-flat",
 }]);
+const compilerSource = \`
+__global__ void consumer_layout_copy(const float* input, float* output) {
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < 4u) output[i] = input[i];
+}\`;
+const compiledView = compileCudaLiteKernelWithLayoutBindings(compilerSource, compilerBinding, { workgroupSize: [4, 1, 1] });
+const compiledResult = runCompiledKernelSemanticReference(
+  compiledView,
+  { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
+  { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+);
 if (cpu.specializationHash !== wgsl.semantic.specializationHash) throw new Error("fresh consumer CPU/WGSL specialization mismatch");
 if (!wgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits")) throw new Error("fresh consumer lowering missing copy");
 if (compilerBinding.layoutSemanticHash !== await hashSemanticArtifact(layout)) throw new Error("fresh consumer compiler binding lost semantic layout identity");
 if (!createCudaLiteLayoutBindingCompileCacheKey("source", compilerBinding).includes(compilerBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler cache key lost binding identity");
+if (![1, 3, 2, 4].every((value, index) => compiledResult.buffers.output[index] === value)) throw new Error("fresh consumer compiler layout lowering produced the wrong transpose");
+if (compiledView.preparedLayoutBindings !== compilerBinding || !compiledView.layoutBindingCompileCacheKey.includes(compilerBinding.bindingProjectionHash)) throw new Error("fresh consumer compiled result lost layout proof identity");
+if (!compiledView.wgslProgram?.name.includes(compilerBinding.layoutSemanticHash) || !compiledView.wgslProgram.name.includes(compilerBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler WGSL identity lost layout proof hashes");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);

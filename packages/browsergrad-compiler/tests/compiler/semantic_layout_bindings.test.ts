@@ -1,16 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
   layoutArtifactPayload,
+  traceViewCoordinate,
   verifyLayoutArtifact,
+  type IndexExpr,
   type MemorySpace,
+  type PredicateExpr,
   type VerifiedLayoutArtifact,
 } from "@unlocalhosted/browsergrad-semantic-core/layout";
-import { hashSemanticArtifact, parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
+  encodeWireI64,
+  hashSemanticArtifact,
+  parseWireI64,
+} from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   CUDA_LITE_LAYOUT_BINDING_PROFILE,
+  CudaLiteCompilerError,
   CudaLiteLayoutBindingError,
+  compileCudaLiteKernelWithLayoutBindings,
   createCudaLiteLayoutBindingCompileCacheKey,
   prepareCudaLiteLayoutBindings,
+  runCompiledKernelSemanticReference,
+  runCompiledKernelWebGpu,
   type CudaLiteLayoutBindingRequest,
   type PreparedCudaLiteLayoutBindings,
 } from "../../src/index";
@@ -149,9 +160,16 @@ describe("prepared CUDA-lite layout bindings", () => {
     const second = await prepareCudaLiteLayoutBindings(artifact, [request(artifact, 1)]);
     const identity = await prepareCudaLiteLayoutBindings(artifact, [request(artifact, 0)]);
     const changedSecond = await prepareCudaLiteLayoutBindings(changed, [request(changed, 1)]);
+    const symbolId = layoutArtifactPayload(artifact).symbols[0]!.id;
+    const rebound = await prepareCudaLiteLayoutBindings(artifact, [{
+      ...request(artifact, 1),
+      dimensionBindings: { [symbolId]: parseWireI64("3") },
+    }]);
 
     expect(second.bindingProjectionHash).not.toBe(identity.bindingProjectionHash);
     expect(second.layoutSemanticHash).not.toBe(changedSecond.layoutSemanticHash);
+    expect(second.layoutSemanticHash).toBe(rebound.layoutSemanticHash);
+    expect(second.bindingProjectionHash).not.toBe(rebound.bindingProjectionHash);
     expect(createCudaLiteLayoutBindingCompileCacheKey("source", second, { workgroupSize: [8, 1, 1] }))
       .not.toBe(createCudaLiteLayoutBindingCompileCacheKey("source", second, { workgroupSize: [16, 1, 1] }));
     expect(createCudaLiteLayoutBindingCompileCacheKey("source", second))
@@ -203,8 +221,380 @@ describe("prepared CUDA-lite layout bindings", () => {
   });
 });
 
+interface CompilerViewFixture {
+  readonly shape: readonly number[];
+  readonly location: IndexExpr;
+  readonly locationUnit?: "element" | "byte";
+  readonly byteOffset?: number;
+  readonly allocationBytes?: number;
+  readonly predicate?: PredicateExpr;
+}
+
+async function compilerViewFixture(input: CompilerViewFixture): Promise<VerifiedLayoutArtifact> {
+  const shape = input.shape.map((value) => constant(String(value)));
+  return verifyLayoutArtifact({
+    schema: "browsergrad.layout",
+    version: { major: 1, minor: 0 },
+    producer: { id: "compiler-layout-lowering-tests", version: "1" },
+    artifactId: "compiler-view",
+    requiredExtensions: [],
+    payload: {
+      symbols: [],
+      constraints: [],
+      allocations: [{
+        allocationId: "inputAllocation",
+        byteLength: constant(String(input.allocationBytes ?? 256)),
+        memorySpace: { kind: "global" },
+        alignmentBytes: 16,
+        aliasSetId: "inputAlias",
+      }],
+      indexMaps: [{
+        indexMapId: "inputMap",
+        coordinateRank: shape.length,
+        locationUnit: input.locationUnit ?? "element",
+        location: input.location,
+        inBounds: input.predicate ?? { kind: "bool", value: true },
+      }],
+      views: [{
+        viewId: "inputView",
+        allocationId: "inputAllocation",
+        dtype: "f32",
+        byteOffset: constant(String(input.byteOffset ?? 0)),
+        shape,
+        indexMapId: "inputMap",
+        requiredAlignmentBytes: 4,
+      }],
+    },
+  });
+}
+
+const DIRECT_VIEW_COPY = `
+__global__ void copy_view(const float* input, float* output) {
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < 6u) output[i] = input[i];
+}`;
+
+describe("CUDA-lite verified layout lowering", () => {
+  it.each([
+    {
+      name: "rank-2 transpose with view byte offset",
+      fixture: {
+        shape: [2, 3],
+        location: addIndex(multiplyIndex(coordinate(1), constant("2")), coordinate(0)),
+        byteOffset: 8,
+      },
+    },
+    {
+      name: "positive strided slice",
+      fixture: {
+        shape: [2, 3],
+        location: addIndex(
+          multiplyIndex(addIndex(coordinate(0), constant("1")), constant("4")),
+          multiplyIndex(coordinate(1), constant("2")),
+        ),
+      },
+    },
+    {
+      name: "read-only broadcast",
+      fixture: {
+        shape: [2, 3],
+        location: coordinate(1),
+      },
+    },
+    {
+      name: "byte-unit map",
+      fixture: {
+        shape: [2, 3],
+        locationUnit: "byte" as const,
+        byteOffset: 4,
+        location: addIndex(
+          multiplyIndex(coordinate(0), constant("24")),
+          multiplyIndex(coordinate(1), constant("8")),
+        ),
+      },
+    },
+    {
+      name: "rank-3 permutation",
+      fixture: {
+        shape: [1, 2, 3],
+        location: addIndex(
+          multiplyIndex(coordinate(2), constant("2")),
+          coordinate(1),
+          multiplyIndex(coordinate(0), constant("6")),
+        ),
+      },
+    },
+  ])("lowers $name through identical CPU memory traces", async ({ fixture }) => {
+    const artifact = await compilerViewFixture(fixture);
+    const payload = layoutArtifactPayload(artifact);
+    const view = payload.views[0]!;
+    const prepared = await prepareCudaLiteLayoutBindings(artifact, [{
+      parameter: "input",
+      viewId: view.viewId,
+      access: "read",
+      indexing: "row-major-flat",
+    }]);
+    const compiled = compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, prepared, {
+      workgroupSize: [8, 1, 1],
+    });
+    const source = Float32Array.from({ length: 64 }, (_, index) => index + 0.25);
+    const output = new Float32Array(6);
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: source, output } },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      { trace: "full" },
+    );
+    const expectedIndices = Array.from({ length: 6 }, (_, flat) => {
+      const coordinates = unflattenFlat(flat, fixture.shape);
+      const trace = traceViewCoordinate(artifact, {
+        viewId: view.viewId,
+        coordinates: coordinates.map((value) => encodeWireI64(BigInt(value))),
+      });
+      expect(trace.accessInBounds).toBe(true);
+      return Number(BigInt(trace.rootByteStart) / 4n);
+    });
+    const readIndices = result.trace.flatMap((thread) => (
+      thread.reads.filter((read) => read.name === "input").map((read) => read.index)
+    ));
+
+    expect(readIndices).toEqual(expectedIndices);
+    expect([...result.buffers.output as Float32Array]).toEqual(expectedIndices.map((index) => source[index]));
+    expect(compiled.wgsl).toBeDefined();
+    expect(compiled.wgslProgram?.name).toBe(
+      `__bg_layout_${prepared.layoutSemanticHash}_${prepared.bindingProjectionHash}_copy_view`,
+    );
+    expect(compiled.verifiedKernelIr.ir).toBe(compiled.kernelIr);
+    expect(compiled.typeCheckedKernelIr.ir).toBe(compiled.kernelIr);
+    expect(compiled.wgslLegalizedKernelIr.ir).toBe(compiled.kernelIr);
+    expect(compiled.preparedLayoutBindings).toBe(prepared);
+    expect(Object.isFrozen(compiled)).toBe(true);
+    expect(compiled.layoutBindingCompileCacheKey).toBe(
+      createCudaLiteLayoutBindingCompileCacheKey(DIRECT_VIEW_COPY, prepared, { workgroupSize: [8, 1, 1] }),
+    );
+  });
+
+  it("specializes dynamic dimension bindings into physical offsets and compile identity", async () => {
+    const artifact = await layoutFixture();
+    const prepared = await prepareCudaLiteLayoutBindings(artifact, [request(artifact)]);
+    const compiled = compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, prepared, {
+      workgroupSize: [8, 1, 1],
+    });
+    const result = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          input: Float32Array.from({ length: 24 }, (_, index) => index),
+          output: new Float32Array(6),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+
+    expect(result.trace.flatMap((thread) => (
+      thread.reads.filter((read) => read.name === "input").map((read) => read.index)
+    ))).toEqual([2, 4, 6, 3, 5, 7]);
+    expect([...result.buffers.output as Float32Array]).toEqual([2, 4, 6, 3, 5, 7]);
+    expect(compiled.layoutBindingCompileCacheKey).toContain(prepared.bindingProjectionHash);
+  });
+
+  it("fails closed without an exact dominant logical-domain guard", async () => {
+    const artifact = await compilerViewFixture({
+      shape: [2, 3],
+      location: addIndex(multiplyIndex(coordinate(1), constant("2")), coordinate(0)),
+    });
+    const prepared = await preparedInput(artifact);
+    const missingGuard = DIRECT_VIEW_COPY.replace("if (i < 6u) ", "");
+    const wrongGuard = DIRECT_VIEW_COPY.replace("i < 6u", "i < 7u");
+
+    expect(() => compileCudaLiteKernelWithLayoutBindings(missingGuard, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-MISSING-GUARD/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(wrongGuard, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-MISSING-GUARD/u);
+
+    try {
+      compileCudaLiteKernelWithLayoutBindings(missingGuard, prepared, { workgroupSize: [8, 1, 1] });
+      throw new Error("expected layout-bound compilation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CudaLiteCompilerError);
+      expect((error as CudaLiteCompilerError).diagnostics).toEqual([
+        expect.objectContaining({
+          code: "BG-COMPILER-LAYOUT-BINDING-MISSING-GUARD",
+          span: expect.objectContaining({ line: expect.any(Number), column: expect.any(Number) }),
+        }),
+      ]);
+    }
+  });
+
+  it("rejects signed or mutated logical indices, aliases, legacy offsets, and writes", async () => {
+    const artifact = await compilerViewFixture({ shape: [2, 3], location: coordinate(1) });
+    const prepared = await preparedInput(artifact);
+    const signed = DIRECT_VIEW_COPY.replace("unsigned int i", "int i");
+    const mutated = DIRECT_VIEW_COPY.replace(
+      "if (i < 6u)",
+      "i += 1u; if (i < 6u)",
+    );
+    const aliased = DIRECT_VIEW_COPY.replace(
+      "if (i < 6u) output[i] = input[i];",
+      "const float* alias = input; if (i < 6u) output[i] = alias[i];",
+    );
+    const writeSource = DIRECT_VIEW_COPY.replace("const float* input", "float* input")
+      .replace("output[i] = input[i]", "input[i] = output[i]");
+
+    expect(() => compileCudaLiteKernelWithLayoutBindings(signed, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(mutated, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(aliased, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-USE/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, prepared, {
+      workgroupSize: [8, 1, 1],
+      pointerBaseOffsets: { input: 1 },
+    })).toThrow(/BG-COMPILER-LAYOUT-BINDING-POINTER-OFFSET/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(writeSource, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-PARAMETER/u);
+  });
+
+  it("rejects logical-index address escapes and operation-level writes", async () => {
+    const artifact = await compilerViewFixture({ shape: [2, 3], location: coordinate(1) });
+    const prepared = await preparedInput(artifact);
+    const helperEscape = `
+__device__ void bump(unsigned int* value) { *value = 99u; }
+__global__ void copy_view(const float* input, float* output) {
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < 6u) { bump(&i); output[threadIdx.x] = input[i]; }
+}`;
+    const inlineAsmWrite = `
+__global__ void copy_view(const float* input, float* output) {
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < 6u) {
+    asm volatile("mov.u32 %0, 99;" : "=r"(i));
+    output[threadIdx.x] = input[i];
+  }
+}`;
+
+    expect(() => compileCudaLiteKernelWithLayoutBindings(helperEscape, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(inlineAsmWrite, prepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX/u);
+  });
+
+  it("requires authorized compiled proofs and full verified allocation extents at runtime", async () => {
+    const artifact = await compilerViewFixture({
+      shape: [2, 3],
+      location: addIndex(multiplyIndex(coordinate(1), constant("2")), coordinate(0)),
+      allocationBytes: 256,
+    });
+    const prepared = await preparedInput(artifact);
+    const compiled = compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, prepared, { workgroupSize: [8, 1, 1] });
+    const shortInput = {
+      buffers: { input: new Float32Array(63), output: new Float32Array(6) },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [8, 1, 1] } as const;
+
+    expect(() => runCompiledKernelSemanticReference(compiled, shortInput, launch))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER/u);
+    expect(() => runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Int32Array(64) as never, output: new Float32Array(6) } },
+      launch,
+    )).toThrow(/BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER/u);
+    await expect(runCompiledKernelWebGpu({} as never, compiled, shortInput, launch))
+      .rejects.toThrow(/BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER/u);
+    await expect(runCompiledKernelWebGpu(
+      {} as never,
+      compiled,
+      {
+        buffers: { output: new Float32Array(6) },
+        residentBuffers: { input: { buffer: {} as never, byteLength: 252, valueType: "f32" } },
+      },
+      launch,
+    )).rejects.toThrow(/BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER/u);
+
+    const forged = { ...compiled };
+    expect(() => runCompiledKernelSemanticReference(
+      forged,
+      { buffers: { input: new Float32Array(64), output: new Float32Array(6) } },
+      launch,
+    )).toThrow(/BG-COMPILER-LAYOUT-BINDING-UNVERIFIED-COMPILED/u);
+  });
+
+  it("puts complete layout and binding proof hashes in program identity", async () => {
+    const transposeArtifact = await compilerViewFixture({
+      shape: [2, 3],
+      location: addIndex(multiplyIndex(coordinate(1), constant("2")), coordinate(0)),
+    });
+    const identityArtifact = await compilerViewFixture({
+      shape: [2, 3],
+      location: addIndex(multiplyIndex(coordinate(0), constant("3")), coordinate(1)),
+    });
+    const transpose = await preparedInput(transposeArtifact);
+    const identity = await preparedInput(identityArtifact);
+    const transposeCompiled = compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, transpose, { workgroupSize: [8, 1, 1] });
+    const identityCompiled = compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, identity, { workgroupSize: [8, 1, 1] });
+
+    expect(transposeCompiled.wgslProgram?.name).toContain(transpose.layoutSemanticHash);
+    expect(transposeCompiled.wgslProgram?.name).toContain(transpose.bindingProjectionHash);
+    expect(identityCompiled.wgslProgram?.name).toContain(identity.layoutSemanticHash);
+    expect(identityCompiled.wgslProgram?.name).toContain(identity.bindingProjectionHash);
+    expect(transposeCompiled.wgslProgram?.name).not.toBe(identityCompiled.wgslProgram?.name);
+  });
+
+  it("rejects conditional, negative, unaligned, overflowing, and unsupported-rank maps before execution", async () => {
+    const conditional = await compilerViewFixture({
+      shape: [2, 3],
+      location: coordinate(1),
+      predicate: { kind: "lessEqual", lhs: coordinate(1), rhs: constant("1") },
+    });
+    const negative = await compilerViewFixture({
+      shape: [2, 3],
+      location: addIndex(constant("-1"), coordinate(1)),
+    });
+    const unaligned = await compilerViewFixture({
+      shape: [2, 3],
+      locationUnit: "byte",
+      location: coordinate(1),
+    });
+    const overflow = await compilerViewFixture({
+      shape: [2, 3],
+      location: multiplyIndex(coordinate(1), constant("4294967296")),
+      allocationBytes: 30_000_000_000,
+    });
+    const rankOne = await compilerViewFixture({ shape: [6], location: coordinate(0) });
+    const rankFour = await compilerViewFixture({ shape: [1, 1, 2, 3], location: coordinate(3) });
+    const conditionalPrepared = await preparedInput(conditional);
+    const negativePrepared = await preparedInput(negative);
+    const unalignedPrepared = await preparedInput(unaligned);
+    const overflowPrepared = await preparedInput(overflow);
+    const rankOnePrepared = await preparedInput(rankOne);
+    const rankFourPrepared = await preparedInput(rankFour);
+
+    expect(() => compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, conditionalPrepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-PREDICATE/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, negativePrepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-INTEGER-RANGE/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, unalignedPrepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX-MAP/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, overflowPrepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-INTEGER-RANGE/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, rankOnePrepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX-MAP/u);
+    expect(() => compileCudaLiteKernelWithLayoutBindings(DIRECT_VIEW_COPY, rankFourPrepared, { workgroupSize: [8, 1, 1] }))
+      .toThrow(/BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX-MAP/u);
+  });
+});
+
+async function preparedInput(artifact: VerifiedLayoutArtifact) {
+  return prepareCudaLiteLayoutBindings(artifact, [{
+    parameter: "input",
+    viewId: layoutArtifactPayload(artifact).views[0]!.viewId,
+    access: "read",
+    indexing: "row-major-flat",
+  }]);
+}
+
 function constant(value: string) {
-  return { kind: "const" as const, value };
+  return { kind: "const" as const, value: parseWireI64(value) };
 }
 
 function coordinate(axis: number) {
@@ -217,4 +607,19 @@ function multiply(lhs: ReturnType<typeof coordinate>, rhs: ReturnType<typeof con
 
 function add(...terms: readonly (ReturnType<typeof coordinate> | ReturnType<typeof multiply>)[]) {
   return { kind: "add" as const, terms };
+}
+
+function multiplyIndex(lhs: IndexExpr, rhs: IndexExpr): IndexExpr {
+  return { kind: "mul", lhs, rhs };
+}
+
+function addIndex(...terms: readonly IndexExpr[]): IndexExpr {
+  return { kind: "add", terms };
+}
+
+function unflattenFlat(flat: number, shape: readonly number[]): number[] {
+  return shape.map((extent, axis) => {
+    const stride = shape.slice(axis + 1).reduce((product, value) => product * value, 1);
+    return Math.floor(flat / stride) % extent;
+  });
 }

@@ -15,6 +15,7 @@ import {
   type WireI64,
   type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import type { SourceSpan } from "./types.js";
 
 export const CUDA_LITE_LAYOUT_BINDING_PROFILE = "browsergrad.compiler.layout-binding.flat-logical-read@1";
 const DEFAULT_MAX_LAYOUT_BINDINGS = 32;
@@ -65,7 +66,19 @@ export type CudaLiteLayoutBindingErrorCode =
   | "BG-COMPILER-LAYOUT-BINDING-RESOURCE-LIMIT"
   | "BG-COMPILER-LAYOUT-BINDING-DUPLICATE-PARAMETER"
   | "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-MEMORY-SPACE"
-  | "BG-COMPILER-LAYOUT-BINDING-UNVERIFIED-PREPARED";
+  | "BG-COMPILER-LAYOUT-BINDING-UNVERIFIED-PREPARED"
+  | "BG-COMPILER-LAYOUT-BINDING-UNKNOWN-PARAMETER"
+  | "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-PARAMETER"
+  | "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-DTYPE"
+  | "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-PREDICATE"
+  | "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX-MAP"
+  | "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-INDEX"
+  | "BG-COMPILER-LAYOUT-BINDING-MISSING-GUARD"
+  | "BG-COMPILER-LAYOUT-BINDING-INTEGER-RANGE"
+  | "BG-COMPILER-LAYOUT-BINDING-POINTER-OFFSET"
+  | "BG-COMPILER-LAYOUT-BINDING-UNSUPPORTED-USE"
+  | "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER"
+  | "BG-COMPILER-LAYOUT-BINDING-UNVERIFIED-COMPILED";
 
 export class CudaLiteLayoutBindingError extends Error {
   constructor(
@@ -73,6 +86,7 @@ export class CudaLiteLayoutBindingError extends Error {
     readonly path: string,
     message: string,
     options?: ErrorOptions,
+    readonly span?: SourceSpan,
   ) {
     super(`${code}: ${message}`, options);
     this.name = "CudaLiteLayoutBindingError";

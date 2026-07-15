@@ -32,7 +32,7 @@ test does not make a gate verified unless every exit criterion is covered.
 |---|---|---|---|---|
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
-| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` owns verified view-copy meaning and shared specialization. Kernels `0.2.0` consumes that proof and passes the full nine-case CPU/actual-WebGPU bit-exact matrix on Apple Metal 3, including structured padding, dynamic specialization, and zero-extent no-submit. | Lower compiler read-only flat-logical-index bindings and typed JIT permutation to identical artifacts/hashes; derive/refuse the frozen legacy plan without widening it. Re-run retained strict evidence in release CI. Registry publication remains a separate release operation after the two-frontend gate passes. | Semantic-core 81 tests; kernels 13 files/86 tests; focused browser typecheck; packed bare-import runtime/typecheck; architecture guard; one validated `passed` terminal record for all nine cases on negotiated WebGPU core. No two-frontend claim yet. |
+| Gate 2 — multi-frontend, multi-backend view slice | `partial` | Semantic-core `0.2.0` owns verified view-copy meaning and shared specialization. Kernels `0.2.0` consumes that proof and passes the full nine-case CPU/actual-WebGPU bit-exact matrix on Apple Metal 3. The compiler now prepares and lowers guarded read-only flat-logical-index bindings into the same verified canonical index maps without changing frozen IR schemas. | Add strict actual-WebGPU compiler evidence, then make typed JIT permutation construct and consume identical artifacts/hashes; derive/refuse the frozen legacy plan without widening it. Re-run retained strict evidence in release CI. Registry publication remains a separate release operation after the two-frontend gate passes. | Semantic-core 81 tests; kernels 13 files/86 tests; compiler 29 files/963 tests; packed bare-import runtime/typecheck; architecture guard; one validated kernels `passed` terminal record for all nine cases on negotiated WebGPU core. No two-frontend claim yet. |
 | Gate 3 — real C++/CuTe frontend slice | `not-started` | No implementation in this workstream. | All Gate 3 exit criteria. | None. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
@@ -62,6 +62,7 @@ families extend the operation rather than add source-shaped execution paths.
 | L2 materializing view-copy contract and CPU reference | `verified` | `view-copy@1.0` owns effects, exact reject/fill bits, and forbid-overlap semantics. Generic L2 verification stays backend-neutral; the shared initial profile legalizes positive-affine f32 rank-2/3 global views. Prepared CPU execution compiles maps once, proves guarded reads and dense destination writes, caches source offsets, derives binding-sensitive specialization hashes, and enforces element/step/scratch/wall-time budgets, cooperative browser yielding and abort, plus native buffer-slot, length, alignment, overlap, and shared-memory checks. |
 | Kernels-owned WGSL view-copy lowering | `verified` | The lowerer consumes authority-bound immutable backend-neutral specializations, preserves whole-root f32 bits through u32 storage, interval-proves signed i32 arithmetic, lowers canonical source/destination maps, emits structured guarded fill loads, validates device and transient-working-set limits, and derives semantic plus device-specific hashes. One-in-flight ownership, timeout/abort stale-result suppression, exact scope drainage, distinct error stages, and device-loss invalidation have deterministic fake-device coverage. The required headed lane emitted one validated `passed` terminal record for all nine bit-exact CPU/WebGPU cases on Apple Metal 3; headless absence remains a truthful failed environment record. |
 | Compiler verified-layout binding preparation | `verified` | Compiler now depends on semantic-core through public `/layout` and `/schema` protocols and prepares explicit read-only, row-major-flat parameter bindings. Prepared objects are authority-bound and deeply immutable, retain the semantic layout hash plus a deterministic binding-projection hash, resolve dynamic dimensions once, reject non-global views and duplicate/malformed bindings, and provide a collision-resistant layout-bound compile-cache key without changing frozen semantic IR. Lowering into memory references is the next slice. |
+| Compiler read-only layout lowering | `verified` | A separate layout-bound compile entrypoint rewrites direct guarded reads after ordinary runtime lowering and before semantic-IR verification. It unflattens one stable non-escaping `uint` logical index, substitutes the verified positive-affine map, and sends the same physical expression through CPU reference and WGSL legalization. Initial support is specialized nonempty rank-2/3 global `f32`; predicates, writes, aliases, pointer offsets/rebasing, signed/mutated/escaped indices, non-affine maps, unaligned byte maps, rank drift, and u32 overflow fail closed. The frozen compiled wrapper is instance-authorized, execution validates the complete verified root allocation for typed/resident buffers, and full semantic/binding hashes enter the WGSL pipeline name. Strict actual-device compiler evidence remains the next slice. |
 
 ### Audit findings recorded so far
 
@@ -187,6 +188,7 @@ families extend the operation rather than add source-shaped execution paths.
 | D-019 | 2026-07-15 | accepted | Resolve, prove, and hash a view-copy once through backend-neutral `prepareViewCopySpecialization`. CPU and device backends consume the same prepared accessors, portable profile, coordinate proof, and specialization hash; only interpreter backends request the optional source-offset cache. | Having kernels call a CPU-branded API would invert ownership and allocate unnecessary per-element scratch, while duplicating binding, guard, and destination proofs would create a second meaning for the same artifact. |
 | D-020 | 2026-07-15 | accepted | The first WGSL profile lowers canonical arithmetic as interval-proved signed i32, converts to word indices only after the source guard, binds whole root allocations as u32 words, and layers a device-specific backend hash over the shared semantic-specialization hash. Required evidence acquires through `navigator.gpu` and fails on missing adapter/device; adapter identity and input hashes are evidence only. | Padding maps can have negative intercepts outside their true predicate, so global u32 lowering wraps incorrectly. f32 loads/stores can canonicalize NaN payloads. Whole-root u32 bindings preserve exact bits and keep view offsets semantic. Separating cache facts from evidence avoids cache fragmentation by adapter labels or test inputs. |
 | D-021 | 2026-07-15 | accepted | WebGPU view-copy plans are module-authorized and deeply immutable; the runtime admits one operation per `GPUDevice`, budgets owned host/GPU working bytes, suppresses timed-out/aborted results until cleanup settles, scopes diagnostics to creation/submission rather than readback, and invalidates all participating wrapper caches through device-loss watchers. A conformance run emits one schema-validated terminal evidence record only after the full ordered case set and late-error drain. | Prevents WGSL/hash TOCTOU, caller-forged plans, aggregate queued-memory growth, interleaved error scopes, stale results, cache reuse after loss, partial pass lines, version drift, and failure records that cannot reproduce the current artifact/input/stage. The long-term cross-operation coordinator still belongs in `KernelDeviceImpl`; Gate 2 remains partial until actual-device and frontend evidence pass. |
+| D-022 | 2026-07-15 | accepted | Adapt compiler layout bindings after ordinary runtime lowering and before semantic-IR verification. The first profile accepts only direct read-only global `f32` access from one unmodified, non-escaping `uint` logical index dominated by its exact logical-domain guard; it interval-proves positive-affine rank-2/3 maps and root containment, then places one physical index expression in the existing memory reference consumed by both CPU and WGSL. The compiled wrapper is frozen and privately bound to its prepared proof, runtime admission validates the complete verified root allocation, and full semantic plus binding hashes enter pipeline identity; frozen semantic schemas gain no fields. | This preserves one indexing truth and one verification pipeline while preventing legacy CPU zero-fill, WebGPU robust-buffer behavior, indirect mutation, forged proof metadata, aliases, pointer rebasing, integer wrap, undersized buffers, or pipeline-cache collisions from silently substituting semantics. Padding and richer signed maps require their own structured lowering rather than widening this contract. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -525,6 +527,32 @@ affected implementation slice is marked complete.
   options cannot alias. Packed and fresh-installed compiler consumers exercise
   the public API and strict declarations through exact semantic-core metadata.
 
+### 2026-07-15 — Compiler read-only verified-view lowering
+
+- Added a separate layout-bound compile path after CUDA-lite runtime lowering
+  and before semantic verification; the ordinary compiler path and all frozen
+  semantic record shapes remain unchanged.
+- Lowered one guarded row-major-flat logical `uint` into verified rank-2/3
+  coordinates and then the canonical positive-affine physical map. CPU
+  reference, verified/typechecked IR, WGSL legalization, and later WebGPU
+  emission all consume that same rewritten memory expression.
+- Proved logical and physical u32 ranges, root-allocation containment, byte-map
+  divisibility, and exact guard dominance. Rejected writes, aliases, helpers,
+  pointer rebasing/offsets, mutable or signed indices, conditional predicates,
+  non-affine maps, unsupported ranks/dtypes, and unsafe arithmetic.
+- Added differential trace/reference cases for transpose, positive slice,
+  broadcast, byte-unit maps, rank-3 permutation, and dynamic specialization;
+  packed and fresh-installed consumers compile and execute the transpose.
+- Closed adversarial execution gaps before commit: all operation-level writes
+  and address escapes invalidate logical-index proofs; typed and resident input
+  buffers must cover the complete verified root allocation; compiled wrappers
+  use private instance authority; and the complete semantic/binding hashes are
+  part of the WGSL program and pipeline-cache identity. Public lowering errors
+  are source-spanned stable compiler diagnostics registered in compatibility.
+- Kept Gate 2 `partial`: this commit has CPU and generated-WGSL structural
+  evidence, but the compiler-specific required-device run and JIT frontend
+  convergence remain.
+
 ## Verification Log
 
 | Date | Scope | Command | Result | Follow-up |
@@ -555,6 +583,7 @@ affected implementation slice is marked complete.
 | 2026-07-15 | Headless required view-copy browser lane | `BG_BROWSER_HEADLESS=1 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy:required` | Failed as designed: emitted one validated `browsergrad.execution-evidence@1` terminal record with `outcome=failed`, `required=true`, the complete nine-case artifact/input manifest, and diagnostic `BG-WEBGPU-EVIDENCE-DEVICE-UNAVAILABLE`; Vitest exited 1 because `requestAdapter` returned no adapter. | Preserve as environment evidence; absence is not a product failure and cannot be a release pass. |
 | 2026-07-15 | Headed required actual-device view-copy lane | `pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:view-copy:required` | Passed: headed Chromium acquired Apple Metal 3 with negotiated WebGPU core, all nine ordered static/dynamic/zero-extent cases matched the CPU reference bit-exact over complete destination allocations, queue/late-error drainage was clean, and one validated terminal record reported `outcome=passed`. | Re-run in release CI and retain the complete terminal log for the exact publish commit. |
 | 2026-07-15 | Compiler verified-layout binding preparation | `pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test && pnpm --filter @unlocalhosted/browsergrad-compiler lint && pnpm --filter @unlocalhosted/browsergrad-compiler build && pnpm architecture:check && pnpm test:release-packages` | Passed: strict typecheck, 29 files/951 tests including 6 focused preparation/cache-identity tests, lint/build, architecture guard, exact packed dependency assertions, extracted-tarball execution, and fresh three-tarball bare-import runtime plus declaration typecheck. | Lower prepared bindings into read-only compiler memory references next. |
+| 2026-07-15 | Compiler read-only verified-view lowering | `pnpm --filter @unlocalhosted/browsergrad-compiler typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler test && pnpm --filter @unlocalhosted/browsergrad-compiler lint && pnpm --filter @unlocalhosted/browsergrad-compiler build && pnpm architecture:check && pnpm test:release-packages && git diff --check` | Passed: strict typecheck, 29 files/963 tests including 18 focused binding/lowering/authority/runtime-admission tests, lint/build, architecture guard, extracted-tarball execution, fresh three-tarball bare-import runtime/declaration proof, and whitespace check. | Add required actual-WebGPU compiler conformance using these same fixtures and buffers. |
 
 ## Failure and Recovery Log
 
@@ -719,6 +748,26 @@ whether any files may be left partially changed.
   cleanup. The fake now exposes readback completion; the test waits for owned
   cleanup before proving the next run is admitted. The final package run,
   including the exact-commit publish guard, passes 13 files/86 tests.
+- The first compiler differential run exposed that the legacy CPU reference's
+  generic `uint` division expression produced a fractional JavaScript number,
+  while WGSL integer division truncates. Generated logical unflattening now
+  wraps division in the existing explicit `uint` cast, restoring CPU/WGSL
+  parity locally without changing the frozen reference semantics for ordinary
+  compiler programs.
+- Adversarial compiler review found that assignment/update-only mutation
+  tracking missed helper address escapes, surface output targets, inline-asm
+  outputs, and other operation-level writes; runtime accepted undersized root
+  buffers; public compiled proof properties were structurally forgeable; and
+  the GPU pipeline name omitted layout identity. The final lowering rejects
+  all such index definitions/escapes, validates typed/resident root extents
+  through private compiled authority, freezes the public wrapper, and puts both
+  full hashes in program identity. Focused regressions cover helper and inline-
+  asm mutation, forged wrappers, wrong/short typed arrays, and short residents.
+- The first full compiler rerun after runtime admission failed its emitted-
+  diagnostic registry check because the new runtime-buffer code was not yet
+  registered. All compile-facing layout and runtime authority/buffer codes are
+  now explicit compatibility records; the subsequent 29-file/963-test run
+  passed.
 
 ## Quick Resume Checklist
 
@@ -733,10 +782,11 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Make the first compiler and JIT adapters produce the same rank-2 transpose
-layout/kernel artifact hashes through a shared construction seam; they may
-derive or refuse the frozen legacy tensor plan but cannot widen it or
-reconstruct offsets independently. After the tracer passes CPU and strict
-WebGPU, extend the unchanged frontend adapters to the full view matrix. Re-run
-the retained strict WebGPU lane for the exact release commit; the current local
-Apple Metal 3 record proves this implementation slice, not a future publish.
+Run the compiler's lowered bindings through a required actual-WebGPU lane with
+the same artifacts, buffers, physical-index evidence, and truthful no-adapter
+failure policy. Then add the semantic-core construction seam and make the JIT
+`PERMUTE` side table produce the same rank-2 transpose artifact/hash without
+widening `TensorGpuPlan` or reconstructing offsets independently. Extend the
+unchanged adapters to the full matrix only after that tracer passes. Re-run the
+retained strict lanes for the exact release commit; current local evidence does
+not prove a future publish.

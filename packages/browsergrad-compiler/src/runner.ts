@@ -1,4 +1,5 @@
 import {
+  defineWgslKernelProgram,
   prepareWgslKernelProgramSequence,
   runWgslKernelProgramSequence,
   type KernelDevice,
@@ -8,20 +9,29 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { analyzeCudaLite } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
-import { createCudaLiteCompileCacheKey } from "./cache-key.js";
+import {
+  createCudaLiteCompileCacheKey,
+  createCudaLiteLayoutBindingCompileCacheKey,
+} from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { cloneReferenceTypedArray } from "./reference_inputs.js";
 import { parseCudaLite } from "./parser.js";
 import {
   canRunCompiledKernelSemanticReference,
-  runCompiledKernelSemanticReference,
+  runCompiledKernelSemanticReference as runCompiledKernelSemanticReferenceUnchecked,
 } from "./semantic_reference.js";
 import { createCudaLiteSemanticModel, lowerSemanticModelToKernelIr } from "./semantic_ir.js";
 import { validateSemanticKernelIr } from "./semantic_ir_verifier.js";
 import { typeCheckSemanticKernelIr } from "./semantic_type_check.js";
 import { legalizeSemanticKernelIrForWgsl } from "./wgsl_legalization.js";
 import { lowerSemanticCudaRuntime } from "./semantic_runtime_lowering.js";
+import { lowerCudaLiteLayoutBindings } from "./semantic_layout_lowering.js";
+import {
+  CudaLiteLayoutBindingError,
+  unwrapPreparedCudaLiteLayoutBindings,
+  type PreparedCudaLiteLayoutBindings,
+} from "./semantic_layout_bindings.js";
 import {
   canEmitSemanticKernelIrWgsl,
   emitSemanticKernelIrWgsl,
@@ -53,6 +63,16 @@ import {
 
 type SupportedCudaWebGpuExecutionPlan = Extract<CudaWebGpuExecutionPlan, { readonly supported: true }>;
 
+interface CompiledLayoutBindingAuthority {
+  readonly prepared: PreparedCudaLiteLayoutBindings;
+  readonly compileCacheKey: string;
+}
+
+const COMPILED_LAYOUT_BINDING_AUTHORITIES = new WeakMap<object, CompiledLayoutBindingAuthority>();
+const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Float32Array.prototype) as object;
+const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, "byteLength")?.get;
+const TYPED_ARRAY_TAG_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, Symbol.toStringTag)?.get;
+
 export interface CompiledKernelWebGpuExecutionOptions {
   readonly compileKernel?: (
     source: string,
@@ -76,6 +96,11 @@ export interface PreparedCompiledKernelWebGpu {
   destroy(): void;
 }
 
+export interface CompiledCudaLiteLayoutBoundKernel extends CompiledCudaLiteKernel {
+  readonly preparedLayoutBindings: PreparedCudaLiteLayoutBindings;
+  readonly layoutBindingCompileCacheKey: string;
+}
+
 export type PrepareCompiledKernelWebGpuOptions = CompiledKernelWebGpuExecutionOptions;
 
 export function compileCudaLiteKernel(
@@ -92,9 +117,41 @@ export function compileCudaLiteKernel(
   }
 }
 
+export function compileCudaLiteKernelWithLayoutBindings(
+  source: string,
+  prepared: PreparedCudaLiteLayoutBindings,
+  options: CompileCudaLiteOptions = {},
+): CompiledCudaLiteLayoutBoundKernel {
+  try {
+    const compiled = compileCudaLiteKernelUnchecked(source, options, prepared);
+    const compileCacheKey = createCudaLiteLayoutBindingCompileCacheKey(source, prepared, options);
+    const result = Object.freeze({
+      ...compiled,
+      preparedLayoutBindings: prepared,
+      layoutBindingCompileCacheKey: compileCacheKey,
+    });
+    COMPILED_LAYOUT_BINDING_AUTHORITIES.set(result, { prepared, compileCacheKey });
+    return result;
+  } catch (error) {
+    if (error instanceof CudaLiteCompilerError) {
+      throw withCudaLiteDiagnosticSource(error, source);
+    }
+    if (error instanceof CudaLiteLayoutBindingError) {
+      throw createCudaLiteCompilerError(error.message, [{
+        code: error.code,
+        severity: "error",
+        message: error.message,
+        span: error.span ?? { start: 0, end: source.length, line: 1, column: 1 },
+      }], source);
+    }
+    throw error;
+  }
+}
+
 function compileCudaLiteKernelUnchecked(
   source: string,
   options: CompileCudaLiteOptions,
+  preparedLayoutBindings?: PreparedCudaLiteLayoutBindings,
 ): CompiledCudaLiteKernel {
   validateTextureDescriptorOptions(options);
   const ast = parseCudaLite(source);
@@ -109,7 +166,10 @@ function compileCudaLiteKernelUnchecked(
   }
   validateBindlessTextureOptions(options, analysis);
   const semantic = createCudaLiteSemanticModel(analysis);
-  const kernelIr = lowerSemanticCudaRuntime(lowerSemanticModelToKernelIr(analysis, semantic, options));
+  const runtimeKernelIr = lowerSemanticCudaRuntime(lowerSemanticModelToKernelIr(analysis, semantic, options));
+  const kernelIr = preparedLayoutBindings === undefined
+    ? runtimeKernelIr
+    : lowerCudaLiteLayoutBindings(runtimeKernelIr, preparedLayoutBindings, options);
   const verifiedKernelIr = validateSemanticKernelIr(kernelIr);
   const typeCheckedKernelIr = typeCheckSemanticKernelIr(verifiedKernelIr);
   const wgslLegalizedKernelIr = legalizeSemanticKernelIrForWgsl(typeCheckedKernelIr);
@@ -129,9 +189,18 @@ function compileCudaLiteKernelUnchecked(
         span: preflightFailure.span,
       }]
     : semanticDiagnostics;
-  const emitted = preflightFailure === undefined
+  const baseEmitted = preflightFailure === undefined
     ? emitSemanticKernelIrWgsl(wgslLegalizedKernelIr, semanticWgslOptions)
     : undefined;
+  const emitted = baseEmitted === undefined || preparedLayoutBindings === undefined
+    ? baseEmitted
+    : {
+        ...baseEmitted,
+        program: defineWgslKernelProgram({
+          ...baseEmitted.program,
+          name: layoutBoundProgramName(baseEmitted.program.name, preparedLayoutBindings),
+        }),
+      };
   const loweringPlan = createCudaLoweringPlan(diagnostics);
   return {
     ast,
@@ -150,6 +219,126 @@ function compileCudaLiteKernelUnchecked(
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
   };
+}
+
+function layoutBoundProgramName(
+  baseName: string,
+  prepared: PreparedCudaLiteLayoutBindings,
+): string {
+  return `__bg_layout_${prepared.layoutSemanticHash}_${prepared.bindingProjectionHash}_${baseName}`;
+}
+
+function isLayoutBoundProgramName(name: string | undefined): boolean {
+  return name !== undefined && /^__bg_layout_[0-9a-f]{64}_[0-9a-f]{64}_/u.test(name);
+}
+
+function compiledLayoutBindingAuthority(
+  compiled: CompiledCudaLiteKernel,
+): CompiledLayoutBindingAuthority | undefined {
+  const authority = COMPILED_LAYOUT_BINDING_AUTHORITIES.get(compiled);
+  if (authority !== undefined) return authority;
+  const candidate = compiled as Partial<CompiledCudaLiteLayoutBoundKernel>;
+  if (
+    candidate.preparedLayoutBindings !== undefined ||
+    candidate.layoutBindingCompileCacheKey !== undefined ||
+    isLayoutBoundProgramName(compiled.wgslProgram?.name)
+  ) {
+    throwLayoutRuntimeError(
+      compiled,
+      "BG-COMPILER-LAYOUT-BINDING-UNVERIFIED-COMPILED",
+      "layout-bound compiled kernel is not authorized by this compiler instance",
+      compiled.kernelIr.span,
+    );
+  }
+  return undefined;
+}
+
+function validateLayoutBoundRuntimeInput(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  backend: "cpu" | "webgpu",
+): void {
+  const authority = compiledLayoutBindingAuthority(compiled);
+  if (authority === undefined) return;
+  const record = unwrapPreparedCudaLiteLayoutBindings(authority.prepared);
+  for (const binding of record.bindings) {
+    const name = binding.summary.parameter;
+    const typed = input.buffers[name];
+    const resident = input.residentBuffers?.[name];
+    if (typed !== undefined && resident !== undefined) {
+      throwLayoutRuntimeError(
+        compiled,
+        "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
+        `layout-bound buffer '${name}' cannot be both typed and resident`,
+        bindingSourceSpan(compiled, name),
+      );
+    }
+    const expectedBytes = BigInt(binding.summary.allocationByteLength);
+    if (resident !== undefined) {
+      if (backend === "cpu") {
+        throwLayoutRuntimeError(
+          compiled,
+          "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
+          `CPU reference requires a typed Float32Array for layout-bound buffer '${name}'`,
+          bindingSourceSpan(compiled, name),
+        );
+      }
+      if (
+        resident.valueType !== "f32" ||
+        !Number.isSafeInteger(resident.byteLength) ||
+        resident.byteLength < 0 ||
+        BigInt(resident.byteLength) < expectedBytes
+      ) {
+        throwLayoutRuntimeError(
+          compiled,
+          "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
+          `resident layout-bound buffer '${name}' must be f32 with at least ${expectedBytes} bytes`,
+          bindingSourceSpan(compiled, name),
+        );
+      }
+      continue;
+    }
+    const facts = typedArrayFacts(typed);
+    if (facts === undefined || facts.tag !== "Float32Array" || BigInt(facts.byteLength) < expectedBytes) {
+      throwLayoutRuntimeError(
+        compiled,
+        "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER",
+        `layout-bound buffer '${name}' must be a native Float32Array with at least ${expectedBytes} bytes`,
+        bindingSourceSpan(compiled, name),
+      );
+    }
+  }
+}
+
+function typedArrayFacts(value: unknown): { readonly tag: string; readonly byteLength: number } | undefined {
+  if (value === undefined || TYPED_ARRAY_BYTE_LENGTH_GETTER === undefined || TYPED_ARRAY_TAG_GETTER === undefined) return undefined;
+  try {
+    const tag = Reflect.apply(TYPED_ARRAY_TAG_GETTER, value, []) as unknown;
+    const byteLength = Reflect.apply(TYPED_ARRAY_BYTE_LENGTH_GETTER, value, []) as unknown;
+    return typeof tag === "string" && typeof byteLength === "number" && Number.isSafeInteger(byteLength) && byteLength >= 0
+      ? { tag, byteLength }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function bindingSourceSpan(compiled: CompiledCudaLiteKernel, parameter: string) {
+  return compiled.kernelIr.params.find((candidate) => candidate.name === parameter)?.span ?? compiled.kernelIr.span;
+}
+
+function throwLayoutRuntimeError(
+  compiled: CompiledCudaLiteKernel,
+  code: "BG-COMPILER-LAYOUT-BINDING-RUNTIME-BUFFER" | "BG-COMPILER-LAYOUT-BINDING-UNVERIFIED-COMPILED",
+  message: string,
+  span: CompiledCudaLiteKernel["kernelIr"]["span"],
+): never {
+  throw createCudaLiteCompilerError(`${code}: ${message}`, [{
+    code,
+    severity: "error",
+    message,
+    span,
+  }], compiled.ast.source);
 }
 
 function reconcileSemanticRuntimeDiagnostics(
@@ -226,8 +415,17 @@ export {
   canEmitSemanticKernelIrWgsl,
   canRunCompiledKernelSemanticReference,
   emitSemanticKernelIrWgsl,
-  runCompiledKernelSemanticReference,
 };
+
+export function runCompiledKernelSemanticReference(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  launch: KernelLaunch,
+  options: RunCompiledKernelReferenceOptions = {},
+): ReferenceKernelResult {
+  validateLayoutBoundRuntimeInput(compiled, input, "cpu");
+  return runCompiledKernelSemanticReferenceUnchecked(compiled, input, launch, options);
+}
 
 export function runCompiledKernelReference(
   compiled: CompiledCudaLiteKernel,
@@ -235,10 +433,11 @@ export function runCompiledKernelReference(
   launch: KernelLaunch,
   options: RunCompiledKernelReferenceOptions = {},
 ): ReferenceKernelResult {
+  validateLayoutBoundRuntimeInput(compiled, input, "cpu");
   if (semanticOperationsContainKind(compiled.kernelIr.operations, "device-launch")) {
     return runCompiledKernelDynamicReference(compiled, input, launch, 0, options);
   }
-  return runCompiledKernelSemanticReference(compiled, input, launch, options);
+  return runCompiledKernelSemanticReferenceUnchecked(compiled, input, launch, options);
 }
 
 function runCompiledKernelDynamicReference(
@@ -369,6 +568,7 @@ export async function runCompiledKernelWebGpu(
   launch: KernelLaunch,
   options: CompiledKernelWebGpuExecutionOptions = {},
 ): Promise<ReferenceKernelResult> {
+  validateLayoutBoundRuntimeInput(compiled, input, "webgpu");
   validateCudaKernelLaunch(launch, compiled.kernelIr.workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
@@ -392,6 +592,7 @@ export async function prepareCompiledKernelWebGpu(
   launch: KernelLaunch,
   options: PrepareCompiledKernelWebGpuOptions = {},
 ): Promise<PreparedCompiledKernelWebGpu> {
+  validateLayoutBoundRuntimeInput(compiled, input, "webgpu");
   validateCudaKernelLaunch(launch, compiled.kernelIr.workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
