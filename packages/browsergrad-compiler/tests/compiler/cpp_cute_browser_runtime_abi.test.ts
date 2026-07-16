@@ -70,7 +70,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       contractSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256,
       generatedImportAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
-      resourceByteLength: 13_255,
+      resourceByteLength: 13_523,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -120,7 +120,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     ]);
   });
 
-  it("pins one unshared wasm32 memory and reserves every coexisting byte budget", async () => {
+  it("pins one unshared wasm32 memory and reserves every coexisting linear-memory budget", async () => {
     const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
       cppCuteBrowserRuntimeAbiManifestResourceBytes(),
     );
@@ -137,13 +137,11 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       growthLinearStepPages: 1_024,
       stackByteLength: 16_777_216,
       maxCompilerWorkingByteLength: 536_870_912,
-      maxAggregateOpenedVfsByteLength: 402_653_184,
       maxInputFrameByteLength: 4_194_304,
       maxResultByteLength: 8_388_608,
     });
     const reserved = memory.stackByteLength + memory.maxCompilerWorkingByteLength +
-      memory.maxAggregateOpenedVfsByteLength + memory.maxInputFrameByteLength +
-      memory.maxResultByteLength;
+      memory.maxInputFrameByteLength + memory.maxResultByteLength;
     expect(reserved).toBeLessThanOrEqual(memory.maximumPages * memory.pageByteLength);
   });
 
@@ -213,6 +211,13 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       networkFallback: "forbidden",
       pathEncoding: "utf8",
       maxPathByteLength: 4_096,
+      maxIndexedNodes: 262_144,
+      maxIndexLogicalByteLength: 134_217_728,
+      indexLogicalByteAccounting:
+        "sum-per-node-metadata-record-plus-canonical-path-utf8-plus-immediate-basename-utf8",
+      maxAggregateLiveOpenByteLength: 402_653_184,
+      liveOpenByteAccounting:
+        "logical-full-file-per-live-handle-reservation-not-wasm-residency",
       maxLiveFileHandles: 65_536,
       maxSessionCalls: 1_000_000,
       directoryOrder: "strict-ascending-utf8-byte-order",
@@ -450,6 +455,18 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     }, "vfs"],
     ["unbounded VFS calls", (value: MutableJson) => {
       objectField(body(value), "vfs").maxSessionCalls = Number.MAX_SAFE_INTEGER;
+    }, "vfs"],
+    ["unbounded VFS index nodes", (value: MutableJson) => {
+      objectField(body(value), "vfs").maxIndexedNodes = Number.MAX_SAFE_INTEGER;
+    }, "vfs"],
+    ["unbounded VFS logical index bytes", (value: MutableJson) => {
+      objectField(body(value), "vfs").maxIndexLogicalByteLength = Number.MAX_SAFE_INTEGER;
+    }, "vfs"],
+    ["unbounded aggregate live-open VFS bytes", (value: MutableJson) => {
+      objectField(body(value), "vfs").maxAggregateLiveOpenByteLength = Number.MAX_SAFE_INTEGER;
+    }, "vfs"],
+    ["Wasm-resident live-open accounting", (value: MutableJson) => {
+      objectField(body(value), "vfs").liveOpenByteAccounting = "wasm-resident-bytes";
     }, "vfs"],
     ["self-authorized generated import", (value: MutableJson) => {
       const generated = objectField(objectField(body(value), "hostImports"), "generatedImportAllowlist");

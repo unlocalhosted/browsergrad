@@ -34,7 +34,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("f28e5cc90b12a175aa1da578cd381ec65cf30f98d96c9ad9858861b471952847");
+    expect(first.profileHash).toBe("e8c3f40c901aa95d7f2e2af0db29a5cf8760e2940f8141d832da7844cad24a83");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(Object.isFrozen(first)).toBe(true);
@@ -156,7 +156,7 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("bfc2ba60f444156827244fe0b5040ff081f89668ba3dbf83d4e6233220d34a94");
+    expect(first.profileHash).toBe("24b7a09db0c6cccf8ff3e54ca04a708856d5727d3dbb1a3a5f26bb9fe448064e");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);

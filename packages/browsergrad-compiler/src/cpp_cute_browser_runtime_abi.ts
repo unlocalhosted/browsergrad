@@ -24,11 +24,11 @@ export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 0;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.8f044c859e7d9ce2127a3fb83dd898c3924b6b3fdc43fe02cdd8bb84268e9553";
+  "bg.cpp.browser-runtime-abi.sha256.ae0515505eb966285d3a3e8be44c2d1755e895bdc3994c60f4c7404439ade6a5";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "94db09b1af3c92d57e5843bb33bccce18f49e878000a125aa22392a6c654bd1b";
+  "65b9de1679ffcf93004544f001f44dcca9c22cec6bcc46d9ab7287d68a33f569";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "02fabd8764d7bebb5303b16152d37ebb2dbf05ac44930dcd8cc40a5dd4276fc4";
+  "f58247d7e2c0b89f3c71f33d07ef30b34186324bbafc427b947c760d05fac617";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075";
 
@@ -371,8 +371,7 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid("$.body.wasm.memory", "memory pages do not match the fixed runtime-v1 byte contract");
     }
     const reservedBytes = memory.stackByteLength + memory.maxCompilerWorkingByteLength +
-      memory.maxAggregateOpenedVfsByteLength + memory.maxInputFrameByteLength +
-      memory.maxResultByteLength;
+      memory.maxInputFrameByteLength + memory.maxResultByteLength;
     if (reservedBytes > memory.maximumPages * memory.pageByteLength) {
       invalid("$.body.wasm.memory", "declared reservations exceed maximum linear memory");
     }
@@ -460,7 +459,14 @@ function validateBodyInvariants(value: JsonObject): void {
         body.vfs.physicalFilesystemFallback !== "forbidden" ||
         body.vfs.networkFallback !== "forbidden" || body.vfs.pathEncoding !== "utf8" ||
         body.vfs.pathForm !== "canonical-absolute-forward-slash-no-nul-dot-or-parent-segments" ||
-        body.vfs.maxPathByteLength !== 4_096 || body.vfs.maxLiveFileHandles !== 65_536 ||
+        body.vfs.maxPathByteLength !== 4_096 || body.vfs.maxIndexedNodes !== 262_144 ||
+        body.vfs.maxIndexLogicalByteLength !== 134_217_728 ||
+        body.vfs.indexLogicalByteAccounting !==
+          "sum-per-node-metadata-record-plus-canonical-path-utf8-plus-immediate-basename-utf8" ||
+        body.vfs.maxAggregateLiveOpenByteLength !== 402_653_184 ||
+        body.vfs.liveOpenByteAccounting !==
+          "logical-full-file-per-live-handle-reservation-not-wasm-residency" ||
+        body.vfs.maxLiveFileHandles !== 65_536 ||
         body.vfs.maxSessionCalls !== 1_000_000 ||
         body.vfs.directoryOrder !== "strict-ascending-utf8-byte-order" ||
         body.vfs.failureAtomicity !==

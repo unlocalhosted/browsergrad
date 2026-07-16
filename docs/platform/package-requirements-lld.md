@@ -21,6 +21,28 @@ contracts. A deterministic CPU reference proves meaning; portable WebGPU is
 the primary accelerated execution product; optional native backends may add
 hardware-specific lowerings without changing the program's declared meaning.
 
+### Portable-product critical path
+
+The required C++/CUDA/CuTe product path is:
+
+```text
+source -> Clang/extractor compiled to Wasm -> dedicated browser Worker
+  -> verified BrowserGrad semantic artifact -> CPU reference or WGSL/WebGPU
+```
+
+The compiler/extractor runs as Wasm. BrowserGrad does not link the user's C++
+into a Wasm application and does not execute a user-produced native or Wasm
+binary. It extracts verified portable meaning, which the BrowserGrad semantic
+backends execute.
+
+Docker is outside this runtime graph. A pinned container MAY be used by
+maintainers to build reproducible browser assets, and an optional native/AOT
+CI lane MAY compare producer parity. Neither lane satisfies the browser-local
+Gate 3 exit, and neither Docker nor a network compiler service may be required
+to use the portable product. Implementation sequencing MUST prioritize the
+browser Worker, closed VFS, real Clang-Wasm asset, semantic convergence, and
+actual WebGPU evidence before optional native parity work.
+
 Guided labs, notebooks, courses, demos, and framework-shaped APIs are demanding
 consumers of this substrate. They are not permission to weaken language,
 tensor, numerical, memory, or execution semantics.
@@ -656,10 +678,14 @@ end-user runtime dependency.
 
 The implementation uses a custom `FrontendAction`/AST consumer and a custom
 `llvm::vfs::FileSystem` with no physical/ambient fallback. The browser-local
-profile materializes verified files lazily from host-owned packs into the
-Worker's WASM memory; it does not eagerly duplicate the complete mounted file
-universe in linear memory. One Worker-execution session owns aggregate opened-
-file metering, transfer/disposal, and cancellation. It does not depend on an
+profile serves verified file ranges lazily from host-owned packs into
+extractor-owned regions of the Worker's WASM memory; it does not eagerly
+duplicate the complete mounted file universe in linear memory. Opening a file
+creates a logical full-file reservation, not evidence that those bytes are
+resident in WASM. Actual WASM residency comes from memory/allocator
+instrumentation and MUST remain a separate observation. One Worker-execution
+session owns aggregate live-open metering, transfer/disposal, and cancellation.
+It does not depend on an
 unofficial prebuilt browser Clang distribution. Release evidence therefore
 owns the LLVM revision, Emscripten
 revision, native TableGen tools, builder image, patches, build flags, source
@@ -846,22 +872,40 @@ entry model or import general archive semantics.
 Asset acquisition, cache admission, VFS verification, mount construction, and
 worker execution mint separate opaque authorities. Cache hits are rehashed
 before use. Mount construction rejects cross-pack path collisions after adding
-the profile-owned virtual root. Asset fetch/pack-verification time is excluded
+the profile-owned virtual root. The final mounted absolute UTF-8 path MUST fit
+the runtime ABI path ceiling; validating only the relative pack path is
+insufficient. Asset fetch/pack-verification time is excluded
 from compiler execution time, but resident bytes are never excluded from
 memory ceilings. The runtime profile names one storage model:
 
 - An eager in-WASM VFS requires mounted VFS + source + AST/template state +
   output + allocator/stack headroom to fit the maximum WASM memory.
-- A host-backed lazy VFS separately meters retained JavaScript pack bytes and
-  every opened-file copy resident in WASM; both remain part of the owning
-  profile's total memory budget.
+- A host-backed lazy VFS separately meters retained JavaScript pack bytes,
+  logical full-file reservations for live handles, actual WASM-owned memory,
+  and result bytes. A range copied into an extractor-owned buffer is accounted
+  by actual WASM memory instrumentation; it is not reclassified as a
+  permanently resident full-file copy.
+
+The browser profile and runtime ABI also pin `maxIndexedNodes` and
+`maxIndexLogicalByteLength` for the Worker-side file/directory index. Logical
+index bytes are the exact sum, for every indexed file or directory, of the
+32-byte ABI metadata record, canonical absolute-path UTF-8 bytes, and immediate
+basename UTF-8 bytes; the root basename contributes zero. Session preparation
+MUST enforce both ceilings incrementally before admitting another node and
+MUST fail before Worker execution when either is exceeded. These counters are
+deterministic logical budgets, not measured JavaScript heap usage. A release
+profile MUST choose narrower values from the measured final pack inventory and
+browser peak-memory qualification; the runtime-ABI maxima are not deployment
+defaults.
 
 For the browser-local profile, `maxMemoryBytes` is the enforced WASM
 linear-memory ceiling. It retains one meaning across the worker lifecycle and
 is not reused for host pack/cache bytes. Stack, compiler working allocation,
-opened VFS file copies, and maximum output reservations MUST fit inside that
-ceiling, which in turn MUST fit the runtime ABI's maximum page count. The stack
-reservation MUST fit initial pages. Host-retained verified pack bytes have a
+actual VFS read destinations, and maximum output reservations MUST fit inside
+that ceiling, which in turn MUST fit the runtime ABI's maximum page count. The
+separate logical live-open ceiling limits handle amplification but MUST NOT be
+reported as WASM residency. The stack reservation MUST fit initial pages.
+Host-retained verified pack bytes have a
 separate ceiling; evidence reports host-retained and WASM-owned categories
 separately instead of inventing a JavaScript heap peak.
 

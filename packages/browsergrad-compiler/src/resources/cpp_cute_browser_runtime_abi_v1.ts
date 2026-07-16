@@ -13,7 +13,7 @@ import {
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
   version: { major: 1, minor: 0 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.8f044c859e7d9ce2127a3fb83dd898c3924b6b3fdc43fe02cdd8bb84268e9553",
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.ae0515505eb966285d3a3e8be44c2d1755e895bdc3994c60f4c7404439ade6a5",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -129,7 +129,6 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         growthLinearStepPages: 1_024,
         stackByteLength: 16_777_216,
         maxCompilerWorkingByteLength: 536_870_912,
-        maxAggregateOpenedVfsByteLength: 402_653_184,
         maxInputFrameByteLength: 4_194_304,
         maxResultByteLength: 8_388_608,
       },
@@ -295,6 +294,13 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       pathEncoding: "utf8",
       pathForm: "canonical-absolute-forward-slash-no-nul-dot-or-parent-segments",
       maxPathByteLength: 4_096,
+      maxIndexedNodes: 262_144,
+      maxIndexLogicalByteLength: 134_217_728,
+      indexLogicalByteAccounting:
+        "sum-per-node-metadata-record-plus-canonical-path-utf8-plus-immediate-basename-utf8",
+      maxAggregateLiveOpenByteLength: 402_653_184,
+      liveOpenByteAccounting:
+        "logical-full-file-per-live-handle-reservation-not-wasm-residency",
       maxLiveFileHandles: 65_536,
       maxSessionCalls: 1_000_000,
       directoryOrder: "strict-ascending-utf8-byte-order",

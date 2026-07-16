@@ -70,7 +70,7 @@ export function createCppCuteProfileInput(
   const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
-    version: { major: 2, minor: 3 },
+    version: { major: 2, minor: 4 },
     profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
     deployment: {
       mode: "ahead-of-time",
@@ -294,7 +294,9 @@ export function createCppCuteBrowserProfileInput(
         virtualFileSystem: {
           storage: "host-backed-lazy",
           maxRetainedHostPackByteLength: 512 * 1024 * 1024,
-          maxAggregateOpenedWasmByteLength: 384 * 1024 * 1024,
+          maxAggregateLiveOpenByteLength: 384 * 1024 * 1024,
+          maxIndexedNodes: 65_536,
+          maxIndexLogicalByteLength: 32 * 1024 * 1024,
         },
       },
       assetLimits: {

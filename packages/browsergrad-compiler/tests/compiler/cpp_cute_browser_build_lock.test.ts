@@ -22,8 +22,8 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.7fe7b1aecc31e9d259c53b4032d8bcbf2c66e53d3e0234c1a423ec6831bf7c6a";
-const RESOURCE_SHA256 = "be50d00350d60a4cc993208e8e41f1651a769c7ad417618f28517c8d907fca6e";
+  "bg.cpp.browser-build-input-lock.sha256.ccff973f6bb12d713f9180b45ee053bcd9ef720759aa3730f58535d525374b2f";
+const RESOURCE_SHA256 = "643ef802fe7be58219a1675a2d29253fd1a625c14dc1f41a25a14022bb6af001";
 const RECIPE_SHA256 = "1308026a3216a76509d25dcf1036adf91e7a77cde8f58a1e805393df18148a07";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [

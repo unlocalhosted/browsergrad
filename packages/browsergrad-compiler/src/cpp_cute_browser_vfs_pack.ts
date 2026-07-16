@@ -84,6 +84,12 @@ export interface InspectedCppCuteBrowserVfsPackRecord {
 
 interface StoredCppCuteBrowserVfsPack extends InspectedCppCuteBrowserVfsPackRecord {
   readonly canonicalBytes: Uint8Array;
+  readonly fileRanges: ReadonlyMap<string, CppCuteBrowserVfsPackFileRange>;
+}
+
+interface CppCuteBrowserVfsPackFileRange {
+  readonly start: number;
+  readonly byteLength: number;
 }
 
 declare const verifiedCppCuteBrowserVfsPackBrand: unique symbol;
@@ -324,6 +330,7 @@ export async function inspectCppCuteBrowserVfsPack(
   }
 
   const entries: CppCuteBrowserVfsPackEntry[] = [];
+  const fileRanges = new Map<string, CppCuteBrowserVfsPackFileRange>();
   let cursor = indexStart;
   let expectedDataOffset = 0n;
   let previousPathBytes: Uint8Array | undefined;
@@ -377,6 +384,10 @@ export async function inspectCppCuteBrowserVfsPack(
       contentSha256,
       byteLength: encodeWireU64(byteLength),
     }));
+    fileRanges.set(virtualPath, Object.freeze({
+      start: fileStart,
+      byteLength: Number(byteLength),
+    }));
     expectedDataOffset += byteLength;
     previousPathBytes = pathBytes;
     seenFiles.add(virtualPath);
@@ -402,6 +413,7 @@ export async function inspectCppCuteBrowserVfsPack(
   INSPECTED_PACKS.set(inspected, Object.freeze({
     canonicalBytes: bytes,
     entries: Object.freeze(entries),
+    fileRanges,
   }));
   return inspected;
 }
@@ -480,6 +492,33 @@ export function unwrapInspectedCppCuteBrowserVfsPack(
 
 export function canonicalCppCuteBrowserVfsPackBytes(pack: VerifiedCppCuteBrowserVfsPack): Uint8Array {
   return canonicalInspectedCppCuteBrowserVfsPackBytes(storedVerified(pack).pack);
+}
+
+/**
+ * Copies one exact range from a verified pack file without reparsing or
+ * duplicating the complete pack. Offsets are pack-relative file offsets.
+ */
+export function copyVerifiedCppCuteBrowserVfsPackFileRange(
+  pack: VerifiedCppCuteBrowserVfsPack,
+  virtualPath: string,
+  offset: number,
+  byteLength: number,
+): Uint8Array {
+  const inspected = storedInspected(storedVerified(pack).pack);
+  if (typeof virtualPath !== "string") invalid("$.virtualPath", "expected string");
+  const range = inspected.fileRanges.get(virtualPath);
+  if (range === undefined) invalid("$.virtualPath", "file is absent from verified pack");
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    invalid("$.offset", "offset must be a non-negative safe integer");
+  }
+  if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
+    invalid("$.byteLength", "byte length must be a non-negative safe integer");
+  }
+  if (offset > range.byteLength || byteLength > range.byteLength - offset) {
+    invalid("$.byteLength", "requested range escapes verified file bytes");
+  }
+  const start = range.start + offset;
+  return inspected.canonicalBytes.slice(start, start + byteLength);
 }
 
 export function unwrapVerifiedCppCuteBrowserVfsPack(

@@ -173,36 +173,40 @@ describe("browser C++/CuTe compiler-runtime profile", () => {
     );
   });
 
-  it("reserves the live ABI input frame alongside compiler, VFS, and result bytes", async () => {
-    const oldFourTermSum = browserProfileInput();
-    extractionLimits(oldFourTermSum)["maxMemoryBytes"] = 920 * MIB;
+  it("reserves the live ABI input frame alongside stack, compiler, and result bytes", async () => {
+    const belowFourTermSum = browserProfileInput();
+    extractionLimits(belowFourTermSum)["maxMemoryBytes"] = 539 * MIB;
     await expectProfileError(
-      oldFourTermSum,
+      belowFourTermSum,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
       "$.extractionLimits.maxMemoryBytes",
     );
 
-    const exactFiveTermSum = browserProfileInput();
-    extractionLimits(exactFiveTermSum)["maxMemoryBytes"] = 924 * MIB;
-    await expect(prepareCppCuteFrontendProfile(exactFiveTermSum)).resolves.toMatchObject({
+    const exactFourTermSum = browserProfileInput();
+    extractionLimits(exactFourTermSum)["maxMemoryBytes"] = 540 * MIB;
+    await expect(prepareCppCuteFrontendProfile(exactFourTermSum)).resolves.toMatchObject({
       deploymentMode: "browser-local",
     });
   });
 
-  it("allows profile-owned working and aggregate opened-file ceilings to narrow ABI maxima", async () => {
+  it("allows profile-owned working, live-open, and logical-index ceilings to narrow ABI maxima", async () => {
     const narrowed = browserProfileInput();
     memory(narrowed)["maxCompilerWorkingByteLength"] = 400 * MIB;
-    virtualFileSystem(narrowed)["maxAggregateOpenedWasmByteLength"] = 300 * MIB;
+    virtualFileSystem(narrowed)["maxAggregateLiveOpenByteLength"] = 300 * MIB;
+    virtualFileSystem(narrowed)["maxIndexedNodes"] = 32_768;
+    virtualFileSystem(narrowed)["maxIndexLogicalByteLength"] = 16 * MIB;
 
     const prepared = await prepareCppCuteFrontendProfile(narrowed);
     const profile = unwrapPreparedCppCuteBrowserFrontendProfile(prepared).profile;
     expect(prepared.deploymentMode).toBe("browser-local");
     expect(profile.deployment.compilerRuntime.memory.maxCompilerWorkingByteLength).toBe(400 * MIB);
-    expect(profile.deployment.compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength).toBe(300 * MIB);
+    expect(profile.deployment.compilerRuntime.virtualFileSystem.maxAggregateLiveOpenByteLength).toBe(300 * MIB);
+    expect(profile.deployment.compilerRuntime.virtualFileSystem.maxIndexedNodes).toBe(32_768);
+    expect(profile.deployment.compilerRuntime.virtualFileSystem.maxIndexLogicalByteLength).toBe(16 * MIB);
     expect(profile.deployment.compilerRuntime.virtualFileSystem.maxRetainedHostPackByteLength).toBe(512 * MIB);
   });
 
-  it("rejects compiler, opened-file, and result ceilings above the ABI maxima", async () => {
+  it("rejects compiler, live-open, logical-index, and result ceilings above ABI maxima", async () => {
     const working = browserProfileInput();
     memory(working)["maxCompilerWorkingByteLength"] = 512 * MIB + 1;
     await expectProfileError(
@@ -212,11 +216,27 @@ describe("browser C++/CuTe compiler-runtime profile", () => {
     );
 
     const opened = browserProfileInput();
-    virtualFileSystem(opened)["maxAggregateOpenedWasmByteLength"] = 384 * MIB + 1;
+    virtualFileSystem(opened)["maxAggregateLiveOpenByteLength"] = 384 * MIB + 1;
     await expectProfileError(
       opened,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
-      "$.deployment.compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength",
+      "$.deployment.compilerRuntime.virtualFileSystem.maxAggregateLiveOpenByteLength",
+    );
+
+    const nodes = browserProfileInput();
+    virtualFileSystem(nodes)["maxIndexedNodes"] = 262_145;
+    await expectProfileError(
+      nodes,
+      "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT",
+      "$.deployment.compilerRuntime.virtualFileSystem.maxIndexedNodes",
+    );
+
+    const indexBytes = browserProfileInput();
+    virtualFileSystem(indexBytes)["maxIndexLogicalByteLength"] = 128 * MIB + 1;
+    await expectProfileError(
+      indexBytes,
+      "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT",
+      "$.deployment.compilerRuntime.virtualFileSystem.maxIndexLogicalByteLength",
     );
 
     const output = browserProfileInput();
@@ -228,7 +248,7 @@ describe("browser C++/CuTe compiler-runtime profile", () => {
     );
   });
 
-  it("bounds retained host packs and aggregate opened WASM bytes by verified asset ceilings", async () => {
+  it("bounds retained host packs and aggregate live-open bytes by verified asset ceilings", async () => {
     const retained = browserProfileInput();
     virtualFileSystem(retained)["maxRetainedHostPackByteLength"] =
       Number(assetLimits(retained)["maxTotalUnpackedByteLength"]) + 1;
@@ -239,12 +259,12 @@ describe("browser C++/CuTe compiler-runtime profile", () => {
     );
 
     const opened = browserProfileInput();
-    virtualFileSystem(opened)["maxAggregateOpenedWasmByteLength"] =
+    virtualFileSystem(opened)["maxAggregateLiveOpenByteLength"] =
       Number(assetLimits(opened)["maxTotalFileContentByteLength"]) + 1;
     await expectProfileError(
       opened,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
-      "$.deployment.compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength",
+      "$.deployment.compilerRuntime.virtualFileSystem.maxAggregateLiveOpenByteLength",
     );
   });
 

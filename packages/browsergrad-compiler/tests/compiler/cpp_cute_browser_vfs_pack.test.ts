@@ -12,6 +12,7 @@ import {
   CppCuteBrowserVfsPackError,
   canonicalCppCuteBrowserVfsPackBytes,
   canonicalInspectedCppCuteBrowserVfsPackBytes,
+  copyVerifiedCppCuteBrowserVfsPackFileRange,
   deriveCppCuteBrowserVfsContentSetSha256,
   inspectCppCuteBrowserVfsPack,
   unwrapInspectedCppCuteBrowserVfsPack,
@@ -308,6 +309,29 @@ describe("C++/CuTe closed browser VFS pack", () => {
     expect(record.asset.kind).toBe("compiler-resource-pack");
     expect(record.entries).toEqual(unwrapInspectedCppCuteBrowserVfsPack(record.pack).entries);
     expect(canonicalCppCuteBrowserVfsPackBytes(verified)).toEqual(packFixture.bytes);
+    expect(copyVerifiedCppCuteBrowserVfsPackFileRange(
+      verified,
+      "include/__stddef_size_t.h",
+      6,
+      6,
+    )).toEqual(TEXT_ENCODER.encode("size_t"));
+    expect(() => copyVerifiedCppCuteBrowserVfsPackFileRange(
+      verified,
+      "include/__stddef_size_t.h",
+      0,
+      Number(packFixture.expected.fileContentByteLength) + 1,
+    )).toThrowError(expect.objectContaining({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-VFS-INVALID",
+      path: "$.byteLength",
+    }));
+    expect(() => copyVerifiedCppCuteBrowserVfsPackFileRange(
+      { ...verified },
+      "include/__stddef_size_t.h",
+      0,
+      1,
+    )).toThrowError(expect.objectContaining({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-VFS-UNVERIFIED",
+    }));
 
     const otherPack = await createPack([{ path: "include/other.h", bytes: Uint8Array.of(1) }]);
     await expectPackError(

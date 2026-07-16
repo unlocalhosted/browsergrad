@@ -16,7 +16,7 @@ import {
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 3;
+export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 4;
 export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA =
   "browsergrad.compiler.cpp-cute.compilation-contract";
 export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR = 1;
@@ -211,7 +211,9 @@ export interface CppCuteFrontendBrowserCompilerRuntimeProfile extends JsonObject
   readonly virtualFileSystem: JsonObject & {
     readonly storage: "host-backed-lazy";
     readonly maxRetainedHostPackByteLength: number;
-    readonly maxAggregateOpenedWasmByteLength: number;
+    readonly maxAggregateLiveOpenByteLength: number;
+    readonly maxIndexedNodes: number;
+    readonly maxIndexLogicalByteLength: number;
   };
 }
 
@@ -614,20 +616,19 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
     }
     const reservedLinearBytes = runtime.memory.stackByteLength +
       runtime.memory.maxCompilerWorkingByteLength +
-      runtime.virtualFileSystem.maxAggregateOpenedWasmByteLength +
       abiMemory.maxInputFrameByteLength +
       extractionLimits.maxOutputBytes;
     if (reservedLinearBytes > extractionLimits.maxMemoryBytes) {
       invalid(
         "$.extractionLimits.maxMemoryBytes",
-        "browser producer memory limit cannot cover stack, compiler working memory, aggregate opened VFS bytes, input frame, and output reservations",
+        "browser producer memory limit cannot cover stack, compiler working memory, input frame, and output reservations",
       );
     }
     if (extractionLimits.maxSourceBytes + extractionLimits.maxHeaderBytes >
-        runtime.virtualFileSystem.maxAggregateOpenedWasmByteLength) {
+        runtime.virtualFileSystem.maxAggregateLiveOpenByteLength) {
       invalid(
-        "$.deployment.compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength",
-        "aggregate opened-VFS ceiling cannot cover the profile source and header byte limits",
+        "$.deployment.compilerRuntime.virtualFileSystem.maxAggregateLiveOpenByteLength",
+        "aggregate live-open logical reservation cannot cover the profile source and header byte limits",
       );
     }
   }
@@ -934,11 +935,11 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       "retained host-pack ceiling cannot exceed verified unpacked asset ceiling",
     );
   }
-  if (compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength >
+  if (compilerRuntime.virtualFileSystem.maxAggregateLiveOpenByteLength >
       assetLimits.maxTotalFileContentByteLength) {
     invalid(
-      `${path}.compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength`,
-      "aggregate opened-WASM ceiling cannot exceed mounted file-content ceiling",
+      `${path}.compilerRuntime.virtualFileSystem.maxAggregateLiveOpenByteLength`,
+      "aggregate live-open logical reservation cannot exceed mounted file-content ceiling",
     );
   }
   return {
@@ -1062,22 +1063,47 @@ function parseBrowserCompilerRuntime(
   const vfsObject = closedObject(field(object, "virtualFileSystem", path), [
     "storage",
     "maxRetainedHostPackByteLength",
-    "maxAggregateOpenedWasmByteLength",
+    "maxAggregateLiveOpenByteLength",
+    "maxIndexedNodes",
+    "maxIndexLogicalByteLength",
   ], `${path}.virtualFileSystem`);
   requireLiteral(
     field(vfsObject, "storage", `${path}.virtualFileSystem`),
     "host-backed-lazy",
     `${path}.virtualFileSystem.storage`,
   );
-  const maxAggregateOpenedWasmByteLength = boundedPositiveInteger(
-    field(vfsObject, "maxAggregateOpenedWasmByteLength", `${path}.virtualFileSystem`),
-    `${path}.virtualFileSystem.maxAggregateOpenedWasmByteLength`,
+  const maxAggregateLiveOpenByteLength = boundedPositiveInteger(
+    field(vfsObject, "maxAggregateLiveOpenByteLength", `${path}.virtualFileSystem`),
+    `${path}.virtualFileSystem.maxAggregateLiveOpenByteLength`,
     2 * 1024 * 1024 * 1024,
   );
-  if (maxAggregateOpenedWasmByteLength > abiMemory.maxAggregateOpenedVfsByteLength) {
+  const abiVfs = CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.vfs;
+  if (maxAggregateLiveOpenByteLength > abiVfs.maxAggregateLiveOpenByteLength) {
     invalid(
-      `${path}.virtualFileSystem.maxAggregateOpenedWasmByteLength`,
-      "aggregate opened-WASM ceiling exceeds the canonical ABI manifest",
+      `${path}.virtualFileSystem.maxAggregateLiveOpenByteLength`,
+      "aggregate live-open logical reservation exceeds the canonical ABI manifest",
+    );
+  }
+  const maxIndexedNodes = boundedPositiveInteger(
+    field(vfsObject, "maxIndexedNodes", `${path}.virtualFileSystem`),
+    `${path}.virtualFileSystem.maxIndexedNodes`,
+    abiVfs.maxIndexedNodes,
+  );
+  if (maxIndexedNodes > abiVfs.maxIndexedNodes) {
+    invalid(
+      `${path}.virtualFileSystem.maxIndexedNodes`,
+      "indexed-node ceiling exceeds the canonical ABI manifest",
+    );
+  }
+  const maxIndexLogicalByteLength = boundedPositiveInteger(
+    field(vfsObject, "maxIndexLogicalByteLength", `${path}.virtualFileSystem`),
+    `${path}.virtualFileSystem.maxIndexLogicalByteLength`,
+    abiVfs.maxIndexLogicalByteLength,
+  );
+  if (maxIndexLogicalByteLength > abiVfs.maxIndexLogicalByteLength) {
+    invalid(
+      `${path}.virtualFileSystem.maxIndexLogicalByteLength`,
+      "logical index-byte ceiling exceeds the canonical ABI manifest",
     );
   }
   return {
@@ -1095,7 +1121,9 @@ function parseBrowserCompilerRuntime(
         `${path}.virtualFileSystem.maxRetainedHostPackByteLength`,
         4 * 1024 * 1024 * 1024,
       ),
-      maxAggregateOpenedWasmByteLength,
+      maxAggregateLiveOpenByteLength,
+      maxIndexedNodes,
+      maxIndexLogicalByteLength,
     },
   };
 }
@@ -1293,13 +1321,13 @@ function parseTarget(value: JsonValue, path: string): CppCuteFrontendTargetProfi
     invalid(`${devicePath}.architecture`, "device architecture must be an sm_NN Clang CUDA target CPU");
   }
   if (device.triple !== "nvptx64-nvidia-cuda") {
-    invalid(`${devicePath}.triple`, "profile v2.3 requires the nvptx64-nvidia-cuda device triple");
+    invalid(`${devicePath}.triple`, "profile v2.4 requires the nvptx64-nvidia-cuda device triple");
   }
   if (host.endianness !== "little" || device.endianness !== "little") {
-    invalid(path, "CUDA profile v2.3 requires little-endian host and NVPTX targets");
+    invalid(path, "CUDA profile v2.4 requires little-endian host and NVPTX targets");
   }
   if (host.pointerBits !== 64 || device.pointerBits !== 64) {
-    invalid(path, "CUDA profile v2.3 requires matching 64-bit host and device pointer widths");
+    invalid(path, "CUDA profile v2.4 requires matching 64-bit host and device pointer widths");
   }
   const hostDataLayout = boundedString(field(host, "dataLayout", hostPath), `${hostPath}.dataLayout`, 1_024);
   const deviceDataLayout = boundedString(field(device, "dataLayout", devicePath), `${devicePath}.dataLayout`, 1_024);
