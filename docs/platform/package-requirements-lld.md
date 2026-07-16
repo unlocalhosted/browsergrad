@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-15
+- **Last reviewed:** 2026-07-16
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -583,6 +583,19 @@ Compilation may use one of three explicit deployment modes:
 | **Trusted compiler service** | A sandboxed service processes source and returns a signed or hash-addressed frontend/semantic artifact. Source-upload and retention policy are explicit. |
 | **Ahead-of-time artifact** | A build tool emits a versioned artifact consumed later by the browser. The artifact retains source maps and provenance. |
 
+Portable product flow:
+
+```text
+C++/CUDA/CuTe source -> Clang-WASM browser worker -> verified frontend artifact
+  -> shared semantics -> CPU reference or WGSL/WebGPU execution
+```
+
+Optional parity flow:
+
+```text
+native/Docker CI producer -> same verified frontend artifact -> parity policy
+```
+
 For the portable BrowserGrad product, the browser-local frontend is the
 primary Gate 3 path. A normal user MUST be able to compile a supported,
 profile-pinned C++/CuTe source unit in the browser without Docker, a native
@@ -591,8 +604,9 @@ profile MUST run the pinned CUDA-capable Clang frontend as WASM in a dedicated
 worker, use the same closed virtual-filesystem and artifact contracts as every
 other producer, and enforce explicit memory, work, output, and cancellation
 limits. Clang-WASM performs source analysis and emits the frontend artifact; it
-does not execute a user-produced native binary. BrowserGrad executes the
-portable meaning only after verified lowering to its reference or WebGPU
+does not execute a user-produced native binary. Only the Clang frontend runs as
+WASM. BrowserGrad does not link or execute user C++ as a WASM program; verified
+portable semantics execute only through the CPU reference or WGSL/WebGPU
 backend.
 
 Trusted-service and AOT producers remain valid optional protocol modes. A
@@ -1348,15 +1362,16 @@ Each migration stage MUST delete an adapter, narrow its allowed callers, or make
 its retirement gate measurably closer. Adding only new handlers, special cases,
 or capability errors is not migration progress.
 
-## Current-State Corrections
+## Historical Migration-Baseline Corrections
 
-This is a migration snapshot reviewed on 2026-07-15, not the generated
-capability manifest.
+This section preserves the migration baseline reviewed on 2026-07-15. It is
+not current implementation status or the generated capability manifest. The
+implementation ledger records current gate truth.
 
-These are gaps in the current implementation, not achievements to paper over
-with broader acceptance or better wording:
+These were baseline gaps, not achievements to paper over with broader
+acceptance or better wording:
 
-| Area | Current state | Required before stronger claim |
+| Area | Baseline state | Required before stronger claim |
 | --- | --- | --- |
 | Shared semantic core | No `browsergrad-semantic-core` package or canonical cross-package wire schema exists. | L1/L2 schemas, validators, canonical serialization, and two-consumer adoption. |
 | C++/CuTe | Shipping compiler is CUDA-lite with limited scalar/static-layout handling, not a CUDA-capable C++/CuTe frontend. | CUTE-001 through CUTE-007. |
