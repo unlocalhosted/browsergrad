@@ -14,6 +14,10 @@ import { unwrapPreparedCppCuteFrontendProfile } from "../../src/cpp_cute_fronten
 import type { CppCuteFrontendPayloadV1 } from "../../src/cpp_cute_frontend_types.js";
 import {
   createCppCuteAotReceiptFixture,
+  PINNED_CPP_CUTE_AOT_INVOCATION_ID,
+  PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH,
+  PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256,
+  PINNED_CPP_CUTE_AOT_RECEIPT_ID,
 } from "./support/cpp_cute_aot_receipt_fixtures.js";
 import {
   createCppCuteProvenanceFixture,
@@ -52,10 +56,10 @@ describe("C++/CuTe AOT runner receipt", () => {
       receiptByteLength: verified.receiptByteLength,
       invocationId: verified.invocationId,
     }).toEqual({
-      receiptId: "bg.cpp.aot-receipt.sha256.a86dec1663f1193b156afabfea57940b72baf8d5b5b6dc557226746e34022dcd",
-      receiptBytesSha256: "1226f1301b58046ca2b801d4c286b769c6bcc3794aa516a86184ad8e42300e24",
-      receiptByteLength: "3837",
-      invocationId: "bg.cpp.aot-invocation.sha256.edaa38ee38a27d469fe381d1e217695f1e15cecd69c2765b11022c60119dea7b",
+      receiptId: PINNED_CPP_CUTE_AOT_RECEIPT_ID,
+      receiptBytesSha256: PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256,
+      receiptByteLength: PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH,
+      invocationId: PINNED_CPP_CUTE_AOT_INVOCATION_ID,
     });
     expect(record.job).toBe(fixture.job);
     expect(record.profile).toBe(fixture.profile);

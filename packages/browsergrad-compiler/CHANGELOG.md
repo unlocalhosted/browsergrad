@@ -28,6 +28,13 @@
   and structural receipt verification from strict receipt-byte authority. A
   future attestation must consume the byte-origin receipt resource; this change
   alone does not establish producer trust or execution.
+- Requires detached provenance to consume that strict receipt resource and bind
+  its content address, raw digest/length, pre-run job/invocation, and exact
+  output manifest. Signed source, runner, toolchain, container, and sandbox
+  facts are derived from the receipt rather than repeated profile declarations.
+- Removes caller-supplied artifact/profile objects from semantic authorization.
+  The authorized artifact is now the exact strict-decoded resource owned by the
+  authenticated receipt; rejected artifacts remain attestable but cannot lower.
 
 ## 0.2.0
 

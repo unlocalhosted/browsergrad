@@ -47,6 +47,12 @@ import {
 
 const wire = (value: number | bigint): WireU64 => parseWireU64(String(value));
 
+export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.50a323388062d6cd80fcacd23743ae5eb5b061084e478b77bbf86e7bbe19ec3b";
+export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.edaa38ee38a27d469fe381d1e217695f1e15cecd69c2765b11022c60119dea7b";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.a86dec1663f1193b156afabfea57940b72baf8d5b5b6dc557226746e34022dcd";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "1226f1301b58046ca2b801d4c286b769c6bcc3794aa516a86184ad8e42300e24";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH = "3837";
+
 export interface CppCuteAotReceiptFixture {
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly artifact: VerifiedCppCuteFrontendArtifact;

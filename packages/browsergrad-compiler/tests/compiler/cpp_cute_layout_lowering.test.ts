@@ -216,7 +216,7 @@ describe("authorized C++/CuTe layout lowering", () => {
     });
 
     const extraEntryId = `bg.cpp.entry.sha256.${"f".repeat(64)}`;
-    const fixture = await createAuthorizedCppCuteProvenanceFixture({
+    await expect(createAuthorizedCppCuteProvenanceFixture({
       mutatePayload: (payload) => {
         const entries = payload.entries as CppCuteFrontendPayloadV1["entries"] & Array<Record<string, unknown>>;
         entries.push({
@@ -229,10 +229,9 @@ describe("authorized C++/CuTe layout lowering", () => {
         });
         (payload.outcome as unknown as { selectedEntryIds: string[] }).selectedEntryIds.push(extraEntryId);
       },
-    });
-    await expect(lower(fixture.authorization)).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-ENTRY",
-      path: "$.artifact.outcome.selectedEntryIds",
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH",
+      path: "$.artifact.payload.outcome",
     });
   });
 

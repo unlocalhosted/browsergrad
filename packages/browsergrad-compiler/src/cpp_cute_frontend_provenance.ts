@@ -15,13 +15,20 @@ import {
 import {
   CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE,
   unwrapPreparedCppCuteFrontendProfile,
-  type CppCuteFrontendExtractionLimits,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
 import {
   unwrapVerifiedCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
 } from "./cpp_cute_frontend_artifact.js";
+import {
+  unwrapVerifiedCppCuteAotRunnerReceipt,
+  unwrapVerifiedCppCuteAotRunnerReceiptResource,
+  type VerifiedCppCuteAotRunnerReceipt,
+  type VerifiedCppCuteAotRunnerReceiptRecord,
+  type VerifiedCppCuteAotRunnerReceiptResource,
+} from "./cpp_cute_aot_receipt.js";
+import { unwrapPreparedCppCuteAotJob } from "./cpp_cute_aot_job.js";
 
 export const CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA = "browsergrad.compiler.cpp-cute.attestation-trust-store";
 export const CPP_CUTE_FRONTEND_PROVENANCE_MAJOR = 1;
@@ -37,6 +44,9 @@ export const CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE = "application/vnd.in-toto+json
  */
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
+const AOT_JOB_ID = /^bg\.cpp\.aot-job\.sha256\.[0-9a-f]{64}$/u;
+const AOT_RECEIPT_ID = /^bg\.cpp\.aot-receipt\.sha256\.[0-9a-f]{64}$/u;
+const AOT_INVOCATION_ID = /^bg\.cpp\.aot-invocation\.sha256\.[0-9a-f]{64}$/u;
 const SHA256_KEY_ID = /^sha256:[0-9a-f]{64}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const PREPARED_TRUST_STORES = new WeakMap<object, PreparedCppCuteAttestationTrustStoreRecord>();
@@ -129,6 +139,10 @@ export interface CppCuteProvenanceRunV1 extends JsonObject {
   readonly invocationId: string;
   readonly invocationManifestSha256: string;
   readonly outputManifestSha256: string;
+  readonly jobId: string;
+  readonly receiptId: string;
+  readonly receiptBytesSha256: string;
+  readonly receiptByteLength: WireU64;
   readonly outcome: "succeeded";
   readonly exitCode: 0;
 }
@@ -177,6 +191,11 @@ export interface VerifiedCppCuteFrontendAttestation {
   readonly artifactHash: string;
   readonly artifactBytesSha256: string;
   readonly artifactByteLength: WireU64;
+  readonly receiptId: string;
+  readonly receiptBytesSha256: string;
+  readonly receiptByteLength: WireU64;
+  readonly jobId: string;
+  readonly invocationManifestSha256: string;
   readonly profileHash: string;
   readonly trustStoreHash: string;
   readonly sourceRepository: string;
@@ -185,6 +204,8 @@ export interface VerifiedCppCuteFrontendAttestation {
 
 interface VerifiedCppCuteFrontendAttestationRecord {
   readonly provenance: CppCuteFrontendProvenanceV1;
+  readonly receiptResource: VerifiedCppCuteAotRunnerReceiptResource;
+  readonly receipt: VerifiedCppCuteAotRunnerReceipt;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly statementHash: string;
@@ -198,6 +219,11 @@ export interface AuthorizedCppCuteFrontendArtifact {
   readonly artifactHash: string;
   readonly artifactBytesSha256: string;
   readonly artifactByteLength: WireU64;
+  readonly receiptId: string;
+  readonly receiptBytesSha256: string;
+  readonly receiptByteLength: WireU64;
+  readonly jobId: string;
+  readonly invocationManifestSha256: string;
   readonly profileHash: string;
   readonly sourceSetSha256: string;
   readonly statementHash: string;
@@ -207,8 +233,6 @@ export interface AuthorizedCppCuteFrontendArtifact {
 }
 
 export interface AuthorizeCppCuteFrontendArtifactRequest {
-  readonly artifact: VerifiedCppCuteFrontendArtifact;
-  readonly profile: PreparedCppCuteFrontendProfile;
   readonly attestation: VerifiedCppCuteFrontendAttestation;
   readonly expectedProfileHash: string;
   readonly expectedSourceSetSha256: string;
@@ -300,8 +324,7 @@ export async function prepareCppCuteAttestationTrustStore(
 export async function verifyCppCuteFrontendAttestation(
   value: unknown,
   request: {
-    readonly artifact: VerifiedCppCuteFrontendArtifact;
-    readonly profile: PreparedCppCuteFrontendProfile;
+    readonly receipt: VerifiedCppCuteAotRunnerReceiptResource;
     readonly trustStore: PreparedCppCuteAttestationTrustStore;
     readonly limits?: Partial<DecodeLimits>;
     readonly signal?: AbortSignal;
@@ -310,8 +333,12 @@ export async function verifyCppCuteFrontendAttestation(
   throwIfAborted(request.signal);
   assertJsonValue(value, request.limits === undefined ? {} : { limits: request.limits });
   const { provenance, statement, payloadBytes } = parseProvenance(value, request.limits);
-  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(request.artifact);
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(request.profile);
+  const receipt = unwrapVerifiedCppCuteAotRunnerReceiptResource(request.receipt);
+  const receiptRecord = unwrapVerifiedCppCuteAotRunnerReceipt(receipt);
+  const artifact = receiptRecord.artifact;
+  const profile = receiptRecord.profile;
+  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
+  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
   const trustStoreRecord = unwrapTrustStore(request.trustStore);
   if (trustStoreRecord.trustStoreHash !== profileRecord.profile.deployment.provenance.trustStoreSha256) {
     policyMismatch("$.trustStore", "prepared trust store differs from profile-pinned trust anchor");
@@ -363,7 +390,7 @@ export async function verifyCppCuteFrontendAttestation(
       "authenticated builder is not allowlisted for this key and prepared profile",
     );
   }
-  await verifyStatementBindings(statement, request.artifact, artifactRecord, request.profile, profileRecord);
+  await verifyStatementBindings(statement, receipt, receiptRecord, artifactRecord, profileRecord);
   throwIfAborted(request.signal);
   const statementHash = await hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.frontend-provenance-statement.v1",
@@ -376,6 +403,11 @@ export async function verifyCppCuteFrontendAttestation(
     artifactHash: predicate.artifact.artifactHash,
     artifactBytesSha256: predicate.artifact.artifactBytesSha256,
     artifactByteLength: predicate.artifact.artifactByteLength,
+    receiptId: receipt.receiptId,
+    receiptBytesSha256: receipt.receiptBytesSha256,
+    receiptByteLength: receipt.receiptByteLength,
+    jobId: receipt.jobId,
+    invocationManifestSha256: receipt.invocationManifestSha256,
     profileHash: predicate.artifact.profileHash,
     trustStoreHash: trustStoreRecord.trustStoreHash,
     sourceRepository: predicate.source.repository,
@@ -383,8 +415,10 @@ export async function verifyCppCuteFrontendAttestation(
   }) as VerifiedCppCuteFrontendAttestation;
   VERIFIED_ATTESTATIONS.set(verified, Object.freeze({
     provenance,
-    artifact: request.artifact,
-    profile: request.profile,
+    receiptResource: request.receipt,
+    receipt,
+    artifact,
+    profile,
     statementHash,
     trustStoreHash: trustStoreRecord.trustStoreHash,
   }));
@@ -394,26 +428,28 @@ export async function verifyCppCuteFrontendAttestation(
 export function authorizeCppCuteFrontendArtifact(
   request: AuthorizeCppCuteFrontendArtifactRequest,
 ): AuthorizedCppCuteFrontendArtifact {
-  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(request.artifact);
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(request.profile);
   const attestationRecord = unwrapVerifiedAttestation(request.attestation);
-  if (request.artifact.outcome !== "accepted") {
+  const artifact = attestationRecord.artifact;
+  const profile = attestationRecord.profile;
+  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
+  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
+  if (artifact.outcome !== "accepted") {
     provenanceFailure(
       "BG-COMPILER-CPP-CUTE-PROVENANCE-ARTIFACT-REJECTED",
       "$.artifact.outcome",
       "rejected frontend artifact cannot receive semantic-lowering authority",
     );
   }
-  if (request.artifact.profileHash !== request.profile.profileHash) {
+  if (artifact.profileHash !== profile.profileHash) {
     subjectMismatch("$.artifact.profileHash", "artifact profile hash differs from prepared profile");
   }
-  if (request.profile.profileHash !== request.expectedProfileHash) {
+  if (profile.profileHash !== request.expectedProfileHash) {
     subjectMismatch("$.expectedProfileHash", "prepared profile differs from caller-pinned profile identity");
   }
-  if (request.artifact.headerSetSha256 !== request.profile.expectedHeaderSetSha256) {
+  if (artifact.headerSetSha256 !== profile.expectedHeaderSetSha256) {
     subjectMismatch("$.artifact.headerSetSha256", "artifact header closure differs from prepared profile");
   }
-  if (request.artifact.sourceSetSha256 !== request.expectedSourceSetSha256) {
+  if (artifact.sourceSetSha256 !== request.expectedSourceSetSha256) {
     subjectMismatch("$.expectedSourceSetSha256", "artifact source set differs from caller-pinned source manifest");
   }
   if (request.attestation.sourceRepository !== request.expectedSourceRepository) {
@@ -421,13 +457,6 @@ export function authorizeCppCuteFrontendArtifact(
   }
   if (canonicalJsonText(request.attestation.sourceRevision) !== canonicalJsonText(request.expectedSourceRevision)) {
     subjectMismatch("$.expectedSourceRevision", "attested source revision differs from expectation");
-  }
-  if (attestationRecord.artifact !== request.artifact || attestationRecord.profile !== request.profile) {
-    provenanceFailure(
-      "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED",
-      "$.attestation",
-      "attestation authority belongs to a different artifact or profile instance",
-    );
   }
   if (artifactRecord.envelope.producer.id !== profileRecord.profile.deployment.extractor.id ||
       artifactRecord.envelope.producer.version !== profileRecord.profile.deployment.extractor.version) {
@@ -440,19 +469,24 @@ export function authorizeCppCuteFrontendArtifact(
     profileRecord.profile.virtualFileSystem.includeRoots,
   );
   const authorized = Object.freeze({
-    artifactHash: request.artifact.artifactHash,
-    artifactBytesSha256: request.artifact.artifactBytesSha256,
-    artifactByteLength: request.artifact.artifactByteLength,
-    profileHash: request.profile.profileHash,
-    sourceSetSha256: request.artifact.sourceSetSha256,
+    artifactHash: artifact.artifactHash,
+    artifactBytesSha256: artifact.artifactBytesSha256,
+    artifactByteLength: artifact.artifactByteLength,
+    receiptId: request.attestation.receiptId,
+    receiptBytesSha256: request.attestation.receiptBytesSha256,
+    receiptByteLength: request.attestation.receiptByteLength,
+    jobId: request.attestation.jobId,
+    invocationManifestSha256: request.attestation.invocationManifestSha256,
+    profileHash: profile.profileHash,
+    sourceSetSha256: artifact.sourceSetSha256,
     statementHash: request.attestation.statementHash,
     trustStoreHash: request.attestation.trustStoreHash,
     builderId: request.attestation.builderId,
     sourceRevision: request.attestation.sourceRevision,
   }) as AuthorizedCppCuteFrontendArtifact;
   AUTHORIZED_ARTIFACTS.set(authorized, Object.freeze({
-    artifact: request.artifact,
-    profile: request.profile,
+    artifact,
+    profile,
     attestation: request.attestation,
   }));
   return authorized;
@@ -483,62 +517,6 @@ export function cppCuteFrontendProvenanceSigningBytes(
   statement: CppCuteFrontendProvenanceStatementV1,
 ): Uint8Array {
   return dsseSigningBytes(CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE, cppCuteFrontendProvenancePayloadBytes(statement));
-}
-
-export async function computeCppCuteProfileDependencyManifestHash(
-  profile: PreparedCppCuteFrontendProfile,
-): Promise<string> {
-  const record = unwrapPreparedCppCuteFrontendProfile(profile);
-  return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.profile-dependencies.v1",
-    dependencies: record.profile.toolchain.dependencies,
-  });
-}
-
-export async function computeCppCuteProfileLimitsHash(
-  limits: CppCuteFrontendExtractionLimits,
-): Promise<string> {
-  return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.extraction-limits.v1",
-    limits,
-  });
-}
-
-export async function computeCppCuteProvenanceOutputManifestHash(
-  artifact: VerifiedCppCuteFrontendArtifact,
-): Promise<string> {
-  return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.provenance-output.v1",
-    artifactId: artifact.artifactId,
-    artifactHash: artifact.artifactHash,
-    transportHash: artifact.transportHash,
-    artifactBytesSha256: artifact.artifactBytesSha256,
-    artifactByteLength: artifact.artifactByteLength,
-  });
-}
-
-export async function computeCppCuteProvenanceInvocationManifestHash(
-  artifact: VerifiedCppCuteFrontendArtifact,
-  profile: PreparedCppCuteFrontendProfile,
-  source: CppCuteProvenanceSourceV1,
-): Promise<string> {
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
-  return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.provenance-invocation.v1",
-    profileHash: profile.profileHash,
-    source,
-    inputs: {
-      sourceSetSha256: artifact.sourceSetSha256,
-      headerSetSha256: artifact.headerSetSha256,
-      inputClosureSha256: artifact.inputClosureSha256,
-    },
-    deployment: profileRecord.profile.deployment,
-    language: profileRecord.profile.language,
-    target: profileRecord.profile.target,
-    toolchain: profileRecord.profile.toolchain,
-    virtualFileSystem: profileRecord.profile.virtualFileSystem,
-    extractionLimits: profileRecord.profile.extractionLimits,
-  });
 }
 
 function parseTrustStore(value: JsonValue): CppCuteAttestationTrustStoreV1 {
@@ -735,7 +713,7 @@ function parseSandbox(value: JsonValue, path: string): CppCuteProvenanceSandboxV
 function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV1 {
   const object = closedObject(value, [
     "platform", "runnerId", "runnerVersion", "runnerBinarySha256", "invocationId", "invocationManifestSha256",
-    "outputManifestSha256", "outcome", "exitCode",
+    "outputManifestSha256", "jobId", "receiptId", "receiptBytesSha256", "receiptByteLength", "outcome", "exitCode",
   ], path);
   if (object.platform !== "linux/amd64") invalid(`${path}.platform`, "AOT v1 canonical producer platform is linux/amd64");
   if (object.outcome !== "succeeded" || object.exitCode !== 0) {
@@ -746,12 +724,16 @@ function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV1 {
     runnerId: boundedString(field(object, "runnerId", path), `${path}.runnerId`, 256),
     runnerVersion: boundedString(field(object, "runnerVersion", path), `${path}.runnerVersion`, 128),
     runnerBinarySha256: sha256(field(object, "runnerBinarySha256", path), `${path}.runnerBinarySha256`),
-    invocationId: boundedString(field(object, "invocationId", path), `${path}.invocationId`, 512),
+    invocationId: matchingString(field(object, "invocationId", path), `${path}.invocationId`, AOT_INVOCATION_ID, "invocation ID"),
     invocationManifestSha256: sha256(
       field(object, "invocationManifestSha256", path),
       `${path}.invocationManifestSha256`,
     ),
     outputManifestSha256: sha256(field(object, "outputManifestSha256", path), `${path}.outputManifestSha256`),
+    jobId: matchingString(field(object, "jobId", path), `${path}.jobId`, AOT_JOB_ID, "job ID"),
+    receiptId: matchingString(field(object, "receiptId", path), `${path}.receiptId`, AOT_RECEIPT_ID, "receipt ID"),
+    receiptBytesSha256: sha256(field(object, "receiptBytesSha256", path), `${path}.receiptBytesSha256`),
+    receiptByteLength: parseWireU64(field(object, "receiptByteLength", path), `${path}.receiptByteLength`),
     outcome: "succeeded",
     exitCode: 0,
   };
@@ -768,12 +750,16 @@ function parseSignature(value: JsonValue, path: string): CppCuteDsseSignatureV1 
 
 async function verifyStatementBindings(
   statement: CppCuteFrontendProvenanceStatementV1,
-  artifact: VerifiedCppCuteFrontendArtifact,
+  receipt: VerifiedCppCuteAotRunnerReceipt,
+  receiptRecord: VerifiedCppCuteAotRunnerReceiptRecord,
   artifactRecord: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>,
-  profile: PreparedCppCuteFrontendProfile,
   profileRecord: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>,
 ): Promise<void> {
   const predicate = statement.predicate;
+  const artifact = receiptRecord.artifact;
+  const profile = receiptRecord.profile;
+  const runnerReceipt = receiptRecord.receipt;
+  const job = unwrapPreparedCppCuteAotJob(receiptRecord.job).job;
   const expectedSubject: CppCuteProvenanceSubjectV1 = {
     artifactId: artifact.artifactId,
     artifactHash: artifact.artifactHash,
@@ -801,43 +787,44 @@ async function verifyStatementBindings(
   if (statement.predicateType !== configured.deployment.provenance.predicateType) {
     policyMismatch("$.payload.predicateType", "attestation predicate type differs from prepared profile policy");
   }
-  const dependencyManifestSha256 = await computeCppCuteProfileDependencyManifestHash(profile);
-  const limitsSha256 = await computeCppCuteProfileLimitsHash(configured.extractionLimits);
-  const outputManifestSha256 = await computeCppCuteProvenanceOutputManifestHash(artifact);
-  const invocationManifestSha256 = await computeCppCuteProvenanceInvocationManifestHash(
-    artifact,
-    profile,
-    predicate.source,
-  );
+  if (canonicalJsonText(predicate.source) !== canonicalJsonText(job.source)) {
+    subjectMismatch("$.payload.predicate.source", "attested source differs from the prepared job source");
+  }
   const expectedToolchain: CppCuteProvenanceToolchainV1 = {
-    extractorId: configured.deployment.extractor.id,
-    extractorVersion: configured.deployment.extractor.version,
-    extractorBuildId: configured.deployment.extractor.buildId,
-    extractorBinarySha256: configured.deployment.extractor.binarySha256,
-    compilerId: configured.toolchain.compiler.id,
-    compilerVersion: configured.toolchain.compiler.version,
-    compilerBinarySha256: configured.toolchain.compiler.binarySha256,
-    compilerBuildId: configured.toolchain.compiler.buildId,
-    containerManifestDigest: configured.deployment.container.manifestDigest,
-    dependencyManifestSha256,
+    extractorId: runnerReceipt.invocation.extractor.id,
+    extractorVersion: runnerReceipt.invocation.extractor.version,
+    extractorBuildId: runnerReceipt.invocation.extractor.buildId,
+    extractorBinarySha256: runnerReceipt.invocation.extractor.binarySha256,
+    compilerId: runnerReceipt.invocation.compiler.id,
+    compilerVersion: runnerReceipt.invocation.compiler.version,
+    compilerBinarySha256: runnerReceipt.invocation.compiler.binarySha256,
+    compilerBuildId: runnerReceipt.invocation.compiler.buildId,
+    containerManifestDigest: runnerReceipt.invocation.container.manifestDigest,
+    dependencyManifestSha256: runnerReceipt.invocation.dependencyManifestSha256,
   };
   if (canonicalJsonText(predicate.toolchain) !== canonicalJsonText(expectedToolchain)) {
     policyMismatch("$.payload.predicate.toolchain", "attested toolchain differs from prepared profile");
   }
-  if (predicate.sandbox.contractId !== configured.deployment.contractId ||
-      predicate.sandbox.policySha256 !== configured.deployment.sandboxPolicySha256 ||
-      predicate.sandbox.limitsSha256 !== limitsSha256) {
-    policyMismatch("$.payload.predicate.sandbox", "attested sandbox policy or limits differ from prepared profile");
+  if (canonicalJsonText(predicate.sandbox) !== canonicalJsonText(runnerReceipt.invocation.sandbox)) {
+    policyMismatch("$.payload.predicate.sandbox", "attested sandbox facts differ from the verified runner receipt");
   }
-  const expectedRunner = configured.deployment.runner;
-  if (predicate.run.platform !== configured.deployment.container.platform ||
-      predicate.run.runnerId !== expectedRunner.id || predicate.run.runnerVersion !== expectedRunner.version ||
-      predicate.run.runnerBinarySha256 !== expectedRunner.binarySha256 ||
-      predicate.run.invocationManifestSha256 !== invocationManifestSha256) {
-    policyMismatch("$.payload.predicate.run", "attested runner or invocation manifest differs from prepared profile");
-  }
-  if (predicate.run.outputManifestSha256 !== outputManifestSha256) {
-    subjectMismatch("$.payload.predicate.run.outputManifestSha256", "attested output manifest differs from verified artifact");
+  const expectedRun: CppCuteProvenanceRunV1 = {
+    platform: runnerReceipt.invocation.container.platform,
+    runnerId: runnerReceipt.invocation.runner.id,
+    runnerVersion: runnerReceipt.invocation.runner.version,
+    runnerBinarySha256: runnerReceipt.invocation.runner.binarySha256,
+    invocationId: runnerReceipt.invocation.invocationId,
+    invocationManifestSha256: runnerReceipt.invocation.invocationManifestSha256,
+    outputManifestSha256: runnerReceipt.output.outputManifestSha256,
+    jobId: receipt.jobId,
+    receiptId: receipt.receiptId,
+    receiptBytesSha256: receipt.receiptBytesSha256,
+    receiptByteLength: receipt.receiptByteLength,
+    outcome: "succeeded",
+    exitCode: 0,
+  };
+  if (canonicalJsonText(predicate.run) !== canonicalJsonText(expectedRun)) {
+    subjectMismatch("$.payload.predicate.run", "attested run differs from the exact verified runner receipt resource");
   }
   if (artifactRecord.envelope.producer.id !== configured.deployment.extractor.id ||
       artifactRecord.envelope.producer.version !== configured.deployment.extractor.version) {
@@ -1039,6 +1026,12 @@ function boundedString(value: JsonValue, path: string, maximumBytes: number): st
 function sha256(value: JsonValue, path: string): string {
   const text = stringValue(value, path);
   if (!SHA256_HEX.test(text)) invalid(path, "SHA-256 must be 64 lowercase hexadecimal digits");
+  return text;
+}
+
+function matchingString(value: JsonValue, path: string, pattern: RegExp, name: string): string {
+  const text = boundedString(value, path, 1_024);
+  if (!pattern.test(text)) invalid(path, `${name} has invalid syntax`);
   return text;
 }
 
