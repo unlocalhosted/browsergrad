@@ -29,7 +29,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("eeda4ccb6334a81bac8fd4a4e99475041eb72e5528670767cc59bb78692b68ee");
+    expect(first.profileHash).toBe("d3dba043b28ea0e22e02bd3f23c1196963eedf669dcb561e7048b4f9c2bef945");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(Object.isFrozen(first)).toBe(true);
@@ -132,11 +132,11 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("350b7bf56b2f416f2083aed62e4444ad72b1e1aad2d8c0f1eb90d2a25fff1dda");
+    expect(first.profileHash).toBe("8bfe58471daae2033cea7165ca5a4322c6816c6a98f4f5b20303684e26fc147c");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
-    expect(first.compilationContractHash).toBe("73172738b46f28fac64e958ff1bc11c901aa0a35494c36cb56f14f403fc47e77");
+    expect(first.compilationContractHash).toBe("8a5f5856e3cf36583ac14ba1e07e7d4a36ffde6e2828df67de8e4e78a469a9a8");
     const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
     expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
     expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
@@ -334,7 +334,7 @@ describe("C++/CuTe frontend profile", () => {
     await expectProfileError(value, "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION", "$.version.major");
 
     const staleMinor = cloneCppCuteProfileInput();
-    staleMinor["version"] = { major: 2, minor: 0 };
+    staleMinor["version"] = { major: 2, minor: 1 };
     await expectProfileError(
       staleMinor,
       "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION",
@@ -430,6 +430,16 @@ describe("C++/CuTe frontend profile", () => {
     const trustDeployment = trust["deployment"] as Record<string, unknown>;
     (trustDeployment["provenance"] as Record<string, unknown>)["trustStoreSha256"] = "not-a-digest";
     await expectProfileError(trust, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.deployment.provenance.trustStoreSha256");
+
+    const stalePredicate = cloneCppCuteProfileInput();
+    const stalePredicateDeployment = stalePredicate["deployment"] as Record<string, unknown>;
+    (stalePredicateDeployment["provenance"] as Record<string, unknown>)["predicateType"] =
+      "https://browsergrad.dev/provenance/cpp-cute-aot/v2";
+    await expectProfileError(
+      stalePredicate,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.provenance.predicateType",
+    );
 
     const builder = cloneCppCuteProfileInput();
     const builderDeployment = builder["deployment"] as Record<string, unknown>;

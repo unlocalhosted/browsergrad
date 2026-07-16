@@ -24,10 +24,10 @@ describe("C++/CuTe execution-environment authority", () => {
   it("strictly authorizes one immutable canonical environment for one profile", async () => {
     const fixture = await createCppCuteAotExecutionEnvironmentFixture();
     expect(fixture.environment).toMatchObject({
-      manifestId: "bg.cpp.execution-environment.sha256.e6f5ff1a9196858230bb274c410cdfc9e5881eaf7c96d2f29aca7e4e5a3d963a",
-      manifestSha256: "4260949ce2950596b2b74f192c1a4e20895a9b306ec645309c0ff1ce032689b8",
+      manifestId: "bg.cpp.execution-environment.sha256.770ae1cb99dc7802695a1e312b170ac7bded5828f77e986c86ba20cf94665f00",
+      manifestSha256: "c4b4a24ad2baab471945c0133766036837e12a18743a86dc9406e9df723b6d42",
       manifestByteLength: "6588",
-      bodySha256: "e6f5ff1a9196858230bb274c410cdfc9e5881eaf7c96d2f29aca7e4e5a3d963a",
+      bodySha256: "770ae1cb99dc7802695a1e312b170ac7bded5828f77e986c86ba20cf94665f00",
       profileHash: fixture.profile.profileHash,
     });
     const record = unwrapPreparedCppCuteAotExecutionEnvironment(fixture.environment);

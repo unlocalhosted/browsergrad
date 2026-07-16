@@ -13,7 +13,7 @@ import type {
 } from "../../src/cpp_cute_frontend_authorization.js";
 import type {
   CppCuteAffineLayoutFactV1,
-  CppCuteFrontendPayloadV2,
+  CppCuteFrontendPayloadV3,
 } from "../../src/cpp_cute_frontend_types.js";
 import {
   CPP_CUTE_FIXTURE_INTRINSIC_FACT_ID,
@@ -52,7 +52,7 @@ function trace(lowered: LoweredCppCuteLayoutEntry, coordinates: readonly string[
   return traceLoweredCppCuteLayoutCoordinate(lowered, { coordinates: coordinates.map(wire) });
 }
 
-function mutableLayoutFact(payload: CppCuteFrontendPayloadV2): Record<string, unknown> {
+function mutableLayoutFact(payload: CppCuteFrontendPayloadV3): Record<string, unknown> {
   const fact = payload.facts.find((candidate) => candidate.kind === "affine-layout");
   if (fact === undefined) throw new Error("fixture lost affine layout fact");
   return fact as unknown as Record<string, unknown>;
@@ -225,7 +225,7 @@ describe("authorized C++/CuTe layout lowering", () => {
     const extraEntryId = `bg.cpp.entry.sha256.${"f".repeat(64)}`;
     await expect(createAuthorizedCppCuteProvenanceFixture({
       mutatePayload: (payload) => {
-        const entries = payload.entries as CppCuteFrontendPayloadV2["entries"] & Array<Record<string, unknown>>;
+        const entries = payload.entries as CppCuteFrontendPayloadV3["entries"] & Array<Record<string, unknown>>;
         entries.push({
           entryId: extraEntryId,
           kind: "layout",
@@ -237,8 +237,8 @@ describe("authorized C++/CuTe layout lowering", () => {
         (payload.outcome as unknown as { selectedEntryIds: string[] }).selectedEntryIds.push(extraEntryId);
       },
     })).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH",
-      path: "$.artifact.payload.outcome",
+      code: "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-SELECTION-MISMATCH",
+      path: "$.artifact.outcome.selectedEntryIds",
     });
   });
 
@@ -247,7 +247,7 @@ describe("authorized C++/CuTe layout lowering", () => {
       mutatePayload: (payload) => {
         const original = payload.facts.find((fact) => fact.kind === "affine-layout") as CppCuteAffineLayoutFactV1;
         const duplicateFactId = `bg.cpp.fact.sha256.${"f".repeat(64)}`;
-        (payload.facts as CppCuteFrontendPayloadV2["facts"] & CppCuteAffineLayoutFactV1[]).push({
+        (payload.facts as CppCuteFrontendPayloadV3["facts"] & CppCuteAffineLayoutFactV1[]).push({
           ...structuredClone(original),
           factId: duplicateFactId,
         });

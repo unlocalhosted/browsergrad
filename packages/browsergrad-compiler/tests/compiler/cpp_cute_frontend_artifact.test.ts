@@ -21,6 +21,7 @@ import {
   cloneCppCuteArtifactInput,
   CPP_CUTE_FIXTURE_DIAGNOSTIC_ID,
   CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
+  CPP_CUTE_FIXTURE_MAIN_FILE_ID,
   CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID,
   CPP_CUTE_FIXTURE_SPAN_ID,
   createCppCuteArtifactInput,
@@ -78,14 +79,14 @@ describe("C++/CuTe frontend artifact", () => {
       headerSetSha256: verified.headerSetSha256,
       inputClosureSha256: verified.inputClosureSha256,
     }).toEqual({
-      artifactHash: "f635757deb2eb8734826c7586f56e0884abe5778401fd0bb866542946c626de5",
+      artifactHash: "bbb05a48da31219963aa2fd4c1b6b5ce61239e832b63c624c8eb6d3b8c7f927c",
       sourceSetSha256: "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46",
       headerSetSha256: "a2974167b9230f04b7cf95e0d2e2d1304b9974ba90398fadd93d087b12d44b91",
       inputClosureSha256: "4df918262f32e5655e26fc72c7f9053e707c9612216733146d035d75870e2f7b",
     });
     expect(verified.transportHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(verified.artifactBytesSha256).toBe("f90119c4607edbb96a365f0e1160441c08a85759afcd6aaf402577529c10f09d");
-    expect(verified.artifactByteLength).toBe("14772");
+    expect(verified.artifactBytesSha256).toBe("02e00b21c65c9a25fcdcbe2a66c14ab4df96cb537708e9949e82e84faf3b8120");
+    expect(verified.artifactByteLength).toBe("15081");
     expect(verified.compilationContractHash).toBe(CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH);
     expect(verified.outcome).toBe("accepted");
     expect(record.envelope.payload.semanticPasses).toEqual([
@@ -492,6 +493,7 @@ describe("C++/CuTe frontend artifact", () => {
       targetTypeId: null,
       initializerExpressionId: null,
       origin: structuredClone(intType["origin"]),
+      identitySpanId: CPP_CUTE_FIXTURE_SPAN_ID,
       definitionKind: "declaration-only",
       linkage: "external",
       storageDuration: "none",
@@ -862,6 +864,59 @@ describe("C++/CuTe frontend artifact", () => {
     await expect(verifyCppCuteFrontendArtifact(macro)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
       path: "$.payload.macroExpansions",
+    });
+  });
+
+  it("requires exact nonempty declaration identity spans inside source origins", async () => {
+    const missing = await cloneCppCuteArtifactInput();
+    const missingDeclarations = (missing["payload"] as Record<string, unknown>)["declarations"] as Record<string, unknown>[];
+    const missingVariable = missingDeclarations.find((declaration) => declaration["kind"] === "variable");
+    if (missingVariable === undefined) throw new Error("fixture lost variable declaration");
+    missingVariable["identitySpanId"] = null;
+    await expect(verifyCppCuteFrontendArtifact(missing)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".identitySpanId"),
+    });
+
+    const empty = await cloneCppCuteArtifactInput();
+    const emptyPayload = empty["payload"] as Record<string, unknown>;
+    const emptyDeclarations = emptyPayload["declarations"] as Record<string, unknown>[];
+    const emptyVariable = emptyDeclarations.find((declaration) => declaration["kind"] === "variable");
+    const emptySpans = emptyPayload["spans"] as Record<string, unknown>[];
+    if (emptyVariable === undefined) throw new Error("fixture lost variable declaration");
+    const emptySpanId = stableId("span", "e");
+    emptySpans.push({
+      spanId: emptySpanId,
+      spelling: { fileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID, startByte: "1", endByte: "1" },
+      expansion: { fileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID, startByte: "1", endByte: "1" },
+      macroExpansionId: null,
+    });
+    emptyVariable["identitySpanId"] = emptySpanId;
+    await expect(verifyCppCuteFrontendArtifact(empty)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".identitySpanId"),
+    });
+
+    const outside = await cloneCppCuteArtifactInput();
+    const outsidePayload = outside["payload"] as Record<string, unknown>;
+    const outsideDeclarations = outsidePayload["declarations"] as Record<string, unknown>[];
+    const outsideVariable = outsideDeclarations.find((declaration) => declaration["kind"] === "variable");
+    const outsideSpans = outsidePayload["spans"] as Record<string, unknown>[];
+    const inputs = outsidePayload["inputs"] as Record<string, unknown>;
+    const files = inputs["files"] as Record<string, unknown>[];
+    const header = files.find((file) => file["role"] === "dependency-header");
+    if (outsideVariable === undefined || header === undefined) throw new Error("fixture lost identity-span inputs");
+    const outsideSpanId = stableId("span", "f");
+    outsideSpans.push({
+      spanId: outsideSpanId,
+      spelling: { fileId: header["fileId"], startByte: "0", endByte: "1" },
+      expansion: { fileId: header["fileId"], startByte: "0", endByte: "1" },
+      macroExpansionId: null,
+    });
+    outsideVariable["identitySpanId"] = outsideSpanId;
+    await expect(verifyCppCuteFrontendArtifact(outside)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".identitySpanId"),
     });
   });
 

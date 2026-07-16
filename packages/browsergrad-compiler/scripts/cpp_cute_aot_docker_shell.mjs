@@ -60,7 +60,8 @@ export class CppCuteAotDockerImageError extends Error {
 
 /**
  * @typedef {Readonly<{
- *   jobId: string;
+ *   runMetadataId: string;
+ *   requestId: string;
  *   profileHash: string;
  *   executionPlanSha256: string;
  *   imageReference: string;
@@ -355,7 +356,8 @@ async function observeWithProcess(
     runRootCleanup: "removed",
   });
   const observed = Object.freeze({
-    jobId: authorizedMetadata.jobId,
+    runMetadataId: authorizedMetadata.runMetadataId,
+    requestId: authorizedMetadata.requestId,
     profileHash: authorizedMetadata.profileHash,
     executionPlanSha256: authorizedMetadata.executionPlanSha256,
     imageReference: authorizedMetadata.imageReference,

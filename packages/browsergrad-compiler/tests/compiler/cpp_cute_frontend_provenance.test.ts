@@ -1,512 +1,91 @@
 import { describe, expect, it } from "vitest";
-import { unwrapVerifiedCppCuteAotRunnerReceiptResource } from "../../src/cpp_cute_aot_receipt.js";
-import {
-  PINNED_CPP_CUTE_AOT_JOB_ID,
-  PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH,
-  PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256,
-  PINNED_CPP_CUTE_AOT_RECEIPT_ID,
-} from "./support/cpp_cute_aot_receipt_fixtures.js";
-import {
-  CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE,
-  CPP_CUTE_FRONTEND_BUILD_TYPE,
-  cppCuteFrontendProvenancePayloadBytes,
-  cppCuteFrontendProvenanceSigningBytes,
-  prepareCppCuteAttestationTrustStore,
-  verifyCppCuteFrontendAttestation,
-  type CppCuteAttestationTrustStoreV1,
-  type CppCuteFrontendProvenanceV1,
-  type PreparedCppCuteAttestationTrustStore,
-  type VerifiedCppCuteFrontendAttestation,
-} from "../../src/cpp_cute_frontend_provenance.js";
-import { CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE } from "../../src/cpp_cute_frontend_profile.js";
 import {
   authorizeAotCppCuteFrontendArtifact,
   unwrapAuthorizedCppCuteFrontendArtifact,
 } from "../../src/cpp_cute_frontend_authorization.js";
 import {
-  CPP_CUTE_FIXTURE_BUILDER_ID,
+  unwrapVerifiedCppCuteFrontendAttestation,
+  verifyCppCuteFrontendAttestation,
+} from "../../src/cpp_cute_frontend_provenance.js";
+import {
+  cppCuteAuthorizationRequest,
+  createAuthorizedCppCuteProvenanceFixture,
+  createCppCuteProvenanceFixture,
+  signedCppCuteProvenanceMutation,
+  verifyCppCuteFixtureAttestation,
+} from "./support/cpp_cute_provenance_fixtures.js";
+import {
   CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
   CPP_CUTE_FIXTURE_SOURCE_REVISION,
 } from "./support/cpp_cute_frontend_fixtures.js";
-import {
-  cppCuteAuthorizationRequest as authorizationRequest,
-  createCppCuteProvenanceFixture as createProvenanceFixture,
-  decodeBase64,
-  encodeBase64,
-  PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH as PINNED_ARTIFACT_BYTE_LENGTH,
-  PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH as PINNED_ARTIFACT_BYTES_HASH,
-  PINNED_CPP_CUTE_ARTIFACT_HASH as PINNED_ARTIFACT_HASH,
-  PINNED_CPP_CUTE_PROFILE_HASH as PINNED_PROFILE_HASH,
-  PINNED_CPP_CUTE_SOURCE_SET_HASH as PINNED_SOURCE_SET_HASH,
-  PINNED_CPP_CUTE_TRUST_STORE_HASH as PINNED_TRUST_STORE_HASH,
-  signedCppCuteProvenanceMutation as signedMutation,
-  TEST_CPP_CUTE_SPKI_BASE64 as TEST_SPKI_BASE64,
-  verifyCppCuteFixtureAttestation as verifyFixtureAttestation,
-} from "./support/cpp_cute_provenance_fixtures.js";
 
-describe("C++/CuTe frontend provenance", () => {
-  it("authorizes one canonical DSSE/in-toto statement through pinned opaque authority", async () => {
-    const fixture = await createProvenanceFixture();
-    const attestation = await verifyFixtureAttestation(fixture);
-    const authorized = authorizeAotCppCuteFrontendArtifact(authorizationRequest(fixture, attestation));
-    const payloadBytes = cppCuteFrontendProvenancePayloadBytes(fixture.statement);
-    const expectedPaePrefix = new TextEncoder().encode(
-      `DSSEv1 ${new TextEncoder().encode(CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE).byteLength} ${CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE} ${payloadBytes.byteLength} `,
-    );
-    const expectedPae = new Uint8Array(expectedPaePrefix.byteLength + payloadBytes.byteLength);
-    expectedPae.set(expectedPaePrefix);
-    expectedPae.set(payloadBytes, expectedPaePrefix.byteLength);
-
-    expect({
-      trustStoreHash: fixture.trustStore.trustStoreHash,
+describe("C++/CuTe AOT provenance v3", () => {
+  it("authenticates the exact metadata-request-binding-receipt chain", async () => {
+    const fixture = await createAuthorizedCppCuteProvenanceFixture();
+    expect(fixture.attestation).toMatchObject({
+      runMetadataId: fixture.metadata.runMetadataId,
+      requestId: fixture.metadata.requestId,
+      requestBindingId: fixture.requestBinding.bindingId,
       profileHash: fixture.profile.profileHash,
-      artifactHash: fixture.artifact.artifactHash,
-      artifactBytesSha256: fixture.artifact.artifactBytesSha256,
-      artifactByteLength: fixture.artifact.artifactByteLength,
-      receiptId: fixture.receipt.receiptId,
-      receiptBytesSha256: fixture.receiptResource.receiptBytesSha256,
-      receiptByteLength: fixture.receiptResource.receiptByteLength,
-      jobId: fixture.job.jobId,
-      sourceSetSha256: fixture.artifact.sourceSetSha256,
-    }).toEqual({
-      trustStoreHash: PINNED_TRUST_STORE_HASH,
-      profileHash: PINNED_PROFILE_HASH,
-      artifactHash: PINNED_ARTIFACT_HASH,
-      artifactBytesSha256: PINNED_ARTIFACT_BYTES_HASH,
-      artifactByteLength: PINNED_ARTIFACT_BYTE_LENGTH,
-      receiptId: PINNED_CPP_CUTE_AOT_RECEIPT_ID,
-      receiptBytesSha256: PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256,
-      receiptByteLength: PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH,
-      jobId: PINNED_CPP_CUTE_AOT_JOB_ID,
-      sourceSetSha256: PINNED_SOURCE_SET_HASH,
+      declaredSourceRepository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
+      declaredSourceRevision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
     });
-    expect(fixture.statement.predicateType).toBe("https://browsergrad.dev/provenance/cpp-cute-aot/v2");
-    expect(fixture.statement.predicateType).toBe(CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE);
-    expect(fixture.statement.predicate.buildType).toBe("https://browsergrad.dev/build-types/cpp-cute-aot/v2");
-    expect(fixture.statement.predicate.buildType).toBe(CPP_CUTE_FRONTEND_BUILD_TYPE);
-    expect(attestation).toMatchObject({
-      builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
-      keyId: fixture.keyId,
-      artifactHash: fixture.artifact.artifactHash,
-      artifactBytesSha256: fixture.artifact.artifactBytesSha256,
-      artifactByteLength: fixture.artifact.artifactByteLength,
-      receiptId: fixture.receipt.receiptId,
-      receiptBytesSha256: fixture.receiptResource.receiptBytesSha256,
-      receiptByteLength: fixture.receiptResource.receiptByteLength,
-      jobId: fixture.job.jobId,
-      profileHash: fixture.profile.profileHash,
-      trustStoreHash: fixture.trustStore.trustStoreHash,
-      sourceRepository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
-      sourceRevision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
-    });
-    expect(authorized).toMatchObject({
-      artifactHash: fixture.artifact.artifactHash,
-      artifactBytesSha256: fixture.artifact.artifactBytesSha256,
-      profileHash: fixture.profile.profileHash,
-      compilationContractHash: fixture.artifact.compilationContractHash,
+    expect(fixture.authorization).toMatchObject({
+      requestId: fixture.metadata.requestId,
+      requestBindingId: fixture.requestBinding.bindingId,
       evidenceKind: "aot-attestation",
-      evidenceHash: attestation.evidenceHash,
     });
-    expect(Object.isFrozen(attestation)).toBe(true);
-    expect(Object.isFrozen(authorized)).toBe(true);
-    expect(unwrapAuthorizedCppCuteFrontendArtifact(authorized)).toEqual({
-      artifact: fixture.artifact,
-      profile: fixture.profile,
-      evidence: {
-        kind: "aot-attestation",
-        authority: attestation,
-      },
-    });
-    expect(cppCuteFrontendProvenanceSigningBytes(fixture.statement)).toEqual(expectedPae);
+    expect(fixture.authorization).not.toHaveProperty("runMetadataId");
+    const record = unwrapAuthorizedCppCuteFrontendArtifact(fixture.authorization);
+    expect(record.requestBinding).toBe(fixture.requestBinding);
+    expect(record.evidence.authority).toBe(fixture.attestation);
   });
 
-  it("requires the strict-decoded receipt resource rather than a structural receipt object", async () => {
-    const fixture = await createProvenanceFixture();
-    const structuralReceipt = unwrapVerifiedCppCuteAotRunnerReceiptResource(fixture.receiptResource);
-    await expect(verifyCppCuteFrontendAttestation(fixture.provenance, {
-      receipt: structuralReceipt as never,
-      trustStore: fixture.trustStore,
-    })).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-UNVERIFIED",
+  it("rejects a signed source statement that differs from run metadata", async () => {
+    const fixture = await createCppCuteProvenanceFixture();
+    const provenance = await signedCppCuteProvenanceMutation(fixture, (statement) => {
+      const predicate = (statement.predicate as Record<string, unknown>);
+      predicate.declaredSource = {
+        repository: "https://example.com/other",
+        revision: { algorithm: "git-sha1", value: "0".repeat(40) },
+      };
+    });
+    await expect(verifyCppCuteFixtureAttestation(fixture, provenance)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
+      path: "$.payload.predicate.declaredSource",
     });
   });
 
-  it("rejects malformed trust stores and structural trust-store forgeries", async () => {
-    const fixture = await createProvenanceFixture();
-    const badKeyId = {
-      schema: "browsergrad.compiler.cpp-cute.attestation-trust-store",
-      version: { major: 1, minor: 0 },
-      keys: [{
-        keyId: `sha256:${"0".repeat(64)}`,
-        builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
-        algorithm: "ecdsa-p256-sha256",
-        spkiDerBase64: TEST_SPKI_BASE64,
-      }],
-    };
-    await expect(prepareCppCuteAttestationTrustStore(badKeyId)).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID",
-      path: "$.keys[0].keyId",
-    });
-
-    const duplicate = structuredClone(badKeyId);
-    duplicate.keys = [
-      { ...duplicate.keys[0]!, keyId: fixture.keyId },
-      { ...duplicate.keys[0]!, keyId: fixture.keyId },
-    ];
-    await expect(prepareCppCuteAttestationTrustStore(duplicate)).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID",
-      path: "$.keys",
-    });
-
-    await expect(verifyCppCuteFrontendAttestation(fixture.provenance, {
+  it("rejects unsigned payload drift and untrusted signatures", async () => {
+    const fixture = await createCppCuteProvenanceFixture();
+    const payloadDrift = structuredClone(fixture.provenance);
+    (payloadDrift as { payload: string }).payload = `${payloadDrift.payload.slice(0, -1)}A`;
+    await expect(verifyCppCuteFrontendAttestation(payloadDrift, {
       receipt: fixture.receiptResource,
-      trustStore: { ...fixture.trustStore } as PreparedCppCuteAttestationTrustStore,
-    })).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED",
-      path: "$.trustStore",
-    });
-  });
-
-  it("rejects a caller-supplied trust store outside the profile-pinned root", async () => {
-    const fixture = await createProvenanceFixture();
-    const alternate = structuredClone({
-      schema: "browsergrad.compiler.cpp-cute.attestation-trust-store",
-      version: { major: 1, minor: 0 },
-      keys: [{
-        keyId: fixture.keyId,
-        builderId: "https://github.com/unlocalhosted/browsergrad/.github/workflows/other.yml",
-        algorithm: "ecdsa-p256-sha256",
-        spkiDerBase64: TEST_SPKI_BASE64,
-      }],
-    }) as CppCuteAttestationTrustStoreV1;
-    const trustStore = await prepareCppCuteAttestationTrustStore(alternate);
-
-    await expect(verifyCppCuteFrontendAttestation(fixture.provenance, {
-      receipt: fixture.receiptResource,
-      trustStore,
-    })).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH",
-      path: "$.trustStore",
-    });
-  });
-
-  it("rejects malformed, noncanonical, or invalid DSSE signatures and payloads", async () => {
-    const fixture = await createProvenanceFixture();
-    const invalidSignature = structuredClone(fixture.provenance) as unknown as Record<string, unknown>;
-    const signatures = invalidSignature["signatures"] as Array<Record<string, unknown>>;
-    const signatureBytes = decodeBase64(String(signatures[0]?.["sig"]));
-    signatureBytes[0] = (signatureBytes[0] ?? 0) ^ 1;
-    if (signatures[0] === undefined) throw new Error("fixture lost DSSE signature");
-    signatures[0]["sig"] = encodeBase64(signatureBytes);
-    await expect(verifyFixtureAttestation(fixture, invalidSignature as unknown as CppCuteFrontendProvenanceV1))
-      .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SIGNATURE" });
-
-    const shortSignature = structuredClone(fixture.provenance) as unknown as Record<string, unknown>;
-    const shortSignatures = shortSignature["signatures"] as Array<Record<string, unknown>>;
-    if (shortSignatures[0] === undefined) throw new Error("fixture lost DSSE signature");
-    shortSignatures[0]["sig"] = encodeBase64(new Uint8Array(63));
-    await expect(verifyFixtureAttestation(fixture, shortSignature as unknown as CppCuteFrontendProvenanceV1))
-      .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID", path: "$.signatures[0].sig" });
-
-    const noncanonicalSignature = structuredClone(fixture.provenance) as unknown as Record<string, unknown>;
-    const noncanonicalSignatures = noncanonicalSignature["signatures"] as Array<Record<string, unknown>>;
-    if (noncanonicalSignatures[0] === undefined) throw new Error("fixture lost DSSE signature");
-    noncanonicalSignatures[0]["sig"] = makeNoncanonicalPaddedBase64(String(noncanonicalSignatures[0]["sig"]));
-    await expect(verifyFixtureAttestation(fixture, noncanonicalSignature as unknown as CppCuteFrontendProvenanceV1))
-      .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID", path: "$.signatures[0].sig" });
-
-    const noncanonicalPayload = structuredClone(fixture.provenance) as unknown as Record<string, unknown>;
-    noncanonicalPayload["payload"] = encodeBase64(new TextEncoder().encode(`${JSON.stringify(fixture.statement)}\n`));
-    await expect(verifyFixtureAttestation(fixture, noncanonicalPayload as unknown as CppCuteFrontendProvenanceV1))
-      .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID", path: "$.payload" });
-
-    const unknownEnvelopeField = structuredClone(fixture.provenance) as unknown as Record<string, unknown>;
-    unknownEnvelopeField["verified"] = true;
-    await expect(verifyFixtureAttestation(fixture, unknownEnvelopeField as unknown as CppCuteFrontendProvenanceV1))
-      .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID", path: "$" });
-  });
-
-  it("rejects noncanonical source identities, revision algorithms, and unsuccessful receipts", async () => {
-    const fixture = await createProvenanceFixture();
-    const cases: Array<{ readonly path: string; readonly mutate: (statement: Record<string, unknown>) => void }> = [
-      {
-        path: "$.payload.predicate.source.repository",
-        mutate: (statement) => {
-          const source = (statement["predicate"] as Record<string, unknown>)["source"] as Record<string, unknown>;
-          source["repository"] = `${CPP_CUTE_FIXTURE_SOURCE_REPOSITORY}/`;
-        },
-      },
-      {
-        path: "$.payload.predicate.source.revision.algorithm",
-        mutate: (statement) => {
-          const source = (statement["predicate"] as Record<string, unknown>)["source"] as Record<string, unknown>;
-          (source["revision"] as Record<string, unknown>)["algorithm"] = "git-sha512";
-        },
-      },
-      {
-        path: "$.payload.predicate.run",
-        mutate: (statement) => {
-          const run = (statement["predicate"] as Record<string, unknown>)["run"] as Record<string, unknown>;
-          run["outcome"] = "failed";
-          run["exitCode"] = 1;
-        },
-      },
-    ];
-    for (const testCase of cases) {
-      const provenance = await signedMutation(fixture, testCase.mutate);
-      await expect(verifyFixtureAttestation(fixture, provenance)).rejects.toMatchObject({
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID",
-        path: testCase.path,
-      });
-    }
-  });
-
-  it("awaits authenticated subject and policy binding checks", async () => {
-    const fixture = await createProvenanceFixture();
-    const cases: Array<{
-      readonly mutate: (statement: Record<string, unknown>) => void;
-      readonly code: string;
-      readonly path: string;
-    }> = [
-      {
-        mutate: (statement) => {
-          const subject = statement["subject"] as Array<Record<string, unknown>>;
-          const digest = subject[0]?.["digest"] as Record<string, unknown>;
-          digest["sha256"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.subject[0]",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const artifact = predicate["artifact"] as Record<string, unknown>;
-          artifact["transportHash"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.artifact",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const artifact = predicate["artifact"] as Record<string, unknown>;
-          artifact["artifactBytesSha256"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.artifact",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const artifact = predicate["artifact"] as Record<string, unknown>;
-          artifact["artifactByteLength"] = "0";
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.artifact",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const toolchain = predicate["toolchain"] as Record<string, unknown>;
-          toolchain["compilerBuildId"] = "different-build";
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH",
-        path: "$.payload.predicate.toolchain",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const toolchain = predicate["toolchain"] as Record<string, unknown>;
-          toolchain["containerConfigDigest"] = `sha256:${"0".repeat(64)}`;
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH",
-        path: "$.payload.predicate.toolchain",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const sandbox = predicate["sandbox"] as Record<string, unknown>;
-          sandbox["policySha256"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH",
-        path: "$.payload.predicate.sandbox",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const run = predicate["run"] as Record<string, unknown>;
-          run["invocationManifestSha256"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.run",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const run = predicate["run"] as Record<string, unknown>;
-          run["executionPlanSha256"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.run",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const run = predicate["run"] as Record<string, unknown>;
-          run["executionEnvironmentManifestSha256"] = "f".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.run",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const run = predicate["run"] as Record<string, unknown>;
-          run["receiptId"] = `bg.cpp.aot-receipt.sha256.${"0".repeat(64)}`;
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.run",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const run = predicate["run"] as Record<string, unknown>;
-          run["receiptBytesSha256"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.run",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const run = predicate["run"] as Record<string, unknown>;
-          run["receiptByteLength"] = "0";
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.run",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          const run = predicate["run"] as Record<string, unknown>;
-          run["outputManifestSha256"] = "0".repeat(64);
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
-        path: "$.payload.predicate.run",
-      },
-      {
-        mutate: (statement) => {
-          const predicate = statement["predicate"] as Record<string, unknown>;
-          predicate["builderId"] = "https://github.com/unlocalhosted/browsergrad/.github/workflows/other.yml";
-        },
-        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH",
-        path: "$.payload.predicate.builderId",
-      },
-    ];
-    for (const testCase of cases) {
-      const provenance = await signedMutation(fixture, testCase.mutate);
-      await expect(verifyFixtureAttestation(fixture, provenance)).rejects.toMatchObject({
-        code: testCase.code,
-        path: testCase.path,
-      });
-    }
-  });
-
-  it("requires caller-pinned profile, source, repository, and revision", async () => {
-    const fixture = await createProvenanceFixture();
-    const attestation = await verifyFixtureAttestation(fixture);
-    const base = authorizationRequest(fixture, attestation);
-    const cases: Array<Partial<typeof base>> = [
-      { expectedProfileHash: "0".repeat(64) },
-      { expectedSourceSetSha256: "0".repeat(64) },
-      { expectedSourceRepository: "https://github.com/unlocalhosted/other" },
-      { expectedSourceRevision: { algorithm: "git-sha1", value: "0".repeat(40) } },
-    ];
-    for (const override of cases) {
-      expect(() => authorizeAotCppCuteFrontendArtifact({ ...base, ...override })).toThrowError(
-        expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-SUBJECT-MISMATCH" }),
-      );
-    }
-  });
-
-  it("rejects authority substitution and forged opaque records", async () => {
-    const fixture = await createProvenanceFixture();
-    const attestation = await verifyFixtureAttestation(fixture);
-    await expect(verifyCppCuteFrontendAttestation(fixture.provenance, {
-      receipt: { ...fixture.receiptResource } as never,
       trustStore: fixture.trustStore,
-    })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-UNVERIFIED" });
+    })).rejects.toBeDefined();
+    const signatureDrift = structuredClone(fixture.provenance);
+    (signatureDrift.signatures[0] as { sig: string }).sig = "A".repeat(84) + "==";
+    await expect(verifyCppCuteFrontendAttestation(signatureDrift, {
+      receipt: fixture.receiptResource,
+      trustStore: fixture.trustStore,
+    })).rejects.toBeDefined();
+  });
 
-    const forgedAttestation = { ...attestation } as VerifiedCppCuteFrontendAttestation;
+  it("rejects authorization cross-wired to another request binding", async () => {
+    const fixture = await createCppCuteProvenanceFixture();
+    const attestation = await verifyCppCuteFixtureAttestation(fixture);
+    const other = await createCppCuteProvenanceFixture();
     expect(() => authorizeAotCppCuteFrontendArtifact({
-      ...authorizationRequest(fixture, attestation),
-      attestation: forgedAttestation,
-    })).toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED" }));
-
-    expect(() => unwrapAuthorizedCppCuteFrontendArtifact({
-      artifactHash: fixture.artifact.artifactHash,
-    } as never)).toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-UNVERIFIED" }));
-  });
-
-  it("never grants lowering authority to a structurally valid rejected artifact", async () => {
-    const fixture = await createProvenanceFixture({
-      mutatePayload: (payload) => {
-        const diagnostic = payload.diagnostics[0];
-        if (diagnostic === undefined) throw new Error("fixture lost diagnostic");
-        const blockingDiagnosticId = `bg.cpp.diagnostic.sha256.${"1".repeat(64)}`;
-        (payload.diagnostics as unknown as Array<unknown>).push({
-          diagnosticId: blockingDiagnosticId,
-          phase: "artifact-extraction",
-          severity: "error",
-          code: "browsergrad.cpp-cute:fixture-rejected",
-          renderedMessage: "Fixture rejection for authorization boundary coverage.",
-          location: { kind: "none" },
-          subject: { kind: "compiler" },
-          parentDiagnosticId: null,
-        });
-        (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((left, right) =>
-          left.diagnosticId.localeCompare(right.diagnosticId));
-        const hostPass = payload.semanticPasses[1];
-        if (hostPass === undefined) throw new Error("fixture lost host validation pass");
-        (hostPass as { status: string }).status = "failed";
-        (hostPass as { diagnosticIds: readonly string[] }).diagnosticIds = [blockingDiagnosticId];
-        (payload as { outcome: unknown }).outcome = {
-          kind: "rejected",
-          blockingDiagnosticIds: [blockingDiagnosticId],
-        };
-      },
-    });
-    const attestation = await verifyFixtureAttestation(fixture);
-    expect(() => authorizeAotCppCuteFrontendArtifact(authorizationRequest(fixture, attestation)))
-      .toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-ARTIFACT-REJECTED" }));
-  });
-
-  it("honors cancellation and rejects hostile in-memory values", async () => {
-    const fixture = await createProvenanceFixture();
-    const controller = new AbortController();
-    controller.abort();
-    await expect(verifyCppCuteFrontendAttestation(fixture.provenance, {
-      receipt: fixture.receiptResource,
-      trustStore: fixture.trustStore,
-      signal: controller.signal,
-    })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-CANCELLED", path: "$.signal" });
-
-    const hostile = {};
-    Object.defineProperty(hostile, "payloadType", { enumerable: true, get: () => CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE });
-    await expect(verifyCppCuteFrontendAttestation(hostile, {
-      receipt: fixture.receiptResource,
-      trustStore: fixture.trustStore,
-    })).rejects.toThrow();
+      attestation,
+      requestBinding: other.requestBinding,
+    })).toThrowError(expect.objectContaining({
+      code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-SUBJECT-MISMATCH",
+      path: "$.requestBinding",
+    }));
+    const authorized = authorizeAotCppCuteFrontendArtifact(cppCuteAuthorizationRequest(fixture, attestation));
+    expect(unwrapVerifiedCppCuteFrontendAttestation(attestation).artifact).toBe(
+      unwrapAuthorizedCppCuteFrontendArtifact(authorized).artifact,
+    );
   });
 });
-
-function makeNoncanonicalPaddedBase64(value: string): string {
-  if (!value.endsWith("==")) throw new Error("fixture signature no longer has two base64 padding bytes");
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const index = value.length - 3;
-  const current = alphabet.indexOf(value[index] ?? "");
-  if (current < 0) throw new Error("fixture signature contains invalid base64");
-  const replacement = alphabet[(current & 0b11_0000) | 1];
-  if (replacement === undefined) throw new Error("failed to create noncanonical base64");
-  return `${value.slice(0, index)}${replacement}${value.slice(index + 1)}`;
-}

@@ -4,6 +4,7 @@ import {
   CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
   CppCuteFrontendRequestError,
   copyPreparedCppCuteFrontendSourceBytes,
+  copyPreparedCppCuteFrontendSourceSnapshots,
   deriveCppCuteFrontendEntryRequestId,
   deriveCppCuteFrontendRequestHash,
   deriveCppCuteFrontendSourceFileId,
@@ -22,6 +23,10 @@ import {
   unwrapPreparedCppCuteFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../src/cpp_cute_frontend_profile.js";
+import {
+  CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+} from "../../src/cpp_cute_frontend_types.js";
 import {
   createCppCuteBrowserProfileInput,
   createCppCuteProfileInput,
@@ -77,7 +82,10 @@ async function createRequestFixture(
     entryRequests: [entryRequest],
     expectedArtifact: {
       schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
-      version: { major: 2, minor: 0 },
+      version: {
+        major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+        minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+      },
     },
     limits: semanticLimits(profile),
   };
@@ -177,6 +185,13 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
     expect(new TextDecoder().decode(firstCopy)).toBe(HEADER_TEXT);
     firstCopy.fill(0);
     expect(new TextDecoder().decode(copyPreparedCppCuteFrontendSourceBytes(first, HEADER_PATH))).toBe(HEADER_TEXT);
+
+    const batch = copyPreparedCppCuteFrontendSourceSnapshots(first);
+    expect(batch.map((snapshot) => snapshot.virtualPath)).toEqual(record.request.files.map((file) => file.virtualPath));
+    batch[0]!.bytes.fill(0);
+    expect(copyPreparedCppCuteFrontendSourceSnapshots(first)[0]!.bytes).not.toEqual(batch[0]!.bytes);
+    expect(Object.isFrozen(batch)).toBe(true);
+    expect(Object.isFrozen(batch[0])).toBe(true);
   });
 
   it("keeps deployment producer identity and detached expectations outside request hash", async () => {
@@ -188,7 +203,7 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
     const plain = await prepareCppCuteFrontendRequest(aotProfile, aotFixture.input, aotFixture.snapshots);
     const detached = await prepareCppCuteFrontendRequest(browserProfile, browserFixture.input, browserFixture.snapshots, {
       detached: {
-        sourceProvenance: { statementSha256: "a".repeat(64) },
+        declaredSourceReference: { statementSha256: "a".repeat(64) },
         conformance: {
           expectedArtifactSha256: "b".repeat(64),
           expectedOpenedHeaderSetSha256: "c".repeat(64),
@@ -200,7 +215,7 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
     expect(detached.requestId).toBe(plain.requestId);
     expect(detached.requestHash).toBe(plain.requestHash);
     expect(detached.profileHash).not.toBe(plain.profileHash);
-    expect(detached.sourceProvenanceStatementSha256).toBe("a".repeat(64));
+    expect(detached.declaredSourceReferenceStatementSha256).toBe("a".repeat(64));
     expect(detached.conformanceAssertionSha256).toMatch(/^[0-9a-f]{64}$/u);
     const wireKeys = JSON.stringify(unwrapPreparedCppCuteFrontendRequest(detached).request);
     expect(wireKeys).not.toContain("repository");
@@ -415,17 +430,17 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
     await expectRequestError(
       prepareCppCuteFrontendRequest(fixture.profile, fixture.input, fixture.snapshots, {
         detached: {
-          sourceProvenance: { statementSha256: "a".repeat(64), repository: "https://example.test/repo" } as never,
+          declaredSourceReference: { statementSha256: "a".repeat(64), repository: "https://example.test/repo" } as never,
           conformance: null,
         },
       }),
       "BG-COMPILER-CPP-CUTE-REQUEST-INVALID",
-      "$.options.detached.sourceProvenance",
+      "$.options.detached.declaredSourceReference",
     );
 
     const first = await prepareCppCuteFrontendRequest(fixture.profile, fixture.input, fixture.snapshots, {
       detached: {
-        sourceProvenance: null,
+        declaredSourceReference: null,
         conformance: {
           expectedArtifactSha256: null,
           expectedOpenedHeaderSetSha256: "1".repeat(64),
@@ -435,7 +450,7 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
     });
     const second = await prepareCppCuteFrontendRequest(fixture.profile, fixture.input, fixture.snapshots, {
       detached: {
-        sourceProvenance: null,
+        declaredSourceReference: null,
         conformance: {
           expectedArtifactSha256: null,
           expectedOpenedHeaderSetSha256: "2".repeat(64),

@@ -64,7 +64,8 @@ export function buildCppCuteAotDockerCreateRequest(input: Readonly<{
   containerName: string;
   sessionNonce: string;
   imageReference: string;
-  jobId: string;
+  runMetadataId: string;
+  requestId: string;
   executionPlanSha256: string;
   memoryBytes: number;
   maxProcesses: number;

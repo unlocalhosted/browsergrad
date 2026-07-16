@@ -4,8 +4,8 @@ import type {
   CppCuteFrontendProfileV2,
 } from "./cpp_cute_frontend_profile.js";
 import type {
-  CppCuteFrontendPayloadV2,
-  CppCuteInputOwnerV2,
+  CppCuteFrontendPayloadV3,
+  CppCuteInputOwnerV3,
 } from "./cpp_cute_frontend_types.js";
 
 export interface CppCuteFrontendProfileBindingMismatch {
@@ -18,7 +18,7 @@ export interface CppCuteFrontendProfileBindingMismatch {
  * The caller retains ownership of its domain-specific error and authority type.
  */
 export function findCppCuteFrontendProfileBindingMismatch(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   profile: CppCuteFrontendProfileV2,
   compilationContractHash?: string,
 ): CppCuteFrontendProfileBindingMismatch | null {
@@ -122,7 +122,7 @@ export function findCppCuteFrontendProfileBindingMismatch(
 }
 
 export function findCppCutePreparedFrontendProfileBindingMismatch(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   profileRecord: PreparedCppCuteFrontendProfileRecord,
 ): CppCuteFrontendProfileBindingMismatch | null {
   return findCppCuteFrontendProfileBindingMismatch(
@@ -132,7 +132,7 @@ export function findCppCutePreparedFrontendProfileBindingMismatch(
   );
 }
 
-function sameOwner(left: CppCuteInputOwnerV2, right: CppCuteInputOwnerV2): boolean {
+function sameOwner(left: CppCuteInputOwnerV3, right: CppCuteInputOwnerV3): boolean {
   return canonicalizeJson(left) === canonicalizeJson(right);
 }
 

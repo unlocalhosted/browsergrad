@@ -29,7 +29,8 @@ const OCI_IMAGE_REFERENCE = /^[a-z0-9.-]+(?::[1-9][0-9]*)?(?:\/[a-z0-9]+(?:[._-]
 const CONTAINER_ID = /^[0-9a-f]{64}$/u;
 const CONTAINER_NAME = /^browsergrad-cpp-cute-aot-[0-9a-f]{32}$/u;
 const SESSION_NONCE = /^[0-9a-f]{32}$/u;
-const JOB_ID = /^bg\.cpp\.aot-job\.sha256\.[0-9a-f]{64}$/u;
+const RUN_METADATA_ID = /^bg\.cpp\.aot-run-metadata\.sha256\.[0-9a-f]{64}$/u;
+const REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const ABORTED_GETTER = Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
 const RUN_ROOT_PREFIX = "/tmp/browsergrad-cpp-cute-docker-";
@@ -164,7 +165,8 @@ export function buildCppCuteAotDockerImageInspectRequest(input) {
  *   containerName: string;
  *   sessionNonce: string;
  *   imageReference: string;
- *   jobId: string;
+ *   runMetadataId: string;
+ *   requestId: string;
  *   executionPlanSha256: string;
  *   memoryBytes: number;
  *   maxProcesses: number;
@@ -178,7 +180,7 @@ export function buildCppCuteAotDockerCreateRequest(input) {
     input,
     [
       "configDirectory", "containerIdFile", "containerName", "controlDirectory",
-      "executionPlanSha256", "homeDirectory", "imageReference", "jobId",
+      "executionPlanSha256", "homeDirectory", "imageReference", "requestId", "runMetadataId",
       "maxProcesses", "memoryBytes", "runRoot", "sessionNonce", "sourceDirectory",
       "seccompProfilePath",
     ],
@@ -228,11 +230,17 @@ export function buildCppCuteAotDockerCreateRequest(input) {
     OCI_IMAGE_REFERENCE,
     "expected canonical digest-qualified OCI image reference",
   );
-  const jobId = matchingString(
-    snapshot.jobId,
-    "$input.jobId",
-    JOB_ID,
-    "expected prepared AOT job ID",
+  const runMetadataId = matchingString(
+    snapshot.runMetadataId,
+    "$input.runMetadataId",
+    RUN_METADATA_ID,
+    "expected prepared AOT run-metadata ID",
+  );
+  const requestId = matchingString(
+    snapshot.requestId,
+    "$input.requestId",
+    REQUEST_ID,
+    "expected prepared frontend request ID",
   );
   const executionPlanSha256 = matchingString(
     snapshot.executionPlanSha256,
@@ -262,7 +270,8 @@ export function buildCppCuteAotDockerCreateRequest(input) {
     `--cidfile=${containerIdFile}`,
     `--label=browsergrad.owner=cpp-cute-aot`,
     `--label=browsergrad.session=${sessionNonce}`,
-    `--label=browsergrad.job=${jobId}`,
+    `--label=browsergrad.run-metadata=${runMetadataId}`,
+    `--label=browsergrad.request=${requestId}`,
     `--label=browsergrad.plan=${executionPlanSha256}`,
     `--hostname=${CPP_CUTE_AOT_CONTAINER_HOSTNAME}`,
     "--attach=stdout",

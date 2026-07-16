@@ -14,9 +14,9 @@ import {
 import type { DecodeLimits } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import type {
   CppCuteConstantV1,
-  CppCuteDeclarationV2,
+  CppCuteDeclarationV3,
   CppCuteExpressionV1,
-  CppCuteFrontendPayloadV2,
+  CppCuteFrontendPayloadV3,
   CppCuteHierarchyV1,
   CppCuteIntegerExprV1,
   CppCuteResolvedFactV1,
@@ -37,7 +37,7 @@ export interface VerifiedCppCuteInputHashes {
 }
 
 export async function verifyCppCuteFrontendPayload(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<VerifiedCppCuteInputHashes> {
   const indexes = buildIndexes(payload);
@@ -80,25 +80,25 @@ export async function verifyCppCuteFrontendPayload(
 }
 
 interface ArtifactIndexes {
-  readonly files: ReadonlyMap<string, CppCuteFrontendPayloadV2["inputs"]["files"][number]>;
-  readonly includeEdges: ReadonlyMap<string, CppCuteFrontendPayloadV2["inputs"]["includeEdges"][number]>;
-  readonly includeRoots: ReadonlyMap<string, CppCuteFrontendPayloadV2["inputs"]["includeRoots"][number]>;
-  readonly spans: ReadonlyMap<string, CppCuteFrontendPayloadV2["spans"][number]>;
-  readonly macros: ReadonlyMap<string, CppCuteFrontendPayloadV2["macroExpansions"][number]>;
+  readonly files: ReadonlyMap<string, CppCuteFrontendPayloadV3["inputs"]["files"][number]>;
+  readonly includeEdges: ReadonlyMap<string, CppCuteFrontendPayloadV3["inputs"]["includeEdges"][number]>;
+  readonly includeRoots: ReadonlyMap<string, CppCuteFrontendPayloadV3["inputs"]["includeRoots"][number]>;
+  readonly spans: ReadonlyMap<string, CppCuteFrontendPayloadV3["spans"][number]>;
+  readonly macros: ReadonlyMap<string, CppCuteFrontendPayloadV3["macroExpansions"][number]>;
   readonly types: ReadonlyMap<string, CppCuteResolvedTypeV1>;
   readonly constants: ReadonlyMap<string, CppCuteConstantV1>;
-  readonly declarations: ReadonlyMap<string, CppCuteDeclarationV2>;
-  readonly instantiations: ReadonlyMap<string, CppCuteFrontendPayloadV2["templateInstantiations"][number]>;
-  readonly resolutions: ReadonlyMap<string, CppCuteFrontendPayloadV2["overloadResolutions"][number]>;
-  readonly bodies: ReadonlyMap<string, CppCuteFrontendPayloadV2["functionBodies"][number]>;
+  readonly declarations: ReadonlyMap<string, CppCuteDeclarationV3>;
+  readonly instantiations: ReadonlyMap<string, CppCuteFrontendPayloadV3["templateInstantiations"][number]>;
+  readonly resolutions: ReadonlyMap<string, CppCuteFrontendPayloadV3["overloadResolutions"][number]>;
+  readonly bodies: ReadonlyMap<string, CppCuteFrontendPayloadV3["functionBodies"][number]>;
   readonly statements: ReadonlyMap<string, CppCuteStatementV1>;
   readonly expressions: ReadonlyMap<string, CppCuteExpressionV1>;
   readonly facts: ReadonlyMap<string, CppCuteResolvedFactV1>;
-  readonly entries: ReadonlyMap<string, CppCuteFrontendPayloadV2["entries"][number]>;
-  readonly diagnostics: ReadonlyMap<string, CppCuteFrontendPayloadV2["diagnostics"][number]>;
+  readonly entries: ReadonlyMap<string, CppCuteFrontendPayloadV3["entries"][number]>;
+  readonly diagnostics: ReadonlyMap<string, CppCuteFrontendPayloadV3["diagnostics"][number]>;
 }
 
-function buildIndexes(payload: CppCuteFrontendPayloadV2): ArtifactIndexes {
+function buildIndexes(payload: CppCuteFrontendPayloadV3): ArtifactIndexes {
   const statements = new Map<string, CppCuteStatementV1>();
   const expressions = new Map<string, CppCuteExpressionV1>();
   for (const [expressionIndex, expression] of payload.initializerExpressions.entries()) {
@@ -133,7 +133,7 @@ function buildIndexes(payload: CppCuteFrontendPayloadV2): ArtifactIndexes {
   };
 }
 
-function verifyInputClosure(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyInputClosure(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   const roots = payload.inputs.includeRoots;
   for (const [index, root] of roots.entries()) {
     if (root.ordinal !== index) invalid(`$.payload.inputs.includeRoots[${index}].ordinal`, "include-root ordinals must be contiguous and match search precedence");
@@ -216,8 +216,8 @@ function verifyInputClosure(payload: CppCuteFrontendPayloadV2, indexes: Artifact
 }
 
 function sameInputOwner(
-  left: CppCuteFrontendPayloadV2["inputs"]["files"][number]["owner"],
-  right: CppCuteFrontendPayloadV2["inputs"]["includeRoots"][number]["owner"],
+  left: CppCuteFrontendPayloadV3["inputs"]["files"][number]["owner"],
+  right: CppCuteFrontendPayloadV3["inputs"]["includeRoots"][number]["owner"],
 ): boolean {
   return left.kind === right.kind && (
     left.kind !== "dependency" || (right.kind === "dependency" && left.dependencyId === right.dependencyId)
@@ -228,7 +228,7 @@ function virtualPathContains(root: string, candidate: string): boolean {
   return root === "/" ? candidate.startsWith("/") && candidate !== "/" : candidate.startsWith(`${root}/`);
 }
 
-function verifySpans(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifySpans(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, span] of payload.spans.entries()) {
     const path = `$.payload.spans[${index}]`;
     verifyRange(span.spelling, `${path}.spelling`, indexes);
@@ -244,7 +244,7 @@ function verifySpans(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes
 }
 
 function verifyRange(
-  range: CppCuteFrontendPayloadV2["spans"][number]["spelling"],
+  range: CppCuteFrontendPayloadV3["spans"][number]["spelling"],
   path: string,
   indexes: ArtifactIndexes,
 ): void {
@@ -255,7 +255,7 @@ function verifyRange(
   if (start > end || end > length) invalid(path, "source range must be a bounded half-open byte range within its file");
 }
 
-function verifyMacroExpansions(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyMacroExpansions(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, macro] of payload.macroExpansions.entries()) {
     const path = `$.payload.macroExpansions[${index}]`;
     ref(indexes.spans, macro.definitionSpanId, `${path}.definitionSpanId`, "span");
@@ -274,7 +274,7 @@ function verifyMacroExpansions(payload: CppCuteFrontendPayloadV2, indexes: Artif
   );
 }
 
-function verifyTypes(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyTypes(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, type] of payload.types.entries()) {
     const path = `$.payload.types[${index}]`;
     verifyOrigin(type.origin, `${path}.origin`, indexes);
@@ -298,7 +298,7 @@ function verifyTypes(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes
   }
 }
 
-function verifyConstants(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyConstants(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, constant] of payload.constants.entries()) {
     const path = `$.payload.constants[${index}]`;
     ref(indexes.types, constant.typeId, `${path}.typeId`, "type");
@@ -316,11 +316,28 @@ function verifyConstants(payload: CppCuteFrontendPayloadV2, indexes: ArtifactInd
   }
 }
 
-function verifyDeclarations(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyDeclarations(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   uniqueValues(payload.declarations.map((declaration) => declaration.canonicalUsr), "$.payload.declarations", "canonical USR");
   for (const [index, declaration] of payload.declarations.entries()) {
     const path = `$.payload.declarations[${index}]`;
     verifyOrigin(declaration.origin, `${path}.origin`, indexes);
+    if (declaration.origin.kind === "source") {
+      if (declaration.identitySpanId === null) {
+        invalid(`${path}.identitySpanId`, "source declaration requires an identifier/declarator token span");
+      }
+      const identitySpan = ref(indexes.spans, declaration.identitySpanId, `${path}.identitySpanId`, "span");
+      const declarationSpan = ref(indexes.spans, declaration.origin.spanId, `${path}.origin.spanId`, "span");
+      if (wireIntegerToBigInt(identitySpan.spelling.startByte) === wireIntegerToBigInt(identitySpan.spelling.endByte) ||
+          wireIntegerToBigInt(identitySpan.expansion.startByte) === wireIntegerToBigInt(identitySpan.expansion.endByte)) {
+        invalid(`${path}.identitySpanId`, "declaration identity span must be nonempty");
+      }
+      if (!sourceRangeContains(declarationSpan.spelling, identitySpan.spelling) ||
+          !sourceRangeContains(declarationSpan.expansion, identitySpan.expansion)) {
+        invalid(`${path}.identitySpanId`, "declaration identity span must stay within declaration origin");
+      }
+    } else if (declaration.identitySpanId !== null) {
+      invalid(`${path}.identitySpanId`, "implicit declaration cannot claim a source identity span");
+    }
     if (declaration.lexicalParentId !== null) ref(indexes.declarations, declaration.lexicalParentId, `${path}.lexicalParentId`, "declaration");
     if (declaration.semanticParentId !== null) ref(indexes.declarations, declaration.semanticParentId, `${path}.semanticParentId`, "declaration");
     if (declaration.typeId !== null) ref(indexes.types, declaration.typeId, `${path}.typeId`, "type");
@@ -388,7 +405,16 @@ function verifyDeclarations(payload: CppCuteFrontendPayloadV2, indexes: Artifact
   );
 }
 
-function verifyDeclarationInitializers(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function sourceRangeContains(
+  outer: CppCuteFrontendPayloadV3["spans"][number]["spelling"],
+  inner: CppCuteFrontendPayloadV3["spans"][number]["spelling"],
+): boolean {
+  return outer.fileId === inner.fileId &&
+    wireIntegerToBigInt(outer.startByte) <= wireIntegerToBigInt(inner.startByte) &&
+    wireIntegerToBigInt(outer.endByte) >= wireIntegerToBigInt(inner.endByte);
+}
+
+function verifyDeclarationInitializers(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   const globalExpressions = new Map(payload.initializerExpressions.map((entry) => [entry.expressionId, entry]));
   const bodyByFunction = new Map(payload.functionBodies.map((body) => [body.declarationId, body]));
   const globalParents = new Map<string, number>();
@@ -428,7 +454,7 @@ function verifyDeclarationInitializers(payload: CppCuteFrontendPayloadV2, indexe
 }
 
 function findEnclosingFunctionId(
-  declaration: CppCuteDeclarationV2,
+  declaration: CppCuteDeclarationV3,
   indexes: ArtifactIndexes,
 ): string | null {
   let parentId = declaration.semanticParentId;
@@ -444,7 +470,7 @@ function findEnclosingFunctionId(
   return null;
 }
 
-function verifyTemplateInstantiations(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyTemplateInstantiations(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, instantiation] of payload.templateInstantiations.entries()) {
     const path = `$.payload.templateInstantiations[${index}]`;
     const template = ref(indexes.declarations, instantiation.templateDeclarationId, `${path}.templateDeclarationId`, "declaration");
@@ -472,7 +498,7 @@ function verifyTemplateInstantiations(payload: CppCuteFrontendPayloadV2, indexes
   );
 }
 
-function verifyOverloadResolutions(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyOverloadResolutions(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, resolution] of payload.overloadResolutions.entries()) {
     const path = `$.payload.overloadResolutions[${index}]`;
     verifyOrigin(resolution.origin, `${path}.origin`, indexes);
@@ -490,7 +516,7 @@ function verifyOverloadResolutions(payload: CppCuteFrontendPayloadV2, indexes: A
   }
 }
 
-async function verifySourceAbi(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): Promise<void> {
+async function verifySourceAbi(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): Promise<void> {
   const sourceEntities = await verifySourceEntities(payload, indexes);
   const observedDomains = new Map<string, Set<"host" | "device">>();
   const abiOwners = new Map<string, Set<"host" | "device">>();
@@ -685,7 +711,7 @@ function addSourceEntityDomain(
 }
 
 async function verifySourceEntities(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   indexes: ArtifactIndexes,
 ): Promise<ReadonlyMap<string, CppCuteSourceEntityV1>> {
   const entities = mapBy(payload.sourceEntities, (entry) => entry.sourceEntityId);
@@ -708,7 +734,7 @@ type CppCuteSourceEntityIdentity = {
 };
 
 export async function deriveCppCuteSourceEntityId(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   entity: CppCuteSourceEntityIdentity,
 ): Promise<string> {
   return deriveSourceEntityId(entity, buildIndexes(payload));
@@ -747,7 +773,7 @@ function canonicalSourceSpan(spanId: string, indexes: ArtifactIndexes): object {
 }
 
 function canonicalSourceRange(
-  range: CppCuteFrontendPayloadV2["spans"][number]["spelling"],
+  range: CppCuteFrontendPayloadV3["spans"][number]["spelling"],
   indexes: ArtifactIndexes,
 ): object {
   const file = ref(indexes.files, range.fileId, "$.payload.sourceEntities.origin", "file");
@@ -765,7 +791,7 @@ function sameSourceOrigin(left: CppCuteSourceOriginV1, right: CppCuteSourceOrigi
     : right.kind === "implicit" && left.anchorSpanId === right.anchorSpanId && left.reason === right.reason);
 }
 
-async function verifySemanticPasses(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): Promise<void> {
+async function verifySemanticPasses(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): Promise<void> {
   const factOwner = new Map<string, number>();
   const diagnosticOwner = new Map<string, number>();
   const openedFileUnion = new Set<string>();
@@ -979,7 +1005,7 @@ async function verifySemanticPasses(payload: CppCuteFrontendPayloadV2, indexes: 
 }
 
 async function deriveSelectedSourceRootEntityIds(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   indexes: ArtifactIndexes,
   sourceEntities: ReadonlyMap<string, CppCuteSourceEntityV1>,
 ): Promise<readonly string[]> {
@@ -1011,7 +1037,7 @@ async function deriveSelectedSourceRootEntityIds(
 }
 
 function verifySemanticPassInputClosure(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   passIndex: number,
   indexes: ArtifactIndexes,
 ): void {
@@ -1060,7 +1086,7 @@ function verifySemanticPassInputClosure(
 }
 
 export async function computeCppCuteSemanticPassInputClosureHash(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   passIndex: number,
 ): Promise<string> {
   const pass = payload.semanticPasses[passIndex];
@@ -1077,7 +1103,7 @@ export async function computeCppCuteSemanticPassInputClosureHash(
 }
 
 export async function computeCppCuteSharedSurfaceHash(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   domain: "host" | "device",
 ): Promise<string> {
   const pass = payload.semanticPasses.find((entry) => entry.domain === domain);
@@ -1112,7 +1138,7 @@ export async function computeCppCuteSharedSurfaceHash(
   });
 }
 
-function verifyFunctionBodies(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyFunctionBodies(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   const declarationsWithBodies = new Set<string>();
   for (const [bodyIndex, body] of payload.functionBodies.entries()) {
     const path = `$.payload.functionBodies[${bodyIndex}]`;
@@ -1255,7 +1281,7 @@ function verifyExpressionTree(
 }
 
 function verifyFacts(
-  payload: CppCuteFrontendPayloadV2,
+  payload: CppCuteFrontendPayloadV3,
   indexes: ArtifactIndexes,
   limits: Partial<DecodeLimits> | undefined,
 ): void {
@@ -1355,7 +1381,7 @@ function verifyTargetIntrinsicFact(
   }
 }
 
-function verifyEntries(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyEntries(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, entry] of payload.entries.entries()) {
     const path = `$.payload.entries[${index}]`;
     entry.selectedRootDeclarationIds.forEach((id, rootIndex) => ref(indexes.declarations, id, `${path}.selectedRootDeclarationIds[${rootIndex}]`, "declaration"));
@@ -1381,7 +1407,7 @@ function verifyEntries(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndex
   }
 }
 
-function verifyDiagnosticsAndOutcome(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
+function verifyDiagnosticsAndOutcome(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
   for (const [index, diagnostic] of payload.diagnostics.entries()) {
     const path = `$.payload.diagnostics[${index}]`;
     if (diagnostic.location.kind === "source") {
@@ -1430,7 +1456,7 @@ function verifyDiagnosticsAndOutcome(payload: CppCuteFrontendPayloadV2, indexes:
   }
 }
 
-function verifyDiagnosticSubject(subject: CppCuteFrontendPayloadV2["diagnostics"][number]["subject"], path: string, indexes: ArtifactIndexes): void {
+function verifyDiagnosticSubject(subject: CppCuteFrontendPayloadV3["diagnostics"][number]["subject"], path: string, indexes: ArtifactIndexes): void {
   if (subject.kind === "file") ref(indexes.files, subject.fileId, `${path}.fileId`, "file");
   else if (subject.kind === "declaration") ref(indexes.declarations, subject.declarationId, `${path}.declarationId`, "declaration");
   else if (subject.kind === "type") ref(indexes.types, subject.typeId, `${path}.typeId`, "type");
@@ -1539,7 +1565,7 @@ function verifyUnsignedBitWidth(value: string, bits: number, path: string): void
   if (bigint < 0n || bigint >= (1n << BigInt(bits))) invalid(path, `unsigned constant does not fit declared ${bits}-bit width`);
 }
 
-function verifyAbiValueContainmentCycles(payload: CppCuteFrontendPayloadV2): void {
+function verifyAbiValueContainmentCycles(payload: CppCuteFrontendPayloadV3): void {
   for (const domain of ["host", "device"] as const) {
     const edges = new Map<string, string[]>();
     for (const type of payload.sourceAbi.types.filter((entry) => entry.domain === domain)) {
@@ -1571,7 +1597,7 @@ function abiDomainKey(domain: "host" | "device", id: string): string {
 
 export async function computeCppCuteInputFileSetHash(
   kind: "source" | "header",
-  files: CppCuteFrontendPayloadV2["inputs"]["files"],
+  files: CppCuteFrontendPayloadV3["inputs"]["files"],
 ): Promise<string> {
   const selected = files
     .filter((file) => kind === "source" ? file.role === "main-source" : file.role !== "main-source")
@@ -1589,7 +1615,7 @@ export async function computeCppCuteInputFileSetHash(
   });
 }
 
-export async function computeCppCuteInputHashes(payload: CppCuteFrontendPayloadV2): Promise<VerifiedCppCuteInputHashes> {
+export async function computeCppCuteInputHashes(payload: CppCuteFrontendPayloadV3): Promise<VerifiedCppCuteInputHashes> {
   const sourceSetSha256 = await computeCppCuteInputFileSetHash("source", payload.inputs.files);
   const headerSetSha256 = await computeCppCuteInputFileSetHash("header", payload.inputs.files);
   const closureSha256 = await hashCanonicalJson({
@@ -1630,8 +1656,8 @@ function verifyParentForest<T>(
 }
 
 function sameRange(
-  left: CppCuteFrontendPayloadV2["spans"][number]["spelling"],
-  right: CppCuteFrontendPayloadV2["spans"][number]["spelling"],
+  left: CppCuteFrontendPayloadV3["spans"][number]["spelling"],
+  right: CppCuteFrontendPayloadV3["spans"][number]["spelling"],
 ): boolean {
   return left.fileId === right.fileId && left.startByte === right.startByte && left.endByte === right.endByte;
 }

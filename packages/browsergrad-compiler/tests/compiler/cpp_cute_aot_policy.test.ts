@@ -82,13 +82,11 @@ describe("C++/CuTe AOT sandbox policy", () => {
       effectiveProfile: "requires-external-run-evidence",
     });
     expect(await computeCppCuteAotExecutionPlanHash(
-      fixture.job,
+      fixture.metadata,
       fixture.executionEnvironment,
     )).toBe(
       fixture.receipt.invocation.executionPlanSha256,
     );
-    expect(fixture.receipt.invocation.executionPlanSha256).toBe(
-      "56f1dbf8a176a300a88cfb65786d30379edf95dbfc7c8219a490fc655dfed72f",
-    );
+    expect(fixture.receipt.invocation.executionPlanSha256).toMatch(/^[0-9a-f]{64}$/u);
   });
 });

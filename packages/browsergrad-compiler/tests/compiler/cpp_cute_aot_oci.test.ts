@@ -39,7 +39,8 @@ describe("C++/CuTe AOT OCI manifest/config metadata", () => {
     expect(Object.isFrozen(verified.manifest)).toBe(true);
     const authorized = authorizeCppCuteAotOciMetadata(fixture.plan, verified);
     expect(authorized).toEqual({
-      jobId: fixture.plan.jobId,
+      runMetadataId: fixture.plan.runMetadataId,
+      requestId: fixture.plan.requestId,
       profileHash: fixture.plan.profileHash,
       executionPlanSha256: fixture.plan.executionPlanSha256,
       imageReference: fixture.plan.imageReference,

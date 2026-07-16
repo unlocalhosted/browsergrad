@@ -2,7 +2,7 @@
   "schema": "browsergrad.compiler.cpp-cute.aot-sandbox-policy",
   "version": {
     "major": 1,
-    "minor": 3
+    "minor": 4
   },
   "contractId": "browsergrad.compiler.cpp-cute.aot@1",
   "runtime": {
@@ -54,7 +54,8 @@
     "workingDirectory": "/run/browsergrad",
     "arguments": [
       "--profile=/run/browsergrad/control/profile.json",
-      "--job=/run/browsergrad/control/job.json",
+      "--request=/run/browsergrad/control/request.json",
+      "--run-metadata=/run/browsergrad/control/run-metadata.json",
       "--execution-environment=/run/browsergrad/control/execution-environment.json",
       "--source-root=/run/browsergrad/source",
       "--protocol=browsergrad.compiler.cpp-cute.aot-result-frame@1"

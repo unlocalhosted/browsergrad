@@ -9,10 +9,12 @@
   caller-propagated bounded integer algebra, and CuTe's actual `cosize`
   definition. Provenance remains outside semantic hashes and no tensor storage,
   dtype, effect, CPU, WebGPU, SLSA, or source-compatibility claim is implied.
-- Adds a closed pre-run AOT producer request that content-addresses the exact
-  profile, Git source identity, source VFS blobs, declaration-token selector,
-  expected stable entry, and expected artifact closure. It deliberately grants
-  no process, filesystem, producer, or provenance authority.
+- Adds one closed producer-neutral frontend request that content-addresses the
+  compilation contract, copied source descriptors/bytes, main path,
+  declaration-token anchor, requested artifact schema, and semantic ceilings.
+  Optional AOT run metadata composes the exact request/profile with a
+  signed-but-unverified declared Git source reference; neither authority grants
+  process, filesystem, producer, or source-acquisition provenance authority.
 - Makes the canonical normalized frontend-artifact bytes a distinct verified
   resource with their own SHA-256 and byte length. Byte decoding now rejects
   any noncanonical producer representation, while the semantic artifact hash
@@ -20,32 +22,36 @@
 - Changes the in-toto subject and signed output manifest to bind those exact
   canonical bytes. Authorization and layout-origin records retain both raw
   resource identity and semantic identity; no observed producer run is claimed.
-- Adds a closed, content-addressed AOT runner-receipt verifier over exact pre-run
-  job intent, opened source projections, deterministic invocation identity,
-  pinned toolchain/container/sandbox facts, selected or rejected frontend
-  outcome, canonical output resource, and all extraction/process ceilings.
+- Adds a closed, content-addressed AOT runner-receipt v3 verifier over exact run
+  metadata, request, host-derived request binding, opened-input projections,
+  deterministic invocation identity, pinned toolchain/container/sandbox facts,
+  canonical output resource, and all extraction/process ceilings. Source
+  descriptors and resolved selection remain in request/binding authority rather
+  than being duplicated by the receipt.
 - Separates structural artifact verification from strict artifact-byte authority,
   and structural receipt verification from strict receipt-byte authority. A
-  future attestation must consume the byte-origin receipt resource; this change
-  alone does not establish producer trust or execution.
+  detached attestation must consume the byte-origin receipt resource;
+  structural verification alone does not establish producer trust or execution.
 - Requires detached provenance to consume that strict receipt resource and bind
-  its content address, raw digest/length, pre-run job/invocation, and exact
-  output manifest. Signed source, runner, toolchain, container, and sandbox
-  facts are derived from the receipt rather than repeated profile declarations.
+  its content address, raw digest/length, exact run/request/binding chain,
+  invocation, and output manifest. The signed predicate carries a declared
+  source reference rather than source-acquisition provenance; runner,
+  toolchain, container, and sandbox facts derive from receipt authority.
 - Removes caller-supplied artifact/profile objects from semantic authorization.
   The authorized artifact is now the exact strict-decoded resource owned by the
   authenticated receipt; rejected artifacts remain attestable but cannot lower.
 - Pins one canonical AOT sandbox policy and hashes a deterministic logical
-  execution plan over exact job/profile/toolchain/VFS/limit inputs. Profile,
-  receipt, provenance, authorization, and compiler origins now retain the OCI
-  image-config and execution-environment identities needed by the future
-  offline runner.
+  execution plan over exact run-metadata/request/profile/toolchain/VFS/limit
+  inputs. Profile, receipt, provenance, authorization, and compiler origins now
+  retain the OCI image-config and execution-environment identities needed by
+  the future offline runner.
 - Corrects the sandbox claim from all native execution being forbidden to
   user-produced native execution being forbidden; the pinned compiler and
   supervisor are necessarily native programs.
 - Adds an opaque offline-runner input plan that synchronously snapshots and
-  verifies exact job-owned source bytes, including the declaration-token anchor,
-  without accepting caller commands, environment, paths, or output controls.
+  verifies exact request-owned source bytes and stages canonical profile,
+  request, run metadata, and execution-environment controls without accepting
+  caller commands, environment, paths, or output controls.
 - Adds one independently bounded artifact/receipt result frame with strict EOF
   and canonical artifact-then-receipt decoding. Authoritative bytes remain
   private; exported accessors return disposable copies. This pure boundary does

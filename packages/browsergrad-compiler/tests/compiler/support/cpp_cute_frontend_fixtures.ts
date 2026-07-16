@@ -13,9 +13,13 @@ import {
   computeCppCuteSharedSurfaceHash,
   deriveCppCuteSourceEntityId,
 } from "../../../src/cpp_cute_frontend_verify.js";
+import {
+  CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+} from "../../../src/cpp_cute_frontend_types.js";
 import type {
-  CppCuteFrontendArtifactV2,
-  CppCuteFrontendPayloadV2,
+  CppCuteFrontendArtifactV3,
+  CppCuteFrontendPayloadV3,
 } from "../../../src/cpp_cute_frontend_types.js";
 
 export const CPP_CUTE_FIXTURE_HEADER_SET_HASH = "2".repeat(64);
@@ -60,7 +64,7 @@ export function createCppCuteProfileInput(
   const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
-    version: { major: 2, minor: 1 },
+    version: { major: 2, minor: 2 },
     profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
     deployment: {
       mode: "ahead-of-time",
@@ -398,8 +402,8 @@ function qualifiers(): { readonly const: boolean; readonly volatile: boolean; re
 
 export async function createCppCutePayloadInput(
   compilationContractHash = CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
-): Promise<CppCuteFrontendPayloadV2> {
-  const payload: CppCuteFrontendPayloadV2 = {
+): Promise<CppCuteFrontendPayloadV3> {
+  const payload: CppCuteFrontendPayloadV3 = {
     compilationContractHash,
     inputs: {
       mainFileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID,
@@ -603,6 +607,7 @@ export async function createCppCutePayloadInput(
         targetTypeId: null,
         initializerExpressionId: null,
         origin: sourceOrigin(),
+        identitySpanId: CPP_CUTE_FIXTURE_SPAN_ID,
         definitionKind: "external",
         linkage: "external",
         storageDuration: "none",
@@ -621,6 +626,7 @@ export async function createCppCutePayloadInput(
         targetTypeId: null,
         initializerExpressionId: null,
         origin: sourceOrigin(),
+        identitySpanId: CPP_CUTE_FIXTURE_SPAN_ID,
         definitionKind: "external",
         linkage: "external",
         storageDuration: "none",
@@ -639,6 +645,7 @@ export async function createCppCutePayloadInput(
         targetTypeId: null,
         initializerExpressionId: null,
         origin: sourceOrigin(),
+        identitySpanId: CPP_CUTE_FIXTURE_SPAN_ID,
         definitionKind: "definition",
         linkage: "internal",
         storageDuration: "static",
@@ -779,7 +786,7 @@ export async function createCppCutePayloadInput(
     { ...intEntity, sourceEntityId: intSourceEntityId },
     { ...layoutEntity, sourceEntityId: layoutSourceEntityId },
   ].sort((left, right) => left.sourceEntityId.localeCompare(right.sourceEntityId));
-  const identityPayload: CppCuteFrontendPayloadV2 = {
+  const identityPayload: CppCuteFrontendPayloadV3 = {
     ...payload,
     semanticPasses: payload.semanticPasses.map((pass) => ({
       ...pass,
@@ -792,7 +799,7 @@ export async function createCppCutePayloadInput(
     },
   };
   const hashes = await computeCppCuteInputHashes(identityPayload);
-  const boundPayload: CppCuteFrontendPayloadV2 = {
+  const boundPayload: CppCuteFrontendPayloadV3 = {
     ...identityPayload,
     inputs: {
       ...identityPayload.inputs,
@@ -812,11 +819,11 @@ export async function createCppCutePayloadInput(
 
 export async function createCppCuteArtifactInput(
   compilationContractHash = CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
-): Promise<CppCuteFrontendArtifactV2> {
+): Promise<CppCuteFrontendArtifactV3> {
   const payload = await createCppCutePayloadInput(compilationContractHash);
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
-    version: { major: 2, minor: 1 },
+    version: { major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR, minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR },
     producer: { id: "browsergrad-tools/cpp-cute-frontend", version: "0.1.0" },
     artifactId: await deriveCppCuteFrontendArtifactId(payload),
     payload,
@@ -830,7 +837,7 @@ export async function cloneCppCuteArtifactInput(
   return structuredClone(await createCppCuteArtifactInput(compilationContractHash)) as unknown as Record<string, unknown>;
 }
 
-export async function rebindCppCuteFixtureSourceEntityIds(payload: CppCuteFrontendPayloadV2): Promise<void> {
+export async function rebindCppCuteFixtureSourceEntityIds(payload: CppCuteFrontendPayloadV3): Promise<void> {
   const replacements = new Map<string, string>();
   const sourceEntities = await Promise.all(payload.sourceEntities.map(async (entity) => {
     const sourceEntityId = await deriveCppCuteSourceEntityId(payload, {
@@ -844,7 +851,7 @@ export async function rebindCppCuteFixtureSourceEntityIds(payload: CppCuteFronte
   }));
   sourceEntities.sort((left, right) => left.sourceEntityId.localeCompare(right.sourceEntityId));
   const replace = (sourceEntityId: string): string => replacements.get(sourceEntityId) ?? sourceEntityId;
-  const sourceAbi: CppCuteFrontendPayloadV2["sourceAbi"] = {
+  const sourceAbi: CppCuteFrontendPayloadV3["sourceAbi"] = {
     types: payload.sourceAbi.types.map((entry) => ({
       ...entry,
       sourceTypeEntityId: replace(entry.sourceTypeEntityId),
@@ -869,13 +876,13 @@ export async function rebindCppCuteFixtureSourceEntityIds(payload: CppCuteFronte
       })),
     })),
   };
-  (payload as { sourceEntities: CppCuteFrontendPayloadV2["sourceEntities"] }).sourceEntities = sourceEntities;
-  (payload as { semanticPasses: CppCuteFrontendPayloadV2["semanticPasses"] }).semanticPasses =
+  (payload as { sourceEntities: CppCuteFrontendPayloadV3["sourceEntities"] }).sourceEntities = sourceEntities;
+  (payload as { semanticPasses: CppCuteFrontendPayloadV3["semanticPasses"] }).semanticPasses =
     payload.semanticPasses.map((pass) => ({
       ...pass,
       selectedSourceRootEntityIds: pass.selectedSourceRootEntityIds.map(replace).sort(),
     }));
-  (payload as { sourceAbi: CppCuteFrontendPayloadV2["sourceAbi"] }).sourceAbi = sourceAbi;
+  (payload as { sourceAbi: CppCuteFrontendPayloadV3["sourceAbi"] }).sourceAbi = sourceAbi;
 }
 
 export function artifactCompatibleProfileOptions(

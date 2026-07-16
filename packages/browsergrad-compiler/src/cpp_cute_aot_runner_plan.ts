@@ -6,10 +6,10 @@ import {
   type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
-  unwrapPreparedCppCuteAotJob,
-  type CppCuteAotSourceFileV2,
-  type PreparedCppCuteAotJob,
-} from "./cpp_cute_aot_job.js";
+  copyPreparedCppCuteAotRunSourceSnapshots,
+  unwrapPreparedCppCuteAotRunMetadata,
+  type PreparedCppCuteAotRunMetadata,
+} from "./cpp_cute_aot_run_metadata.js";
 import {
   CPP_CUTE_AOT_ARTIFACT_DECODE_LIMITS,
   CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS,
@@ -26,6 +26,14 @@ import {
   decodeCppCuteAotRunnerReceipt,
   type VerifiedCppCuteAotRunnerReceiptResource,
 } from "./cpp_cute_aot_receipt.js";
+import {
+  prepareCppCuteFrontendRequestBinding,
+  type PreparedCppCuteFrontendRequestBinding,
+} from "./cpp_cute_frontend_request_binding.js";
+import {
+  unwrapPreparedCppCuteFrontendRequest,
+  type CppCuteFrontendRequestSourceFileV1,
+} from "./cpp_cute_frontend_request.js";
 import {
   decodeCppCuteFrontendArtifact,
   unwrapVerifiedCppCuteFrontendArtifactResource,
@@ -50,13 +58,13 @@ const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
   : Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
 
-export interface CppCuteAotSourceBlob {
+export interface CppCuteAotSourceSnapshot {
   readonly fileId: string;
   readonly bytes: Uint8Array;
 }
 
-interface SnapshottedCppCuteAotSourceBlob {
-  readonly file: CppCuteAotSourceFileV2;
+interface SnapshottedCppCuteAotSourceSnapshot {
+  readonly file: CppCuteFrontendRequestSourceFileV1;
   readonly bytes: Uint8Array;
 }
 
@@ -65,7 +73,8 @@ declare const preparedCppCuteAotOfflineRunBrand: unique symbol;
 /** Opaque, output-independent authority over exact snapshotted source bytes. */
 export interface PreparedCppCuteAotOfflineRun {
   readonly [preparedCppCuteAotOfflineRunBrand]: true;
-  readonly jobId: string;
+  readonly runMetadataId: string;
+  readonly requestId: string;
   readonly profileHash: string;
   readonly executionPlanSha256: string;
   readonly imageReference: string;
@@ -79,10 +88,10 @@ export interface PreparedCppCuteAotOfflineRun {
 }
 
 export interface PreparedCppCuteAotOfflineRunRecord {
-  readonly job: PreparedCppCuteAotJob;
+  readonly metadata: PreparedCppCuteAotRunMetadata;
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
-  readonly sourceFiles: readonly CppCuteAotSourceFileV2[];
+  readonly sourceFiles: readonly CppCuteFrontendRequestSourceFileV1[];
   readonly executionPlanSha256: string;
   readonly artifactByteLimit: number;
   readonly receiptByteLimit: number;
@@ -90,18 +99,20 @@ export interface PreparedCppCuteAotOfflineRunRecord {
 }
 
 interface StoredCppCuteAotOfflineRunRecord extends PreparedCppCuteAotOfflineRunRecord {
-  readonly sourceBlobs: readonly SnapshottedCppCuteAotSourceBlob[];
+  readonly sourceSnapshots: readonly SnapshottedCppCuteAotSourceSnapshot[];
 }
 
 declare const verifiedCppCuteAotOfflineResultBrand: unique symbol;
 
 /**
- * Canonical frame/job consistency only. This is not container-execution,
+ * Canonical frame/request consistency only. This is not container-execution,
  * sandbox-enforcement, producer-trust, provenance, or attestation authority.
  */
 export interface VerifiedCppCuteAotOfflineResult {
   readonly [verifiedCppCuteAotOfflineResultBrand]: true;
-  readonly jobId: string;
+  readonly runMetadataId: string;
+  readonly requestId: string;
+  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
   readonly profileHash: string;
   readonly executionPlanSha256: string;
   readonly artifactResource: VerifiedCppCuteFrontendArtifactResource;
@@ -125,7 +136,7 @@ export interface CppCuteAotOfflineResultBytes {
   readonly receiptBytes: Uint8Array;
 }
 
-export interface CppCuteAotOfflineStagingSourceBlob extends CppCuteAotSourceBlob {
+export interface CppCuteAotOfflineStagingSourceSnapshot extends CppCuteAotSourceSnapshot {
   readonly virtualPath: string;
   readonly contentSha256: string;
   readonly byteLength: WireU64;
@@ -134,9 +145,10 @@ export interface CppCuteAotOfflineStagingSourceBlob extends CppCuteAotSourceBlob
 /** Disposable canonical control/source bytes for the private Node staging shell. */
 export interface CppCuteAotOfflineStagingInputs {
   readonly profileBytes: Uint8Array;
-  readonly jobBytes: Uint8Array;
+  readonly requestBytes: Uint8Array;
+  readonly runMetadataBytes: Uint8Array;
   readonly environmentBytes: Uint8Array;
-  readonly sourceBlobs: readonly CppCuteAotOfflineStagingSourceBlob[];
+  readonly sourceSnapshots: readonly CppCuteAotOfflineStagingSourceSnapshot[];
 }
 
 export interface PrepareCppCuteAotOfflineRunOptions {
@@ -169,23 +181,22 @@ export class CppCuteAotOfflineRunnerError extends Error {
 }
 
 /**
- * Snapshots caller bytes synchronously, then verifies exact job ownership.
+ * Copies request-owned bytes, then verifies exact request ownership.
  * The returned authority contains no caller paths, commands, environment, or
  * output. Node staging later consumes only the private byte snapshots.
  */
 export async function prepareCppCuteAotOfflineRun(
-  job: PreparedCppCuteAotJob,
+  metadata: PreparedCppCuteAotRunMetadata,
   executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
-  sourceBlobs: readonly CppCuteAotSourceBlob[],
   options: PrepareCppCuteAotOfflineRunOptions = {},
 ): Promise<PreparedCppCuteAotOfflineRun> {
-  const jobRecord = unwrapPreparedCppCuteAotJob(job);
-  const profile = jobRecord.profile;
+  const metadataRecord = unwrapPreparedCppCuteAotRunMetadata(metadata);
+  const requestRecord = unwrapPreparedCppCuteFrontendRequest(metadataRecord.request);
+  const profile = metadataRecord.profile;
   const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   const signal = normalizeOptions(options);
   throwIfAborted(signal);
-  const snapshots = snapshotSourceBlobs(sourceBlobs, jobRecord.job.files);
-  throwIfAborted(signal);
+  const snapshots = copyPreparedCppCuteAotRunSourceSnapshots(metadata);
   const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(executionEnvironment);
   if (environmentRecord.profile !== profile || executionEnvironment.profileHash !== profile.profileHash) {
     mismatch(
@@ -202,9 +213,9 @@ export async function prepareCppCuteAotOfflineRun(
     );
   }
   await verifyCppCuteAotSandboxPolicyIdentity();
-  const verifiedSources = await verifySourceSnapshots(jobRecord.job.files, snapshots, jobRecord.job.entryRequests[0]);
+  const verifiedSources = await verifySourceSnapshots(requestRecord.request.files, snapshots);
   throwIfAborted(signal);
-  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job, executionEnvironment);
+  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(metadata, executionEnvironment);
   throwIfAborted(signal);
   const artifactByteLimit = Math.min(
     profile.extractionLimits.maxOutputBytes,
@@ -212,13 +223,14 @@ export async function prepareCppCuteAotOfflineRun(
   );
   const receiptByteLimit = CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS.maxDocumentBytes;
   const frameByteLimit = FRAME_MAGIC_BYTES.byteLength + FRAME_LENGTH_BYTES + artifactByteLimit + receiptByteLimit;
-  const sourceBytes = jobRecord.job.files.reduce(
+  const sourceBytes = requestRecord.request.files.reduce(
     (total, file) => total + wireIntegerToBigInt(file.byteLength),
     0n,
   );
   const container = profileRecord.profile.deployment.container;
   const prepared = Object.freeze({
-    jobId: job.jobId,
+    runMetadataId: metadata.runMetadataId,
+    requestId: metadata.requestId,
     profileHash: profile.profileHash,
     executionPlanSha256,
     imageReference: `${container.repository}@${container.manifestDigest}`,
@@ -232,11 +244,11 @@ export async function prepareCppCuteAotOfflineRun(
     frameByteLimit,
   }) as PreparedCppCuteAotOfflineRun;
   PREPARED_RUNS.set(prepared, Object.freeze({
-    job,
+    metadata,
     profile,
     executionEnvironment,
-    sourceFiles: jobRecord.job.files,
-    sourceBlobs: verifiedSources,
+    sourceFiles: requestRecord.request.files,
+    sourceSnapshots: verifiedSources,
     executionPlanSha256,
     artifactByteLimit,
     receiptByteLimit,
@@ -252,7 +264,7 @@ export function unwrapPreparedCppCuteAotOfflineRun(
   const record = PREPARED_RUNS.get(prepared as object);
   if (record === undefined) unverified();
   return Object.freeze({
-    job: record.job,
+    metadata: record.metadata,
     profile: record.profile,
     executionEnvironment: record.executionEnvironment,
     sourceFiles: record.sourceFiles,
@@ -264,20 +276,20 @@ export function unwrapPreparedCppCuteAotOfflineRun(
 }
 
 /** Returns disposable copies for the Node staging shell; copies hold no authority. */
-export function copyCppCuteAotOfflineRunSourceBlobs(
+export function copyCppCuteAotOfflineRunSourceSnapshots(
   prepared: PreparedCppCuteAotOfflineRun,
-): readonly CppCuteAotSourceBlob[] {
+): readonly CppCuteAotSourceSnapshot[] {
   if (typeof prepared !== "object" || prepared === null) unverified();
   const record = PREPARED_RUNS.get(prepared as object);
   if (record === undefined) unverified();
-  return Object.freeze(record.sourceBlobs.map(({ file, bytes }) => Object.freeze({
+  return Object.freeze(record.sourceSnapshots.map(({ file, bytes }) => Object.freeze({
     fileId: file.fileId,
     bytes: new Uint8Array(bytes),
   })));
 }
 
 /**
- * Returns canonical profile/job bytes plus exact source snapshots. Returned
+ * Returns canonical profile/request/metadata bytes plus exact source snapshots. Returned
  * arrays hold no authority and may be discarded or mutated by the caller.
  */
 export function copyCppCuteAotOfflineRunStagingInputs(
@@ -287,12 +299,14 @@ export function copyCppCuteAotOfflineRunStagingInputs(
   const record = PREPARED_RUNS.get(prepared as object);
   if (record === undefined) unverified();
   const profile = unwrapPreparedCppCuteAotFrontendProfile(record.profile).profile;
-  const job = unwrapPreparedCppCuteAotJob(record.job).job;
+  const metadataRecord = unwrapPreparedCppCuteAotRunMetadata(record.metadata);
+  const request = unwrapPreparedCppCuteFrontendRequest(metadataRecord.request).request;
   return Object.freeze({
     profileBytes: new Uint8Array(canonicalJsonBytes(profile)),
-    jobBytes: new Uint8Array(canonicalJsonBytes(job)),
+    requestBytes: new Uint8Array(canonicalJsonBytes(request)),
+    runMetadataBytes: new Uint8Array(canonicalJsonBytes(metadataRecord.metadata)),
     environmentBytes: copyPreparedCppCuteAotExecutionEnvironmentBytes(record.executionEnvironment),
-    sourceBlobs: Object.freeze(record.sourceBlobs.map(({ file, bytes }) => Object.freeze({
+    sourceSnapshots: Object.freeze(record.sourceSnapshots.map(({ file, bytes }) => Object.freeze({
       fileId: file.fileId,
       virtualPath: file.virtualPath,
       contentSha256: file.contentSha256,
@@ -351,10 +365,15 @@ export async function decodeCppCuteAotResultFrame(
       : { limits: artifactDecodeLimits, signal },
   );
   const artifact = unwrapVerifiedCppCuteFrontendArtifactResource(artifactResource);
-  const receiptResource = await decodeCppCuteAotRunnerReceipt(
-    record.job,
-    record.executionEnvironment,
+  const requestBinding = await prepareCppCuteFrontendRequestBinding(
+    unwrapPreparedCppCuteAotRunMetadata(record.metadata).request,
     artifactResource,
+    signal === undefined ? {} : { signal },
+  );
+  const receiptResource = await decodeCppCuteAotRunnerReceipt(
+    record.metadata,
+    record.executionEnvironment,
+    requestBinding,
     receiptBytes,
     signal === undefined
       ? { limits: CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS }
@@ -362,7 +381,9 @@ export async function decodeCppCuteAotResultFrame(
   );
   throwIfAborted(signal);
   const result = Object.freeze({
-    jobId: plan.jobId,
+    runMetadataId: plan.runMetadataId,
+    requestId: plan.requestId,
+    requestBinding,
     profileHash: plan.profileHash,
     executionPlanSha256: plan.executionPlanSha256,
     artifactResource,
@@ -418,165 +439,43 @@ export function encodeCppCuteAotResultFrame(
   return frame;
 }
 
-function snapshotSourceBlobs(
-  value: readonly CppCuteAotSourceBlob[],
-  expectedFiles: readonly CppCuteAotSourceFileV2[],
-): readonly { readonly fileId: string; readonly bytes: Uint8Array }[] {
-  let arrayDescriptors: Record<string, PropertyDescriptor>;
-  let arrayKeys: readonly PropertyKey[];
-  let arrayPrototype: object | null;
-  try {
-    arrayPrototype = Object.getPrototypeOf(value);
-    arrayDescriptors = Object.getOwnPropertyDescriptors(value) as Record<string, PropertyDescriptor>;
-    arrayKeys = Reflect.ownKeys(arrayDescriptors);
-  } catch (cause) {
-    invalid("$sourceBlobs", "source blobs must be an inspectable plain dense array", { cause });
-  }
-  if (!Array.isArray(value) || arrayPrototype !== Array.prototype) {
-    invalid("$sourceBlobs", "source blobs must be a plain dense array");
-  }
-  const length = arrayDescriptors.length?.value;
-  if (typeof length !== "number" || length !== expectedFiles.length) {
+async function verifySourceSnapshots(
+  expectedFiles: readonly CppCuteFrontendRequestSourceFileV1[],
+  snapshots: readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[],
+): Promise<readonly SnapshottedCppCuteAotSourceSnapshot[]> {
+  const byPath = new Map(snapshots.map((snapshot) => [snapshot.virtualPath, snapshot.bytes] as const));
+  if (byPath.size !== expectedFiles.length || snapshots.length !== expectedFiles.length) {
     mismatch(
       "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-      "$sourceBlobs",
-      `source blob count must equal prepared job count ${expectedFiles.length}`,
+      "$.request.files",
+      "prepared request source snapshots are incomplete or duplicated",
     );
   }
-  for (let index = 0; index < length; index += 1) {
-    const descriptor = arrayDescriptors[String(index)];
-    if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
-      invalid(`$sourceBlobs[${index}]`, "source arrays must contain enumerable data elements");
-    }
-  }
-  for (const key of arrayKeys) {
-    if (key === "length") continue;
-    if (typeof key !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(key) || Number(key) >= length) {
-      invalid("$sourceBlobs", "source array contains extra properties");
-    }
-  }
-  const expectedById = new Map(expectedFiles.map((file) => [file.fileId, file] as const));
-  if (expectedById.size !== expectedFiles.length) {
-    invalid("$.job.files", "prepared job contains duplicate source file IDs");
-  }
-  const seen = new Set<string>();
-  const snapshots: Array<{ readonly fileId: string; readonly bytes: Uint8Array }> = [];
-  for (let index = 0; index < length; index += 1) {
-    const entry = arrayDescriptors[String(index)]?.value as unknown;
-    let entryPrototype: object | null;
-    let descriptors: PropertyDescriptorMap;
-    let keys: readonly PropertyKey[];
-    try {
-      entryPrototype = typeof entry === "object" && entry !== null
-        ? Object.getPrototypeOf(entry)
-        : null;
-      descriptors = typeof entry === "object" && entry !== null
-        ? Object.getOwnPropertyDescriptors(entry)
-        : {};
-      keys = Reflect.ownKeys(descriptors);
-    } catch (cause) {
-      invalid(`$sourceBlobs[${index}]`, "source blob must be an inspectable plain object", { cause });
-    }
-    if (typeof entry !== "object" || entry === null || entryPrototype !== Object.prototype) {
-      invalid(`$sourceBlobs[${index}]`, "source blob must be a plain object");
-    }
-    if (keys.length !== 2 || !keys.includes("fileId") || !keys.includes("bytes")) {
-      invalid(`$sourceBlobs[${index}]`, "source blob fields must be exactly fileId and bytes");
-    }
-    for (const key of ["fileId", "bytes"] as const) {
-      const descriptor = descriptors[key];
-      if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
-        invalid(`$sourceBlobs[${index}].${key}`, "source blob fields must be enumerable data properties");
-      }
-    }
-    const fileId = descriptors.fileId?.value as unknown;
-    const bytesValue = descriptors.bytes?.value as unknown;
-    if (typeof fileId !== "string") invalid(`$sourceBlobs[${index}].fileId`, "fileId must be a string");
-    const expected = expectedById.get(fileId);
-    if (expected === undefined) {
-      mismatch(
-        "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-        `$sourceBlobs[${index}].fileId`,
-        "source blob ID is not owned by the prepared job",
-      );
-    }
-    if (seen.has(fileId)) {
-      mismatch(
-        "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-        `$sourceBlobs[${index}].fileId`,
-        "source blob IDs must be unique",
-      );
-    }
-    const inspected = inspectSourceBytes(bytesValue, `$sourceBlobs[${index}].bytes`);
-    if (BigInt(inspected.byteLength) !== wireIntegerToBigInt(expected.byteLength)) {
-      mismatch(
-        "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-        `$sourceBlobs[${index}].bytes`,
-        "source byte length differs from prepared job",
-      );
-    }
-    seen.add(fileId);
-    snapshots.push(Object.freeze({
-      fileId,
-      bytes: copySourceBytes(bytesValue, inspected, `$sourceBlobs[${index}].bytes`),
-    }));
-  }
-  return Object.freeze(snapshots);
-}
-
-async function verifySourceSnapshots(
-  expectedFiles: readonly CppCuteAotSourceFileV2[],
-  snapshots: readonly { readonly fileId: string; readonly bytes: Uint8Array }[],
-  request: ReturnType<typeof unwrapPreparedCppCuteAotJob>["job"]["entryRequests"][number] | undefined,
-): Promise<readonly SnapshottedCppCuteAotSourceBlob[]> {
-  const byId = new Map<string, Uint8Array>();
-  for (const [index, snapshot] of snapshots.entries()) {
-    if (byId.has(snapshot.fileId)) {
-      mismatch(
-        "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-        `$sourceBlobs[${index}].fileId`,
-        "source blob IDs must be unique",
-      );
-    }
-    byId.set(snapshot.fileId, snapshot.bytes);
-  }
-  const result: SnapshottedCppCuteAotSourceBlob[] = [];
+  const result: SnapshottedCppCuteAotSourceSnapshot[] = [];
   for (const [index, file] of expectedFiles.entries()) {
-    const bytes = byId.get(file.fileId);
+    const bytes = byPath.get(file.virtualPath);
     if (bytes === undefined) {
       mismatch(
         "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-        `$sourceBlobs[${index}].fileId`,
+        `$.request.files[${index}].virtualPath`,
         `missing source bytes for ${file.fileId}`,
       );
     }
     if (BigInt(bytes.byteLength) !== wireIntegerToBigInt(file.byteLength)) {
       mismatch(
         "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-        `$sourceBlobs[${index}].bytes`,
-        "source byte length differs from prepared job",
+        `$.request.files[${index}].byteLength`,
+        "source byte length differs from prepared request",
       );
     }
     if (await sha256Hex(bytes) !== file.contentSha256) {
       mismatch(
         "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-        `$sourceBlobs[${index}].bytes`,
-        "source digest differs from prepared job",
+        `$.request.files[${index}].contentSha256`,
+        "source digest differs from prepared request",
       );
     }
     result.push(Object.freeze({ file, bytes }));
-  }
-  if (request === undefined) invalid("$.job.entryRequests", "prepared job lost its entry request");
-  const anchorFile = result.find(({ file }) => file.virtualPath === request.anchor.virtualPath);
-  if (anchorFile === undefined) invalid("$.job.entryRequests[0].anchor", "entry anchor source disappeared");
-  const begin = Number(wireIntegerToBigInt(request.anchor.beginByte));
-  const end = Number(wireIntegerToBigInt(request.anchor.endByte));
-  if (await sha256Hex(anchorFile.bytes.subarray(begin, end)) !== request.anchor.tokenSha256) {
-    mismatch(
-      "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
-      "$.job.entryRequests[0].anchor.tokenSha256",
-      "source anchor token differs from prepared request",
-    );
   }
   return Object.freeze(result);
 }
@@ -609,26 +508,6 @@ function parseResultFrame(
     artifactBytes: bytes.slice(headerBytes, artifactEnd),
     receiptBytes: bytes.slice(artifactEnd),
   };
-}
-
-function inspectSourceBytes(value: unknown, path: string): InspectedUnsharedUint8Array {
-  try {
-    return inspectUnsharedPlainUint8Array(value);
-  } catch (cause) {
-    invalid(path, "source bytes must be an unshared plain Uint8Array", { cause });
-  }
-}
-
-function copySourceBytes(
-  value: unknown,
-  inspected: InspectedUnsharedUint8Array,
-  path: string,
-): Uint8Array {
-  try {
-    return copyInspectedUnsharedUint8Array(value, inspected);
-  } catch (cause) {
-    invalid(path, "source bytes became unreadable while snapshotting", { cause });
-  }
 }
 
 function inspectFrameBytes(value: unknown, path: string): InspectedUnsharedUint8Array {

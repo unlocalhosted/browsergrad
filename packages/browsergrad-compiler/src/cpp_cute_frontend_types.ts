@@ -6,8 +6,8 @@ import type {
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 export const CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-artifact";
-export const CPP_CUTE_FRONTEND_ARTIFACT_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_ARTIFACT_MINOR = 1;
+export const CPP_CUTE_FRONTEND_ARTIFACT_MAJOR = 3;
+export const CPP_CUTE_FRONTEND_ARTIFACT_MINOR = 0;
 
 export type CppCuteSemanticDomainV1 = "host" | "device";
 
@@ -48,9 +48,9 @@ export interface CppCuteSemanticPassRecordV1 extends JsonObject {
   readonly diagnosticIds: readonly string[];
 }
 
-export interface CppCuteFrontendPayloadV2 extends JsonObject {
+export interface CppCuteFrontendPayloadV3 extends JsonObject {
   readonly compilationContractHash: string;
-  readonly inputs: CppCuteInputClosureV2;
+  readonly inputs: CppCuteInputClosureV3;
   /** Exact device extraction then host validation evidence over one verified VFS universe. */
   readonly semanticPasses: readonly CppCuteSemanticPassRecordV1[];
   /** All resolved graph tables below come only from this pass; no host/device AST merge exists. */
@@ -59,7 +59,7 @@ export interface CppCuteFrontendPayloadV2 extends JsonObject {
   readonly macroExpansions: readonly CppCuteMacroExpansionV1[];
   readonly types: readonly CppCuteResolvedTypeV1[];
   readonly constants: readonly CppCuteConstantV1[];
-  readonly declarations: readonly CppCuteDeclarationV2[];
+  readonly declarations: readonly CppCuteDeclarationV3[];
   /** Expressions owned by namespace/file-scope variable initializers. */
   readonly initializerExpressions: readonly CppCuteExpressionV1[];
   readonly templateInstantiations: readonly CppCuteTemplateInstantiationV1[];
@@ -70,28 +70,28 @@ export interface CppCuteFrontendPayloadV2 extends JsonObject {
   readonly functionBodies: readonly CppCuteFunctionBodyV1[];
   readonly facts: readonly CppCuteResolvedFactV1[];
   readonly entries: readonly CppCuteFrontendEntryV1[];
-  readonly diagnostics: readonly CppCuteFrontendDiagnosticV2[];
+  readonly diagnostics: readonly CppCuteFrontendDiagnosticV3[];
   readonly outcome: CppCuteFrontendOutcomeV1;
   readonly extraction: CppCuteExtractionRecordV1;
 }
 
-export type CppCuteFrontendArtifactV2 = WireEnvelope<CppCuteFrontendPayloadV2>;
+export type CppCuteFrontendArtifactV3 = WireEnvelope<CppCuteFrontendPayloadV3>;
 
-export type CppCuteInputOwnerV2 =
+export type CppCuteInputOwnerV3 =
   | (JsonObject & { readonly kind: "source" })
   | (JsonObject & { readonly kind: "compiler-resource-directory" })
   | (JsonObject & { readonly kind: "dependency"; readonly dependencyId: string });
 
-export interface CppCuteIncludeRootV2 extends JsonObject {
+export interface CppCuteIncludeRootV3 extends JsonObject {
   readonly includeRootId: string;
   readonly ordinal: number;
   readonly mode: "quote" | "system";
   readonly virtualPath: string;
   readonly manifestSha256: string;
-  readonly owner: CppCuteInputOwnerV2;
+  readonly owner: CppCuteInputOwnerV3;
 }
 
-export interface CppCuteSourceFileV2 extends JsonObject {
+export interface CppCuteSourceFileV3 extends JsonObject {
   readonly fileId: string;
   readonly role:
     | "main-source"
@@ -103,12 +103,12 @@ export interface CppCuteSourceFileV2 extends JsonObject {
   readonly virtualPath: string;
   readonly contentSha256: string;
   readonly byteLength: WireU64;
-  readonly owner: CppCuteInputOwnerV2;
+  readonly owner: CppCuteInputOwnerV3;
   /** Include root containing this file; null only for the main source. */
   readonly includeRootId: string | null;
 }
 
-export type CppCuteIncludeResolutionV2 =
+export type CppCuteIncludeResolutionV3 =
   | (JsonObject & {
       readonly kind: "resolved";
       readonly fileId: string;
@@ -119,7 +119,7 @@ export type CppCuteIncludeResolutionV2 =
       readonly diagnosticId: string;
     });
 
-export type CppCuteIncludeEdgeV2 =
+export type CppCuteIncludeEdgeV3 =
   | (JsonObject & {
       readonly kind: "source-directive";
       readonly includeEdgeId: string;
@@ -127,7 +127,7 @@ export type CppCuteIncludeEdgeV2 =
       readonly directiveSpanId: string;
       readonly spelling: string;
       readonly mode: "quote" | "angle";
-      readonly resolution: CppCuteIncludeResolutionV2;
+      readonly resolution: CppCuteIncludeResolutionV3;
     })
   | (JsonObject & {
       readonly kind: "compiler-forced";
@@ -138,12 +138,12 @@ export type CppCuteIncludeEdgeV2 =
       readonly compilerOptionOrdinal: number;
     });
 
-export interface CppCuteInputClosureV2 extends JsonObject {
+export interface CppCuteInputClosureV3 extends JsonObject {
   readonly mainFileId: string;
   /** Include resolution precedence; ordinals must be contiguous. */
-  readonly includeRoots: readonly CppCuteIncludeRootV2[];
-  readonly files: readonly CppCuteSourceFileV2[];
-  readonly includeEdges: readonly CppCuteIncludeEdgeV2[];
+  readonly includeRoots: readonly CppCuteIncludeRootV3[];
+  readonly files: readonly CppCuteSourceFileV3[];
+  readonly includeEdges: readonly CppCuteIncludeEdgeV3[];
   readonly sourceSetSha256: string;
   readonly headerSetSha256: string;
   readonly closureSha256: string;
@@ -324,7 +324,7 @@ export interface CppCuteCudaAttributesV1 extends JsonObject {
   readonly forceInline: boolean;
 }
 
-export interface CppCuteDeclarationV2 extends JsonObject {
+export interface CppCuteDeclarationV3 extends JsonObject {
   readonly declarationId: string;
   readonly kind: CppCuteDeclarationKindV1;
   readonly canonicalUsr: string;
@@ -336,6 +336,8 @@ export interface CppCuteDeclarationV2 extends JsonObject {
   /** Root expression for a variable initializer; null when no initializer exists. */
   readonly initializerExpressionId: string | null;
   readonly origin: CppCuteSourceOriginV1;
+  /** Exact identifier/declarator token span used by source-entry selection; null for implicit unnamed declarations. */
+  readonly identitySpanId: string | null;
   readonly definitionKind: "definition" | "declaration-only" | "builtin" | "external";
   readonly linkage: "none" | "internal" | "external" | "weak" | "linkonce-odr";
   readonly storageDuration: "none" | "automatic" | "static" | "thread";
@@ -657,7 +659,7 @@ export type CppCuteFrontendEntryV1 =
       readonly selectedRootDeclarationIds: readonly string[];
     });
 
-export type CppCuteDiagnosticPhaseV2 =
+export type CppCuteDiagnosticPhaseV3 =
   | "preprocessing"
   | "parsing"
   | "name-lookup"
@@ -666,7 +668,7 @@ export type CppCuteDiagnosticPhaseV2 =
   | "cuda-sema"
   | "artifact-extraction";
 
-export type CppCuteDiagnosticSubjectV2 =
+export type CppCuteDiagnosticSubjectV3 =
   | (JsonObject & { readonly kind: "compiler" })
   | (JsonObject & { readonly kind: "file"; readonly fileId: string })
   | (JsonObject & { readonly kind: "declaration"; readonly declarationId: string })
@@ -679,7 +681,7 @@ export interface CppCuteDiagnosticRelatedLocationV1 extends JsonObject {
   readonly message: string;
 }
 
-export type CppCuteDiagnosticLocationV2 =
+export type CppCuteDiagnosticLocationV3 =
   | (JsonObject & {
       readonly kind: "source";
       readonly primarySpanId: string;
@@ -687,14 +689,14 @@ export type CppCuteDiagnosticLocationV2 =
     })
   | (JsonObject & { readonly kind: "none" });
 
-export interface CppCuteFrontendDiagnosticV2 extends JsonObject {
+export interface CppCuteFrontendDiagnosticV3 extends JsonObject {
   readonly diagnosticId: string;
-  readonly phase: CppCuteDiagnosticPhaseV2;
+  readonly phase: CppCuteDiagnosticPhaseV3;
   readonly severity: "remark" | "note" | "warning" | "error" | "fatal";
   readonly code: string;
   readonly renderedMessage: string;
-  readonly location: CppCuteDiagnosticLocationV2;
-  readonly subject: CppCuteDiagnosticSubjectV2;
+  readonly location: CppCuteDiagnosticLocationV3;
+  readonly subject: CppCuteDiagnosticSubjectV3;
   readonly parentDiagnosticId: string | null;
 }
 

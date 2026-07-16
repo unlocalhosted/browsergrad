@@ -5,16 +5,15 @@ import {
   unwrapVerifiedCppCuteAotRunnerReceipt,
   unwrapVerifiedCppCuteAotRunnerReceiptResource,
   verifyCppCuteAotRunnerReceipt,
-  type CppCuteAotRunnerReceiptV2,
+  type CppCuteAotRunnerReceiptV3,
   type VerifiedCppCuteAotRunnerReceiptResource,
 } from "../../../src/cpp_cute_aot_receipt.js";
 import {
-  unwrapPreparedCppCuteAotJob,
-  type PreparedCppCuteAotJob,
-} from "../../../src/cpp_cute_aot_job.js";
+  unwrapPreparedCppCuteAotRunMetadata,
+  type PreparedCppCuteAotRunMetadata,
+} from "../../../src/cpp_cute_aot_run_metadata.js";
+import type { PreparedCppCuteFrontendRequestBinding } from "../../../src/cpp_cute_frontend_request_binding.js";
 import {
-  deriveCppCuteFrontendArtifactId,
-  verifyCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifactResource,
 } from "../../../src/cpp_cute_frontend_artifact.js";
@@ -31,9 +30,9 @@ import {
   cppCuteFrontendProvenanceSigningBytes,
   prepareCppCuteAttestationTrustStore,
   verifyCppCuteFrontendAttestation,
-  type CppCuteFrontendProvenanceStatementV1,
-  type CppCuteFrontendProvenanceV1,
-  type CppCuteProvenanceSourceV1,
+  type CppCuteFrontendProvenanceStatementV3,
+  type CppCuteFrontendProvenanceV3,
+  type CppCuteDeclaredSourceReferenceV3,
   type PreparedCppCuteAttestationTrustStore,
   type VerifiedCppCuteFrontendAttestation,
 } from "../../../src/cpp_cute_frontend_provenance.js";
@@ -41,17 +40,10 @@ import {
   authorizeAotCppCuteFrontendArtifact,
   type AuthorizedCppCuteFrontendArtifact,
 } from "../../../src/cpp_cute_frontend_authorization.js";
-import type { CppCuteFrontendPayloadV2 } from "../../../src/cpp_cute_frontend_types.js";
-import {
-  computeCppCuteInputHashes,
-  computeCppCuteSemanticPassInputClosureHash,
-} from "../../../src/cpp_cute_frontend_verify.js";
+import type { CppCuteFrontendPayloadV3 } from "../../../src/cpp_cute_frontend_types.js";
 import {
   artifactCompatibleProfileOptions,
   CPP_CUTE_FIXTURE_BUILDER_ID,
-  CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
-  CPP_CUTE_FIXTURE_SOURCE_REVISION,
-  createCppCuteArtifactInput,
 } from "./cpp_cute_frontend_fixtures.js";
 import { createCppCuteAotReceiptFixture } from "./cpp_cute_aot_receipt_fixtures.js";
 import { createCppCuteAotExecutionEnvironmentFixture } from "./cpp_cute_aot_environment_fixtures.js";
@@ -83,11 +75,12 @@ export interface CppCuteProvenanceFixture {
   readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly artifactResource: VerifiedCppCuteFrontendArtifactResource;
-  readonly job: PreparedCppCuteAotJob;
-  readonly receipt: CppCuteAotRunnerReceiptV2;
+  readonly metadata: PreparedCppCuteAotRunMetadata;
+  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
+  readonly receipt: CppCuteAotRunnerReceiptV3;
   readonly receiptResource: VerifiedCppCuteAotRunnerReceiptResource;
-  readonly statement: CppCuteFrontendProvenanceStatementV1;
-  readonly provenance: CppCuteFrontendProvenanceV1;
+  readonly statement: CppCuteFrontendProvenanceStatementV3;
+  readonly provenance: CppCuteFrontendProvenanceV3;
 }
 
 export interface AuthorizedCppCuteProvenanceFixture extends CppCuteProvenanceFixture {
@@ -96,7 +89,7 @@ export interface AuthorizedCppCuteProvenanceFixture extends CppCuteProvenanceFix
 }
 
 export interface CppCuteProvenanceFixtureOptions {
-  readonly mutatePayload?: (payload: CppCuteFrontendPayloadV2) => void;
+  readonly mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void;
 }
 
 export async function createCppCuteProvenanceFixture(
@@ -125,36 +118,22 @@ export async function createCppCuteProvenanceFixture(
     profile: artifactCompatibleProfileOptions(trustStore.trustStoreHash),
   });
   const profile = environmentFixture.profile;
-  const artifactInput = await createCppCuteArtifactInput(profile.compilationContractHash);
-  options.mutatePayload?.(artifactInput.payload);
-  if (options.mutatePayload !== undefined) {
-    const hashes = await computeCppCuteInputHashes(artifactInput.payload);
-    (artifactInput.payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
-    (artifactInput.payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
-    (artifactInput.payload.inputs as { closureSha256: string }).closureSha256 = hashes.closureSha256;
-    for (const [index, pass] of artifactInput.payload.semanticPasses.entries()) {
-      (pass as { observedInputClosureSha256: string }).observedInputClosureSha256 =
-        await computeCppCuteSemanticPassInputClosureHash(artifactInput.payload, index);
-    }
-    (artifactInput.payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
-    (artifactInput as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(artifactInput.payload);
-  }
-  const inMemoryArtifact = await verifyCppCuteFrontendArtifact(artifactInput);
   const receiptFixture = await createCppCuteAotReceiptFixture(
     profile,
     environmentFixture.environment,
-    inMemoryArtifact,
+    "accepted",
+    options.mutatePayload,
   );
   const structuralReceipt = await verifyCppCuteAotRunnerReceipt(
-    receiptFixture.job,
+    receiptFixture.metadata,
     environmentFixture.environment,
-    receiptFixture.artifactResource,
+    receiptFixture.requestBinding,
     receiptFixture.receipt,
   );
   const receiptResource = await decodeCppCuteAotRunnerReceipt(
-    receiptFixture.job,
+    receiptFixture.metadata,
     environmentFixture.environment,
-    receiptFixture.artifactResource,
+    receiptFixture.requestBinding,
     canonicalCppCuteAotRunnerReceiptBytes(structuralReceipt),
   );
   const receipt = unwrapVerifiedCppCuteAotRunnerReceiptResource(receiptResource);
@@ -171,7 +150,8 @@ export async function createCppCuteProvenanceFixture(
     executionEnvironment: environmentFixture.environment,
     artifact,
     artifactResource,
-    job: receiptRecord.job,
+    metadata: receiptRecord.metadata,
+    requestBinding: receiptRecord.requestBinding,
     receipt: receiptRecord.receipt,
     receiptResource,
     statement,
@@ -190,13 +170,17 @@ export async function createAuthorizedCppCuteProvenanceFixture(
 
 export async function createCppCuteProvenanceStatement(
   receiptResource: VerifiedCppCuteAotRunnerReceiptResource,
-): Promise<CppCuteFrontendProvenanceStatementV1> {
+): Promise<CppCuteFrontendProvenanceStatementV3> {
   const receipt = unwrapVerifiedCppCuteAotRunnerReceiptResource(receiptResource);
   const receiptRecord = unwrapVerifiedCppCuteAotRunnerReceipt(receipt);
   const artifact = receiptRecord.artifact;
   const profile = receiptRecord.profile;
   const configured = unwrapPreparedCppCuteAotFrontendProfile(profile).profile;
-  const source: CppCuteProvenanceSourceV1 = unwrapPreparedCppCuteAotJob(receiptRecord.job).job.source;
+  const sourceStatement = unwrapPreparedCppCuteAotRunMetadata(receiptRecord.metadata).metadata.declaredSourceReference.statement;
+  const declaredSource: CppCuteDeclaredSourceReferenceV3 = {
+    repository: sourceStatement.repository,
+    revision: sourceStatement.revision,
+  };
   const run = receiptRecord.receipt;
   return {
     _type: CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE,
@@ -205,7 +189,7 @@ export async function createCppCuteProvenanceStatement(
     predicate: {
       builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
       buildType: CPP_CUTE_FRONTEND_BUILD_TYPE,
-      source,
+      declaredSource,
       artifact: {
         artifactId: artifact.artifactId,
         artifactHash: artifact.artifactHash,
@@ -243,7 +227,9 @@ export async function createCppCuteProvenanceStatement(
         executionPlanSha256: run.invocation.executionPlanSha256,
         executionEnvironmentManifestSha256: run.invocation.executionEnvironmentManifestSha256,
         outputManifestSha256: run.output.outputManifestSha256,
-        jobId: receipt.jobId,
+        runMetadataId: receipt.runMetadataId,
+        requestId: receipt.requestId,
+        requestBindingId: receipt.requestBindingId,
         receiptId: receipt.receiptId,
         receiptBytesSha256: receipt.receiptBytesSha256,
         receiptByteLength: receipt.receiptByteLength,
@@ -255,10 +241,10 @@ export async function createCppCuteProvenanceStatement(
 }
 
 export async function signCppCuteProvenanceStatement(
-  statement: CppCuteFrontendProvenanceStatementV1,
+  statement: CppCuteFrontendProvenanceStatementV3,
   privateKey: CryptoKey,
   keyId: string,
-): Promise<CppCuteFrontendProvenanceV1> {
+): Promise<CppCuteFrontendProvenanceV3> {
   const signature = new Uint8Array(await crypto.subtle.sign(
     { name: "ECDSA", hash: "SHA-256" },
     privateKey,
@@ -275,11 +261,11 @@ export async function signCppCuteProvenanceStatement(
 export async function signedCppCuteProvenanceMutation(
   fixture: CppCuteProvenanceFixture,
   mutate: (statement: Record<string, unknown>) => void,
-): Promise<CppCuteFrontendProvenanceV1> {
+): Promise<CppCuteFrontendProvenanceV3> {
   const statement = structuredClone(fixture.statement) as unknown as Record<string, unknown>;
   mutate(statement);
   return signCppCuteProvenanceStatement(
-    statement as unknown as CppCuteFrontendProvenanceStatementV1,
+    statement as unknown as CppCuteFrontendProvenanceStatementV3,
     fixture.privateKey,
     fixture.keyId,
   );
@@ -301,10 +287,7 @@ export function cppCuteAuthorizationRequest(
 ): Parameters<typeof authorizeAotCppCuteFrontendArtifact>[0] {
   return {
     attestation,
-    expectedProfileHash: fixture.profile.profileHash,
-    expectedSourceSetSha256: fixture.artifact.sourceSetSha256,
-    expectedSourceRepository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
-    expectedSourceRevision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
+    requestBinding: fixture.requestBinding,
   };
 }
 

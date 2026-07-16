@@ -26,7 +26,7 @@ import {
 import {
   prepareCppCuteAotExecutionEnvironment as prepareDistEnvironment,
 } from "../dist/cpp_cute_aot_environment.js";
-import { prepareCppCuteAotJob as prepareDistJob } from "../dist/cpp_cute_aot_job.js";
+import { prepareCppCuteAotRunMetadata as prepareDistRunMetadata } from "../dist/cpp_cute_aot_run_metadata.js";
 import {
   copyCppCuteAotOfflineRunStagingInputs,
   encodeCppCuteAotResultFrame,
@@ -34,6 +34,7 @@ import {
   type PreparedCppCuteAotOfflineRun,
   unwrapPreparedCppCuteAotOfflineRun as unwrapDistOfflineRun,
 } from "../dist/cpp_cute_aot_runner_plan.js";
+import { prepareCppCuteFrontendRequest as prepareDistRequest } from "../dist/cpp_cute_frontend_request.js";
 import {
   CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT,
   CPP_CUTE_AOT_CONTAINER_HOSTNAME,
@@ -52,14 +53,17 @@ import {
   prepareCppCuteFrontendProfile as prepareDistProfile,
   unwrapPreparedCppCuteFrontendProfile as unwrapDistProfile,
 } from "../dist/cpp_cute_frontend_profile.js";
-import { unwrapPreparedCppCuteAotJob } from "../src/cpp_cute_aot_job.js";
 import {
   copyPreparedCppCuteAotExecutionEnvironmentBytes,
 } from "../src/cpp_cute_aot_environment.js";
+import { unwrapPreparedCppCuteAotRunMetadata } from "../src/cpp_cute_aot_run_metadata.js";
 import {
-  copyCppCuteAotOfflineRunSourceBlobs,
   unwrapPreparedCppCuteAotOfflineRun,
 } from "../src/cpp_cute_aot_runner_plan.js";
+import {
+  copyPreparedCppCuteFrontendSourceSnapshots,
+  unwrapPreparedCppCuteFrontendRequest,
+} from "../src/cpp_cute_frontend_request.js";
 import { unwrapPreparedCppCuteFrontendProfile } from "../src/cpp_cute_frontend_profile.js";
 import {
   createCppCuteAotOciFixture,
@@ -134,7 +138,8 @@ interface ContainerSessionState {
   cidFile?: string;
   memoryBytes?: number;
   maxProcesses?: number;
-  jobId?: string;
+  runMetadataId?: string;
+  requestId?: string;
   executionPlanSha256?: string;
   removeForced?: boolean;
 }
@@ -166,21 +171,27 @@ interface AdapterOptions {
 async function prepareFixture(): Promise<PreparedLifecycleFixture> {
   const fixture = await createCppCuteAotOciFixture();
   const sourcePlan = unwrapPreparedCppCuteAotOfflineRun(fixture.plan);
-  const sourceJob = unwrapPreparedCppCuteAotJob(sourcePlan.job);
-  const sourceProfile = unwrapPreparedCppCuteFrontendProfile(sourceJob.profile);
+  const sourceMetadata = unwrapPreparedCppCuteAotRunMetadata(sourcePlan.metadata);
+  const sourceRequest = unwrapPreparedCppCuteFrontendRequest(sourceMetadata.request);
+  const sourceProfile = unwrapPreparedCppCuteFrontendProfile(sourceMetadata.profile);
   const distProfile = await prepareDistProfile(structuredClone(sourceProfile.profile));
-  const distJob = await prepareDistJob(distProfile, structuredClone(sourceJob.job));
+  const distRequest = await prepareDistRequest(
+    distProfile,
+    structuredClone(sourceRequest.request),
+    copyPreparedCppCuteFrontendSourceSnapshots(sourceMetadata.request),
+    { detached: structuredClone(sourceRequest.detached) },
+  );
+  const distRunMetadata = await prepareDistRunMetadata(
+    distRequest,
+    structuredClone(sourceMetadata.metadata),
+  );
   const distEnvironment = await prepareDistEnvironment(
     distProfile,
     copyPreparedCppCuteAotExecutionEnvironmentBytes(sourcePlan.executionEnvironment),
   );
   const distPlan = await prepareDistOfflineRun(
-    distJob,
+    distRunMetadata,
     distEnvironment,
-    copyCppCuteAotOfflineRunSourceBlobs(fixture.plan).map(({ fileId, bytes }) => ({
-      fileId,
-      bytes: new Uint8Array(bytes),
-    })),
   );
   const metadata = await verifyCppCuteAotOciMetadata(fixture.evidence);
   return {
@@ -300,7 +311,8 @@ function captureCreateState(
   state.homeDirectory = required(request.environment.HOME, "HOME");
   state.containerName = argumentValue(request.arguments, "--name=");
   state.sessionNonce = argumentValue(request.arguments, "--label=browsergrad.session=");
-  state.jobId = argumentValue(request.arguments, "--label=browsergrad.job=");
+  state.runMetadataId = argumentValue(request.arguments, "--label=browsergrad.run-metadata=");
+  state.requestId = argumentValue(request.arguments, "--label=browsergrad.request=");
   state.executionPlanSha256 = argumentValue(request.arguments, "--label=browsergrad.plan=");
   state.cidFile = argumentValue(request.arguments, "--cidfile=");
   state.sourceDirectory = mountSource(request.arguments, CPP_CUTE_AOT_CONTAINER_SOURCE_ROOT);
@@ -320,9 +332,10 @@ function argumentAfter(arguments_: readonly string[], argument: string): string 
 
 function containerLabels(state: ContainerSessionState): Record<string, string> {
   return {
-    "browsergrad.job": required(state.jobId, "jobId"),
     "browsergrad.owner": "cpp-cute-aot",
     "browsergrad.plan": required(state.executionPlanSha256, "executionPlanSha256"),
+    "browsergrad.request": required(state.requestId, "requestId"),
+    "browsergrad.run-metadata": required(state.runMetadataId, "runMetadataId"),
     "browsergrad.session": required(state.sessionNonce, "sessionNonce"),
   };
 }
@@ -524,17 +537,19 @@ function snapshotStaging(
     controlDirectory,
     required(state.seccompProfilePath, "seccompProfilePath"),
     join(controlDirectory, "profile.json"),
-    join(controlDirectory, "job.json"),
+    join(controlDirectory, "request.json"),
+    join(controlDirectory, "run-metadata.json"),
     join(controlDirectory, "execution-environment.json"),
-    ...inputs.sourceBlobs.map((source) => join(sourceDirectory, source.virtualPath.slice(1))),
+    ...inputs.sourceSnapshots.map((source) => join(sourceDirectory, source.virtualPath.slice(1))),
   ];
   const bytes: Record<string, Uint8Array> = {
     profile: new Uint8Array(readFileSync(join(controlDirectory, "profile.json"))),
-    job: new Uint8Array(readFileSync(join(controlDirectory, "job.json"))),
+    request: new Uint8Array(readFileSync(join(controlDirectory, "request.json"))),
+    runMetadata: new Uint8Array(readFileSync(join(controlDirectory, "run-metadata.json"))),
     environment: new Uint8Array(readFileSync(join(controlDirectory, "execution-environment.json"))),
     seccomp: new Uint8Array(readFileSync(required(state.seccompProfilePath, "seccompProfilePath"))),
   };
-  for (const [index, source] of inputs.sourceBlobs.entries()) {
+  for (const [index, source] of inputs.sourceSnapshots.entries()) {
     bytes[`source-${index}`] = new Uint8Array(readFileSync(
       join(sourceDirectory, source.virtualPath.slice(1)),
     ));
@@ -726,7 +741,8 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
     );
 
     expect(completed).toMatchObject({
-      jobId: prepared.authorized.jobId,
+      runMetadataId: prepared.authorized.runMetadataId,
+      requestId: prepared.authorized.requestId,
       profileHash: prepared.authorized.profileHash,
       executionPlanSha256: prepared.authorized.executionPlanSha256,
       containerId: CONTAINER_ID,
@@ -750,10 +766,12 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
     expect(staging.modes[required(harness.state.controlDirectory, "controlDirectory")]).toBe(0o555);
     expect(staging.modes[required(harness.state.seccompProfilePath, "seccompProfilePath")]).toBe(0o444);
     expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "profile.json")]).toBe(0o444);
-    expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "job.json")]).toBe(0o444);
+    expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "request.json")]).toBe(0o444);
+    expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "run-metadata.json")]).toBe(0o444);
     expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "execution-environment.json")]).toBe(0o444);
     expect(staging.bytes.profile).toEqual(inputs.profileBytes);
-    expect(staging.bytes.job).toEqual(inputs.jobBytes);
+    expect(staging.bytes.request).toEqual(inputs.requestBytes);
+    expect(staging.bytes.runMetadata).toEqual(inputs.runMetadataBytes);
     expect(staging.bytes.environment).toEqual(inputs.environmentBytes);
     const expectedSeccomp = JSON.stringify(JSON.parse(decoder.decode(readFileSync(SECCOMP_SOURCE_PATH))));
     expect(staging.bytes.seccomp).toEqual(encoder.encode(expectedSeccomp));
@@ -761,7 +779,7 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
       required(harness.state.runRoot, "runRoot"),
       CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE,
     ));
-    for (const [index, source] of inputs.sourceBlobs.entries()) {
+    for (const [index, source] of inputs.sourceSnapshots.entries()) {
       const sourcePath = join(required(harness.state.sourceDirectory, "sourceDirectory"), source.virtualPath.slice(1));
       expect(staging.modes[sourcePath]).toBe(0o444);
       expect(staging.bytes[`source-${index}`]).toEqual(source.bytes);
@@ -786,7 +804,8 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
         containerName: required(harness.state.containerName, "containerName"),
         sessionNonce: required(harness.state.sessionNonce, "sessionNonce"),
         imageReference: plan.imageReference,
-        jobId: plan.jobId,
+        runMetadataId: plan.runMetadataId,
+        requestId: plan.requestId,
         executionPlanSha256: plan.executionPlanSha256,
         memoryBytes: limits.maxMemoryBytes,
         maxProcesses: limits.maxProcesses,
@@ -1038,7 +1057,7 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
       force: true,
     })).toThrow(/DOCKER-PROCESS-INVALID/u);
 
-    const minimumMemoryCreate = buildCppCuteAotDockerCreateRequest({
+    const minimumCreateInput = {
       ...common,
       controlDirectory: `${common.runRoot}/control`,
       sourceDirectory: `${common.runRoot}/source`,
@@ -1046,14 +1065,24 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
       containerName: `browsergrad-cpp-cute-aot-${"0".repeat(32)}`,
       sessionNonce: "0".repeat(32),
       imageReference: `registry.example.com/browsergrad/cpp-cute@sha256:${"a".repeat(64)}`,
-      jobId: `bg.cpp.aot-job.sha256.${"b".repeat(64)}`,
+      runMetadataId: `bg.cpp.aot-run-metadata.sha256.${"b".repeat(64)}`,
+      requestId: `bg.cpp.frontend-request.sha256.${"d".repeat(64)}`,
       executionPlanSha256: "c".repeat(64),
       memoryBytes: 1,
       maxProcesses: 1,
       seccompProfilePath: `${common.runRoot}/${CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE}`,
-    });
+    } as const;
+    const minimumMemoryCreate = buildCppCuteAotDockerCreateRequest(minimumCreateInput);
     expect(minimumMemoryCreate.arguments).toContain(
       "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=1,mode=1777",
     );
+    expect(() => buildCppCuteAotDockerCreateRequest({
+      ...minimumCreateInput,
+      runMetadataId: `bg.cpp.aot-job.sha256.${"b".repeat(64)}`,
+    })).toThrow(/DOCKER-PROCESS-INVALID/u);
+    expect(() => buildCppCuteAotDockerCreateRequest({
+      ...minimumCreateInput,
+      requestId: `bg.cpp.entry-request.sha256.${"d".repeat(64)}`,
+    })).toThrow(/DOCKER-PROCESS-INVALID/u);
   });
 });

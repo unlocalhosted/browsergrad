@@ -14,9 +14,9 @@ import {
   type PreparedCppCuteAotExecutionEnvironment,
 } from "./cpp_cute_aot_environment.js";
 import {
-  unwrapPreparedCppCuteAotJob,
-  type PreparedCppCuteAotJob,
-} from "./cpp_cute_aot_job.js";
+  unwrapPreparedCppCuteAotRunMetadata,
+  type PreparedCppCuteAotRunMetadata,
+} from "./cpp_cute_aot_run_metadata.js";
 import { unwrapPreparedCppCuteAotFrontendProfile } from "./cpp_cute_frontend_profile.js";
 
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA =
@@ -40,8 +40,10 @@ export const CPP_CUTE_AOT_CONTAINER_SOURCE_ROOT = "/run/browsergrad/source";
 export const CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT = "/run/browsergrad/control";
 export const CPP_CUTE_AOT_CONTAINER_PROFILE_PATH =
   `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/profile.json`;
-export const CPP_CUTE_AOT_CONTAINER_JOB_PATH =
-  `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/job.json`;
+export const CPP_CUTE_AOT_CONTAINER_REQUEST_PATH =
+  `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/request.json`;
+export const CPP_CUTE_AOT_CONTAINER_RUN_METADATA_PATH =
+  `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/run-metadata.json`;
 export const CPP_CUTE_AOT_CONTAINER_EXECUTION_ENVIRONMENT_PATH =
   `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/execution-environment.json`;
 export const CPP_CUTE_AOT_DOCKER_DEFAULT_PATH =
@@ -252,7 +254,7 @@ export const CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_DECODE_LIMITS = deepFreezeJso
  */
 export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
   schema: CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA,
-  version: { major: 1, minor: 3 },
+  version: { major: 1, minor: 4 },
   contractId: "browsergrad.compiler.cpp-cute.aot@1",
   runtime: {
     engine: "docker",
@@ -300,7 +302,8 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     workingDirectory: "/run/browsergrad",
     arguments: [
       "--profile=/run/browsergrad/control/profile.json",
-      "--job=/run/browsergrad/control/job.json",
+      "--request=/run/browsergrad/control/request.json",
+      "--run-metadata=/run/browsergrad/control/run-metadata.json",
       "--execution-environment=/run/browsergrad/control/execution-environment.json",
       "--source-root=/run/browsergrad/source",
       `--protocol=${CPP_CUTE_AOT_RESULT_FRAME_PROTOCOL}`,
@@ -452,7 +455,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
 
 // SHA-256 of canonical JSON for CPP_CUTE_AOT_SANDBOX_POLICY_V1.
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 =
-  "14052e2d877fb00a293ef21ad64721b6432274b4e25400a85d2314f0fa1c773b";
+  "8a410d3292a165813894a37fca339d583c6781f2704070314347a5247bd0def9";
 
 export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
   const actual = await hashCanonicalJson(CPP_CUTE_AOT_SANDBOX_POLICY_V1);
@@ -464,16 +467,16 @@ export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
 /**
  * Hashes the exact output-independent logical execution plan. Random host
  * workspace paths and container IDs are excluded; every semantic Docker
- * setting is derived from this built-in policy plus the prepared job/profile.
+ * setting is derived from this built-in policy plus prepared run metadata/profile.
  */
 export async function computeCppCuteAotExecutionPlanHash(
-  job: PreparedCppCuteAotJob,
+  metadata: PreparedCppCuteAotRunMetadata,
   environment: PreparedCppCuteAotExecutionEnvironment,
 ): Promise<string> {
-  const jobRecord = unwrapPreparedCppCuteAotJob(job);
-  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(jobRecord.profile);
+  const metadataRecord = unwrapPreparedCppCuteAotRunMetadata(metadata);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(metadataRecord.profile);
   const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(environment);
-  if (environmentRecord.profile !== jobRecord.profile || environment.profileHash !== job.profileHash) {
+  if (environmentRecord.profile !== metadataRecord.profile || environment.profileHash !== metadata.profileHash) {
     throw new Error("BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-PROFILE-MISMATCH: execution environment belongs to a different prepared profile");
   }
   const profile = profileRecord.profile;
@@ -483,25 +486,25 @@ export async function computeCppCuteAotExecutionPlanHash(
   await verifyCppCuteAotSandboxPolicyIdentity();
   verifyExecutionEnvironmentPolicy(environmentRecord.manifest);
   return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.aot-execution-plan.v2",
+    domain: "browsergrad.compiler.cpp-cute.aot-execution-plan.v3",
     policy: CPP_CUTE_AOT_SANDBOX_POLICY_V1,
-    jobId: job.jobId,
-    profileHash: job.profileHash,
+    runMetadataId: metadata.runMetadataId,
+    requestId: metadata.requestId,
+    profileHash: metadata.profileHash,
     executionEnvironment: {
       manifestId: environment.manifestId,
       manifestSha256: environment.manifestSha256,
       manifestByteLength: environment.manifestByteLength,
       bodySha256: environment.bodySha256,
     },
-    invocationManifestSha256: await computeCppCuteAotInvocationManifestHash(job),
-    dependencyManifestSha256: await computeCppCuteAotDependencyManifestHash(jobRecord.profile),
+    invocationManifestSha256: await computeCppCuteAotInvocationManifestHash(metadata),
+    dependencyManifestSha256: await computeCppCuteAotDependencyManifestHash(metadataRecord.profile),
     limitsManifestSha256: await computeCppCuteAotLimitsManifestHash(profile.extractionLimits),
     deployment: profile.deployment,
     toolchain: profile.toolchain,
     language: profile.language,
     target: profile.target,
     virtualFileSystem: profile.virtualFileSystem,
-    sourceFiles: jobRecord.job.files,
   });
 }
 

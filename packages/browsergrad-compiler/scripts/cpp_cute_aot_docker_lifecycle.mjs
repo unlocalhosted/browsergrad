@@ -88,7 +88,8 @@ export class CppCuteAotDockerRunError extends Error {
 
 /**
  * @typedef {Readonly<{
- *   jobId: string;
+ *   runMetadataId: string;
+ *   requestId: string;
  *   profileHash: string;
  *   executionPlanSha256: string;
  *   containerId: string;
@@ -206,7 +207,8 @@ async function executeWithSession(
   );
   throwIfAborted(signal);
   const completed = Object.freeze({
-    jobId: plan.jobId,
+    runMetadataId: plan.runMetadataId,
+    requestId: plan.requestId,
     profileHash: plan.profileHash,
     executionPlanSha256: plan.executionPlanSha256,
     containerId: sessionResult.value.containerId,
@@ -273,7 +275,8 @@ async function runContainerLifecycle(session, authorized, limits, production) {
       containerName,
       sessionNonce,
       imageReference: authorized.plan.imageReference,
-      jobId: authorized.plan.jobId,
+      runMetadataId: authorized.plan.runMetadataId,
+      requestId: authorized.plan.requestId,
       executionPlanSha256: authorized.plan.executionPlanSha256,
       memoryBytes: limits.maxMemoryBytes,
       maxProcesses: limits.maxProcesses,
@@ -441,9 +444,17 @@ async function stageInputs(runRoot, plan, signal, deadline) {
   ));
   checkLifecycleDeadline(deadline, signal);
   expectedFiles.push(await stageFile(
-    join(controlDirectory, "job.json"),
-    inputs.jobBytes,
-    await sha256Hex(inputs.jobBytes),
+    join(controlDirectory, "request.json"),
+    inputs.requestBytes,
+    await sha256Hex(inputs.requestBytes),
+    signal,
+    deadline,
+  ));
+  checkLifecycleDeadline(deadline, signal);
+  expectedFiles.push(await stageFile(
+    join(controlDirectory, "run-metadata.json"),
+    inputs.runMetadataBytes,
+    await sha256Hex(inputs.runMetadataBytes),
     signal,
     deadline,
   ));
@@ -456,7 +467,7 @@ async function stageInputs(runRoot, plan, signal, deadline) {
     deadline,
   ));
   const createdDirectories = new Set([sourceDirectory, controlDirectory]);
-  for (const source of inputs.sourceBlobs) {
+  for (const source of inputs.sourceSnapshots) {
     checkLifecycleDeadline(deadline, signal);
     const target = sourceStagePath(sourceDirectory, source.virtualPath);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
@@ -988,13 +999,14 @@ function verifyNameAndLabels(name, labelsValue, expected, path) {
   if (name !== `/${expected.containerName}`) containerMismatch(`${path}.name`, "container name differs from private session");
   const labels = objectValue(labelsValue, `${path}.labels`);
   const expectedLabels = {
-    "browsergrad.job": expected.authorized.plan.jobId,
     "browsergrad.owner": "cpp-cute-aot",
     "browsergrad.plan": expected.authorized.plan.executionPlanSha256,
+    "browsergrad.request": expected.authorized.plan.requestId,
+    "browsergrad.run-metadata": expected.authorized.plan.runMetadataId,
     "browsergrad.session": expected.sessionNonce,
   };
   const keys = Object.keys(labels).sort();
-  if (keys.length !== 4 || keys.some((key, index) => key !== Object.keys(expectedLabels).sort()[index])) {
+  if (keys.length !== 5 || keys.some((key, index) => key !== Object.keys(expectedLabels).sort()[index])) {
     containerMismatch(`${path}.labels`, "container labels differ from closed session labels");
   }
   for (const [key, expectedValue] of Object.entries(expectedLabels)) {

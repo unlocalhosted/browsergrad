@@ -1,7 +1,4 @@
-import {
-  canonicalizeJson,
-  type WireU64,
-} from "@unlocalhosted/browsergrad-semantic-core/schema";
+import type { WireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   unwrapVerifiedCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
@@ -12,16 +9,18 @@ import {
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
 import {
+  unwrapPreparedCppCuteFrontendRequestBinding,
+  type PreparedCppCuteFrontendRequestBinding,
+} from "./cpp_cute_frontend_request_binding.js";
+import {
   unwrapVerifiedCppCuteFrontendAttestation,
-  type CppCuteProvenanceGitRevisionV1,
   type VerifiedCppCuteFrontendAttestation,
 } from "./cpp_cute_frontend_provenance.js";
+import { unwrapVerifiedCppCuteAotRunnerReceipt } from "./cpp_cute_aot_receipt.js";
 
 declare const authorizedArtifactBrand: unique symbol;
 
-export type CppCuteFrontendAuthorizationEvidenceKind =
-  | "aot-attestation"
-  | "browser-local-worker";
+export type CppCuteFrontendAuthorizationEvidenceKind = "aot-attestation";
 
 /**
  * Producer-neutral authority accepted by semantic lowering. Producer-specific
@@ -34,6 +33,8 @@ export interface AuthorizedCppCuteFrontendArtifact {
   readonly artifactBytesSha256: string;
   readonly artifactByteLength: WireU64;
   readonly profileHash: string;
+  readonly requestId: string;
+  readonly requestBindingId: string;
   readonly compilationContractHash: string;
   readonly sourceSetSha256: string;
   readonly headerSetSha256: string;
@@ -45,20 +46,19 @@ export interface AuthorizedCppCuteFrontendArtifact {
 export type CppCuteFrontendAuthorizationEvidence = {
   readonly kind: "aot-attestation";
   readonly authority: VerifiedCppCuteFrontendAttestation;
+  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
 };
 
 export interface AuthorizedCppCuteFrontendArtifactRecord {
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly evidence: CppCuteFrontendAuthorizationEvidence;
+  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
 }
 
 export interface AuthorizeAotCppCuteFrontendArtifactRequest {
   readonly attestation: VerifiedCppCuteFrontendAttestation;
-  readonly expectedProfileHash: string;
-  readonly expectedSourceSetSha256: string;
-  readonly expectedSourceRepository: string;
-  readonly expectedSourceRevision: CppCuteProvenanceGitRevisionV1;
+  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
 }
 
 export type CppCuteFrontendAuthorizationErrorCode =
@@ -85,6 +85,8 @@ export function authorizeAotCppCuteFrontendArtifact(
   const attestationRecord = unwrapVerifiedCppCuteFrontendAttestation(request.attestation);
   const artifact = attestationRecord.artifact;
   const profile = attestationRecord.profile;
+  const receiptRecord = unwrapVerifiedCppCuteAotRunnerReceipt(attestationRecord.receipt);
+  const bindingRecord = unwrapPreparedCppCuteFrontendRequestBinding(request.requestBinding);
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
   const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   if (artifact.outcome !== "accepted") {
@@ -97,17 +99,14 @@ export function authorizeAotCppCuteFrontendArtifact(
   if (artifact.compilationContractHash !== profile.compilationContractHash) {
     mismatch("$.artifact.compilationContractHash", "artifact compilation contract differs from prepared profile");
   }
-  if (profile.profileHash !== request.expectedProfileHash) {
-    mismatch("$.expectedProfileHash", "prepared profile differs from caller-pinned profile identity");
-  }
-  if (artifact.sourceSetSha256 !== request.expectedSourceSetSha256) {
-    mismatch("$.expectedSourceSetSha256", "artifact source set differs from caller-pinned source manifest");
-  }
-  if (request.attestation.sourceRepository !== request.expectedSourceRepository) {
-    mismatch("$.expectedSourceRepository", "attested source repository differs from expectation");
-  }
-  if (canonicalizeJson(request.attestation.sourceRevision) !== canonicalizeJson(request.expectedSourceRevision)) {
-    mismatch("$.expectedSourceRevision", "attested source revision differs from expectation");
+  if (
+    receiptRecord.requestBinding !== request.requestBinding
+    || bindingRecord.artifact !== artifact
+    || request.attestation.runMetadataId !== receiptRecord.metadata.runMetadataId
+    || request.attestation.requestId !== request.requestBinding.requestId
+    || request.attestation.requestBindingId !== request.requestBinding.bindingId
+  ) {
+    mismatch("$.requestBinding", "attestation, receipt, request binding, and artifact are not the same opaque authority chain");
   }
   const extractor = profileRecord.profile.deployment.extractor;
   if (artifactRecord.envelope.producer.id !== extractor.id ||
@@ -123,7 +122,7 @@ export function authorizeAotCppCuteFrontendArtifact(
   return mintAuthorizedCppCuteFrontendArtifact(
     artifact,
     profile,
-    { kind: "aot-attestation", authority: request.attestation },
+    { kind: "aot-attestation", authority: request.attestation, requestBinding: request.requestBinding },
     request.attestation.evidenceHash,
   );
 }
@@ -149,6 +148,8 @@ function mintAuthorizedCppCuteFrontendArtifact(
     artifactBytesSha256: artifact.artifactBytesSha256,
     artifactByteLength: artifact.artifactByteLength,
     profileHash: profile.profileHash,
+    requestId: evidence.requestBinding.requestId,
+    requestBindingId: evidence.requestBinding.bindingId,
     compilationContractHash: artifact.compilationContractHash,
     sourceSetSha256: artifact.sourceSetSha256,
     headerSetSha256: artifact.headerSetSha256,
@@ -156,7 +157,12 @@ function mintAuthorizedCppCuteFrontendArtifact(
     evidenceKind: evidence.kind,
     evidenceHash,
   }) as AuthorizedCppCuteFrontendArtifact;
-  AUTHORIZED_ARTIFACTS.set(authorized, Object.freeze({ artifact, profile, evidence }));
+  AUTHORIZED_ARTIFACTS.set(authorized, Object.freeze({
+    artifact,
+    profile,
+    evidence,
+    requestBinding: evidence.requestBinding,
+  }));
   return authorized;
 }
 

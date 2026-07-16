@@ -1113,6 +1113,22 @@ __global__ void vectorParams(float *out, float prefix, float2 value, int suffix)
       expect(missing).toEqual([]);
     });
 
+  it("advertises run-metadata diagnostics without the deleted AOT job authority", () => {
+      const registered = getCudaFeatureRegistry().map((feature) => feature.code);
+      expect(registered.filter((code) => code.startsWith("BG-COMPILER-CPP-CUTE-AOT-JOB-"))).toEqual([]);
+      expect(registered.filter((code) => code.startsWith("BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-"))).toEqual([
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-CANCELLED",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-INVALID",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-UNSUPPORTED-VERSION",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-PROFILE-MISMATCH",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-REQUEST-MISMATCH",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-SOURCE-REFERENCE-MISMATCH",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-HASH-MISMATCH",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-RESOURCE-LIMIT",
+        "BG-COMPILER-CPP-CUTE-AOT-RUN-METADATA-UNVERIFIED",
+      ]);
+    });
+
   it("reports unsupported C++ CUDA object-model gaps with stable diagnostic codes", () => {
       expectParseDiagnosticCode(`
   __global__ void cute(float* out) {

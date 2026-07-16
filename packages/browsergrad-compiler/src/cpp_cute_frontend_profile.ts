@@ -10,9 +10,9 @@ import {
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 1;
+export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 2;
 export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
-  "https://browsergrad.dev/provenance/cpp-cute-aot/v2";
+  "https://browsergrad.dev/provenance/cpp-cute-aot/v3";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const OCI_SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -1236,13 +1236,13 @@ function parseTarget(value: JsonValue, path: string): CppCuteFrontendTargetProfi
     invalid(`${devicePath}.architecture`, "device architecture must be an sm_NN Clang CUDA target CPU");
   }
   if (device.triple !== "nvptx64-nvidia-cuda") {
-    invalid(`${devicePath}.triple`, "profile v2.1 requires the nvptx64-nvidia-cuda device triple");
+    invalid(`${devicePath}.triple`, "profile v2.2 requires the nvptx64-nvidia-cuda device triple");
   }
   if (host.endianness !== "little" || device.endianness !== "little") {
-    invalid(path, "CUDA profile v2.1 requires little-endian host and NVPTX targets");
+    invalid(path, "CUDA profile v2.2 requires little-endian host and NVPTX targets");
   }
   if (host.pointerBits !== 64 || device.pointerBits !== 64) {
-    invalid(path, "CUDA profile v2.1 requires matching 64-bit host and device pointer widths");
+    invalid(path, "CUDA profile v2.2 requires matching 64-bit host and device pointer widths");
   }
   const hostDataLayout = boundedString(field(host, "dataLayout", hostPath), `${hostPath}.dataLayout`, 1_024);
   const deviceDataLayout = boundedString(field(device, "dataLayout", devicePath), `${devicePath}.dataLayout`, 1_024);

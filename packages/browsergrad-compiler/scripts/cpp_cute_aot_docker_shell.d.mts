@@ -23,7 +23,8 @@ declare const observedCppCuteAotLocalDockerImageBrand: unique symbol;
 
 export interface ObservedCppCuteAotLocalDockerImage {
   readonly [observedCppCuteAotLocalDockerImageBrand]: true;
-  readonly jobId: string;
+  readonly runMetadataId: string;
+  readonly requestId: string;
   readonly profileHash: string;
   readonly executionPlanSha256: string;
   readonly imageReference: string;

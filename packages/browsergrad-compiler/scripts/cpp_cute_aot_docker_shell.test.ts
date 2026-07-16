@@ -21,8 +21,9 @@ import {
 import {
   prepareCppCuteAotExecutionEnvironment as prepareDistEnvironment,
 } from "../dist/cpp_cute_aot_environment.js";
-import { prepareCppCuteAotJob as prepareDistJob } from "../dist/cpp_cute_aot_job.js";
+import { prepareCppCuteAotRunMetadata as prepareDistRunMetadata } from "../dist/cpp_cute_aot_run_metadata.js";
 import { prepareCppCuteAotOfflineRun as prepareDistOfflineRun } from "../dist/cpp_cute_aot_runner_plan.js";
+import { prepareCppCuteFrontendRequest as prepareDistRequest } from "../dist/cpp_cute_frontend_request.js";
 import { prepareCppCuteFrontendProfile as prepareDistProfile } from "../dist/cpp_cute_frontend_profile.js";
 import {
   CPP_CUTE_AOT_DOCKER_API_VERSION,
@@ -50,14 +51,17 @@ import {
   __unwrapObservedCppCuteAotLocalDockerImageForTest,
   unwrapObservedCppCuteAotLocalDockerImage,
 } from "./cpp_cute_aot_docker_shell.mjs";
-import { unwrapPreparedCppCuteAotJob } from "../src/cpp_cute_aot_job.js";
 import {
   copyPreparedCppCuteAotExecutionEnvironmentBytes,
 } from "../src/cpp_cute_aot_environment.js";
+import { unwrapPreparedCppCuteAotRunMetadata } from "../src/cpp_cute_aot_run_metadata.js";
 import {
-  copyCppCuteAotOfflineRunSourceBlobs,
   unwrapPreparedCppCuteAotOfflineRun,
 } from "../src/cpp_cute_aot_runner_plan.js";
+import {
+  copyPreparedCppCuteFrontendSourceSnapshots,
+  unwrapPreparedCppCuteFrontendRequest,
+} from "../src/cpp_cute_frontend_request.js";
 import { unwrapPreparedCppCuteFrontendProfile } from "../src/cpp_cute_frontend_profile.js";
 import {
   createCppCuteAotOciFixture,
@@ -186,21 +190,27 @@ async function prepareFixture(twoLayers = false): Promise<PreparedDockerFixture>
       }
     : {});
   const sourcePlan = unwrapPreparedCppCuteAotOfflineRun(fixture.plan);
-  const sourceJob = unwrapPreparedCppCuteAotJob(sourcePlan.job);
-  const sourceProfile = unwrapPreparedCppCuteFrontendProfile(sourceJob.profile);
+  const sourceMetadata = unwrapPreparedCppCuteAotRunMetadata(sourcePlan.metadata);
+  const sourceRequest = unwrapPreparedCppCuteFrontendRequest(sourceMetadata.request);
+  const sourceProfile = unwrapPreparedCppCuteFrontendProfile(sourceMetadata.profile);
   const distProfile = await prepareDistProfile(structuredClone(sourceProfile.profile));
-  const distJob = await prepareDistJob(distProfile, structuredClone(sourceJob.job));
+  const distRequest = await prepareDistRequest(
+    distProfile,
+    structuredClone(sourceRequest.request),
+    copyPreparedCppCuteFrontendSourceSnapshots(sourceMetadata.request),
+    { detached: structuredClone(sourceRequest.detached) },
+  );
+  const distRunMetadata = await prepareDistRunMetadata(
+    distRequest,
+    structuredClone(sourceMetadata.metadata),
+  );
   const distEnvironment = await prepareDistEnvironment(
     distProfile,
     copyPreparedCppCuteAotExecutionEnvironmentBytes(sourcePlan.executionEnvironment),
   );
   const distPlan = await prepareDistOfflineRun(
-    distJob,
+    distRunMetadata,
     distEnvironment,
-    copyCppCuteAotOfflineRunSourceBlobs(fixture.plan).map(({ fileId, bytes }) => ({
-      fileId,
-      bytes: new Uint8Array(bytes),
-    })),
   );
   const metadata = await verifyCppCuteAotOciMetadata(fixture.evidence);
   return {
@@ -535,7 +545,8 @@ describe("C++/CuTe AOT local Docker image observation", () => {
       adapter,
     );
     expect(observed).toEqual({
-      jobId: prepared.authorized.jobId,
+      runMetadataId: prepared.authorized.runMetadataId,
+      requestId: prepared.authorized.requestId,
       profileHash: prepared.authorized.profileHash,
       executionPlanSha256: prepared.authorized.executionPlanSha256,
       imageReference: prepared.authorized.imageReference,

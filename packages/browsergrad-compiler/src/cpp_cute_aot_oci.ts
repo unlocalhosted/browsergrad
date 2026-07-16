@@ -80,7 +80,8 @@ declare const authorizedCppCuteAotOciMetadataBrand: unique symbol;
 /** Exact OCI manifest/config metadata authorized for one prepared plan. */
 export interface AuthorizedCppCuteAotOciMetadata {
   readonly [authorizedCppCuteAotOciMetadataBrand]: true;
-  readonly jobId: string;
+  readonly runMetadataId: string;
+  readonly requestId: string;
   readonly profileHash: string;
   readonly executionPlanSha256: string;
   readonly imageReference: string;
@@ -200,7 +201,8 @@ export function authorizeCppCuteAotOciMetadata(
     environment.manifest.body.image.layers,
   );
   const authorized = Object.freeze({
-    jobId: plan.jobId,
+    runMetadataId: plan.runMetadataId,
+    requestId: plan.requestId,
     profileHash: plan.profileHash,
     executionPlanSha256: plan.executionPlanSha256,
     imageReference: plan.imageReference,

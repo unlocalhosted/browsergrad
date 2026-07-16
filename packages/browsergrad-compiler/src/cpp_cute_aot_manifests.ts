@@ -2,9 +2,9 @@ import {
   hashCanonicalJson,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
-  unwrapPreparedCppCuteAotJob,
-  type PreparedCppCuteAotJob,
-} from "./cpp_cute_aot_job.js";
+  unwrapPreparedCppCuteAotRunMetadata,
+  type PreparedCppCuteAotRunMetadata,
+} from "./cpp_cute_aot_run_metadata.js";
 import {
   unwrapVerifiedCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
@@ -38,16 +38,18 @@ export async function computeCppCuteAotLimitsManifestHash(
 
 /**
  * Computes the invocation before execution. Output facts cannot influence this
- * identity: it is derived only from the prepared job and its exact profile.
+ * identity: it is derived only from prepared run metadata and its exact profile.
  */
 export async function computeCppCuteAotInvocationManifestHash(
-  job: PreparedCppCuteAotJob,
+  metadata: PreparedCppCuteAotRunMetadata,
 ): Promise<string> {
-  const jobRecord = unwrapPreparedCppCuteAotJob(job);
-  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(jobRecord.profile);
+  const metadataRecord = unwrapPreparedCppCuteAotRunMetadata(metadata);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(metadataRecord.profile);
   return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.aot-invocation.v1",
-    job: jobRecord.job,
+    domain: "browsergrad.compiler.cpp-cute.aot-invocation.v2",
+    runMetadataId: metadata.runMetadataId,
+    requestId: metadata.requestId,
+    profileHash: metadata.profileHash,
     deployment: profileRecord.profile.deployment,
     language: profileRecord.profile.language,
     target: profileRecord.profile.target,

@@ -795,8 +795,11 @@ hash, exact source descriptors and snapshots, main virtual path, source anchor,
 and expected artifact schema/version. It does not contain a deployment-profile
 hash, worker/container/assets, compiler arguments, environment, host paths,
 URLs, repository/revision, or pre-known output/header/input-closure hashes.
-Repository identity is detached source provenance. Expected hashes are
-detached conformance assertions, not ordinary compile-request fields.
+Repository/revision, when supplied, is a detached caller-declared source
+reference. It is signed metadata, not source-acquisition provenance. Only a
+separate authority that binds repository, revision, paths, and digests to the
+exact request bytes may claim that provenance. Expected hashes are detached
+conformance assertions, not ordinary compile-request fields.
 
 Request JSON contains content-addressed source descriptors, not executable
 host paths or embedded mutable byte views. Exact source snapshots cross the API
@@ -1677,9 +1680,10 @@ widening the frozen tensor-plan schema or treating device absence as success.
   bounded input, preprocessing/template work, memory, output, time, and
   cancellation. Docker, native Clang, and a compiler service are absent from
   this required path.
-- Use one producer-neutral source request and detached provenance/conformance
-  assertions. Verify exact package-owned worker bytes before Blob-worker
-  construction; no self-attestation or unverified-URL fallback is allowed.
+- Use one producer-neutral source request. Keep any declared source reference
+  and conformance assertions detached from request identity. Verify exact
+  package-owned worker bytes before Blob-worker construction; no
+  self-attestation or unverified-URL fallback is allowed.
 - Prove layout-only fixtures, then dynamic `Tensor<Engine, Layout>` binding and
   copy/view operations.
 - Preserve source spans and typed unsupported target intrinsics.

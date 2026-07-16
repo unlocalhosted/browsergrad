@@ -28,23 +28,26 @@ import {
   type VerifiedCppCuteAotRunnerReceiptRecord,
   type VerifiedCppCuteAotRunnerReceiptResource,
 } from "./cpp_cute_aot_receipt.js";
-import { unwrapPreparedCppCuteAotJob } from "./cpp_cute_aot_job.js";
+import { unwrapPreparedCppCuteAotRunMetadata } from "./cpp_cute_aot_run_metadata.js";
 
 export const CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA = "browsergrad.compiler.cpp-cute.attestation-trust-store";
-export const CPP_CUTE_FRONTEND_PROVENANCE_MAJOR = 1;
-export const CPP_CUTE_FRONTEND_PROVENANCE_MINOR = 0;
-export const CPP_CUTE_FRONTEND_BUILD_TYPE = "https://browsergrad.dev/build-types/cpp-cute-aot/v2";
+export const CPP_CUTE_ATTESTATION_TRUST_STORE_MAJOR = 1;
+export const CPP_CUTE_ATTESTATION_TRUST_STORE_MINOR = 0;
+export const CPP_CUTE_FRONTEND_BUILD_TYPE = "https://browsergrad.dev/build-types/cpp-cute-aot/v3";
 export const CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
 export const CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 
 /**
- * V1 uses standard DSSE PAE around an in-toto Statement v1. Its predicate is
- * BrowserGrad-specific, not SLSA provenance. A later Sigstore verifier may
- * mint the same opaque authority without changing lowering consumers.
+ * V3 uses standard DSSE PAE around an in-toto Statement v1. Predicate and
+ * build-type versions are BrowserGrad-specific; neither is SLSA provenance.
+ * A later Sigstore verifier may mint the same opaque authority without
+ * changing lowering consumers.
  */
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
-const AOT_JOB_ID = /^bg\.cpp\.aot-job\.sha256\.[0-9a-f]{64}$/u;
+const AOT_RUN_METADATA_ID = /^bg\.cpp\.aot-run-metadata\.sha256\.[0-9a-f]{64}$/u;
+const FRONTEND_REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
+const FRONTEND_REQUEST_BINDING_ID = /^bg\.cpp\.frontend-request-binding\.sha256\.[0-9a-f]{64}$/u;
 const AOT_RECEIPT_ID = /^bg\.cpp\.aot-receipt\.sha256\.[0-9a-f]{64}$/u;
 const AOT_INVOCATION_ID = /^bg\.cpp\.aot-invocation\.sha256\.[0-9a-f]{64}$/u;
 const SHA256_KEY_ID = /^sha256:[0-9a-f]{64}$/u;
@@ -61,7 +64,10 @@ export interface CppCuteAttestationTrustKeyV1 extends JsonObject {
 
 export interface CppCuteAttestationTrustStoreV1 extends JsonObject {
   readonly schema: typeof CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA;
-  readonly version: { readonly major: 1; readonly minor: 0 };
+  readonly version: {
+    readonly major: typeof CPP_CUTE_ATTESTATION_TRUST_STORE_MAJOR;
+    readonly minor: typeof CPP_CUTE_ATTESTATION_TRUST_STORE_MINOR;
+  };
   readonly keys: readonly CppCuteAttestationTrustKeyV1[];
 }
 
@@ -84,7 +90,7 @@ interface PreparedCppCuteAttestationTrustStoreRecord {
   readonly keys: ReadonlyMap<string, ImportedTrustKey>;
 }
 
-export interface CppCuteProvenanceSubjectV1 extends JsonObject {
+export interface CppCuteProvenanceSubjectV3 extends JsonObject {
   readonly artifactId: string;
   readonly artifactHash: string;
   readonly transportHash: string;
@@ -97,17 +103,17 @@ export interface CppCuteProvenanceSubjectV1 extends JsonObject {
   readonly inputClosureSha256: string;
 }
 
-export interface CppCuteProvenanceSourceV1 extends JsonObject {
+export interface CppCuteDeclaredSourceReferenceV3 extends JsonObject {
   readonly repository: string;
-  readonly revision: CppCuteProvenanceGitRevisionV1;
+  readonly revision: CppCuteProvenanceGitRevisionV3;
 }
 
-export interface CppCuteProvenanceGitRevisionV1 extends JsonObject {
+export interface CppCuteProvenanceGitRevisionV3 extends JsonObject {
   readonly algorithm: "git-sha1" | "git-sha256";
   readonly value: string;
 }
 
-export interface CppCuteProvenanceToolchainV1 extends JsonObject {
+export interface CppCuteProvenanceToolchainV3 extends JsonObject {
   readonly extractorId: string;
   readonly extractorVersion: string;
   readonly extractorBuildId: string;
@@ -121,7 +127,7 @@ export interface CppCuteProvenanceToolchainV1 extends JsonObject {
   readonly dependencyManifestSha256: string;
 }
 
-export interface CppCuteProvenanceSandboxV1 extends JsonObject {
+export interface CppCuteProvenanceSandboxV3 extends JsonObject {
   readonly contractId: "browsergrad.compiler.cpp-cute.aot@1";
   readonly policySha256: string;
   readonly limitsSha256: string;
@@ -132,7 +138,7 @@ export interface CppCuteProvenanceSandboxV1 extends JsonObject {
   readonly userProducedNativeExecution: "forbidden";
 }
 
-export interface CppCuteProvenanceRunV1 extends JsonObject {
+export interface CppCuteProvenanceRunV3 extends JsonObject {
   readonly platform: "linux/amd64";
   readonly runnerId: string;
   readonly runnerVersion: string;
@@ -142,7 +148,9 @@ export interface CppCuteProvenanceRunV1 extends JsonObject {
   readonly executionPlanSha256: string;
   readonly executionEnvironmentManifestSha256: string;
   readonly outputManifestSha256: string;
-  readonly jobId: string;
+  readonly runMetadataId: string;
+  readonly requestId: string;
+  readonly requestBindingId: string;
   readonly receiptId: string;
   readonly receiptBytesSha256: string;
   readonly receiptByteLength: WireU64;
@@ -150,15 +158,15 @@ export interface CppCuteProvenanceRunV1 extends JsonObject {
   readonly exitCode: 0;
 }
 
-export interface CppCuteFrontendProvenancePredicateV1 extends JsonObject {
+export interface CppCuteFrontendProvenancePredicateV3 extends JsonObject {
   readonly builderId: string;
   readonly buildType: typeof CPP_CUTE_FRONTEND_BUILD_TYPE;
-  readonly source: CppCuteProvenanceSourceV1;
-  readonly artifact: CppCuteProvenanceSubjectV1;
+  readonly declaredSource: CppCuteDeclaredSourceReferenceV3;
+  readonly artifact: CppCuteProvenanceSubjectV3;
   readonly profileId: string;
-  readonly toolchain: CppCuteProvenanceToolchainV1;
-  readonly sandbox: CppCuteProvenanceSandboxV1;
-  readonly run: CppCuteProvenanceRunV1;
+  readonly toolchain: CppCuteProvenanceToolchainV3;
+  readonly sandbox: CppCuteProvenanceSandboxV3;
+  readonly run: CppCuteProvenanceRunV3;
 }
 
 export interface CppCuteInTotoSubjectV1 extends JsonObject {
@@ -166,22 +174,22 @@ export interface CppCuteInTotoSubjectV1 extends JsonObject {
   readonly digest: { readonly sha256: string };
 }
 
-export interface CppCuteFrontendProvenanceStatementV1 extends JsonObject {
+export interface CppCuteFrontendProvenanceStatementV3 extends JsonObject {
   readonly _type: typeof CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE;
   readonly subject: readonly [CppCuteInTotoSubjectV1];
   readonly predicateType: typeof CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE;
-  readonly predicate: CppCuteFrontendProvenancePredicateV1;
+  readonly predicate: CppCuteFrontendProvenancePredicateV3;
 }
 
-export interface CppCuteDsseSignatureV1 extends JsonObject {
+export interface CppCuteDsseSignature extends JsonObject {
   readonly keyid: string;
   readonly sig: string;
 }
 
-export interface CppCuteFrontendProvenanceV1 extends JsonObject {
+export interface CppCuteFrontendProvenanceV3 extends JsonObject {
   readonly payloadType: typeof CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE;
   readonly payload: string;
-  readonly signatures: readonly [CppCuteDsseSignatureV1];
+  readonly signatures: readonly [CppCuteDsseSignature];
 }
 
 declare const verifiedAttestationBrand: unique symbol;
@@ -198,18 +206,20 @@ export interface VerifiedCppCuteFrontendAttestation {
   readonly receiptId: string;
   readonly receiptBytesSha256: string;
   readonly receiptByteLength: WireU64;
-  readonly jobId: string;
+  readonly runMetadataId: string;
+  readonly requestId: string;
+  readonly requestBindingId: string;
   readonly invocationManifestSha256: string;
   readonly executionPlanSha256: string;
   readonly executionEnvironmentManifestSha256: string;
   readonly profileHash: string;
   readonly trustStoreHash: string;
-  readonly sourceRepository: string;
-  readonly sourceRevision: CppCuteProvenanceGitRevisionV1;
+  readonly declaredSourceRepository: string;
+  readonly declaredSourceRevision: CppCuteProvenanceGitRevisionV3;
 }
 
 export interface VerifiedCppCuteFrontendAttestationRecord {
-  readonly provenance: CppCuteFrontendProvenanceV1;
+  readonly provenance: CppCuteFrontendProvenanceV3;
   readonly receiptResource: VerifiedCppCuteAotRunnerReceiptResource;
   readonly receipt: VerifiedCppCuteAotRunnerReceipt;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
@@ -365,11 +375,11 @@ export async function verifyCppCuteFrontendAttestation(
   await verifyStatementBindings(statement, receipt, receiptRecord, artifactRecord, profileRecord);
   throwIfAborted(request.signal);
   const statementHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.frontend-provenance-statement.v1",
+    domain: "browsergrad.compiler.cpp-cute.frontend-provenance-statement.v3",
     statement,
   });
   const evidenceHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.aot-attestation-evidence.v1",
+    domain: "browsergrad.compiler.cpp-cute.aot-attestation-evidence.v3",
     statementHash,
     trustStoreHash: trustStoreRecord.trustStoreHash,
     keyId: dsseSignature.keyid,
@@ -389,14 +399,16 @@ export async function verifyCppCuteFrontendAttestation(
     receiptId: receipt.receiptId,
     receiptBytesSha256: receipt.receiptBytesSha256,
     receiptByteLength: receipt.receiptByteLength,
-    jobId: receipt.jobId,
+    runMetadataId: receipt.runMetadataId,
+    requestId: receipt.requestId,
+    requestBindingId: receipt.requestBindingId,
     invocationManifestSha256: receipt.invocationManifestSha256,
     executionPlanSha256: receipt.executionPlanSha256,
     executionEnvironmentManifestSha256: receipt.executionEnvironmentManifestSha256,
     profileHash: predicate.artifact.profileHash,
     trustStoreHash: trustStoreRecord.trustStoreHash,
-    sourceRepository: predicate.source.repository,
-    sourceRevision: predicate.source.revision,
+    declaredSourceRepository: predicate.declaredSource.repository,
+    declaredSourceRevision: predicate.declaredSource.revision,
   }) as VerifiedCppCuteFrontendAttestation;
   VERIFIED_ATTESTATIONS.set(verified, Object.freeze({
     provenance,
@@ -412,19 +424,19 @@ export async function verifyCppCuteFrontendAttestation(
 }
 
 export function cppCuteFrontendProvenancePayloadBytes(
-  statement: CppCuteFrontendProvenanceStatementV1,
+  statement: CppCuteFrontendProvenanceStatementV3,
 ): Uint8Array {
   return canonicalJsonBytes(statement);
 }
 
 export function cppCuteFrontendProvenancePayloadBase64(
-  statement: CppCuteFrontendProvenanceStatementV1,
+  statement: CppCuteFrontendProvenanceStatementV3,
 ): string {
   return encodeCanonicalBase64(cppCuteFrontendProvenancePayloadBytes(statement));
 }
 
 export function cppCuteFrontendProvenanceSigningBytes(
-  statement: CppCuteFrontendProvenanceStatementV1,
+  statement: CppCuteFrontendProvenanceStatementV3,
 ): Uint8Array {
   return dsseSigningBytes(CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE, cppCuteFrontendProvenancePayloadBytes(statement));
 }
@@ -432,14 +444,17 @@ export function cppCuteFrontendProvenanceSigningBytes(
 function parseTrustStore(value: JsonValue): CppCuteAttestationTrustStoreV1 {
   const object = closedObject(value, ["schema", "version", "keys"], "$");
   if (object.schema !== CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA) invalid("$.schema", `expected ${CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA}`);
-  parseVersion(field(object, "version", "$"), "$.version");
+  parseTrustStoreVersion(field(object, "version", "$"), "$.version");
   const rawKeys = arrayValue(field(object, "keys", "$"), "$.keys");
   if (rawKeys.length === 0 || rawKeys.length > 64) invalid("$.keys", "trust store requires 1..64 keys");
   const keys = rawKeys.map((entry, index) => parseTrustKey(entry, `$.keys[${index}]`));
   requireSortedUnique(keys, (key) => key.keyId, "$.keys");
   return deepFreezeJson({
     schema: CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: {
+      major: CPP_CUTE_ATTESTATION_TRUST_STORE_MAJOR,
+      minor: CPP_CUTE_ATTESTATION_TRUST_STORE_MINOR,
+    },
     keys,
   });
 }
@@ -448,7 +463,9 @@ function parseTrustKey(value: JsonValue, path: string): CppCuteAttestationTrustK
   const object = closedObject(value, ["keyId", "builderId", "algorithm", "spkiDerBase64"], path);
   const keyId = stringValue(field(object, "keyId", path), `${path}.keyId`);
   if (!SHA256_KEY_ID.test(keyId)) invalid(`${path}.keyId`, "keyId must be sha256:<64 lowercase hexadecimal digits>");
-  if (object.algorithm !== "ecdsa-p256-sha256") invalid(`${path}.algorithm`, "provenance v1 supports ecdsa-p256-sha256 only");
+  if (object.algorithm !== "ecdsa-p256-sha256") {
+    invalid(`${path}.algorithm`, "attestation trust-store v1 supports ecdsa-p256-sha256 only");
+  }
   return {
     keyId,
     builderId: canonicalHttpsIdentifier(field(object, "builderId", path), `${path}.builderId`),
@@ -458,8 +475,8 @@ function parseTrustKey(value: JsonValue, path: string): CppCuteAttestationTrustK
 }
 
 function parseProvenance(value: JsonValue, limits?: Partial<DecodeLimits>): {
-  readonly provenance: CppCuteFrontendProvenanceV1;
-  readonly statement: CppCuteFrontendProvenanceStatementV1;
+  readonly provenance: CppCuteFrontendProvenanceV3;
+  readonly statement: CppCuteFrontendProvenanceStatementV3;
   readonly payloadBytes: Uint8Array;
 } {
   const object = closedObject(value, ["payloadType", "payload", "signatures"], "$");
@@ -476,19 +493,19 @@ function parseProvenance(value: JsonValue, limits?: Partial<DecodeLimits>): {
     invalid("$.payload", "in-toto payload must use BrowserGrad canonical JSON bytes");
   }
   const rawSignatures = arrayValue(field(object, "signatures", "$"), "$.signatures");
-  if (rawSignatures.length !== 1) invalid("$.signatures", "provenance v1 requires exactly one DSSE signature");
+  if (rawSignatures.length !== 1) invalid("$.signatures", "provenance v3 requires exactly one DSSE signature");
   const signatureValue = rawSignatures[0];
-  if (signatureValue === undefined) invalid("$.signatures", "provenance v1 requires exactly one DSSE signature");
+  if (signatureValue === undefined) invalid("$.signatures", "provenance v3 requires exactly one DSSE signature");
   const signature = parseSignature(signatureValue, "$.signatures[0]");
   const provenance = deepFreezeJson({
     payloadType: CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE,
     payload,
     signatures: [signature],
-  }) as CppCuteFrontendProvenanceV1;
+  }) as CppCuteFrontendProvenanceV3;
   return { provenance, statement, payloadBytes };
 }
 
-function parseStatement(value: JsonValue, path: string): CppCuteFrontendProvenanceStatementV1 {
+function parseStatement(value: JsonValue, path: string): CppCuteFrontendProvenanceStatementV3 {
   const object = closedObject(value, ["_type", "subject", "predicateType", "predicate"], path);
   if (object._type !== CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE) {
     invalid(`${path}._type`, `expected ${CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE}`);
@@ -498,7 +515,7 @@ function parseStatement(value: JsonValue, path: string): CppCuteFrontendProvenan
   }
   const subjects = arrayValue(field(object, "subject", path), `${path}.subject`);
   if (subjects.length !== 1 || subjects[0] === undefined) {
-    invalid(`${path}.subject`, "provenance v1 requires exactly one in-toto subject");
+    invalid(`${path}.subject`, "provenance v3 requires exactly one in-toto Statement v1 subject");
   }
   return {
     _type: CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE,
@@ -517,9 +534,9 @@ function parseInTotoSubject(value: JsonValue, path: string): CppCuteInTotoSubjec
   };
 }
 
-function parsePredicate(value: JsonValue, path: string): CppCuteFrontendProvenancePredicateV1 {
+function parsePredicate(value: JsonValue, path: string): CppCuteFrontendProvenancePredicateV3 {
   const object = closedObject(value, [
-    "builderId", "buildType", "source", "artifact", "profileId", "toolchain", "sandbox", "run",
+    "builderId", "buildType", "declaredSource", "artifact", "profileId", "toolchain", "sandbox", "run",
   ], path);
   if (object.buildType !== CPP_CUTE_FRONTEND_BUILD_TYPE) {
     invalid(`${path}.buildType`, `expected ${CPP_CUTE_FRONTEND_BUILD_TYPE}`);
@@ -527,7 +544,10 @@ function parsePredicate(value: JsonValue, path: string): CppCuteFrontendProvenan
   return {
     builderId: canonicalHttpsIdentifier(field(object, "builderId", path), `${path}.builderId`),
     buildType: CPP_CUTE_FRONTEND_BUILD_TYPE,
-    source: parseSource(field(object, "source", path), `${path}.source`),
+    declaredSource: parseDeclaredSource(
+      field(object, "declaredSource", path),
+      `${path}.declaredSource`,
+    ),
     artifact: parseSubject(field(object, "artifact", path), `${path}.artifact`),
     profileId: boundedString(field(object, "profileId", path), `${path}.profileId`, 512),
     toolchain: parseToolchain(field(object, "toolchain", path), `${path}.toolchain`),
@@ -536,7 +556,7 @@ function parsePredicate(value: JsonValue, path: string): CppCuteFrontendProvenan
   };
 }
 
-function parseSource(value: JsonValue, path: string): CppCuteProvenanceSourceV1 {
+function parseDeclaredSource(value: JsonValue, path: string): CppCuteDeclaredSourceReferenceV3 {
   const object = closedObject(value, ["repository", "revision"], path);
   return {
     repository: canonicalRepository(field(object, "repository", path), `${path}.repository`),
@@ -544,7 +564,7 @@ function parseSource(value: JsonValue, path: string): CppCuteProvenanceSourceV1 
   };
 }
 
-function parseGitRevision(value: JsonValue, path: string): CppCuteProvenanceGitRevisionV1 {
+function parseGitRevision(value: JsonValue, path: string): CppCuteProvenanceGitRevisionV3 {
   const object = closedObject(value, ["algorithm", "value"], path);
   if (object.algorithm !== "git-sha1" && object.algorithm !== "git-sha256") {
     invalid(`${path}.algorithm`, "revision algorithm must be git-sha1 or git-sha256");
@@ -555,7 +575,7 @@ function parseGitRevision(value: JsonValue, path: string): CppCuteProvenanceGitR
   return { algorithm: object.algorithm, value: revision };
 }
 
-function parseSubject(value: JsonValue, path: string): CppCuteProvenanceSubjectV1 {
+function parseSubject(value: JsonValue, path: string): CppCuteProvenanceSubjectV3 {
   const object = closedObject(value, [
     "artifactId", "artifactHash", "transportHash", "artifactBytesSha256", "artifactByteLength", "profileHash",
     "compilationContractHash",
@@ -578,7 +598,7 @@ function parseSubject(value: JsonValue, path: string): CppCuteProvenanceSubjectV
   };
 }
 
-function parseToolchain(value: JsonValue, path: string): CppCuteProvenanceToolchainV1 {
+function parseToolchain(value: JsonValue, path: string): CppCuteProvenanceToolchainV3 {
   const object = closedObject(value, [
     "extractorId", "extractorVersion", "extractorBuildId", "extractorBinarySha256", "compilerId",
     "compilerVersion", "compilerBinarySha256", "compilerBuildId", "containerManifestDigest", "containerConfigDigest",
@@ -608,7 +628,7 @@ function parseToolchain(value: JsonValue, path: string): CppCuteProvenanceToolch
   };
 }
 
-function parseSandbox(value: JsonValue, path: string): CppCuteProvenanceSandboxV1 {
+function parseSandbox(value: JsonValue, path: string): CppCuteProvenanceSandboxV3 {
   const object = closedObject(value, [
     "contractId", "policySha256", "limitsSha256", "network", "readOnlyRoot", "noNewPrivileges", "linking",
     "userProducedNativeExecution",
@@ -630,10 +650,11 @@ function parseSandbox(value: JsonValue, path: string): CppCuteProvenanceSandboxV
   };
 }
 
-function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV1 {
+function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV3 {
   const object = closedObject(value, [
     "platform", "runnerId", "runnerVersion", "runnerBinarySha256", "invocationId", "invocationManifestSha256",
-    "executionPlanSha256", "executionEnvironmentManifestSha256", "outputManifestSha256", "jobId", "receiptId",
+    "executionPlanSha256", "executionEnvironmentManifestSha256", "outputManifestSha256", "runMetadataId", "requestId",
+    "requestBindingId", "receiptId",
     "receiptBytesSha256", "receiptByteLength", "outcome", "exitCode",
   ], path);
   if (object.platform !== "linux/amd64") invalid(`${path}.platform`, "AOT v1 canonical producer platform is linux/amd64");
@@ -656,7 +677,24 @@ function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV1 {
       `${path}.executionEnvironmentManifestSha256`,
     ),
     outputManifestSha256: sha256(field(object, "outputManifestSha256", path), `${path}.outputManifestSha256`),
-    jobId: matchingString(field(object, "jobId", path), `${path}.jobId`, AOT_JOB_ID, "job ID"),
+    runMetadataId: matchingString(
+      field(object, "runMetadataId", path),
+      `${path}.runMetadataId`,
+      AOT_RUN_METADATA_ID,
+      "run metadata ID",
+    ),
+    requestId: matchingString(
+      field(object, "requestId", path),
+      `${path}.requestId`,
+      FRONTEND_REQUEST_ID,
+      "frontend request ID",
+    ),
+    requestBindingId: matchingString(
+      field(object, "requestBindingId", path),
+      `${path}.requestBindingId`,
+      FRONTEND_REQUEST_BINDING_ID,
+      "frontend request binding ID",
+    ),
     receiptId: matchingString(field(object, "receiptId", path), `${path}.receiptId`, AOT_RECEIPT_ID, "receipt ID"),
     receiptBytesSha256: sha256(field(object, "receiptBytesSha256", path), `${path}.receiptBytesSha256`),
     receiptByteLength: parseWireU64(field(object, "receiptByteLength", path), `${path}.receiptByteLength`),
@@ -665,7 +703,7 @@ function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV1 {
   };
 }
 
-function parseSignature(value: JsonValue, path: string): CppCuteDsseSignatureV1 {
+function parseSignature(value: JsonValue, path: string): CppCuteDsseSignature {
   const object = closedObject(value, ["keyid", "sig"], path);
   const keyid = stringValue(field(object, "keyid", path), `${path}.keyid`);
   if (!SHA256_KEY_ID.test(keyid)) invalid(`${path}.keyid`, "keyid must be sha256:<64 lowercase hexadecimal digits>");
@@ -675,7 +713,7 @@ function parseSignature(value: JsonValue, path: string): CppCuteDsseSignatureV1 
 }
 
 async function verifyStatementBindings(
-  statement: CppCuteFrontendProvenanceStatementV1,
+  statement: CppCuteFrontendProvenanceStatementV3,
   receipt: VerifiedCppCuteAotRunnerReceipt,
   receiptRecord: VerifiedCppCuteAotRunnerReceiptRecord,
   artifactRecord: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>,
@@ -685,8 +723,8 @@ async function verifyStatementBindings(
   const artifact = receiptRecord.artifact;
   const profile = receiptRecord.profile;
   const runnerReceipt = receiptRecord.receipt;
-  const job = unwrapPreparedCppCuteAotJob(receiptRecord.job).job;
-  const expectedSubject: CppCuteProvenanceSubjectV1 = {
+  const metadata = unwrapPreparedCppCuteAotRunMetadata(receiptRecord.metadata).metadata;
+  const expectedSubject: CppCuteProvenanceSubjectV3 = {
     artifactId: artifact.artifactId,
     artifactHash: artifact.artifactHash,
     transportHash: artifact.transportHash,
@@ -715,10 +753,17 @@ async function verifyStatementBindings(
   if (statement.predicateType !== configured.deployment.provenance.predicateType) {
     policyMismatch("$.payload.predicateType", "attestation predicate type differs from prepared profile policy");
   }
-  if (canonicalJsonText(predicate.source) !== canonicalJsonText(job.source)) {
-    subjectMismatch("$.payload.predicate.source", "attested source differs from the prepared job source");
+  const expectedDeclaredSource: CppCuteDeclaredSourceReferenceV3 = {
+    repository: metadata.declaredSourceReference.statement.repository,
+    revision: metadata.declaredSourceReference.statement.revision,
+  };
+  if (canonicalJsonText(predicate.declaredSource) !== canonicalJsonText(expectedDeclaredSource)) {
+    subjectMismatch(
+      "$.payload.predicate.declaredSource",
+      "signed declared source reference differs from prepared run metadata",
+    );
   }
-  const expectedToolchain: CppCuteProvenanceToolchainV1 = {
+  const expectedToolchain: CppCuteProvenanceToolchainV3 = {
     extractorId: runnerReceipt.invocation.extractor.id,
     extractorVersion: runnerReceipt.invocation.extractor.version,
     extractorBuildId: runnerReceipt.invocation.extractor.buildId,
@@ -737,7 +782,7 @@ async function verifyStatementBindings(
   if (canonicalJsonText(predicate.sandbox) !== canonicalJsonText(runnerReceipt.invocation.sandbox)) {
     policyMismatch("$.payload.predicate.sandbox", "attested sandbox facts differ from the verified runner receipt");
   }
-  const expectedRun: CppCuteProvenanceRunV1 = {
+  const expectedRun: CppCuteProvenanceRunV3 = {
     platform: runnerReceipt.invocation.container.platform,
     runnerId: runnerReceipt.invocation.runner.id,
     runnerVersion: runnerReceipt.invocation.runner.version,
@@ -747,7 +792,9 @@ async function verifyStatementBindings(
     executionPlanSha256: runnerReceipt.invocation.executionPlanSha256,
     executionEnvironmentManifestSha256: runnerReceipt.invocation.executionEnvironmentManifestSha256,
     outputManifestSha256: runnerReceipt.output.outputManifestSha256,
-    jobId: receipt.jobId,
+    runMetadataId: receipt.runMetadataId,
+    requestId: receipt.requestId,
+    requestBindingId: receipt.requestBindingId,
     receiptId: receipt.receiptId,
     receiptBytesSha256: receipt.receiptBytesSha256,
     receiptByteLength: receipt.receiptByteLength,
@@ -779,13 +826,16 @@ export function unwrapVerifiedCppCuteFrontendAttestation(
   return record;
 }
 
-function parseVersion(value: JsonValue, path: string): void {
+function parseTrustStoreVersion(value: JsonValue, path: string): void {
   const object = closedObject(value, ["major", "minor"], path);
-  if (object.major !== 1 || object.minor !== 0) {
+  if (
+    object.major !== CPP_CUTE_ATTESTATION_TRUST_STORE_MAJOR
+    || object.minor !== CPP_CUTE_ATTESTATION_TRUST_STORE_MINOR
+  ) {
     provenanceFailure(
       "BG-COMPILER-CPP-CUTE-PROVENANCE-UNSUPPORTED-VERSION",
       path,
-      "reader supports closed provenance version 1.0 only",
+      `reader supports closed attestation trust-store version ${CPP_CUTE_ATTESTATION_TRUST_STORE_MAJOR}.${CPP_CUTE_ATTESTATION_TRUST_STORE_MINOR} only`,
     );
   }
 }

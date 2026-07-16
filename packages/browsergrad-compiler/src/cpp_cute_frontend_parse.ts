@@ -15,26 +15,26 @@ import type {
   CppCuteConstantV1,
   CppCuteCudaAttributesV1,
   CppCuteDeclarationKindV1,
-  CppCuteDeclarationV2,
-  CppCuteDiagnosticLocationV2,
-  CppCuteDiagnosticPhaseV2,
+  CppCuteDeclarationV3,
+  CppCuteDiagnosticLocationV3,
+  CppCuteDiagnosticPhaseV3,
   CppCuteDiagnosticRelatedLocationV1,
-  CppCuteDiagnosticSubjectV2,
+  CppCuteDiagnosticSubjectV3,
   CppCuteExpressionV1,
   CppCuteExtractionRecordV1,
   CppCuteFileRangeV1,
-  CppCuteFrontendDiagnosticV2,
+  CppCuteFrontendDiagnosticV3,
   CppCuteFrontendEntryV1,
   CppCuteFrontendOutcomeV1,
-  CppCuteFrontendPayloadV2,
+  CppCuteFrontendPayloadV3,
   CppCuteFunctionAbiV1,
   CppCuteFunctionBodyV1,
   CppCuteHierarchyV1,
-  CppCuteIncludeEdgeV2,
-  CppCuteIncludeResolutionV2,
-  CppCuteIncludeRootV2,
-  CppCuteInputClosureV2,
-  CppCuteInputOwnerV2,
+  CppCuteIncludeEdgeV3,
+  CppCuteIncludeResolutionV3,
+  CppCuteIncludeRootV3,
+  CppCuteInputClosureV3,
+  CppCuteInputOwnerV3,
   CppCuteIntegerExprV1,
   CppCuteIntrinsicEffectsV1,
   CppCuteMacroExpansionV1,
@@ -46,7 +46,7 @@ import type {
   CppCuteSemanticPassRecordV1,
   CppCuteSourceAbiV1,
   CppCuteSourceEntityV1,
-  CppCuteSourceFileV2,
+  CppCuteSourceFileV3,
   CppCuteSourceOriginV1,
   CppCuteSourceSpanV1,
   CppCuteStatementV1,
@@ -139,7 +139,7 @@ export class CppCuteFrontendArtifactError extends Error {
 export function parseCppCuteFrontendPayload(
   value: JsonValue,
   limits: CppCuteFrontendArtifactLimits = DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS,
-): CppCuteFrontendPayloadV2 {
+): CppCuteFrontendPayloadV3 {
   const object = closedObject(value, [
     "compilationContractHash",
     "inputs",
@@ -242,7 +242,7 @@ export function parseCppCuteFrontendPayload(
     ),
     outcome: parseOutcome(field(object, "outcome", "$.payload"), limits, "$.payload.outcome"),
     extraction: parseExtraction(field(object, "extraction", "$.payload"), "$.payload.extraction"),
-  } as CppCuteFrontendPayloadV2;
+  } as CppCuteFrontendPayloadV3;
   return deepFreezeJson(payload);
 }
 
@@ -349,7 +349,7 @@ function parseSemanticPasses(
   });
 }
 
-function parseInputs(value: JsonValue, limits: CppCuteFrontendArtifactLimits, path: string): CppCuteInputClosureV2 {
+function parseInputs(value: JsonValue, limits: CppCuteFrontendArtifactLimits, path: string): CppCuteInputClosureV3 {
   const object = closedObject(value, [
     "mainFileId",
     "includeRoots",
@@ -381,7 +381,7 @@ function parseInputs(value: JsonValue, limits: CppCuteFrontendArtifactLimits, pa
   };
 }
 
-function parseIncludeRoot(value: JsonValue, path: string): CppCuteIncludeRootV2 {
+function parseIncludeRoot(value: JsonValue, path: string): CppCuteIncludeRootV3 {
   const object = closedObject(value, [
     "includeRootId", "ordinal", "mode", "virtualPath", "manifestSha256", "owner",
   ], path);
@@ -398,7 +398,7 @@ function parseIncludeRoot(value: JsonValue, path: string): CppCuteIncludeRootV2 
   };
 }
 
-function parseSourceFile(value: JsonValue, path: string): CppCuteSourceFileV2 {
+function parseSourceFile(value: JsonValue, path: string): CppCuteSourceFileV3 {
   const object = closedObject(value, [
     "fileId", "role", "virtualPath", "contentSha256", "byteLength", "owner", "includeRootId",
   ], path);
@@ -422,7 +422,7 @@ function parseSourceFile(value: JsonValue, path: string): CppCuteSourceFileV2 {
   };
 }
 
-function parseInputOwner(value: JsonValue, path: string): CppCuteInputOwnerV2 {
+function parseInputOwner(value: JsonValue, path: string): CppCuteInputOwnerV3 {
   if (!isJsonObject(value)) invalid(path, "input owner must be an object");
   if (value.kind === "source" || value.kind === "compiler-resource-directory") {
     closedObject(value, ["kind"], path);
@@ -438,7 +438,7 @@ function parseInputOwner(value: JsonValue, path: string): CppCuteInputOwnerV2 {
   invalid(`${path}.kind`, "unknown input owner kind");
 }
 
-function parseIncludeEdge(value: JsonValue, path: string): CppCuteIncludeEdgeV2 {
+function parseIncludeEdge(value: JsonValue, path: string): CppCuteIncludeEdgeV3 {
   if (!isJsonObject(value)) invalid(path, "include edge must be an object");
   if (value.kind === "source-directive") {
     const object = closedObject(value, [
@@ -472,7 +472,7 @@ function parseIncludeEdge(value: JsonValue, path: string): CppCuteIncludeEdgeV2 
   invalid(`${path}.kind`, "unknown include edge kind");
 }
 
-function parseIncludeResolution(value: JsonValue, path: string): CppCuteIncludeResolutionV2 {
+function parseIncludeResolution(value: JsonValue, path: string): CppCuteIncludeResolutionV3 {
   if (!isJsonObject(value)) invalid(path, "include resolution must be an object");
   if (value.kind === "resolved") {
     const object = closedObject(value, ["kind", "fileId", "includeRootId"], path);
@@ -744,11 +744,11 @@ function parseConstant(value: JsonValue, path: string): CppCuteConstantV1 {
   invalid(`${path}.kind`, "unknown constant kind");
 }
 
-function parseDeclaration(value: JsonValue, path: string): CppCuteDeclarationV2 {
+function parseDeclaration(value: JsonValue, path: string): CppCuteDeclarationV3 {
   const object = closedObject(value, [
     "declarationId", "kind", "canonicalUsr", "canonicalName", "lexicalParentId", "semanticParentId", "typeId",
     "targetTypeId", "initializerExpressionId", "origin", "definitionKind", "linkage", "storageDuration", "memorySpace",
-    "mangledName", "cudaAttributes",
+    "identitySpanId", "mangledName", "cudaAttributes",
   ], path);
   const canonicalUsr = boundedString(field(object, "canonicalUsr", path), `${path}.canonicalUsr`, 16_384);
   if (!CANONICAL_USR.test(canonicalUsr)) invalid(`${path}.canonicalUsr`, "canonical USR must use the Clang c:@ namespace");
@@ -781,6 +781,7 @@ function parseDeclaration(value: JsonValue, path: string): CppCuteDeclarationV2 
     targetTypeId: nullableStableId(field(object, "targetTypeId", path), `${path}.targetTypeId`, "type"),
     initializerExpressionId,
     origin: parseOrigin(field(object, "origin", path), `${path}.origin`),
+    identitySpanId: nullableStableId(field(object, "identitySpanId", path), `${path}.identitySpanId`, "span"),
     definitionKind,
     linkage: enumValue(field(object, "linkage", path), [
       "none", "internal", "external", "weak", "linkonce-odr",
@@ -1487,7 +1488,7 @@ function parseDiagnostic(
   value: JsonValue,
   limits: CppCuteFrontendArtifactLimits,
   path: string,
-): CppCuteFrontendDiagnosticV2 {
+): CppCuteFrontendDiagnosticV3 {
   const object = closedObject(value, [
     "diagnosticId", "phase", "severity", "code", "renderedMessage", "location", "subject", "parentDiagnosticId",
   ], path);
@@ -1503,7 +1504,7 @@ function parseDiagnostic(
     phase: enumValue(field(object, "phase", path), [
       "preprocessing", "parsing", "name-lookup", "overload-resolution",
       "template-instantiation", "cuda-sema", "artifact-extraction",
-    ] as const, `${path}.phase`) as CppCuteDiagnosticPhaseV2,
+    ] as const, `${path}.phase`) as CppCuteDiagnosticPhaseV3,
     severity: enumValue(field(object, "severity", path), [
       "remark", "note", "warning", "error", "fatal",
     ] as const, `${path}.severity`),
@@ -1527,7 +1528,7 @@ function parseDiagnosticLocation(
   value: JsonValue,
   limits: CppCuteFrontendArtifactLimits,
   path: string,
-): CppCuteDiagnosticLocationV2 {
+): CppCuteDiagnosticLocationV3 {
   if (!isJsonObject(value)) invalid(path, "diagnostic location must be an object");
   if (value.kind === "none") {
     closedObject(value, ["kind"], path);
@@ -1558,7 +1559,7 @@ function parseRelatedDiagnostic(
   };
 }
 
-function parseDiagnosticSubject(value: JsonValue, path: string): CppCuteDiagnosticSubjectV2 {
+function parseDiagnosticSubject(value: JsonValue, path: string): CppCuteDiagnosticSubjectV3 {
   if (!isJsonObject(value)) invalid(path, "diagnostic subject must be an object");
   if (value.kind === "compiler") {
     closedObject(value, ["kind"], path);

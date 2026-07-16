@@ -32,7 +32,8 @@ declare const completedCppCuteAotDockerRunBrand: unique symbol;
 
 export interface CompletedCppCuteAotDockerRun {
   readonly [completedCppCuteAotDockerRunBrand]: true;
-  readonly jobId: string;
+  readonly runMetadataId: string;
+  readonly requestId: string;
   readonly profileHash: string;
   readonly executionPlanSha256: string;
   readonly containerId: string;

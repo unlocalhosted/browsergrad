@@ -126,8 +126,8 @@ export interface CppCuteFrontendSourceSnapshotInput {
   readonly bytes: Uint8Array;
 }
 
-/** Reference to source provenance verified by a separate policy boundary. */
-export interface CppCuteFrontendDetachedSourceProvenanceV1 extends JsonObject {
+/** Caller-declared source reference. It is not source-acquisition proof. */
+export interface CppCuteFrontendDetachedSourceReferenceV1 extends JsonObject {
   readonly statementSha256: string;
 }
 
@@ -139,7 +139,7 @@ export interface CppCuteFrontendDetachedConformanceV1 extends JsonObject {
 }
 
 export interface CppCuteFrontendDetachedExpectationsV1 extends JsonObject {
-  readonly sourceProvenance: CppCuteFrontendDetachedSourceProvenanceV1 | null;
+  readonly declaredSourceReference: CppCuteFrontendDetachedSourceReferenceV1 | null;
   readonly conformance: CppCuteFrontendDetachedConformanceV1 | null;
 }
 
@@ -162,7 +162,7 @@ export interface PreparedCppCuteFrontendRequest {
   readonly sourceFileCount: number;
   readonly sourceByteLength: WireU64;
   readonly entryRequestId: string;
-  readonly sourceProvenanceStatementSha256: string | null;
+  readonly declaredSourceReferenceStatementSha256: string | null;
   readonly conformanceAssertionSha256: string | null;
 }
 
@@ -282,8 +282,8 @@ export async function prepareCppCuteFrontendRequest(
     sourceFileCount: request.files.length,
     sourceByteLength: encodeWireU64(sourceByteLength),
     entryRequestId: expectedEntryRequestId,
-    sourceProvenanceStatementSha256:
-      normalizedOptions.detached.sourceProvenance?.statementSha256 ?? null,
+    declaredSourceReferenceStatementSha256:
+      normalizedOptions.detached.declaredSourceReference?.statementSha256 ?? null,
     conformanceAssertionSha256,
   }) as PreparedCppCuteFrontendRequest;
   const orderedInputs = Object.freeze({
@@ -315,6 +315,17 @@ export function copyPreparedCppCuteFrontendSourceBytes(
   const snapshot = record.sourceSnapshots.find((candidate) => candidate.virtualPath === virtualPath);
   if (snapshot === undefined) invalid("$.virtualPath", "source snapshot does not exist");
   return new Uint8Array(snapshot.bytes);
+}
+
+/** Returns one ordered fresh copy per request descriptor. */
+export function copyPreparedCppCuteFrontendSourceSnapshots(
+  prepared: PreparedCppCuteFrontendRequest,
+): readonly CppCuteFrontendSourceSnapshotInput[] {
+  const record = getPreparedRecord(prepared);
+  return Object.freeze(record.sourceSnapshots.map((snapshot) => Object.freeze({
+    virtualPath: snapshot.virtualPath,
+    bytes: new Uint8Array(snapshot.bytes),
+  })));
 }
 
 export async function deriveCppCuteFrontendSourceFileId(
@@ -676,7 +687,7 @@ function normalizeOptions(options: PrepareCppCuteFrontendRequestOptions): {
   }
   const rawDetached = optionalDescriptorValue(descriptors, "detached");
   const detached = rawDetached === undefined
-    ? deepFreezeJson({ sourceProvenance: null, conformance: null })
+    ? deepFreezeJson({ declaredSourceReference: null, conformance: null })
     : parseDetached(rawDetached);
   return Object.freeze({ decodeLimits, signal: rawSignal as AbortSignal | undefined, detached });
 }
@@ -687,14 +698,18 @@ function parseDetached(value: unknown): CppCuteFrontendDetachedExpectationsV1 {
   } catch (error) {
     invalid("$.options.detached", "detached expectations must be closed JSON", { cause: error });
   }
-  const object = closedObject(value as JsonValue, ["sourceProvenance", "conformance"], "$.options.detached");
-  const rawProvenance = field(object, "sourceProvenance", "$.options.detached");
-  const sourceProvenance = rawProvenance === null ? null : (() => {
-    const record = closedObject(rawProvenance, ["statementSha256"], "$.options.detached.sourceProvenance");
+  const object = closedObject(value as JsonValue, ["declaredSourceReference", "conformance"], "$.options.detached");
+  const rawSourceReference = field(object, "declaredSourceReference", "$.options.detached");
+  const declaredSourceReference = rawSourceReference === null ? null : (() => {
+    const record = closedObject(
+      rawSourceReference,
+      ["statementSha256"],
+      "$.options.detached.declaredSourceReference",
+    );
     return {
       statementSha256: sha256(
-        field(record, "statementSha256", "$.options.detached.sourceProvenance"),
-        "$.options.detached.sourceProvenance.statementSha256",
+        field(record, "statementSha256", "$.options.detached.declaredSourceReference"),
+        "$.options.detached.declaredSourceReference.statementSha256",
       ),
     };
   })();
@@ -716,7 +731,7 @@ function parseDetached(value: unknown): CppCuteFrontendDetachedExpectationsV1 {
       ),
     };
   })();
-  return deepFreezeJson({ sourceProvenance, conformance });
+  return deepFreezeJson({ declaredSourceReference, conformance });
 }
 
 function plainDataRecord(

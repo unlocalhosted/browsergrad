@@ -1,4 +1,5 @@
 import {
+  encodeWireU64,
   parseWireU64,
   sha256Hex,
   wireIntegerToBigInt,
@@ -10,34 +11,53 @@ import {
   computeCppCuteAotLimitsManifestHash,
   computeCppCuteAotOutputManifestHash,
 } from "../../../src/cpp_cute_aot_manifests.js";
+import {
+  CPP_CUTE_AOT_RUN_METADATA_SCHEMA,
+  CPP_CUTE_GIT_SOURCE_REFERENCE_SCHEMA,
+  deriveCppCuteAotRunMetadataHash,
+  deriveCppCuteGitSourceReferenceStatementSha256,
+  prepareCppCuteAotRunMetadata,
+  unwrapPreparedCppCuteAotRunMetadata,
+  type CppCuteAotRunMetadataBodyV1,
+  type CppCuteAotRunMetadataV1,
+  type CppCuteGitSourceReferenceStatementV1,
+  type PreparedCppCuteAotRunMetadata,
+} from "../../../src/cpp_cute_aot_run_metadata.js";
 import { computeCppCuteAotExecutionPlanHash } from "../../../src/cpp_cute_aot_policy.js";
 import type { PreparedCppCuteAotExecutionEnvironment } from "../../../src/cpp_cute_aot_environment.js";
 import {
-  deriveCppCuteAotEntryRequestId,
-  deriveCppCuteAotJobId,
-  deriveCppCuteAotSourceFileId,
-  prepareCppCuteAotJob,
-  unwrapPreparedCppCuteAotJob,
-  type CppCuteAotEntryRequestV2,
-  type CppCuteAotJobBodyV2,
-  type CppCuteAotJobV2,
-  type CppCuteAotSourceFileV2,
-  type PreparedCppCuteAotJob,
-} from "../../../src/cpp_cute_aot_job.js";
-import {
   CPP_CUTE_AOT_RECEIPT_SCHEMA,
   deriveCppCuteAotRunnerReceiptId,
-  type CppCuteAotReceiptResourcesV2,
-  type CppCuteAotRunnerReceiptBodyV2,
-  type CppCuteAotRunnerReceiptV2,
+  type CppCuteAotReceiptResourcesV3,
+  type CppCuteAotRunnerReceiptBodyV3,
+  type CppCuteAotRunnerReceiptV3,
 } from "../../../src/cpp_cute_aot_receipt.js";
 import {
   canonicalCppCuteFrontendArtifactBytes,
   decodeCppCuteFrontendArtifact,
+  deriveCppCuteFrontendArtifactId,
+  verifyCppCuteFrontendArtifact,
   unwrapVerifiedCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifactResource,
 } from "../../../src/cpp_cute_frontend_artifact.js";
+import {
+  CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
+  deriveCppCuteFrontendEntryRequestId,
+  deriveCppCuteFrontendRequestHash,
+  deriveCppCuteFrontendSourceFileId,
+  prepareCppCuteFrontendRequest,
+  type CppCuteFrontendEntryRequestV1,
+  type CppCuteFrontendRequestBodyV1,
+  type CppCuteFrontendRequestLimitsV1,
+  type CppCuteFrontendRequestV1,
+  type CppCuteFrontendSourceSnapshotInput,
+  type PreparedCppCuteFrontendRequest,
+} from "../../../src/cpp_cute_frontend_request.js";
+import {
+  prepareCppCuteFrontendRequestBinding,
+  type PreparedCppCuteFrontendRequestBinding,
+} from "../../../src/cpp_cute_frontend_request_binding.js";
 import {
   unwrapPreparedCppCuteAotFrontendProfile,
   type CppCuteFrontendExtractionLimits,
@@ -46,127 +66,116 @@ import {
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+  type CppCuteFrontendArtifactV3,
+  type CppCuteFrontendPayloadV3,
 } from "../../../src/cpp_cute_frontend_types.js";
+import {
+  computeCppCuteInputHashes,
+  computeCppCuteSemanticPassInputClosureHash,
+  computeCppCuteSharedSurfaceHash,
+} from "../../../src/cpp_cute_frontend_verify.js";
 import {
   CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
   CPP_CUTE_FIXTURE_SOURCE_REVISION,
+  createCppCuteArtifactInput,
+  rebindCppCuteFixtureSourceEntityIds,
 } from "./cpp_cute_frontend_fixtures.js";
 
 const wire = (value: number | bigint): WireU64 => parseWireU64(String(value));
-
-export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.ab039f0a40c8c390da95a82422c1a1957f8352a6665b125d5f5ff26b9f822cb5";
-export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.cc6c224308df2e95b7693b578b73da872e6dab6209190a68c59fdd393b8c6276";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.38ce469c2540427f553c0dc2475457377b794c3665556b2d91ec003ec8dc939d";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "af196a537a076d94d3220aee3e2bef549603c79cd8c1a84e3cbb5c44be7b38cc";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH = "4986";
 
 export interface CppCuteAotReceiptFixture {
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly artifactResource: VerifiedCppCuteFrontendArtifactResource;
-  readonly job: PreparedCppCuteAotJob;
-  readonly receipt: CppCuteAotRunnerReceiptV2;
+  readonly request: PreparedCppCuteFrontendRequest;
+  readonly metadata: PreparedCppCuteAotRunMetadata;
+  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
+  readonly sourceSnapshots: readonly CppCuteFrontendSourceSnapshotInput[];
+  readonly receipt: CppCuteAotRunnerReceiptV3;
 }
 
 export async function createCppCuteAotReceiptFixture(
   profile: PreparedCppCuteFrontendProfile,
   executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
-  artifact: VerifiedCppCuteFrontendArtifact,
+  outcome: "accepted" | "rejected" = "accepted",
+  mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void,
 ): Promise<CppCuteAotReceiptFixture> {
+  const sourceBytes = cppCuteAotFixtureSourceBytes();
+  const artifactInput = await createRealSourceBackedArtifact(
+    profile.compilationContractHash,
+    sourceBytes,
+    outcome,
+    mutatePayload,
+  );
+  const artifact = await verifyCppCuteFrontendArtifact(artifactInput);
   const artifactResource = await decodeCppCuteFrontendArtifact(canonicalCppCuteFrontendArtifactBytes(artifact));
-  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
-  const payload = artifactRecord.envelope.payload;
-  const sourceFiles = await Promise.all(payload.inputs.files
-    .filter((file) => file.role === "main-source" || file.role === "project-header")
-    .map(async (file): Promise<CppCuteAotSourceFileV2> => {
-      const body = {
-        fileId: `bg.cpp.file.sha256.${"0".repeat(64)}`,
-        role: file.role as "main-source" | "project-header",
-        virtualPath: file.virtualPath,
-        contentSha256: file.contentSha256,
-        byteLength: file.byteLength,
-      } satisfies CppCuteAotSourceFileV2;
-      return { ...body, fileId: await deriveCppCuteAotSourceFileId(body) };
-    }));
-  sourceFiles.sort((left, right) => left.virtualPath.localeCompare(right.virtualPath));
-  const main = sourceFiles.find((file) => file.role === "main-source");
+  const payload = unwrapVerifiedCppCuteFrontendArtifact(artifact).envelope.payload;
+  const main = payload.inputs.files.find((file) => file.role === "main-source" && file.owner.kind === "source");
   if (main === undefined) throw new Error("fixture artifact lost main source");
-  const source = {
+  const sourceSnapshots = Object.freeze([{ virtualPath: main.virtualPath, bytes: sourceBytes }]);
+  const request = await createRequest(profile, main, sourceBytes);
+  const statement: CppCuteGitSourceReferenceStatementV1 = {
+    schema: CPP_CUTE_GIT_SOURCE_REFERENCE_SCHEMA,
+    version: { major: 1, minor: 0 },
     repository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
     revision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
   };
-  const anchor = {
-    virtualPath: main.virtualPath,
-    beginByte: wire(0),
-    endByte: wire(1),
-    tokenSha256: await sha256Hex(new Uint8Array([0])),
-  };
-  const outcome = payload.outcome;
-  const artifactEntryId = outcome.kind === "accepted"
-    ? outcome.selectedEntryIds[0]
-    : payload.entries[0]?.entryId;
-  if (artifactEntryId === undefined) throw new Error("fixture artifact lost entry");
-  const requestBody = {
-    requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
-    kind: "layout" as const,
-    declarationKind: "variable" as const,
-    anchor,
-  } satisfies CppCuteAotEntryRequestV2;
-  const request: CppCuteAotEntryRequestV2 = {
-    ...requestBody,
-    requestId: await deriveCppCuteAotEntryRequestId(requestBody),
-  };
-  const body = {
-    schema: "browsergrad.compiler.cpp-cute.aot-job" as const,
-    version: { major: 2 as const, minor: 0 as const },
+  const statementSha256 = await deriveCppCuteGitSourceReferenceStatementSha256(statement);
+  const preparedRequest = await prepareCppCuteFrontendRequest(profile, request, sourceSnapshots, {
+    detached: { declaredSourceReference: { statementSha256 }, conformance: null },
+  });
+  const metadataBody: CppCuteAotRunMetadataBodyV1 = {
+    schema: CPP_CUTE_AOT_RUN_METADATA_SCHEMA,
+    version: { major: 1, minor: 0 },
     profileHash: profile.profileHash,
-    source,
-    mainVirtualPath: main.virtualPath,
-    files: sourceFiles,
-    entryRequests: [request],
-    expectedOutput: {
-      schema: "browsergrad.compiler.cpp-cute.frontend-artifact" as const,
-      version: { major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR, minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR },
-      sourceSetSha256: artifact.sourceSetSha256,
-      headerSetSha256: artifact.headerSetSha256,
-      inputClosureSha256: artifact.inputClosureSha256,
-    },
-  } satisfies CppCuteAotJobBodyV2;
-  const jobValue: CppCuteAotJobV2 = { ...body, jobId: await deriveCppCuteAotJobId(body) };
-  const job = await prepareCppCuteAotJob(profile, jobValue);
-  const receiptBody = await createCppCuteAotReceiptBody(job, executionEnvironment, artifact);
-  const receipt: CppCuteAotRunnerReceiptV2 = {
+    requestId: preparedRequest.requestId,
+    declaredSourceReference: { statementSha256, statement },
+  };
+  const metadataInput: CppCuteAotRunMetadataV1 = {
+    ...metadataBody,
+    runMetadataId: `bg.cpp.aot-run-metadata.sha256.${await deriveCppCuteAotRunMetadataHash(metadataBody)}`,
+  };
+  const metadata = await prepareCppCuteAotRunMetadata(preparedRequest, metadataInput);
+  const requestBinding = await prepareCppCuteFrontendRequestBinding(preparedRequest, artifactResource);
+  const receiptBody = await createCppCuteAotReceiptBody(metadata, requestBinding, executionEnvironment, artifact);
+  const receipt = {
     ...receiptBody,
     receiptId: await deriveCppCuteAotRunnerReceiptId(receiptBody),
+  } satisfies CppCuteAotRunnerReceiptV3;
+  return {
+    profile,
+    executionEnvironment,
+    artifact,
+    artifactResource,
+    request: preparedRequest,
+    metadata,
+    requestBinding,
+    sourceSnapshots,
+    receipt,
   };
-  return { profile, executionEnvironment, artifact, artifactResource, job, receipt };
 }
 
 export async function createCppCuteAotReceiptBody(
-  job: PreparedCppCuteAotJob,
+  metadata: PreparedCppCuteAotRunMetadata,
+  requestBinding: PreparedCppCuteFrontendRequestBinding,
   executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   artifact: VerifiedCppCuteFrontendArtifact,
-): Promise<CppCuteAotRunnerReceiptBodyV2> {
-  const jobRecord = unwrapPreparedCppCuteAotJob(job);
-  const profile = jobRecord.profile;
+): Promise<CppCuteAotRunnerReceiptBodyV3> {
+  const profile = unwrapPreparedCppCuteFrontendProfileFromMetadata(metadata);
   const configured = unwrapPreparedCppCuteAotFrontendProfile(profile).profile;
-  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
-  const payload = artifactRecord.envelope.payload;
-  const request = jobRecord.job.entryRequests[0];
-  if (request === undefined) throw new Error("fixture job lost entry request");
-  const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(job);
-  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job, executionEnvironment);
-  const resources = createResourceAccounting(artifact, configured.extractionLimits);
+  const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(metadata);
   return {
     schema: CPP_CUTE_AOT_RECEIPT_SCHEMA,
-    version: { major: 2, minor: 0 },
-    jobId: job.jobId,
+    version: { major: 3, minor: 0 },
+    runMetadataId: metadata.runMetadataId,
+    requestId: metadata.requestId,
+    requestBindingId: requestBinding.bindingId,
     profileHash: profile.profileHash,
     invocation: {
       invocationId: `bg.cpp.aot-invocation.sha256.${invocationManifestSha256}`,
       invocationManifestSha256,
-      executionPlanSha256,
+      executionPlanSha256: await computeCppCuteAotExecutionPlanHash(metadata, executionEnvironment),
       executionEnvironmentManifestSha256: executionEnvironment.manifestSha256,
       runner: configured.deployment.runner,
       container: configured.deployment.container,
@@ -185,24 +194,10 @@ export async function createCppCuteAotReceiptBody(
       },
     },
     openedInputs: {
-      files: jobRecord.job.files,
-      sourceSetSha256: jobRecord.job.expectedOutput.sourceSetSha256,
-      headerSetSha256: jobRecord.job.expectedOutput.headerSetSha256,
-      inputClosureSha256: jobRecord.job.expectedOutput.inputClosureSha256,
+      sourceSetSha256: artifact.sourceSetSha256,
+      headerSetSha256: artifact.headerSetSha256,
+      inputClosureSha256: artifact.inputClosureSha256,
     },
-    selection: payload.outcome.kind === "accepted"
-      ? {
-          kind: "resolved",
-          requestId: request.requestId,
-          anchorTokenSha256: request.anchor.tokenSha256,
-          resolvedEntryId: payload.outcome.selectedEntryIds[0]!,
-        }
-      : {
-          kind: "rejected",
-          requestId: request.requestId,
-          anchorTokenSha256: request.anchor.tokenSha256,
-          blockingDiagnosticIds: payload.outcome.blockingDiagnosticIds,
-        },
     output: {
       artifactId: artifact.artifactId,
       artifactHash: artifact.artifactHash,
@@ -211,88 +206,189 @@ export async function createCppCuteAotReceiptBody(
       artifactByteLength: artifact.artifactByteLength,
       outputManifestSha256: await computeCppCuteAotOutputManifestHash(artifact),
     },
-    resources,
+    resources: createResourceAccounting(artifact, configured.extractionLimits),
     outcome: "succeeded",
     exitCode: 0,
   };
 }
 
+export function cppCuteAotFixtureSourceBytes(): Uint8Array {
+  const bytes = new Uint8Array(100);
+  for (let index = 1; index < bytes.length; index += 1) bytes[index] = (index * 31) & 0xff;
+  return bytes;
+}
+
+async function createRequest(
+  profile: PreparedCppCuteFrontendProfile,
+  main: CppCuteFrontendPayloadV3["inputs"]["files"][number],
+  bytes: Uint8Array,
+): Promise<CppCuteFrontendRequestV1> {
+  const file = {
+    fileId: main.fileId,
+    role: "main-source" as const,
+    virtualPath: main.virtualPath,
+    contentSha256: main.contentSha256,
+    byteLength: main.byteLength,
+    includeRootId: null,
+  };
+  const anchor = {
+    virtualPath: main.virtualPath,
+    beginByte: wire(0),
+    endByte: wire(bytes.byteLength),
+    tokenSha256: await sha256Hex(bytes),
+  };
+  const entryBody = {
+    requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
+    kind: "layout" as const,
+    declarationKind: "variable" as const,
+    anchor,
+  };
+  const entry: CppCuteFrontendEntryRequestV1 = {
+    ...entryBody,
+    requestId: await deriveCppCuteFrontendEntryRequestId(entryBody),
+  };
+  const body: CppCuteFrontendRequestBodyV1 = {
+    schema: CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
+    version: { major: 1, minor: 0 },
+    compilationContractHash: profile.compilationContractHash,
+    mainVirtualPath: main.virtualPath,
+    files: [file],
+    entryRequests: [entry],
+    expectedArtifact: {
+      schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
+      version: { major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR, minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR },
+    },
+    limits: semanticLimits(profile),
+  };
+  return { ...body, requestId: `bg.cpp.frontend-request.sha256.${await deriveCppCuteFrontendRequestHash(body)}` };
+}
+
+async function createRealSourceBackedArtifact(
+  compilationContractHash: string,
+  bytes: Uint8Array,
+  outcome: "accepted" | "rejected",
+  mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void,
+): Promise<CppCuteFrontendArtifactV3> {
+  const artifact = await createCppCuteArtifactInput(compilationContractHash);
+  const payload = structuredClone(artifact.payload) as CppCuteFrontendPayloadV3;
+  const main = payload.inputs.files.find((file) => file.role === "main-source");
+  if (main === undefined) throw new Error("fixture lost source file");
+  const oldFileId = main.fileId;
+  const body = {
+    role: "main-source" as const,
+    virtualPath: main.virtualPath,
+    contentSha256: await sha256Hex(bytes),
+    byteLength: encodeWireU64(BigInt(bytes.byteLength)),
+    includeRootId: null,
+  };
+  const newFileId = await deriveCppCuteFrontendSourceFileId(body);
+  replaceString(payload, oldFileId, newFileId);
+  const rewritten = payload.inputs.files.find((file) => file.fileId === newFileId)!;
+  (rewritten as { contentSha256: string }).contentSha256 = body.contentSha256;
+  (rewritten as { byteLength: WireU64 }).byteLength = body.byteLength;
+  await rebindCppCuteFixtureSourceEntityIds(payload);
+  mutatePayload?.(payload);
+  const hashes = await computeCppCuteInputHashes(payload);
+  (payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
+  (payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
+  (payload.inputs as { closureSha256: string }).closureSha256 = hashes.closureSha256;
+  for (const [index, pass] of payload.semanticPasses.entries()) {
+    (pass as { observedInputClosureSha256: string }).observedInputClosureSha256 =
+      await computeCppCuteSemanticPassInputClosureHash(payload, index);
+    (pass as { sharedSurfaceSha256: string }).sharedSurfaceSha256 =
+      await computeCppCuteSharedSurfaceHash(payload, pass.domain);
+  }
+  (payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
+  if (outcome === "rejected") rejectPayload(payload);
+  return { ...artifact, artifactId: await deriveCppCuteFrontendArtifactId(payload), payload };
+}
+
+function rejectPayload(payload: CppCuteFrontendPayloadV3): void {
+  const blockingDiagnosticId = `bg.cpp.diagnostic.sha256.${"1".repeat(64)}`;
+  (payload.diagnostics as unknown as Array<unknown>).push({
+    diagnosticId: blockingDiagnosticId,
+    phase: "artifact-extraction",
+    severity: "error",
+    code: "browsergrad.cpp-cute:fixture-rejected",
+    renderedMessage: "Fixture rejection for offline-runner coverage.",
+    location: { kind: "none" },
+    subject: { kind: "compiler" },
+    parentDiagnosticId: null,
+  });
+  (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((a, b) => a.diagnosticId.localeCompare(b.diagnosticId));
+  const hostPass = payload.semanticPasses[1]!;
+  (hostPass as { status: string }).status = "failed";
+  (hostPass as { diagnosticIds: readonly string[] }).diagnosticIds = [blockingDiagnosticId];
+  (payload as { outcome: unknown }).outcome = { kind: "rejected", blockingDiagnosticIds: [blockingDiagnosticId] };
+}
+
+function unwrapPreparedCppCuteFrontendProfileFromMetadata(metadata: PreparedCppCuteAotRunMetadata): PreparedCppCuteFrontendProfile {
+  // Metadata derives and stores the exact request-owned profile; no caller profile is accepted here.
+  return unwrapPreparedCppCuteAotRunMetadata(metadata).profile;
+}
+
+function semanticLimits(profile: PreparedCppCuteFrontendProfile): CppCuteFrontendRequestLimitsV1 {
+  const limits = profile.extractionLimits;
+  return Object.fromEntries(Object.entries(limits).filter(([key]) => ![
+    "maxWallTimeMs", "maxCpuTimeMs", "maxMemoryBytes", "maxProcesses",
+  ].includes(key))) as CppCuteFrontendRequestLimitsV1;
+}
+
 function createResourceAccounting(
   artifact: VerifiedCppCuteFrontendArtifact,
   limits: CppCuteFrontendExtractionLimits,
-): CppCuteAotReceiptResourcesV2 {
+): CppCuteAotReceiptResourcesV3 {
   const payload = unwrapVerifiedCppCuteFrontendArtifact(artifact).envelope.payload;
-  const sources = payload.inputs.files.filter((file) => file.role === "main-source" || file.role === "project-header");
-  const headers = payload.inputs.files.filter((file) => file.role !== "main-source" && file.role !== "project-header");
-  const sum = (files: typeof payload.inputs.files): bigint => files.reduce(
-    (total, file) => total + wireIntegerToBigInt(file.byteLength),
-    0n,
-  );
+  const sources = payload.inputs.files.filter((file) => file.owner.kind === "source");
+  const headers = payload.inputs.files.filter((file) => file.owner.kind !== "source");
+  const sum = (files: typeof payload.inputs.files): bigint => files.reduce((total, file) => total + wireIntegerToBigInt(file.byteLength), 0n);
   return {
-    observedInputs: {
-      accountingKind: "observed-exact",
-      values: {
-        openedSourceFiles: wire(sources.length),
-        openedSourceBytes: wire(sum(sources)),
-        openedHeaderFiles: wire(headers.length),
-        openedHeaderBytes: wire(sum(headers)),
-      },
-    },
-    processMeasurements: {
-      accountingKind: "observed-exact",
-      values: {
-        wallTimeMs: wire(25),
-        cpuTimeMs: wire(20),
-        peakMemoryBytes: wire(65_536),
-        peakProcesses: wire(1),
-      },
-    },
-    emittedArtifact: {
-      accountingKind: "emitted-artifact-exact",
-      values: {
-        macroExpansionFacts: wire(payload.macroExpansions.length),
-        templateInstantiationFacts: wire(payload.templateInstantiations.length),
-        declarations: wire(payload.declarations.length),
-        types: wire(payload.types.length),
-        constants: wire(payload.constants.length),
-        layoutFacts: wire(payload.facts.filter((fact) => fact.kind === "affine-layout").length),
-        tensorFacts: wire(payload.facts.filter((fact) => fact.kind === "tensor").length),
-        operationFacts: wire(payload.facts.filter((fact) => (
-          fact.kind !== "affine-layout" && fact.kind !== "tensor" && fact.kind !== "target-intrinsic"
-        )).length),
-        targetIntrinsicFacts: wire(payload.facts.filter((fact) => fact.kind === "target-intrinsic").length),
-        diagnostics: wire(payload.diagnostics.length),
-        outputBytes: artifact.artifactByteLength,
-      },
-    },
-    enforcedCeilings: {
-      accountingKind: "enforced-upper-bound",
-      values: {
-        maxSourceFiles: wire(limits.maxSourceFiles),
-        maxSourceBytes: wire(limits.maxSourceBytes),
-        maxHeaderFiles: wire(limits.maxHeaderFiles),
-        maxHeaderBytes: wire(limits.maxHeaderBytes),
-        maxIncludeDepth: wire(limits.maxIncludeDepth),
-        maxMacroExpansions: wire(limits.maxMacroExpansions),
-        maxPreprocessedTokens: wire(limits.maxPreprocessedTokens),
-        maxAstNodes: wire(limits.maxAstNodes),
-        maxConstexprSteps: wire(limits.maxConstexprSteps),
-        maxTemplateInstantiations: wire(limits.maxTemplateInstantiations),
-        maxTemplateDepth: wire(limits.maxTemplateDepth),
-        maxDeclarations: wire(limits.maxDeclarations),
-        maxTypes: wire(limits.maxTypes),
-        maxConstants: wire(limits.maxConstants),
-        maxLayouts: wire(limits.maxLayouts),
-        maxTensors: wire(limits.maxTensors),
-        maxOperations: wire(limits.maxOperations),
-        maxTargetIntrinsics: wire(limits.maxTargetIntrinsics),
-        maxDiagnostics: wire(limits.maxDiagnostics),
-        maxOutputBytes: wire(limits.maxOutputBytes),
-        maxWallTimeMs: wire(limits.maxWallTimeMs),
-        maxCpuTimeMs: wire(limits.maxCpuTimeMs),
-        maxMemoryBytes: wire(limits.maxMemoryBytes),
-        maxProcesses: wire(limits.maxProcesses),
-      },
-    },
+    observedInputs: { accountingKind: "observed-exact", values: {
+      openedSourceFiles: wire(sources.length), openedSourceBytes: wire(sum(sources)),
+      openedHeaderFiles: wire(headers.length), openedHeaderBytes: wire(sum(headers)),
+    } },
+    processMeasurements: { accountingKind: "observed-exact", values: {
+      wallTimeMs: wire(25), cpuTimeMs: wire(20), peakMemoryBytes: wire(65_536), peakProcesses: wire(1),
+    } },
+    emittedArtifact: { accountingKind: "emitted-artifact-exact", values: {
+      macroExpansionFacts: wire(payload.macroExpansions.length),
+      templateInstantiationFacts: wire(payload.templateInstantiations.length),
+      declarations: wire(payload.declarations.length), types: wire(payload.types.length),
+      constants: wire(payload.constants.length),
+      layoutFacts: wire(payload.facts.filter((fact) => fact.kind === "affine-layout").length),
+      tensorFacts: wire(payload.facts.filter((fact) => fact.kind === "tensor").length),
+      operationFacts: wire(payload.facts.filter((fact) => !["affine-layout", "tensor", "target-intrinsic"].includes(fact.kind)).length),
+      targetIntrinsicFacts: wire(payload.facts.filter((fact) => fact.kind === "target-intrinsic").length),
+      diagnostics: wire(payload.diagnostics.length), outputBytes: artifact.artifactByteLength,
+    } },
+    enforcedCeilings: { accountingKind: "enforced-upper-bound", values: {
+      maxSourceFiles: wire(limits.maxSourceFiles), maxSourceBytes: wire(limits.maxSourceBytes),
+      maxHeaderFiles: wire(limits.maxHeaderFiles), maxHeaderBytes: wire(limits.maxHeaderBytes),
+      maxIncludeDepth: wire(limits.maxIncludeDepth), maxMacroExpansions: wire(limits.maxMacroExpansions),
+      maxPreprocessedTokens: wire(limits.maxPreprocessedTokens), maxAstNodes: wire(limits.maxAstNodes),
+      maxConstexprSteps: wire(limits.maxConstexprSteps), maxTemplateInstantiations: wire(limits.maxTemplateInstantiations),
+      maxTemplateDepth: wire(limits.maxTemplateDepth), maxDeclarations: wire(limits.maxDeclarations),
+      maxTypes: wire(limits.maxTypes), maxConstants: wire(limits.maxConstants), maxLayouts: wire(limits.maxLayouts),
+      maxTensors: wire(limits.maxTensors), maxOperations: wire(limits.maxOperations),
+      maxTargetIntrinsics: wire(limits.maxTargetIntrinsics), maxDiagnostics: wire(limits.maxDiagnostics),
+      maxOutputBytes: wire(limits.maxOutputBytes), maxWallTimeMs: wire(limits.maxWallTimeMs),
+      maxCpuTimeMs: wire(limits.maxCpuTimeMs), maxMemoryBytes: wire(limits.maxMemoryBytes),
+      maxProcesses: wire(limits.maxProcesses),
+    } },
   };
+}
+
+function replaceString(value: unknown, target: string, replacement: string): void {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (value[index] === target) value[index] = replacement;
+      else replaceString(value[index], target, replacement);
+    }
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === target) (value as Record<string, unknown>)[key] = replacement;
+    else replaceString(entry, target, replacement);
+  }
 }
