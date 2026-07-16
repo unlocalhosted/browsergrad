@@ -63,9 +63,9 @@ const TEST_PRIVATE_JWK: JsonWebKey = Object.freeze({
 export const TEST_CPP_CUTE_SPKI_BASE64 =
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl8h7VCP+TUDyAHiNww/AEpx+H6YG/bXR1bsUEtcquSfen4okTS1aPQ0oyKgQtZPo2Mn2pfS6TSArNTL7ACRmdQ==";
 export const PINNED_CPP_CUTE_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
-export const PINNED_CPP_CUTE_PROFILE_HASH = "15bc3d4f4b222a077e325ea0f9963fe900fa1e0e715c125632d4ad1a4ae02196";
-export const PINNED_CPP_CUTE_ARTIFACT_HASH = "626179c470d3b1e26fdf45d615b1b83da8eaf80533ef2ecb7cb59b63511153fd";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "b0f2b8c28ca12e5f9ad4e8f9bb605df8f0551c05858e3fb6362bc23e1aa49345";
+export const PINNED_CPP_CUTE_PROFILE_HASH = "9a619de252458d63121f0be42b6976f40e33e14f956669ff0540eeada45132b8";
+export const PINNED_CPP_CUTE_ARTIFACT_HASH = "4344eeb12e1cc1214857f4dd786345ee0427fbd4b2b6004d4f071ccede47757f";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "6e69067e24c943cfcc231a1eff83f7fbe61a394b91693fa7017156802468ee95";
 export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "9068";
 export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "9a122d8462fc232451f6e758bcda17f48dcf2614d67aa641e951a5886fac6975";
 
@@ -207,6 +207,7 @@ export async function createCppCuteProvenanceStatement(
         compilerBinarySha256: run.invocation.compiler.binarySha256,
         compilerBuildId: run.invocation.compiler.buildId,
         containerManifestDigest: run.invocation.container.manifestDigest,
+        containerConfigDigest: run.invocation.container.configDigest,
         dependencyManifestSha256: run.invocation.dependencyManifestSha256,
       },
       sandbox: run.invocation.sandbox,
@@ -217,6 +218,8 @@ export async function createCppCuteProvenanceStatement(
         runnerBinarySha256: run.invocation.runner.binarySha256,
         invocationId: run.invocation.invocationId,
         invocationManifestSha256: run.invocation.invocationManifestSha256,
+        executionPlanSha256: run.invocation.executionPlanSha256,
+        executionEnvironmentManifestSha256: run.invocation.executionEnvironmentManifestSha256,
         outputManifestSha256: run.output.outputManifestSha256,
         jobId: receipt.jobId,
         receiptId: receipt.receiptId,

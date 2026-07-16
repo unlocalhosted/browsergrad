@@ -24,6 +24,7 @@ import {
   computeCppCuteAotLimitsManifestHash,
   computeCppCuteAotOutputManifestHash,
 } from "./cpp_cute_aot_manifests.js";
+import { computeCppCuteAotExecutionPlanHash } from "./cpp_cute_aot_policy.js";
 import {
   unwrapPreparedCppCuteAotJob,
   type CppCuteAotSourceFileV1,
@@ -70,12 +71,14 @@ export interface CppCuteAotReceiptSandboxV1 extends JsonObject {
   readonly readOnlyRoot: true;
   readonly noNewPrivileges: true;
   readonly linking: "forbidden";
-  readonly nativeExecution: "forbidden";
+  readonly userProducedNativeExecution: "forbidden";
 }
 
 export interface CppCuteAotReceiptInvocationV1 extends JsonObject {
   readonly invocationId: string;
   readonly invocationManifestSha256: string;
+  readonly executionPlanSha256: string;
+  readonly executionEnvironmentManifestSha256: string;
   readonly runner: CppCuteFrontendRunnerProfile;
   readonly container: CppCuteFrontendContainerProfile;
   readonly extractor: CppCuteFrontendExtractorProfile;
@@ -183,6 +186,8 @@ export interface VerifiedCppCuteAotRunnerReceipt {
   readonly profileHash: string;
   readonly invocationId: string;
   readonly invocationManifestSha256: string;
+  readonly executionPlanSha256: string;
+  readonly executionEnvironmentManifestSha256: string;
   readonly artifactId: string;
   readonly artifactHash: string;
   readonly artifactBytesSha256: string;
@@ -292,6 +297,8 @@ export async function verifyCppCuteAotRunnerReceipt(
     profileHash: receipt.profileHash,
     invocationId: receipt.invocation.invocationId,
     invocationManifestSha256: receipt.invocation.invocationManifestSha256,
+    executionPlanSha256: receipt.invocation.executionPlanSha256,
+    executionEnvironmentManifestSha256: receipt.invocation.executionEnvironmentManifestSha256,
     artifactId: receipt.output.artifactId,
     artifactHash: receipt.output.artifactHash,
     artifactBytesSha256: receipt.output.artifactBytesSha256,
@@ -429,12 +436,17 @@ function parseVersion(value: JsonValue, path: string): CppCuteAotReceiptVersionV
 
 function parseInvocation(value: JsonValue, path: string): CppCuteAotReceiptInvocationV1 {
   const object = closedObject(value, [
-    "invocationId", "invocationManifestSha256", "runner", "container", "extractor", "compiler",
-    "dependencyManifestSha256", "sandbox",
+    "invocationId", "invocationManifestSha256", "executionPlanSha256", "executionEnvironmentManifestSha256",
+    "runner", "container", "extractor", "compiler", "dependencyManifestSha256", "sandbox",
   ], path);
   return {
     invocationId: patterned(field(object, "invocationId", path), `${path}.invocationId`, INVOCATION_ID, "invocation ID"),
     invocationManifestSha256: sha256(field(object, "invocationManifestSha256", path), `${path}.invocationManifestSha256`),
+    executionPlanSha256: sha256(field(object, "executionPlanSha256", path), `${path}.executionPlanSha256`),
+    executionEnvironmentManifestSha256: sha256(
+      field(object, "executionEnvironmentManifestSha256", path),
+      `${path}.executionEnvironmentManifestSha256`,
+    ),
     runner: parseRunner(field(object, "runner", path), `${path}.runner`),
     container: parseContainer(field(object, "container", path), `${path}.container`),
     extractor: parseExtractor(field(object, "extractor", path), `${path}.extractor`),
@@ -457,7 +469,7 @@ function parseRunner(value: JsonValue, path: string): CppCuteFrontendRunnerProfi
 }
 
 function parseContainer(value: JsonValue, path: string): CppCuteFrontendContainerProfile {
-  const object = closedObject(value, ["runtime", "repository", "platform", "manifestDigest"], path);
+  const object = closedObject(value, ["runtime", "repository", "platform", "manifestDigest", "configDigest"], path);
   if (object.runtime !== "docker" || object.platform !== "linux/amd64") {
     invalid(path, "runner receipt requires Docker on resolved linux/amd64");
   }
@@ -466,6 +478,7 @@ function parseContainer(value: JsonValue, path: string): CppCuteFrontendContaine
     repository: boundedString(field(object, "repository", path), `${path}.repository`, 512),
     platform: "linux/amd64",
     manifestDigest: patterned(field(object, "manifestDigest", path), `${path}.manifestDigest`, OCI_SHA256, "OCI digest"),
+    configDigest: patterned(field(object, "configDigest", path), `${path}.configDigest`, OCI_SHA256, "OCI digest"),
   };
 }
 
@@ -496,7 +509,7 @@ function parseCompiler(value: JsonValue, path: string): CppCuteFrontendCompilerP
 function parseSandbox(value: JsonValue, path: string): CppCuteAotReceiptSandboxV1 {
   const object = closedObject(value, [
     "contractId", "policySha256", "limitsSha256", "network", "readOnlyRoot", "noNewPrivileges", "linking",
-    "nativeExecution",
+    "userProducedNativeExecution",
   ], path);
   if (
     object.contractId !== "browsergrad.compiler.cpp-cute.aot@1"
@@ -504,7 +517,7 @@ function parseSandbox(value: JsonValue, path: string): CppCuteAotReceiptSandboxV
     || object.readOnlyRoot !== true
     || object.noNewPrivileges !== true
     || object.linking !== "forbidden"
-    || object.nativeExecution !== "forbidden"
+    || object.userProducedNativeExecution !== "forbidden"
   ) {
     invalid(path, "runner receipt does not satisfy the closed AOT sandbox contract");
   }
@@ -516,7 +529,7 @@ function parseSandbox(value: JsonValue, path: string): CppCuteAotReceiptSandboxV
     readOnlyRoot: true,
     noNewPrivileges: true,
     linking: "forbidden",
-    nativeExecution: "forbidden",
+    userProducedNativeExecution: "forbidden",
   };
 }
 
@@ -726,9 +739,12 @@ async function verifyInvocationBindings(
 ): Promise<void> {
   const configured = profileRecord.profile;
   const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(job);
+  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job);
   const expected: CppCuteAotReceiptInvocationV1 = {
     invocationId: `bg.cpp.aot-invocation.sha256.${invocationManifestSha256}`,
     invocationManifestSha256,
+    executionPlanSha256,
+    executionEnvironmentManifestSha256: configured.deployment.executionEnvironmentManifestSha256,
     runner: configured.deployment.runner,
     container: configured.deployment.container,
     extractor: configured.deployment.extractor,
@@ -742,7 +758,7 @@ async function verifyInvocationBindings(
       readOnlyRoot: true,
       noNewPrivileges: true,
       linking: "forbidden",
-      nativeExecution: "forbidden",
+      userProducedNativeExecution: "forbidden",
     },
   };
   if (canonicalText(receipt.invocation) !== canonicalText(expected)) {

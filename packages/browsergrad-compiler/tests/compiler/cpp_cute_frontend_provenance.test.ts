@@ -304,6 +304,15 @@ describe("C++/CuTe frontend provenance", () => {
       {
         mutate: (statement) => {
           const predicate = statement["predicate"] as Record<string, unknown>;
+          const toolchain = predicate["toolchain"] as Record<string, unknown>;
+          toolchain["containerConfigDigest"] = `sha256:${"0".repeat(64)}`;
+        },
+        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH",
+        path: "$.payload.predicate.toolchain",
+      },
+      {
+        mutate: (statement) => {
+          const predicate = statement["predicate"] as Record<string, unknown>;
           const sandbox = predicate["sandbox"] as Record<string, unknown>;
           sandbox["policySha256"] = "0".repeat(64);
         },
@@ -315,6 +324,24 @@ describe("C++/CuTe frontend provenance", () => {
           const predicate = statement["predicate"] as Record<string, unknown>;
           const run = predicate["run"] as Record<string, unknown>;
           run["invocationManifestSha256"] = "0".repeat(64);
+        },
+        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
+        path: "$.payload.predicate.run",
+      },
+      {
+        mutate: (statement) => {
+          const predicate = statement["predicate"] as Record<string, unknown>;
+          const run = predicate["run"] as Record<string, unknown>;
+          run["executionPlanSha256"] = "0".repeat(64);
+        },
+        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
+        path: "$.payload.predicate.run",
+      },
+      {
+        mutate: (statement) => {
+          const predicate = statement["predicate"] as Record<string, unknown>;
+          const run = predicate["run"] as Record<string, unknown>;
+          run["executionEnvironmentManifestSha256"] = "f".repeat(64);
         },
         code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
         path: "$.payload.predicate.run",

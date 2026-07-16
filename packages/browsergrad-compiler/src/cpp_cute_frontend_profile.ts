@@ -111,6 +111,8 @@ export interface CppCuteFrontendContainerProfile extends JsonObject {
   readonly platform: "linux/amd64";
   /** Resolved platform-manifest digest, never a mutable tag or multi-platform index. */
   readonly manifestDigest: string;
+  /** OCI image-configuration digest transitively bound by manifestDigest. */
+  readonly configDigest: string;
 }
 
 export interface CppCuteFrontendProvenancePolicy extends JsonObject {
@@ -124,6 +126,8 @@ export interface CppCuteFrontendDeploymentProfile extends JsonObject {
   readonly mode: "ahead-of-time";
   readonly contractId: "browsergrad.compiler.cpp-cute.aot@1";
   readonly sandboxPolicySha256: string;
+  /** Builder/runtime/kernel/cgroup/security-module environment manifest. */
+  readonly executionEnvironmentManifestSha256: string;
   readonly extractor: CppCuteFrontendExtractorProfile;
   readonly runner: CppCuteFrontendRunnerProfile;
   readonly container: CppCuteFrontendContainerProfile;
@@ -351,7 +355,10 @@ function parseVersion(value: JsonValue, path: string): CppCuteFrontendProfileVer
 function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploymentProfile {
   const object = closedObject(
     value,
-    ["mode", "contractId", "sandboxPolicySha256", "extractor", "runner", "container", "provenance"],
+    [
+      "mode", "contractId", "sandboxPolicySha256", "executionEnvironmentManifestSha256",
+      "extractor", "runner", "container", "provenance",
+    ],
     path,
   );
   if (object.mode !== "ahead-of-time") invalid(`${path}.mode`, "profile v1 supports ahead-of-time extraction only");
@@ -381,7 +388,7 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
   };
   const containerObject = closedObject(
     field(object, "container", path),
-    ["runtime", "repository", "platform", "manifestDigest"],
+    ["runtime", "repository", "platform", "manifestDigest", "configDigest"],
     `${path}.container`,
   );
   if (containerObject.runtime !== "docker" || containerObject.platform !== "linux/amd64") {
@@ -398,6 +405,10 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     manifestDigest: ociSha256(
       field(containerObject, "manifestDigest", `${path}.container`),
       `${path}.container.manifestDigest`,
+    ),
+    configDigest: ociSha256(
+      field(containerObject, "configDigest", `${path}.container`),
+      `${path}.container.configDigest`,
     ),
   };
   const provenanceObject = closedObject(
@@ -435,6 +446,10 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     mode: "ahead-of-time",
     contractId: "browsergrad.compiler.cpp-cute.aot@1",
     sandboxPolicySha256: sha256(field(object, "sandboxPolicySha256", path), `${path}.sandboxPolicySha256`),
+    executionEnvironmentManifestSha256: sha256(
+      field(object, "executionEnvironmentManifestSha256", path),
+      `${path}.executionEnvironmentManifestSha256`,
+    ),
     extractor,
     runner,
     container,

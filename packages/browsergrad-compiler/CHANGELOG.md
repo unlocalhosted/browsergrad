@@ -35,6 +35,14 @@
 - Removes caller-supplied artifact/profile objects from semantic authorization.
   The authorized artifact is now the exact strict-decoded resource owned by the
   authenticated receipt; rejected artifacts remain attestable but cannot lower.
+- Pins one canonical AOT sandbox policy and hashes a deterministic logical
+  execution plan over exact job/profile/toolchain/VFS/limit inputs. Profile,
+  receipt, provenance, authorization, and compiler origins now retain the OCI
+  image-config and execution-environment identities needed by the future
+  offline runner.
+- Corrects the sandbox claim from all native execution being forbidden to
+  user-produced native execution being forbidden; the pinned compiler and
+  supervisor are necessarily native programs.
 
 ## 0.2.0
 

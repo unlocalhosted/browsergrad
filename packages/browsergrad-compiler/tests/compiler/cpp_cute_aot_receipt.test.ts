@@ -45,6 +45,9 @@ describe("C++/CuTe AOT runner receipt", () => {
       artifactId: fixture.artifact.artifactId,
       artifactHash: fixture.artifact.artifactHash,
       artifactBytesSha256: fixture.artifact.artifactBytesSha256,
+      executionPlanSha256: fixture.receipt.invocation.executionPlanSha256,
+      executionEnvironmentManifestSha256:
+        fixture.receipt.invocation.executionEnvironmentManifestSha256,
     });
     expect(verified.receiptId).toMatch(/^bg\.cpp\.aot-receipt\.sha256\.[0-9a-f]{64}$/u);
     expect(verified.invocationId).toBe(
@@ -159,6 +162,31 @@ describe("C++/CuTe AOT runner receipt", () => {
           const invocation = receipt["invocation"] as Record<string, unknown>;
           const sandbox = invocation["sandbox"] as Record<string, unknown>;
           sandbox["policySha256"] = "0".repeat(64);
+        },
+      },
+      {
+        code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVOCATION-MISMATCH",
+        path: "$.invocation",
+        mutate: (receipt) => {
+          const invocation = receipt["invocation"] as Record<string, unknown>;
+          invocation["executionPlanSha256"] = "0".repeat(64);
+        },
+      },
+      {
+        code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVOCATION-MISMATCH",
+        path: "$.invocation",
+        mutate: (receipt) => {
+          const invocation = receipt["invocation"] as Record<string, unknown>;
+          invocation["executionEnvironmentManifestSha256"] = "f".repeat(64);
+        },
+      },
+      {
+        code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVOCATION-MISMATCH",
+        path: "$.invocation",
+        mutate: (receipt) => {
+          const invocation = receipt["invocation"] as Record<string, unknown>;
+          const container = invocation["container"] as Record<string, unknown>;
+          container["configDigest"] = `sha256:${"f".repeat(64)}`;
         },
       },
       {

@@ -201,6 +201,8 @@ export async function lowerAuthorizedCppCuteLayoutEntry(
       runnerReceiptByteLength: authorization.receiptByteLength,
       aotJobId: authorization.jobId,
       invocationManifestSha256: authorization.invocationManifestSha256,
+      executionPlanSha256: authorization.executionPlanSha256,
+      executionEnvironmentManifestSha256: authorization.executionEnvironmentManifestSha256,
       profileHash: authorization.profileHash,
       statementHash: authorization.statementHash,
       trustStoreHash: authorization.trustStoreHash,

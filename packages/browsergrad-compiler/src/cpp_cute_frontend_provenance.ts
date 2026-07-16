@@ -117,6 +117,7 @@ export interface CppCuteProvenanceToolchainV1 extends JsonObject {
   readonly compilerBinarySha256: string;
   readonly compilerBuildId: string;
   readonly containerManifestDigest: string;
+  readonly containerConfigDigest: string;
   readonly dependencyManifestSha256: string;
 }
 
@@ -128,7 +129,7 @@ export interface CppCuteProvenanceSandboxV1 extends JsonObject {
   readonly readOnlyRoot: true;
   readonly noNewPrivileges: true;
   readonly linking: "forbidden";
-  readonly nativeExecution: "forbidden";
+  readonly userProducedNativeExecution: "forbidden";
 }
 
 export interface CppCuteProvenanceRunV1 extends JsonObject {
@@ -138,6 +139,8 @@ export interface CppCuteProvenanceRunV1 extends JsonObject {
   readonly runnerBinarySha256: string;
   readonly invocationId: string;
   readonly invocationManifestSha256: string;
+  readonly executionPlanSha256: string;
+  readonly executionEnvironmentManifestSha256: string;
   readonly outputManifestSha256: string;
   readonly jobId: string;
   readonly receiptId: string;
@@ -196,6 +199,8 @@ export interface VerifiedCppCuteFrontendAttestation {
   readonly receiptByteLength: WireU64;
   readonly jobId: string;
   readonly invocationManifestSha256: string;
+  readonly executionPlanSha256: string;
+  readonly executionEnvironmentManifestSha256: string;
   readonly profileHash: string;
   readonly trustStoreHash: string;
   readonly sourceRepository: string;
@@ -224,6 +229,8 @@ export interface AuthorizedCppCuteFrontendArtifact {
   readonly receiptByteLength: WireU64;
   readonly jobId: string;
   readonly invocationManifestSha256: string;
+  readonly executionPlanSha256: string;
+  readonly executionEnvironmentManifestSha256: string;
   readonly profileHash: string;
   readonly sourceSetSha256: string;
   readonly statementHash: string;
@@ -408,6 +415,8 @@ export async function verifyCppCuteFrontendAttestation(
     receiptByteLength: receipt.receiptByteLength,
     jobId: receipt.jobId,
     invocationManifestSha256: receipt.invocationManifestSha256,
+    executionPlanSha256: receipt.executionPlanSha256,
+    executionEnvironmentManifestSha256: receipt.executionEnvironmentManifestSha256,
     profileHash: predicate.artifact.profileHash,
     trustStoreHash: trustStoreRecord.trustStoreHash,
     sourceRepository: predicate.source.repository,
@@ -477,6 +486,8 @@ export function authorizeCppCuteFrontendArtifact(
     receiptByteLength: request.attestation.receiptByteLength,
     jobId: request.attestation.jobId,
     invocationManifestSha256: request.attestation.invocationManifestSha256,
+    executionPlanSha256: request.attestation.executionPlanSha256,
+    executionEnvironmentManifestSha256: request.attestation.executionEnvironmentManifestSha256,
     profileHash: profile.profileHash,
     sourceSetSha256: artifact.sourceSetSha256,
     statementHash: request.attestation.statementHash,
@@ -666,7 +677,8 @@ function parseSubject(value: JsonValue, path: string): CppCuteProvenanceSubjectV
 function parseToolchain(value: JsonValue, path: string): CppCuteProvenanceToolchainV1 {
   const object = closedObject(value, [
     "extractorId", "extractorVersion", "extractorBuildId", "extractorBinarySha256", "compilerId",
-    "compilerVersion", "compilerBinarySha256", "compilerBuildId", "containerManifestDigest", "dependencyManifestSha256",
+    "compilerVersion", "compilerBinarySha256", "compilerBuildId", "containerManifestDigest", "containerConfigDigest",
+    "dependencyManifestSha256",
   ], path);
   return {
     extractorId: boundedString(field(object, "extractorId", path), `${path}.extractorId`, 256),
@@ -681,6 +693,10 @@ function parseToolchain(value: JsonValue, path: string): CppCuteProvenanceToolch
       field(object, "containerManifestDigest", path),
       `${path}.containerManifestDigest`,
     ),
+    containerConfigDigest: ociSha256(
+      field(object, "containerConfigDigest", path),
+      `${path}.containerConfigDigest`,
+    ),
     dependencyManifestSha256: sha256(
       field(object, "dependencyManifestSha256", path),
       `${path}.dependencyManifestSha256`,
@@ -691,11 +707,11 @@ function parseToolchain(value: JsonValue, path: string): CppCuteProvenanceToolch
 function parseSandbox(value: JsonValue, path: string): CppCuteProvenanceSandboxV1 {
   const object = closedObject(value, [
     "contractId", "policySha256", "limitsSha256", "network", "readOnlyRoot", "noNewPrivileges", "linking",
-    "nativeExecution",
+    "userProducedNativeExecution",
   ], path);
   if (object.contractId !== "browsergrad.compiler.cpp-cute.aot@1" || object.network !== "none" ||
       object.readOnlyRoot !== true || object.noNewPrivileges !== true || object.linking !== "forbidden" ||
-      object.nativeExecution !== "forbidden") {
+      object.userProducedNativeExecution !== "forbidden") {
     invalid(path, "sandbox statement does not satisfy closed AOT v1 isolation contract");
   }
   return {
@@ -706,14 +722,15 @@ function parseSandbox(value: JsonValue, path: string): CppCuteProvenanceSandboxV
     readOnlyRoot: true,
     noNewPrivileges: true,
     linking: "forbidden",
-    nativeExecution: "forbidden",
+    userProducedNativeExecution: "forbidden",
   };
 }
 
 function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV1 {
   const object = closedObject(value, [
     "platform", "runnerId", "runnerVersion", "runnerBinarySha256", "invocationId", "invocationManifestSha256",
-    "outputManifestSha256", "jobId", "receiptId", "receiptBytesSha256", "receiptByteLength", "outcome", "exitCode",
+    "executionPlanSha256", "executionEnvironmentManifestSha256", "outputManifestSha256", "jobId", "receiptId",
+    "receiptBytesSha256", "receiptByteLength", "outcome", "exitCode",
   ], path);
   if (object.platform !== "linux/amd64") invalid(`${path}.platform`, "AOT v1 canonical producer platform is linux/amd64");
   if (object.outcome !== "succeeded" || object.exitCode !== 0) {
@@ -728,6 +745,11 @@ function parseRun(value: JsonValue, path: string): CppCuteProvenanceRunV1 {
     invocationManifestSha256: sha256(
       field(object, "invocationManifestSha256", path),
       `${path}.invocationManifestSha256`,
+    ),
+    executionPlanSha256: sha256(field(object, "executionPlanSha256", path), `${path}.executionPlanSha256`),
+    executionEnvironmentManifestSha256: sha256(
+      field(object, "executionEnvironmentManifestSha256", path),
+      `${path}.executionEnvironmentManifestSha256`,
     ),
     outputManifestSha256: sha256(field(object, "outputManifestSha256", path), `${path}.outputManifestSha256`),
     jobId: matchingString(field(object, "jobId", path), `${path}.jobId`, AOT_JOB_ID, "job ID"),
@@ -800,6 +822,7 @@ async function verifyStatementBindings(
     compilerBinarySha256: runnerReceipt.invocation.compiler.binarySha256,
     compilerBuildId: runnerReceipt.invocation.compiler.buildId,
     containerManifestDigest: runnerReceipt.invocation.container.manifestDigest,
+    containerConfigDigest: runnerReceipt.invocation.container.configDigest,
     dependencyManifestSha256: runnerReceipt.invocation.dependencyManifestSha256,
   };
   if (canonicalJsonText(predicate.toolchain) !== canonicalJsonText(expectedToolchain)) {
@@ -815,6 +838,8 @@ async function verifyStatementBindings(
     runnerBinarySha256: runnerReceipt.invocation.runner.binarySha256,
     invocationId: runnerReceipt.invocation.invocationId,
     invocationManifestSha256: runnerReceipt.invocation.invocationManifestSha256,
+    executionPlanSha256: runnerReceipt.invocation.executionPlanSha256,
+    executionEnvironmentManifestSha256: runnerReceipt.invocation.executionEnvironmentManifestSha256,
     outputManifestSha256: runnerReceipt.output.outputManifestSha256,
     jobId: receipt.jobId,
     receiptId: receipt.receiptId,

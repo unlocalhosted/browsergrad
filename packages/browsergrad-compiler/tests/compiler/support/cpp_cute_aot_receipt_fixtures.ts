@@ -10,6 +10,7 @@ import {
   computeCppCuteAotLimitsManifestHash,
   computeCppCuteAotOutputManifestHash,
 } from "../../../src/cpp_cute_aot_manifests.js";
+import { computeCppCuteAotExecutionPlanHash } from "../../../src/cpp_cute_aot_policy.js";
 import {
   deriveCppCuteAotEntryRequestId,
   deriveCppCuteAotJobId,
@@ -47,11 +48,11 @@ import {
 
 const wire = (value: number | bigint): WireU64 => parseWireU64(String(value));
 
-export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.50a323388062d6cd80fcacd23743ae5eb5b061084e478b77bbf86e7bbe19ec3b";
-export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.edaa38ee38a27d469fe381d1e217695f1e15cecd69c2765b11022c60119dea7b";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.a86dec1663f1193b156afabfea57940b72baf8d5b5b6dc557226746e34022dcd";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "1226f1301b58046ca2b801d4c286b769c6bcc3794aa516a86184ad8e42300e24";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH = "3837";
+export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.cf5fba944b3bc6cc2dbe03067973074030ef448ca8878147a35bc85927ee44c4";
+export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.6ec7dc16afdf80b9df15c8375db2f8c5a525ffe53342697e11d8400f97838b3d";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.08119a83fb35468ee3e6c6b043273ccb863fcb6aae9dab8ae1e96a564ac9548b";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "c1c2aa4d401de40da1af0f012c8f7af09bc561e98fb18bee5fc579862f0028a6";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH = "4131";
 
 export interface CppCuteAotReceiptFixture {
   readonly profile: PreparedCppCuteFrontendProfile;
@@ -145,6 +146,7 @@ export async function createCppCuteAotReceiptBody(
   const request = jobRecord.job.entryRequests[0];
   if (request === undefined) throw new Error("fixture job lost entry request");
   const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(job);
+  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job);
   const resources = createResourceObservations(artifact);
   return {
     schema: CPP_CUTE_AOT_RECEIPT_SCHEMA,
@@ -154,6 +156,8 @@ export async function createCppCuteAotReceiptBody(
     invocation: {
       invocationId: `bg.cpp.aot-invocation.sha256.${invocationManifestSha256}`,
       invocationManifestSha256,
+      executionPlanSha256,
+      executionEnvironmentManifestSha256: configured.deployment.executionEnvironmentManifestSha256,
       runner: configured.deployment.runner,
       container: configured.deployment.container,
       extractor: configured.deployment.extractor,
@@ -167,7 +171,7 @@ export async function createCppCuteAotReceiptBody(
         readOnlyRoot: true,
         noNewPrivileges: true,
         linking: "forbidden",
-        nativeExecution: "forbidden",
+        userProducedNativeExecution: "forbidden",
       },
     },
     openedInputs: {

@@ -27,7 +27,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("3901d40bd01c78df67f140dd8c57ac4c77e78a76af749e162ad20b991bbfe49b");
+    expect(first.profileHash).toBe("bd4303641eaca9df8ca69517997ebbb6521e77b49bd6d836eb4252fbd085cad9");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@1");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(first.expectedHeaderSetSha256).toBe(CPP_CUTE_FIXTURE_HEADER_SET_HASH);
@@ -136,6 +136,24 @@ describe("C++/CuTe frontend profile", () => {
     const deployment = container["deployment"] as Record<string, unknown>;
     (deployment["container"] as Record<string, unknown>)["repository"] = "GHCR.io/example/image:latest";
     await expectProfileError(container, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.deployment.container.repository");
+
+    const configDigest = cloneCppCuteProfileInput();
+    const configDeployment = configDigest["deployment"] as Record<string, unknown>;
+    (configDeployment["container"] as Record<string, unknown>)["configDigest"] = "sha256:ABC";
+    await expectProfileError(
+      configDigest,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.container.configDigest",
+    );
+
+    const executionEnvironment = cloneCppCuteProfileInput();
+    const environmentDeployment = executionEnvironment["deployment"] as Record<string, unknown>;
+    environmentDeployment["executionEnvironmentManifestSha256"] = "not-a-digest";
+    await expectProfileError(
+      executionEnvironment,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.executionEnvironmentManifestSha256",
+    );
 
     const trust = cloneCppCuteProfileInput();
     const trustDeployment = trust["deployment"] as Record<string, unknown>;

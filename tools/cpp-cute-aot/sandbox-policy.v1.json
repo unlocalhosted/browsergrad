@@ -1,0 +1,70 @@
+{
+  "schema": "browsergrad.compiler.cpp-cute.aot-sandbox-policy",
+  "version": { "major": 1, "minor": 0 },
+  "contractId": "browsergrad.compiler.cpp-cute.aot@1",
+  "runtime": {
+    "engine": "docker",
+    "endpoint": "local-unix",
+    "platform": "linux/amd64",
+    "imagePull": "forbidden",
+    "createBy": "image-config-digest",
+    "executionEnvironment": "profile-pinned"
+  },
+  "process": {
+    "user": { "uid": 65532, "gid": 65532 },
+    "entrypoint": "/opt/browsergrad/bin/cpp-cute-aot-supervisor",
+    "workingDirectory": "/run/browsergrad",
+    "arguments": [
+      "--profile=/run/browsergrad/input/profile.json",
+      "--job=/run/browsergrad/input/job.json",
+      "--protocol=browsergrad.compiler.cpp-cute.aot-result-frame@1"
+    ],
+    "environment": [],
+    "stdin": "closed",
+    "stdout": "single-bounded-frame",
+    "stderr": "bounded-diagnostic",
+    "healthcheck": "disabled",
+    "restart": "none",
+    "logging": "disabled"
+  },
+  "namespaces": {
+    "network": "none",
+    "ipc": "private",
+    "pid": "private",
+    "uts": "private",
+    "cgroup": "private"
+  },
+  "privileges": {
+    "privileged": false,
+    "capabilitiesAdded": [],
+    "capabilitiesDropped": ["ALL"],
+    "noNewPrivileges": true,
+    "seccomp": "runtime-default-pinned-by-execution-environment"
+  },
+  "filesystem": {
+    "root": "read-only",
+    "imageVolumes": "forbidden",
+    "source": "runner-snapshot-read-only-rprivate",
+    "control": "runner-snapshot-read-only-rprivate",
+    "temporaryPath": "/tmp",
+    "temporary": ["rw", "noexec", "nosuid", "nodev"],
+    "temporaryBytes": "min(maxMemoryBytes/4,536870912)",
+    "dockerSocket": "forbidden",
+    "devices": "forbidden"
+  },
+  "limits": {
+    "memory": "maxMemoryBytes",
+    "memorySwap": "maxMemoryBytes",
+    "processes": "maxProcesses",
+    "wallTime": "maxWallTimeMs",
+    "cpuTime": "in-image-supervisor-and-cgroup-observation",
+    "stdout": "maxOutputBytes-plus-receipt-cap",
+    "stderrBytes": 65536,
+    "receiptBytes": 8388608
+  },
+  "semantics": {
+    "linking": "forbidden",
+    "userProducedNativeExecution": "forbidden",
+    "externalAttestation": "required-after-receipt"
+  }
+}

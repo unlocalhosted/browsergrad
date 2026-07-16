@@ -3,6 +3,7 @@ import {
   type CppCuteFrontendIncludeRoot,
   type CppCuteFrontendProfileV1,
 } from "../../../src/cpp_cute_frontend_profile.js";
+import { CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 } from "../../../src/cpp_cute_aot_policy.js";
 import { deriveCppCuteFrontendArtifactId } from "../../../src/cpp_cute_frontend_artifact.js";
 import { computeCppCuteInputHashes } from "../../../src/cpp_cute_frontend_verify.js";
 import type {
@@ -13,6 +14,8 @@ import type {
 export const CPP_CUTE_FIXTURE_HEADER_SET_HASH = "2".repeat(64);
 export const CPP_CUTE_FIXTURE_COMPILER_HASH = "3".repeat(64);
 export const CPP_CUTE_FIXTURE_CONTAINER_DIGEST = `sha256:${"4".repeat(64)}`;
+export const CPP_CUTE_FIXTURE_CONTAINER_CONFIG_DIGEST = `sha256:${"1".repeat(64)}`;
+export const CPP_CUTE_FIXTURE_EXECUTION_ENVIRONMENT_HASH = "0".repeat(64);
 export const CPP_CUTE_FIXTURE_CUDA_HEADER_HASH = "5".repeat(64);
 export const CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH = "6".repeat(64);
 export const CPP_CUTE_FIXTURE_CUTLASS_REVISION = "7".repeat(40);
@@ -29,6 +32,9 @@ export interface CppCuteProfileFixtureOptions {
   readonly expectedHeaderSetSha256?: string;
   readonly sourceRoots?: readonly string[];
   readonly includeRoots?: readonly CppCuteFrontendIncludeRoot[];
+  readonly sandboxPolicySha256?: string;
+  readonly executionEnvironmentManifestSha256?: string;
+  readonly containerConfigDigest?: string;
 }
 
 export function createCppCuteProfileInput(
@@ -41,7 +47,9 @@ export function createCppCuteProfileInput(
     deployment: {
       mode: "ahead-of-time",
       contractId: "browsergrad.compiler.cpp-cute.aot@1",
-      sandboxPolicySha256: "c".repeat(64),
+      sandboxPolicySha256: options.sandboxPolicySha256 ?? CPP_CUTE_AOT_SANDBOX_POLICY_SHA256,
+      executionEnvironmentManifestSha256:
+        options.executionEnvironmentManifestSha256 ?? CPP_CUTE_FIXTURE_EXECUTION_ENVIRONMENT_HASH,
       extractor: {
         id: "browsergrad-tools/cpp-cute-frontend",
         version: "0.1.0",
@@ -58,6 +66,7 @@ export function createCppCuteProfileInput(
         repository: "ghcr.io/unlocalhosted/browsergrad-cpp-cute-aot",
         platform: "linux/amd64",
         manifestDigest: CPP_CUTE_FIXTURE_CONTAINER_DIGEST,
+        configDigest: options.containerConfigDigest ?? CPP_CUTE_FIXTURE_CONTAINER_CONFIG_DIGEST,
       },
       provenance: {
         kind: "external-attestation",
