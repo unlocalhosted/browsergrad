@@ -30,6 +30,13 @@ export interface CppCuteClangWasmBuildStep {
   readonly environment: Readonly<Record<string, string>>;
 }
 
+export interface CppCuteClangWasmExtractorSourceFile {
+  readonly path: "BrowserGradCppCuteExtractor.cpp" | "CMakeLists.txt";
+  readonly sha256: string;
+  readonly byteLength: string;
+  readonly absolutePath: string;
+}
+
 export interface CppCuteClangWasmBuildPlan {
   readonly schema: "browsergrad.compiler.cpp-cute.clang-wasm-build-plan";
   readonly version: 1;
@@ -37,6 +44,21 @@ export interface CppCuteClangWasmBuildPlan {
   readonly recipeId: string;
   readonly steps: readonly CppCuteClangWasmBuildStep[];
   readonly nativeTools: Readonly<{ clangTablegen: string; llvmTablegen: string }>;
+  readonly extractorSource: Readonly<{
+    sourceSetSha256: string;
+    files: readonly CppCuteClangWasmExtractorSourceFile[];
+    buildVerified: false;
+    blockerId: "browsergrad-extractor-source-verification";
+  }>;
+  readonly generatedExtractor: Readonly<{
+    factoryModulePath: string;
+    wasmSidecarPath: string;
+    distributedWasmPath: string;
+    distributedMaterializationReady: false;
+    materializationBlockerId: "browsergrad-extractor-distributed-materialization";
+    workerBundleReady: false;
+    blockerId: "browsergrad-worker-emscripten-factory-bundle";
+  }>;
   readonly outputRoot: string;
 }
 

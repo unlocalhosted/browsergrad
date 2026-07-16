@@ -22,12 +22,18 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.ccff973f6bb12d713f9180b45ee053bcd9ef720759aa3730f58535d525374b2f";
-const RESOURCE_SHA256 = "643ef802fe7be58219a1675a2d29253fd1a625c14dc1f41a25a14022bb6af001";
-const RECIPE_SHA256 = "1308026a3216a76509d25dcf1036adf91e7a77cde8f58a1e805393df18148a07";
+  "bg.cpp.browser-build-input-lock.sha256.ed7a69299279e2439843d3c96fefd36c569bed3b1acc1327700332fad21c2100";
+const RESOURCE_SHA256 = "2e515985c4be646bc88ee0cdf3711f542fe93a318eb51e5410a6bfa2e84e9daa";
+const RECIPE_SHA256 = "e0a6be2253b314b077a7bc5a72ee3b164f5a783e84797274d2e1033a7a5326e8";
+const EXTRACTOR_SOURCE_SHA256 = "c54c248660a85bd709b42c1590d042dc8f224782e1b3f2a7a2fa9a7fbe1e6b5c";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
-  "browsergrad-extractor-source",
+  "browsergrad-extractor-artifact-v3",
+  "browsergrad-extractor-cuda-dual-pass",
+  "browsergrad-extractor-distributed-materialization",
+  "browsergrad-extractor-source-verification",
+  "browsergrad-extractor-vfs-bridge",
+  "browsergrad-worker-emscripten-factory-bundle",
   "cuda-header-redistribution",
   "distributed-file-license-manifest",
   "linux-sysroot-redistribution",
@@ -44,11 +50,12 @@ describe("browser Clang-WASM build-input lock", () => {
       lockId: LOCK_ID,
       resourceSha256: RESOURCE_SHA256,
       recipeSha256: RECIPE_SHA256,
+      extractorSourceSetSha256: EXTRACTOR_SOURCE_SHA256,
       noticeInventorySha256: NOTICE_SHA256,
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
       runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
       runtimeAbiResourceByteLength: cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength,
-      resourceByteLength: 18_667,
+      resourceByteLength: 20_263,
       releaseReady: false,
       releaseBlockerIds: BLOCKERS,
     });
@@ -149,6 +156,10 @@ describe("browser Clang-WASM build-input lock", () => {
     expect(recipe.stages[1]?.targets).toEqual(["browsergrad-cpp-cute-extractor"]);
     expect(recipe.parallelJobs).toBe(1);
     expect(recipe.stages[1]?.definitions).toContainEqual({
+      name: "BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH",
+      value: "@BUILD_EVIDENCE@/generated/clang-extractor.mjs",
+    });
+    expect(recipe.stages[1]?.definitions).toContainEqual({
       name: "LLVM_NATIVE_TOOL_DIR",
       value: "@NATIVE_BUILD@/bin",
     });
@@ -157,6 +168,9 @@ describe("browser Clang-WASM build-input lock", () => {
       value: "STATIC_LIBRARY",
     });
     expect(recipe.stages[1]?.linkerFlags).toContain("-sENVIRONMENT=worker");
+    expect(recipe.stages[1]?.linkerFlags).toContain("-sMODULARIZE=1");
+    expect(recipe.stages[1]?.linkerFlags).toContain("-sEXPORT_ES6=1");
+    expect(recipe.stages[1]?.linkerFlags).not.toContain("-sSTANDALONE_WASM=1");
     expect(recipe.stages[1]?.linkerFlags).toContain("-sFILESYSTEM=0");
     expect(recipe.stages[1]?.linkerFlags).toContain("-sMAXIMUM_MEMORY=1073741824");
     expect(recipe.stages[1]?.linkerFlags).toContain(
@@ -209,6 +223,7 @@ describe("browser Clang-WASM build-input lock", () => {
         "clangBasic",
         "clangDriver",
         "clangFrontend",
+        "clangIndex",
         "clangLex",
         "clangParse",
         "clangSema",

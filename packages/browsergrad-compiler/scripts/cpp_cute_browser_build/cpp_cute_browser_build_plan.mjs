@@ -7,6 +7,7 @@ import {
 const INVALID = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PLAN-INVALID";
 const RECIPE_ID = "browsergrad.compiler.cpp-cute.clang-wasm-build@1";
 const LOCK_ID = /^bg\.cpp\.browser-build-input-lock\.sha256\.[0-9a-f]{64}$/u;
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const PLACEHOLDER = /@[A-Z][A-Z0-9_]*@/gu;
 const POSSIBLE_PLACEHOLDER = /@[A-Za-z0-9_]+@/u;
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
@@ -51,6 +52,7 @@ const NATIVE_DEFINITION_NAMES = Object.freeze([
   "Python3_EXECUTABLE",
 ]);
 const WASM_DEFINITION_NAMES = Object.freeze([
+  "BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH",
   "BUILD_SHARED_LIBS",
   "CLANG_BUILD_TOOLS",
   "CLANG_ENABLE_HLSL",
@@ -102,8 +104,22 @@ const WASM_DEFINITION_NAMES = Object.freeze([
 ]);
 const NATIVE_TARGETS = Object.freeze(["clang-tblgen", "llvm-tblgen"]);
 const WASM_TARGETS = Object.freeze(["browsergrad-cpp-cute-extractor"]);
+const EXTRACTOR_SOURCE_PATHS = Object.freeze([
+  "BrowserGradCppCuteExtractor.cpp",
+  "CMakeLists.txt",
+]);
 
 /** @typedef {Readonly<{ name: string; value: string }>} RecipeNameValue */
+
+/** @typedef {Readonly<{ path: string; sha256: string; byteLength: string }>} ExtractorSourceFile */
+
+/**
+ * @typedef {Readonly<{
+ *   sourceSetSha256: string;
+ *   hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1";
+ *   files: readonly ExtractorSourceFile[];
+ * }>} ExtractorSourceSet
+ */
 
 /**
  * @typedef {Readonly<{
@@ -128,6 +144,7 @@ const WASM_TARGETS = Object.freeze(["browsergrad-cpp-cute-extractor"]);
  *   parallelJobs: number;
  *   prefixMapKinds: readonly string[];
  *   stages: readonly CppCuteClangWasmRecipeStage[];
+ *   extractorSource: ExtractorSourceSet;
  * }>} CppCuteClangWasmRecipe
  */
 
@@ -217,6 +234,12 @@ export function planCppCuteClangWasmBuild(input) {
     "@NATIVE_BUILD@": nativeBuild,
     "@OUTPUT@": roots.outputRoot,
   };
+  const generatedFactoryModulePath = join(
+    roots.stateRoot,
+    "evidence",
+    "generated",
+    "clang-extractor.mjs",
+  );
 
   const nativeSteps = stageSteps({
     stage: native,
@@ -263,6 +286,33 @@ export function planCppCuteClangWasmBuild(input) {
     recipeId: selected.recipe.recipeId,
     steps: [...nativeSteps, ...wasmSteps],
     nativeTools,
+    extractorSource: {
+      sourceSetSha256: selected.recipe.extractorSource.sourceSetSha256,
+      files: selected.recipe.extractorSource.files.map((file) => ({
+        ...file,
+        absolutePath: join(roots.extractorSourceRoot, file.path),
+      })),
+      buildVerified: false,
+      blockerId: "browsergrad-extractor-source-verification",
+    },
+    generatedExtractor: {
+      factoryModulePath: generatedFactoryModulePath,
+      wasmSidecarPath: join(
+        roots.stateRoot,
+        "evidence",
+        "generated",
+        "clang-extractor.wasm",
+      ),
+      distributedWasmPath: join(
+        roots.outputRoot,
+        "browsergrad-cpp-cute",
+        "clang-extractor.wasm",
+      ),
+      distributedMaterializationReady: false,
+      materializationBlockerId: "browsergrad-extractor-distributed-materialization",
+      workerBundleReady: false,
+      blockerId: "browsergrad-worker-emscripten-factory-bundle",
+    },
     outputRoot: roots.outputRoot,
   });
 }
@@ -386,10 +436,54 @@ function parseRecipe(value) {
     environment,
     parallelJobs,
     prefixMapKinds,
+    extractorSource: parseExtractorSource(recipe.extractorSource),
     stages: [
       parseStage(stages[0], 0, "native-tablegen", NATIVE_DEFINITION_NAMES, NATIVE_TARGETS, false),
       parseStage(stages[1], 1, "clang-extractor-wasm", WASM_DEFINITION_NAMES, WASM_TARGETS, true),
     ],
+  };
+}
+
+/** @param {unknown} value @returns {ExtractorSourceSet} */
+function parseExtractorSource(value) {
+  const path = "$preparedLockRecord.lock.body.recipe.extractorSource";
+  const source = requiredObject(value, path);
+  const hashDomain = requiredString(source.hashDomain, `${path}.hashDomain`, 128);
+  if (hashDomain !== "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1") {
+    invalid(`${path}.hashDomain`, "unexpected extractor source hash domain");
+  }
+  const sourceSetSha256 = requiredString(
+    source.sourceSetSha256,
+    `${path}.sourceSetSha256`,
+    64,
+  );
+  if (!SHA256_HEX.test(sourceSetSha256)) {
+    invalid(`${path}.sourceSetSha256`, "expected lowercase SHA-256 hex");
+  }
+  const files = requiredArray(source.files, `${path}.files`);
+  if (files.length !== EXTRACTOR_SOURCE_PATHS.length) {
+    invalid(`${path}.files`, "extractor source set has missing or extra files");
+  }
+  return {
+    sourceSetSha256,
+    hashDomain,
+    files: files.map((entry, index) => {
+      const filePath = `${path}.files[${index}]`;
+      const file = requiredObject(entry, filePath);
+      const selectedPath = requiredString(file.path, `${filePath}.path`, 256);
+      if (selectedPath !== EXTRACTOR_SOURCE_PATHS[index]) {
+        invalid(`${filePath}.path`, `expected ${EXTRACTOR_SOURCE_PATHS[index]}`);
+      }
+      const sha256 = requiredString(file.sha256, `${filePath}.sha256`, 64);
+      if (!SHA256_HEX.test(sha256)) {
+        invalid(`${filePath}.sha256`, "expected lowercase SHA-256 hex");
+      }
+      return {
+        path: selectedPath,
+        sha256,
+        byteLength: decimalString(file.byteLength, `${filePath}.byteLength`),
+      };
+    }),
   };
 }
 

@@ -8,14 +8,13 @@ import {
  *
  * This resource is intentionally blocked for release. It fixes reviewed
  * upstream inputs and the build recipe without claiming that BrowserGrad
- * extractor source, distributed header licenses, output bytes, or two clean
- * builds exist. Those facts require detached evidence produced by later
- * authorities.
+ * distributed header licenses, output bytes, or two clean builds exist. Those
+ * facts require detached evidence produced by later authorities.
  */
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.ccff973f6bb12d713f9180b45ee053bcd9ef720759aa3730f58535d525374b2f",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.ed7a69299279e2439843d3c96fefd36c569bed3b1acc1327700332fad21c2100",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -154,6 +153,10 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           sourceSubdirectory: "llvm",
           buildDirectoryRole: "clang-extractor-wasm",
           definitions: [
+            {
+              name: "BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH",
+              value: "@BUILD_EVIDENCE@/generated/clang-extractor.mjs",
+            },
             { name: "BUILD_SHARED_LIBS", value: "OFF" },
             { name: "CLANG_BUILD_TOOLS", value: "OFF" },
             { name: "CLANG_ENABLE_HLSL", value: "OFF" },
@@ -246,12 +249,29 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           targets: ["browsergrad-cpp-cute-extractor"],
         },
       ],
+      extractorSource: {
+        sourceSetSha256: "c54c248660a85bd709b42c1590d042dc8f224782e1b3f2a7a2fa9a7fbe1e6b5c",
+        hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
+        files: [
+          {
+            path: "BrowserGradCppCuteExtractor.cpp",
+            sha256: "9688044709041bd25b95a876c2e60eb3c7f1c717a1e3eb48e4b495294a34d103",
+            byteLength: "14654",
+          },
+          {
+            path: "CMakeLists.txt",
+            sha256: "8930cd42a8d2c9b478fe6c8e922290e14bd8c552fc77fd035338bc39bddb7584",
+            byteLength: "1484",
+          },
+        ],
+      },
       extractorLinkPolicy: {
         selectedClangLibraries: [
           "clangAST",
           "clangBasic",
           "clangDriver",
           "clangFrontend",
+          "clangIndex",
           "clangLex",
           "clangParse",
           "clangSema",
@@ -546,14 +566,39 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
     },
     unresolvedBuildInputs: [
       {
-        blockerId: "browsergrad-extractor-source",
-        requirement: "clean-committed-source-tree-and-canonical-archive-sha256",
+        blockerId: "browsergrad-extractor-artifact-v3",
+        requirement: "canonical-frontend-artifact-v3-serialization-and-hash-closure",
+      },
+      {
+        blockerId: "browsergrad-extractor-cuda-dual-pass",
+        requirement: "explicit-device-first-and-host-second-clang-cuda-tool-invocations",
+      },
+      {
+        blockerId: "browsergrad-extractor-distributed-materialization",
+        requirement: "deterministic-hash-verified-copy-of-generated-wasm-sidecar-into-declared-distributed-output",
+      },
+      {
+        blockerId: "browsergrad-extractor-source-verification",
+        requirement: "build-executor-hash-and-length-verification-of-exact-source-set-before-configure",
+      },
+      {
+        blockerId: "browsergrad-extractor-vfs-bridge",
+        requirement: "runtime-abi-host-imports-backed-closed-llvm-vfs-without-physical-fallback",
+      },
+      {
+        blockerId: "browsergrad-worker-emscripten-factory-bundle",
+        requirement: "deterministic-package-owned-worker-bundle-of-exact-generated-factory-with-host-supplied-wasm-instantiation",
       },
     ],
     releasePolicy: {
       decision: "blocked",
       blockerIds: [
-        "browsergrad-extractor-source",
+        "browsergrad-extractor-artifact-v3",
+        "browsergrad-extractor-cuda-dual-pass",
+        "browsergrad-extractor-distributed-materialization",
+        "browsergrad-extractor-source-verification",
+        "browsergrad-extractor-vfs-bridge",
+        "browsergrad-worker-emscripten-factory-bundle",
         "cuda-header-redistribution",
         "distributed-file-license-manifest",
         "linux-sysroot-redistribution",

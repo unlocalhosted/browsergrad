@@ -119,6 +119,8 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
     expect(definition(wasm, "LLVM_NATIVE_TOOL_DIR")).toBe("-DLLVM_NATIVE_TOOL_DIR=/build/native/bin");
     expect(definition(wasm, "LLVM_TABLEGEN")).toBe("-DLLVM_TABLEGEN=/build/native/bin/llvm-tblgen");
     expect(definition(wasm, "CLANG_TABLEGEN")).toBe("-DCLANG_TABLEGEN=/build/native/bin/clang-tblgen");
+    expect(definition(wasm, "BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH"))
+      .toBe("-DBROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH=/state/clang-wasm-a/evidence/generated/clang-extractor.mjs");
     expect(plan.nativeTools).toEqual({
       clangTablegen: "/build/native/bin/clang-tblgen",
       llvmTablegen: "/build/native/bin/llvm-tblgen",
@@ -132,6 +134,35 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
     expect(linkerFlags).toContain("-Wl,--Map=/state/clang-wasm-a/evidence/clang-extractor.link.map");
     expect(linkerFlags).not.toContain("-Wl,--Map=/release/assets/");
     expect(JSON.stringify(plan)).not.toMatch(/@BUILD_EVIDENCE@|@OUTPUT@/u);
+    expect(plan.generatedExtractor).toEqual({
+      factoryModulePath: "/state/clang-wasm-a/evidence/generated/clang-extractor.mjs",
+      wasmSidecarPath: "/state/clang-wasm-a/evidence/generated/clang-extractor.wasm",
+      distributedWasmPath: "/release/assets/browsergrad-cpp-cute/clang-extractor.wasm",
+      distributedMaterializationReady: false,
+      materializationBlockerId: "browsergrad-extractor-distributed-materialization",
+      workerBundleReady: false,
+      blockerId: "browsergrad-worker-emscripten-factory-bundle",
+    });
+  });
+
+  it("materializes every lock-pinned extractor source path without granting source verification", () => {
+    const plan = planCppCuteClangWasmBuild(input());
+
+    expect(plan.extractorSource).toEqual({
+      sourceSetSha256: "c54c248660a85bd709b42c1590d042dc8f224782e1b3f2a7a2fa9a7fbe1e6b5c",
+      buildVerified: false,
+      blockerId: "browsergrad-extractor-source-verification",
+      files: [
+        expect.objectContaining({
+          path: "BrowserGradCppCuteExtractor.cpp",
+          absolutePath: "/source/browsergrad-extractor/BrowserGradCppCuteExtractor.cpp",
+        }),
+        expect.objectContaining({
+          path: "CMakeLists.txt",
+          absolutePath: "/source/browsergrad-extractor/CMakeLists.txt",
+        }),
+      ],
+    });
   });
 
   it("prefix-maps every selected source/build/output root", () => {

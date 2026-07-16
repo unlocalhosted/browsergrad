@@ -73,6 +73,7 @@ export interface PreparedCppCuteBrowserBuildInputLock {
   readonly lockId: string;
   readonly resourceSha256: string;
   readonly recipeSha256: string;
+  readonly extractorSourceSetSha256: string;
   readonly noticeInventorySha256: string;
   readonly runtimeAbiManifestId: string;
   readonly runtimeAbiResourceSha256: string;
@@ -194,22 +195,38 @@ export async function decodeCppCuteBrowserBuildInputLock(
     );
   }
   throwIfAborted(signal);
-  const [resourceSha256, recipeSha256, noticeInventorySha256] = await Promise.all([
+  const [
+    resourceSha256,
+    recipeSha256,
+    extractorSourceSetSha256,
+    noticeInventorySha256,
+  ] = await Promise.all([
     hashBytes(snapshot, "$bytes"),
     hashJson({
       domain: "browsergrad.compiler.cpp-cute.browser-build-recipe.v1",
       recipe: lock.body.recipe,
     }, "$.body.recipe"),
     hashJson({
+      domain: lock.body.recipe.extractorSource.hashDomain,
+      files: lock.body.recipe.extractorSource.files,
+    }, "$.body.recipe.extractorSource"),
+    hashJson({
       domain: "browsergrad.compiler.cpp-cute.browser-build-notices.v1",
       notices: lock.body.notices,
     }, "$.body.notices"),
   ]);
+  if (extractorSourceSetSha256 !== lock.body.recipe.extractorSource.sourceSetSha256) {
+    hashMismatch(
+      "$.body.recipe.extractorSource.sourceSetSha256",
+      "extractor source-set digest differs from its exact file projection",
+    );
+  }
   throwIfAborted(signal);
   const prepared = Object.freeze({
     lockId: expectedLockId,
     resourceSha256,
     recipeSha256,
+    extractorSourceSetSha256,
     noticeInventorySha256,
     runtimeAbiManifestId: runtimeAbi.manifestId,
     runtimeAbiResourceSha256: runtimeAbi.resourceSha256,
@@ -352,6 +369,34 @@ function validateBodyInvariants(value: JsonObject): void {
     assertSha1(body.builder.emsdk.binaryenCommit, "$.body.builder.emsdk.binaryenCommit");
 
     assertWireU64(body.recipe.sourceDateEpoch, "$.body.recipe.sourceDateEpoch");
+    const extractorSource = body.recipe.extractorSource;
+    if (extractorSource.hashDomain !==
+        "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1") {
+      invalid("$.body.recipe.extractorSource.hashDomain", "unknown extractor source hash domain");
+    }
+    assertSha256(
+      extractorSource.sourceSetSha256,
+      "$.body.recipe.extractorSource.sourceSetSha256",
+    );
+    const extractorFiles = extractorSource.files as readonly {
+      readonly path: string;
+      readonly sha256: string;
+      readonly byteLength: string;
+    }[];
+    if (extractorFiles.length === 0) {
+      invalid("$.body.recipe.extractorSource.files", "extractor source set must not be empty");
+    }
+    assertSortedUniqueStrings(
+      extractorFiles.map((file) => file.path),
+      "$.body.recipe.extractorSource.files[*].path",
+    );
+    for (const [index, file] of extractorFiles.entries()) {
+      const path = `$.body.recipe.extractorSource.files[${index}]`;
+      assertSafeRelativePath(file.path, `${path}.path`);
+      assertSha256(file.sha256, `${path}.sha256`);
+      assertWireU64(file.byteLength, `${path}.byteLength`);
+      if (file.byteLength === "0") invalid(`${path}.byteLength`, "extractor source file must be nonempty");
+    }
     if (body.recipe.parallelJobs !== 1) {
       invalid("$.body.recipe.parallelJobs", "deterministic build parallelism must equal one");
     }
