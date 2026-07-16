@@ -47,6 +47,23 @@ export interface ObservedCppCuteAotLocalDockerImageRecord {
   readonly repoDigests: readonly string[];
 }
 
+export interface DockerObservationSession {
+  readonly runRoot: string;
+  readonly configDirectory: string;
+  readonly homeDirectory: string;
+  readonly authorizedMetadata: AuthorizedCppCuteAotOciMetadata;
+  readonly processAdapter: (
+    request: BoundedChildProcessRequest,
+  ) => Promise<BoundedChildProcessResult>;
+  readonly preserveRunRoot: () => void;
+  readonly signal?: AbortSignal;
+}
+
+export interface CppCuteAotDockerImageSessionResult<T> {
+  readonly observed: ObservedCppCuteAotLocalDockerImage;
+  readonly value: T;
+}
+
 export function observeCppCuteAotLocalDockerImage(
   authorizedMetadata: AuthorizedCppCuteAotOciMetadata,
   options?: { readonly signal?: AbortSignal },
@@ -59,6 +76,21 @@ export function __observeCppCuteAotLocalDockerImageWithProcessForTest(
   ) => Promise<BoundedChildProcessResult>,
   options?: { readonly signal?: AbortSignal },
 ): Promise<ObservedCppCuteAotLocalDockerImage>;
+
+export function __runCppCuteAotLocalDockerImageSession<T>(
+  authorizedMetadata: AuthorizedCppCuteAotOciMetadata,
+  continuation: (session: DockerObservationSession) => Promise<T>,
+  options?: { readonly signal?: AbortSignal },
+): Promise<Readonly<CppCuteAotDockerImageSessionResult<T>>>;
+
+export function __runCppCuteAotLocalDockerImageSessionWithProcessForTest<T>(
+  authorizedMetadata: AuthorizedCppCuteAotOciMetadata,
+  processAdapter: (
+    request: BoundedChildProcessRequest,
+  ) => Promise<BoundedChildProcessResult>,
+  continuation: (session: DockerObservationSession) => Promise<T>,
+  options?: { readonly signal?: AbortSignal },
+): Promise<Readonly<CppCuteAotDockerImageSessionResult<T>>>;
 
 export function unwrapObservedCppCuteAotLocalDockerImage(
   observed: ObservedCppCuteAotLocalDockerImage,

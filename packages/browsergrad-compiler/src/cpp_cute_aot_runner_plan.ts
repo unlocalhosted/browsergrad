@@ -1,4 +1,5 @@
 import {
+  canonicalJsonBytes,
   encodeWireU64,
   sha256Hex,
   wireIntegerToBigInt,
@@ -116,6 +117,19 @@ interface StoredCppCuteAotOfflineResultRecord extends VerifiedCppCuteAotOfflineR
 export interface CppCuteAotOfflineResultBytes {
   readonly artifactBytes: Uint8Array;
   readonly receiptBytes: Uint8Array;
+}
+
+export interface CppCuteAotOfflineStagingSourceBlob extends CppCuteAotSourceBlob {
+  readonly virtualPath: string;
+  readonly contentSha256: string;
+  readonly byteLength: WireU64;
+}
+
+/** Disposable canonical control/source bytes for the private Node staging shell. */
+export interface CppCuteAotOfflineStagingInputs {
+  readonly profileBytes: Uint8Array;
+  readonly jobBytes: Uint8Array;
+  readonly sourceBlobs: readonly CppCuteAotOfflineStagingSourceBlob[];
 }
 
 export interface PrepareCppCuteAotOfflineRunOptions {
@@ -242,6 +256,31 @@ export function copyCppCuteAotOfflineRunSourceBlobs(
     fileId: file.fileId,
     bytes: new Uint8Array(bytes),
   })));
+}
+
+/**
+ * Returns canonical profile/job bytes plus exact source snapshots. Returned
+ * arrays hold no authority and may be discarded or mutated by the caller.
+ */
+export function copyCppCuteAotOfflineRunStagingInputs(
+  prepared: PreparedCppCuteAotOfflineRun,
+): CppCuteAotOfflineStagingInputs {
+  if (typeof prepared !== "object" || prepared === null) unverified();
+  const record = PREPARED_RUNS.get(prepared as object);
+  if (record === undefined) unverified();
+  const profile = unwrapPreparedCppCuteFrontendProfile(record.profile).profile;
+  const job = unwrapPreparedCppCuteAotJob(record.job).job;
+  return Object.freeze({
+    profileBytes: new Uint8Array(canonicalJsonBytes(profile)),
+    jobBytes: new Uint8Array(canonicalJsonBytes(job)),
+    sourceBlobs: Object.freeze(record.sourceBlobs.map(({ file, bytes }) => Object.freeze({
+      fileId: file.fileId,
+      virtualPath: file.virtualPath,
+      contentSha256: file.contentSha256,
+      byteLength: file.byteLength,
+      bytes: new Uint8Array(bytes),
+    }))),
+  });
 }
 
 export function unwrapVerifiedCppCuteAotOfflineResult(

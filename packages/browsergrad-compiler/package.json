@@ -54,7 +54,7 @@
     "test:verify-real-world-cli": "node ../../scripts/test-verify-real-world-cuda-cli.mjs",
     "test:tool-lock": "node ../../scripts/test-cuda-lite-tool-lock.mjs",
     "test:aot-docker-shell": "pnpm run build && pnpm run test:aot-docker-shell:run",
-    "test:aot-docker-shell:run": "tsc -p tsconfig.docker-shell.json && oxlint scripts/cpp_cute_aot_docker_*.mjs scripts/cpp_cute_aot_docker_shell.test.ts && vitest run --config vitest.docker-shell.config.ts",
+    "test:aot-docker-shell:run": "tsc -p tsconfig.docker-shell.json && oxlint scripts/cpp_cute_aot_docker_*.mjs scripts/cpp_cute_aot_docker_*.test.ts && vitest run --config vitest.docker-shell.config.ts",
     "test:audit-corpus": "pnpm --dir ../.. --filter @unlocalhosted/browsergrad-kernels run build && pnpm run build && pnpm run test:audit-corpus:run",
     "test:audit-corpus:run": "node ../../scripts/test-cuda-lite-corpus-audit.mjs",
     "bench": "node ../../scripts/run-cuda-lite-tool.mjs bench",

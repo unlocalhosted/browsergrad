@@ -802,6 +802,24 @@ describe("C++/CuTe AOT local Docker image observation", () => {
     expect(requests[0] === undefined ? true : existsSync(requests[0].cwd)).toBe(false);
   });
 
+  it.each(DOCKER_PROBE_SEQUENCE)("detects and cleans private HOME mutation after the %s adapter", async (stage) => {
+    const { adapter, requests } = createProbeAdapter(prepared, {
+      afterProbe: (probe, request) => {
+        if (probe === stage) {
+          writeFileSync(join(request.cwd, "home", ".docker-state"), "forbidden", { mode: 0o600 });
+        }
+      },
+    });
+    await expect(__observeCppCuteAotLocalDockerImageWithProcessForTest(
+      prepared.authorized,
+      adapter,
+    )).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-DOCKER-IMAGE-OUTPUT" });
+    expect(requests.map(probeFromRequest)).toEqual(
+      DOCKER_PROBE_SEQUENCE.slice(0, DOCKER_PROBE_SEQUENCE.indexOf(stage) + 1),
+    );
+    expect(requests[0] === undefined ? true : existsSync(requests[0].cwd)).toBe(false);
+  });
+
   it.each(DOCKER_PROBE_SEQUENCE)("honors cancellation immediately after the %s adapter and cleans staging", async (stage) => {
     const controller = new AbortController();
     const { adapter, requests } = createProbeAdapter(prepared, {

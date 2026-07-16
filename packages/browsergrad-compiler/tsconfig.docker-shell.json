@@ -12,7 +12,8 @@
   "include": [
     "scripts/cpp_cute_aot_docker_process.mjs",
     "scripts/cpp_cute_aot_docker_shell.mjs",
-    "scripts/cpp_cute_aot_docker_shell.test.ts",
+    "scripts/cpp_cute_aot_docker_lifecycle.mjs",
+    "scripts/cpp_cute_aot_docker_*.test.ts",
     "vitest.docker-shell.config.ts"
   ],
   "exclude": ["dist", "node_modules"]

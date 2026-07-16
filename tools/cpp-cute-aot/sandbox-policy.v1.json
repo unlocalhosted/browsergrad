@@ -1,6 +1,6 @@
 {
   "schema": "browsergrad.compiler.cpp-cute.aot-sandbox-policy",
-  "version": { "major": 1, "minor": 0 },
+  "version": { "major": 1, "minor": 1 },
   "contractId": "browsergrad.compiler.cpp-cute.aot@1",
   "runtime": {
     "engine": "docker",
@@ -17,7 +17,7 @@
     "platform": "linux/amd64",
     "imagePull": "forbidden",
     "createBy": "authorized-manifest-reference",
-    "executionEnvironment": "profile-pinned",
+    "executionEnvironment": "profile-hash-pinned-external-attestation-required",
     "client": {
       "config": "runner-private-empty-directory",
       "cwd": "runner-private-directory",
@@ -31,10 +31,19 @@
       ],
       "shell": false,
       "retries": 0
+    },
+    "hostProcess": {
+      "isolation": "dedicated-single-job-worker-required",
+      "uid": "dedicated-runner-required",
+      "sameUidProcesses": "trusted-boundary",
+      "coreDumps": "disabled-required",
+      "failStop": "abort-on-unreaped-child-or-unproved-container-absence",
+      "authority": "execution-environment-attestation-required"
     }
   },
   "process": {
     "user": { "uid": 65532, "gid": 65532 },
+    "hostname": "browsergrad-cpp-cute-aot",
     "entrypoint": "/opt/browsergrad/bin/cpp-cute-aot-supervisor",
     "workingDirectory": "/run/browsergrad",
     "arguments": [
@@ -46,6 +55,11 @@
     "environment": {
       "imageConfig": "must-be-empty",
       "overrides": [],
+      "dockerInjected": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "HOSTNAME=browsergrad-cpp-cute-aot"
+      ],
+      "supervisor": "clear-before-toolchain",
       "effective": []
     },
     "stdin": "closed",
@@ -53,7 +67,8 @@
     "stderr": "bounded-diagnostic",
     "healthcheck": "disabled",
     "restart": "none",
-    "logging": "disabled"
+    "logging": "disabled",
+    "runtime": "runc"
   },
   "namespaces": {
     "network": "none",
@@ -67,18 +82,27 @@
     "capabilitiesAdded": [],
     "capabilitiesDropped": ["ALL"],
     "noNewPrivileges": true,
-    "seccomp": "runtime-default-pinned-by-execution-environment"
+    "seccomp": "runtime-default-requested-effective-profile-requires-external-attestation"
   },
   "filesystem": {
-    "root": "read-only",
+    "root": "image-rootfs-read-only",
+    "runtimeManagedMounts": [
+      "/dev",
+      "/etc/hostname",
+      "/etc/hosts",
+      "/etc/resolv.conf",
+      "/proc",
+      "/sys"
+    ],
     "imageVolumes": "forbidden",
     "source": "runner-snapshot-read-only-rprivate",
     "control": "runner-snapshot-read-only-rprivate",
     "temporaryPath": "/tmp",
     "temporary": ["rw", "noexec", "nosuid", "nodev", "mode=1777"],
-    "temporaryBytes": "min(maxMemoryBytes/4,536870912)",
+    "temporaryBytes": "max(1,min(floor(maxMemoryBytes/4),536870912))",
     "dockerSocket": "forbidden",
-    "devices": "forbidden"
+    "devices": "runtime-minimal-defaults",
+    "hostDevicePassthrough": "forbidden"
   },
   "limits": {
     "memory": "maxMemoryBytes",
@@ -138,6 +162,63 @@
           "stdoutBytes": 65536,
           "stderrBytes": 65536,
           "repoDigests": 256
+        }
+      },
+      "containerLifecycle": {
+        "sequence": [
+          "create",
+          "inspect-created",
+          "start-attached",
+          "inspect-terminal",
+          "remove",
+          "prove-absent"
+        ],
+        "createBy": "authorized-manifest-reference",
+        "hostname": "browsergrad-cpp-cute-aot",
+        "output": "attach-before-start-single-frame",
+        "cleanup": "exact-container-id-before-staging-removal",
+        "createdProjectionSchema": "browsergrad.compiler.cpp-cute.docker-container-inspect@1",
+        "createdProjectionFormat": "{\"args\":{{json .Args}},\"config\":{{json .Config}},\"hostConfig\":{{json .HostConfig}},\"id\":{{json .Id}},\"image\":{{json .Image}},\"imageManifestDescriptor\":{{json .ImageManifestDescriptor}},\"mounts\":{{json .Mounts}},\"name\":{{json .Name}},\"path\":{{json .Path}},\"restartCount\":{{json .RestartCount}},\"schema\":\"browsergrad.compiler.cpp-cute.docker-container-inspect\",\"state\":{{json .State}},\"version\":1}",
+        "createdProjectionAuthority": "daemon-recorded-request-and-state-not-kernel-enforcement",
+        "recoveryProjectionSchema": "browsergrad.compiler.cpp-cute.docker-container-recovery@1",
+        "recoveryProjectionFormat": "{\"id\":{{json .Id}},\"labels\":{{json .Config.Labels}},\"name\":{{json .Name}},\"schema\":\"browsergrad.compiler.cpp-cute.docker-container-recovery\",\"version\":1}",
+        "limits": {
+          "create": {
+            "timeoutMs": 10000,
+            "killGraceMs": 1000,
+            "stdoutBytes": 65,
+            "stderrBytes": 65536,
+            "cidFileBytes": 64
+          },
+          "inspect": {
+            "timeoutMs": 10000,
+            "killGraceMs": 1000,
+            "stdoutBytes": 262144,
+            "stderrBytes": 65536
+          },
+          "start": {
+            "killGraceMs": 1000,
+            "stdoutBytes": 75497502,
+            "stderrBytes": 65536
+          },
+          "remove": {
+            "timeoutMs": 10000,
+            "killGraceMs": 1000,
+            "stdoutBytes": 65,
+            "stderrBytes": 65536
+          },
+          "absence": {
+            "timeoutMs": 10000,
+            "killGraceMs": 1000,
+            "stdoutBytes": 65,
+            "stderrBytes": 65536,
+            "recoveryAttempts": 3,
+            "recoveryIntervalMs": 100
+          },
+          "lifecycle": {
+            "overheadMs": 60000,
+            "cleanupMs": 30000
+          }
         }
       },
       "resources": {
@@ -230,6 +311,17 @@
       "maxRank": 64,
       "maxIntegerBits": 256,
       "maxArithmeticOperations": 65536
+    },
+    "dockerContainerInspect": {
+      "maxDocumentBytes": 262144,
+      "maxDepth": 32,
+      "maxNodes": 65536,
+      "maxStringBytes": 2097152,
+      "maxArrayLength": 4096,
+      "maxObjectProperties": 4096,
+      "maxRank": 64,
+      "maxIntegerBits": 256,
+      "maxArithmeticOperations": 131072
     }
   },
   "semantics": {

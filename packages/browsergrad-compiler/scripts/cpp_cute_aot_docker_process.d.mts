@@ -54,6 +54,51 @@ export function buildCppCuteAotDockerImageInspectRequest(input: Readonly<{
   signal?: AbortSignal;
 }>): BoundedChildProcessRequest;
 
+export function buildCppCuteAotDockerCreateRequest(input: Readonly<{
+  runRoot: string;
+  configDirectory: string;
+  homeDirectory: string;
+  controlDirectory: string;
+  sourceDirectory: string;
+  containerIdFile: string;
+  containerName: string;
+  sessionNonce: string;
+  imageReference: string;
+  jobId: string;
+  executionPlanSha256: string;
+  memoryBytes: number;
+  maxProcesses: number;
+  signal?: AbortSignal;
+}>): BoundedChildProcessRequest;
+
+export function buildCppCuteAotDockerContainerInspectRequest(
+  input: Readonly<CppCuteAotPrivateDockerRequestInput & { containerId: string }>,
+): BoundedChildProcessRequest;
+
+export function buildCppCuteAotDockerContainerRecoveryRequest(
+  input: Readonly<CppCuteAotPrivateDockerRequestInput & { containerName: string }>,
+): BoundedChildProcessRequest;
+
+export function buildCppCuteAotDockerStartAttachedRequest(input: Readonly<
+  CppCuteAotPrivateDockerRequestInput & {
+    containerId: string;
+    timeoutMs: number;
+    stdoutByteLimit: number;
+  }
+>): BoundedChildProcessRequest;
+
+export function buildCppCuteAotDockerRemoveRequest(input: Readonly<{
+  runRoot: string;
+  configDirectory: string;
+  homeDirectory: string;
+  containerId: string;
+  force: boolean;
+}>): BoundedChildProcessRequest;
+
+export function buildCppCuteAotDockerAbsenceRequest(
+  input: Readonly<CppCuteAotPrivateDockerRequestInput & { containerId: string }>,
+): BoundedChildProcessRequest;
+
 export function runBoundedChildProcess(
   request: BoundedChildProcessRequest,
 ): Promise<BoundedChildProcessResult>;

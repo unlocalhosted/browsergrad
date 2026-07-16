@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: false,
-    include: ["scripts/cpp_cute_aot_docker_shell.test.ts"],
+    include: ["scripts/cpp_cute_aot_docker_*.test.ts"],
     fileParallelism: false,
   },
 });

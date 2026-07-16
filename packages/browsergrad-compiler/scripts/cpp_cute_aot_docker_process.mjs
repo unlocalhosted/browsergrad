@@ -2,18 +2,34 @@ import { spawn } from "node:child_process";
 import { isAbsolute, join, resolve } from "node:path";
 
 import {
+  CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT,
+  CPP_CUTE_AOT_CONTAINER_HOSTNAME,
+  CPP_CUTE_AOT_CONTAINER_SOURCE_ROOT,
+  CPP_CUTE_AOT_DOCKER_ABSENCE_LIMITS,
   CPP_CUTE_AOT_DOCKER_API_VERSION,
+  CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_FORMAT,
+  CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_LIMITS,
+  CPP_CUTE_AOT_DOCKER_CONTAINER_RECOVERY_FORMAT,
+  CPP_CUTE_AOT_DOCKER_CREATE_LIMITS,
   CPP_CUTE_AOT_DOCKER_EXECUTABLE,
   CPP_CUTE_AOT_DOCKER_INFO_FORMAT,
   CPP_CUTE_AOT_DOCKER_INFO_LIMITS,
   CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_FORMAT,
   CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_LIMITS,
+  CPP_CUTE_AOT_DOCKER_REMOVE_LIMITS,
+  CPP_CUTE_AOT_DOCKER_START_LIMITS,
   CPP_CUTE_AOT_DOCKER_VERSION_FORMAT,
   CPP_CUTE_AOT_DOCKER_VERSION_LIMITS,
+  CPP_CUTE_AOT_HARD_FRAME_BYTE_LIMIT,
   CPP_CUTE_AOT_SANDBOX_POLICY_V1,
 } from "../dist/cpp_cute_aot_policy.js";
 
 const OCI_IMAGE_REFERENCE = /^[a-z0-9.-]+(?::[1-9][0-9]*)?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+@sha256:[0-9a-f]{64}$/u;
+const CONTAINER_ID = /^[0-9a-f]{64}$/u;
+const CONTAINER_NAME = /^browsergrad-cpp-cute-aot-[0-9a-f]{32}$/u;
+const SESSION_NONCE = /^[0-9a-f]{32}$/u;
+const JOB_ID = /^bg\.cpp\.aot-job\.sha256\.[0-9a-f]{64}$/u;
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const ABORTED_GETTER = Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
 const RUN_ROOT_PREFIX = "/tmp/browsergrad-cpp-cute-docker-";
 
@@ -132,6 +148,278 @@ export function buildCppCuteAotDockerImageInspectRequest(input) {
     "--format", CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_FORMAT,
     imageReference,
   ], CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_LIMITS);
+}
+
+/**
+ * Builds the sole policy-authorized container creation request.
+ *
+ * @param {Readonly<{
+ *   runRoot: string;
+ *   configDirectory: string;
+ *   homeDirectory: string;
+ *   controlDirectory: string;
+ *   sourceDirectory: string;
+ *   containerIdFile: string;
+ *   containerName: string;
+ *   sessionNonce: string;
+ *   imageReference: string;
+ *   jobId: string;
+ *   executionPlanSha256: string;
+ *   memoryBytes: number;
+ *   maxProcesses: number;
+ *   signal?: AbortSignal;
+ * }>} input
+ * @returns {BoundedChildProcessRequest}
+ */
+export function buildCppCuteAotDockerCreateRequest(input) {
+  const snapshot = closedDataObject(
+    input,
+    [
+      "configDirectory", "containerIdFile", "containerName", "controlDirectory",
+      "executionPlanSha256", "homeDirectory", "imageReference", "jobId",
+      "maxProcesses", "memoryBytes", "runRoot", "sessionNonce", "sourceDirectory",
+    ],
+    ["signal"],
+    "$input",
+  );
+  const context = privateDockerContext(snapshot);
+  const controlDirectory = exactChildPath(
+    snapshot.controlDirectory,
+    context.runRoot,
+    "control",
+    "$input.controlDirectory",
+  );
+  const sourceDirectory = exactChildPath(
+    snapshot.sourceDirectory,
+    context.runRoot,
+    "source",
+    "$input.sourceDirectory",
+  );
+  const containerIdFile = exactChildPath(
+    snapshot.containerIdFile,
+    context.runRoot,
+    "container.cid",
+    "$input.containerIdFile",
+  );
+  const containerName = matchingString(
+    snapshot.containerName,
+    "$input.containerName",
+    CONTAINER_NAME,
+    "expected BrowserGrad container name",
+  );
+  const sessionNonce = matchingString(
+    snapshot.sessionNonce,
+    "$input.sessionNonce",
+    SESSION_NONCE,
+    "expected 128-bit lowercase-hex session nonce",
+  );
+  const imageReference = matchingString(
+    snapshot.imageReference,
+    "$input.imageReference",
+    OCI_IMAGE_REFERENCE,
+    "expected canonical digest-qualified OCI image reference",
+  );
+  const jobId = matchingString(
+    snapshot.jobId,
+    "$input.jobId",
+    JOB_ID,
+    "expected prepared AOT job ID",
+  );
+  const executionPlanSha256 = matchingString(
+    snapshot.executionPlanSha256,
+    "$input.executionPlanSha256",
+    SHA256_HEX,
+    "expected lowercase SHA-256 execution-plan digest",
+  );
+  const memoryBytes = boundedPositiveInteger(
+    snapshot.memoryBytes,
+    "$input.memoryBytes",
+    17_179_869_184,
+  );
+  const maxProcesses = boundedPositiveInteger(
+    snapshot.maxProcesses,
+    "$input.maxProcesses",
+    1_024,
+  );
+  const temporaryBytes = Math.max(
+    1,
+    Math.min(Math.floor(memoryBytes / 4), 536_870_912),
+  );
+  return dockerRequest(context, [
+    "container", "create",
+    "--pull=never",
+    `--platform=${CPP_CUTE_AOT_SANDBOX_POLICY_V1.runtime.platform}`,
+    `--name=${containerName}`,
+    `--cidfile=${containerIdFile}`,
+    `--label=browsergrad.owner=cpp-cute-aot`,
+    `--label=browsergrad.session=${sessionNonce}`,
+    `--label=browsergrad.job=${jobId}`,
+    `--label=browsergrad.plan=${executionPlanSha256}`,
+    `--hostname=${CPP_CUTE_AOT_CONTAINER_HOSTNAME}`,
+    "--attach=stdout",
+    "--attach=stderr",
+    `--user=${CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.user.uid}:${CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.user.gid}`,
+    `--workdir=${CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.workingDirectory}`,
+    `--entrypoint=${CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.entrypoint}`,
+    "--network=none",
+    "--ipc=none",
+    "--cgroupns=private",
+    "--read-only",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges=true",
+    `--memory=${memoryBytes}`,
+    `--memory-swap=${memoryBytes}`,
+    `--pids-limit=${maxProcesses}`,
+    "--restart=no",
+    "--log-driver=none",
+    "--no-healthcheck",
+    `--runtime=${CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.runtime}`,
+    "--mount", `type=bind,source=${sourceDirectory},target=${CPP_CUTE_AOT_CONTAINER_SOURCE_ROOT},readonly,bind-propagation=rprivate`,
+    "--mount", `type=bind,source=${controlDirectory},target=${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT},readonly,bind-propagation=rprivate`,
+    `--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=${temporaryBytes},mode=1777`,
+    imageReference,
+    ...CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.arguments,
+  ], CPP_CUTE_AOT_DOCKER_CREATE_LIMITS);
+}
+
+/** @param {Readonly<CppCuteAotPrivateDockerRequestInput & { containerId: string }>} input */
+export function buildCppCuteAotDockerContainerInspectRequest(input) {
+  return buildContainerReferenceRequest(
+    input,
+    "containerId",
+    CONTAINER_ID,
+    ["container", "inspect", "--format", CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_FORMAT],
+    CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_LIMITS,
+  );
+}
+
+/** @param {Readonly<CppCuteAotPrivateDockerRequestInput & { containerName: string }>} input */
+export function buildCppCuteAotDockerContainerRecoveryRequest(input) {
+  return buildContainerReferenceRequest(
+    input,
+    "containerName",
+    CONTAINER_NAME,
+    ["container", "inspect", "--format", CPP_CUTE_AOT_DOCKER_CONTAINER_RECOVERY_FORMAT],
+    CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_LIMITS,
+  );
+}
+
+/**
+ * @param {Readonly<CppCuteAotPrivateDockerRequestInput & {
+ *   containerId: string;
+ *   timeoutMs: number;
+ *   stdoutByteLimit: number;
+ * }>} input
+ */
+export function buildCppCuteAotDockerStartAttachedRequest(input) {
+  const snapshot = closedDataObject(
+    input,
+    [
+      "configDirectory", "containerId", "homeDirectory", "runRoot",
+      "stdoutByteLimit", "timeoutMs",
+    ],
+    ["signal"],
+    "$input",
+  );
+  const context = privateDockerContext(snapshot);
+  const containerId = matchingString(
+    snapshot.containerId,
+    "$input.containerId",
+    CONTAINER_ID,
+    "expected full lowercase Docker container ID",
+  );
+  const timeoutMs = boundedPositiveInteger(snapshot.timeoutMs, "$input.timeoutMs", 1_800_000);
+  const stdoutBytes = boundedPositiveInteger(
+    snapshot.stdoutByteLimit,
+    "$input.stdoutByteLimit",
+    CPP_CUTE_AOT_DOCKER_START_LIMITS.stdoutBytes,
+  );
+  return dockerRequest(context, [
+    "container", "start", "--attach", containerId,
+  ], {
+    timeoutMs,
+    killGraceMs: CPP_CUTE_AOT_DOCKER_START_LIMITS.killGraceMs,
+    stdoutBytes,
+    stderrBytes: CPP_CUTE_AOT_DOCKER_START_LIMITS.stderrBytes,
+  });
+}
+
+/**
+ * @param {Readonly<CppCuteAotPrivateDockerRequestInput & {
+ *   containerId: string;
+ *   force: boolean;
+ * }>} input
+ */
+export function buildCppCuteAotDockerRemoveRequest(input) {
+  const snapshot = closedDataObject(
+    input,
+    ["configDirectory", "containerId", "force", "homeDirectory", "runRoot"],
+    [],
+    "$input",
+  );
+  const context = privateDockerContext(snapshot);
+  const containerId = matchingString(
+    snapshot.containerId,
+    "$input.containerId",
+    CONTAINER_ID,
+    "expected full lowercase Docker container ID",
+  );
+  if (typeof snapshot.force !== "boolean") invalid("$input.force", "force must be a boolean");
+  return dockerRequest(context, [
+    "container", "rm",
+    ...(snapshot.force ? ["--force"] : []),
+    "--volumes",
+    containerId,
+  ], CPP_CUTE_AOT_DOCKER_REMOVE_LIMITS);
+}
+
+/** @param {Readonly<CppCuteAotPrivateDockerRequestInput & { containerId: string }>} input */
+export function buildCppCuteAotDockerAbsenceRequest(input) {
+  return buildContainerReferenceRequest(
+    input,
+    "containerId",
+    CONTAINER_ID,
+    ["container", "ls", "--all", "--quiet", "--no-trunc", "--filter"],
+    CPP_CUTE_AOT_DOCKER_ABSENCE_LIMITS,
+    (containerId) => `id=${containerId}`,
+  );
+}
+
+/**
+ * @param {unknown} input
+ * @param {string} referenceField
+ * @param {RegExp} referencePattern
+ * @param {readonly string[]} operationArguments
+ * @param {CppCuteAotDockerProcessLimits} limits
+ * @param {(reference: string) => string} [renderReference]
+ * @returns {BoundedChildProcessRequest}
+ */
+function buildContainerReferenceRequest(
+  input,
+  referenceField,
+  referencePattern,
+  operationArguments,
+  limits,
+  renderReference = (reference) => reference,
+) {
+  const snapshot = closedDataObject(
+    input,
+    ["configDirectory", "homeDirectory", referenceField, "runRoot"],
+    ["signal"],
+    "$input",
+  );
+  const context = privateDockerContext(snapshot);
+  const reference = matchingString(
+    snapshot[referenceField],
+    `$input.${referenceField}`,
+    referencePattern,
+    "expected canonical Docker container reference",
+  );
+  return dockerRequest(
+    context,
+    [...operationArguments, renderReference(reference)],
+    limits,
+  );
 }
 
 /**
@@ -478,9 +766,13 @@ function normalizeRequest(request) {
   )));
   const cwd = absolutePath(snapshot.cwd, "$request.cwd");
   const environment = normalizeEnvironment(snapshot.environment);
-  const timeoutMs = boundedPositiveInteger(snapshot.timeoutMs, "$request.timeoutMs", 600_000);
+  const timeoutMs = boundedPositiveInteger(snapshot.timeoutMs, "$request.timeoutMs", 1_800_000);
   const killGraceMs = boundedPositiveInteger(snapshot.killGraceMs, "$request.killGraceMs", 10_000);
-  const stdoutByteLimit = boundedPositiveInteger(snapshot.stdoutByteLimit, "$request.stdoutByteLimit", 67_108_864);
+  const stdoutByteLimit = boundedPositiveInteger(
+    snapshot.stdoutByteLimit,
+    "$request.stdoutByteLimit",
+    CPP_CUTE_AOT_HARD_FRAME_BYTE_LIMIT,
+  );
   const stderrByteLimit = boundedPositiveInteger(snapshot.stderrByteLimit, "$request.stderrByteLimit", 67_108_864);
   const signal = optionalAbortSignal(snapshot.signal, "$request.signal");
   return Object.freeze({
@@ -663,6 +955,13 @@ function boundedString(value, path, max, allowEmpty = false) {
     invalid(path, "expected bounded UTF-8 string without NUL");
   }
   return value;
+}
+
+/** @param {unknown} value @param {string} path @param {RegExp} pattern @param {string} message @returns {string} */
+function matchingString(value, path, pattern, message) {
+  const result = boundedString(value, path, 4_096);
+  if (!pattern.test(result)) invalid(path, message);
+  return result;
 }
 
 /** @param {unknown} value @param {string} path @param {number} max @returns {number} */

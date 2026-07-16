@@ -18,13 +18,27 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA =
   "browsergrad.compiler.cpp-cute.aot-sandbox-policy";
 export const CPP_CUTE_AOT_RESULT_FRAME_PROTOCOL =
   "browsergrad.compiler.cpp-cute.aot-result-frame@1";
+export const CPP_CUTE_AOT_RESULT_FRAME_HEADER_BYTES = 30;
 export const CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_SCHEMA =
   "browsergrad.compiler.cpp-cute.docker-image-inspect";
 export const CPP_CUTE_AOT_DOCKER_VERSION_SCHEMA =
   "browsergrad.compiler.cpp-cute.docker-version";
 export const CPP_CUTE_AOT_DOCKER_INFO_SCHEMA =
   "browsergrad.compiler.cpp-cute.docker-info";
+export const CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_SCHEMA =
+  "browsergrad.compiler.cpp-cute.docker-container-inspect";
+export const CPP_CUTE_AOT_DOCKER_CONTAINER_RECOVERY_SCHEMA =
+  "browsergrad.compiler.cpp-cute.docker-container-recovery";
 export const CPP_CUTE_AOT_DOCKER_EXECUTABLE = "/usr/bin/docker";
+export const CPP_CUTE_AOT_CONTAINER_HOSTNAME = "browsergrad-cpp-cute-aot";
+export const CPP_CUTE_AOT_CONTAINER_SOURCE_ROOT = "/run/browsergrad/source";
+export const CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT = "/run/browsergrad/control";
+export const CPP_CUTE_AOT_CONTAINER_PROFILE_PATH =
+  `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/profile.json`;
+export const CPP_CUTE_AOT_CONTAINER_JOB_PATH =
+  `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/job.json`;
+export const CPP_CUTE_AOT_DOCKER_DEFAULT_PATH =
+  "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 export const CPP_CUTE_AOT_DOCKER_CLIENT_VERSION = "29.6.1";
 export const CPP_CUTE_AOT_DOCKER_ENGINE_VERSION = "29.6.1";
 export const CPP_CUTE_AOT_DOCKER_API_VERSION = "1.49";
@@ -37,8 +51,14 @@ export const CPP_CUTE_AOT_DOCKER_INFO_FORMAT =
   `{"architecture":{{json .Architecture}},"driverStatus":{{json .DriverStatus}},"osType":{{json .OSType}},"schema":"${CPP_CUTE_AOT_DOCKER_INFO_SCHEMA}","serverVersion":{{json .ServerVersion}},"version":1}`;
 export const CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_FORMAT =
   `{"config":{{json .Config}},"descriptor":{"digest":{{json .Descriptor.Digest}},"mediaType":{{json .Descriptor.MediaType}},"size":{{json .Descriptor.Size}}},"id":{{json .Id}},"platform":{"architecture":{{json .Architecture}},"os":{{json .Os}},"osVersion":{{json .OsVersion}},"variant":{{json .Variant}}},"repoDigests":{{json .RepoDigests}},"rootfs":{"diffIds":{{json .RootFS.Layers}},"type":{{json .RootFS.Type}}},"schema":"${CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_SCHEMA}","version":1}`;
+export const CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_FORMAT =
+  `{"args":{{json .Args}},"config":{{json .Config}},"hostConfig":{{json .HostConfig}},"id":{{json .Id}},"image":{{json .Image}},"imageManifestDescriptor":{{json .ImageManifestDescriptor}},"mounts":{{json .Mounts}},"name":{{json .Name}},"path":{{json .Path}},"restartCount":{{json .RestartCount}},"schema":"${CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_SCHEMA}","state":{{json .State}},"version":1}`;
+export const CPP_CUTE_AOT_DOCKER_CONTAINER_RECOVERY_FORMAT =
+  `{"id":{{json .Id}},"labels":{{json .Config.Labels}},"name":{{json .Name}},"schema":"${CPP_CUTE_AOT_DOCKER_CONTAINER_RECOVERY_SCHEMA}","version":1}`;
 export const CPP_CUTE_AOT_RECEIPT_BYTE_LIMIT = 8_388_608;
 export const CPP_CUTE_AOT_STDERR_BYTE_LIMIT = 65_536;
+export const CPP_CUTE_AOT_HARD_FRAME_BYTE_LIMIT =
+  67_108_864 + CPP_CUTE_AOT_RECEIPT_BYTE_LIMIT + CPP_CUTE_AOT_RESULT_FRAME_HEADER_BYTES;
 
 export const CPP_CUTE_AOT_ARTIFACT_DECODE_LIMITS = deepFreezeJson({
   maxDocumentBytes: 67_108_864,
@@ -123,6 +143,48 @@ export const CPP_CUTE_AOT_DOCKER_INFO_LIMITS = deepFreezeJson({
   driverStatusEntries: 1,
 } as const satisfies JsonObject);
 
+export const CPP_CUTE_AOT_DOCKER_CREATE_LIMITS = deepFreezeJson({
+  timeoutMs: 10_000,
+  killGraceMs: 1_000,
+  stdoutBytes: 65,
+  stderrBytes: CPP_CUTE_AOT_STDERR_BYTE_LIMIT,
+  cidFileBytes: 64,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_LIMITS = deepFreezeJson({
+  timeoutMs: 10_000,
+  killGraceMs: 1_000,
+  stdoutBytes: 262_144,
+  stderrBytes: CPP_CUTE_AOT_STDERR_BYTE_LIMIT,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_DOCKER_START_LIMITS = deepFreezeJson({
+  killGraceMs: 1_000,
+  stdoutBytes: CPP_CUTE_AOT_HARD_FRAME_BYTE_LIMIT,
+  stderrBytes: CPP_CUTE_AOT_STDERR_BYTE_LIMIT,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_DOCKER_REMOVE_LIMITS = deepFreezeJson({
+  timeoutMs: 10_000,
+  killGraceMs: 1_000,
+  stdoutBytes: 65,
+  stderrBytes: CPP_CUTE_AOT_STDERR_BYTE_LIMIT,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_DOCKER_ABSENCE_LIMITS = deepFreezeJson({
+  timeoutMs: 10_000,
+  killGraceMs: 1_000,
+  stdoutBytes: 65,
+  stderrBytes: CPP_CUTE_AOT_STDERR_BYTE_LIMIT,
+  recoveryAttempts: 3,
+  recoveryIntervalMs: 100,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_DOCKER_LIFECYCLE_LIMITS = deepFreezeJson({
+  overheadMs: 60_000,
+  cleanupMs: 30_000,
+} as const satisfies JsonObject);
+
 export const CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_DECODE_LIMITS = deepFreezeJson({
   maxDocumentBytes: CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_LIMITS.stdoutBytes,
   maxDepth: 32,
@@ -159,6 +221,18 @@ export const CPP_CUTE_AOT_DOCKER_INFO_DECODE_LIMITS = deepFreezeJson({
   maxArithmeticOperations: 128,
 } as const satisfies JsonObject);
 
+export const CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_DECODE_LIMITS = deepFreezeJson({
+  maxDocumentBytes: CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_LIMITS.stdoutBytes,
+  maxDepth: 32,
+  maxNodes: 65_536,
+  maxStringBytes: 2_097_152,
+  maxArrayLength: 4_096,
+  maxObjectProperties: 4_096,
+  maxRank: 64,
+  maxIntegerBits: 256,
+  maxArithmeticOperations: 131_072,
+} as const satisfies JsonObject);
+
 /**
  * Closed logical policy. Per-run staging paths, container IDs, timestamps,
  * and other random operational values are intentionally absent. The fixed
@@ -166,7 +240,7 @@ export const CPP_CUTE_AOT_DOCKER_INFO_DECODE_LIMITS = deepFreezeJson({
  */
 export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
   schema: CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA,
-  version: { major: 1, minor: 0 },
+  version: { major: 1, minor: 1 },
   contractId: "browsergrad.compiler.cpp-cute.aot@1",
   runtime: {
     engine: "docker",
@@ -183,7 +257,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     platform: "linux/amd64",
     imagePull: "forbidden",
     createBy: "authorized-manifest-reference",
-    executionEnvironment: "profile-pinned",
+    executionEnvironment: "profile-hash-pinned-external-attestation-required",
     client: {
       config: "runner-private-empty-directory",
       cwd: "runner-private-directory",
@@ -198,9 +272,18 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
       shell: false,
       retries: 0,
     },
+    hostProcess: {
+      isolation: "dedicated-single-job-worker-required",
+      uid: "dedicated-runner-required",
+      sameUidProcesses: "trusted-boundary",
+      coreDumps: "disabled-required",
+      failStop: "abort-on-unreaped-child-or-unproved-container-absence",
+      authority: "execution-environment-attestation-required",
+    },
   },
   process: {
     user: { uid: 65_532, gid: 65_532 },
+    hostname: CPP_CUTE_AOT_CONTAINER_HOSTNAME,
     entrypoint: "/opt/browsergrad/bin/cpp-cute-aot-supervisor",
     workingDirectory: "/run/browsergrad",
     arguments: [
@@ -212,6 +295,11 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     environment: {
       imageConfig: "must-be-empty",
       overrides: [],
+      dockerInjected: [
+        `PATH=${CPP_CUTE_AOT_DOCKER_DEFAULT_PATH}`,
+        `HOSTNAME=${CPP_CUTE_AOT_CONTAINER_HOSTNAME}`,
+      ],
+      supervisor: "clear-before-toolchain",
       effective: [],
     },
     stdin: "closed",
@@ -220,6 +308,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     healthcheck: "disabled",
     restart: "none",
     logging: "disabled",
+    runtime: "runc",
   },
   namespaces: {
     network: "none",
@@ -233,18 +322,27 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     capabilitiesAdded: [],
     capabilitiesDropped: ["ALL"],
     noNewPrivileges: true,
-    seccomp: "runtime-default-pinned-by-execution-environment",
+    seccomp: "runtime-default-requested-effective-profile-requires-external-attestation",
   },
   filesystem: {
-    root: "read-only",
+    root: "image-rootfs-read-only",
+    runtimeManagedMounts: [
+      "/dev",
+      "/etc/hostname",
+      "/etc/hosts",
+      "/etc/resolv.conf",
+      "/proc",
+      "/sys",
+    ],
     imageVolumes: "forbidden",
     source: "runner-snapshot-read-only-rprivate",
     control: "runner-snapshot-read-only-rprivate",
     temporaryPath: "/tmp",
     temporary: ["rw", "noexec", "nosuid", "nodev", "mode=1777"],
-    temporaryBytes: "min(maxMemoryBytes/4,536870912)",
+    temporaryBytes: "max(1,min(floor(maxMemoryBytes/4),536870912))",
     dockerSocket: "forbidden",
-    devices: "forbidden",
+    devices: "runtime-minimal-defaults",
+    hostDevicePassthrough: "forbidden",
   },
   limits: {
     memory: "maxMemoryBytes",
@@ -286,6 +384,33 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
         continuedPresence: "not-claimed",
         limits: CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_LIMITS,
       },
+      containerLifecycle: {
+        sequence: [
+          "create",
+          "inspect-created",
+          "start-attached",
+          "inspect-terminal",
+          "remove",
+          "prove-absent",
+        ],
+        createBy: "authorized-manifest-reference",
+        hostname: CPP_CUTE_AOT_CONTAINER_HOSTNAME,
+        output: "attach-before-start-single-frame",
+        cleanup: "exact-container-id-before-staging-removal",
+        createdProjectionSchema: `${CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_SCHEMA}@1`,
+        createdProjectionFormat: CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_FORMAT,
+        createdProjectionAuthority: "daemon-recorded-request-and-state-not-kernel-enforcement",
+        recoveryProjectionSchema: `${CPP_CUTE_AOT_DOCKER_CONTAINER_RECOVERY_SCHEMA}@1`,
+        recoveryProjectionFormat: CPP_CUTE_AOT_DOCKER_CONTAINER_RECOVERY_FORMAT,
+        limits: {
+          create: CPP_CUTE_AOT_DOCKER_CREATE_LIMITS,
+          inspect: CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_LIMITS,
+          start: CPP_CUTE_AOT_DOCKER_START_LIMITS,
+          remove: CPP_CUTE_AOT_DOCKER_REMOVE_LIMITS,
+          absence: CPP_CUTE_AOT_DOCKER_ABSENCE_LIMITS,
+          lifecycle: CPP_CUTE_AOT_DOCKER_LIFECYCLE_LIMITS,
+        },
+      },
       resources: CPP_CUTE_AOT_OCI_RESOURCE_LIMITS,
     },
   },
@@ -297,6 +422,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     dockerVersion: CPP_CUTE_AOT_DOCKER_VERSION_DECODE_LIMITS,
     dockerInfo: CPP_CUTE_AOT_DOCKER_INFO_DECODE_LIMITS,
     dockerImageInspect: CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_DECODE_LIMITS,
+    dockerContainerInspect: CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_DECODE_LIMITS,
   },
   semantics: {
     linking: "forbidden",
@@ -307,7 +433,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
 
 // SHA-256 of canonical JSON for CPP_CUTE_AOT_SANDBOX_POLICY_V1.
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 =
-  "b8c08d81712865a1e7ad1b2e1abc4ea043bc9692291ffc71a8e6e5d8c3ea2816";
+  "86d5ccd7ca20ebdc72431358b9e02c581381a6191cea161a15635cc04c08cb78";
 
 export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
   const actual = await hashCanonicalJson(CPP_CUTE_AOT_SANDBOX_POLICY_V1);

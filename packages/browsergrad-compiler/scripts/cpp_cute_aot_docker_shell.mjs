@@ -90,6 +90,18 @@ export class CppCuteAotDockerImageError extends Error {
 /** @typedef {(request: import("./cpp_cute_aot_docker_process.mjs").BoundedChildProcessRequest) => Promise<import("./cpp_cute_aot_docker_process.mjs").BoundedChildProcessResult>} DockerObservationProcess */
 
 /**
+ * @typedef {Readonly<{
+ *   runRoot: string;
+ *   configDirectory: string;
+ *   homeDirectory: string;
+ *   authorizedMetadata: import("../dist/cpp_cute_aot_oci.js").AuthorizedCppCuteAotOciMetadata;
+ *   processAdapter: DockerObservationProcess;
+ *   preserveRunRoot: () => void;
+ *   signal?: AbortSignal;
+ * }>} DockerObservationSession
+ */
+
+/**
  * Production point-in-time observation. No caller can supply Docker process,
  * executable, argv, environment, endpoint, or result bytes.
  *
@@ -98,12 +110,13 @@ export class CppCuteAotDockerImageError extends Error {
  * @returns {Promise<ObservedCppCuteAotLocalDockerImage>}
  */
 export async function observeCppCuteAotLocalDockerImage(authorizedMetadata, options = {}) {
-  return observeWithProcess(
+  const session = await observeWithProcess(
     authorizedMetadata,
     runBoundedChildProcess,
     options,
     LIVE_OBSERVATIONS,
   );
+  return session.observed;
 }
 
 /**
@@ -121,7 +134,63 @@ export async function __observeCppCuteAotLocalDockerImageWithProcessForTest(
   options = {},
 ) {
   if (typeof processAdapter !== "function") invalid("$processAdapter", "test process adapter must be a function");
-  return observeWithProcess(authorizedMetadata, processAdapter, options, TEST_OBSERVATIONS);
+  const session = await observeWithProcess(
+    authorizedMetadata,
+    processAdapter,
+    options,
+    TEST_OBSERVATIONS,
+  );
+  return session.observed;
+}
+
+/**
+ * Private production lifecycle seam. Continuation runs after runtime/image
+ * verification inside the same private Docker client session.
+ *
+ * @template T
+ * @param {import("../dist/cpp_cute_aot_oci.js").AuthorizedCppCuteAotOciMetadata} authorizedMetadata
+ * @param {(session: DockerObservationSession) => Promise<T>} continuation
+ * @param {{ readonly signal?: AbortSignal }} [options]
+ * @returns {Promise<Readonly<{ observed: ObservedCppCuteAotLocalDockerImage; value: T }>>}
+ */
+export function __runCppCuteAotLocalDockerImageSession(
+  authorizedMetadata,
+  continuation,
+  options = {},
+) {
+  if (typeof continuation !== "function") invalid("$continuation", "session continuation must be a function");
+  return observeWithProcess(
+    authorizedMetadata,
+    runBoundedChildProcess,
+    options,
+    LIVE_OBSERVATIONS,
+    continuation,
+  );
+}
+
+/**
+ * @template T
+ * @param {import("../dist/cpp_cute_aot_oci.js").AuthorizedCppCuteAotOciMetadata} authorizedMetadata
+ * @param {DockerObservationProcess} processAdapter
+ * @param {(session: DockerObservationSession) => Promise<T>} continuation
+ * @param {{ readonly signal?: AbortSignal }} [options]
+ * @returns {Promise<Readonly<{ observed: ObservedCppCuteAotLocalDockerImage; value: T }>>}
+ */
+export function __runCppCuteAotLocalDockerImageSessionWithProcessForTest(
+  authorizedMetadata,
+  processAdapter,
+  continuation,
+  options = {},
+) {
+  if (typeof processAdapter !== "function") invalid("$processAdapter", "test process adapter must be a function");
+  if (typeof continuation !== "function") invalid("$continuation", "session continuation must be a function");
+  return observeWithProcess(
+    authorizedMetadata,
+    processAdapter,
+    options,
+    TEST_OBSERVATIONS,
+    continuation,
+  );
 }
 
 /**
@@ -144,9 +213,17 @@ export function __unwrapObservedCppCuteAotLocalDockerImageForTest(observed) {
  * @param {DockerObservationProcess} processAdapter
  * @param {{ readonly signal?: AbortSignal }} options
  * @param {WeakMap<object, StoredDockerImageObservation>} authorityStore
- * @returns {Promise<ObservedCppCuteAotLocalDockerImage>}
+ * @template T
+ * @param {(session: DockerObservationSession) => Promise<T>} [sessionContinuation]
+ * @returns {Promise<Readonly<{ observed: ObservedCppCuteAotLocalDockerImage; value: T }>>}
  */
-async function observeWithProcess(authorizedMetadata, processAdapter, options, authorityStore) {
+async function observeWithProcess(
+  authorizedMetadata,
+  processAdapter,
+  options,
+  authorityStore,
+  sessionContinuation,
+) {
   const signal = normalizeOptions(options);
   throwIfAborted(signal);
   const authorized = inspectAuthorizedCppCuteAotOciMetadata(authorizedMetadata);
@@ -158,6 +235,10 @@ async function observeWithProcess(authorizedMetadata, processAdapter, options, a
   let verifiedImage;
   /** @type {Readonly<{ clientVersion: "29.6.1"; engineVersion: "29.6.1"; requestApiVersion: "1.49"; engineApiVersion: "1.55"; engineMinApiVersion: "1.40"; imageStore: "containerd" }> | undefined} */
   let verifiedRuntime;
+  /** @type {T | undefined} */
+  let sessionValue;
+  let continuationStarted = false;
+  let preserveRunRoot = false;
   /** @type {unknown} */
   let failure;
   try {
@@ -195,6 +276,7 @@ async function observeWithProcess(authorizedMetadata, processAdapter, options, a
       processAdapter,
       buildCppCuteAotDockerVersionRequest(commonRequest),
       configDirectory,
+      homeDirectory,
       signal,
       CPP_CUTE_AOT_DOCKER_VERSION_LIMITS,
       CPP_CUTE_AOT_DOCKER_VERSION_DECODE_LIMITS,
@@ -206,6 +288,7 @@ async function observeWithProcess(authorizedMetadata, processAdapter, options, a
       processAdapter,
       buildCppCuteAotDockerInfoRequest(commonRequest),
       configDirectory,
+      homeDirectory,
       signal,
       CPP_CUTE_AOT_DOCKER_INFO_LIMITS,
       CPP_CUTE_AOT_DOCKER_INFO_DECODE_LIMITS,
@@ -220,6 +303,7 @@ async function observeWithProcess(authorizedMetadata, processAdapter, options, a
         imageReference: authorizedMetadata.imageReference,
       }),
       configDirectory,
+      homeDirectory,
       signal,
       CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_LIMITS,
       CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_DECODE_LIMITS,
@@ -234,11 +318,25 @@ async function observeWithProcess(authorizedMetadata, processAdapter, options, a
       engineMinApiVersion: CPP_CUTE_AOT_DOCKER_ENGINE_MIN_API_VERSION,
       imageStore: "containerd",
     });
+    if (sessionContinuation !== undefined) {
+      continuationStarted = true;
+      sessionValue = await sessionContinuation(Object.freeze({
+        runRoot,
+        configDirectory,
+        homeDirectory,
+        authorizedMetadata,
+        processAdapter,
+        preserveRunRoot: () => {
+          preserveRunRoot = true;
+        },
+        ...(signal === undefined ? {} : { signal }),
+      }));
+    }
   } catch (error) {
-    failure = normalizeObservationFailure(error);
+    failure = continuationStarted ? error : normalizeObservationFailure(error);
   }
 
-  if (runRoot !== undefined) {
+  if (runRoot !== undefined && !preserveRunRoot) {
     try {
       await rm(runRoot, { recursive: true, force: true, maxRetries: 0 });
       await assertRemoved(runRoot);
@@ -246,6 +344,7 @@ async function observeWithProcess(authorizedMetadata, processAdapter, options, a
       cleanupFailure(failure);
     }
   }
+  if (preserveRunRoot && failure === undefined) cleanupFailure();
   if (failure !== undefined) throw failure;
   throwIfAborted(signal);
   if (verifiedImage === undefined || verifiedRuntime === undefined) processFailure();
@@ -278,7 +377,7 @@ async function observeWithProcess(authorizedMetadata, processAdapter, options, a
     shellSession,
     repoDigests: verifiedImage.repoDigests,
   }));
-  return observed;
+  return Object.freeze({ observed, value: /** @type {T} */ (sessionValue) });
 }
 
 /** @param {ObservedCppCuteAotLocalDockerImage} observed @param {WeakMap<object, StoredDockerImageObservation>} store @returns {StoredDockerImageObservation} */
@@ -297,6 +396,7 @@ function unwrapStored(observed, store) {
  * @param {DockerObservationProcess} processAdapter
  * @param {import("./cpp_cute_aot_docker_process.mjs").BoundedChildProcessRequest} request
  * @param {string} configDirectory
+ * @param {string} homeDirectory
  * @param {AbortSignal | undefined} signal
  * @param {{ readonly stdoutBytes: number; readonly stderrBytes: number }} limits
  * @param {import("@unlocalhosted/browsergrad-semantic-core/schema").DecodeLimits} decodeLimits
@@ -307,6 +407,7 @@ async function executeProbe(
   processAdapter,
   request,
   configDirectory,
+  homeDirectory,
   signal,
   limits,
   decodeLimits,
@@ -326,8 +427,8 @@ async function executeProbe(
   if (processResult.stderr.byteLength !== 0) {
     outputInvalid("$process.stderr", `successful Docker ${probe} probe must emit no stderr`);
   }
-  if ((await readdir(configDirectory)).length !== 0) {
-    outputInvalid("$runRoot/docker-config", `Docker ${probe} probe modified its private empty configuration`);
+  if ((await readdir(configDirectory)).length !== 0 || (await readdir(homeDirectory)).length !== 0) {
+    outputInvalid("$runRoot", `Docker ${probe} probe modified its private empty client state`);
   }
   throwIfAborted(signal);
   return decodeProjection(processResult.stdout, decodeLimits, probe);
@@ -757,7 +858,7 @@ function exitFailure(probe) {
   fail("BG-COMPILER-CPP-CUTE-AOT-DOCKER-IMAGE-EXIT", "$process", `Docker ${probe} probe did not exit cleanly`);
 }
 
-/** @param {unknown} primary @returns {never} */
+/** @param {unknown} [primary] @returns {never} */
 function cleanupFailure(primary) {
   const error = new CppCuteAotDockerImageError(
     "BG-COMPILER-CPP-CUTE-AOT-DOCKER-IMAGE-CLEANUP",
