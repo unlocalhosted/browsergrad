@@ -70,12 +70,12 @@ describe("C++/CuTe browser-local asset manifest", () => {
     expect(first.manifestId).toBe(fixture.input.manifestId);
     expect(fixture.input.body.assetSetSha256).toBe(first.assetSetSha256);
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.be05d8ce1173804ad438eceaffd79229b9e92a4f2573ff3870cb986a3f880e88",
+      "bg.cpp.browser-assets.sha256.35a815860fa795850f2f28c0c6b9f78c2b705be3c1aa651512c776432c969279",
     );
-    expect(first.assetSetSha256).toBe("1292a44ffadc288d7942126231a8d16d15f70a72cb4acdb6d4d4af82ca24e7a6");
+    expect(first.assetSetSha256).toBe("8c2eb8a57536b24ae280b6f6b71d42b7164d0fa2ae21c92457e468be1b9a32ef");
     expect(first.assetCount).toBe(7);
-    expect(first.manifestSha256).toBe("194540c5a6c6274fb96aa480419e132f8da79eddc061791cfdf493852c75ee2f");
-    expect(first.manifestByteLength).toBe("8569");
+    expect(first.manifestSha256).toBe("afde5ba74242bdd2d92f609d08a52d06cbc3db11d65b626e608a51f2de40c09f");
+    expect(first.manifestByteLength).toBe("8759");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
     expect(record.profile).toBe(fixture.profile);
@@ -167,6 +167,21 @@ describe("C++/CuTe browser-local asset manifest", () => {
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
       "$.body.assets[0]",
     );
+
+    for (const [field, value] of [
+      ["mediaType", "application/vnd.browsergrad.vfs-pack.v1+tar"],
+      ["compression", "gzip"],
+    ] as const) {
+      const legacyArchive = cloneCppCuteBrowserAssetInput(fixture.input);
+      const pack = assets(legacyArchive).find((asset) => asset["kind"] === "dependency-header-pack");
+      if (pack === undefined) throw new Error("fixture lost dependency pack");
+      pack[field] = value;
+      await expectAssetError(
+        prepareCppCuteBrowserAssetManifest(legacyArchive, fixture.profile),
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+        `$.body.assets[3].${field}`,
+      );
+    }
   });
 
   it("accepts only unique normalized root-relative URLs", async () => {
@@ -372,6 +387,15 @@ describe("C++/CuTe browser-local asset manifest", () => {
       prepareCppCuteBrowserAssetManifest(total.input, total.profile),
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-RESOURCE-LIMIT",
       "$.body.totals.unpackedByteLength",
+    );
+
+    const fileContent = await createCppCuteBrowserAssetFixture({
+      assetLimits: { maxAssetFileContentByteLength: 100 },
+    });
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(fileContent.input, fileContent.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-RESOURCE-LIMIT",
+      "$.body.assets[2].fileContentByteLength",
     );
 
     const totalDrift = cloneCppCuteBrowserAssetInput((await createCppCuteBrowserAssetFixture()).input);

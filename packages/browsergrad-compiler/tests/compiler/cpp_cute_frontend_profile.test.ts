@@ -45,7 +45,7 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("2699c9a2b312fefcc29fd652a227468f7b437a5fcf3181cda898e5b3ba7af2da");
+    expect(first.profileHash).toBe("a35f45ab99a733b19d2c616be6f2133bb0cd7736ed12419c82214678d7479424");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
@@ -163,6 +163,18 @@ describe("C++/CuTe frontend profile", () => {
       totals,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
       "$.deployment.assetLimits.maxAssetCompressedByteLength",
+    );
+
+    const fileContent = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const fileContentLimits = (
+      (fileContent["deployment"] as Record<string, unknown>)["assetLimits"] as Record<string, unknown>
+    );
+    fileContentLimits["maxAssetFileContentByteLength"] = 768 * 1024 * 1024;
+    fileContentLimits["maxTotalFileContentByteLength"] = 512 * 1024 * 1024;
+    await expectProfileError(
+      fileContent,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.assetLimits.maxAssetFileContentByteLength",
     );
 
     const extraction = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;

@@ -179,8 +179,10 @@ export interface CppCuteFrontendBrowserAssetLimits extends JsonObject {
   readonly maxAssets: number;
   readonly maxAssetCompressedByteLength: number;
   readonly maxAssetUnpackedByteLength: number;
+  readonly maxAssetFileContentByteLength: number;
   readonly maxTotalCompressedByteLength: number;
   readonly maxTotalUnpackedByteLength: number;
+  readonly maxTotalFileContentByteLength: number;
 }
 
 export interface CppCuteFrontendBrowserDeploymentProfile extends JsonObject {
@@ -738,8 +740,10 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       "maxAssets",
       "maxAssetCompressedByteLength",
       "maxAssetUnpackedByteLength",
+      "maxAssetFileContentByteLength",
       "maxTotalCompressedByteLength",
       "maxTotalUnpackedByteLength",
+      "maxTotalFileContentByteLength",
     ],
     `${path}.assetLimits`,
   );
@@ -759,6 +763,11 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       `${path}.assetLimits.maxAssetUnpackedByteLength`,
       2 * 1024 * 1024 * 1024,
     ),
+    maxAssetFileContentByteLength: boundedPositiveInteger(
+      field(assetLimitsObject, "maxAssetFileContentByteLength", `${path}.assetLimits`),
+      `${path}.assetLimits.maxAssetFileContentByteLength`,
+      1024 * 1024 * 1024,
+    ),
     maxTotalCompressedByteLength: boundedPositiveInteger(
       field(assetLimitsObject, "maxTotalCompressedByteLength", `${path}.assetLimits`),
       `${path}.assetLimits.maxTotalCompressedByteLength`,
@@ -768,6 +777,11 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       field(assetLimitsObject, "maxTotalUnpackedByteLength", `${path}.assetLimits`),
       `${path}.assetLimits.maxTotalUnpackedByteLength`,
       4 * 1024 * 1024 * 1024,
+    ),
+    maxTotalFileContentByteLength: boundedPositiveInteger(
+      field(assetLimitsObject, "maxTotalFileContentByteLength", `${path}.assetLimits`),
+      `${path}.assetLimits.maxTotalFileContentByteLength`,
+      2 * 1024 * 1024 * 1024,
     ),
   };
   if (assetLimits.maxAssetCompressedByteLength > assetLimits.maxTotalCompressedByteLength) {
@@ -780,6 +794,12 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
     invalid(
       `${path}.assetLimits.maxAssetUnpackedByteLength`,
       "per-asset unpacked limit must not exceed the total unpacked limit",
+    );
+  }
+  if (assetLimits.maxAssetFileContentByteLength > assetLimits.maxTotalFileContentByteLength) {
+    invalid(
+      `${path}.assetLimits.maxAssetFileContentByteLength`,
+      "per-asset file-content ceiling cannot exceed total file-content ceiling",
     );
   }
   return {

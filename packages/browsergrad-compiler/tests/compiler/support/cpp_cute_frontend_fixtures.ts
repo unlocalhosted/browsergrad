@@ -231,8 +231,10 @@ export function createCppCuteBrowserProfileInput(
         maxAssets: 32,
         maxAssetCompressedByteLength: 256 * 1024 * 1024,
         maxAssetUnpackedByteLength: 512 * 1024 * 1024,
+        maxAssetFileContentByteLength: 256 * 1024 * 1024,
         maxTotalCompressedByteLength: 512 * 1024 * 1024,
         maxTotalUnpackedByteLength: 1024 * 1024 * 1024,
+        maxTotalFileContentByteLength: 512 * 1024 * 1024,
       },
     },
     extractionLimits: {

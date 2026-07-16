@@ -34,15 +34,22 @@ export interface CppCuteBrowserAssetFixture {
 export interface CppCuteBrowserAssetFixtureOptions {
   readonly profile?: CppCuteBrowserProfileFixtureOptions;
   readonly assetLimits?: Partial<CppCuteFrontendBrowserAssetLimits>;
+  readonly packOverrides?: Readonly<Record<string, CppCuteBrowserPackAssetFixtureOverride>>;
+}
+
+export interface CppCuteBrowserPackAssetFixtureOverride {
+  readonly sha256: string;
+  readonly byteLength: number;
+  readonly fileContentByteLength: number;
+  readonly contentSetSha256: string;
 }
 
 export async function createCppCuteBrowserAssetFixture(
   options: CppCuteBrowserAssetFixtureOptions = {},
 ): Promise<CppCuteBrowserAssetFixture> {
-  const provisionalProfile = await prepareCppCuteFrontendProfile(createCppCuteBrowserProfileInput({
-    ...options.profile,
-    assetSetSha256: "0".repeat(64),
-  }));
+  const provisionalProfile = await prepareCppCuteFrontendProfile(
+    browserProfileInput(options, "0".repeat(64)),
+  );
   const provisionalRecord = unwrapPreparedCppCuteBrowserFrontendProfile(provisionalProfile).profile;
   const sourceAbi = cppCuteBrowserSourceAbi(provisionalProfile);
   const sourceAbiSha256 = await hashCanonicalJson({
@@ -75,32 +82,40 @@ export async function createCppCuteBrowserAssetFixture(
       buildProvenanceId: PROVENANCE_ID,
       sourceAbiSha256,
     },
-    compilerResourceAsset(provisionalRecord, PROVENANCE_ID),
+    compilerResourceAsset(provisionalRecord, PROVENANCE_ID, options.packOverrides),
     ...provisionalRecord.virtualFileSystem.includeRoots
       .filter((root) => root.owner.kind === "dependency")
       .map((root, index): CppCuteBrowserAssetV1 => {
         if (root.owner.kind !== "dependency") throw new Error("fixture dependency root narrowing failed");
+        const override = options.packOverrides?.[root.includeRootId];
+        const byteLength = override?.byteLength ?? 16_500 + index;
         return {
           assetId: `dependency.${root.owner.dependencyId}`,
           kind: "dependency-header-pack",
-          url: `/browsergrad/cpp-cute/${root.owner.dependencyId}.headers.tar.gz`,
+          url: `/browsergrad/cpp-cute/${root.owner.dependencyId}.headers.bgvfs`,
           urlPolicy: "same-origin-root-relative",
-          sha256: (index + 3).toString(16).repeat(64),
-          byteLength: wire(2_000 + index),
-          unpackedByteLength: wire(16_000 + index),
-          mediaType: "application/vnd.browsergrad.vfs-pack.v1+tar",
-          compression: "gzip",
+          sha256: override?.sha256 ?? (index + 3).toString(16).repeat(64),
+          byteLength: wire(byteLength),
+          unpackedByteLength: wire(byteLength),
+          fileContentByteLength: wire(override?.fileContentByteLength ?? 16_000 + index),
+          mediaType: "application/vnd.browsergrad.vfs-pack.v1",
+          compression: "identity",
           buildProvenanceId: PROVENANCE_ID,
           dependencyId: root.owner.dependencyId,
           includeRootId: root.includeRootId,
           mountedVirtualRoot: root.virtualPath,
-          contentSetSha256: root.manifestSha256,
+          contentSetSha256: override?.contentSetSha256 ?? root.manifestSha256,
         };
       }),
   ];
   assets.sort((left, right) => left.assetId < right.assetId ? -1 : left.assetId > right.assetId ? 1 : 0);
   const compressed = assets.reduce((total, asset) => total + BigInt(asset.byteLength), 0n);
   const unpacked = assets.reduce((total, asset) => total + BigInt(asset.unpackedByteLength), 0n);
+  const fileContent = assets.reduce((total, asset) => total + (
+    asset.kind === "compiler-resource-pack" || asset.kind === "dependency-header-pack"
+      ? BigInt(asset.fileContentByteLength)
+      : 0n
+  ), 0n);
   const mountedVirtualRoots = assets.flatMap((asset): string[] =>
     asset.kind === "compiler-resource-pack" || asset.kind === "dependency-header-pack"
       ? [asset.mountedVirtualRoot]
@@ -112,10 +127,7 @@ export async function createCppCuteBrowserAssetFixture(
     mountedVirtualRoots,
     assets,
   });
-  const finalProfileInput = structuredClone(createCppCuteBrowserProfileInput({
-    ...options.profile,
-    assetSetSha256,
-  }));
+  const finalProfileInput = browserProfileInput(options, assetSetSha256);
   if (options.assetLimits !== undefined) {
     Object.assign(finalProfileInput.deployment.assetLimits, options.assetLimits);
   }
@@ -133,6 +145,7 @@ export async function createCppCuteBrowserAssetFixture(
     totals: {
       compressedByteLength: compressed.toString() as WireU64,
       unpackedByteLength: unpacked.toString() as WireU64,
+      fileContentByteLength: fileContent.toString() as WireU64,
     },
   };
   const input: CppCuteBrowserAssetManifestV1 = {
@@ -153,25 +166,56 @@ export function cloneCppCuteBrowserAssetInput(
 function compilerResourceAsset(
   profile: ReturnType<typeof unwrapPreparedCppCuteBrowserFrontendProfile>["profile"],
   buildProvenanceId: string,
+  overrides: CppCuteBrowserAssetFixtureOptions["packOverrides"],
 ): CppCuteBrowserAssetV1 {
   const root = profile.virtualFileSystem.includeRoots.find((entry) =>
     entry.owner.kind === "compiler-resource-directory");
   if (root === undefined) throw new Error("fixture profile lost compiler resource root");
+  const override = overrides?.[root.includeRootId];
+  const byteLength = override?.byteLength ?? 8_500;
   return {
     assetId: "compiler-resource",
     kind: "compiler-resource-pack",
-    url: "/browsergrad/cpp-cute/clang-resource.tar.gz",
+    url: "/browsergrad/cpp-cute/clang-resource.bgvfs",
     urlPolicy: "same-origin-root-relative",
-    sha256: "2".repeat(64),
-    byteLength: wire(1_000),
-    unpackedByteLength: wire(8_000),
-    mediaType: "application/vnd.browsergrad.vfs-pack.v1+tar",
-    compression: "gzip",
+    sha256: override?.sha256 ?? "2".repeat(64),
+    byteLength: wire(byteLength),
+    unpackedByteLength: wire(byteLength),
+    fileContentByteLength: wire(override?.fileContentByteLength ?? 8_000),
+    mediaType: "application/vnd.browsergrad.vfs-pack.v1",
+    compression: "identity",
     buildProvenanceId,
     includeRootId: root.includeRootId,
     mountedVirtualRoot: root.virtualPath,
-    contentSetSha256: root.manifestSha256,
+    contentSetSha256: override?.contentSetSha256 ?? root.manifestSha256,
   };
+}
+
+function browserProfileInput(
+  options: CppCuteBrowserAssetFixtureOptions,
+  assetSetSha256: string,
+): ReturnType<typeof createCppCuteBrowserProfileInput> {
+  const input = structuredClone(createCppCuteBrowserProfileInput({
+    ...options.profile,
+    assetSetSha256,
+  }));
+  for (const root of input.virtualFileSystem.includeRoots) {
+    const override = options.packOverrides?.[root.includeRootId];
+    if (override === undefined) continue;
+    (root as { manifestSha256: string }).manifestSha256 = override.contentSetSha256;
+    if (root.owner.kind === "compiler-resource-directory") {
+      (input.toolchain.compiler as { resourceDirectorySha256: string }).resourceDirectorySha256 =
+        override.contentSetSha256;
+      continue;
+    }
+    if (root.owner.kind === "dependency") {
+      const dependency = input.toolchain.dependencies.find((entry) =>
+        entry.dependencyId === root.owner.dependencyId);
+      if (dependency === undefined) throw new Error("fixture pack override lost dependency");
+      (dependency as { headerSetSha256: string }).headerSetSha256 = override.contentSetSha256;
+    }
+  }
+  return input;
 }
 
 function wire(value: number): WireU64 {

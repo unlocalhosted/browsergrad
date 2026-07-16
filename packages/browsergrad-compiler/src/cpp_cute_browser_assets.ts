@@ -82,6 +82,7 @@ export interface CppCuteBrowserSourceAbiV1 extends JsonObject {
 export interface CppCuteBrowserAssetTotalsV1 extends JsonObject {
   readonly compressedByteLength: WireU64;
   readonly unpackedByteLength: WireU64;
+  readonly fileContentByteLength: WireU64;
 }
 
 interface CppCuteBrowserAssetCommonV1 extends JsonObject {
@@ -103,20 +104,22 @@ export type CppCuteBrowserAssetV1 =
     })
   | (CppCuteBrowserAssetCommonV1 & {
       readonly kind: "compiler-resource-pack";
-      readonly mediaType: "application/vnd.browsergrad.vfs-pack.v1+tar";
-      readonly compression: "identity" | "gzip";
+      readonly mediaType: "application/vnd.browsergrad.vfs-pack.v1";
+      readonly compression: "identity";
       readonly includeRootId: string;
       readonly mountedVirtualRoot: string;
       readonly contentSetSha256: string;
+      readonly fileContentByteLength: WireU64;
     })
   | (CppCuteBrowserAssetCommonV1 & {
       readonly kind: "dependency-header-pack";
-      readonly mediaType: "application/vnd.browsergrad.vfs-pack.v1+tar";
-      readonly compression: "identity" | "gzip";
+      readonly mediaType: "application/vnd.browsergrad.vfs-pack.v1";
+      readonly compression: "identity";
       readonly dependencyId: string;
       readonly includeRootId: string;
       readonly mountedVirtualRoot: string;
       readonly contentSetSha256: string;
+      readonly fileContentByteLength: WireU64;
     })
   | (CppCuteBrowserAssetCommonV1 & {
       readonly kind: "semantic-adapter-manifest";
@@ -498,10 +501,19 @@ function parseBody(
 
 function parseTotals(value: JsonValue): CppCuteBrowserAssetTotalsV1 {
   const path = "$.body.totals";
-  const object = closedObject(value, ["compressedByteLength", "unpackedByteLength"], path, true);
+  const object = closedObject(
+    value,
+    ["compressedByteLength", "unpackedByteLength", "fileContentByteLength"],
+    path,
+    true,
+  );
   return {
     compressedByteLength: wirePositive(field(object, "compressedByteLength", path), `${path}.compressedByteLength`),
     unpackedByteLength: wirePositive(field(object, "unpackedByteLength", path), `${path}.unpackedByteLength`),
+    fileContentByteLength: wirePositive(
+      field(object, "fileContentByteLength", path),
+      `${path}.fileContentByteLength`,
+    ),
   };
 }
 
@@ -510,6 +522,7 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
     "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
     "mediaType", "compression", "buildProvenanceId", "sourceAbiSha256", "dependencyId",
     "includeRootId", "mountedVirtualRoot", "contentSetSha256",
+    "fileContentByteLength",
   ], path, false);
   const kind = boundedString(field(base, "kind", path), `${path}.kind`, 64);
   const common = {
@@ -546,47 +559,59 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
       "mediaType", "compression", "buildProvenanceId", "includeRootId", "mountedVirtualRoot",
-      "contentSetSha256",
+      "contentSetSha256", "fileContentByteLength",
     ], path);
     exactString(
       field(base, "mediaType", path),
-      "application/vnd.browsergrad.vfs-pack.v1+tar",
+      "application/vnd.browsergrad.vfs-pack.v1",
       `${path}.mediaType`,
     );
-    const compression = compressionValue(field(base, "compression", path), `${path}.compression`);
-    if (compression === "identity") requireIdentityLength(common, path);
+    exactString(field(base, "compression", path), "identity", `${path}.compression`);
+    requireIdentityLength(common, path);
+    const fileContentByteLength = wirePositive(
+      field(base, "fileContentByteLength", path),
+      `${path}.fileContentByteLength`,
+    );
+    requirePackLength(common, fileContentByteLength, path);
     return {
       ...common,
       kind,
-      mediaType: "application/vnd.browsergrad.vfs-pack.v1+tar",
-      compression,
+      mediaType: "application/vnd.browsergrad.vfs-pack.v1",
+      compression: "identity",
       includeRootId: boundedPattern(field(base, "includeRootId", path), `${path}.includeRootId`, ASSET_ID),
       mountedVirtualRoot: virtualPathValue(field(base, "mountedVirtualRoot", path), `${path}.mountedVirtualRoot`),
       contentSetSha256: sha256(field(base, "contentSetSha256", path), `${path}.contentSetSha256`),
+      fileContentByteLength,
     };
   }
   if (kind === "dependency-header-pack") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
       "mediaType", "compression", "buildProvenanceId", "dependencyId", "includeRootId",
-      "mountedVirtualRoot", "contentSetSha256",
+      "mountedVirtualRoot", "contentSetSha256", "fileContentByteLength",
     ], path);
     exactString(
       field(base, "mediaType", path),
-      "application/vnd.browsergrad.vfs-pack.v1+tar",
+      "application/vnd.browsergrad.vfs-pack.v1",
       `${path}.mediaType`,
     );
-    const compression = compressionValue(field(base, "compression", path), `${path}.compression`);
-    if (compression === "identity") requireIdentityLength(common, path);
+    exactString(field(base, "compression", path), "identity", `${path}.compression`);
+    requireIdentityLength(common, path);
+    const fileContentByteLength = wirePositive(
+      field(base, "fileContentByteLength", path),
+      `${path}.fileContentByteLength`,
+    );
+    requirePackLength(common, fileContentByteLength, path);
     return {
       ...common,
       kind,
-      mediaType: "application/vnd.browsergrad.vfs-pack.v1+tar",
-      compression,
+      mediaType: "application/vnd.browsergrad.vfs-pack.v1",
+      compression: "identity",
       dependencyId: boundedPattern(field(base, "dependencyId", path), `${path}.dependencyId`, ASSET_ID),
       includeRootId: boundedPattern(field(base, "includeRootId", path), `${path}.includeRootId`, ASSET_ID),
       mountedVirtualRoot: virtualPathValue(field(base, "mountedVirtualRoot", path), `${path}.mountedVirtualRoot`),
       contentSetSha256: sha256(field(base, "contentSetSha256", path), `${path}.contentSetSha256`),
+      fileContentByteLength,
     };
   }
   if (kind === "semantic-adapter-manifest") {
@@ -633,9 +658,12 @@ function validateResourceAccounting(
     BigInt(profileLimits.maxTotalUnpackedByteLength),
     HARD_MAX_TOTAL_UNPACKED_BYTES,
   );
+  const maxFileContent = BigInt(profileLimits.maxAssetFileContentByteLength);
+  const maxTotalFileContent = BigInt(profileLimits.maxTotalFileContentByteLength);
   if (assets.length > maxAssets) resource("$.body.assets", "asset count exceeds browser profile ceiling");
   let compressed = 0n;
   let unpacked = 0n;
+  let fileContent = 0n;
   for (const [index, asset] of assets.entries()) {
     const assetCompressed = wireIntegerToBigInt(asset.byteLength);
     const assetUnpacked = wireIntegerToBigInt(asset.unpackedByteLength);
@@ -643,6 +671,13 @@ function validateResourceAccounting(
     if (assetUnpacked > maxUnpacked) resource(`$.body.assets[${index}].unpackedByteLength`, "asset exceeds unpacked ceiling");
     compressed += assetCompressed;
     unpacked += assetUnpacked;
+    if (asset.kind === "compiler-resource-pack" || asset.kind === "dependency-header-pack") {
+      const assetFileContent = wireIntegerToBigInt(asset.fileContentByteLength);
+      if (assetFileContent > maxFileContent) {
+        resource(`$.body.assets[${index}].fileContentByteLength`, "asset exceeds file-content ceiling");
+      }
+      fileContent += assetFileContent;
+    }
   }
   if (compressed > maxTotalCompressed) {
     resource("$.body.totals.compressedByteLength", "compressed total exceeds browser profile ceiling");
@@ -650,11 +685,17 @@ function validateResourceAccounting(
   if (unpacked > maxTotalUnpacked) {
     resource("$.body.totals.unpackedByteLength", "unpacked total exceeds browser profile ceiling");
   }
+  if (fileContent > maxTotalFileContent) {
+    resource("$.body.totals.fileContentByteLength", "file-content total exceeds browser profile ceiling");
+  }
   if (compressed !== wireIntegerToBigInt(totals.compressedByteLength)) {
     invalid("$.body.totals.compressedByteLength", "compressed total does not equal asset byte lengths");
   }
   if (unpacked !== wireIntegerToBigInt(totals.unpackedByteLength)) {
     invalid("$.body.totals.unpackedByteLength", "unpacked total does not equal asset lengths");
+  }
+  if (fileContent !== wireIntegerToBigInt(totals.fileContentByteLength)) {
+    invalid("$.body.totals.fileContentByteLength", "file-content total does not equal VFS pack file lengths");
   }
 }
 
@@ -907,11 +948,6 @@ function requireUnique(values: readonly string[], path: string, message: string)
   if (new Set(values).size !== values.length) invalid(path, message);
 }
 
-function compressionValue(value: JsonValue, path: string): "identity" | "gzip" {
-  if (value !== "identity" && value !== "gzip") invalid(path, "compression must be identity or gzip");
-  return value;
-}
-
 function exactString<T extends string>(value: JsonValue, expected: T, path: string): T {
   if (value !== expected) invalid(path, `must equal ${JSON.stringify(expected)}`);
   return expected;
@@ -927,6 +963,19 @@ function requireIdentityLength(
 ): void {
   if (asset.byteLength !== asset.unpackedByteLength) {
     invalid(`${path}.unpackedByteLength`, "identity-compressed asset lengths must match");
+  }
+}
+
+function requirePackLength(
+  asset: { readonly byteLength: WireU64; readonly unpackedByteLength: WireU64 },
+  fileContentByteLength: WireU64,
+  path: string,
+): void {
+  if (wireIntegerToBigInt(asset.unpackedByteLength) <= wireIntegerToBigInt(fileContentByteLength)) {
+    invalid(
+      `${path}.fileContentByteLength`,
+      "VFS pack bytes must exceed mounted file-content bytes because the pack has a fixed header and index",
+    );
   }
 }
 

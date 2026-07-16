@@ -604,8 +604,9 @@ profile MUST run the pinned CUDA-capable Clang frontend as WASM in a dedicated
 worker, use the same closed virtual-filesystem and artifact contracts as every
 other producer, and enforce explicit memory, work, output, and cancellation
 limits. Clang-WASM performs source analysis and emits the frontend artifact; it
-does not execute a user-produced native binary. Only the Clang frontend runs as
-WASM. BrowserGrad does not link or execute user C++ as a WASM program; verified
+does not execute a user-produced native binary. In this compilation path, the
+compiler/extractor module—not the user C++ program—runs as WASM. BrowserGrad
+does not link or execute user C++ as a WASM program; verified
 portable semantics execute only through the CPU reference or WGSL/WebGPU
 backend.
 
@@ -631,6 +632,184 @@ The compiler service or WASM frontend MUST treat input as untrusted. It MUST
 use an allowlisted virtual filesystem, bounded preprocessing/template work,
 bounded output, cancellation, and no execution or linking of user-produced
 native binaries during semantic extraction.
+
+#### Browser-local producer architecture
+
+The browser producer is a BrowserGrad-owned semantic extractor built from a
+version-pinned LLVM/Clang source revision and cross-compiled with a
+version-pinned Emscripten toolchain. It SHOULD link only the Clang/LLVM
+libraries and Emscripten runtime support needed for preprocessing, parsing,
+Sema, instantiated AST/constant evaluation,
+diagnostics, and BrowserGrad artifact emission. It MUST NOT require the Clang
+driver as a subprocess, LLD, native code generation, PTX assembly, a CUDA
+driver, or execution of user-produced code. A reproducible build MAY run in a
+pinned container; that is a maintainer/build-time input, never a browser or
+end-user runtime dependency.
+
+The implementation uses a custom `FrontendAction`/AST consumer and an
+in-memory LLVM VFS. It does not depend on an unofficial prebuilt browser Clang
+distribution. Release evidence therefore owns the LLVM revision, Emscripten
+revision, native TableGen tools, builder image, patches, build flags, source
+epoch, license inventory, and reproducibility proof. The selected profile owns
+an exact file-level license/notice allowlist for every distributed asset. It
+MUST NOT package an entire CUDA toolkit include tree merely because it is
+installed in the builder; redistribution rights and required notices are
+reviewed for the exact pinned header files. Two clean builds in distinct paths
+MUST produce identical asset hashes before a compiler profile is released.
+
+Two sysroots remain separate:
+
+- The Emscripten build sysroot compiles the extractor itself to WASM.
+- The parsed-program virtual sysroot defines the source program's Clang
+  resource headers, C++ library headers, CUDA compatibility headers,
+  CuTe/CUTLASS/CCCL headers, include order, macros, target triple, CUDA pass,
+  and target architecture.
+
+Parsed programs MUST NOT inherit `wasm32-emscripten`, `__EMSCRIPTEN__`, the
+worker's ambient filesystem, locale, clock, time zone, current directory, or
+network. CUDA profiles MUST model host and device semantic passes explicitly;
+one accidental host-only parse is not CUDA compatibility. Compatibility claims
+name the pinned Clang-CUDA dialect and header profile rather than claiming
+undifferentiated NVCC compatibility.
+
+Virtual paths and file modification times are canonical. The compilation
+contract either rejects `__DATE__`, `__TIME__`, and `__TIMESTAMP__` or pins
+their exact expansions. `__FILE__` expands only from the canonical virtual
+path; no builder, cache, Blob, or browser path may enter source semantics.
+
+The source ABI and compiler runtime ABI are distinct contracts. The source ABI
+describes the program being analyzed. The compiler runtime ABI separately pins
+WASM width/features, import/export interface hash, memory-sharing mode and
+ownership, initial and maximum pages, stack ceiling, VFS storage model, and
+worker/module compatibility. Version 1 requires one unshared memory. Source
+target pointer width MUST NOT be used as evidence about the Clang-WASM runtime.
+
+The package emits one self-contained module-worker resource without static or
+dynamic imports. Because module workers have no subresource-integrity option,
+the host MUST verify the exact package-owned worker bytes and length before
+creating a Blob-backed module worker. A worker handshake cannot attest its own
+code identity. Deployments MUST declare the required CSP/browser capability;
+if verified Blob workers are unavailable, compilation fails with a typed
+capability result and MUST NOT fall back to an unverified URL worker.
+The host also verifies the separate Clang/extractor WASM bytes, then transfers
+those bytes or a compiled `WebAssembly.Module` into the worker. The bundled
+Emscripten factory MUST accept that verified object and MUST NOT resolve or
+fetch a `.wasm` file relative to the Blob module URL.
+
+#### Closed browser VFS assets
+
+Compiler-resource and dependency-header packs use the closed media type
+`application/vnd.browsergrad.vfs-pack.v1`, not tar, zip, or a general archive.
+Version 1 is identity-encoded and contains:
+
+```text
+96-byte header:
+  magic "BGVFSPK1"
+  u16le major, u16le minor, u32le fileCount
+  u64le indexByteLength, u64le fileDataByteLength
+  32-byte indexSha256, 32-byte contentSetSha256
+
+repeated canonical index entries:
+  u16le pathByteLength, UTF-8 path bytes
+  u64le fileByteLength, 32-byte fileSha256
+
+file bytes concatenated in index order
+```
+
+In the outer asset manifest, identity encoding means `byteLength` equals
+`unpackedByteLength` and covers the complete header + index + data bytes.
+Pack-specific `fileContentByteLength` separately covers only the concatenated
+file-data region. Per-asset and aggregate ceilings exist for both categories;
+one field never changes meaning by asset kind.
+
+Entries are regular files only; directories are implicit. Version-1 paths are
+strict UTF-8/NFC relative POSIX paths whose segments match the portable ASCII
+allowlist `[A-Za-z0-9._+@=-]+`; entries are sorted uniquely by encoded bytes.
+Absolute paths, empty/dot/parent segments, backslashes, control characters,
+normalization aliases, duplicate paths, and file/directory collisions are
+invalid. The format has no links, sparse files, devices, permissions, owners,
+timestamps, xattrs, PAX/GNU extensions, or caller-selected offsets. Index
+length, file count, per-path bytes, per-file bytes, total file bytes, and total
+pack bytes are independently bounded. Entry lengths consume the data region
+exactly; truncation and trailing bytes are invalid. The content-set hash covers
+only canonical path, content hash, and file length, while the outer asset hash
+covers the complete pack bytes.
+
+All header integers are parsed with checked unsigned-64-bit arithmetic and
+compared with profile and actual-buffer limits before conversion to JavaScript
+`Number`, slicing, copying, or allocation. `contentSetSha256` is SHA-256 over
+canonical JSON with the exact domain
+`browsergrad.compiler.cpp-cute.browser-vfs-content-set.v1` and this projection:
+
+```json
+{
+  "domain": "browsergrad.compiler.cpp-cute.browser-vfs-content-set.v1",
+  "files": [
+    {
+      "virtualPath": "sorted/path.h",
+      "contentSha256": "lowercase hex",
+      "byteLength": "canonical WireU64 decimal"
+    }
+  ]
+}
+```
+
+The `files` array follows index order. Offsets, pack framing, and index bytes
+are absent from this semantic projection and remain covered by the index and
+outer pack hashes.
+
+Compression is intentionally absent from v1. A future compressed transport
+requires a separately versioned, pinned streaming decoder with an enforced
+output ceiling before the closed pack verifier runs. It MUST NOT widen the VFS
+entry model or import general archive semantics.
+
+Asset acquisition, cache admission, VFS verification, mount construction, and
+worker execution mint separate opaque authorities. Cache hits are rehashed
+before use. Mount construction rejects cross-pack path collisions after adding
+the profile-owned virtual root. Asset fetch/pack-verification time is excluded
+from compiler execution time, but resident bytes are never excluded from
+memory ceilings. The runtime profile names one storage model:
+
+- An eager in-WASM VFS requires mounted VFS + source + AST/template state +
+  output + allocator/stack headroom to fit the maximum WASM memory.
+- A host-backed lazy VFS separately meters retained JavaScript pack bytes and
+  every opened-file copy resident in WASM; both remain part of the owning
+  profile's total memory budget.
+
+#### Producer-neutral requests and browser evidence
+
+The common frontend request binds the producer-neutral compilation-contract
+hash, exact source descriptors and snapshots, main virtual path, source anchor,
+and expected artifact schema/version. It does not contain a deployment-profile
+hash, worker/container/assets, compiler arguments, environment, host paths,
+URLs, repository/revision, or pre-known output/header/input-closure hashes.
+Repository identity is detached source provenance. Expected hashes are
+detached conformance assertions, not ordinary compile-request fields.
+
+The profile pins the complete available virtual header universe. A produced
+artifact and worker evidence separately record a canonical unique set of files
+whose content was successfully read and contributed to preprocessing or Sema
+for one request. Failed lookup/stat probes and duplicate opens are excluded.
+The actual opened-header hash varies legitimately by source
+and MUST NOT be compared to one profile-wide expected-opened-header constant.
+
+Browser authority follows this fail-closed chain:
+
+```text
+prepared browser profile -> prepared asset manifest -> verified asset bytes
+  -> verified VFS installation -> prepared common request/source snapshots
+  -> prepared browser invocation -> strict one-shot worker result
+  -> host-verified browser evidence -> common lowering authorization
+```
+
+The worker result cannot authorize itself. The host verifies exact canonical
+control and artifact bytes, reconstructs trusted profile/asset/source facts
+from opaque inputs, and treats malformed, duplicate, late, crashed, timed-out,
+or cancelled results as terminal failures without lowering authority. Hard
+timeout or cancellation terminates and replaces the dedicated worker. Browser
+evidence records host-observable wall time, WASM memory pages, instrumented
+frontend counters, opened inputs, diagnostics, and output bytes; it MUST NOT
+synthesize OS process metrics, browser CPU time, or JavaScript heap peaks.
 
 ### CuTe/CUTLASS requirements
 
@@ -1137,6 +1316,10 @@ Source, semantic artifacts, schemas, shapes, and runtime bindings are untrusted
 inputs. The platform MUST bound:
 
 - Source/include bytes and include depth.
+- Browser compiler worker/WASM transfer bytes, verified VFS pack/index/file
+  bytes, cache bytes, source snapshots, WASM stack/linear memory, and allocator
+  headroom as separate budgets. Mounted VFS bytes MUST fit the declared storage
+  model without consuming memory reserved for Clang AST/template work.
 - Preprocessor expansion and template-instantiation work.
 - Diagnostic count and size.
 - IR nodes, nesting, symbols, rank, and expression depth per artifact.
@@ -1459,11 +1642,21 @@ widening the frozen tensor-plan schema or treating device absence as success.
 
 - Pin one browser-local CUDA-capable Clang-WASM profile and CuTe/CUTLASS
   revision, including exact compiler/WASM assets, headers, options, target ABI,
-  and virtual include roots.
+  compiler runtime ABI, virtual include roots, worker bytes, build provenance,
+  license inventory, and reproducible build recipe.
+- Build one BrowserGrad LibTooling/AST extractor with pinned LLVM/Clang and
+  Emscripten revisions. Keep its build sysroot separate from the parsed-program
+  virtual sysroot, and prove explicit CUDA host/device semantic passes.
+- Verify compiler-resource and dependency headers through the closed v1 VFS
+  pack and collision-free installation authorities. General archives and
+  corpus-minimal header closures do not satisfy the profile.
 - Compile supported unmodified source inside a dedicated browser worker with
   bounded input, preprocessing/template work, memory, output, time, and
   cancellation. Docker, native Clang, and a compiler service are absent from
   this required path.
+- Use one producer-neutral source request and detached provenance/conformance
+  assertions. Verify exact package-owned worker bytes before Blob-worker
+  construction; no self-attestation or unverified-URL fallback is allowed.
 - Prove layout-only fixtures, then dynamic `Tensor<Engine, Layout>` binding and
   copy/view operations.
 - Preserve source spans and typed unsupported target intrinsics.
