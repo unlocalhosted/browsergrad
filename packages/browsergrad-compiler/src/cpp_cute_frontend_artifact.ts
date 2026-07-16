@@ -15,7 +15,7 @@ import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
-  type CppCuteFrontendPayloadV1,
+  type CppCuteFrontendPayloadV2,
 } from "./cpp_cute_frontend_types.js";
 import {
   cppCuteFrontendArtifactFailure,
@@ -66,7 +66,7 @@ export interface VerifyCppCuteFrontendArtifactOptions {
 }
 
 export interface VerifiedCppCuteFrontendArtifactRecord {
-  readonly envelope: WireEnvelope<CppCuteFrontendPayloadV1>;
+  readonly envelope: WireEnvelope<CppCuteFrontendPayloadV2>;
   readonly inputHashes: VerifiedCppCuteInputHashes;
   readonly artifactHash: string;
   readonly transportHash: string;
@@ -99,7 +99,7 @@ export async function verifyCppCuteFrontendArtifact(
     cppCuteFrontendArtifactFailure(
       "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
       "$.optionalMetadata",
-      "frontend artifact v1 forbids optional metadata; evidence and provenance are detached records",
+      "frontend artifact v2 forbids optional metadata; evidence and provenance are detached records",
     );
   }
   const payload = parseCppCuteFrontendPayload(envelope.payload, artifactLimits);
@@ -114,7 +114,7 @@ export async function verifyCppCuteFrontendArtifact(
       `artifactId must equal ${expectedArtifactId}`,
     );
   }
-  const normalizedEnvelope: WireEnvelope<CppCuteFrontendPayloadV1> = {
+  const normalizedEnvelope: WireEnvelope<CppCuteFrontendPayloadV2> = {
     schema: CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
     version: {
       major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
@@ -129,7 +129,7 @@ export async function verifyCppCuteFrontendArtifact(
   const artifactBytesSha256 = await sha256Hex(canonicalBytes);
   const artifactByteLength = encodeWireU64(BigInt(canonicalBytes.byteLength));
   const transportHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.frontend-artifact-transport.v1",
+    domain: "browsergrad.compiler.cpp-cute.frontend-artifact-transport.v2",
     envelope: normalizedEnvelope,
   }, { limits });
   throwIfAborted(options.signal);
@@ -220,7 +220,7 @@ export function unwrapVerifiedCppCuteFrontendArtifact(
 }
 
 export async function deriveCppCuteFrontendArtifactId(
-  payload: CppCuteFrontendPayloadV1,
+  payload: CppCuteFrontendPayloadV2,
   options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   const digest = await hashCppCuteFrontendSemantics(payload, [], options);
@@ -247,12 +247,12 @@ export async function deriveCppCuteStableId(
 }
 
 async function hashCppCuteFrontendSemantics(
-  payload: CppCuteFrontendPayloadV1,
+  payload: CppCuteFrontendPayloadV2,
   requiredExtensions: readonly string[],
   options: { readonly limits?: Partial<DecodeLimits> },
 ): Promise<string> {
   return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.frontend-artifact.v1",
+    domain: "browsergrad.compiler.cpp-cute.frontend-artifact.v2",
     schema: CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
     version: {
       major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,

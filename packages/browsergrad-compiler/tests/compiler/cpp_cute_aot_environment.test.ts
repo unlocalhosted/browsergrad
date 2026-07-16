@@ -24,9 +24,10 @@ describe("C++/CuTe execution-environment authority", () => {
   it("strictly authorizes one immutable canonical environment for one profile", async () => {
     const fixture = await createCppCuteAotExecutionEnvironmentFixture();
     expect(fixture.environment).toMatchObject({
-      manifestId: expect.stringMatching(/^bg\.cpp\.execution-environment\.sha256\.[0-9a-f]{64}$/u),
-      manifestSha256: await sha256Hex(fixture.bytes),
-      manifestByteLength: String(fixture.bytes.byteLength),
+      manifestId: "bg.cpp.execution-environment.sha256.e6f5ff1a9196858230bb274c410cdfc9e5881eaf7c96d2f29aca7e4e5a3d963a",
+      manifestSha256: "4260949ce2950596b2b74f192c1a4e20895a9b306ec645309c0ff1ce032689b8",
+      manifestByteLength: "6588",
+      bodySha256: "e6f5ff1a9196858230bb274c410cdfc9e5881eaf7c96d2f29aca7e4e5a3d963a",
       profileHash: fixture.profile.profileHash,
     });
     const record = unwrapPreparedCppCuteAotExecutionEnvironment(fixture.environment);
@@ -105,7 +106,15 @@ describe("C++/CuTe execution-environment authority", () => {
       (input) => { asMutableObject(input.body.scope).sandboxPolicySha256 = "f".repeat(64); },
       (input) => { asMutableObject(input.body.image).manifestDigest = `sha256:${"0".repeat(64)}`; },
       (input) => { asMutableObject(input.body.toolchain.binaries[0]).sha256 = "f".repeat(64); },
-      (input) => { asMutableObject(input.body.toolchain.headerSets[0]).headerSetSha256 = "f".repeat(64); },
+      (input) => {
+        const headerSet = input.body.toolchain.headerSets[0];
+        if (headerSet === undefined) throw new Error("fixture lost its first header set");
+        asMutableObject(headerSet).headerSetSha256 = "f".repeat(64);
+        const root = input.body.toolchain.includeRoots.find((entry) =>
+          entry.owner.kind === "dependency" && entry.owner.dependencyId === headerSet.dependencyId);
+        if (root === undefined) throw new Error("fixture lost its first dependency-owned include root");
+        asMutableObject(root).manifestSha256 = "f".repeat(64);
+      },
       (input) => { asMutableObject(input.body.toolchain.includeRoots[0]).manifestSha256 = "f".repeat(64); },
       (input) => { asMutableObject(input.body.attestation).trustStoreSha256 = "f".repeat(64); },
     ];
@@ -123,6 +132,90 @@ describe("C++/CuTe execution-environment authority", () => {
       }));
       await expect(prepareCppCuteAotExecutionEnvironment(profile, bytes)).rejects.toMatchObject({
         code: "BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-PROFILE-MISMATCH",
+      });
+    }
+  });
+
+  it("rejects invalid or ambiguous include-root ownership before profile authorization", async () => {
+    const base = await createCppCuteAotExecutionEnvironmentFixture();
+
+    const unknownOwner = cloneEnvironmentInput(base.input);
+    asMutableObject(unknownOwner.body.toolchain.includeRoots[0]).owner = { kind: "host" };
+    await expect(prepareCppCuteAotExecutionEnvironment(
+      base.profile,
+      await canonicalEnvironmentBytes(unknownOwner),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-INVALID",
+      path: "$.body.toolchain.includeRoots[0].owner.kind",
+    });
+
+    const missingDependency = cloneEnvironmentInput(base.input);
+    asMutableObject(missingDependency.body.toolchain.includeRoots[2]).owner = {
+      kind: "dependency",
+      dependencyId: "missing",
+    };
+    await expect(prepareCppCuteAotExecutionEnvironment(
+      base.profile,
+      await canonicalEnvironmentBytes(missingDependency),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-INVALID",
+      path: "$.body.toolchain.includeRoots[2].owner.dependencyId",
+    });
+
+    const duplicatePath = cloneEnvironmentInput(base.input);
+    const firstRoot = duplicatePath.body.toolchain.includeRoots[0];
+    const secondRoot = duplicatePath.body.toolchain.includeRoots[1];
+    if (firstRoot === undefined || secondRoot === undefined) throw new Error("fixture lost include roots");
+    asMutableObject(secondRoot).virtualPath = firstRoot.virtualPath;
+    await expect(prepareCppCuteAotExecutionEnvironment(
+      base.profile,
+      await canonicalEnvironmentBytes(duplicatePath),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-INVALID",
+      path: "$.body.toolchain.includeRoots[1].virtualPath",
+    });
+  });
+
+  it("rejects valid owner or semantic-adapter drift from the exact prepared profile", async () => {
+    const base = await createCppCuteAotExecutionEnvironmentFixture();
+    const cases: Array<{
+      readonly input: typeof base.input;
+      readonly path: string;
+    }> = [];
+
+    const ownerDrift = cloneEnvironmentInput(base.input);
+    const cudaRoot = ownerDrift.body.toolchain.includeRoots.find((root) =>
+      root.owner.kind === "dependency" && root.owner.dependencyId === "cuda");
+    const cutlassRoot = ownerDrift.body.toolchain.includeRoots.find((root) =>
+      root.owner.kind === "dependency" && root.owner.dependencyId === "cutlass");
+    const cudaHeaders = ownerDrift.body.toolchain.headerSets.find((headerSet) => headerSet.dependencyId === "cuda");
+    const cutlassHeaders = ownerDrift.body.toolchain.headerSets.find((headerSet) => headerSet.dependencyId === "cutlass");
+    if (cudaRoot === undefined || cutlassRoot === undefined || cudaHeaders === undefined || cutlassHeaders === undefined) {
+      throw new Error("fixture lost CUDA/CUTLASS ownership records");
+    }
+    asMutableObject(cudaRoot).owner = { kind: "dependency", dependencyId: "cutlass" };
+    asMutableObject(cudaRoot).manifestSha256 = cutlassHeaders.headerSetSha256;
+    asMutableObject(cutlassRoot).owner = { kind: "dependency", dependencyId: "cuda" };
+    asMutableObject(cutlassRoot).manifestSha256 = cudaHeaders.headerSetSha256;
+    cases.push({ input: ownerDrift, path: "$.body.toolchain.includeRoots" });
+
+    const adapterDrift = cloneEnvironmentInput(base.input);
+    asMutableObject(adapterDrift.body.toolchain).semanticAdapterManifestSha256 = "f".repeat(64);
+    cases.push({
+      input: adapterDrift,
+      path: "$.body.toolchain.semanticAdapterManifestSha256",
+    });
+
+    for (const { input, path } of cases) {
+      const closureHashes = await computeCppCuteAotExecutionEnvironmentClosureHashes(input.body);
+      asMutableObject(input.body.toolchain).headersManifestSha256 = closureHashes.headersManifestSha256;
+      const bytes = await canonicalEnvironmentBytes(input);
+      const profile = await prepareCppCuteFrontendProfile(createCppCuteProfileInput({
+        executionEnvironmentManifestSha256: await sha256Hex(bytes),
+      }));
+      await expect(prepareCppCuteAotExecutionEnvironment(profile, bytes)).rejects.toMatchObject({
+        code: "BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-PROFILE-MISMATCH",
+        path,
       });
     }
   });
@@ -183,7 +276,7 @@ describe("C++/CuTe execution-environment authority", () => {
   it("rejects unsupported versions and resource amplification", async () => {
     const fixture = await createCppCuteAotExecutionEnvironmentFixture();
     const version = cloneEnvironmentInput(fixture.input);
-    asMutableObject(version).version = { major: 2, minor: 0 };
+    asMutableObject(version).version = { major: 1, minor: 0 };
     await expect(prepareCppCuteAotExecutionEnvironment(
       fixture.profile,
       canonicalJsonBytes(version),

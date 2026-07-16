@@ -17,12 +17,13 @@ import {
   unwrapPreparedCppCuteFrontendProfile,
   type CppCuteFrontendDependencyProfile,
   type CppCuteFrontendIncludeRoot,
+  type CppCuteFrontendIncludeRootOwner,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
 
 export const CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_SCHEMA =
   "browsergrad.compiler.cpp-cute.execution-environment";
-export const CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_MAJOR = 1;
+export const CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_MAJOR = 2;
 export const CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_MINOR = 0;
 export const CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_EVIDENCE_SCHEMA =
   "browsergrad.compiler.cpp-cute.execution-environment-evidence@1";
@@ -44,6 +45,7 @@ const OCI_SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const MANIFEST_ID = /^bg\.cpp\.execution-environment\.sha256\.[0-9a-f]{64}$/u;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9.+:~_-]{0,127}$/u;
 const IDENTIFIER = /^[a-z][a-z0-9._/-]{0,255}$/u;
+const DEPENDENCY_ID = /^[a-z][a-z0-9._-]*$/u;
 const ABSOLUTE_PATH = /^\/(?:[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)*)?$/u;
 const PREPARED_ENVIRONMENTS = new WeakMap<object, StoredCppCuteAotExecutionEnvironmentRecord>();
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
@@ -92,9 +94,10 @@ export interface CppCuteAotExecutionEnvironmentIncludeRoot extends JsonObject {
   readonly mode: CppCuteFrontendIncludeRoot["mode"];
   readonly virtualPath: string;
   readonly manifestSha256: string;
+  readonly owner: CppCuteFrontendIncludeRootOwner;
 }
 
-export interface CppCuteAotExecutionEnvironmentManifestV1 extends JsonObject {
+export interface CppCuteAotExecutionEnvironmentManifestV2 extends JsonObject {
   readonly schema: typeof CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_SCHEMA;
   readonly version: CppCuteAotExecutionEnvironmentVersion;
   readonly manifestId: string;
@@ -177,6 +180,7 @@ export interface CppCuteAotExecutionEnvironmentManifestV1 extends JsonObject {
       readonly dynamicLibrariesManifestSha256: string;
       readonly headersManifestSha256: string;
       readonly resourceDirectorySha256: string;
+      readonly semanticAdapterManifestSha256: string;
       readonly binaries: readonly CppCuteAotExecutionEnvironmentBinary[];
       readonly dynamicLibraries: readonly CppCuteAotExecutionEnvironmentDynamicLibrary[];
       readonly headerSets: readonly CppCuteAotExecutionEnvironmentHeaderSet[];
@@ -216,7 +220,7 @@ export interface PreparedCppCuteAotExecutionEnvironment {
 
 export interface PreparedCppCuteAotExecutionEnvironmentRecord {
   readonly profile: PreparedCppCuteFrontendProfile;
-  readonly manifest: CppCuteAotExecutionEnvironmentManifestV1;
+  readonly manifest: CppCuteAotExecutionEnvironmentManifestV2;
 }
 
 interface StoredCppCuteAotExecutionEnvironmentRecord
@@ -281,7 +285,7 @@ export async function prepareCppCuteAotExecutionEnvironment(
   }
   throwIfAborted(signal);
   const bodySha256 = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.execution-environment.v1",
+    domain: "browsergrad.compiler.cpp-cute.execution-environment.v2",
     body: manifest.body,
   }, { limits: CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_DECODE_LIMITS });
   const expectedManifestId = `bg.cpp.execution-environment.sha256.${bodySha256}`;
@@ -300,7 +304,7 @@ export async function prepareCppCuteAotExecutionEnvironment(
   }
   verifyProfileClosure(profileRecord.profile, manifest.body);
   throwIfAborted(signal);
-  const frozen = deepFreezeJson(manifest) as CppCuteAotExecutionEnvironmentManifestV1;
+  const frozen = deepFreezeJson(manifest) as CppCuteAotExecutionEnvironmentManifestV2;
   const prepared = Object.freeze({
     manifestId: expectedManifestId,
     manifestSha256,
@@ -336,25 +340,25 @@ export function copyPreparedCppCuteAotExecutionEnvironmentBytes(
  * their independent raw-resource hashes.
  */
 export async function computeCppCuteAotExecutionEnvironmentClosureHashes(
-  body: CppCuteAotExecutionEnvironmentManifestV1["body"],
+  body: CppCuteAotExecutionEnvironmentManifestV2["body"],
 ): Promise<CppCuteAotExecutionEnvironmentClosureHashes> {
   const options = { limits: CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_DECODE_LIMITS } as const;
   const [rootfsManifestSha256, binariesManifestSha256, dynamicLibrariesManifestSha256, headersManifestSha256] =
     await Promise.all([
       hashCanonicalJson({
-        domain: "browsergrad.compiler.cpp-cute.execution-environment.rootfs.v1",
+        domain: "browsergrad.compiler.cpp-cute.execution-environment.rootfs.v2",
         layers: body.image.layers,
       }, options),
       hashCanonicalJson({
-        domain: "browsergrad.compiler.cpp-cute.execution-environment.binaries.v1",
+        domain: "browsergrad.compiler.cpp-cute.execution-environment.binaries.v2",
         binaries: body.toolchain.binaries,
       }, options),
       hashCanonicalJson({
-        domain: "browsergrad.compiler.cpp-cute.execution-environment.dynamic-libraries.v1",
+        domain: "browsergrad.compiler.cpp-cute.execution-environment.dynamic-libraries.v2",
         dynamicLibraries: body.toolchain.dynamicLibraries,
       }, options),
       hashCanonicalJson({
-        domain: "browsergrad.compiler.cpp-cute.execution-environment.headers.v1",
+        domain: "browsergrad.compiler.cpp-cute.execution-environment.headers.v2",
         headerSets: body.toolchain.headerSets,
         includeRoots: body.toolchain.includeRoots,
       }, options),
@@ -368,7 +372,7 @@ export async function computeCppCuteAotExecutionEnvironmentClosureHashes(
 }
 
 async function verifyInlineClosureHashes(
-  body: CppCuteAotExecutionEnvironmentManifestV1["body"],
+  body: CppCuteAotExecutionEnvironmentManifestV2["body"],
 ): Promise<void> {
   const expected = await computeCppCuteAotExecutionEnvironmentClosureHashes(body);
   const actual = {
@@ -396,7 +400,7 @@ function storedEnvironment(
   return record;
 }
 
-function parseManifest(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1 {
+function parseManifest(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2 {
   const root = closedObject(value, ["schema", "version", "manifestId", "body"], "$", true);
   if (root.schema !== CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_SCHEMA) {
     invalid("$.schema", `schema must equal ${CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_SCHEMA}`);
@@ -421,7 +425,7 @@ function parseManifest(value: JsonValue): CppCuteAotExecutionEnvironmentManifest
   };
 }
 
-function parseBody(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["body"] {
+function parseBody(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2["body"] {
   const body = closedObject(
     value,
     ["scope", "platform", "runtime", "image", "toolchain", "attestation"],
@@ -438,7 +442,7 @@ function parseBody(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["
   };
 }
 
-function parseScope(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["body"]["scope"] {
+function parseScope(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2["body"]["scope"] {
   const path = "$.body.scope";
   const object = closedObject(
     value,
@@ -459,7 +463,7 @@ function parseScope(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1[
   };
 }
 
-function parsePlatform(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["body"]["platform"] {
+function parsePlatform(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2["body"]["platform"] {
   const path = "$.body.platform";
   const object = closedObject(
     value,
@@ -546,7 +550,7 @@ function parsePlatform(value: JsonValue): CppCuteAotExecutionEnvironmentManifest
   };
 }
 
-function parseRuntime(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["body"]["runtime"] {
+function parseRuntime(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2["body"]["runtime"] {
   const path = "$.body.runtime";
   const object = closedObject(value, ["docker", "containerd", "runc", "seccomp"], path, true);
   const dockerPath = `${path}.docker`;
@@ -594,7 +598,7 @@ function parseRuntime(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV
   };
 }
 
-function parseImage(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["body"]["image"] {
+function parseImage(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2["body"]["image"] {
   const path = "$.body.image";
   const object = closedObject(
     value,
@@ -635,11 +639,21 @@ function parseImage(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1[
   };
 }
 
-function parseToolchain(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["body"]["toolchain"] {
+function parseToolchain(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2["body"]["toolchain"] {
   const path = "$.body.toolchain";
   const object = closedObject(
     value,
-    ["binariesManifestSha256", "dynamicLibrariesManifestSha256", "headersManifestSha256", "resourceDirectorySha256", "binaries", "dynamicLibraries", "headerSets", "includeRoots"],
+    [
+      "binariesManifestSha256",
+      "dynamicLibrariesManifestSha256",
+      "headersManifestSha256",
+      "resourceDirectorySha256",
+      "semanticAdapterManifestSha256",
+      "binaries",
+      "dynamicLibraries",
+      "headerSets",
+      "includeRoots",
+    ],
     path,
     true,
   );
@@ -650,11 +664,20 @@ function parseToolchain(value: JsonValue): CppCuteAotExecutionEnvironmentManifes
   );
   const headerSets = parseHeaderSets(field(object, "headerSets", path), `${path}.headerSets`);
   const includeRoots = parseIncludeRoots(field(object, "includeRoots", path), `${path}.includeRoots`);
+  const resourceDirectorySha256 = sha256(
+    field(object, "resourceDirectorySha256", path),
+    `${path}.resourceDirectorySha256`,
+  );
+  validateHeaderClosure(headerSets, includeRoots, resourceDirectorySha256);
   return {
     binariesManifestSha256: sha256(field(object, "binariesManifestSha256", path), `${path}.binariesManifestSha256`),
     dynamicLibrariesManifestSha256: sha256(field(object, "dynamicLibrariesManifestSha256", path), `${path}.dynamicLibrariesManifestSha256`),
     headersManifestSha256: sha256(field(object, "headersManifestSha256", path), `${path}.headersManifestSha256`),
-    resourceDirectorySha256: sha256(field(object, "resourceDirectorySha256", path), `${path}.resourceDirectorySha256`),
+    resourceDirectorySha256,
+    semanticAdapterManifestSha256: sha256(
+      field(object, "semanticAdapterManifestSha256", path),
+      `${path}.semanticAdapterManifestSha256`,
+    ),
     binaries,
     dynamicLibraries,
     headerSets,
@@ -662,7 +685,7 @@ function parseToolchain(value: JsonValue): CppCuteAotExecutionEnvironmentManifes
   };
 }
 
-function parseAttestation(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV1["body"]["attestation"] {
+function parseAttestation(value: JsonValue): CppCuteAotExecutionEnvironmentManifestV2["body"]["attestation"] {
   const path = "$.body.attestation";
   const object = closedObject(
     value,
@@ -741,11 +764,12 @@ function parseHeaderSets(value: JsonValue, path: string): readonly CppCuteAotExe
       true,
     );
     const kind = boundedString(field(object, "kind", itemPath), `${itemPath}.kind`, 64);
-    if (!(["cuda-toolkit", "cutlass", "cccl", "cxx-standard-library"] as const).includes(kind as never)) {
+    if (!(["cuda-toolkit", "cutlass", "cccl", "cxx-standard-library", "c-system-headers", "linux-sysroot"] as const)
+      .includes(kind as never)) {
       invalid(`${itemPath}.kind`, "unknown header-set dependency kind");
     }
     return {
-      dependencyId: boundedPattern(field(object, "dependencyId", itemPath), `${itemPath}.dependencyId`, IDENTIFIER),
+      dependencyId: boundedPattern(field(object, "dependencyId", itemPath), `${itemPath}.dependencyId`, DEPENDENCY_ID),
       kind: kind as CppCuteFrontendDependencyProfile["kind"],
       version: boundedVersion(field(object, "version", itemPath), `${itemPath}.version`),
       revision: boundedVersion(field(object, "revision", itemPath), `${itemPath}.revision`),
@@ -759,28 +783,103 @@ function parseHeaderSets(value: JsonValue, path: string): readonly CppCuteAotExe
 function parseIncludeRoots(value: JsonValue, path: string): readonly CppCuteAotExecutionEnvironmentIncludeRoot[] {
   const values = array(value, path);
   if (values.length === 0 || values.length > 128) resource(path, "include-root closure must contain 1..128 entries");
-  const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenPaths = new Set<string>();
   return values.map((entry, index): CppCuteAotExecutionEnvironmentIncludeRoot => {
     const itemPath = `${path}[${index}]`;
-    const object = closedObject(entry, ["includeRootId", "mode", "virtualPath", "manifestSha256"], itemPath, true);
-    const includeRootId = boundedPattern(field(object, "includeRootId", itemPath), `${itemPath}.includeRootId`, IDENTIFIER);
-    if (seen.has(includeRootId)) invalid(`${itemPath}.includeRootId`, "include-root IDs must be unique");
-    seen.add(includeRootId);
+    const object = closedObject(
+      entry,
+      ["includeRootId", "mode", "virtualPath", "manifestSha256", "owner"],
+      itemPath,
+      true,
+    );
+    const includeRootId = boundedPattern(
+      field(object, "includeRootId", itemPath),
+      `${itemPath}.includeRootId`,
+      DEPENDENCY_ID,
+    );
+    if (seenIds.has(includeRootId)) invalid(`${itemPath}.includeRootId`, "include-root IDs must be unique");
+    seenIds.add(includeRootId);
     const mode = field(object, "mode", itemPath);
     if (mode !== "quote" && mode !== "system") invalid(`${itemPath}.mode`, "include-root mode must be quote or system");
+    const virtualPath = absolutePath(field(object, "virtualPath", itemPath), `${itemPath}.virtualPath`);
+    if (seenPaths.has(virtualPath)) invalid(`${itemPath}.virtualPath`, "include-root paths must have unique ownership");
+    seenPaths.add(virtualPath);
     return {
       includeRootId,
       mode,
-      virtualPath: absolutePath(field(object, "virtualPath", itemPath), `${itemPath}.virtualPath`),
+      virtualPath,
       manifestSha256: sha256(field(object, "manifestSha256", itemPath), `${itemPath}.manifestSha256`),
+      owner: parseIncludeRootOwner(field(object, "owner", itemPath), `${itemPath}.owner`),
     };
   });
 }
 
-function parseLsm(value: JsonValue, path: string): CppCuteAotExecutionEnvironmentManifestV1["body"]["platform"]["lsm"] {
+function parseIncludeRootOwner(value: JsonValue, path: string): CppCuteFrontendIncludeRootOwner {
+  const object = closedObject(value, ["kind", "dependencyId"], path, false);
+  const kind = field(object, "kind", path);
+  if (kind === "source" || kind === "compiler-resource-directory") {
+    closedObject(object, ["kind"], path, true);
+    return { kind };
+  }
+  if (kind === "dependency") {
+    const dependency = closedObject(object, ["kind", "dependencyId"], path, true);
+    return {
+      kind,
+      dependencyId: boundedPattern(
+        field(dependency, "dependencyId", path),
+        `${path}.dependencyId`,
+        DEPENDENCY_ID,
+      ),
+    };
+  }
+  invalid(`${path}.kind`, "unknown include-root owner kind");
+}
+
+function validateHeaderClosure(
+  headerSets: readonly CppCuteAotExecutionEnvironmentHeaderSet[],
+  includeRoots: readonly CppCuteAotExecutionEnvironmentIncludeRoot[],
+  resourceDirectorySha256: string,
+): void {
+  const dependencies = new Map(headerSets.map((headerSet) => [headerSet.dependencyId, headerSet]));
+  const ownedDependencies = new Set<string>();
+  let compilerResourceRoots = 0;
+  for (const [index, root] of includeRoots.entries()) {
+    const path = `$.body.toolchain.includeRoots[${index}]`;
+    if (root.owner.kind === "source") continue;
+    if (root.owner.kind === "compiler-resource-directory") {
+      compilerResourceRoots += 1;
+      if (root.manifestSha256 !== resourceDirectorySha256) {
+        invalid(`${path}.manifestSha256`, "compiler-owned root differs from the resource-directory manifest");
+      }
+      continue;
+    }
+    const dependency = dependencies.get(root.owner.dependencyId);
+    if (dependency === undefined) {
+      invalid(`${path}.owner.dependencyId`, "include-root owner does not name an environment header set");
+    }
+    if (root.manifestSha256 !== dependency.headerSetSha256) {
+      invalid(`${path}.manifestSha256`, "dependency-owned root differs from its environment header set");
+    }
+    ownedDependencies.add(dependency.dependencyId);
+  }
+  if (compilerResourceRoots !== 1) {
+    invalid("$.body.toolchain.includeRoots", "environment must expose exactly one compiler resource-directory root");
+  }
+  for (const headerSet of headerSets) {
+    if (!ownedDependencies.has(headerSet.dependencyId)) {
+      invalid(
+        "$.body.toolchain.includeRoots",
+        `header set ${JSON.stringify(headerSet.dependencyId)} must own at least one include root`,
+      );
+    }
+  }
+}
+
+function parseLsm(value: JsonValue, path: string): CppCuteAotExecutionEnvironmentManifestV2["body"]["platform"]["lsm"] {
   const values = array(value, path);
   if (values.length === 0 || values.length > 2) invalid(path, "one or two enforcing LSM policies are required");
-  const entries = values.map((entry, index): CppCuteAotExecutionEnvironmentManifestV1["body"]["platform"]["lsm"][number] => {
+  const entries = values.map((entry, index): CppCuteAotExecutionEnvironmentManifestV2["body"]["platform"]["lsm"][number] => {
     const itemPath = `${path}[${index}]`;
     const object = closedObject(entry, ["kind", "policySha256", "enforcing"], itemPath, true);
     const kindValue = field(object, "kind", itemPath);
@@ -799,7 +898,7 @@ function parseLsm(value: JsonValue, path: string): CppCuteAotExecutionEnvironmen
 
 function verifyProfileClosure(
   profile: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>["profile"],
-  body: CppCuteAotExecutionEnvironmentManifestV1["body"],
+  body: CppCuteAotExecutionEnvironmentManifestV2["body"],
 ): void {
   if (
     body.scope.contractId !== profile.deployment.contractId
@@ -829,6 +928,15 @@ function verifyProfileClosure(
     || extractor.buildId !== profile.deployment.extractor.buildId
     || extractor.sha256 !== profile.deployment.extractor.binarySha256
   ) profileMismatch("$.body.toolchain.binaries.extractor", "environment extractor differs from prepared profile");
+  if (
+    body.toolchain.semanticAdapterManifestSha256
+      !== profile.deployment.extractor.semanticAdapterManifestSha256
+  ) {
+    profileMismatch(
+      "$.body.toolchain.semanticAdapterManifestSha256",
+      "environment semantic adapter differs from the prepared extractor profile",
+    );
+  }
   if (
     compiler === undefined
     || compiler.id !== profile.toolchain.compiler.id

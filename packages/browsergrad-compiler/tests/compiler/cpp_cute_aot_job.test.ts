@@ -11,17 +11,16 @@ import {
   deriveCppCuteAotSourceFileId,
   prepareCppCuteAotJob,
   unwrapPreparedCppCuteAotJob,
-  type CppCuteAotEntryRequestV1,
-  type CppCuteAotJobBodyV1,
-  type CppCuteAotJobV1,
-  type CppCuteAotSourceFileV1,
+  type CppCuteAotEntryRequestV2,
+  type CppCuteAotJobBodyV2,
+  type CppCuteAotJobV2,
+  type CppCuteAotSourceFileV2,
 } from "../../src/cpp_cute_aot_job.js";
 import {
   prepareCppCuteFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../src/cpp_cute_frontend_profile.js";
 import {
-  CPP_CUTE_FIXTURE_ENTRY_ID,
   CPP_CUTE_FIXTURE_HEADER_SET_HASH,
   CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
   CPP_CUTE_FIXTURE_SOURCE_REVISION,
@@ -45,58 +44,59 @@ const wire = (value: number): WireU64 => parseWireU64(String(value));
 
 interface JobFixture {
   readonly profile: PreparedCppCuteFrontendProfile;
-  readonly job: CppCuteAotJobV1;
+  readonly job: CppCuteAotJobV2;
 }
 
 async function createJobFixture(): Promise<JobFixture> {
   const profile = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
-  const requestWithoutId = {
-    requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
-    expectedEntryId: CPP_CUTE_FIXTURE_ENTRY_ID,
-    kind: "layout" as const,
-    declarationKind: "variable" as const,
-    anchor: {
-      virtualPath: "/workspace/src/layout.cu",
-      beginByte: wire(TOKEN_BEGIN),
-      endByte: wire(TOKEN_BEGIN + TOKEN.length),
-      tokenSha256: await sha256Hex(new TextEncoder().encode(TOKEN)),
-    },
-  } satisfies CppCuteAotEntryRequestV1;
-  const request: CppCuteAotEntryRequestV1 = {
-    ...requestWithoutId,
-    requestId: await deriveCppCuteAotEntryRequestId(requestWithoutId),
-  };
   const sourceFileWithoutId = {
     fileId: `bg.cpp.file.sha256.${"0".repeat(64)}`,
     role: "main-source" as const,
     virtualPath: "/workspace/src/layout.cu",
     contentSha256: await sha256Hex(SOURCE_BYTES),
     byteLength: wire(SOURCE_BYTES.byteLength),
-  } satisfies CppCuteAotSourceFileV1;
-  const sourceFile: CppCuteAotSourceFileV1 = {
+  } satisfies CppCuteAotSourceFileV2;
+  const sourceFile: CppCuteAotSourceFileV2 = {
     ...sourceFileWithoutId,
     fileId: await deriveCppCuteAotSourceFileId(sourceFileWithoutId),
   };
+  const source = {
+    repository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
+    revision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
+  };
+  const anchor = {
+    virtualPath: "/workspace/src/layout.cu",
+    beginByte: wire(TOKEN_BEGIN),
+    endByte: wire(TOKEN_BEGIN + TOKEN.length),
+    tokenSha256: await sha256Hex(new TextEncoder().encode(TOKEN)),
+  };
+  const requestWithoutId = {
+    requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
+    kind: "layout" as const,
+    declarationKind: "variable" as const,
+    anchor,
+  } satisfies CppCuteAotEntryRequestV2;
+  const request: CppCuteAotEntryRequestV2 = {
+    ...requestWithoutId,
+    requestId: await deriveCppCuteAotEntryRequestId(requestWithoutId),
+  };
   const body = {
     schema: CPP_CUTE_AOT_JOB_SCHEMA,
-    version: { major: 1 as const, minor: 0 as const },
+    version: { major: 2 as const, minor: 0 as const },
     profileHash: profile.profileHash,
-    source: {
-      repository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
-      revision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
-    },
+    source,
     mainVirtualPath: "/workspace/src/layout.cu",
     files: [sourceFile],
     entryRequests: [request],
     expectedOutput: {
       schema: "browsergrad.compiler.cpp-cute.frontend-artifact" as const,
-      version: { major: 1 as const, minor: 0 as const },
+      version: { major: 2 as const, minor: 0 as const },
       sourceSetSha256: "a".repeat(64),
       headerSetSha256: CPP_CUTE_FIXTURE_HEADER_SET_HASH,
       inputClosureSha256: "b".repeat(64),
     },
-  } satisfies CppCuteAotJobBodyV1;
-  const job: CppCuteAotJobV1 = {
+  } satisfies CppCuteAotJobBodyV2;
+  const job: CppCuteAotJobV2 = {
     ...body,
     jobId: await deriveCppCuteAotJobId(body),
   };
@@ -116,20 +116,19 @@ describe("C++/CuTe AOT producer request", () => {
       sourceFileCount: 1,
       sourceBytes: String(SOURCE_BYTES.byteLength),
       entryRequestId: fixture.job.entryRequests[0]?.requestId,
-      expectedEntryId: CPP_CUTE_FIXTURE_ENTRY_ID,
     });
     expect(prepared.jobId).toBe(
-      "bg.cpp.aot-job.sha256.6ef2111b35d223593f8c30ffb908f263db37488aef360d940662c860be1b9b21",
+      "bg.cpp.aot-job.sha256.79a39a927f11063e146a680e5af554c6a602eeacd48b713fe7767caab209d59a",
     );
     expect(prepared.entryRequestId).toBe(
-      "bg.cpp.entry-request.sha256.b3bcfcdba40d2d0980480de85525f5ec9e30370d404b8fec4815f5b2ecaa9af2",
+      "bg.cpp.entry-request.sha256.6f962caa8bc9f13d38abdaab77f296fd412e1323c1d077dbf8152eda4cbbbb5e",
     );
     expect(Object.isFrozen(prepared)).toBe(true);
     expect(record.profile).toBe(fixture.profile);
     expect(record.job).not.toBe(fixture.job);
     expect(Object.isFrozen(record.job)).toBe(true);
     expect(record.job.files[0]?.fileId).toBe(
-      "bg.cpp.file.sha256.73153ae2fbc60cd447e711b94af5005399a520da45fdb6140ede80bd636047a1",
+      "bg.cpp.file.sha256.c6e62a64117c1457ac5a91022e417ea258dbed7304ee7ebb6d350c1da795c68c",
     );
     expect(record.job).not.toHaveProperty("command");
     expect(record.job).not.toHaveProperty("compilerFlags");
@@ -137,37 +136,108 @@ describe("C++/CuTe AOT producer request", () => {
     expect(record.job).not.toHaveProperty("outputPath");
   });
 
+  it("keeps request identity output-independent and binds the full source closure to the job", async () => {
+    const fixture = await createJobFixture();
+    const request = fixture.job.entryRequests[0];
+    if (request === undefined) throw new Error("fixture lost entry request");
+    const canonicalRequestId = await deriveCppCuteAotEntryRequestId(request);
+    expect(canonicalRequestId).toBe(request.requestId);
+
+    const outputDrift = structuredClone(fixture.job) as CppCuteAotJobV2;
+    (outputDrift.expectedOutput as { sourceSetSha256: string }).sourceSetSha256 = "f".repeat(64);
+    (outputDrift as { jobId: string }).jobId = await deriveCppCuteAotJobId(outputDrift);
+    expect(outputDrift.jobId).not.toBe(fixture.job.jobId);
+    expect(await deriveCppCuteAotEntryRequestId(outputDrift.entryRequests[0]!)).toBe(canonicalRequestId);
+
+    const withHeader = async (content: string): Promise<CppCuteAotJobV2> => {
+      const bytes = new TextEncoder().encode(content);
+      const headerWithoutId = {
+        fileId: `bg.cpp.file.sha256.${"0".repeat(64)}`,
+        role: "project-header" as const,
+        virtualPath: "/workspace/src/project_config.cuh",
+        contentSha256: await sha256Hex(bytes),
+        byteLength: wire(bytes.byteLength),
+      } satisfies CppCuteAotSourceFileV2;
+      const header = {
+        ...headerWithoutId,
+        fileId: await deriveCppCuteAotSourceFileId(headerWithoutId),
+      } satisfies CppCuteAotSourceFileV2;
+      const job = structuredClone(fixture.job) as CppCuteAotJobV2;
+      (job as unknown as { files: CppCuteAotSourceFileV2[] }).files = [...job.files, header]
+        .sort((left, right) => left.virtualPath.localeCompare(right.virtualPath));
+      (job as { jobId: string }).jobId = await deriveCppCuteAotJobId(job);
+      return job;
+    };
+    const firstHeader = await withHeader("#pragma once\nconstexpr int project_value = 1;\n");
+    const changedHeader = await withHeader("#pragma once\nconstexpr int project_value = 2;\n");
+    expect(firstHeader.jobId).not.toBe(fixture.job.jobId);
+    expect(changedHeader.jobId).not.toBe(firstHeader.jobId);
+    expect(await deriveCppCuteAotEntryRequestId(firstHeader.entryRequests[0]!)).toBe(canonicalRequestId);
+    expect(await deriveCppCuteAotEntryRequestId(changedHeader.entryRequests[0]!)).toBe(canonicalRequestId);
+    await expect(prepareCppCuteAotJob(fixture.profile, firstHeader)).resolves.toMatchObject({
+      sourceFileCount: 2,
+      entryRequestId: canonicalRequestId,
+    });
+    await expect(prepareCppCuteAotJob(fixture.profile, changedHeader)).resolves.toMatchObject({
+      sourceFileCount: 2,
+      entryRequestId: canonicalRequestId,
+    });
+
+    const changedAnchor = structuredClone(request) as CppCuteAotEntryRequestV2;
+    (changedAnchor.anchor as { tokenSha256: string }).tokenSha256 = "f".repeat(64);
+    expect(await deriveCppCuteAotEntryRequestId(changedAnchor)).not.toBe(canonicalRequestId);
+  });
+
+  it("rejects stale request and job IDs", async () => {
+    const fixture = await createJobFixture();
+
+    const staleRequest = structuredClone(fixture.job) as CppCuteAotJobV2;
+    (staleRequest.entryRequests[0]?.anchor as { tokenSha256: string }).tokenSha256 = "f".repeat(64);
+    await expect(prepareCppCuteAotJob(fixture.profile, staleRequest)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-JOB-HASH-MISMATCH",
+      path: "$.entryRequests[0].requestId",
+    });
+
+    const staleJob = structuredClone(fixture.job) as CppCuteAotJobV2;
+    (staleJob.expectedOutput as { sourceSetSha256: string }).sourceSetSha256 = "f".repeat(64);
+    await expect(prepareCppCuteAotJob(fixture.profile, staleJob)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-JOB-HASH-MISMATCH",
+      path: "$.jobId",
+    });
+  });
+
   it("rejects profile and content-address drift before authority", async () => {
     const fixture = await createJobFixture();
-    const profileDrift = structuredClone(fixture.job) as CppCuteAotJobV1;
+    const profileDrift = structuredClone(fixture.job) as CppCuteAotJobV2;
     (profileDrift as { profileHash: string }).profileHash = "f".repeat(64);
     await expect(prepareCppCuteAotJob(fixture.profile, profileDrift)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-JOB-PROFILE-MISMATCH",
       path: "$.profileHash",
     });
 
-    const headerDrift = structuredClone(fixture.job) as CppCuteAotJobV1;
+    const headerDrift = structuredClone(fixture.job) as CppCuteAotJobV2;
     (headerDrift.expectedOutput as { headerSetSha256: string }).headerSetSha256 = "f".repeat(64);
     await expect(prepareCppCuteAotJob(fixture.profile, headerDrift)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-JOB-PROFILE-MISMATCH",
       path: "$.expectedOutput.headerSetSha256",
     });
 
-    const requestDrift = structuredClone(fixture.job) as CppCuteAotJobV1;
-    (requestDrift.entryRequests[0]?.anchor as { tokenSha256: string }).tokenSha256 = "f".repeat(64);
+    const requestDrift = structuredClone(fixture.job) as CppCuteAotJobV2;
+    (requestDrift.entryRequests[0] as { requestId: string }).requestId =
+      `bg.cpp.entry-request.sha256.${"f".repeat(64)}`;
     await expect(prepareCppCuteAotJob(fixture.profile, requestDrift)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-JOB-HASH-MISMATCH",
       path: "$.entryRequests[0].requestId",
     });
 
-    const fileDrift = structuredClone(fixture.job) as CppCuteAotJobV1;
+    const fileDrift = structuredClone(fixture.job) as CppCuteAotJobV2;
     (fileDrift.files[0] as { contentSha256: string }).contentSha256 = "f".repeat(64);
     await expect(prepareCppCuteAotJob(fixture.profile, fileDrift)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-JOB-HASH-MISMATCH",
       path: "$.files[0].fileId",
     });
 
-    const jobDrift = structuredClone(fixture.job) as CppCuteAotJobV1;
+    const jobDrift = structuredClone(fixture.job) as CppCuteAotJobV2;
     (jobDrift.expectedOutput as { sourceSetSha256: string }).sourceSetSha256 = "f".repeat(64);
     await expect(prepareCppCuteAotJob(fixture.profile, jobDrift)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-JOB-HASH-MISMATCH",
@@ -228,7 +298,7 @@ describe("C++/CuTe AOT producer request", () => {
     const constrainedInput = createCppCuteProfileInput();
     (constrainedInput.extractionLimits as { maxSourceBytes: number }).maxSourceBytes = SOURCE_BYTES.byteLength - 1;
     const constrained = await prepareCppCuteFrontendProfile(constrainedInput);
-    const constrainedJob = structuredClone(fixture.job) as CppCuteAotJobV1;
+    const constrainedJob = structuredClone(fixture.job) as CppCuteAotJobV2;
     (constrainedJob as { profileHash: string }).profileHash = constrained.profileHash;
     await expect(prepareCppCuteAotJob(constrained, constrainedJob)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-JOB-RESOURCE-LIMIT",
@@ -246,7 +316,7 @@ describe("C++/CuTe AOT producer request", () => {
     const fixture = await createJobFixture();
     await expect(prepareCppCuteAotJob(fixture.profile, {
       ...fixture.job,
-      version: { major: 2, minor: 0 },
+      version: { major: 3, minor: 0 },
     })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-JOB-UNSUPPORTED-VERSION" });
 
     const controller = new AbortController();

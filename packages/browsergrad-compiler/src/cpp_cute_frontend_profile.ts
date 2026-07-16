@@ -9,7 +9,7 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
-export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 1;
+export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
 export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 0;
 export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
   "https://browsergrad.dev/provenance/cpp-cute-aot/v1";
@@ -97,6 +97,8 @@ export interface CppCuteFrontendExtractorProfile extends JsonObject {
   readonly version: string;
   readonly buildId: string;
   readonly binarySha256: string;
+  /** Exact adapter inventory that maps resolved frontend facts into the artifact schema. */
+  readonly semanticAdapterManifestSha256: string;
 }
 
 export interface CppCuteFrontendRunnerProfile extends JsonObject {
@@ -153,6 +155,11 @@ export type CppCuteFrontendCompilerOption =
       readonly kind: "warning-policy";
       readonly id: string;
       readonly disposition: "ignore" | "warn" | "error";
+    })
+  | (JsonObject & {
+      readonly kind: "forced-include";
+      readonly includeRootId: string;
+      readonly virtualPath: string;
     });
 
 export interface CppCuteFrontendLanguageProfile extends JsonObject {
@@ -177,9 +184,17 @@ export interface CppCuteFrontendCompilerProfile extends JsonObject {
   readonly resourceDirectorySha256: string;
 }
 
+export type CppCuteFrontendDependencyKind =
+  | "cuda-toolkit"
+  | "cutlass"
+  | "cccl"
+  | "cxx-standard-library"
+  | "c-system-headers"
+  | "linux-sysroot";
+
 export interface CppCuteFrontendDependencyProfile extends JsonObject {
   readonly dependencyId: string;
-  readonly kind: "cuda-toolkit" | "cutlass" | "cccl" | "cxx-standard-library";
+  readonly kind: CppCuteFrontendDependencyKind;
   readonly version: string;
   readonly revision: string;
   readonly headerSetSha256: string;
@@ -197,11 +212,17 @@ export interface CppCuteFrontendVirtualFileSystemProfile extends JsonObject {
   readonly includeRoots: readonly CppCuteFrontendIncludeRoot[];
 }
 
+export type CppCuteFrontendIncludeRootOwner =
+  | (JsonObject & { readonly kind: "source" })
+  | (JsonObject & { readonly kind: "compiler-resource-directory" })
+  | (JsonObject & { readonly kind: "dependency"; readonly dependencyId: string });
+
 export interface CppCuteFrontendIncludeRoot extends JsonObject {
   readonly includeRootId: string;
   readonly mode: "quote" | "system";
   readonly virtualPath: string;
   readonly manifestSha256: string;
+  readonly owner: CppCuteFrontendIncludeRootOwner;
 }
 
 export interface CppCuteFrontendCompatibilityProfile extends JsonObject {
@@ -212,7 +233,7 @@ export interface CppCuteFrontendCompatibilityProfile extends JsonObject {
 
 export type CppCuteFrontendExtractionLimits = JsonObject & Readonly<Record<CppCuteExtractionLimitName, number>>;
 
-export interface CppCuteFrontendProfileV1 extends JsonObject {
+export interface CppCuteFrontendProfileV2 extends JsonObject {
   readonly schema: typeof CPP_CUTE_FRONTEND_PROFILE_SCHEMA;
   readonly version: CppCuteFrontendProfileVersion;
   readonly profileId: string;
@@ -260,7 +281,7 @@ export class CppCuteFrontendProfileError extends Error {
 }
 
 export interface PreparedCppCuteFrontendProfileRecord {
-  readonly profile: CppCuteFrontendProfileV1;
+  readonly profile: CppCuteFrontendProfileV2;
   readonly profileHash: string;
 }
 
@@ -272,7 +293,7 @@ export async function prepareCppCuteFrontendProfile(
   const profile = parseProfile(value);
   canonicalizeJson(profile);
   const profileHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.frontend-profile.v1",
+    domain: "browsergrad.compiler.cpp-cute.frontend-profile.v2",
     profile,
   });
   throwIfAborted(options.signal);
@@ -296,7 +317,7 @@ export function unwrapPreparedCppCuteFrontendProfile(
   return record;
 }
 
-function parseProfile(value: unknown): CppCuteFrontendProfileV1 {
+function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
   assertJsonValue(value);
   const object = closedObject(value, [
     "schema",
@@ -318,18 +339,25 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV1 {
   if (!PROFILE_ID.test(profileId)) {
     invalid("$.profileId", "profileId must be a versioned BrowserGrad C++/CuTe profile identifier");
   }
+  const language = parseLanguage(field(object, "language", "$"), "$.language");
+  const toolchain = parseToolchain(field(object, "toolchain", "$"), "$.toolchain");
+  const virtualFileSystem = parseVirtualFileSystem(
+    field(object, "virtualFileSystem", "$"),
+    "$.virtualFileSystem",
+  );
+  validateProfileReferences(language, toolchain, virtualFileSystem);
   const profile = {
     schema: CPP_CUTE_FRONTEND_PROFILE_SCHEMA,
     version,
     profileId,
     deployment: parseDeployment(field(object, "deployment", "$"), "$.deployment"),
-    language: parseLanguage(field(object, "language", "$"), "$.language"),
+    language,
     target: parseTarget(field(object, "target", "$"), "$.target"),
-    toolchain: parseToolchain(field(object, "toolchain", "$"), "$.toolchain"),
-    virtualFileSystem: parseVirtualFileSystem(field(object, "virtualFileSystem", "$"), "$.virtualFileSystem"),
+    toolchain,
+    virtualFileSystem,
     compatibility: parseCompatibility(field(object, "compatibility", "$"), "$.compatibility"),
     extractionLimits: parseExtractionLimits(field(object, "extractionLimits", "$"), "$.extractionLimits"),
-  } as CppCuteFrontendProfileV1;
+  } as CppCuteFrontendProfileV2;
   return deepFreezeJson(profile);
 }
 
@@ -361,13 +389,13 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     ],
     path,
   );
-  if (object.mode !== "ahead-of-time") invalid(`${path}.mode`, "profile v1 supports ahead-of-time extraction only");
+  if (object.mode !== "ahead-of-time") invalid(`${path}.mode`, "profile v2 supports ahead-of-time extraction only");
   if (object.contractId !== "browsergrad.compiler.cpp-cute.aot@1") {
-    invalid(`${path}.contractId`, "profile v1 requires browsergrad.compiler.cpp-cute.aot@1 deployment contract");
+    invalid(`${path}.contractId`, "profile v2 requires browsergrad.compiler.cpp-cute.aot@1 deployment contract");
   }
   const extractorObject = closedObject(
     field(object, "extractor", path),
-    ["id", "version", "buildId", "binarySha256"],
+    ["id", "version", "buildId", "binarySha256", "semanticAdapterManifestSha256"],
     `${path}.extractor`,
   );
   const extractor = {
@@ -375,6 +403,10 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     version: boundedString(field(extractorObject, "version", `${path}.extractor`), `${path}.extractor.version`, 128),
     buildId: boundedString(field(extractorObject, "buildId", `${path}.extractor`), `${path}.extractor.buildId`, 256),
     binarySha256: sha256(field(extractorObject, "binarySha256", `${path}.extractor`), `${path}.extractor.binarySha256`),
+    semanticAdapterManifestSha256: sha256(
+      field(extractorObject, "semanticAdapterManifestSha256", `${path}.extractor`),
+      `${path}.extractor.semanticAdapterManifestSha256`,
+    ),
   };
   const runnerObject = closedObject(
     field(object, "runner", path),
@@ -392,7 +424,7 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     `${path}.container`,
   );
   if (containerObject.runtime !== "docker" || containerObject.platform !== "linux/amd64") {
-    invalid(`${path}.container`, "profile v1 requires Docker with resolved linux/amd64 platform manifest");
+    invalid(`${path}.container`, "profile v2 requires Docker with resolved linux/amd64 platform manifest");
   }
   const repository = stringValue(field(containerObject, "repository", `${path}.container`), `${path}.container.repository`);
   if (!OCI_REPOSITORY.test(repository)) {
@@ -430,7 +462,7 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
   if (provenanceObject.predicateType !== CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE) {
     invalid(
       `${path}.provenance.predicateType`,
-      `profile v1 requires ${CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE}`,
+      `profile v2 requires ${CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE}`,
     );
   }
   const provenance: CppCuteFrontendProvenancePolicy = {
@@ -459,7 +491,7 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
 
 function parseLanguage(value: JsonValue, path: string): CppCuteFrontendLanguageProfile {
   const object = closedObject(value, ["cxxStandard", "cudaCompatibility", "options"], path);
-  if (object.cxxStandard !== "c++17") invalid(`${path}.cxxStandard`, "profile v1 supports c++17 only");
+  if (object.cxxStandard !== "c++17") invalid(`${path}.cxxStandard`, "profile v2 supports c++17 only");
   return {
     cxxStandard: "c++17",
     cudaCompatibility: boundedString(field(object, "cudaCompatibility", path), `${path}.cudaCompatibility`, 128),
@@ -493,7 +525,7 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
       const object = closedObject(entry, ["kind", "id", "value"], optionPath);
       const id = stringValue(field(object, "id", optionPath), `${optionPath}.id`);
       if (id !== "syntax-only" && id !== "cuda-host-only" && id !== "error-limit") {
-        invalid(`${optionPath}.id`, `frontend option ${JSON.stringify(id)} is not allowlisted by profile v1`);
+        invalid(`${optionPath}.id`, `frontend option ${JSON.stringify(id)} is not allowlisted by profile v2`);
       }
       const rawValue = field(object, "value", optionPath);
       const optionValue = rawValue === null ? null : boundedString(rawValue, `${optionPath}.value`, 64);
@@ -515,6 +547,16 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
       }
       option = { kind, id, disposition };
       singleton = `warning:${id}`;
+    } else if (kind === "forced-include") {
+      const object = closedObject(entry, ["kind", "includeRootId", "virtualPath"], optionPath);
+      const includeRootId = dependencyId(
+        field(object, "includeRootId", optionPath),
+        `${optionPath}.includeRootId`,
+      );
+      const virtualPath = stringValue(field(object, "virtualPath", optionPath), `${optionPath}.virtualPath`);
+      validateVirtualPath(virtualPath, `${optionPath}.virtualPath`);
+      option = { kind, includeRootId, virtualPath };
+      singleton = `forced-include:${includeRootId}:${virtualPath}`;
     } else {
       invalid(`${optionPath}.kind`, `unknown compiler option kind ${JSON.stringify(kind)}`);
     }
@@ -564,20 +606,39 @@ function parseToolchain(value: JsonValue, path: string): CppCuteFrontendToolchai
   const dependencies = arrayValue(field(object, "dependencies", path), `${path}.dependencies`).map((entry, index) =>
     parseDependency(entry, `${path}.dependencies[${index}]`));
   requireSortedUnique(dependencies, (dependency) => dependency.dependencyId, `${path}.dependencies`);
-  for (const requiredKind of ["cuda-toolkit", "cutlass"] as const) {
+  const dependencyKinds: readonly CppCuteFrontendDependencyKind[] = [
+    "cuda-toolkit",
+    "cutlass",
+    "cccl",
+    "cxx-standard-library",
+    "c-system-headers",
+    "linux-sysroot",
+  ];
+  for (const kind of dependencyKinds) {
+    if (dependencies.filter((dependency) => dependency.kind === kind).length > 1) {
+      invalid(`${path}.dependencies`, `toolchain may pin at most one ${kind} dependency`);
+    }
+  }
+  for (const requiredKind of ["cuda-toolkit", "cutlass", "cxx-standard-library"] as const) {
     if (dependencies.filter((dependency) => dependency.kind === requiredKind).length !== 1) {
       invalid(`${path}.dependencies`, `toolchain must pin exactly one ${requiredKind} dependency`);
     }
+  }
+  const cSystemProviders = dependencies.filter(
+    (dependency) => dependency.kind === "c-system-headers" || dependency.kind === "linux-sysroot",
+  );
+  if (cSystemProviders.length !== 1) {
+    invalid(`${path}.dependencies`, "toolchain must pin exactly one C-system provider or Linux sysroot dependency");
   }
   return { compiler, dependencies };
 }
 
 function parseDependency(value: JsonValue, path: string): CppCuteFrontendDependencyProfile {
   const object = closedObject(value, ["dependencyId", "kind", "version", "revision", "headerSetSha256"], path);
-  const dependencyId = stringValue(field(object, "dependencyId", path), `${path}.dependencyId`);
-  if (!DEPENDENCY_ID.test(dependencyId)) invalid(`${path}.dependencyId`, "invalid dependency ID");
+  const parsedDependencyId = dependencyId(field(object, "dependencyId", path), `${path}.dependencyId`);
   const kind = stringValue(field(object, "kind", path), `${path}.kind`);
-  if (kind !== "cuda-toolkit" && kind !== "cutlass" && kind !== "cccl" && kind !== "cxx-standard-library") {
+  if (kind !== "cuda-toolkit" && kind !== "cutlass" && kind !== "cccl" && kind !== "cxx-standard-library" &&
+      kind !== "c-system-headers" && kind !== "linux-sysroot") {
     invalid(`${path}.kind`, `unknown dependency kind ${JSON.stringify(kind)}`);
   }
   const revision = boundedString(field(object, "revision", path), `${path}.revision`, 256);
@@ -585,7 +646,7 @@ function parseDependency(value: JsonValue, path: string): CppCuteFrontendDepende
     invalid(`${path}.revision`, `${kind} revision must be an exact 40-digit lowercase Git commit`);
   }
   return {
-    dependencyId,
+    dependencyId: parsedDependencyId,
     kind,
     version: boundedString(field(object, "version", path), `${path}.version`, 128),
     revision,
@@ -602,15 +663,17 @@ function parseVirtualFileSystem(value: JsonValue, path: string): CppCuteFrontend
   if (new Set(includeRoots.map((root) => root.includeRootId)).size !== includeRoots.length) {
     invalid(`${path}.includeRoots`, "include root IDs must be unique");
   }
+  if (new Set(includeRoots.map((root) => root.virtualPath)).size !== includeRoots.length) {
+    invalid(`${path}.includeRoots`, "include root virtual paths must have unique ownership");
+  }
   if (sourceRoots.length === 0) invalid(`${path}.sourceRoots`, "at least one source root is required");
   if (includeRoots.length === 0) invalid(`${path}.includeRoots`, "at least one include root is required");
   return { sourceRoots, includeRoots };
 }
 
 function parseIncludeRoot(value: JsonValue, path: string): CppCuteFrontendIncludeRoot {
-  const object = closedObject(value, ["includeRootId", "mode", "virtualPath", "manifestSha256"], path);
-  const includeRootId = stringValue(field(object, "includeRootId", path), `${path}.includeRootId`);
-  if (!DEPENDENCY_ID.test(includeRootId)) invalid(`${path}.includeRootId`, "invalid include root ID");
+  const object = closedObject(value, ["includeRootId", "mode", "virtualPath", "manifestSha256", "owner"], path);
+  const includeRootId = dependencyId(field(object, "includeRootId", path), `${path}.includeRootId`);
   if (object.mode !== "quote" && object.mode !== "system") invalid(`${path}.mode`, "include root mode must be quote or system");
   const virtualPath = stringValue(field(object, "virtualPath", path), `${path}.virtualPath`);
   validateVirtualPath(virtualPath, `${path}.virtualPath`);
@@ -619,7 +682,93 @@ function parseIncludeRoot(value: JsonValue, path: string): CppCuteFrontendInclud
     mode: object.mode,
     virtualPath,
     manifestSha256: sha256(field(object, "manifestSha256", path), `${path}.manifestSha256`),
+    owner: parseIncludeRootOwner(field(object, "owner", path), `${path}.owner`),
   };
+}
+
+function parseIncludeRootOwner(value: JsonValue, path: string): CppCuteFrontendIncludeRootOwner {
+  if (!isJsonObject(value)) invalid(path, "include root owner must be an object");
+  const kind = stringValue(field(value, "kind", path), `${path}.kind`);
+  if (kind === "source" || kind === "compiler-resource-directory") {
+    closedObject(value, ["kind"], path);
+    return { kind };
+  }
+  if (kind === "dependency") {
+    const object = closedObject(value, ["kind", "dependencyId"], path);
+    return {
+      kind,
+      dependencyId: dependencyId(field(object, "dependencyId", path), `${path}.dependencyId`),
+    };
+  }
+  invalid(`${path}.kind`, `unknown include root owner kind ${JSON.stringify(kind)}`);
+}
+
+function validateProfileReferences(
+  language: CppCuteFrontendLanguageProfile,
+  toolchain: CppCuteFrontendToolchainProfile,
+  virtualFileSystem: CppCuteFrontendVirtualFileSystemProfile,
+): void {
+  const dependencies = new Map(toolchain.dependencies.map((dependency) => [dependency.dependencyId, dependency]));
+  const includeRoots = new Map(
+    virtualFileSystem.includeRoots.map((root, index) => [root.includeRootId, { root, index }]),
+  );
+  const ownedDependencies = new Set<string>();
+  let compilerResourceRoots = 0;
+
+  for (const [index, root] of virtualFileSystem.includeRoots.entries()) {
+    const rootPath = `$.virtualFileSystem.includeRoots[${index}]`;
+    if (root.owner.kind === "source") {
+      const containers = virtualFileSystem.sourceRoots.filter((sourceRoot) =>
+        virtualPathContains(sourceRoot, root.virtualPath));
+      if (containers.length !== 1) {
+        invalid(`${rootPath}.virtualPath`, "source-owned include root must belong to exactly one source root");
+      }
+      continue;
+    }
+    if (root.owner.kind === "compiler-resource-directory") {
+      compilerResourceRoots += 1;
+      if (root.manifestSha256 !== toolchain.compiler.resourceDirectorySha256) {
+        invalid(`${rootPath}.manifestSha256`, "compiler-owned include root must bind the compiler resource directory");
+      }
+      continue;
+    }
+    const dependency = dependencies.get(root.owner.dependencyId);
+    if (dependency === undefined) {
+      invalid(`${rootPath}.owner.dependencyId`, "include root owner does not name a pinned toolchain dependency");
+    }
+    if (root.manifestSha256 !== dependency.headerSetSha256) {
+      invalid(`${rootPath}.manifestSha256`, "dependency-owned include root must bind its dependency header set");
+    }
+    ownedDependencies.add(dependency.dependencyId);
+  }
+
+  if (compilerResourceRoots !== 1) {
+    invalid(
+      "$.virtualFileSystem.includeRoots",
+      "profile must expose exactly one compiler resource directory include root",
+    );
+  }
+  for (const dependency of toolchain.dependencies) {
+    if (!ownedDependencies.has(dependency.dependencyId)) {
+      invalid(
+        "$.virtualFileSystem.includeRoots",
+        `dependency ${JSON.stringify(dependency.dependencyId)} must own at least one include root`,
+      );
+    }
+  }
+
+  for (const [index, option] of language.options.entries()) {
+    if (option.kind !== "forced-include") continue;
+    const optionPath = `$.language.options[${index}]`;
+    const referenced = includeRoots.get(option.includeRootId);
+    if (referenced === undefined) {
+      invalid(`${optionPath}.includeRootId`, "forced include does not name a declared include root");
+    }
+    if (!virtualPathContains(referenced.root.virtualPath, option.virtualPath) ||
+        referenced.root.virtualPath === option.virtualPath) {
+      invalid(`${optionPath}.virtualPath`, "forced include must be a file contained by its declared include root");
+    }
+  }
 }
 
 function parseCompatibility(value: JsonValue, path: string): CppCuteFrontendCompatibilityProfile {
@@ -682,9 +831,13 @@ function validateVirtualPath(value: string, path: string): void {
     invalid(path, "virtual path must be bounded absolute POSIX syntax");
   }
   const segments = value.split("/");
-  if (segments.some((segment, index) => index > 0 && (segment.length === 0 || segment === "." || segment === ".."))) {
+  if (value !== "/" && segments.some((segment, index) => index > 0 && (segment.length === 0 || segment === "." || segment === ".."))) {
     invalid(path, "virtual path must be normalized and must not contain empty, . or .. segments");
   }
+}
+
+function virtualPathContains(root: string, candidate: string): boolean {
+  return root === "/" ? candidate.startsWith("/") : candidate === root || candidate.startsWith(`${root}/`);
 }
 
 function validateCanonicalHttpsIdentifier(value: string, path: string): void {
@@ -761,6 +914,12 @@ function macroName(value: JsonValue, path: string): string {
   const name = stringValue(value, path);
   if (!MACRO_NAME.test(name)) invalid(path, "macro name must be a C/C++ identifier");
   return name;
+}
+
+function dependencyId(value: JsonValue, path: string): string {
+  const id = stringValue(value, path);
+  if (!DEPENDENCY_ID.test(id)) invalid(path, "invalid dependency or include-root ID");
+  return id;
 }
 
 function boundedString(value: JsonValue, path: string, maximumBytes: number): string {

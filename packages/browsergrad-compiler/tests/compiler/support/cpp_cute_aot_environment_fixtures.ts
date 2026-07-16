@@ -8,7 +8,7 @@ import {
   CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_SCHEMA,
   computeCppCuteAotExecutionEnvironmentClosureHashes,
   prepareCppCuteAotExecutionEnvironment,
-  type CppCuteAotExecutionEnvironmentManifestV1,
+  type CppCuteAotExecutionEnvironmentManifestV2,
   type PreparedCppCuteAotExecutionEnvironment,
 } from "../../../src/cpp_cute_aot_environment.js";
 import {
@@ -27,12 +27,12 @@ export interface CppCuteAotExecutionEnvironmentFixture {
   readonly environment: PreparedCppCuteAotExecutionEnvironment;
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly bytes: Uint8Array;
-  readonly input: CppCuteAotExecutionEnvironmentManifestV1;
+  readonly input: CppCuteAotExecutionEnvironmentManifestV2;
 }
 
 export interface CppCuteAotExecutionEnvironmentFixtureOptions {
   readonly profile?: Partial<CppCuteProfileFixtureOptions>;
-  readonly mutateBody?: (body: CppCuteAotExecutionEnvironmentManifestV1["body"]) => void;
+  readonly mutateBody?: (body: CppCuteAotExecutionEnvironmentManifestV2["body"]) => void;
 }
 
 export async function createCppCuteAotExecutionEnvironmentFixture(
@@ -47,12 +47,12 @@ export async function createCppCuteAotExecutionEnvironmentFixture(
   asMutableObject(body.toolchain).dynamicLibrariesManifestSha256 = closureHashes.dynamicLibrariesManifestSha256;
   asMutableObject(body.toolchain).headersManifestSha256 = closureHashes.headersManifestSha256;
   const manifestId = `bg.cpp.execution-environment.sha256.${await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.execution-environment.v1",
+    domain: "browsergrad.compiler.cpp-cute.execution-environment.v2",
     body,
   })}`;
-  const input: CppCuteAotExecutionEnvironmentManifestV1 = {
+  const input: CppCuteAotExecutionEnvironmentManifestV2 = {
     schema: CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: { major: 2, minor: 0 },
     manifestId,
     body,
   };
@@ -66,11 +66,11 @@ export async function createCppCuteAotExecutionEnvironmentFixture(
 }
 
 export async function canonicalEnvironmentBytes(
-  input: CppCuteAotExecutionEnvironmentManifestV1,
+  input: CppCuteAotExecutionEnvironmentManifestV2,
 ): Promise<Uint8Array> {
   const body = input.body;
   const manifestId = `bg.cpp.execution-environment.sha256.${await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.execution-environment.v1",
+    domain: "browsergrad.compiler.cpp-cute.execution-environment.v2",
     body,
   })}`;
   return canonicalJsonBytes({ ...input, manifestId });
@@ -78,7 +78,7 @@ export async function canonicalEnvironmentBytes(
 
 function createEnvironmentBody(
   profile: ReturnType<typeof createCppCuteProfileInput>,
-): CppCuteAotExecutionEnvironmentManifestV1["body"] {
+): CppCuteAotExecutionEnvironmentManifestV2["body"] {
   const compiler = profile.toolchain.compiler;
   return {
     scope: {
@@ -160,6 +160,7 @@ function createEnvironmentBody(
       dynamicLibrariesManifestSha256: "1".repeat(64),
       headersManifestSha256: "2".repeat(64),
       resourceDirectorySha256: compiler.resourceDirectorySha256,
+      semanticAdapterManifestSha256: profile.deployment.extractor.semanticAdapterManifestSha256,
       binaries: [
         {
           role: "compiler",
@@ -202,6 +203,7 @@ function createEnvironmentBody(
         mode: root.mode,
         virtualPath: root.virtualPath,
         manifestSha256: root.manifestSha256,
+        owner: root.owner,
       })),
     },
     attestation: {
@@ -210,13 +212,13 @@ function createEnvironmentBody(
       trustStoreSha256: profile.deployment.provenance.trustStoreSha256,
       builderIds: [...profile.deployment.provenance.builderIds],
     },
-  } as CppCuteAotExecutionEnvironmentManifestV1["body"];
+  } as CppCuteAotExecutionEnvironmentManifestV2["body"];
 }
 
 export function cloneEnvironmentInput(
-  input: CppCuteAotExecutionEnvironmentManifestV1,
-): CppCuteAotExecutionEnvironmentManifestV1 {
-  return structuredClone(input) as CppCuteAotExecutionEnvironmentManifestV1;
+  input: CppCuteAotExecutionEnvironmentManifestV2,
+): CppCuteAotExecutionEnvironmentManifestV2 {
+  return structuredClone(input) as CppCuteAotExecutionEnvironmentManifestV2;
 }
 
 export function asMutableObject(value: unknown): Record<string, unknown> {

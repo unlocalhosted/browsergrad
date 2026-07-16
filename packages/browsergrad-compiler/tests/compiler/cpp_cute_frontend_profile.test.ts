@@ -8,8 +8,8 @@ import {
 import {
   cloneCppCuteProfileInput,
   CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
-  CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
   CPP_CUTE_FIXTURE_HEADER_SET_HASH,
+  CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH,
   createCppCuteProfileInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
 
@@ -27,8 +27,8 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("91130acd52a8487ed1b4b56ded8b4b37cd770e341abb9074e4b0567b6d37de85");
-    expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@1");
+    expect(first.profileHash).toBe("f570cc6d51b252f4d78b57fd1f7de60355b44314a8622647458fc465d4549d23");
+    expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(first.expectedHeaderSetSha256).toBe(CPP_CUTE_FIXTURE_HEADER_SET_HASH);
     expect(Object.isFrozen(first)).toBe(true);
@@ -38,7 +38,7 @@ describe("C++/CuTe frontend profile", () => {
 
   it("rejects structural copies without profile authority", () => {
     const forged = {
-      profileId: "browsergrad.compiler.cpp-cute.layout-tracer@1",
+      profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
       profileHash: "0".repeat(64),
       deploymentMode: "ahead-of-time",
       expectedHeaderSetSha256: CPP_CUTE_FIXTURE_HEADER_SET_HASH,
@@ -58,7 +58,7 @@ describe("C++/CuTe frontend profile", () => {
 
   it("rejects unsupported profile versions", async () => {
     const value = cloneCppCuteProfileInput();
-    value["version"] = { major: 2, minor: 0 };
+    value["version"] = { major: 1, minor: 0 };
     await expectProfileError(value, "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION", "$.version.major");
   });
 
@@ -74,43 +74,34 @@ describe("C++/CuTe frontend profile", () => {
     const language = value["language"] as Record<string, unknown>;
     language["options"] = [
       { kind: "frontend-option", id: "syntax-only", value: null },
+      {
+        kind: "forced-include",
+        includeRootId: "clang-resource",
+        virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+      },
       { kind: "define", name: "CUTE_SM80_ENABLED", value: "1" },
     ];
     const vfs = value["virtualFileSystem"] as Record<string, unknown>;
-    vfs["includeRoots"] = [
-      {
-        includeRootId: "cutlass",
-        mode: "system",
-        virtualPath: "/toolchain/cutlass/include",
-        manifestSha256: CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
-      },
-      {
-        includeRootId: "cuda",
-        mode: "system",
-        virtualPath: "/toolchain/cuda/include",
-        manifestSha256: CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
-      },
-    ];
+    vfs["includeRoots"] = [...vfs["includeRoots"] as unknown[]].reverse();
 
     const prepared = await prepareCppCuteFrontendProfile(value);
     const profile = unwrapPreparedCppCuteFrontendProfile(prepared).profile;
     expect(profile.language.options).toEqual([
       { kind: "frontend-option", id: "syntax-only", value: null },
+      {
+        kind: "forced-include",
+        includeRootId: "clang-resource",
+        virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+      },
       { kind: "define", name: "CUTE_SM80_ENABLED", value: "1" },
     ]);
-    expect(profile.virtualFileSystem.includeRoots).toEqual([
-      {
-        includeRootId: "cutlass",
-        mode: "system",
-        virtualPath: "/toolchain/cutlass/include",
-        manifestSha256: CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
-      },
-      {
-        includeRootId: "cuda",
-        mode: "system",
-        virtualPath: "/toolchain/cuda/include",
-        manifestSha256: CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
-      },
+    expect(profile.virtualFileSystem.includeRoots.map((root) => root.includeRootId)).toEqual([
+      "linux-sysroot",
+      "cxx-stdlib",
+      "cutlass",
+      "cuda",
+      "clang-resource",
+      "workspace-source",
     ]);
   });
 
@@ -178,20 +169,191 @@ describe("C++/CuTe frontend profile", () => {
     await expectProfileError(cutlassRevision, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.toolchain.dependencies[1].revision");
   });
 
-  it("requires exactly one CUDA toolkit and CUTLASS dependency", async () => {
+  it("binds the extractor to one exact semantic adapter manifest", async () => {
+    const value = cloneCppCuteProfileInput();
+    const deployment = value["deployment"] as Record<string, unknown>;
+    const extractor = deployment["extractor"] as Record<string, unknown>;
+    expect(extractor["semanticAdapterManifestSha256"]).toBe(CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH);
+    extractor["semanticAdapterManifestSha256"] = "not-a-digest";
+    await expectProfileError(
+      value,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.extractor.semanticAdapterManifestSha256",
+    );
+  });
+
+  it("covers explicit C++, C-system, Linux sysroot, and optional CCCL dependencies", async () => {
     const value = cloneCppCuteProfileInput();
     const toolchain = value["toolchain"] as Record<string, unknown>;
-    toolchain["dependencies"] = [
-      ...toolchain["dependencies"] as unknown[],
-      {
-        dependencyId: "cutlass_shadow",
-        kind: "cutlass",
-        version: "3.7.0",
-        revision: "8".repeat(40),
-        headerSetSha256: "9".repeat(64),
-      },
-    ];
-    await expectProfileError(value, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.toolchain.dependencies");
+    const dependencies = toolchain["dependencies"] as Record<string, unknown>[];
+    const linux = dependencies.find((dependency) => dependency["kind"] === "linux-sysroot");
+    if (linux === undefined) throw new Error("fixture lost Linux sysroot dependency");
+    linux["kind"] = "c-system-headers";
+    dependencies.unshift({
+      dependencyId: "cccl",
+      kind: "cccl",
+      version: "2.7.0",
+      revision: "8".repeat(40),
+      headerSetSha256: "8".repeat(64),
+    });
+    const vfs = value["virtualFileSystem"] as Record<string, unknown>;
+    const includeRoots = vfs["includeRoots"] as Record<string, unknown>[];
+    includeRoots.push({
+      includeRootId: "cccl",
+      mode: "system",
+      virtualPath: "/toolchain/cccl/include",
+      manifestSha256: "8".repeat(64),
+      owner: { kind: "dependency", dependencyId: "cccl" },
+    });
+
+    const prepared = await prepareCppCuteFrontendProfile(value);
+    expect(unwrapPreparedCppCuteFrontendProfile(prepared).profile.toolchain.dependencies.map(({ kind }) => kind)).toEqual([
+      "cccl",
+      "cuda-toolkit",
+      "cutlass",
+      "cxx-standard-library",
+      "c-system-headers",
+    ]);
+  });
+
+  it("requires exactly one CUDA, CUTLASS, C++ standard library, and C-system provider", async () => {
+    const duplicateCutlass = cloneCppCuteProfileInput();
+    const toolchain = duplicateCutlass["toolchain"] as Record<string, unknown>;
+    const dependencies = toolchain["dependencies"] as unknown[];
+    dependencies.splice(2, 0, {
+      dependencyId: "cutlass-shadow",
+      kind: "cutlass",
+      version: "3.7.0",
+      revision: "8".repeat(40),
+      headerSetSha256: "9".repeat(64),
+    });
+    await expectProfileError(
+      duplicateCutlass,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.toolchain.dependencies",
+    );
+
+    const dualSystemProviders = cloneCppCuteProfileInput();
+    const dualDependencies = (dualSystemProviders["toolchain"] as Record<string, unknown>)["dependencies"] as unknown[];
+    dualDependencies.unshift({
+      dependencyId: "aaa-c-system",
+      kind: "c-system-headers",
+      version: "glibc-2.39",
+      revision: "ubuntu-24.04-amd64",
+      headerSetSha256: "9".repeat(64),
+    });
+    await expectProfileError(
+      dualSystemProviders,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.toolchain.dependencies",
+    );
+  });
+
+  it("rejects unowned, multiply owned, and owner-digest-mismatched include roots", async () => {
+    const unknownOwner = cloneCppCuteProfileInput();
+    const unknownRoots = (unknownOwner["virtualFileSystem"] as Record<string, unknown>)["includeRoots"] as Record<string, unknown>[];
+    if (unknownRoots[0] === undefined) throw new Error("fixture lost source include root");
+    unknownRoots[0]["owner"] = { kind: "host" };
+    await expectProfileError(
+      unknownOwner,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots[0].owner.kind",
+    );
+
+    const missingDependency = cloneCppCuteProfileInput();
+    const missingRoots = (missingDependency["virtualFileSystem"] as Record<string, unknown>)["includeRoots"] as Record<string, unknown>[];
+    if (missingRoots[2] === undefined) throw new Error("fixture lost CUDA include root");
+    missingRoots[2]["owner"] = { kind: "dependency", dependencyId: "missing" };
+    await expectProfileError(
+      missingDependency,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots[2].owner.dependencyId",
+    );
+
+    const mismatchedCompiler = cloneCppCuteProfileInput();
+    const compilerRoots = (mismatchedCompiler["virtualFileSystem"] as Record<string, unknown>)["includeRoots"] as Record<string, unknown>[];
+    if (compilerRoots[1] === undefined) throw new Error("fixture lost compiler include root");
+    compilerRoots[1]["manifestSha256"] = "0".repeat(64);
+    await expectProfileError(
+      mismatchedCompiler,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots[1].manifestSha256",
+    );
+
+    const mismatchedDependency = cloneCppCuteProfileInput();
+    const dependencyRoots = (mismatchedDependency["virtualFileSystem"] as Record<string, unknown>)["includeRoots"] as Record<string, unknown>[];
+    if (dependencyRoots[3] === undefined) throw new Error("fixture lost CUTLASS include root");
+    dependencyRoots[3]["manifestSha256"] = CPP_CUTE_FIXTURE_CUDA_HEADER_HASH;
+    await expectProfileError(
+      mismatchedDependency,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots[3].manifestSha256",
+    );
+
+    const multiplyOwned = cloneCppCuteProfileInput();
+    const multiplyOwnedRoots = (multiplyOwned["virtualFileSystem"] as Record<string, unknown>)["includeRoots"] as Record<string, unknown>[];
+    if (multiplyOwnedRoots[2] === undefined || multiplyOwnedRoots[3] === undefined) {
+      throw new Error("fixture lost dependency include roots");
+    }
+    multiplyOwnedRoots[3]["virtualPath"] = multiplyOwnedRoots[2]["virtualPath"];
+    await expectProfileError(
+      multiplyOwned,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots",
+    );
+  });
+
+  it("requires source-owned roots and forced includes to stay inside their declared roots", async () => {
+    const sourceEscape = cloneCppCuteProfileInput();
+    const sourceRoots = (sourceEscape["virtualFileSystem"] as Record<string, unknown>)["includeRoots"] as Record<string, unknown>[];
+    if (sourceRoots[0] === undefined) throw new Error("fixture lost source include root");
+    sourceRoots[0]["virtualPath"] = "/workspace/private";
+    await expectProfileError(
+      sourceEscape,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots[0].virtualPath",
+    );
+
+    const missingRoot = cloneCppCuteProfileInput();
+    const missingOptions = (missingRoot["language"] as Record<string, unknown>)["options"] as Record<string, unknown>[];
+    if (missingOptions[1] === undefined) throw new Error("fixture lost forced include");
+    missingOptions[1]["includeRootId"] = "missing";
+    await expectProfileError(
+      missingRoot,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.options[1].includeRootId",
+    );
+
+    const pathEscape = cloneCppCuteProfileInput();
+    const escapedOptions = (pathEscape["language"] as Record<string, unknown>)["options"] as Record<string, unknown>[];
+    if (escapedOptions[1] === undefined) throw new Error("fixture lost forced include");
+    escapedOptions[1]["virtualPath"] = "/toolchain/clang/lib/clang/20/include-shadow/wrapper.h";
+    await expectProfileError(
+      pathEscape,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.options[1].virtualPath",
+    );
+
+    const rootInsteadOfFile = cloneCppCuteProfileInput();
+    const rootOptions = (rootInsteadOfFile["language"] as Record<string, unknown>)["options"] as Record<string, unknown>[];
+    if (rootOptions[1] === undefined) throw new Error("fixture lost forced include");
+    rootOptions[1]["virtualPath"] = "/toolchain/clang/lib/clang/20/include";
+    await expectProfileError(
+      rootInsteadOfFile,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.options[1].virtualPath",
+    );
+
+    const duplicate = cloneCppCuteProfileInput();
+    const duplicateOptions = (duplicate["language"] as Record<string, unknown>)["options"] as Record<string, unknown>[];
+    const forcedInclude = duplicateOptions[1];
+    if (forcedInclude === undefined) throw new Error("fixture lost forced include");
+    duplicateOptions.push(structuredClone(forcedInclude));
+    await expectProfileError(
+      duplicate,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.options[4]",
+    );
   });
 
   it("caps every extraction resource budget", async () => {

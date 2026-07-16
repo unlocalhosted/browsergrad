@@ -8,10 +8,10 @@ import {
   unwrapVerifiedCppCuteAotRunnerReceipt,
   unwrapVerifiedCppCuteAotRunnerReceiptResource,
   verifyCppCuteAotRunnerReceipt,
-  type CppCuteAotRunnerReceiptV1,
+  type CppCuteAotRunnerReceiptV2,
 } from "../../src/cpp_cute_aot_receipt.js";
 import { unwrapPreparedCppCuteFrontendProfile } from "../../src/cpp_cute_frontend_profile.js";
-import type { CppCuteFrontendPayloadV1 } from "../../src/cpp_cute_frontend_types.js";
+import type { CppCuteFrontendPayloadV2 } from "../../src/cpp_cute_frontend_types.js";
 import {
   createCppCuteAotReceiptFixture,
   PINNED_CPP_CUTE_AOT_INVOCATION_ID,
@@ -79,6 +79,17 @@ describe("C++/CuTe AOT runner receipt", () => {
     expect(record.receipt).not.toHaveProperty("command");
     expect(record.receipt).not.toHaveProperty("environment");
     expect(record.receipt).not.toHaveProperty("hostPath");
+    expect(record.receipt.resources).toMatchObject({
+      observedInputs: { accountingKind: "observed-exact" },
+      processMeasurements: { accountingKind: "observed-exact" },
+      emittedArtifact: { accountingKind: "emitted-artifact-exact" },
+      enforcedCeilings: { accountingKind: "enforced-upper-bound" },
+    });
+    expect(record.receipt.resources.observedInputs.values).not.toHaveProperty("constexprSteps");
+    expect(record.receipt.resources.emittedArtifact.values).not.toHaveProperty("constexprSteps");
+    expect(record.receipt.resources.enforcedCeilings.values.maxConstexprSteps).toBe(
+      String(unwrapPreparedCppCuteFrontendProfile(fixture.profile).profile.extractionLimits.maxConstexprSteps),
+    );
   });
 
   it("mints byte-origin authority only from strict canonical receipt bytes", async () => {
@@ -244,7 +255,7 @@ describe("C++/CuTe AOT runner receipt", () => {
 
   it("allows a successful process receipt for a structurally valid rejected artifact", async () => {
     const base = await createCppCuteProvenanceFixture({
-      mutatePayload: (payload: CppCuteFrontendPayloadV1) => {
+      mutatePayload: (payload: CppCuteFrontendPayloadV2) => {
         const diagnostic = payload.diagnostics[0];
         if (diagnostic === undefined) throw new Error("fixture lost diagnostic");
         const blockingDiagnosticId = `bg.cpp.diagnostic.sha256.${"1".repeat(64)}`;
@@ -254,10 +265,9 @@ describe("C++/CuTe AOT runner receipt", () => {
           severity: "error",
           code: "browsergrad.cpp-cute:fixture-rejected",
           renderedMessage: "Fixture rejection for receipt coverage.",
-          primarySpanId: diagnostic.primarySpanId,
+          location: structuredClone(diagnostic.location),
           subject: structuredClone(diagnostic.subject),
           parentDiagnosticId: null,
-          related: [],
         });
         (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((left, right) =>
           left.diagnosticId.localeCompare(right.diagnosticId));
@@ -284,67 +294,179 @@ describe("C++/CuTe AOT runner receipt", () => {
     });
   });
 
-  it("enforces every profile extraction/process ceiling and exact artifact-visible counters", async () => {
+  it("rejects producer-invented forced includes outside the exact profile option", async () => {
+    await expect(createCppCuteProvenanceFixture({
+      mutatePayload: (payload) => {
+        const edge = payload.inputs.includeEdges.find((candidate) => candidate.kind === "compiler-forced");
+        if (edge?.kind !== "compiler-forced") throw new Error("fixture lost compiler-forced include");
+        (edge as { compilerOptionOrdinal: number }).compilerOptionOrdinal = 0;
+      },
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH",
+      path: expect.stringContaining("includeEdges"),
+    });
+  });
+
+  it("separates exact observations and emitted counts from enforced compiler-work ceilings", async () => {
     const fixture = await createFixture();
     const limits = unwrapPreparedCppCuteFrontendProfile(fixture.profile).profile.extractionLimits;
-    const maximums: Readonly<Record<string, number>> = {
-      sourceFiles: limits.maxSourceFiles,
-      sourceBytes: limits.maxSourceBytes,
-      headerFiles: limits.maxHeaderFiles,
-      headerBytes: limits.maxHeaderBytes,
-      includeDepth: limits.maxIncludeDepth,
-      macroExpansions: limits.maxMacroExpansions,
-      preprocessedTokens: limits.maxPreprocessedTokens,
-      astNodes: limits.maxAstNodes,
-      constexprSteps: limits.maxConstexprSteps,
-      templateInstantiations: limits.maxTemplateInstantiations,
-      templateDepth: limits.maxTemplateDepth,
-      declarations: limits.maxDeclarations,
-      types: limits.maxTypes,
-      constants: limits.maxConstants,
-      layouts: limits.maxLayouts,
-      tensors: limits.maxTensors,
-      operations: limits.maxOperations,
-      targetIntrinsics: limits.maxTargetIntrinsics,
-      diagnostics: limits.maxDiagnostics,
-      outputBytes: limits.maxOutputBytes,
-      wallTimeMs: limits.maxWallTimeMs,
-      cpuTimeMs: limits.maxCpuTimeMs,
-      peakMemoryBytes: limits.maxMemoryBytes,
-      peakProcesses: limits.maxProcesses,
+    const boundedGroups: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+      observedInputs: {
+        openedSourceFiles: limits.maxSourceFiles,
+        openedSourceBytes: limits.maxSourceBytes,
+        openedHeaderFiles: limits.maxHeaderFiles,
+        openedHeaderBytes: limits.maxHeaderBytes,
+      },
+      emittedArtifact: {
+        macroExpansionFacts: limits.maxMacroExpansions,
+        templateInstantiationFacts: limits.maxTemplateInstantiations,
+        declarations: limits.maxDeclarations,
+        types: limits.maxTypes,
+        constants: limits.maxConstants,
+        layoutFacts: limits.maxLayouts,
+        tensorFacts: limits.maxTensors,
+        operationFacts: limits.maxOperations,
+        targetIntrinsicFacts: limits.maxTargetIntrinsics,
+        diagnostics: limits.maxDiagnostics,
+        outputBytes: limits.maxOutputBytes,
+      },
+      processMeasurements: {
+        wallTimeMs: limits.maxWallTimeMs,
+        cpuTimeMs: limits.maxCpuTimeMs,
+        peakMemoryBytes: limits.maxMemoryBytes,
+        peakProcesses: limits.maxProcesses,
+      },
     };
-    for (const [field, maximum] of Object.entries(maximums)) {
-      const receipt = structuredClone(fixture.receipt) as unknown as Record<string, unknown>;
-      const resources = receipt["resources"] as Record<string, unknown>;
-      resources[field] = parseWireU64(String(BigInt(maximum) + 1n));
-      await expect(verifyCppCuteAotRunnerReceipt(
-        fixture.job,
-        fixture.executionEnvironment,
-        fixture.artifactResource,
-        receipt,
-      )).rejects.toMatchObject({
-        code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-RESOURCE-LIMIT",
-        path: `$.resources.${field}`,
-      });
+    for (const [groupName, maximums] of Object.entries(boundedGroups)) {
+      for (const [field, maximum] of Object.entries(maximums)) {
+        const receipt = structuredClone(fixture.receipt) as unknown as Record<string, unknown>;
+        const resources = receipt["resources"] as Record<string, unknown>;
+        const group = resources[groupName] as Record<string, unknown>;
+        const values = group["values"] as Record<string, unknown>;
+        values[field] = parseWireU64(String(BigInt(maximum) + 1n));
+        await expect(verifyCppCuteAotRunnerReceipt(
+          fixture.job,
+          fixture.executionEnvironment,
+          fixture.artifactResource,
+          receipt,
+        )).rejects.toMatchObject({
+          code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-RESOURCE-LIMIT",
+          path: `$.resources.${groupName}.values.${field}`,
+        });
+      }
     }
 
     const counterDrift = structuredClone(fixture.receipt) as unknown as Record<string, unknown>;
     const resources = counterDrift["resources"] as Record<string, unknown>;
-    resources["sourceFiles"] = "2";
+    const observed = resources["observedInputs"] as Record<string, unknown>;
+    const observedValues = observed["values"] as Record<string, unknown>;
+    observedValues["openedSourceFiles"] = "2";
     await expect(verifyCppCuteAotRunnerReceipt(
       fixture.job,
       fixture.executionEnvironment,
       fixture.artifactResource,
       counterDrift,
     )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH",
-      path: "$.resources.sourceFiles",
+      code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH",
+      path: "$.resources.observedInputs.values",
     });
+
+    const emittedDrift = structuredClone(fixture.receipt) as unknown as Record<string, unknown>;
+    const emittedResources = emittedDrift["resources"] as Record<string, unknown>;
+    const emitted = emittedResources["emittedArtifact"] as Record<string, unknown>;
+    const emittedValues = emitted["values"] as Record<string, unknown>;
+    emittedValues["declarations"] = "0";
+    await expect(verifyCppCuteAotRunnerReceipt(
+      fixture.job,
+      fixture.executionEnvironment,
+      fixture.artifactResource,
+      emittedDrift,
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH",
+      path: "$.resources.emittedArtifact.values",
+    });
+
+    const configuredCeilings = fixture.receipt.resources.enforcedCeilings.values;
+    for (const field of Object.keys(configuredCeilings)) {
+      const ceilingDrift = structuredClone(fixture.receipt) as unknown as Record<string, unknown>;
+      const ceilingResources = ceilingDrift["resources"] as Record<string, unknown>;
+      const ceilings = ceilingResources["enforcedCeilings"] as Record<string, unknown>;
+      const ceilingValues = ceilings["values"] as Record<string, unknown>;
+      ceilingValues[field] = String(BigInt(ceilingValues[field] as string) - 1n);
+      await expect(verifyCppCuteAotRunnerReceipt(
+        fixture.job,
+        fixture.executionEnvironment,
+        fixture.artifactResource,
+        ceilingDrift,
+      )).rejects.toMatchObject({
+        code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVOCATION-MISMATCH",
+        path: "$.resources.enforcedCeilings.values",
+      });
+    }
+  });
+
+  it("rejects hostile accounting kinds, values, and category substitution", async () => {
+    const fixture = await createFixture();
+    const cases: Array<{
+      readonly path: string;
+      readonly mutate: (resources: Record<string, unknown>) => void;
+    }> = [
+      {
+        path: "$.resources.observedInputs.accountingKind",
+        mutate: (resources) => {
+          const group = resources["observedInputs"] as Record<string, unknown>;
+          group["accountingKind"] = "enforced-upper-bound";
+        },
+      },
+      {
+        path: "$.resources.emittedArtifact.accountingKind",
+        mutate: (resources) => {
+          const group = resources["emittedArtifact"] as Record<string, unknown>;
+          group["accountingKind"] = "observed-exact";
+        },
+      },
+      {
+        path: "$.resources.enforcedCeilings.accountingKind",
+        mutate: (resources) => {
+          const group = resources["enforcedCeilings"] as Record<string, unknown>;
+          group["accountingKind"] = "emitted-artifact-exact";
+        },
+      },
+      {
+        path: "$",
+        mutate: (resources) => {
+          const group = resources["processMeasurements"] as Record<string, unknown>;
+          const values = group["values"] as Record<string, unknown>;
+          values["peakProcesses"] = "-1";
+        },
+      },
+      {
+        path: "$.resources.observedInputs.values",
+        mutate: (resources) => {
+          const group = resources["observedInputs"] as Record<string, unknown>;
+          const values = group["values"] as Record<string, unknown>;
+          values["maxConstexprSteps"] = values["openedSourceFiles"];
+        },
+      },
+    ];
+    for (const testCase of cases) {
+      const receipt = structuredClone(fixture.receipt) as unknown as Record<string, unknown>;
+      testCase.mutate(receipt["resources"] as Record<string, unknown>);
+      await expect(verifyCppCuteAotRunnerReceipt(
+        fixture.job,
+        fixture.executionEnvironment,
+        fixture.artifactResource,
+        receipt,
+      )).rejects.toMatchObject({
+        code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVALID",
+        path: testCase.path,
+      });
+    }
   });
 
   it("rejects receipt hash/version/outcome drift, operational fields, cancellation, and hostile inputs", async () => {
     const fixture = await createFixture();
-    const hashDrift = structuredClone(fixture.receipt) as CppCuteAotRunnerReceiptV1;
+    const hashDrift = structuredClone(fixture.receipt) as CppCuteAotRunnerReceiptV2;
     (hashDrift as { receiptId: string }).receiptId = `bg.cpp.aot-receipt.sha256.${"0".repeat(64)}`;
     await expect(verifyCppCuteAotRunnerReceipt(
       fixture.job,
@@ -355,7 +477,7 @@ describe("C++/CuTe AOT runner receipt", () => {
 
     await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.executionEnvironment, fixture.artifactResource, {
       ...fixture.receipt,
-      version: { major: 2, minor: 0 },
+      version: { major: 1, minor: 1 },
     })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-UNSUPPORTED-VERSION" });
     await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.executionEnvironment, fixture.artifactResource, {
       ...fixture.receipt,

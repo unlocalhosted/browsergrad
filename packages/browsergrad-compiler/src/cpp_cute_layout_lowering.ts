@@ -22,7 +22,7 @@ import {
 import type {
   CppCuteAffineLayoutFactV1,
   CppCuteFrontendEntryV1,
-  CppCuteFrontendPayloadV1,
+  CppCuteFrontendPayloadV2,
   CppCuteHierarchyV1,
   CppCuteMacroExpansionV1,
   CppCuteSourceOriginV1,
@@ -377,7 +377,7 @@ function indexConstant(value: bigint): IndexExpr {
 }
 
 function collectOriginClosure(
-  payload: CppCuteFrontendPayloadV1,
+  payload: CppCuteFrontendPayloadV2,
   origin: CppCuteSourceOriginV1,
 ): { readonly spans: readonly CppCuteSourceSpanV1[]; readonly macroExpansions: readonly CppCuteMacroExpansionV1[] } {
   const spansById = new Map(payload.spans.map((span) => [span.spanId, span]));

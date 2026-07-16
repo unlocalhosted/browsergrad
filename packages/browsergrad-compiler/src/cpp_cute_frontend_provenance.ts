@@ -29,6 +29,7 @@ import {
   type VerifiedCppCuteAotRunnerReceiptResource,
 } from "./cpp_cute_aot_receipt.js";
 import { unwrapPreparedCppCuteAotJob } from "./cpp_cute_aot_job.js";
+import { findCppCuteFrontendProfileBindingMismatch } from "./cpp_cute_frontend_profile_binding.js";
 
 export const CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA = "browsergrad.compiler.cpp-cute.attestation-trust-store";
 export const CPP_CUTE_FRONTEND_PROVENANCE_MAJOR = 1;
@@ -471,12 +472,13 @@ export function authorizeCppCuteFrontendArtifact(
       artifactRecord.envelope.producer.version !== profileRecord.profile.deployment.extractor.version) {
     subjectMismatch("$.artifact.producer", "artifact transport producer differs from prepared extractor profile");
   }
-  verifyIncludeRootProfile(artifactRecord.envelope.payload.inputs.includeRoots, profileRecord.profile.virtualFileSystem.includeRoots);
-  verifyVirtualFileProfile(
-    artifactRecord.envelope.payload.inputs.files,
-    profileRecord.profile.virtualFileSystem.sourceRoots,
-    profileRecord.profile.virtualFileSystem.includeRoots,
+  const profileBindingMismatch = findCppCuteFrontendProfileBindingMismatch(
+    artifactRecord.envelope.payload,
+    profileRecord.profile,
   );
+  if (profileBindingMismatch !== null) {
+    subjectMismatch(profileBindingMismatch.path, profileBindingMismatch.message);
+  }
   const authorized = Object.freeze({
     artifactHash: artifact.artifactHash,
     artifactBytesSha256: artifact.artifactBytesSha256,
@@ -855,43 +857,6 @@ async function verifyStatementBindings(
       artifactRecord.envelope.producer.version !== configured.deployment.extractor.version) {
     subjectMismatch("$.artifact.producer", "artifact producer differs from prepared extractor profile");
   }
-}
-
-function verifyIncludeRootProfile(
-  artifactRoots: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>["envelope"]["payload"]["inputs"]["includeRoots"],
-  profileRoots: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>["profile"]["virtualFileSystem"]["includeRoots"],
-): void {
-  if (artifactRoots.length !== profileRoots.length) subjectMismatch("$.artifact.inputs.includeRoots", "artifact include-root count differs from profile");
-  for (const [index, artifactRoot] of artifactRoots.entries()) {
-    const profileRoot = profileRoots[index];
-    if (profileRoot === undefined || artifactRoot.mode !== profileRoot.mode ||
-        artifactRoot.virtualPath !== profileRoot.virtualPath || artifactRoot.manifestSha256 !== profileRoot.manifestSha256) {
-      subjectMismatch(`$.artifact.inputs.includeRoots[${index}]`, "artifact include-root precedence or manifest differs from profile");
-    }
-  }
-}
-
-function verifyVirtualFileProfile(
-  files: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>["envelope"]["payload"]["inputs"]["files"],
-  sourceRoots: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>["profile"]["virtualFileSystem"]["sourceRoots"],
-  includeRoots: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>["profile"]["virtualFileSystem"]["includeRoots"],
-): void {
-  const headerRoots = includeRoots.map((root) => root.virtualPath);
-  for (const [index, file] of files.entries()) {
-    const allowedRoots = file.profileDependency === "none" ? sourceRoots : headerRoots;
-    if (!allowedRoots.some((root) => isVirtualPathBelow(file.virtualPath, root))) {
-      subjectMismatch(
-        `$.artifact.inputs.files[${index}].virtualPath`,
-        file.profileDependency === "none"
-          ? "source-owned file escapes profile source roots"
-          : "toolchain-owned header escapes profile include roots",
-      );
-    }
-  }
-}
-
-function isVirtualPathBelow(path: string, root: string): boolean {
-  return root === "/" ? path !== "/" : path.startsWith(`${root}/`);
 }
 
 function unwrapTrustStore(store: PreparedCppCuteAttestationTrustStore): PreparedCppCuteAttestationTrustStoreRecord {

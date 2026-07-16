@@ -31,7 +31,7 @@ import {
 import { computeCppCuteAotExecutionPlanHash } from "./cpp_cute_aot_policy.js";
 import {
   unwrapPreparedCppCuteAotJob,
-  type CppCuteAotSourceFileV1,
+  type CppCuteAotSourceFileV2,
   type PreparedCppCuteAotJob,
 } from "./cpp_cute_aot_job.js";
 import {
@@ -48,10 +48,11 @@ import {
   type CppCuteFrontendRunnerProfile,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
+import { findCppCuteFrontendProfileBindingMismatch } from "./cpp_cute_frontend_profile_binding.js";
 
 export const CPP_CUTE_AOT_RECEIPT_SCHEMA = "browsergrad.compiler.cpp-cute.aot-runner-receipt";
-export const CPP_CUTE_AOT_RECEIPT_MAJOR = 1;
-export const CPP_CUTE_AOT_RECEIPT_MINOR = 1;
+export const CPP_CUTE_AOT_RECEIPT_MAJOR = 2;
+export const CPP_CUTE_AOT_RECEIPT_MINOR = 0;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const OCI_SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -62,12 +63,12 @@ const ARTIFACT_ID = /^bg\.artifact\.cpp-cute-frontend\.sha256\.[0-9a-f]{64}$/u;
 const VERIFIED_RECEIPTS = new WeakMap<object, VerifiedCppCuteAotRunnerReceiptRecord>();
 const VERIFIED_RECEIPT_RESOURCES = new WeakMap<object, VerifiedCppCuteAotRunnerReceipt>();
 
-export interface CppCuteAotReceiptVersionV1 extends JsonObject {
+export interface CppCuteAotReceiptVersionV2 extends JsonObject {
   readonly major: typeof CPP_CUTE_AOT_RECEIPT_MAJOR;
   readonly minor: typeof CPP_CUTE_AOT_RECEIPT_MINOR;
 }
 
-export interface CppCuteAotReceiptSandboxV1 extends JsonObject {
+export interface CppCuteAotReceiptSandboxV2 extends JsonObject {
   readonly contractId: "browsergrad.compiler.cpp-cute.aot@1";
   readonly policySha256: string;
   readonly limitsSha256: string;
@@ -78,7 +79,7 @@ export interface CppCuteAotReceiptSandboxV1 extends JsonObject {
   readonly userProducedNativeExecution: "forbidden";
 }
 
-export interface CppCuteAotReceiptInvocationV1 extends JsonObject {
+export interface CppCuteAotReceiptInvocationV2 extends JsonObject {
   readonly invocationId: string;
   readonly invocationManifestSha256: string;
   readonly executionPlanSha256: string;
@@ -88,33 +89,31 @@ export interface CppCuteAotReceiptInvocationV1 extends JsonObject {
   readonly extractor: CppCuteFrontendExtractorProfile;
   readonly compiler: CppCuteFrontendCompilerProfile;
   readonly dependencyManifestSha256: string;
-  readonly sandbox: CppCuteAotReceiptSandboxV1;
+  readonly sandbox: CppCuteAotReceiptSandboxV2;
 }
 
-export interface CppCuteAotReceiptOpenedInputsV1 extends JsonObject {
-  readonly files: readonly CppCuteAotSourceFileV1[];
+export interface CppCuteAotReceiptOpenedInputsV2 extends JsonObject {
+  readonly files: readonly CppCuteAotSourceFileV2[];
   readonly sourceSetSha256: string;
   readonly headerSetSha256: string;
   readonly inputClosureSha256: string;
 }
 
-export type CppCuteAotReceiptSelectionV1 =
+export type CppCuteAotReceiptSelectionV2 =
   | (JsonObject & {
       readonly kind: "resolved";
       readonly requestId: string;
       readonly anchorTokenSha256: string;
-      readonly expectedEntryId: string;
       readonly resolvedEntryId: string;
     })
   | (JsonObject & {
       readonly kind: "rejected";
       readonly requestId: string;
       readonly anchorTokenSha256: string;
-      readonly expectedEntryId: string;
       readonly blockingDiagnosticIds: readonly string[];
     });
 
-export interface CppCuteAotReceiptOutputV1 extends JsonObject {
+export interface CppCuteAotReceiptOutputV2 extends JsonObject {
   readonly artifactId: string;
   readonly artifactHash: string;
   readonly transportHash: string;
@@ -123,58 +122,110 @@ export interface CppCuteAotReceiptOutputV1 extends JsonObject {
   readonly outputManifestSha256: string;
 }
 
-export interface CppCuteAotReceiptResourcesV1 extends JsonObject {
-  readonly sourceFiles: WireU64;
-  readonly sourceBytes: WireU64;
-  readonly headerFiles: WireU64;
-  readonly headerBytes: WireU64;
-  readonly includeDepth: WireU64;
-  readonly macroExpansions: WireU64;
-  readonly preprocessedTokens: WireU64;
-  readonly astNodes: WireU64;
-  readonly constexprSteps: WireU64;
-  readonly templateInstantiations: WireU64;
-  readonly templateDepth: WireU64;
-  readonly declarations: WireU64;
-  readonly types: WireU64;
-  readonly constants: WireU64;
-  readonly layouts: WireU64;
-  readonly tensors: WireU64;
-  readonly operations: WireU64;
-  readonly targetIntrinsics: WireU64;
-  readonly diagnostics: WireU64;
-  readonly outputBytes: WireU64;
+/** Exact files/bytes present in verified opened-input closure. */
+export interface CppCuteAotReceiptObservedInputValuesV2 extends JsonObject {
+  readonly openedSourceFiles: WireU64;
+  readonly openedSourceBytes: WireU64;
+  readonly openedHeaderFiles: WireU64;
+  readonly openedHeaderBytes: WireU64;
+}
+
+/** Values sampled by supervisor/OS accounting for this completed process. */
+export interface CppCuteAotReceiptProcessMeasurementValuesV2 extends JsonObject {
   readonly wallTimeMs: WireU64;
   readonly cpuTimeMs: WireU64;
   readonly peakMemoryBytes: WireU64;
   readonly peakProcesses: WireU64;
 }
 
-export interface CppCuteAotRunnerReceiptV1 extends JsonObject {
+/** Exact counts of records serialized in verified frontend artifact, not total Clang work. */
+export interface CppCuteAotReceiptEmittedArtifactValuesV2 extends JsonObject {
+  readonly macroExpansionFacts: WireU64;
+  readonly templateInstantiationFacts: WireU64;
+  readonly declarations: WireU64;
+  readonly types: WireU64;
+  readonly constants: WireU64;
+  readonly layoutFacts: WireU64;
+  readonly tensorFacts: WireU64;
+  readonly operationFacts: WireU64;
+  readonly targetIntrinsicFacts: WireU64;
+  readonly diagnostics: WireU64;
+  readonly outputBytes: WireU64;
+}
+
+/** Controls configured before extraction. These are ceilings, never observations. */
+export interface CppCuteAotReceiptEnforcedCeilingValuesV2 extends JsonObject {
+  readonly maxSourceFiles: WireU64;
+  readonly maxSourceBytes: WireU64;
+  readonly maxHeaderFiles: WireU64;
+  readonly maxHeaderBytes: WireU64;
+  readonly maxIncludeDepth: WireU64;
+  readonly maxMacroExpansions: WireU64;
+  readonly maxPreprocessedTokens: WireU64;
+  readonly maxAstNodes: WireU64;
+  readonly maxConstexprSteps: WireU64;
+  readonly maxTemplateInstantiations: WireU64;
+  readonly maxTemplateDepth: WireU64;
+  readonly maxDeclarations: WireU64;
+  readonly maxTypes: WireU64;
+  readonly maxConstants: WireU64;
+  readonly maxLayouts: WireU64;
+  readonly maxTensors: WireU64;
+  readonly maxOperations: WireU64;
+  readonly maxTargetIntrinsics: WireU64;
+  readonly maxDiagnostics: WireU64;
+  readonly maxOutputBytes: WireU64;
+  readonly maxWallTimeMs: WireU64;
+  readonly maxCpuTimeMs: WireU64;
+  readonly maxMemoryBytes: WireU64;
+  readonly maxProcesses: WireU64;
+}
+
+export type CppCuteAotReceiptAccountingKindV2 =
+  | "observed-exact"
+  | "emitted-artifact-exact"
+  | "enforced-upper-bound";
+
+export interface CppCuteAotReceiptAccountingV2<
+  K extends CppCuteAotReceiptAccountingKindV2,
+  T extends JsonObject,
+> extends JsonObject {
+  readonly accountingKind: K;
+  readonly values: T;
+}
+
+export interface CppCuteAotReceiptResourcesV2 extends JsonObject {
+  readonly observedInputs: CppCuteAotReceiptAccountingV2<"observed-exact", CppCuteAotReceiptObservedInputValuesV2>;
+  readonly processMeasurements: CppCuteAotReceiptAccountingV2<"observed-exact", CppCuteAotReceiptProcessMeasurementValuesV2>;
+  readonly emittedArtifact: CppCuteAotReceiptAccountingV2<"emitted-artifact-exact", CppCuteAotReceiptEmittedArtifactValuesV2>;
+  readonly enforcedCeilings: CppCuteAotReceiptAccountingV2<"enforced-upper-bound", CppCuteAotReceiptEnforcedCeilingValuesV2>;
+}
+
+export interface CppCuteAotRunnerReceiptV2 extends JsonObject {
   readonly schema: typeof CPP_CUTE_AOT_RECEIPT_SCHEMA;
-  readonly version: CppCuteAotReceiptVersionV1;
+  readonly version: CppCuteAotReceiptVersionV2;
   readonly receiptId: string;
   readonly jobId: string;
   readonly profileHash: string;
-  readonly invocation: CppCuteAotReceiptInvocationV1;
-  readonly openedInputs: CppCuteAotReceiptOpenedInputsV1;
-  readonly selection: CppCuteAotReceiptSelectionV1;
-  readonly output: CppCuteAotReceiptOutputV1;
-  readonly resources: CppCuteAotReceiptResourcesV1;
+  readonly invocation: CppCuteAotReceiptInvocationV2;
+  readonly openedInputs: CppCuteAotReceiptOpenedInputsV2;
+  readonly selection: CppCuteAotReceiptSelectionV2;
+  readonly output: CppCuteAotReceiptOutputV2;
+  readonly resources: CppCuteAotReceiptResourcesV2;
   readonly outcome: "succeeded";
   readonly exitCode: 0;
 }
 
-export interface CppCuteAotRunnerReceiptBodyV1 extends JsonObject {
+export interface CppCuteAotRunnerReceiptBodyV2 extends JsonObject {
   readonly schema: typeof CPP_CUTE_AOT_RECEIPT_SCHEMA;
-  readonly version: CppCuteAotReceiptVersionV1;
+  readonly version: CppCuteAotReceiptVersionV2;
   readonly jobId: string;
   readonly profileHash: string;
-  readonly invocation: CppCuteAotReceiptInvocationV1;
-  readonly openedInputs: CppCuteAotReceiptOpenedInputsV1;
-  readonly selection: CppCuteAotReceiptSelectionV1;
-  readonly output: CppCuteAotReceiptOutputV1;
-  readonly resources: CppCuteAotReceiptResourcesV1;
+  readonly invocation: CppCuteAotReceiptInvocationV2;
+  readonly openedInputs: CppCuteAotReceiptOpenedInputsV2;
+  readonly selection: CppCuteAotReceiptSelectionV2;
+  readonly output: CppCuteAotReceiptOutputV2;
+  readonly resources: CppCuteAotReceiptResourcesV2;
   readonly outcome: "succeeded";
   readonly exitCode: 0;
 }
@@ -209,7 +260,7 @@ export interface VerifiedCppCuteAotRunnerReceiptResource {
 }
 
 export interface VerifiedCppCuteAotRunnerReceiptRecord {
-  readonly receipt: CppCuteAotRunnerReceiptV1;
+  readonly receipt: CppCuteAotRunnerReceiptV2;
   readonly job: PreparedCppCuteAotJob;
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
@@ -274,7 +325,7 @@ export async function verifyCppCuteAotRunnerReceipt(
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
   const limits = normalizeOptions(options);
   throwIfAborted(options.signal);
-  let receipt: CppCuteAotRunnerReceiptV1;
+  let receipt: CppCuteAotRunnerReceiptV2;
   try {
     assertJsonValue(value, { limits });
     receipt = parseReceipt(value);
@@ -398,11 +449,11 @@ export function canonicalCppCuteAotRunnerReceiptBytes(
 }
 
 export async function deriveCppCuteAotRunnerReceiptId(
-  receipt: CppCuteAotRunnerReceiptV1 | CppCuteAotRunnerReceiptBodyV1,
+  receipt: CppCuteAotRunnerReceiptV2 | CppCuteAotRunnerReceiptBodyV2,
   options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   const digest = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.aot-runner-receipt.v1",
+    domain: "browsergrad.compiler.cpp-cute.aot-runner-receipt.v2",
     receipt: {
       schema: receipt.schema,
       version: receipt.version,
@@ -420,7 +471,7 @@ export async function deriveCppCuteAotRunnerReceiptId(
   return `bg.cpp.aot-receipt.sha256.${digest}`;
 }
 
-function parseReceipt(value: JsonValue): CppCuteAotRunnerReceiptV1 {
+function parseReceipt(value: JsonValue): CppCuteAotRunnerReceiptV2 {
   const object = closedObject(value, [
     "schema", "version", "receiptId", "jobId", "profileHash", "invocation", "openedInputs", "selection",
     "output", "resources", "outcome", "exitCode",
@@ -445,7 +496,7 @@ function parseReceipt(value: JsonValue): CppCuteAotRunnerReceiptV1 {
   });
 }
 
-function parseVersion(value: JsonValue, path: string): CppCuteAotReceiptVersionV1 {
+function parseVersion(value: JsonValue, path: string): CppCuteAotReceiptVersionV2 {
   const object = closedObject(value, ["major", "minor"], path);
   if (object.major !== CPP_CUTE_AOT_RECEIPT_MAJOR || object.minor !== CPP_CUTE_AOT_RECEIPT_MINOR) {
     mismatch(
@@ -457,7 +508,7 @@ function parseVersion(value: JsonValue, path: string): CppCuteAotReceiptVersionV
   return { major: CPP_CUTE_AOT_RECEIPT_MAJOR, minor: CPP_CUTE_AOT_RECEIPT_MINOR };
 }
 
-function parseInvocation(value: JsonValue, path: string): CppCuteAotReceiptInvocationV1 {
+function parseInvocation(value: JsonValue, path: string): CppCuteAotReceiptInvocationV2 {
   const object = closedObject(value, [
     "invocationId", "invocationManifestSha256", "executionPlanSha256", "executionEnvironmentManifestSha256",
     "runner", "container", "extractor", "compiler", "dependencyManifestSha256", "sandbox",
@@ -506,12 +557,20 @@ function parseContainer(value: JsonValue, path: string): CppCuteFrontendContaine
 }
 
 function parseExtractor(value: JsonValue, path: string): CppCuteFrontendExtractorProfile {
-  const object = closedObject(value, ["id", "version", "buildId", "binarySha256"], path);
+  const object = closedObject(
+    value,
+    ["id", "version", "buildId", "binarySha256", "semanticAdapterManifestSha256"],
+    path,
+  );
   return {
     id: boundedString(field(object, "id", path), `${path}.id`, 256),
     version: boundedString(field(object, "version", path), `${path}.version`, 128),
     buildId: boundedString(field(object, "buildId", path), `${path}.buildId`, 256),
     binarySha256: sha256(field(object, "binarySha256", path), `${path}.binarySha256`),
+    semanticAdapterManifestSha256: sha256(
+      field(object, "semanticAdapterManifestSha256", path),
+      `${path}.semanticAdapterManifestSha256`,
+    ),
   };
 }
 
@@ -529,7 +588,7 @@ function parseCompiler(value: JsonValue, path: string): CppCuteFrontendCompilerP
   };
 }
 
-function parseSandbox(value: JsonValue, path: string): CppCuteAotReceiptSandboxV1 {
+function parseSandbox(value: JsonValue, path: string): CppCuteAotReceiptSandboxV2 {
   const object = closedObject(value, [
     "contractId", "policySha256", "limitsSha256", "network", "readOnlyRoot", "noNewPrivileges", "linking",
     "userProducedNativeExecution",
@@ -556,7 +615,7 @@ function parseSandbox(value: JsonValue, path: string): CppCuteAotReceiptSandboxV
   };
 }
 
-function parseOpenedInputs(value: JsonValue, path: string): CppCuteAotReceiptOpenedInputsV1 {
+function parseOpenedInputs(value: JsonValue, path: string): CppCuteAotReceiptOpenedInputsV2 {
   const object = closedObject(value, ["files", "sourceSetSha256", "headerSetSha256", "inputClosureSha256"], path);
   const rawFiles = arrayValue(field(object, "files", path), `${path}.files`);
   if (rawFiles.length === 0) invalid(`${path}.files`, "receipt must report at least one opened source file");
@@ -568,7 +627,7 @@ function parseOpenedInputs(value: JsonValue, path: string): CppCuteAotReceiptOpe
   };
 }
 
-function parseOpenedFile(value: JsonValue, path: string): CppCuteAotSourceFileV1 {
+function parseOpenedFile(value: JsonValue, path: string): CppCuteAotSourceFileV2 {
   const object = closedObject(value, ["fileId", "role", "virtualPath", "contentSha256", "byteLength"], path);
   if (object.role !== "main-source" && object.role !== "project-header") {
     invalid(`${path}.role`, "opened job source role must be main-source or project-header");
@@ -582,21 +641,20 @@ function parseOpenedFile(value: JsonValue, path: string): CppCuteAotSourceFileV1
   };
 }
 
-function parseSelection(value: JsonValue, path: string): CppCuteAotReceiptSelectionV1 {
+function parseSelection(value: JsonValue, path: string): CppCuteAotReceiptSelectionV2 {
   if (!isJsonObject(value)) invalid(path, "expected object");
   if (value.kind === "resolved") {
-    const object = closedObject(value, ["kind", "requestId", "anchorTokenSha256", "expectedEntryId", "resolvedEntryId"], path);
+    const object = closedObject(value, ["kind", "requestId", "anchorTokenSha256", "resolvedEntryId"], path);
     return {
       kind: "resolved",
       requestId: patterned(field(object, "requestId", path), `${path}.requestId`, STABLE_ID, "request ID"),
       anchorTokenSha256: sha256(field(object, "anchorTokenSha256", path), `${path}.anchorTokenSha256`),
-      expectedEntryId: patterned(field(object, "expectedEntryId", path), `${path}.expectedEntryId`, STABLE_ID, "entry ID"),
       resolvedEntryId: patterned(field(object, "resolvedEntryId", path), `${path}.resolvedEntryId`, STABLE_ID, "entry ID"),
     };
   }
   if (value.kind === "rejected") {
     const object = closedObject(value, [
-      "kind", "requestId", "anchorTokenSha256", "expectedEntryId", "blockingDiagnosticIds",
+      "kind", "requestId", "anchorTokenSha256", "blockingDiagnosticIds",
     ], path);
     const blockingDiagnosticIds = arrayValue(
       field(object, "blockingDiagnosticIds", path),
@@ -613,14 +671,13 @@ function parseSelection(value: JsonValue, path: string): CppCuteAotReceiptSelect
       kind: "rejected",
       requestId: patterned(field(object, "requestId", path), `${path}.requestId`, STABLE_ID, "request ID"),
       anchorTokenSha256: sha256(field(object, "anchorTokenSha256", path), `${path}.anchorTokenSha256`),
-      expectedEntryId: patterned(field(object, "expectedEntryId", path), `${path}.expectedEntryId`, STABLE_ID, "entry ID"),
       blockingDiagnosticIds,
     };
   }
   invalid(`${path}.kind`, "selection kind must be resolved or rejected");
 }
 
-function parseOutput(value: JsonValue, path: string): CppCuteAotReceiptOutputV1 {
+function parseOutput(value: JsonValue, path: string): CppCuteAotReceiptOutputV2 {
   const object = closedObject(value, [
     "artifactId", "artifactHash", "transportHash", "artifactBytesSha256", "artifactByteLength",
     "outputManifestSha256",
@@ -635,25 +692,76 @@ function parseOutput(value: JsonValue, path: string): CppCuteAotReceiptOutputV1 
   };
 }
 
-function parseResources(value: JsonValue, path: string): CppCuteAotReceiptResourcesV1 {
-  const fields = [
-    "sourceFiles", "sourceBytes", "headerFiles", "headerBytes", "includeDepth", "macroExpansions",
-    "preprocessedTokens", "astNodes", "constexprSteps", "templateInstantiations", "templateDepth",
-    "declarations", "types", "constants", "layouts", "tensors", "operations", "targetIntrinsics",
-    "diagnostics", "outputBytes", "wallTimeMs", "cpuTimeMs", "peakMemoryBytes", "peakProcesses",
-  ] as const;
-  const object = closedObject(value, fields, path);
-  const resources = Object.fromEntries(
-    fields.map((name) => [name, parseWireU64(field(object, name, path), `${path}.${name}`)]),
-  ) as unknown as CppCuteAotReceiptResourcesV1;
-  if (wireIntegerToBigInt(resources.peakMemoryBytes) === 0n || wireIntegerToBigInt(resources.peakProcesses) === 0n) {
-    invalid(path, "successful receipt must report nonzero peak memory and process observations");
+function parseResources(value: JsonValue, path: string): CppCuteAotReceiptResourcesV2 {
+  const object = closedObject(
+    value,
+    ["observedInputs", "processMeasurements", "emittedArtifact", "enforcedCeilings"],
+    path,
+  );
+  const observedInputs = parseAccounting(
+    field(object, "observedInputs", path),
+    `${path}.observedInputs`,
+    "observed-exact",
+    ["openedSourceFiles", "openedSourceBytes", "openedHeaderFiles", "openedHeaderBytes"],
+  ) as CppCuteAotReceiptResourcesV2["observedInputs"];
+  const processMeasurements = parseAccounting(
+    field(object, "processMeasurements", path),
+    `${path}.processMeasurements`,
+    "observed-exact",
+    ["wallTimeMs", "cpuTimeMs", "peakMemoryBytes", "peakProcesses"],
+  ) as CppCuteAotReceiptResourcesV2["processMeasurements"];
+  const emittedArtifact = parseAccounting(
+    field(object, "emittedArtifact", path),
+    `${path}.emittedArtifact`,
+    "emitted-artifact-exact",
+    [
+      "macroExpansionFacts", "templateInstantiationFacts", "declarations", "types", "constants",
+      "layoutFacts", "tensorFacts", "operationFacts", "targetIntrinsicFacts", "diagnostics", "outputBytes",
+    ],
+  ) as CppCuteAotReceiptResourcesV2["emittedArtifact"];
+  const enforcedCeilings = parseAccounting(
+    field(object, "enforcedCeilings", path),
+    `${path}.enforcedCeilings`,
+    "enforced-upper-bound",
+    [
+      "maxSourceFiles", "maxSourceBytes", "maxHeaderFiles", "maxHeaderBytes", "maxIncludeDepth",
+      "maxMacroExpansions", "maxPreprocessedTokens", "maxAstNodes", "maxConstexprSteps",
+      "maxTemplateInstantiations", "maxTemplateDepth", "maxDeclarations", "maxTypes", "maxConstants",
+      "maxLayouts", "maxTensors", "maxOperations", "maxTargetIntrinsics", "maxDiagnostics",
+      "maxOutputBytes", "maxWallTimeMs", "maxCpuTimeMs", "maxMemoryBytes", "maxProcesses",
+    ],
+  ) as CppCuteAotReceiptResourcesV2["enforcedCeilings"];
+  if (
+    wireIntegerToBigInt(processMeasurements.values.peakMemoryBytes) === 0n
+    || wireIntegerToBigInt(processMeasurements.values.peakProcesses) === 0n
+  ) {
+    invalid(`${path}.processMeasurements.values`, "successful receipt must report nonzero peak memory and process observations");
   }
-  return resources;
+  return { observedInputs, processMeasurements, emittedArtifact, enforcedCeilings };
+}
+
+function parseAccounting(
+  value: JsonValue,
+  path: string,
+  expectedKind: CppCuteAotReceiptAccountingKindV2,
+  valueFields: readonly string[],
+): CppCuteAotReceiptAccountingV2<CppCuteAotReceiptAccountingKindV2, JsonObject> {
+  const object = closedObject(value, ["accountingKind", "values"], path);
+  if (object.accountingKind !== expectedKind) {
+    invalid(`${path}.accountingKind`, `accounting kind must be ${expectedKind}`);
+  }
+  const values = closedObject(field(object, "values", path), valueFields, `${path}.values`);
+  return {
+    accountingKind: expectedKind,
+    values: Object.fromEntries(valueFields.map((name) => [
+      name,
+      parseWireU64(field(values, name, `${path}.values`), `${path}.values.${name}`),
+    ])),
+  };
 }
 
 function verifyJobAndArtifactBindings(
-  receipt: CppCuteAotRunnerReceiptV1,
+  receipt: CppCuteAotRunnerReceiptV2,
   job: PreparedCppCuteAotJob,
   artifact: VerifiedCppCuteFrontendArtifact,
   artifactRecord: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>,
@@ -663,7 +771,7 @@ function verifyJobAndArtifactBindings(
   if (receipt.jobId !== job.jobId || receipt.profileHash !== job.profileHash) {
     mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-JOB-MISMATCH", "$.jobId", "receipt differs from prepared job authority");
   }
-  const expectedInputs: CppCuteAotReceiptOpenedInputsV1 = {
+  const expectedInputs: CppCuteAotReceiptOpenedInputsV2 = {
     files: jobRecord.job.files,
     sourceSetSha256: jobRecord.job.expectedOutput.sourceSetSha256,
     headerSetSha256: jobRecord.job.expectedOutput.headerSetSha256,
@@ -681,7 +789,9 @@ function verifyJobAndArtifactBindings(
     mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH", "$.artifact.inputs", "verified artifact closure differs from the prepared request");
   }
   const payload = artifactRecord.envelope.payload;
-  const sourceOwnedFiles = payload.inputs.files.filter((file) => file.profileDependency === "none");
+  const sourceOwnedFiles = payload.inputs.files.filter(
+    (file) => file.role === "main-source" || file.role === "project-header",
+  );
   if (sourceOwnedFiles.length !== jobRecord.job.files.length) {
     mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH", "$.artifact.inputs.files", "verified artifact has extra or missing source-owned files");
   }
@@ -693,7 +803,7 @@ function verifyJobAndArtifactBindings(
       || actual.virtualPath !== expected.virtualPath
       || actual.contentSha256 !== expected.contentSha256
       || actual.byteLength !== expected.byteLength
-      || actual.profileDependency !== "none"
+      || actual.owner.kind !== "source"
     ) {
       mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH", `$.openedInputs.files[${index}]`, "opened source differs from the verified artifact input closure");
     }
@@ -710,13 +820,23 @@ function verifyJobAndArtifactBindings(
     const actual = payload.inputs.includeRoots[index];
     if (
       actual === undefined
+      || actual.includeRootId !== expected.includeRootId
       || actual.ordinal !== index
       || actual.mode !== expected.mode
       || actual.virtualPath !== expected.virtualPath
       || actual.manifestSha256 !== expected.manifestSha256
+      || canonicalText(actual.owner) !== canonicalText(expected.owner)
     ) {
       mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH", `$.artifact.inputs.includeRoots[${index}]`, "artifact include-root precedence or manifest differs from prepared profile");
     }
+  }
+  const profileBindingMismatch = findCppCuteFrontendProfileBindingMismatch(payload, profileRecord.profile);
+  if (profileBindingMismatch !== null) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH",
+      profileBindingMismatch.path,
+      profileBindingMismatch.message,
+    );
   }
   const extractor = profileRecord.profile.deployment.extractor;
   if (
@@ -727,35 +847,36 @@ function verifyJobAndArtifactBindings(
   }
   const request = jobRecord.job.entryRequests[0];
   if (request === undefined) mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-JOB-MISMATCH", "$.selection", "prepared job lost its entry request");
-  const expectedSelection: CppCuteAotReceiptSelectionV1 = payload.outcome.kind === "accepted"
-    ? {
-        kind: "resolved",
-        requestId: request.requestId,
-        anchorTokenSha256: request.anchor.tokenSha256,
-        expectedEntryId: request.expectedEntryId,
-        resolvedEntryId: request.expectedEntryId,
-      }
-    : {
-        kind: "rejected",
-        requestId: request.requestId,
-        anchorTokenSha256: request.anchor.tokenSha256,
-        expectedEntryId: request.expectedEntryId,
-        blockingDiagnosticIds: payload.outcome.blockingDiagnosticIds,
-      };
+  let expectedSelection: CppCuteAotReceiptSelectionV2;
+  if (payload.outcome.kind === "accepted") {
+    if (payload.outcome.selectedEntryIds.length !== 1) {
+      mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH", "$.artifact.payload.outcome", "AOT declaration request must resolve exactly one selected entry");
+    }
+    const selectedEntryId = payload.outcome.selectedEntryIds[0];
+    if (selectedEntryId === undefined) {
+      mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH", "$.artifact.payload.outcome", "accepted artifact lost its selected entry");
+    }
+    expectedSelection = {
+      kind: "resolved",
+      requestId: request.requestId,
+      anchorTokenSha256: request.anchor.tokenSha256,
+      resolvedEntryId: selectedEntryId,
+    };
+  } else {
+    expectedSelection = {
+      kind: "rejected",
+      requestId: request.requestId,
+      anchorTokenSha256: request.anchor.tokenSha256,
+      blockingDiagnosticIds: payload.outcome.blockingDiagnosticIds,
+    };
+  }
   if (canonicalText(receipt.selection) !== canonicalText(expectedSelection)) {
     mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH", "$.selection", "resolved declaration differs from the prepared entry request");
-  }
-  if (payload.outcome.kind === "accepted" && (
-    payload.outcome.selectedEntryIds.length !== 1
-    || payload.outcome.selectedEntryIds[0] !== request.expectedEntryId
-    || !payload.entries.some((entry) => entry.entryId === request.expectedEntryId)
-  )) {
-    mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH", "$.artifact.payload.outcome", "accepted artifact did not resolve exactly the requested entry");
   }
 }
 
 async function verifyInvocationBindings(
-  receipt: CppCuteAotRunnerReceiptV1,
+  receipt: CppCuteAotRunnerReceiptV2,
   job: PreparedCppCuteAotJob,
   executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   profile: PreparedCppCuteFrontendProfile,
@@ -764,7 +885,7 @@ async function verifyInvocationBindings(
   const configured = profileRecord.profile;
   const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(job);
   const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job, executionEnvironment);
-  const expected: CppCuteAotReceiptInvocationV1 = {
+  const expected: CppCuteAotReceiptInvocationV2 = {
     invocationId: `bg.cpp.aot-invocation.sha256.${invocationManifestSha256}`,
     invocationManifestSha256,
     executionPlanSha256,
@@ -791,10 +912,10 @@ async function verifyInvocationBindings(
 }
 
 async function verifyOutputBindings(
-  receipt: CppCuteAotRunnerReceiptV1,
+  receipt: CppCuteAotRunnerReceiptV2,
   artifact: VerifiedCppCuteFrontendArtifact,
 ): Promise<void> {
-  const expected: CppCuteAotReceiptOutputV1 = {
+  const expected: CppCuteAotReceiptOutputV2 = {
     artifactId: artifact.artifactId,
     artifactHash: artifact.artifactHash,
     transportHash: artifact.transportHash,
@@ -808,69 +929,115 @@ async function verifyOutputBindings(
 }
 
 function verifyResourceBindings(
-  resources: CppCuteAotReceiptResourcesV1,
+  resources: CppCuteAotReceiptResourcesV2,
   profile: PreparedCppCuteFrontendProfile,
   artifact: VerifiedCppCuteFrontendArtifact,
   artifactRecord: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>,
 ): void {
   const configured = unwrapPreparedCppCuteFrontendProfile(profile).profile.extractionLimits;
-  const cases: readonly [keyof CppCuteAotReceiptResourcesV1, number][] = [
-    ["sourceFiles", configured.maxSourceFiles],
-    ["sourceBytes", configured.maxSourceBytes],
-    ["headerFiles", configured.maxHeaderFiles],
-    ["headerBytes", configured.maxHeaderBytes],
-    ["includeDepth", configured.maxIncludeDepth],
-    ["macroExpansions", configured.maxMacroExpansions],
-    ["preprocessedTokens", configured.maxPreprocessedTokens],
-    ["astNodes", configured.maxAstNodes],
-    ["constexprSteps", configured.maxConstexprSteps],
-    ["templateInstantiations", configured.maxTemplateInstantiations],
-    ["templateDepth", configured.maxTemplateDepth],
-    ["declarations", configured.maxDeclarations],
-    ["types", configured.maxTypes],
-    ["constants", configured.maxConstants],
-    ["layouts", configured.maxLayouts],
-    ["tensors", configured.maxTensors],
-    ["operations", configured.maxOperations],
-    ["targetIntrinsics", configured.maxTargetIntrinsics],
-    ["diagnostics", configured.maxDiagnostics],
-    ["outputBytes", configured.maxOutputBytes],
-    ["wallTimeMs", configured.maxWallTimeMs],
-    ["cpuTimeMs", configured.maxCpuTimeMs],
-    ["peakMemoryBytes", configured.maxMemoryBytes],
-    ["peakProcesses", configured.maxProcesses],
+  const payload = artifactRecord.envelope.payload;
+  const sources = payload.inputs.files.filter(
+    (file) => file.role === "main-source" || file.role === "project-header",
+  );
+  const headers = payload.inputs.files.filter(
+    (file) => file.role !== "main-source" && file.role !== "project-header",
+  );
+  const expectedObservedInputs: CppCuteAotReceiptObservedInputValuesV2 = {
+    openedSourceFiles: encodeWireU64(BigInt(sources.length)),
+    openedSourceBytes: encodeWireU64(sumFileBytes(sources)),
+    openedHeaderFiles: encodeWireU64(BigInt(headers.length)),
+    openedHeaderBytes: encodeWireU64(sumFileBytes(headers)),
+  };
+  const expectedEmittedArtifact: CppCuteAotReceiptEmittedArtifactValuesV2 = {
+    macroExpansionFacts: encodeWireU64(BigInt(payload.macroExpansions.length)),
+    templateInstantiationFacts: encodeWireU64(BigInt(payload.templateInstantiations.length)),
+    declarations: encodeWireU64(BigInt(payload.declarations.length)),
+    types: encodeWireU64(BigInt(payload.types.length)),
+    constants: encodeWireU64(BigInt(payload.constants.length)),
+    layoutFacts: encodeWireU64(BigInt(payload.facts.filter((fact) => fact.kind === "affine-layout").length)),
+    tensorFacts: encodeWireU64(BigInt(payload.facts.filter((fact) => fact.kind === "tensor").length)),
+    operationFacts: encodeWireU64(BigInt(payload.facts.filter((fact) => (
+      fact.kind !== "affine-layout" && fact.kind !== "tensor" && fact.kind !== "target-intrinsic"
+    )).length)),
+    targetIntrinsicFacts: encodeWireU64(BigInt(payload.facts.filter((fact) => fact.kind === "target-intrinsic").length)),
+    diagnostics: encodeWireU64(BigInt(payload.diagnostics.length)),
+    outputBytes: artifact.artifactByteLength,
+  };
+  const expectedCeilings: CppCuteAotReceiptEnforcedCeilingValuesV2 = {
+    maxSourceFiles: encodeWireU64(BigInt(configured.maxSourceFiles)),
+    maxSourceBytes: encodeWireU64(BigInt(configured.maxSourceBytes)),
+    maxHeaderFiles: encodeWireU64(BigInt(configured.maxHeaderFiles)),
+    maxHeaderBytes: encodeWireU64(BigInt(configured.maxHeaderBytes)),
+    maxIncludeDepth: encodeWireU64(BigInt(configured.maxIncludeDepth)),
+    maxMacroExpansions: encodeWireU64(BigInt(configured.maxMacroExpansions)),
+    maxPreprocessedTokens: encodeWireU64(BigInt(configured.maxPreprocessedTokens)),
+    maxAstNodes: encodeWireU64(BigInt(configured.maxAstNodes)),
+    maxConstexprSteps: encodeWireU64(BigInt(configured.maxConstexprSteps)),
+    maxTemplateInstantiations: encodeWireU64(BigInt(configured.maxTemplateInstantiations)),
+    maxTemplateDepth: encodeWireU64(BigInt(configured.maxTemplateDepth)),
+    maxDeclarations: encodeWireU64(BigInt(configured.maxDeclarations)),
+    maxTypes: encodeWireU64(BigInt(configured.maxTypes)),
+    maxConstants: encodeWireU64(BigInt(configured.maxConstants)),
+    maxLayouts: encodeWireU64(BigInt(configured.maxLayouts)),
+    maxTensors: encodeWireU64(BigInt(configured.maxTensors)),
+    maxOperations: encodeWireU64(BigInt(configured.maxOperations)),
+    maxTargetIntrinsics: encodeWireU64(BigInt(configured.maxTargetIntrinsics)),
+    maxDiagnostics: encodeWireU64(BigInt(configured.maxDiagnostics)),
+    maxOutputBytes: encodeWireU64(BigInt(configured.maxOutputBytes)),
+    maxWallTimeMs: encodeWireU64(BigInt(configured.maxWallTimeMs)),
+    maxCpuTimeMs: encodeWireU64(BigInt(configured.maxCpuTimeMs)),
+    maxMemoryBytes: encodeWireU64(BigInt(configured.maxMemoryBytes)),
+    maxProcesses: encodeWireU64(BigInt(configured.maxProcesses)),
+  };
+  if (canonicalText(resources.enforcedCeilings.values) !== canonicalText(expectedCeilings)) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVOCATION-MISMATCH",
+      "$.resources.enforcedCeilings.values",
+      "enforced upper bounds differ from exact prepared profile configuration",
+    );
+  }
+  const observed = resources.observedInputs.values;
+  const process = resources.processMeasurements.values;
+  const emitted = resources.emittedArtifact.values;
+  const bounded: readonly [WireU64, number, string][] = [
+    [observed.openedSourceFiles, configured.maxSourceFiles, "$.resources.observedInputs.values.openedSourceFiles"],
+    [observed.openedSourceBytes, configured.maxSourceBytes, "$.resources.observedInputs.values.openedSourceBytes"],
+    [observed.openedHeaderFiles, configured.maxHeaderFiles, "$.resources.observedInputs.values.openedHeaderFiles"],
+    [observed.openedHeaderBytes, configured.maxHeaderBytes, "$.resources.observedInputs.values.openedHeaderBytes"],
+    [emitted.macroExpansionFacts, configured.maxMacroExpansions, "$.resources.emittedArtifact.values.macroExpansionFacts"],
+    [emitted.templateInstantiationFacts, configured.maxTemplateInstantiations, "$.resources.emittedArtifact.values.templateInstantiationFacts"],
+    [emitted.declarations, configured.maxDeclarations, "$.resources.emittedArtifact.values.declarations"],
+    [emitted.types, configured.maxTypes, "$.resources.emittedArtifact.values.types"],
+    [emitted.constants, configured.maxConstants, "$.resources.emittedArtifact.values.constants"],
+    [emitted.layoutFacts, configured.maxLayouts, "$.resources.emittedArtifact.values.layoutFacts"],
+    [emitted.tensorFacts, configured.maxTensors, "$.resources.emittedArtifact.values.tensorFacts"],
+    [emitted.operationFacts, configured.maxOperations, "$.resources.emittedArtifact.values.operationFacts"],
+    [emitted.targetIntrinsicFacts, configured.maxTargetIntrinsics, "$.resources.emittedArtifact.values.targetIntrinsicFacts"],
+    [emitted.diagnostics, configured.maxDiagnostics, "$.resources.emittedArtifact.values.diagnostics"],
+    [emitted.outputBytes, configured.maxOutputBytes, "$.resources.emittedArtifact.values.outputBytes"],
+    [process.wallTimeMs, configured.maxWallTimeMs, "$.resources.processMeasurements.values.wallTimeMs"],
+    [process.cpuTimeMs, configured.maxCpuTimeMs, "$.resources.processMeasurements.values.cpuTimeMs"],
+    [process.peakMemoryBytes, configured.maxMemoryBytes, "$.resources.processMeasurements.values.peakMemoryBytes"],
+    [process.peakProcesses, configured.maxProcesses, "$.resources.processMeasurements.values.peakProcesses"],
   ];
-  for (const [fieldName, maximum] of cases) {
-    if (wireIntegerToBigInt(resources[fieldName] as WireU64) > BigInt(maximum)) {
-      resource(`$.resources.${fieldName}`, `observed resource use exceeds profile maximum ${maximum}`);
+  for (const [value, maximum, path] of bounded) {
+    if (wireIntegerToBigInt(value) > BigInt(maximum)) {
+      resource(path, `observed exact value exceeds prepared profile maximum ${maximum}`);
     }
   }
-  const payload = artifactRecord.envelope.payload;
-  const sources = payload.inputs.files.filter((file) => file.profileDependency === "none");
-  const headers = payload.inputs.files.filter((file) => file.profileDependency !== "none");
-  const exact: Readonly<Partial<Record<keyof CppCuteAotReceiptResourcesV1, bigint>>> = {
-    sourceFiles: BigInt(sources.length),
-    sourceBytes: sumFileBytes(sources),
-    headerFiles: BigInt(headers.length),
-    headerBytes: sumFileBytes(headers),
-    macroExpansions: BigInt(payload.macroExpansions.length),
-    templateInstantiations: BigInt(payload.templateInstantiations.length),
-    declarations: BigInt(payload.declarations.length),
-    types: BigInt(payload.types.length),
-    constants: BigInt(payload.constants.length),
-    layouts: BigInt(payload.facts.filter((fact) => fact.kind === "affine-layout").length),
-    tensors: BigInt(payload.facts.filter((fact) => fact.kind === "tensor").length),
-    operations: BigInt(payload.facts.filter((fact) => (
-      fact.kind !== "affine-layout" && fact.kind !== "tensor" && fact.kind !== "target-intrinsic"
-    )).length),
-    targetIntrinsics: BigInt(payload.facts.filter((fact) => fact.kind === "target-intrinsic").length),
-    diagnostics: BigInt(payload.diagnostics.length),
-    outputBytes: wireIntegerToBigInt(artifact.artifactByteLength),
-  };
-  for (const [fieldName, expected] of Object.entries(exact) as Array<[keyof CppCuteAotReceiptResourcesV1, bigint]>) {
-    if (wireIntegerToBigInt(resources[fieldName] as WireU64) !== expected) {
-      mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH", `$.resources.${fieldName}`, "reported extraction count differs from verified artifact");
-    }
+  if (canonicalText(resources.observedInputs.values) !== canonicalText(expectedObservedInputs)) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH",
+      "$.resources.observedInputs.values",
+      "exact opened-input accounting differs from verified artifact inputs",
+    );
+  }
+  if (canonicalText(resources.emittedArtifact.values) !== canonicalText(expectedEmittedArtifact)) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-OUTPUT-MISMATCH",
+      "$.resources.emittedArtifact.values",
+      "exact emitted-artifact accounting differs from verified artifact",
+    );
   }
 }
 

@@ -13,10 +13,9 @@ import type {
 } from "../../src/cpp_cute_frontend_provenance.js";
 import type {
   CppCuteAffineLayoutFactV1,
-  CppCuteFrontendPayloadV1,
+  CppCuteFrontendPayloadV2,
 } from "../../src/cpp_cute_frontend_types.js";
 import {
-  CPP_CUTE_FIXTURE_ENTRY_ID,
   CPP_CUTE_FIXTURE_INTRINSIC_FACT_ID,
   CPP_CUTE_FIXTURE_LAYOUT_FACT_ID,
   CPP_CUTE_FIXTURE_TEMPLATE_DECLARATION_ID,
@@ -36,16 +35,24 @@ beforeAll(async () => {
 
 async function lower(
   authorization: AuthorizedCppCuteFrontendArtifact = canonicalFixture.authorization,
-  entryId = CPP_CUTE_FIXTURE_ENTRY_ID,
+  entryId = selectedEntryId(canonicalFixture.artifact),
 ) {
   return lowerAuthorizedCppCuteLayoutEntry(authorization, { entryId });
+}
+
+function selectedEntryId(artifact = canonicalFixture.artifact): string {
+  const outcome = unwrapVerifiedCppCuteFrontendArtifact(artifact).envelope.payload.outcome;
+  if (outcome.kind !== "accepted" || outcome.selectedEntryIds[0] === undefined) {
+    throw new Error("fixture lost selected entry");
+  }
+  return outcome.selectedEntryIds[0];
 }
 
 function trace(lowered: LoweredCppCuteLayoutEntry, coordinates: readonly string[]) {
   return traceLoweredCppCuteLayoutCoordinate(lowered, { coordinates: coordinates.map(wire) });
 }
 
-function mutableLayoutFact(payload: CppCuteFrontendPayloadV1): Record<string, unknown> {
+function mutableLayoutFact(payload: CppCuteFrontendPayloadV2): Record<string, unknown> {
   const fact = payload.facts.find((candidate) => candidate.kind === "affine-layout");
   if (fact === undefined) throw new Error("fixture lost affine layout fact");
   return fact as unknown as Record<string, unknown>;
@@ -68,7 +75,7 @@ describe("authorized C++/CuTe layout lowering", () => {
     });
     expect(lowered.originHash).toMatch(/^[0-9a-f]{64}$/u);
     expect(Object.isFrozen(lowered)).toBe(true);
-    expect(record.entry.entryId).toBe(CPP_CUTE_FIXTURE_ENTRY_ID);
+    expect(record.entry.entryId).toBe(selectedEntryId());
     expect(record.fact.factId).toBe(record.entry.layoutFactId);
     expect(record.originSpanRecords).toHaveLength(1);
     expect(payload.allocations).toEqual([]);
@@ -218,7 +225,7 @@ describe("authorized C++/CuTe layout lowering", () => {
     const extraEntryId = `bg.cpp.entry.sha256.${"f".repeat(64)}`;
     await expect(createAuthorizedCppCuteProvenanceFixture({
       mutatePayload: (payload) => {
-        const entries = payload.entries as CppCuteFrontendPayloadV1["entries"] & Array<Record<string, unknown>>;
+        const entries = payload.entries as CppCuteFrontendPayloadV2["entries"] & Array<Record<string, unknown>>;
         entries.push({
           entryId: extraEntryId,
           kind: "layout",
@@ -239,7 +246,7 @@ describe("authorized C++/CuTe layout lowering", () => {
     const fixture = await createAuthorizedCppCuteProvenanceFixture({
       mutatePayload: (payload) => {
         const original = payload.facts.find((fact) => fact.kind === "affine-layout") as CppCuteAffineLayoutFactV1;
-        (payload.facts as CppCuteFrontendPayloadV1["facts"] & CppCuteAffineLayoutFactV1[]).push({
+        (payload.facts as CppCuteFrontendPayloadV2["facts"] & CppCuteAffineLayoutFactV1[]).push({
           ...structuredClone(original),
           factId: `bg.cpp.fact.sha256.${"f".repeat(64)}`,
         });
@@ -264,12 +271,12 @@ describe("authorized C++/CuTe layout lowering", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(lowerAuthorizedCppCuteLayoutEntry(canonicalFixture.authorization, {
-      entryId: CPP_CUTE_FIXTURE_ENTRY_ID,
+      entryId: selectedEntryId(),
     }, { signal: controller.signal })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-LAYOUT-CANCELLED",
     });
     await expect(lowerAuthorizedCppCuteLayoutEntry(canonicalFixture.authorization, {
-      entryId: CPP_CUTE_FIXTURE_ENTRY_ID,
+      entryId: selectedEntryId(),
       extra: true,
     } as never)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-LAYOUT-INVALID-REQUEST",
@@ -277,17 +284,17 @@ describe("authorized C++/CuTe layout lowering", () => {
     const hostile: Record<string, unknown> = {};
     Object.defineProperty(hostile, "limits", { enumerable: true, get: () => ({ maxNodes: 10 }) });
     await expect(lowerAuthorizedCppCuteLayoutEntry(canonicalFixture.authorization, {
-      entryId: CPP_CUTE_FIXTURE_ENTRY_ID,
+      entryId: selectedEntryId(),
     }, hostile)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-LAYOUT-INVALID-REQUEST",
     });
     await expect(lowerAuthorizedCppCuteLayoutEntry(canonicalFixture.authorization, {
-      entryId: CPP_CUTE_FIXTURE_ENTRY_ID,
+      entryId: selectedEntryId(),
     }, { limits: { maxNodes: 4 } })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-LAYOUT-RESOURCE-LIMIT",
     });
     await expect(lowerAuthorizedCppCuteLayoutEntry(canonicalFixture.authorization, {
-      entryId: CPP_CUTE_FIXTURE_ENTRY_ID,
+      entryId: selectedEntryId(),
     }, { limits: { maxIntegerBits: 2 } })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-LAYOUT-RESOURCE-LIMIT",
     });

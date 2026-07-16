@@ -448,10 +448,9 @@ describe("C++/CuTe frontend provenance", () => {
           severity: "error",
           code: "browsergrad.cpp-cute:fixture-rejected",
           renderedMessage: "Fixture rejection for authorization boundary coverage.",
-          primarySpanId: diagnostic.primarySpanId,
+          location: structuredClone(diagnostic.location),
           subject: structuredClone(diagnostic.subject),
           parentDiagnosticId: null,
-          related: [],
         });
         (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((left, right) =>
           left.diagnosticId.localeCompare(right.diagnosticId));

@@ -20,8 +20,8 @@ import {
   computeCppCuteInputHashes,
 } from "../../../src/cpp_cute_frontend_verify.js";
 import type {
-  CppCuteFrontendArtifactV1,
-  CppCuteFrontendPayloadV1,
+  CppCuteFrontendArtifactV2,
+  CppCuteFrontendPayloadV2,
 } from "../../../src/cpp_cute_frontend_types.js";
 import {
   prepareCppCuteAotOfflineRun,
@@ -104,7 +104,7 @@ export async function createCppCuteAotRunnerFixture(
     profile,
     executionEnvironment: environmentFixture.environment,
     sourceBlob,
-    artifactBytes: canonicalCppCuteFrontendArtifactBytes(artifact),
+    artifactBytes: canonicalCppCuteFrontendArtifactBytes(receiptFixture.artifact),
     receiptBytes: canonicalCppCuteAotRunnerReceiptBytes(receipt),
   };
 }
@@ -112,9 +112,9 @@ export async function createCppCuteAotRunnerFixture(
 async function createRealSourceBackedArtifact(
   profileHash: string,
   outcome: "accepted" | "rejected",
-): Promise<CppCuteFrontendArtifactV1> {
+): Promise<CppCuteFrontendArtifactV2> {
   const artifact = await createCppCuteArtifactInput(profileHash);
-  const payload = structuredClone(artifact.payload) as CppCuteFrontendPayloadV1;
+  const payload = structuredClone(artifact.payload) as CppCuteFrontendPayloadV2;
   const main = payload.inputs.files.find((file) => file.role === "main-source");
   if (main === undefined) throw new Error("runner fixture lost source file");
   const oldFileId = main.fileId;
@@ -125,7 +125,8 @@ async function createRealSourceBackedArtifact(
     virtualPath: main.virtualPath,
     contentSha256,
     byteLength: String(bytes.byteLength),
-    profileDependency: main.profileDependency,
+    owner: main.owner,
+    includeRootId: main.includeRootId,
   });
   replaceString(payload, oldFileId, newFileId);
   const rewrittenMain = payload.inputs.files.find((file) => file.fileId === newFileId);
@@ -145,7 +146,7 @@ async function createRealSourceBackedArtifact(
   };
 }
 
-function rejectPayload(payload: CppCuteFrontendPayloadV1): void {
+function rejectPayload(payload: CppCuteFrontendPayloadV2): void {
   const diagnostic = payload.diagnostics[0];
   if (diagnostic === undefined) throw new Error("runner fixture lost diagnostic");
   const blockingDiagnosticId = `bg.cpp.diagnostic.sha256.${"1".repeat(64)}`;
@@ -155,10 +156,9 @@ function rejectPayload(payload: CppCuteFrontendPayloadV1): void {
     severity: "error",
     code: "browsergrad.cpp-cute:fixture-rejected",
     renderedMessage: "Fixture rejection for offline-runner coverage.",
-    primarySpanId: diagnostic.primarySpanId,
+    location: structuredClone(diagnostic.location),
     subject: structuredClone(diagnostic.subject),
     parentDiagnosticId: null,
-    related: [],
   });
   (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((left, right) =>
     left.diagnosticId.localeCompare(right.diagnosticId));

@@ -7,7 +7,7 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   unwrapPreparedCppCuteAotJob,
-  type CppCuteAotSourceFileV1,
+  type CppCuteAotSourceFileV2,
   type PreparedCppCuteAotJob,
 } from "./cpp_cute_aot_job.js";
 import {
@@ -56,7 +56,7 @@ export interface CppCuteAotSourceBlob {
 }
 
 interface SnapshottedCppCuteAotSourceBlob {
-  readonly file: CppCuteAotSourceFileV1;
+  readonly file: CppCuteAotSourceFileV2;
   readonly bytes: Uint8Array;
 }
 
@@ -82,7 +82,7 @@ export interface PreparedCppCuteAotOfflineRunRecord {
   readonly job: PreparedCppCuteAotJob;
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
-  readonly sourceFiles: readonly CppCuteAotSourceFileV1[];
+  readonly sourceFiles: readonly CppCuteAotSourceFileV2[];
   readonly executionPlanSha256: string;
   readonly artifactByteLimit: number;
   readonly receiptByteLimit: number;
@@ -420,7 +420,7 @@ export function encodeCppCuteAotResultFrame(
 
 function snapshotSourceBlobs(
   value: readonly CppCuteAotSourceBlob[],
-  expectedFiles: readonly CppCuteAotSourceFileV1[],
+  expectedFiles: readonly CppCuteAotSourceFileV2[],
 ): readonly { readonly fileId: string; readonly bytes: Uint8Array }[] {
   let arrayDescriptors: Record<string, PropertyDescriptor>;
   let arrayKeys: readonly PropertyKey[];
@@ -525,7 +525,7 @@ function snapshotSourceBlobs(
 }
 
 async function verifySourceSnapshots(
-  expectedFiles: readonly CppCuteAotSourceFileV1[],
+  expectedFiles: readonly CppCuteAotSourceFileV2[],
   snapshots: readonly { readonly fileId: string; readonly bytes: Uint8Array }[],
   request: ReturnType<typeof unwrapPreparedCppCuteAotJob>["job"]["entryRequests"][number] | undefined,
 ): Promise<readonly SnapshottedCppCuteAotSourceBlob[]> {

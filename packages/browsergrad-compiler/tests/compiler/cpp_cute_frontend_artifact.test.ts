@@ -3,12 +3,14 @@ import { sha256Hex } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   canonicalCppCuteFrontendArtifactBytes,
   decodeCppCuteFrontendArtifact,
+  deriveCppCuteFrontendArtifactId,
   deriveCppCuteStableId,
   unwrapVerifiedCppCuteFrontendArtifactResource,
   unwrapVerifiedCppCuteFrontendArtifact,
   verifyCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
 } from "../../src/cpp_cute_frontend_artifact.js";
+import { computeCppCuteInputHashes } from "../../src/cpp_cute_frontend_verify.js";
 import {
   cloneCppCuteArtifactInput,
   CPP_CUTE_FIXTURE_DIAGNOSTIC_ID,
@@ -20,6 +22,10 @@ import {
 
 function stableId(kind: string, digit: string): string {
   return `bg.cpp.${kind}.sha256.${digit.repeat(64)}`;
+}
+
+async function rebindArtifactId(value: Record<string, unknown>): Promise<void> {
+  value["artifactId"] = await deriveCppCuteFrontendArtifactId(value["payload"] as never);
 }
 
 describe("C++/CuTe frontend artifact", () => {
@@ -34,14 +40,14 @@ describe("C++/CuTe frontend artifact", () => {
       headerSetSha256: verified.headerSetSha256,
       inputClosureSha256: verified.inputClosureSha256,
     }).toEqual({
-      artifactHash: "a89655452625dadf8c489e3640dfa98a21e78af742cf593fa974e387c8d3ce65",
-      sourceSetSha256: "9a122d8462fc232451f6e758bcda17f48dcf2614d67aa641e951a5886fac6975",
-      headerSetSha256: "a6b1ad5036810001364f1c3062577e7c0d3089bb6c84297dfb6ba59a0b02437c",
-      inputClosureSha256: "36b44d4e6ef78c9696f9864407dcebbec7ff988394653a0cae1600a2662ab847",
+      artifactHash: "b007e902edf81d64bf1508ce71cee635fba9bc11d1ab4914ceb3288c7f82b2e2",
+      sourceSetSha256: "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46",
+      headerSetSha256: "a2974167b9230f04b7cf95e0d2e2d1304b9974ba90398fadd93d087b12d44b91",
+      inputClosureSha256: "4df918262f32e5655e26fc72c7f9053e707c9612216733146d035d75870e2f7b",
     });
     expect(verified.transportHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(verified.artifactBytesSha256).toBe("199c4662192055f3fb68e8947b626a1ba069f90b038db2de364cb87ccb965f71");
-    expect(verified.artifactByteLength).toBe("9068");
+    expect(verified.artifactBytesSha256).toBe("8f53eb66109db78973ebd082033741e9a00a4430a81c6ac224169acd7bfd4680");
+    expect(verified.artifactByteLength).toBe("11064");
     expect(verified.profileHash).toBe(CPP_CUTE_FIXTURE_PROFILE_HASH);
     expect(verified.outcome).toBe("accepted");
     expect(record.envelope.payload.facts).toContainEqual(expect.objectContaining({
@@ -174,10 +180,131 @@ describe("C++/CuTe frontend artifact", () => {
     const edges = danglingInputs["includeEdges"] as Record<string, unknown>[];
     const resolution = edges[0]?.["resolution"] as Record<string, unknown> | undefined;
     if (resolution === undefined) throw new Error("fixture lost include resolution");
-    resolution["includeRootId"] = stableId("include-root", "9");
+    resolution["includeRootId"] = "unknown-root";
     await expect(verifyCppCuteFrontendArtifact(dangling)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-DANGLING-REFERENCE",
       path: "$.payload.inputs.includeEdges[0].resolution.includeRootId",
+    });
+  });
+
+  it("treats the virtual root as containing normalized absolute child paths", async () => {
+    const input = await createCppCuteArtifactInput();
+    const root = input.payload.inputs.includeRoots.find((candidate) => candidate.includeRootId === "cutlass");
+    if (root === undefined) throw new Error("fixture lost dependency include root");
+    (root as { virtualPath: string }).virtualPath = "/";
+    const hashes = await computeCppCuteInputHashes(input.payload);
+    (input.payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
+    (input.payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
+    (input.payload.inputs as { closureSha256: string }).closureSha256 = hashes.closureSha256;
+    (input.payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
+    (input as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(input.payload);
+
+    await expect(verifyCppCuteFrontendArtifact(input)).resolves.toMatchObject({ outcome: "accepted" });
+  });
+
+  it("models compiler-forced includes without fabricated source directives", async () => {
+    const unreachable = await cloneCppCuteArtifactInput();
+    const unreachableInputs = (unreachable["payload"] as Record<string, unknown>)["inputs"] as Record<string, unknown>;
+    const unreachableEdges = unreachableInputs["includeEdges"] as Record<string, unknown>[];
+    unreachableInputs["includeEdges"] = unreachableEdges.filter((edge) => edge["kind"] !== "compiler-forced");
+    await expect(verifyCppCuteFrontendArtifact(unreachable)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining("$.payload.inputs.files"),
+    });
+
+    const fabricated = await cloneCppCuteArtifactInput();
+    const fabricatedInputs = (fabricated["payload"] as Record<string, unknown>)["inputs"] as Record<string, unknown>;
+    const forced = (fabricatedInputs["includeEdges"] as Record<string, unknown>[])
+      .find((edge) => edge["kind"] === "compiler-forced");
+    if (forced === undefined) throw new Error("fixture lost compiler-forced include");
+    forced["directiveSpanId"] = CPP_CUTE_FIXTURE_SPAN_ID;
+    await expect(verifyCppCuteFrontendArtifact(fabricated)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining("$.payload.inputs.includeEdges"),
+    });
+
+    const negativeOrdinal = await cloneCppCuteArtifactInput();
+    const ordinalInputs = (negativeOrdinal["payload"] as Record<string, unknown>)["inputs"] as Record<string, unknown>;
+    const ordinalForced = (ordinalInputs["includeEdges"] as Record<string, unknown>[])
+      .find((edge) => edge["kind"] === "compiler-forced");
+    if (ordinalForced === undefined) throw new Error("fixture lost compiler-forced include");
+    ordinalForced["compilerOptionOrdinal"] = -1;
+    await expect(verifyCppCuteFrontendArtifact(negativeOrdinal)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".compilerOptionOrdinal"),
+    });
+  });
+
+  it("enforces exact source, compiler, and dependency ownership", async () => {
+    const value = await cloneCppCuteArtifactInput();
+    const inputs = (value["payload"] as Record<string, unknown>)["inputs"] as Record<string, unknown>;
+    const compilerHeader = (inputs["files"] as Record<string, unknown>[])
+      .find((file) => file["role"] === "compiler-header");
+    if (compilerHeader === undefined) throw new Error("fixture lost compiler header");
+    compilerHeader["owner"] = { kind: "source" };
+    await expect(verifyCppCuteFrontendArtifact(value)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".owner"),
+    });
+  });
+
+  it("binds variable definitions to closed initializer expression trees", async () => {
+    const valid = await cloneCppCuteArtifactInput();
+    const validPayload = valid["payload"] as Record<string, unknown>;
+    const declarations = validPayload["declarations"] as Record<string, unknown>[];
+    const variable = declarations.find((declaration) => declaration["kind"] === "variable");
+    if (variable === undefined) throw new Error("fixture lost variable declaration");
+    const expressionId = stableId("expression", "8");
+    variable["initializerExpressionId"] = expressionId;
+    validPayload["initializerExpressions"] = [{
+      expressionId,
+      typeId: variable["typeId"],
+      valueCategory: "lvalue",
+      origin: { kind: "source", spanId: CPP_CUTE_FIXTURE_SPAN_ID },
+      kind: "declaration-reference",
+      declarationId: variable["declarationId"],
+    }];
+    await rebindArtifactId(valid);
+    await expect(verifyCppCuteFrontendArtifact(valid)).resolves.toMatchObject({ outcome: "accepted" });
+
+    const dangling = await cloneCppCuteArtifactInput();
+    const danglingDeclarations = (dangling["payload"] as Record<string, unknown>)["declarations"] as Record<string, unknown>[];
+    const danglingVariable = danglingDeclarations.find((declaration) => declaration["kind"] === "variable");
+    if (danglingVariable === undefined) throw new Error("fixture lost variable declaration");
+    danglingVariable["initializerExpressionId"] = stableId("expression", "9");
+    await expect(verifyCppCuteFrontendArtifact(dangling)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-DANGLING-REFERENCE",
+      path: expect.stringContaining(".initializerExpressionId"),
+    });
+
+    const wrongKind = await cloneCppCuteArtifactInput();
+    const wrongDeclarations = (wrongKind["payload"] as Record<string, unknown>)["declarations"] as Record<string, unknown>[];
+    const record = wrongDeclarations.find((declaration) => declaration["kind"] === "record");
+    if (record === undefined) throw new Error("fixture lost record declaration");
+    record["initializerExpressionId"] = stableId("expression", "a");
+    await expect(verifyCppCuteFrontendArtifact(wrongKind)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".initializerExpressionId"),
+    });
+  });
+
+  it("permits honest locationless compiler diagnostics only for non-source subjects", async () => {
+    const compiler = await cloneCppCuteArtifactInput();
+    const compilerPayload = compiler["payload"] as Record<string, unknown>;
+    const diagnostics = compilerPayload["diagnostics"] as Record<string, unknown>[];
+    if (diagnostics[0] === undefined) throw new Error("fixture lost diagnostic");
+    diagnostics[0]["location"] = { kind: "none" };
+    diagnostics[0]["subject"] = { kind: "compiler" };
+    await rebindArtifactId(compiler);
+    await expect(verifyCppCuteFrontendArtifact(compiler)).resolves.toMatchObject({ outcome: "accepted" });
+
+    const fabricated = await cloneCppCuteArtifactInput();
+    const fabricatedDiagnostics = (fabricated["payload"] as Record<string, unknown>)["diagnostics"] as Record<string, unknown>[];
+    if (fabricatedDiagnostics[0] === undefined) throw new Error("fixture lost diagnostic");
+    fabricatedDiagnostics[0]["location"] = { kind: "none" };
+    await expect(verifyCppCuteFrontendArtifact(fabricated)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".location"),
     });
   });
 

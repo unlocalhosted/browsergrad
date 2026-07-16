@@ -30,22 +30,21 @@ import {
 } from "./cpp_cute_frontend_types.js";
 
 export const CPP_CUTE_AOT_JOB_SCHEMA = "browsergrad.compiler.cpp-cute.aot-job";
-export const CPP_CUTE_AOT_JOB_MAJOR = 1;
+export const CPP_CUTE_AOT_JOB_MAJOR = 2;
 export const CPP_CUTE_AOT_JOB_MINOR = 0;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const JOB_ID = /^bg\.cpp\.aot-job\.sha256\.[0-9a-f]{64}$/u;
 const REQUEST_ID = /^bg\.cpp\.entry-request\.sha256\.[0-9a-f]{64}$/u;
 const FILE_ID = /^bg\.cpp\.file\.sha256\.[0-9a-f]{64}$/u;
-const ENTRY_ID = /^bg\.cpp\.entry\.sha256\.[0-9a-f]{64}$/u;
 const PREPARED_JOBS = new WeakMap<object, PreparedCppCuteAotJobRecord>();
 
-export interface CppCuteAotJobVersionV1 extends JsonObject {
+export interface CppCuteAotJobVersionV2 extends JsonObject {
   readonly major: typeof CPP_CUTE_AOT_JOB_MAJOR;
   readonly minor: typeof CPP_CUTE_AOT_JOB_MINOR;
 }
 
-export interface CppCuteAotSourceFileV1 extends JsonObject {
+export interface CppCuteAotSourceFileV2 extends JsonObject {
   readonly fileId: string;
   readonly role: "main-source" | "project-header";
   readonly virtualPath: string;
@@ -53,32 +52,31 @@ export interface CppCuteAotSourceFileV1 extends JsonObject {
   readonly byteLength: WireU64;
 }
 
-export interface CppCuteAotSourceAnchorV1 extends JsonObject {
+export interface CppCuteAotSourceAnchorV2 extends JsonObject {
   readonly virtualPath: string;
   readonly beginByte: WireU64;
   readonly endByte: WireU64;
   readonly tokenSha256: string;
 }
 
-export interface CppCuteAotEntryRequestV1 extends JsonObject {
+export interface CppCuteAotEntryRequestV2 extends JsonObject {
   readonly requestId: string;
-  readonly expectedEntryId: string;
   readonly kind: "layout";
   readonly declarationKind: "variable";
-  readonly anchor: CppCuteAotSourceAnchorV1;
+  readonly anchor: CppCuteAotSourceAnchorV2;
 }
 
-export interface CppCuteAotSourceRevisionV1 extends JsonObject {
+export interface CppCuteAotSourceRevisionV2 extends JsonObject {
   readonly algorithm: "git-sha1" | "git-sha256";
   readonly value: string;
 }
 
-export interface CppCuteAotSourceIdentityV1 extends JsonObject {
+export interface CppCuteAotSourceIdentityV2 extends JsonObject {
   readonly repository: string;
-  readonly revision: CppCuteAotSourceRevisionV1;
+  readonly revision: CppCuteAotSourceRevisionV2;
 }
 
-export interface CppCuteAotExpectedOutputV1 extends JsonObject {
+export interface CppCuteAotExpectedOutputV2 extends JsonObject {
   readonly schema: typeof CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA;
   readonly version: {
     readonly major: typeof CPP_CUTE_FRONTEND_ARTIFACT_MAJOR;
@@ -89,27 +87,27 @@ export interface CppCuteAotExpectedOutputV1 extends JsonObject {
   readonly inputClosureSha256: string;
 }
 
-export interface CppCuteAotJobV1 extends JsonObject {
+export interface CppCuteAotJobV2 extends JsonObject {
   readonly schema: typeof CPP_CUTE_AOT_JOB_SCHEMA;
-  readonly version: CppCuteAotJobVersionV1;
+  readonly version: CppCuteAotJobVersionV2;
   readonly jobId: string;
   readonly profileHash: string;
-  readonly source: CppCuteAotSourceIdentityV1;
+  readonly source: CppCuteAotSourceIdentityV2;
   readonly mainVirtualPath: string;
-  readonly files: readonly CppCuteAotSourceFileV1[];
-  readonly entryRequests: readonly CppCuteAotEntryRequestV1[];
-  readonly expectedOutput: CppCuteAotExpectedOutputV1;
+  readonly files: readonly CppCuteAotSourceFileV2[];
+  readonly entryRequests: readonly CppCuteAotEntryRequestV2[];
+  readonly expectedOutput: CppCuteAotExpectedOutputV2;
 }
 
-export interface CppCuteAotJobBodyV1 extends JsonObject {
+export interface CppCuteAotJobBodyV2 extends JsonObject {
   readonly schema: typeof CPP_CUTE_AOT_JOB_SCHEMA;
-  readonly version: CppCuteAotJobVersionV1;
+  readonly version: CppCuteAotJobVersionV2;
   readonly profileHash: string;
-  readonly source: CppCuteAotSourceIdentityV1;
+  readonly source: CppCuteAotSourceIdentityV2;
   readonly mainVirtualPath: string;
-  readonly files: readonly CppCuteAotSourceFileV1[];
-  readonly entryRequests: readonly CppCuteAotEntryRequestV1[];
-  readonly expectedOutput: CppCuteAotExpectedOutputV1;
+  readonly files: readonly CppCuteAotSourceFileV2[];
+  readonly entryRequests: readonly CppCuteAotEntryRequestV2[];
+  readonly expectedOutput: CppCuteAotExpectedOutputV2;
 }
 
 declare const preparedCppCuteAotJobBrand: unique symbol;
@@ -122,12 +120,11 @@ export interface PreparedCppCuteAotJob {
   readonly sourceFileCount: number;
   readonly sourceBytes: WireU64;
   readonly entryRequestId: string;
-  readonly expectedEntryId: string;
 }
 
 export interface PreparedCppCuteAotJobRecord {
   readonly profile: PreparedCppCuteFrontendProfile;
-  readonly job: CppCuteAotJobV1;
+  readonly job: CppCuteAotJobV2;
 }
 
 export interface PrepareCppCuteAotJobOptions {
@@ -169,7 +166,7 @@ export async function prepareCppCuteAotJob(
   const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
   const limits = normalizeOptions(options);
   throwIfAborted(options.signal);
-  let job: CppCuteAotJobV1;
+  let job: CppCuteAotJobV2;
   try {
     assertJsonValue(value, { limits });
     job = parseJob(
@@ -209,8 +206,12 @@ export async function prepareCppCuteAotJob(
       );
     }
   }
-  const expectedRequestId = await deriveCppCuteAotEntryRequestId(job.entryRequests[0] as CppCuteAotEntryRequestV1, { limits });
-  if (job.entryRequests[0]?.requestId !== expectedRequestId) {
+  const request = job.entryRequests[0];
+  if (request === undefined) {
+    fail("BG-COMPILER-CPP-CUTE-AOT-JOB-INVALID", "$", "verified AOT job lost its entry request");
+  }
+  const expectedRequestId = await deriveCppCuteAotEntryRequestId(request, { limits });
+  if (request.requestId !== expectedRequestId) {
     fail(
       "BG-COMPILER-CPP-CUTE-AOT-JOB-HASH-MISMATCH",
       "$.entryRequests[0].requestId",
@@ -230,7 +231,6 @@ export async function prepareCppCuteAotJob(
     sourceFileCount: job.files.length,
     sourceBytes: encodeWireU64(sourceBytes),
     entryRequestId: expectedRequestId,
-    expectedEntryId: job.entryRequests[0]?.expectedEntryId as string,
   }) as PreparedCppCuteAotJob;
   PREPARED_JOBS.set(prepared, Object.freeze({ profile, job }));
   return prepared;
@@ -244,15 +244,14 @@ export function unwrapPreparedCppCuteAotJob(prepared: PreparedCppCuteAotJob): Pr
 }
 
 export async function deriveCppCuteAotEntryRequestId(
-  request: CppCuteAotEntryRequestV1,
+  request: CppCuteAotEntryRequestV2,
   options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   const digest = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.aot-entry-request.v1",
+    domain: "browsergrad.compiler.cpp-cute.aot-entry-request.v2",
     request: {
       kind: request.kind,
       declarationKind: request.declarationKind,
-      expectedEntryId: request.expectedEntryId,
       anchor: request.anchor,
     },
   }, options);
@@ -260,7 +259,7 @@ export async function deriveCppCuteAotEntryRequestId(
 }
 
 export async function deriveCppCuteAotSourceFileId(
-  file: CppCuteAotSourceFileV1,
+  file: CppCuteAotSourceFileV2,
   options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   return deriveCppCuteStableId("file", {
@@ -268,16 +267,15 @@ export async function deriveCppCuteAotSourceFileId(
     virtualPath: file.virtualPath,
     contentSha256: file.contentSha256,
     byteLength: file.byteLength,
-    profileDependency: "none",
   }, options);
 }
 
 export async function deriveCppCuteAotJobId(
-  job: CppCuteAotJobV1 | CppCuteAotJobBodyV1,
+  job: CppCuteAotJobV2 | CppCuteAotJobBodyV2,
   options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   const digest = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.aot-job.v1",
+    domain: "browsergrad.compiler.cpp-cute.aot-job.v2",
     job: {
       schema: job.schema,
       version: job.version,
@@ -296,7 +294,7 @@ function parseJob(
   value: JsonValue,
   sourceRoots: readonly string[],
   extractionLimits: PreparedCppCuteFrontendProfile["extractionLimits"],
-): CppCuteAotJobV1 {
+): CppCuteAotJobV2 {
   const object = closedObject(value, [
     "schema",
     "version",
@@ -352,7 +350,7 @@ function parseJob(
   });
 }
 
-function parseVersion(value: JsonValue, path: string): CppCuteAotJobVersionV1 {
+function parseVersion(value: JsonValue, path: string): CppCuteAotJobVersionV2 {
   const object = closedObject(value, ["major", "minor"], path);
   if (object.major !== CPP_CUTE_AOT_JOB_MAJOR || object.minor !== CPP_CUTE_AOT_JOB_MINOR) {
     fail(
@@ -368,7 +366,7 @@ function parseFile(
   value: JsonValue,
   path: string,
   sourceRoots: readonly string[],
-): CppCuteAotSourceFileV1 {
+): CppCuteAotSourceFileV2 {
   const object = closedObject(value, ["fileId", "role", "virtualPath", "contentSha256", "byteLength"], path);
   if (object.role !== "main-source" && object.role !== "project-header") {
     invalid(`${path}.role`, "source role must be main-source or project-header");
@@ -391,12 +389,12 @@ function parseFile(
 function parseEntryRequest(
   value: JsonValue,
   path: string,
-  files: readonly CppCuteAotSourceFileV1[],
+  files: readonly CppCuteAotSourceFileV2[],
   mainVirtualPath: string,
-): CppCuteAotEntryRequestV1 {
-  const object = closedObject(value, ["requestId", "expectedEntryId", "kind", "declarationKind", "anchor"], path);
+): CppCuteAotEntryRequestV2 {
+  const object = closedObject(value, ["requestId", "kind", "declarationKind", "anchor"], path);
   if (object.kind !== "layout" || object.declarationKind !== "variable") {
-    invalid(path, "AOT job v1 selects one layout variable declaration only");
+    invalid(path, "AOT job v2 selects one layout variable declaration only");
   }
   const anchorPath = `${path}.anchor`;
   const anchorObject = closedObject(field(object, "anchor", path), [
@@ -425,12 +423,6 @@ function parseEntryRequest(
       REQUEST_ID,
       "entry request",
     ),
-    expectedEntryId: stableId(
-      field(object, "expectedEntryId", path),
-      `${path}.expectedEntryId`,
-      ENTRY_ID,
-      "expected entry",
-    ),
     kind: "layout",
     declarationKind: "variable",
     anchor: {
@@ -442,7 +434,7 @@ function parseEntryRequest(
   };
 }
 
-function parseSourceIdentity(value: JsonValue, path: string): CppCuteAotSourceIdentityV1 {
+function parseSourceIdentity(value: JsonValue, path: string): CppCuteAotSourceIdentityV2 {
   const object = closedObject(value, ["repository", "revision"], path);
   const repository = boundedString(field(object, "repository", path), `${path}.repository`, 1_024);
   let parsed: URL;
@@ -479,7 +471,7 @@ function parseSourceIdentity(value: JsonValue, path: string): CppCuteAotSourceId
   };
 }
 
-function parseExpectedOutput(value: JsonValue, path: string): CppCuteAotExpectedOutputV1 {
+function parseExpectedOutput(value: JsonValue, path: string): CppCuteAotExpectedOutputV2 {
   const object = closedObject(value, [
     "schema",
     "version",

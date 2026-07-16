@@ -1,24 +1,29 @@
 import {
   CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE,
   type CppCuteFrontendIncludeRoot,
-  type CppCuteFrontendProfileV1,
+  type CppCuteFrontendProfileV2,
 } from "../../../src/cpp_cute_frontend_profile.js";
 import { CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 } from "../../../src/cpp_cute_aot_policy.js";
 import { deriveCppCuteFrontendArtifactId } from "../../../src/cpp_cute_frontend_artifact.js";
 import { computeCppCuteInputHashes } from "../../../src/cpp_cute_frontend_verify.js";
 import type {
-  CppCuteFrontendArtifactV1,
-  CppCuteFrontendPayloadV1,
+  CppCuteFrontendArtifactV2,
+  CppCuteFrontendPayloadV2,
 } from "../../../src/cpp_cute_frontend_types.js";
 
 export const CPP_CUTE_FIXTURE_HEADER_SET_HASH = "2".repeat(64);
 export const CPP_CUTE_FIXTURE_COMPILER_HASH = "3".repeat(64);
+export const CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH = "b".repeat(64);
+export const CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH = "e".repeat(64);
 export const CPP_CUTE_FIXTURE_CONTAINER_DIGEST = `sha256:${"4".repeat(64)}`;
 export const CPP_CUTE_FIXTURE_CONTAINER_CONFIG_DIGEST = `sha256:${"1".repeat(64)}`;
 export const CPP_CUTE_FIXTURE_EXECUTION_ENVIRONMENT_HASH = "0".repeat(64);
 export const CPP_CUTE_FIXTURE_CUDA_HEADER_HASH = "5".repeat(64);
 export const CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH = "6".repeat(64);
 export const CPP_CUTE_FIXTURE_CUTLASS_REVISION = "7".repeat(40);
+export const CPP_CUTE_FIXTURE_CXX_HEADER_HASH = "c".repeat(64);
+export const CPP_CUTE_FIXTURE_LINUX_SYSROOT_HEADER_HASH = "f".repeat(64);
+export const CPP_CUTE_FIXTURE_SOURCE_INCLUDE_HASH = "1".repeat(64);
 export const CPP_CUTE_FIXTURE_BUILDER_ID =
   "https://github.com/unlocalhosted/browsergrad/.github/workflows/cpp-cute-aot.yml";
 export const CPP_CUTE_FIXTURE_SOURCE_REPOSITORY = "https://github.com/unlocalhosted/browsergrad";
@@ -40,11 +45,12 @@ export interface CppCuteProfileFixtureOptions {
 
 export function createCppCuteProfileInput(
   options: CppCuteProfileFixtureOptions = {},
-): CppCuteFrontendProfileV1 {
+): CppCuteFrontendProfileV2 {
+  const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
-    version: { major: 1, minor: 0 },
-    profileId: "browsergrad.compiler.cpp-cute.layout-tracer@1",
+    version: { major: 2, minor: 0 },
+    profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
     deployment: {
       mode: "ahead-of-time",
       contractId: "browsergrad.compiler.cpp-cute.aot@1",
@@ -56,6 +62,7 @@ export function createCppCuteProfileInput(
         version: "0.1.0",
         buildId: "browsergrad-cpp-cute-extractor-0.1.0",
         binarySha256: "a".repeat(64),
+        semanticAdapterManifestSha256: CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH,
       },
       runner: {
         id: "browsergrad-tools/cpp-cute-aot-runner",
@@ -81,6 +88,11 @@ export function createCppCuteProfileInput(
       cudaCompatibility: "12.6",
       options: [
         { kind: "define", name: "CUTE_SM80_ENABLED", value: "1" },
+        {
+          kind: "forced-include",
+          includeRootId: "clang-resource",
+          virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+        },
         { kind: "frontend-option", id: "cuda-host-only", value: null },
         { kind: "frontend-option", id: "syntax-only", value: null },
       ],
@@ -97,7 +109,7 @@ export function createCppCuteProfileInput(
         version: "20.1.8",
         buildId: "llvmorg-20.1.8",
         binarySha256: CPP_CUTE_FIXTURE_COMPILER_HASH,
-        resourceDirectorySha256: "b".repeat(64),
+        resourceDirectorySha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
       },
       dependencies: [
         {
@@ -114,24 +126,25 @@ export function createCppCuteProfileInput(
           revision: CPP_CUTE_FIXTURE_CUTLASS_REVISION,
           headerSetSha256: CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
         },
+        {
+          dependencyId: "cxx-stdlib",
+          kind: "cxx-standard-library",
+          version: "18.1.8",
+          revision: "llvmorg-18.1.8",
+          headerSetSha256: CPP_CUTE_FIXTURE_CXX_HEADER_HASH,
+        },
+        {
+          dependencyId: "linux-sysroot",
+          kind: "linux-sysroot",
+          version: "ubuntu-24.04",
+          revision: "ubuntu-24.04-amd64",
+          headerSetSha256: CPP_CUTE_FIXTURE_LINUX_SYSROOT_HEADER_HASH,
+        },
       ],
     },
     virtualFileSystem: {
-      sourceRoots: options.sourceRoots ?? ["/workspace/src"],
-      includeRoots: options.includeRoots ?? [
-        {
-          includeRootId: "cuda",
-          mode: "system",
-          virtualPath: "/toolchain/cuda/include",
-          manifestSha256: CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
-        },
-        {
-          includeRootId: "cutlass",
-          mode: "system",
-          virtualPath: "/toolchain/cutlass/include",
-          manifestSha256: CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
-        },
-      ],
+      sourceRoots,
+      includeRoots: options.includeRoots ?? createDefaultCppCuteIncludeRoots(sourceRoots[0] ?? "/workspace/src"),
     },
     compatibility: {
       expectedHeaderSetSha256: options.expectedHeaderSetSha256 ?? CPP_CUTE_FIXTURE_HEADER_SET_HASH,
@@ -167,6 +180,53 @@ export function createCppCuteProfileInput(
   };
 }
 
+function createDefaultCppCuteIncludeRoots(sourceRoot: string): readonly CppCuteFrontendIncludeRoot[] {
+  return [
+    {
+      includeRootId: "workspace-source",
+      mode: "quote",
+      virtualPath: sourceRoot,
+      manifestSha256: CPP_CUTE_FIXTURE_SOURCE_INCLUDE_HASH,
+      owner: { kind: "source" },
+    },
+    {
+      includeRootId: "clang-resource",
+      mode: "system",
+      virtualPath: "/toolchain/clang/lib/clang/20/include",
+      manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
+      owner: { kind: "compiler-resource-directory" },
+    },
+    {
+      includeRootId: "cuda",
+      mode: "system",
+      virtualPath: "/toolchain/cuda/include",
+      manifestSha256: CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
+      owner: { kind: "dependency", dependencyId: "cuda" },
+    },
+    {
+      includeRootId: "cutlass",
+      mode: "system",
+      virtualPath: "/toolchain/cutlass/include",
+      manifestSha256: CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
+      owner: { kind: "dependency", dependencyId: "cutlass" },
+    },
+    {
+      includeRootId: "cxx-stdlib",
+      mode: "system",
+      virtualPath: "/toolchain/cxx/include/c++/v1",
+      manifestSha256: CPP_CUTE_FIXTURE_CXX_HEADER_HASH,
+      owner: { kind: "dependency", dependencyId: "cxx-stdlib" },
+    },
+    {
+      includeRootId: "linux-sysroot",
+      mode: "system",
+      virtualPath: "/toolchain/sysroot/usr/include",
+      manifestSha256: CPP_CUTE_FIXTURE_LINUX_SYSROOT_HEADER_HASH,
+      owner: { kind: "dependency", dependencyId: "linux-sysroot" },
+    },
+  ];
+}
+
 export function cloneCppCuteProfileInput(
   options: CppCuteProfileFixtureOptions = {},
 ): Record<string, unknown> {
@@ -175,9 +235,16 @@ export function cloneCppCuteProfileInput(
 
 export const CPP_CUTE_FIXTURE_PROFILE_HASH = "a".repeat(64);
 export const CPP_CUTE_FIXTURE_MAIN_FILE_ID = stableId("file", "1");
+export const CPP_CUTE_FIXTURE_COMPILER_HEADER_FILE_ID = stableId("file", "d");
 export const CPP_CUTE_FIXTURE_HEADER_FILE_ID = stableId("file", "e");
-export const CPP_CUTE_FIXTURE_INCLUDE_ROOT_ID = stableId("include-root", "f");
+export const CPP_CUTE_FIXTURE_SOURCE_INCLUDE_ROOT_ID = "workspace-source";
+export const CPP_CUTE_FIXTURE_COMPILER_INCLUDE_ROOT_ID = "clang-resource";
+export const CPP_CUTE_FIXTURE_CUDA_INCLUDE_ROOT_ID = "cuda";
+export const CPP_CUTE_FIXTURE_CXX_INCLUDE_ROOT_ID = "cxx-stdlib";
+export const CPP_CUTE_FIXTURE_LINUX_SYSROOT_INCLUDE_ROOT_ID = "linux-sysroot";
+export const CPP_CUTE_FIXTURE_INCLUDE_ROOT_ID = "cutlass";
 export const CPP_CUTE_FIXTURE_INCLUDE_EDGE_ID = stableId("include-edge", "0");
+export const CPP_CUTE_FIXTURE_FORCED_INCLUDE_EDGE_ID = stableId("include-edge", "1");
 export const CPP_CUTE_FIXTURE_SPAN_ID = stableId("span", "2");
 export const CPP_CUTE_FIXTURE_INT_TYPE_ID = stableId("type", "3");
 export const CPP_CUTE_FIXTURE_LAYOUT_TYPE_ID = stableId("type", "4");
@@ -205,18 +272,61 @@ function qualifiers(): { readonly const: boolean; readonly volatile: boolean; re
 
 export async function createCppCutePayloadInput(
   profileHash = CPP_CUTE_FIXTURE_PROFILE_HASH,
-): Promise<CppCuteFrontendPayloadV1> {
-  const payload: CppCuteFrontendPayloadV1 = {
+): Promise<CppCuteFrontendPayloadV2> {
+  const payload: CppCuteFrontendPayloadV2 = {
     profileHash,
     inputs: {
       mainFileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID,
-      includeRoots: [{
-        includeRootId: CPP_CUTE_FIXTURE_INCLUDE_ROOT_ID,
-        ordinal: 0,
-        mode: "system",
-        virtualPath: "/toolchain/cutlass/include",
-        manifestSha256: "f".repeat(64),
-      }],
+      includeRoots: [
+        {
+          includeRootId: CPP_CUTE_FIXTURE_SOURCE_INCLUDE_ROOT_ID,
+          ordinal: 0,
+          mode: "quote",
+          virtualPath: "/src",
+          manifestSha256: CPP_CUTE_FIXTURE_SOURCE_INCLUDE_HASH,
+          owner: { kind: "source" },
+        },
+        {
+          includeRootId: CPP_CUTE_FIXTURE_COMPILER_INCLUDE_ROOT_ID,
+          ordinal: 1,
+          mode: "system",
+          virtualPath: "/toolchain/clang/lib/clang/20/include",
+          manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
+          owner: { kind: "compiler-resource-directory" },
+        },
+        {
+          includeRootId: CPP_CUTE_FIXTURE_CUDA_INCLUDE_ROOT_ID,
+          ordinal: 2,
+          mode: "system",
+          virtualPath: "/toolchain/cuda/include",
+          manifestSha256: CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
+          owner: { kind: "dependency", dependencyId: "cuda" },
+        },
+        {
+          includeRootId: CPP_CUTE_FIXTURE_INCLUDE_ROOT_ID,
+          ordinal: 3,
+          mode: "system",
+          virtualPath: "/toolchain/cutlass/include",
+          manifestSha256: CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
+          owner: { kind: "dependency", dependencyId: "cutlass" },
+        },
+        {
+          includeRootId: CPP_CUTE_FIXTURE_CXX_INCLUDE_ROOT_ID,
+          ordinal: 4,
+          mode: "system",
+          virtualPath: "/toolchain/cxx/include/c++/v1",
+          manifestSha256: CPP_CUTE_FIXTURE_CXX_HEADER_HASH,
+          owner: { kind: "dependency", dependencyId: "cxx-stdlib" },
+        },
+        {
+          includeRootId: CPP_CUTE_FIXTURE_LINUX_SYSROOT_INCLUDE_ROOT_ID,
+          ordinal: 5,
+          mode: "system",
+          virtualPath: "/toolchain/sysroot/usr/include",
+          manifestSha256: CPP_CUTE_FIXTURE_LINUX_SYSROOT_HEADER_HASH,
+          owner: { kind: "dependency", dependencyId: "linux-sysroot" },
+        },
+      ],
       files: [
         {
           fileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID,
@@ -224,29 +334,50 @@ export async function createCppCutePayloadInput(
           virtualPath: "/src/layout.cu",
           contentSha256: "d".repeat(64),
           byteLength: "100" as never,
-          profileDependency: "none",
+          owner: { kind: "source" },
+          includeRootId: null,
+        },
+        {
+          fileId: CPP_CUTE_FIXTURE_COMPILER_HEADER_FILE_ID,
+          role: "compiler-header",
+          virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+          contentSha256: "c".repeat(64),
+          byteLength: "300" as never,
+          owner: { kind: "compiler-resource-directory" },
+          includeRootId: CPP_CUTE_FIXTURE_COMPILER_INCLUDE_ROOT_ID,
         },
         {
           fileId: CPP_CUTE_FIXTURE_HEADER_FILE_ID,
-          role: "cute-header",
+          role: "dependency-header",
           virtualPath: "/toolchain/cutlass/include/cute/layout.hpp",
           contentSha256: "e".repeat(64),
           byteLength: "200" as never,
-          profileDependency: "cute",
-        },
-      ],
-      includeEdges: [{
-        includeEdgeId: CPP_CUTE_FIXTURE_INCLUDE_EDGE_ID,
-        includingFileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID,
-        directiveSpanId: CPP_CUTE_FIXTURE_SPAN_ID,
-        spelling: "cute/layout.hpp",
-        mode: "angle",
-        resolution: {
-          kind: "resolved",
-          fileId: CPP_CUTE_FIXTURE_HEADER_FILE_ID,
+          owner: { kind: "dependency", dependencyId: "cutlass" },
           includeRootId: CPP_CUTE_FIXTURE_INCLUDE_ROOT_ID,
         },
-      }],
+      ],
+      includeEdges: [
+        {
+          kind: "source-directive",
+          includeEdgeId: CPP_CUTE_FIXTURE_INCLUDE_EDGE_ID,
+          includingFileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID,
+          directiveSpanId: CPP_CUTE_FIXTURE_SPAN_ID,
+          spelling: "cute/layout.hpp",
+          mode: "angle",
+          resolution: {
+            kind: "resolved",
+            fileId: CPP_CUTE_FIXTURE_HEADER_FILE_ID,
+            includeRootId: CPP_CUTE_FIXTURE_INCLUDE_ROOT_ID,
+          },
+        },
+        {
+          kind: "compiler-forced",
+          includeEdgeId: CPP_CUTE_FIXTURE_FORCED_INCLUDE_EDGE_ID,
+          fileId: CPP_CUTE_FIXTURE_COMPILER_HEADER_FILE_ID,
+          includeRootId: CPP_CUTE_FIXTURE_COMPILER_INCLUDE_ROOT_ID,
+          compilerOptionOrdinal: 1,
+        },
+      ],
       sourceSetSha256: ZERO_HASH,
       headerSetSha256: ZERO_HASH,
       closureSha256: ZERO_HASH,
@@ -286,6 +417,7 @@ export async function createCppCutePayloadInput(
       },
     ],
     constants: [],
+    initializerExpressions: [],
     declarations: [
       {
         declarationId: CPP_CUTE_FIXTURE_TEMPLATE_DECLARATION_ID,
@@ -296,6 +428,7 @@ export async function createCppCutePayloadInput(
         semanticParentId: null,
         typeId: CPP_CUTE_FIXTURE_INT_TYPE_ID,
         targetTypeId: null,
+        initializerExpressionId: null,
         origin: sourceOrigin(),
         definitionKind: "external",
         linkage: "external",
@@ -313,6 +446,7 @@ export async function createCppCutePayloadInput(
         semanticParentId: null,
         typeId: CPP_CUTE_FIXTURE_LAYOUT_TYPE_ID,
         targetTypeId: null,
+        initializerExpressionId: null,
         origin: sourceOrigin(),
         definitionKind: "external",
         linkage: "external",
@@ -330,6 +464,7 @@ export async function createCppCutePayloadInput(
         semanticParentId: null,
         typeId: CPP_CUTE_FIXTURE_LAYOUT_TYPE_ID,
         targetTypeId: null,
+        initializerExpressionId: null,
         origin: sourceOrigin(),
         definitionKind: "definition",
         linkage: "internal",
@@ -400,10 +535,9 @@ export async function createCppCutePayloadInput(
       severity: "warning",
       code: "browsergrad.cpp-cute:recognized-unsupported-intrinsic",
       renderedMessage: "WGMMA preserved as a typed unsupported target capability.",
-      primarySpanId: CPP_CUTE_FIXTURE_SPAN_ID,
+      location: { kind: "source", primarySpanId: CPP_CUTE_FIXTURE_SPAN_ID, related: [] },
       subject: { kind: "fact", factId: CPP_CUTE_FIXTURE_INTRINSIC_FACT_ID },
       parentDiagnosticId: null,
-      related: [],
     }],
     outcome: { kind: "accepted", selectedEntryIds: [CPP_CUTE_FIXTURE_ENTRY_ID] },
     extraction: {
@@ -427,11 +561,11 @@ export async function createCppCutePayloadInput(
 
 export async function createCppCuteArtifactInput(
   profileHash = CPP_CUTE_FIXTURE_PROFILE_HASH,
-): Promise<CppCuteFrontendArtifactV1> {
+): Promise<CppCuteFrontendArtifactV2> {
   const payload = await createCppCutePayloadInput(profileHash);
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
-    version: { major: 1, minor: 0 },
+    version: { major: 2, minor: 0 },
     producer: { id: "browsergrad-tools/cpp-cute-frontend", version: "0.1.0" },
     artifactId: await deriveCppCuteFrontendArtifactId(payload),
     payload,
@@ -453,11 +587,5 @@ export function artifactCompatibleProfileOptions(
     trustStoreSha256,
     expectedHeaderSetSha256: headerSetSha256,
     sourceRoots: ["/src"],
-    includeRoots: [{
-      includeRootId: "cutlass",
-      mode: "system",
-      virtualPath: "/toolchain/cutlass/include",
-      manifestSha256: "f".repeat(64),
-    }],
   };
 }

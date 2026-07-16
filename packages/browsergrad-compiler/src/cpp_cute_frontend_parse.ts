@@ -15,24 +15,26 @@ import type {
   CppCuteConstantV1,
   CppCuteCudaAttributesV1,
   CppCuteDeclarationKindV1,
-  CppCuteDeclarationV1,
-  CppCuteDiagnosticPhaseV1,
+  CppCuteDeclarationV2,
+  CppCuteDiagnosticLocationV2,
+  CppCuteDiagnosticPhaseV2,
   CppCuteDiagnosticRelatedLocationV1,
-  CppCuteDiagnosticSubjectV1,
+  CppCuteDiagnosticSubjectV2,
   CppCuteExpressionV1,
   CppCuteExtractionRecordV1,
   CppCuteFileRangeV1,
-  CppCuteFrontendDiagnosticV1,
+  CppCuteFrontendDiagnosticV2,
   CppCuteFrontendEntryV1,
   CppCuteFrontendOutcomeV1,
-  CppCuteFrontendPayloadV1,
+  CppCuteFrontendPayloadV2,
   CppCuteFunctionAbiV1,
   CppCuteFunctionBodyV1,
   CppCuteHierarchyV1,
-  CppCuteIncludeEdgeV1,
-  CppCuteIncludeResolutionV1,
-  CppCuteIncludeRootV1,
-  CppCuteInputClosureV1,
+  CppCuteIncludeEdgeV2,
+  CppCuteIncludeResolutionV2,
+  CppCuteIncludeRootV2,
+  CppCuteInputClosureV2,
+  CppCuteInputOwnerV2,
   CppCuteIntegerExprV1,
   CppCuteIntrinsicEffectsV1,
   CppCuteMacroExpansionV1,
@@ -41,7 +43,7 @@ import type {
   CppCuteResolvedFactV1,
   CppCuteResolvedTypeV1,
   CppCuteSourceAbiV1,
-  CppCuteSourceFileV1,
+  CppCuteSourceFileV2,
   CppCuteSourceOriginV1,
   CppCuteSourceSpanV1,
   CppCuteStatementV1,
@@ -62,6 +64,7 @@ const CAPABILITY_ID = /^[a-z][a-z0-9.-]*:[a-z][a-z0-9._-]*(?:@[1-9][0-9]*)?$/u;
 const DIAGNOSTIC_CODE = /^[a-z][a-z0-9.-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const CANONICAL_USR = /^c:@/u;
 const MACRO_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const DEPENDENCY_ID = /^[a-z][a-z0-9._-]*$/u;
 
 export interface CppCuteFrontendArtifactLimits {
   readonly maxIncludeRoots: number;
@@ -72,6 +75,7 @@ export interface CppCuteFrontendArtifactLimits {
   readonly maxTypes: number;
   readonly maxConstants: number;
   readonly maxDeclarations: number;
+  readonly maxInitializerExpressions: number;
   readonly maxTemplateInstantiations: number;
   readonly maxOverloadResolutions: number;
   readonly maxAbiEntries: number;
@@ -93,6 +97,7 @@ export const DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS: CppCuteFrontendArtifactL
   maxTypes: 16_384,
   maxConstants: 16_384,
   maxDeclarations: 16_384,
+  maxInitializerExpressions: 50_000,
   maxTemplateInstantiations: 8_192,
   maxOverloadResolutions: 8_192,
   maxAbiEntries: 16_384,
@@ -131,7 +136,7 @@ export class CppCuteFrontendArtifactError extends Error {
 export function parseCppCuteFrontendPayload(
   value: JsonValue,
   limits: CppCuteFrontendArtifactLimits = DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS,
-): CppCuteFrontendPayloadV1 {
+): CppCuteFrontendPayloadV2 {
   const object = closedObject(value, [
     "profileHash",
     "inputs",
@@ -140,6 +145,7 @@ export function parseCppCuteFrontendPayload(
     "types",
     "constants",
     "declarations",
+    "initializerExpressions",
     "templateInstantiations",
     "overloadResolutions",
     "sourceAbi",
@@ -169,6 +175,13 @@ export function parseCppCuteFrontendPayload(
       limits.maxDeclarations,
       parseDeclaration,
       (entry) => entry.declarationId,
+    ),
+    initializerExpressions: parseSetArray(
+      object,
+      "initializerExpressions",
+      limits.maxInitializerExpressions,
+      parseExpression,
+      (entry) => entry.expressionId,
     ),
     templateInstantiations: parseSetArray(
       object,
@@ -203,11 +216,11 @@ export function parseCppCuteFrontendPayload(
     ),
     outcome: parseOutcome(field(object, "outcome", "$.payload"), "$.payload.outcome"),
     extraction: parseExtraction(field(object, "extraction", "$.payload"), "$.payload.extraction"),
-  } as CppCuteFrontendPayloadV1;
+  } as CppCuteFrontendPayloadV2;
   return deepFreezeJson(payload);
 }
 
-function parseInputs(value: JsonValue, limits: CppCuteFrontendArtifactLimits, path: string): CppCuteInputClosureV1 {
+function parseInputs(value: JsonValue, limits: CppCuteFrontendArtifactLimits, path: string): CppCuteInputClosureV2 {
   const object = closedObject(value, [
     "mainFileId",
     "includeRoots",
@@ -239,22 +252,27 @@ function parseInputs(value: JsonValue, limits: CppCuteFrontendArtifactLimits, pa
   };
 }
 
-function parseIncludeRoot(value: JsonValue, path: string): CppCuteIncludeRootV1 {
-  const object = closedObject(value, ["includeRootId", "ordinal", "mode", "virtualPath", "manifestSha256"], path);
+function parseIncludeRoot(value: JsonValue, path: string): CppCuteIncludeRootV2 {
+  const object = closedObject(value, [
+    "includeRootId", "ordinal", "mode", "virtualPath", "manifestSha256", "owner",
+  ], path);
   const mode = enumValue(field(object, "mode", path), ["quote", "system"] as const, `${path}.mode`);
   const virtualPath = boundedString(field(object, "virtualPath", path), `${path}.virtualPath`, 4_096);
   validateVirtualPath(virtualPath, `${path}.virtualPath`);
   return {
-    includeRootId: stableId(field(object, "includeRootId", path), `${path}.includeRootId`, "include-root"),
+    includeRootId: dependencyId(field(object, "includeRootId", path), `${path}.includeRootId`),
     ordinal: nonnegativeInteger(field(object, "ordinal", path), `${path}.ordinal`),
     mode,
     virtualPath,
     manifestSha256: sha256(field(object, "manifestSha256", path), `${path}.manifestSha256`),
+    owner: parseInputOwner(field(object, "owner", path), `${path}.owner`),
   };
 }
 
-function parseSourceFile(value: JsonValue, path: string): CppCuteSourceFileV1 {
-  const object = closedObject(value, ["fileId", "role", "virtualPath", "contentSha256", "byteLength", "profileDependency"], path);
+function parseSourceFile(value: JsonValue, path: string): CppCuteSourceFileV2 {
+  const object = closedObject(value, [
+    "fileId", "role", "virtualPath", "contentSha256", "byteLength", "owner", "includeRootId",
+  ], path);
   const virtualPath = boundedString(field(object, "virtualPath", path), `${path}.virtualPath`, 4_096);
   validateVirtualPath(virtualPath, `${path}.virtualPath`);
   return {
@@ -262,49 +280,77 @@ function parseSourceFile(value: JsonValue, path: string): CppCuteSourceFileV1 {
     role: enumValue(field(object, "role", path), [
       "main-source",
       "project-header",
-      "cuda-header",
-      "cute-header",
-      "compiler-builtin-header",
+      "system-header",
+      "dependency-header",
+      "compiler-header",
       "generated-header",
     ] as const, `${path}.role`),
     virtualPath,
     contentSha256: sha256(field(object, "contentSha256", path), `${path}.contentSha256`),
     byteLength: parseWireU64(field(object, "byteLength", path), `${path}.byteLength`),
-    profileDependency: enumValue(
-      field(object, "profileDependency", path),
-      ["none", "cuda", "cute", "frontend"] as const,
-      `${path}.profileDependency`,
-    ),
+    owner: parseInputOwner(field(object, "owner", path), `${path}.owner`),
+    includeRootId: nullableDependencyId(field(object, "includeRootId", path), `${path}.includeRootId`),
   };
 }
 
-function parseIncludeEdge(value: JsonValue, path: string): CppCuteIncludeEdgeV1 {
-  const object = closedObject(value, [
-    "includeEdgeId",
-    "includingFileId",
-    "directiveSpanId",
-    "spelling",
-    "mode",
-    "resolution",
-  ], path);
-  return {
-    includeEdgeId: stableId(field(object, "includeEdgeId", path), `${path}.includeEdgeId`, "include-edge"),
-    includingFileId: stableId(field(object, "includingFileId", path), `${path}.includingFileId`, "file"),
-    directiveSpanId: stableId(field(object, "directiveSpanId", path), `${path}.directiveSpanId`, "span"),
-    spelling: boundedString(field(object, "spelling", path), `${path}.spelling`, 4_096),
-    mode: enumValue(field(object, "mode", path), ["quote", "angle"] as const, `${path}.mode`),
-    resolution: parseIncludeResolution(field(object, "resolution", path), `${path}.resolution`),
-  };
+function parseInputOwner(value: JsonValue, path: string): CppCuteInputOwnerV2 {
+  if (!isJsonObject(value)) invalid(path, "input owner must be an object");
+  if (value.kind === "source" || value.kind === "compiler-resource-directory") {
+    closedObject(value, ["kind"], path);
+    return { kind: value.kind };
+  }
+  if (value.kind === "dependency") {
+    const object = closedObject(value, ["kind", "dependencyId"], path);
+    return {
+      kind: "dependency",
+      dependencyId: dependencyId(field(object, "dependencyId", path), `${path}.dependencyId`),
+    };
+  }
+  invalid(`${path}.kind`, "unknown input owner kind");
 }
 
-function parseIncludeResolution(value: JsonValue, path: string): CppCuteIncludeResolutionV1 {
+function parseIncludeEdge(value: JsonValue, path: string): CppCuteIncludeEdgeV2 {
+  if (!isJsonObject(value)) invalid(path, "include edge must be an object");
+  if (value.kind === "source-directive") {
+    const object = closedObject(value, [
+      "kind", "includeEdgeId", "includingFileId", "directiveSpanId", "spelling", "mode", "resolution",
+    ], path);
+    return {
+      kind: "source-directive",
+      includeEdgeId: stableId(field(object, "includeEdgeId", path), `${path}.includeEdgeId`, "include-edge"),
+      includingFileId: stableId(field(object, "includingFileId", path), `${path}.includingFileId`, "file"),
+      directiveSpanId: stableId(field(object, "directiveSpanId", path), `${path}.directiveSpanId`, "span"),
+      spelling: boundedString(field(object, "spelling", path), `${path}.spelling`, 4_096),
+      mode: enumValue(field(object, "mode", path), ["quote", "angle"] as const, `${path}.mode`),
+      resolution: parseIncludeResolution(field(object, "resolution", path), `${path}.resolution`),
+    };
+  }
+  if (value.kind === "compiler-forced") {
+    const object = closedObject(value, [
+      "kind", "includeEdgeId", "fileId", "includeRootId", "compilerOptionOrdinal",
+    ], path);
+    return {
+      kind: "compiler-forced",
+      includeEdgeId: stableId(field(object, "includeEdgeId", path), `${path}.includeEdgeId`, "include-edge"),
+      fileId: stableId(field(object, "fileId", path), `${path}.fileId`, "file"),
+      includeRootId: dependencyId(field(object, "includeRootId", path), `${path}.includeRootId`),
+      compilerOptionOrdinal: nonnegativeInteger(
+        field(object, "compilerOptionOrdinal", path),
+        `${path}.compilerOptionOrdinal`,
+      ),
+    };
+  }
+  invalid(`${path}.kind`, "unknown include edge kind");
+}
+
+function parseIncludeResolution(value: JsonValue, path: string): CppCuteIncludeResolutionV2 {
   if (!isJsonObject(value)) invalid(path, "include resolution must be an object");
   if (value.kind === "resolved") {
     const object = closedObject(value, ["kind", "fileId", "includeRootId"], path);
     return {
       kind: "resolved",
       fileId: stableId(field(object, "fileId", path), `${path}.fileId`, "file"),
-      includeRootId: stableId(field(object, "includeRootId", path), `${path}.includeRootId`, "include-root"),
+      includeRootId: dependencyId(field(object, "includeRootId", path), `${path}.includeRootId`),
     };
   }
   if (value.kind === "unresolved") {
@@ -569,30 +615,44 @@ function parseConstant(value: JsonValue, path: string): CppCuteConstantV1 {
   invalid(`${path}.kind`, "unknown constant kind");
 }
 
-function parseDeclaration(value: JsonValue, path: string): CppCuteDeclarationV1 {
+function parseDeclaration(value: JsonValue, path: string): CppCuteDeclarationV2 {
   const object = closedObject(value, [
     "declarationId", "kind", "canonicalUsr", "canonicalName", "lexicalParentId", "semanticParentId", "typeId",
-    "targetTypeId", "origin", "definitionKind", "linkage", "storageDuration", "memorySpace", "mangledName",
-    "cudaAttributes",
+    "targetTypeId", "initializerExpressionId", "origin", "definitionKind", "linkage", "storageDuration", "memorySpace",
+    "mangledName", "cudaAttributes",
   ], path);
   const canonicalUsr = boundedString(field(object, "canonicalUsr", path), `${path}.canonicalUsr`, 16_384);
   if (!CANONICAL_USR.test(canonicalUsr)) invalid(`${path}.canonicalUsr`, "canonical USR must use the Clang c:@ namespace");
+  const kind = enumValue(field(object, "kind", path), [
+    "namespace", "type-alias", "record", "enum", "field", "function", "parameter", "variable", "template",
+    "template-parameter",
+  ] as const, `${path}.kind`) as CppCuteDeclarationKindV1;
+  const initializerExpressionId = nullableStableId(
+    field(object, "initializerExpressionId", path),
+    `${path}.initializerExpressionId`,
+    "expression",
+  );
+  if (kind !== "variable" && initializerExpressionId !== null) {
+    invalid(`${path}.initializerExpressionId`, "only variable declarations may carry an initializer expression");
+  }
+  const definitionKind = enumValue(field(object, "definitionKind", path), [
+    "definition", "declaration-only", "builtin", "external",
+  ] as const, `${path}.definitionKind`);
+  if (initializerExpressionId !== null && definitionKind !== "definition") {
+    invalid(`${path}.initializerExpressionId`, "an initializer requires a variable definition");
+  }
   return {
     declarationId: stableId(field(object, "declarationId", path), `${path}.declarationId`, "declaration"),
-    kind: enumValue(field(object, "kind", path), [
-      "namespace", "type-alias", "record", "enum", "field", "function", "parameter", "variable", "template",
-      "template-parameter",
-    ] as const, `${path}.kind`) as CppCuteDeclarationKindV1,
+    kind,
     canonicalUsr,
     canonicalName: boundedString(field(object, "canonicalName", path), `${path}.canonicalName`, 16_384),
     lexicalParentId: nullableStableId(field(object, "lexicalParentId", path), `${path}.lexicalParentId`, "declaration"),
     semanticParentId: nullableStableId(field(object, "semanticParentId", path), `${path}.semanticParentId`, "declaration"),
     typeId: nullableStableId(field(object, "typeId", path), `${path}.typeId`, "type"),
     targetTypeId: nullableStableId(field(object, "targetTypeId", path), `${path}.targetTypeId`, "type"),
+    initializerExpressionId,
     origin: parseOrigin(field(object, "origin", path), `${path}.origin`),
-    definitionKind: enumValue(field(object, "definitionKind", path), [
-      "definition", "declaration-only", "builtin", "external",
-    ] as const, `${path}.definitionKind`),
+    definitionKind,
     linkage: enumValue(field(object, "linkage", path), [
       "none", "internal", "external", "weak", "linkonce-odr",
     ] as const, `${path}.linkage`),
@@ -1226,21 +1286,23 @@ function parseDiagnostic(
   value: JsonValue,
   limits: CppCuteFrontendArtifactLimits,
   path: string,
-): CppCuteFrontendDiagnosticV1 {
+): CppCuteFrontendDiagnosticV2 {
   const object = closedObject(value, [
-    "diagnosticId", "phase", "severity", "code", "renderedMessage", "primarySpanId", "subject",
-    "parentDiagnosticId", "related",
+    "diagnosticId", "phase", "severity", "code", "renderedMessage", "location", "subject", "parentDiagnosticId",
   ], path);
   const code = stringValue(field(object, "code", path), `${path}.code`);
   if (!DIAGNOSTIC_CODE.test(code)) invalid(`${path}.code`, "diagnostic code must be namespaced");
-  const related = orderedArrayField(object, "related", path, limits.maxRelatedDiagnosticLocations).map((entry, index) =>
-    parseRelatedDiagnostic(entry, limits, `${path}.related[${index}]`));
+  const subject = parseDiagnosticSubject(field(object, "subject", path), `${path}.subject`);
+  const location = parseDiagnosticLocation(field(object, "location", path), limits, `${path}.location`);
+  if (location.kind === "none" && subject.kind !== "invocation" && subject.kind !== "profile" && subject.kind !== "compiler") {
+    invalid(`${path}.location`, "locationless diagnostics require an invocation, profile, or compiler subject");
+  }
   return {
     diagnosticId: stableId(field(object, "diagnosticId", path), `${path}.diagnosticId`, "diagnostic"),
     phase: enumValue(field(object, "phase", path), [
-      "preprocessing", "parsing", "name-lookup", "overload-resolution", "template-instantiation", "cuda-sema",
-      "artifact-extraction",
-    ] as const, `${path}.phase`) as CppCuteDiagnosticPhaseV1,
+      "invocation", "profile-validation", "preprocessing", "parsing", "name-lookup", "overload-resolution",
+      "template-instantiation", "cuda-sema", "artifact-extraction",
+    ] as const, `${path}.phase`) as CppCuteDiagnosticPhaseV2,
     severity: enumValue(field(object, "severity", path), [
       "remark", "note", "warning", "error", "fatal",
     ] as const, `${path}.severity`),
@@ -1250,15 +1312,37 @@ function parseDiagnostic(
       `${path}.renderedMessage`,
       limits.maxStringBytes,
     ),
-    primarySpanId: stableId(field(object, "primarySpanId", path), `${path}.primarySpanId`, "span"),
-    subject: parseDiagnosticSubject(field(object, "subject", path), `${path}.subject`),
+    location,
+    subject,
     parentDiagnosticId: nullableStableId(
       field(object, "parentDiagnosticId", path),
       `${path}.parentDiagnosticId`,
       "diagnostic",
     ),
-    related,
   };
+}
+
+function parseDiagnosticLocation(
+  value: JsonValue,
+  limits: CppCuteFrontendArtifactLimits,
+  path: string,
+): CppCuteDiagnosticLocationV2 {
+  if (!isJsonObject(value)) invalid(path, "diagnostic location must be an object");
+  if (value.kind === "none") {
+    closedObject(value, ["kind"], path);
+    return { kind: "none" };
+  }
+  if (value.kind === "source") {
+    const object = closedObject(value, ["kind", "primarySpanId", "related"], path);
+    const related = orderedArrayField(object, "related", path, limits.maxRelatedDiagnosticLocations).map((entry, index) =>
+      parseRelatedDiagnostic(entry, limits, `${path}.related[${index}]`));
+    return {
+      kind: "source",
+      primarySpanId: stableId(field(object, "primarySpanId", path), `${path}.primarySpanId`, "span"),
+      related,
+    };
+  }
+  invalid(`${path}.kind`, "unknown diagnostic location kind");
 }
 
 function parseRelatedDiagnostic(
@@ -1273,8 +1357,12 @@ function parseRelatedDiagnostic(
   };
 }
 
-function parseDiagnosticSubject(value: JsonValue, path: string): CppCuteDiagnosticSubjectV1 {
+function parseDiagnosticSubject(value: JsonValue, path: string): CppCuteDiagnosticSubjectV2 {
   if (!isJsonObject(value)) invalid(path, "diagnostic subject must be an object");
+  if (value.kind === "invocation" || value.kind === "profile" || value.kind === "compiler") {
+    closedObject(value, ["kind"], path);
+    return { kind: value.kind };
+  }
   if (value.kind === "file") {
     const object = closedObject(value, ["kind", "fileId"], path);
     return { kind: "file", fileId: stableId(field(object, "fileId", path), `${path}.fileId`, "file") };
@@ -1373,6 +1461,16 @@ function nullableStableId(value: JsonValue, path: string, kind: string): string 
   return value === null ? null : stableId(value, path, kind);
 }
 
+function dependencyId(value: JsonValue, path: string): string {
+  const text = stringValue(value, path);
+  if (!DEPENDENCY_ID.test(text)) invalid(path, "invalid dependency ID");
+  return text;
+}
+
+function nullableDependencyId(value: JsonValue, path: string): string | null {
+  return value === null ? null : dependencyId(value, path);
+}
+
 function sha256(value: JsonValue, path: string): string {
   const text = stringValue(value, path);
   if (!SHA256_HEX.test(text)) invalid(path, "SHA-256 must be 64 lowercase hexadecimal digits");
@@ -1466,7 +1564,7 @@ function validateVirtualPath(value: string, path: string): void {
     invalid(path, "virtual path must be bounded absolute POSIX syntax");
   }
   const segments = value.split("/");
-  if (segments.some((segment, index) => index > 0 && (segment.length === 0 || segment === "." || segment === ".."))) {
+  if (value !== "/" && segments.some((segment, index) => index > 0 && (segment.length === 0 || segment === "." || segment === ".."))) {
     invalid(path, "virtual path must be normalized and must not contain empty, . or .. segments");
   }
 }

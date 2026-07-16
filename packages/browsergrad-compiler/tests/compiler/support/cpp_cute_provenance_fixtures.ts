@@ -5,7 +5,7 @@ import {
   unwrapVerifiedCppCuteAotRunnerReceipt,
   unwrapVerifiedCppCuteAotRunnerReceiptResource,
   verifyCppCuteAotRunnerReceipt,
-  type CppCuteAotRunnerReceiptV1,
+  type CppCuteAotRunnerReceiptV2,
   type VerifiedCppCuteAotRunnerReceiptResource,
 } from "../../../src/cpp_cute_aot_receipt.js";
 import {
@@ -39,7 +39,8 @@ import {
   type PreparedCppCuteAttestationTrustStore,
   type VerifiedCppCuteFrontendAttestation,
 } from "../../../src/cpp_cute_frontend_provenance.js";
-import type { CppCuteFrontendPayloadV1 } from "../../../src/cpp_cute_frontend_types.js";
+import type { CppCuteFrontendPayloadV2 } from "../../../src/cpp_cute_frontend_types.js";
+import { computeCppCuteInputHashes } from "../../../src/cpp_cute_frontend_verify.js";
 import {
   artifactCompatibleProfileOptions,
   CPP_CUTE_FIXTURE_BUILDER_ID,
@@ -63,11 +64,11 @@ const TEST_PRIVATE_JWK: JsonWebKey = Object.freeze({
 export const TEST_CPP_CUTE_SPKI_BASE64 =
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl8h7VCP+TUDyAHiNww/AEpx+H6YG/bXR1bsUEtcquSfen4okTS1aPQ0oyKgQtZPo2Mn2pfS6TSArNTL7ACRmdQ==";
 export const PINNED_CPP_CUTE_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
-export const PINNED_CPP_CUTE_PROFILE_HASH = "a0e6fabe8083ee9dfc364db374d3a8454126c137251cfc3a421e94d61e0bc492";
-export const PINNED_CPP_CUTE_ARTIFACT_HASH = "c8bb7641faa1add94c262137ae5716c4b9bb8582ec69b5ebcb8cc0e66428066e";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "7dce5b4e22c97c54812a7ad3d7ec35289e8ab43bb82f0ef8b75fa3272ea3169b";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "9068";
-export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "9a122d8462fc232451f6e758bcda17f48dcf2614d67aa641e951a5886fac6975";
+export const PINNED_CPP_CUTE_PROFILE_HASH = "5092db2cbe369b22e817cfe2e94e244f5180abf3b80fc9230d5f7f7a3285b64a";
+export const PINNED_CPP_CUTE_ARTIFACT_HASH = "de50d94c50a0d77d8724e31cbf4a325efd980bae28181cadec0bc5a048b3a654";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "6c488751b88b9b614b652ce6ce4172214b4e4c98aa61661f306fec537e6244d7";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "11064";
+export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46";
 
 export interface CppCuteProvenanceFixture {
   readonly privateKey: CryptoKey;
@@ -78,7 +79,7 @@ export interface CppCuteProvenanceFixture {
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly artifactResource: VerifiedCppCuteFrontendArtifactResource;
   readonly job: PreparedCppCuteAotJob;
-  readonly receipt: CppCuteAotRunnerReceiptV1;
+  readonly receipt: CppCuteAotRunnerReceiptV2;
   readonly receiptResource: VerifiedCppCuteAotRunnerReceiptResource;
   readonly statement: CppCuteFrontendProvenanceStatementV1;
   readonly provenance: CppCuteFrontendProvenanceV1;
@@ -90,7 +91,7 @@ export interface AuthorizedCppCuteProvenanceFixture extends CppCuteProvenanceFix
 }
 
 export interface CppCuteProvenanceFixtureOptions {
-  readonly mutatePayload?: (payload: CppCuteFrontendPayloadV1) => void;
+  readonly mutatePayload?: (payload: CppCuteFrontendPayloadV2) => void;
 }
 
 export async function createCppCuteProvenanceFixture(
@@ -127,6 +128,11 @@ export async function createCppCuteProvenanceFixture(
   const artifactInput = await createCppCuteArtifactInput(profile.profileHash);
   options.mutatePayload?.(artifactInput.payload);
   if (options.mutatePayload !== undefined) {
+    const hashes = await computeCppCuteInputHashes(artifactInput.payload);
+    (artifactInput.payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
+    (artifactInput.payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
+    (artifactInput.payload.inputs as { closureSha256: string }).closureSha256 = hashes.closureSha256;
+    (artifactInput.payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
     (artifactInput as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(artifactInput.payload);
   }
   const inMemoryArtifact = await verifyCppCuteFrontendArtifact(artifactInput);
