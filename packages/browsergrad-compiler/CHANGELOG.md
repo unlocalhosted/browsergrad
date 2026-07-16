@@ -9,6 +9,10 @@
   caller-propagated bounded integer algebra, and CuTe's actual `cosize`
   definition. Provenance remains outside semantic hashes and no tensor storage,
   dtype, effect, CPU, WebGPU, SLSA, or source-compatibility claim is implied.
+- Adds a closed pre-run AOT producer request that content-addresses the exact
+  profile, Git source identity, source VFS blobs, declaration-token selector,
+  expected stable entry, and expected artifact closure. It deliberately grants
+  no process, filesystem, producer, or provenance authority.
 
 ## 0.2.0
 
