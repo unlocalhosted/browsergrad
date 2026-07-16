@@ -34,6 +34,7 @@ export interface CppCuteProfileFixtureOptions {
   readonly includeRoots?: readonly CppCuteFrontendIncludeRoot[];
   readonly sandboxPolicySha256?: string;
   readonly executionEnvironmentManifestSha256?: string;
+  readonly containerManifestDigest?: string;
   readonly containerConfigDigest?: string;
 }
 
@@ -65,7 +66,7 @@ export function createCppCuteProfileInput(
         runtime: "docker",
         repository: "ghcr.io/unlocalhosted/browsergrad-cpp-cute-aot",
         platform: "linux/amd64",
-        manifestDigest: CPP_CUTE_FIXTURE_CONTAINER_DIGEST,
+        manifestDigest: options.containerManifestDigest ?? CPP_CUTE_FIXTURE_CONTAINER_DIGEST,
         configDigest: options.containerConfigDigest ?? CPP_CUTE_FIXTURE_CONTAINER_CONFIG_DIGEST,
       },
       provenance: {

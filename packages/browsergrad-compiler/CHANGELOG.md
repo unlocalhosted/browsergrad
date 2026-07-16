@@ -57,6 +57,18 @@
   membership and length checks, intrinsic `Uint8Array` element-kind proof, and
   rejection of proxies, shared buffers, hostile species, and disguised word
   arrays.
+- Adds cacheable, opaque OCI manifest/config metadata verification plus a
+  separate plan-specific authorization. It binds exact raw descriptors, one
+  closed `linux/amd64` OCI leaf, distributable layer metadata, rootfs diff IDs,
+  empty image execution config, bounded history/annotations, and aggregate
+  layer size without claiming unseen layer blob bytes.
+- Pins the raw OCI metadata budgets, exact local Docker socket, supervisor
+  control/source paths, and tmpfs mode into the logical sandbox policy. A live
+  Docker observation remains a separate pending process-owned authority;
+  caller-provided inspect JSON cannot establish local image or execution state.
+- Validates OCI timestamps with explicit Gregorian RFC 3339 checks, handles
+  cancellation before evidence copying, and keeps strict-parser details out of
+  attacker-amplified public diagnostics.
 
 ## 0.2.0
 

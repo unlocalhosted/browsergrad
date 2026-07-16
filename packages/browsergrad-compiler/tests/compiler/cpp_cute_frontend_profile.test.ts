@@ -27,7 +27,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("14b2e633f131061949ccd9dcc89fc22ade77e718637bc1ff78724dfeabc9cec5");
+    expect(first.profileHash).toBe("920a6575c87f360075a215ee08bdc15ea1f562744287461091a986d7e17424ac");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@1");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(first.expectedHeaderSetSha256).toBe(CPP_CUTE_FIXTURE_HEADER_SET_HASH);

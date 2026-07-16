@@ -29,26 +29,17 @@ import {
   unwrapPreparedCppCuteFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
+import {
+  copyInspectedUnsharedUint8Array,
+  inspectUnsharedPlainUint8Array,
+  type InspectedUnsharedUint8Array,
+} from "./cpp_cute_aot_bytes.js";
 
 export const CPP_CUTE_AOT_RESULT_FRAME_MAGIC = "BGCUTE-AOT-R1\n";
 const FRAME_MAGIC_BYTES = new TextEncoder().encode(CPP_CUTE_AOT_RESULT_FRAME_MAGIC);
 const FRAME_LENGTH_BYTES = 16;
 const PREPARED_RUNS = new WeakMap<object, StoredCppCuteAotOfflineRunRecord>();
 const VERIFIED_RESULTS = new WeakMap<object, StoredCppCuteAotOfflineResultRecord>();
-const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype) as object;
-const TYPED_ARRAY_BUFFER_GETTER = Object.getOwnPropertyDescriptor(
-  TYPED_ARRAY_PROTOTYPE,
-  "buffer",
-)?.get;
-const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
-  TYPED_ARRAY_PROTOTYPE,
-  "byteLength",
-)?.get;
-const TYPED_ARRAY_TAG_GETTER = Object.getOwnPropertyDescriptor(
-  TYPED_ARRAY_PROTOTYPE,
-  Symbol.toStringTag,
-)?.get;
-const UINT8_ARRAY_SET = Uint8Array.prototype.set;
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
   : Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
@@ -561,67 +552,41 @@ function parseResultFrame(
   };
 }
 
-interface InspectedUint8Array {
-  readonly byteLength: number;
-}
-
-function inspectUnsharedUint8Array(value: unknown): InspectedUint8Array {
-  if (
-    TYPED_ARRAY_BUFFER_GETTER === undefined
-    || TYPED_ARRAY_BYTE_LENGTH_GETTER === undefined
-    || TYPED_ARRAY_TAG_GETTER === undefined
-  ) {
-    throw new TypeError("Uint8Array intrinsic accessors are unavailable");
-  }
-  if (typeof value !== "object" || value === null) throw new TypeError("value is not an object");
-  const prototype = Object.getPrototypeOf(value);
-  const buffer = TYPED_ARRAY_BUFFER_GETTER.call(value) as ArrayBufferLike;
-  const byteLength = TYPED_ARRAY_BYTE_LENGTH_GETTER.call(value) as unknown;
-  const tag = TYPED_ARRAY_TAG_GETTER.call(value) as unknown;
-  if (prototype !== Uint8Array.prototype) throw new TypeError("value is not a plain Uint8Array");
-  if (tag !== "Uint8Array") throw new TypeError("value does not have Uint8Array element semantics");
-  if (typeof byteLength !== "number" || !Number.isSafeInteger(byteLength) || byteLength < 0) {
-    throw new TypeError("Uint8Array byte length is invalid");
-  }
-  if (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer) {
-    throw new TypeError("SharedArrayBuffer-backed bytes are forbidden");
-  }
-  return { byteLength };
-}
-
-function copyUnsharedUint8Array(value: unknown, inspected: InspectedUint8Array): Uint8Array {
-  const copy = new Uint8Array(inspected.byteLength);
-  UINT8_ARRAY_SET.call(copy, value as Uint8Array);
-  return copy;
-}
-
-function inspectSourceBytes(value: unknown, path: string): InspectedUint8Array {
+function inspectSourceBytes(value: unknown, path: string): InspectedUnsharedUint8Array {
   try {
-    return inspectUnsharedUint8Array(value);
+    return inspectUnsharedPlainUint8Array(value);
   } catch (cause) {
     invalid(path, "source bytes must be an unshared plain Uint8Array", { cause });
   }
 }
 
-function copySourceBytes(value: unknown, inspected: InspectedUint8Array, path: string): Uint8Array {
+function copySourceBytes(
+  value: unknown,
+  inspected: InspectedUnsharedUint8Array,
+  path: string,
+): Uint8Array {
   try {
-    return copyUnsharedUint8Array(value, inspected);
+    return copyInspectedUnsharedUint8Array(value, inspected);
   } catch (cause) {
     invalid(path, "source bytes became unreadable while snapshotting", { cause });
   }
 }
 
-function inspectFrameBytes(value: unknown, path: string): InspectedUint8Array {
+function inspectFrameBytes(value: unknown, path: string): InspectedUnsharedUint8Array {
   try {
-    return inspectUnsharedUint8Array(value);
+    return inspectUnsharedPlainUint8Array(value);
   } catch (cause) {
     frameInvalid(path, "frame bytes must be an unshared plain Uint8Array", { cause });
   }
 }
 
-function copyFrameBytes(value: unknown, inspected: InspectedUint8Array, path: string): Uint8Array {
+function copyFrameBytes(
+  value: unknown,
+  inspected: InspectedUnsharedUint8Array,
+  path: string,
+): Uint8Array {
   try {
-    return copyUnsharedUint8Array(value, inspected);
+    return copyInspectedUnsharedUint8Array(value, inspected);
   } catch (cause) {
     frameInvalid(path, "frame bytes became unreadable while snapshotting", { cause });
   }

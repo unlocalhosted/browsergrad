@@ -45,6 +45,42 @@ export const CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS = deepFreezeJson({
   maxArithmeticOperations: 200_000,
 } as const satisfies JsonObject);
 
+export const CPP_CUTE_AOT_OCI_RESOURCE_LIMITS = deepFreezeJson({
+  manifestBytes: 1_048_576,
+  configBytes: 8_388_608,
+  layers: 256,
+  layerBytes: 2_147_483_648,
+  totalLayerBytes: 4_294_967_296,
+  historyEntries: 512,
+  annotations: 128,
+  annotationKeyBytes: 1_024,
+  annotationValueBytes: 8_192,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_OCI_MANIFEST_DECODE_LIMITS = deepFreezeJson({
+  maxDocumentBytes: CPP_CUTE_AOT_OCI_RESOURCE_LIMITS.manifestBytes,
+  maxDepth: 16,
+  maxNodes: 32_768,
+  maxStringBytes: 262_144,
+  maxArrayLength: 512,
+  maxObjectProperties: 512,
+  maxRank: 64,
+  maxIntegerBits: 256,
+  maxArithmeticOperations: 65_536,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_OCI_CONFIG_DECODE_LIMITS = deepFreezeJson({
+  maxDocumentBytes: CPP_CUTE_AOT_OCI_RESOURCE_LIMITS.configBytes,
+  maxDepth: 16,
+  maxNodes: 16_384,
+  maxStringBytes: 1_048_576,
+  maxArrayLength: 1_024,
+  maxObjectProperties: 512,
+  maxRank: 64,
+  maxIntegerBits: 256,
+  maxArithmeticOperations: 32_768,
+} as const satisfies JsonObject);
+
 /**
  * Closed logical policy. Host paths, container IDs, timestamps, and other
  * per-run operational values are intentionally absent from its identity.
@@ -56,6 +92,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
   runtime: {
     engine: "docker",
     endpoint: "local-unix",
+    endpointUri: "unix:///var/run/docker.sock",
     platform: "linux/amd64",
     imagePull: "forbidden",
     createBy: "image-config-digest",
@@ -66,8 +103,9 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     entrypoint: "/opt/browsergrad/bin/cpp-cute-aot-supervisor",
     workingDirectory: "/run/browsergrad",
     arguments: [
-      "--profile=/run/browsergrad/input/profile.json",
-      "--job=/run/browsergrad/input/job.json",
+      "--profile=/run/browsergrad/control/profile.json",
+      "--job=/run/browsergrad/control/job.json",
+      "--source-root=/run/browsergrad/source",
       `--protocol=${CPP_CUTE_AOT_RESULT_FRAME_PROTOCOL}`,
     ],
     environment: {
@@ -102,7 +140,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     source: "runner-snapshot-read-only-rprivate",
     control: "runner-snapshot-read-only-rprivate",
     temporaryPath: "/tmp",
-    temporary: ["rw", "noexec", "nosuid", "nodev"],
+    temporary: ["rw", "noexec", "nosuid", "nodev", "mode=1777"],
     temporaryBytes: "min(maxMemoryBytes/4,536870912)",
     dockerSocket: "forbidden",
     devices: "forbidden",
@@ -117,9 +155,19 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     stderrBytes: CPP_CUTE_AOT_STDERR_BYTE_LIMIT,
     receiptBytes: CPP_CUTE_AOT_RECEIPT_BYTE_LIMIT,
   },
+  evidence: {
+    ociMetadata: {
+      authority: "manifest-config-metadata-only",
+      layerBlobs: "not-supplied-or-rehashed",
+      localDockerObservation: "separate-live-authority-required",
+      resources: CPP_CUTE_AOT_OCI_RESOURCE_LIMITS,
+    },
+  },
   decoding: {
     artifact: CPP_CUTE_AOT_ARTIFACT_DECODE_LIMITS,
     receipt: CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS,
+    ociManifest: CPP_CUTE_AOT_OCI_MANIFEST_DECODE_LIMITS,
+    ociConfig: CPP_CUTE_AOT_OCI_CONFIG_DECODE_LIMITS,
   },
   semantics: {
     linking: "forbidden",
@@ -130,7 +178,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
 
 // SHA-256 of canonical JSON for CPP_CUTE_AOT_SANDBOX_POLICY_V1.
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 =
-  "e63d85ff943b7822e6e8e510951a0bdf17656e31e2422b5d638c768f40489c0a";
+  "c8bf6bdc84ce739ef32939ac8f417433b250ac28218caac95b0eaaeefb7b02ca";
 
 export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
   const actual = await hashCanonicalJson(CPP_CUTE_AOT_SANDBOX_POLICY_V1);
