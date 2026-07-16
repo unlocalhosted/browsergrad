@@ -31,6 +31,8 @@ import {
   createCppCuteProvenanceStatement as createStatement,
   decodeBase64,
   encodeBase64,
+  PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH as PINNED_ARTIFACT_BYTE_LENGTH,
+  PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH as PINNED_ARTIFACT_BYTES_HASH,
   PINNED_CPP_CUTE_ARTIFACT_HASH as PINNED_ARTIFACT_HASH,
   PINNED_CPP_CUTE_PROFILE_HASH as PINNED_PROFILE_HASH,
   PINNED_CPP_CUTE_SOURCE_SET_HASH as PINNED_SOURCE_SET_HASH,
@@ -58,17 +60,23 @@ describe("C++/CuTe frontend provenance", () => {
       trustStoreHash: fixture.trustStore.trustStoreHash,
       profileHash: fixture.profile.profileHash,
       artifactHash: fixture.artifact.artifactHash,
+      artifactBytesSha256: fixture.artifact.artifactBytesSha256,
+      artifactByteLength: fixture.artifact.artifactByteLength,
       sourceSetSha256: fixture.artifact.sourceSetSha256,
     }).toEqual({
       trustStoreHash: PINNED_TRUST_STORE_HASH,
       profileHash: PINNED_PROFILE_HASH,
       artifactHash: PINNED_ARTIFACT_HASH,
+      artifactBytesSha256: PINNED_ARTIFACT_BYTES_HASH,
+      artifactByteLength: PINNED_ARTIFACT_BYTE_LENGTH,
       sourceSetSha256: PINNED_SOURCE_SET_HASH,
     });
     expect(attestation).toMatchObject({
       builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
       keyId: fixture.keyId,
       artifactHash: fixture.artifact.artifactHash,
+      artifactBytesSha256: fixture.artifact.artifactBytesSha256,
+      artifactByteLength: fixture.artifact.artifactByteLength,
       profileHash: fixture.profile.profileHash,
       trustStoreHash: fixture.trustStore.trustStoreHash,
       sourceRepository: CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
@@ -76,6 +84,7 @@ describe("C++/CuTe frontend provenance", () => {
     });
     expect(authorized).toMatchObject({
       artifactHash: fixture.artifact.artifactHash,
+      artifactBytesSha256: fixture.artifact.artifactBytesSha256,
       profileHash: fixture.profile.profileHash,
       trustStoreHash: fixture.trustStore.trustStoreHash,
       sourceRevision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
@@ -243,6 +252,24 @@ describe("C++/CuTe frontend provenance", () => {
           const predicate = statement["predicate"] as Record<string, unknown>;
           const artifact = predicate["artifact"] as Record<string, unknown>;
           artifact["transportHash"] = "0".repeat(64);
+        },
+        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
+        path: "$.payload.predicate.artifact",
+      },
+      {
+        mutate: (statement) => {
+          const predicate = statement["predicate"] as Record<string, unknown>;
+          const artifact = predicate["artifact"] as Record<string, unknown>;
+          artifact["artifactBytesSha256"] = "0".repeat(64);
+        },
+        code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
+        path: "$.payload.predicate.artifact",
+      },
+      {
+        mutate: (statement) => {
+          const predicate = statement["predicate"] as Record<string, unknown>;
+          const artifact = predicate["artifact"] as Record<string, unknown>;
+          artifact["artifactByteLength"] = "0";
         },
         code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH",
         path: "$.payload.predicate.artifact",

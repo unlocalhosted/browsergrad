@@ -54,6 +54,8 @@ export const TEST_CPP_CUTE_SPKI_BASE64 =
 export const PINNED_CPP_CUTE_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
 export const PINNED_CPP_CUTE_PROFILE_HASH = "15bc3d4f4b222a077e325ea0f9963fe900fa1e0e715c125632d4ad1a4ae02196";
 export const PINNED_CPP_CUTE_ARTIFACT_HASH = "626179c470d3b1e26fdf45d615b1b83da8eaf80533ef2ecb7cb59b63511153fd";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "b0f2b8c28ca12e5f9ad4e8f9bb605df8f0551c05858e3fb6362bc23e1aa49345";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "9068";
 export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "9a122d8462fc232451f6e758bcda17f48dcf2614d67aa641e951a5886fac6975";
 
 export interface CppCuteProvenanceFixture {
@@ -133,7 +135,7 @@ export async function createCppCuteProvenanceStatement(
   };
   return {
     _type: CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE,
-    subject: [{ name: artifact.artifactId, digest: { sha256: artifact.artifactHash } }],
+    subject: [{ name: artifact.artifactId, digest: { sha256: artifact.artifactBytesSha256 } }],
     predicateType: configured.deployment.provenance.predicateType,
     predicate: {
       builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
@@ -143,6 +145,8 @@ export async function createCppCuteProvenanceStatement(
         artifactId: artifact.artifactId,
         artifactHash: artifact.artifactHash,
         transportHash: artifact.transportHash,
+        artifactBytesSha256: artifact.artifactBytesSha256,
+        artifactByteLength: artifact.artifactByteLength,
         profileHash: artifact.profileHash,
         sourceSetSha256: artifact.sourceSetSha256,
         headerSetSha256: artifact.headerSetSha256,

@@ -5,10 +5,12 @@ import {
   deepFreezeJson,
   hashCanonicalJson,
   isJsonObject,
+  parseWireU64,
   sha256Hex,
   type DecodeLimits,
   type JsonObject,
   type JsonValue,
+  type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE,
@@ -77,6 +79,8 @@ export interface CppCuteProvenanceSubjectV1 extends JsonObject {
   readonly artifactId: string;
   readonly artifactHash: string;
   readonly transportHash: string;
+  readonly artifactBytesSha256: string;
+  readonly artifactByteLength: WireU64;
   readonly profileHash: string;
   readonly sourceSetSha256: string;
   readonly headerSetSha256: string;
@@ -171,6 +175,8 @@ export interface VerifiedCppCuteFrontendAttestation {
   readonly builderId: string;
   readonly keyId: string;
   readonly artifactHash: string;
+  readonly artifactBytesSha256: string;
+  readonly artifactByteLength: WireU64;
   readonly profileHash: string;
   readonly trustStoreHash: string;
   readonly sourceRepository: string;
@@ -190,6 +196,8 @@ declare const authorizedArtifactBrand: unique symbol;
 export interface AuthorizedCppCuteFrontendArtifact {
   readonly [authorizedArtifactBrand]: true;
   readonly artifactHash: string;
+  readonly artifactBytesSha256: string;
+  readonly artifactByteLength: WireU64;
   readonly profileHash: string;
   readonly sourceSetSha256: string;
   readonly statementHash: string;
@@ -366,6 +374,8 @@ export async function verifyCppCuteFrontendAttestation(
     builderId: predicate.builderId,
     keyId: dsseSignature.keyid,
     artifactHash: predicate.artifact.artifactHash,
+    artifactBytesSha256: predicate.artifact.artifactBytesSha256,
+    artifactByteLength: predicate.artifact.artifactByteLength,
     profileHash: predicate.artifact.profileHash,
     trustStoreHash: trustStoreRecord.trustStoreHash,
     sourceRepository: predicate.source.repository,
@@ -431,6 +441,8 @@ export function authorizeCppCuteFrontendArtifact(
   );
   const authorized = Object.freeze({
     artifactHash: request.artifact.artifactHash,
+    artifactBytesSha256: request.artifact.artifactBytesSha256,
+    artifactByteLength: request.artifact.artifactByteLength,
     profileHash: request.profile.profileHash,
     sourceSetSha256: request.artifact.sourceSetSha256,
     statementHash: request.attestation.statementHash,
@@ -500,6 +512,8 @@ export async function computeCppCuteProvenanceOutputManifestHash(
     artifactId: artifact.artifactId,
     artifactHash: artifact.artifactHash,
     transportHash: artifact.transportHash,
+    artifactBytesSha256: artifact.artifactBytesSha256,
+    artifactByteLength: artifact.artifactByteLength,
   });
 }
 
@@ -655,13 +669,15 @@ function parseGitRevision(value: JsonValue, path: string): CppCuteProvenanceGitR
 
 function parseSubject(value: JsonValue, path: string): CppCuteProvenanceSubjectV1 {
   const object = closedObject(value, [
-    "artifactId", "artifactHash", "transportHash", "profileHash", "sourceSetSha256", "headerSetSha256",
-    "inputClosureSha256",
+    "artifactId", "artifactHash", "transportHash", "artifactBytesSha256", "artifactByteLength", "profileHash",
+    "sourceSetSha256", "headerSetSha256", "inputClosureSha256",
   ], path);
   return {
     artifactId: boundedString(field(object, "artifactId", path), `${path}.artifactId`, 512),
     artifactHash: sha256(field(object, "artifactHash", path), `${path}.artifactHash`),
     transportHash: sha256(field(object, "transportHash", path), `${path}.transportHash`),
+    artifactBytesSha256: sha256(field(object, "artifactBytesSha256", path), `${path}.artifactBytesSha256`),
+    artifactByteLength: parseWireU64(field(object, "artifactByteLength", path), `${path}.artifactByteLength`),
     profileHash: sha256(field(object, "profileHash", path), `${path}.profileHash`),
     sourceSetSha256: sha256(field(object, "sourceSetSha256", path), `${path}.sourceSetSha256`),
     headerSetSha256: sha256(field(object, "headerSetSha256", path), `${path}.headerSetSha256`),
@@ -762,12 +778,17 @@ async function verifyStatementBindings(
     artifactId: artifact.artifactId,
     artifactHash: artifact.artifactHash,
     transportHash: artifact.transportHash,
+    artifactBytesSha256: artifact.artifactBytesSha256,
+    artifactByteLength: artifact.artifactByteLength,
     profileHash: artifact.profileHash,
     sourceSetSha256: artifact.sourceSetSha256,
     headerSetSha256: artifact.headerSetSha256,
     inputClosureSha256: artifact.inputClosureSha256,
   };
-  if (statement.subject[0].name !== artifact.artifactId || statement.subject[0].digest.sha256 !== artifact.artifactHash) {
+  if (
+    statement.subject[0].name !== artifact.artifactId
+    || statement.subject[0].digest.sha256 !== artifact.artifactBytesSha256
+  ) {
     subjectMismatch("$.payload.subject[0]", "in-toto subject differs from verified artifact identity");
   }
   if (canonicalJsonText(predicate.artifact) !== canonicalJsonText(expectedSubject)) {

@@ -1,11 +1,14 @@
 import {
-  canonicalizeJson,
+  canonicalJsonBytes,
   decodeWireJson,
+  encodeWireU64,
   hashCanonicalJson,
   resolveDecodeLimits,
+  sha256Hex,
   validateWireEnvelope,
   type DecodeLimits,
   type JsonValue,
+  type WireU64,
   type WireEnvelope,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
@@ -35,6 +38,8 @@ export interface VerifiedCppCuteFrontendArtifact {
   readonly artifactId: string;
   readonly artifactHash: string;
   readonly transportHash: string;
+  readonly artifactBytesSha256: string;
+  readonly artifactByteLength: WireU64;
   readonly profileHash: string;
   readonly sourceSetSha256: string;
   readonly headerSetSha256: string;
@@ -53,6 +58,8 @@ export interface VerifiedCppCuteFrontendArtifactRecord {
   readonly inputHashes: VerifiedCppCuteInputHashes;
   readonly artifactHash: string;
   readonly transportHash: string;
+  readonly artifactBytesSha256: string;
+  readonly artifactByteLength: WireU64;
 }
 
 export async function verifyCppCuteFrontendArtifact(
@@ -106,7 +113,9 @@ export async function verifyCppCuteFrontendArtifact(
     payload,
     requiredExtensions: [],
   };
-  canonicalizeJson(normalizedEnvelope, { limits });
+  const canonicalBytes = canonicalJsonBytes(normalizedEnvelope, { limits });
+  const artifactBytesSha256 = await sha256Hex(canonicalBytes);
+  const artifactByteLength = encodeWireU64(BigInt(canonicalBytes.byteLength));
   const transportHash = await hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.frontend-artifact-transport.v1",
     envelope: normalizedEnvelope,
@@ -116,6 +125,8 @@ export async function verifyCppCuteFrontendArtifact(
     artifactId: expectedArtifactId,
     artifactHash,
     transportHash,
+    artifactBytesSha256,
+    artifactByteLength,
     profileHash: payload.profileHash,
     sourceSetSha256: inputHashes.sourceSetSha256,
     headerSetSha256: inputHashes.headerSetSha256,
@@ -127,6 +138,8 @@ export async function verifyCppCuteFrontendArtifact(
     inputHashes,
     artifactHash,
     transportHash,
+    artifactBytesSha256,
+    artifactByteLength,
   }));
   return verified;
 }
@@ -136,10 +149,30 @@ export async function decodeCppCuteFrontendArtifact(
   options: VerifyCppCuteFrontendArtifactOptions = {},
 ): Promise<VerifiedCppCuteFrontendArtifact> {
   throwIfAborted(options.signal);
-  return verifyCppCuteFrontendArtifact(
-    decodeWireJson(bytes, options.limits === undefined ? {} : { limits: options.limits }),
+  const snapshot = new Uint8Array(bytes);
+  const artifact = await verifyCppCuteFrontendArtifact(
+    decodeWireJson(snapshot, options.limits === undefined ? {} : { limits: options.limits }),
     options,
   );
+  const canonical = canonicalCppCuteFrontendArtifactBytes(
+    artifact,
+    options.limits === undefined ? {} : { limits: options.limits },
+  );
+  if (!equalBytes(snapshot, canonical)) {
+    cppCuteFrontendArtifactFailure(
+      "BG-COMPILER-CPP-CUTE-ARTIFACT-NONCANONICAL-BYTES",
+      "$bytes",
+      "producer artifact bytes must exactly equal the canonical normalized envelope",
+    );
+  }
+  return artifact;
+}
+
+export function canonicalCppCuteFrontendArtifactBytes(
+  artifact: VerifiedCppCuteFrontendArtifact,
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
+): Uint8Array {
+  return canonicalJsonBytes(unwrapVerifiedCppCuteFrontendArtifact(artifact).envelope, options);
 }
 
 export function unwrapVerifiedCppCuteFrontendArtifact(
@@ -193,6 +226,15 @@ async function hashCppCuteFrontendSemantics(
     requiredExtensions: [...requiredExtensions].sort(),
     payload,
   }, options);
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
+  }
+  return difference === 0;
 }
 
 function resolveArtifactLimits(

@@ -13,6 +13,13 @@
   profile, Git source identity, source VFS blobs, declaration-token selector,
   expected stable entry, and expected artifact closure. It deliberately grants
   no process, filesystem, producer, or provenance authority.
+- Makes the canonical normalized frontend-artifact bytes a distinct verified
+  resource with their own SHA-256 and byte length. Byte decoding now rejects
+  any noncanonical producer representation, while the semantic artifact hash
+  remains independent of producer metadata.
+- Changes the in-toto subject and signed output manifest to bind those exact
+  canonical bytes. Authorization and layout-origin records retain both raw
+  resource identity and semantic identity; no observed producer run is claimed.
 
 ## 0.2.0
 

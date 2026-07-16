@@ -194,6 +194,8 @@ export async function lowerAuthorizedCppCuteLayoutEntry(
       domain: "browsergrad.compiler.cpp-cute.layout-origin.v1",
       layoutSemanticHash: preparedLayout.layoutSemanticHash,
       frontendArtifactHash: authorized.artifact.artifactHash,
+      frontendArtifactBytesSha256: authorized.artifact.artifactBytesSha256,
+      frontendArtifactByteLength: authorized.artifact.artifactByteLength,
       profileHash: authorization.profileHash,
       statementHash: authorization.statementHash,
       trustStoreHash: authorization.trustStoreHash,

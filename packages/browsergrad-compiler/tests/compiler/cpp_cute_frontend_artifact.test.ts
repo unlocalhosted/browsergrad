@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { sha256Hex } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
+  canonicalCppCuteFrontendArtifactBytes,
   decodeCppCuteFrontendArtifact,
   deriveCppCuteStableId,
   unwrapVerifiedCppCuteFrontendArtifact,
@@ -37,6 +39,8 @@ describe("C++/CuTe frontend artifact", () => {
       inputClosureSha256: "36b44d4e6ef78c9696f9864407dcebbec7ff988394653a0cae1600a2662ab847",
     });
     expect(verified.transportHash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(verified.artifactBytesSha256).toBe("199c4662192055f3fb68e8947b626a1ba069f90b038db2de364cb87ccb965f71");
+    expect(verified.artifactByteLength).toBe("9068");
     expect(verified.profileHash).toBe(CPP_CUTE_FIXTURE_PROFILE_HASH);
     expect(verified.outcome).toBe("accepted");
     expect(record.envelope.payload.facts).toContainEqual(expect.objectContaining({
@@ -49,9 +53,22 @@ describe("C++/CuTe frontend artifact", () => {
   });
 
   it("decodes bounded UTF-8 bytes through the untrusted wire parser", async () => {
-    const bytes = new TextEncoder().encode(JSON.stringify(await createCppCuteArtifactInput()));
+    const prepared = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput());
+    const bytes = canonicalCppCuteFrontendArtifactBytes(prepared);
     const verified = await decodeCppCuteFrontendArtifact(bytes);
-    expect(verified.outcome).toBe("accepted");
+    expect(await sha256Hex(bytes)).toBe(prepared.artifactBytesSha256);
+    expect(verified).toMatchObject({
+      outcome: "accepted",
+      artifactBytesSha256: prepared.artifactBytesSha256,
+      artifactByteLength: String(bytes.byteLength),
+    });
+
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    const noncanonical = new TextEncoder().encode(JSON.stringify(parsed, null, 2));
+    await expect(decodeCppCuteFrontendArtifact(noncanonical)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-NONCANONICAL-BYTES",
+      path: "$bytes",
+    });
   });
 
   it("normalizes set-like record order before deriving identity", async () => {
@@ -66,6 +83,7 @@ describe("C++/CuTe frontend artifact", () => {
     const second = await verifyCppCuteFrontendArtifact(permuted);
     expect(second.artifactHash).toBe(first.artifactHash);
     expect(second.transportHash).toBe(first.transportHash);
+    expect(second.artifactBytesSha256).toBe(first.artifactBytesSha256);
   });
 
   it("keeps transport producer outside semantic identity and trust", async () => {
@@ -80,6 +98,7 @@ describe("C++/CuTe frontend artifact", () => {
     const second = await verifyCppCuteFrontendArtifact(secondArtifact);
     expect(second.artifactHash).toBe(first.artifactHash);
     expect(second.transportHash).not.toBe(first.transportHash);
+    expect(second.artifactBytesSha256).not.toBe(first.artifactBytesSha256);
   });
 
   it("rejects structural copies without artifact authority", async () => {
