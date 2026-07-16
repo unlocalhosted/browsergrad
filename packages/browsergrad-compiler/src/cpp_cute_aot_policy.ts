@@ -52,6 +52,11 @@ export const CPP_CUTE_AOT_DOCKER_API_VERSION = "1.49";
 export const CPP_CUTE_AOT_DOCKER_CLIENT_DEFAULT_API_VERSION = "1.55";
 export const CPP_CUTE_AOT_DOCKER_ENGINE_API_VERSION = "1.55";
 export const CPP_CUTE_AOT_DOCKER_ENGINE_MIN_API_VERSION = "1.40";
+export const CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256 =
+  "536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74";
+export const CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LENGTH = 13_470;
+export const CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LIMIT = 1_048_576;
+export const CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE = "seccomp.json";
 export const CPP_CUTE_AOT_DOCKER_VERSION_FORMAT =
   `{"client":{"apiVersion":{{json .Client.APIVersion}},"defaultApiVersion":{{json .Client.DefaultAPIVersion}},"version":{{json .Client.Version}}},"schema":"${CPP_CUTE_AOT_DOCKER_VERSION_SCHEMA}","server":{"apiVersion":{{json .Server.APIVersion}},"arch":{{json .Server.Arch}},"minApiVersion":{{json .Server.MinAPIVersion}},"os":{{json .Server.Os}},"version":{{json .Server.Version}}},"version":1}`;
 export const CPP_CUTE_AOT_DOCKER_INFO_FORMAT =
@@ -247,7 +252,7 @@ export const CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_DECODE_LIMITS = deepFreezeJso
  */
 export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
   schema: CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA,
-  version: { major: 1, minor: 2 },
+  version: { major: 1, minor: 3 },
   contractId: "browsergrad.compiler.cpp-cute.aot@1",
   runtime: {
     engine: "docker",
@@ -330,7 +335,12 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     capabilitiesAdded: [],
     capabilitiesDropped: ["ALL"],
     noNewPrivileges: true,
-    seccomp: "runtime-default-requested-effective-profile-requires-external-attestation",
+    seccomp: {
+      request: "checked-private-snapshot",
+      sourceSha256: CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256,
+      sourceByteLength: CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LENGTH,
+      effectiveProfile: "requires-external-run-evidence",
+    },
   },
   filesystem: {
     root: "image-rootfs-read-only",
@@ -442,7 +452,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
 
 // SHA-256 of canonical JSON for CPP_CUTE_AOT_SANDBOX_POLICY_V1.
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 =
-  "d626d88e137cae80d3df7ccade30b5317f1ecc1906e3604133c5dab32dd278e0";
+  "14052e2d877fb00a293ef21ad64721b6432274b4e25400a85d2314f0fa1c773b";
 
 export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
   const actual = await hashCanonicalJson(CPP_CUTE_AOT_SANDBOX_POLICY_V1);
@@ -505,6 +515,7 @@ function verifyExecutionEnvironmentPolicy(
     || body.runtime.docker.engineVersion !== CPP_CUTE_AOT_DOCKER_ENGINE_VERSION
     || body.runtime.docker.requestApiVersion !== CPP_CUTE_AOT_DOCKER_API_VERSION
     || body.runtime.docker.imageStore !== "containerd"
+    || body.runtime.seccomp.profileSha256 !== CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256
     || body.image.platform !== "linux/amd64"
     || body.platform.runnerIdentity.uid !== CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.user.uid
     || body.platform.runnerIdentity.gid !== CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.user.gid

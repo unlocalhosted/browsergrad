@@ -2,7 +2,7 @@
   "schema": "browsergrad.compiler.cpp-cute.aot-sandbox-policy",
   "version": {
     "major": 1,
-    "minor": 2
+    "minor": 3
   },
   "contractId": "browsergrad.compiler.cpp-cute.aot@1",
   "runtime": {
@@ -91,7 +91,12 @@
       "ALL"
     ],
     "noNewPrivileges": true,
-    "seccomp": "runtime-default-requested-effective-profile-requires-external-attestation"
+    "seccomp": {
+      "request": "checked-private-snapshot",
+      "sourceSha256": "536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74",
+      "sourceByteLength": 13470,
+      "effectiveProfile": "requires-external-run-evidence"
+    }
   },
   "filesystem": {
     "root": "image-rootfs-read-only",

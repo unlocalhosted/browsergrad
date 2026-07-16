@@ -11,6 +11,7 @@ import {
 import { dirname, join, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import {
   decodeWireJson,
@@ -38,7 +39,11 @@ import {
   CPP_CUTE_AOT_DOCKER_LIFECYCLE_LIMITS,
   CPP_CUTE_AOT_DOCKER_REMOVE_LIMITS,
   CPP_CUTE_AOT_DOCKER_START_LIMITS,
+  CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE,
   CPP_CUTE_AOT_SANDBOX_POLICY_V1,
+  CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LENGTH,
+  CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LIMIT,
+  CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256,
 } from "../dist/cpp_cute_aot_policy.js";
 import {
   copyCppCuteAotOfflineRunStagingInputs,
@@ -62,6 +67,10 @@ import {
 
 const CONTAINER_ID = /^[0-9a-f]{64}$/u;
 const ABORTED_GETTER = Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
+const SECCOMP_SOURCE_PATH = fileURLToPath(
+  new URL("../../../tools/cpp-cute-aot/seccomp.v1.json", import.meta.url),
+);
+const FATAL_UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const LIVE_RUNS = new WeakMap();
 const TEST_RUNS = new WeakMap();
 
@@ -97,6 +106,8 @@ export class CppCuteAotDockerRunError extends Error {
  *   sessionNonce: string;
  *   sourceDirectory: string;
  *   controlDirectory: string;
+ *   seccompProfilePath: string;
+ *   seccompProfile: string;
  *   containerIdFile: string;
  *   memoryBytes: number;
  *   maxProcesses: number;
@@ -231,6 +242,8 @@ async function runContainerLifecycle(session, authorized, limits, production) {
     sessionNonce,
     sourceDirectory: staged.sourceDirectory,
     controlDirectory: staged.controlDirectory,
+    seccompProfilePath: staged.seccompProfilePath,
+    seccompProfile: staged.seccompProfile,
     containerIdFile,
     memoryBytes: limits.maxMemoryBytes,
     maxProcesses: limits.maxProcesses,
@@ -264,6 +277,7 @@ async function runContainerLifecycle(session, authorized, limits, production) {
       executionPlanSha256: authorized.plan.executionPlanSha256,
       memoryBytes: limits.maxMemoryBytes,
       maxProcesses: limits.maxProcesses,
+      seccompProfilePath: staged.seccompProfilePath,
       ...(signal === undefined ? {} : { signal }),
     }), deadline);
     let createResult;
@@ -399,6 +413,8 @@ async function runContainerLifecycle(session, authorized, limits, production) {
 /** @param {string} runRoot @param {import("../dist/cpp_cute_aot_runner_plan.js").PreparedCppCuteAotOfflineRun} plan @param {AbortSignal | undefined} signal @param {number} deadline */
 async function stageInputs(runRoot, plan, signal, deadline) {
   checkLifecycleDeadline(deadline, signal);
+  const seccomp = await loadPinnedSeccompProfile(SECCOMP_SOURCE_PATH, signal, deadline);
+  checkLifecycleDeadline(deadline, signal);
   const inputs = copyCppCuteAotOfflineRunStagingInputs(plan);
   const sourceDirectory = join(runRoot, "source");
   const controlDirectory = join(runRoot, "control");
@@ -407,6 +423,15 @@ async function stageInputs(runRoot, plan, signal, deadline) {
   await mkdir(controlDirectory, { mode: 0o700 });
   checkLifecycleDeadline(deadline, signal);
   const expectedFiles = [];
+  const seccompProfilePath = join(runRoot, CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE);
+  expectedFiles.push(await stageFile(
+    seccompProfilePath,
+    seccomp.bytes,
+    seccomp.sha256,
+    signal,
+    deadline,
+  ));
+  checkLifecycleDeadline(deadline, signal);
   expectedFiles.push(await stageFile(
     join(controlDirectory, "profile.json"),
     inputs.profileBytes,
@@ -467,7 +492,57 @@ async function stageInputs(runRoot, plan, signal, deadline) {
   return Object.freeze({
     sourceDirectory,
     controlDirectory,
+    seccompProfilePath,
+    seccompProfile: seccomp.profile,
     directories: Object.freeze([...createdDirectories].sort()),
+  });
+}
+
+/** Test-only source-verifier seam. Mints no execution authority. @param {string} sourcePath */
+export async function __loadCppCuteAotSeccompProfileForTest(sourcePath) {
+  return loadPinnedSeccompProfile(sourcePath, undefined, Number.POSITIVE_INFINITY);
+}
+
+/** @param {string} sourcePath @param {AbortSignal | undefined} signal @param {number} deadline */
+async function loadPinnedSeccompProfile(sourcePath, signal, deadline) {
+  checkLifecycleDeadline(deadline, signal);
+  const bytes = await readVerifiedRegularFile(sourcePath, {
+    maximumBytes: CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LIMIT,
+    expectedSha256: CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256,
+    expectedMode: undefined,
+    expectedBytes: CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LENGTH,
+    label: "checked seccomp source",
+  });
+  checkLifecycleDeadline(deadline, signal);
+  let value;
+  try {
+    value = JSON.parse(FATAL_UTF8_DECODER.decode(bytes));
+  } catch (cause) {
+    stagingFailure(sourcePath, "checked seccomp source is not strict UTF-8 JSON", { cause });
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    stagingFailure(sourcePath, "checked seccomp source must contain one JSON object");
+  }
+  let profile;
+  try {
+    profile = JSON.stringify(value);
+  } catch (cause) {
+    stagingFailure(sourcePath, "checked seccomp source cannot be compacted", { cause });
+  }
+  if (typeof profile !== "string" || profile.length === 0) {
+    stagingFailure(sourcePath, "checked seccomp source produced an empty compact profile");
+  }
+  const compactBytes = new TextEncoder().encode(profile);
+  if (compactBytes.byteLength > CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LIMIT) {
+    stagingFailure(sourcePath, "compact seccomp profile exceeds policy byte limit");
+  }
+  const sha256 = await sha256Hex(compactBytes);
+  checkLifecycleDeadline(deadline, signal);
+  return Object.freeze({
+    bytes: new Uint8Array(compactBytes),
+    profile,
+    sha256,
+    sourceSha256: CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256,
   });
 }
 
@@ -504,20 +579,77 @@ async function stageFile(path, bytes, digest, signal, deadline) {
     await handle.close();
   }
   checkLifecycleDeadline(deadline, signal);
-  const status = await lstat(path);
-  if (
-    !status.isFile()
-    || status.isSymbolicLink()
-    || status.nlink !== 1
-    || status.size !== bytes.byteLength
-    || (status.mode & 0o777) !== 0o444
-  ) {
-    stagingFailure(path, "staged file identity differs from the private snapshot");
-  }
-  const readback = await readFile(path);
-  if (await sha256Hex(readback) !== digest) stagingFailure(path, "staged file digest differs from the private snapshot");
+  await readVerifiedRegularFile(path, {
+    maximumBytes: bytes.byteLength,
+    expectedSha256: digest,
+    expectedMode: 0o444,
+    expectedBytes: bytes.byteLength,
+    label: "staged file",
+  });
   checkLifecycleDeadline(deadline, signal);
   return Object.freeze({ path, digest, bytes: bytes.byteLength });
+}
+
+/**
+ * @param {string} path
+ * @param {Readonly<{
+ *   maximumBytes: number;
+ *   expectedSha256: string;
+ *   expectedMode: number | undefined;
+ *   expectedBytes: number | undefined;
+ *   label: string;
+ * }>} expectation
+ */
+async function readVerifiedRegularFile(path, expectation) {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (cause) {
+    stagingFailure(path, `${expectation.label} cannot be opened without following links`, { cause });
+  }
+  try {
+    const before = await handle.stat({ bigint: true });
+    verifyRegularFileStatus(before, path, expectation);
+    const bytes = new Uint8Array(await handle.readFile());
+    const after = await handle.stat({ bigint: true });
+    verifyRegularFileStatus(after, path, expectation);
+    if (!sameFileIdentity(before, after) || BigInt(bytes.byteLength) !== before.size) {
+      stagingFailure(path, `${expectation.label} changed while being read`);
+    }
+    if (await sha256Hex(bytes) !== expectation.expectedSha256) {
+      stagingFailure(path, `${expectation.label} digest differs from policy`);
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+/** @param {import("node:fs").BigIntStats} status @param {string} path @param {{maximumBytes: number; expectedMode: number | undefined; expectedBytes: number | undefined; label: string}} expectation */
+function verifyRegularFileStatus(status, path, expectation) {
+  if (!status.isFile() || status.nlink !== 1n) {
+    stagingFailure(path, `${expectation.label} must be one regular single-link file`);
+  }
+  if (status.size <= 0n || status.size > BigInt(expectation.maximumBytes)) {
+    stagingFailure(path, `${expectation.label} size exceeds its closed bounds`);
+  }
+  if (expectation.expectedBytes !== undefined && status.size !== BigInt(expectation.expectedBytes)) {
+    stagingFailure(path, `${expectation.label} size differs from the private snapshot`);
+  }
+  if (expectation.expectedMode !== undefined && (status.mode & 0o777n) !== BigInt(expectation.expectedMode)) {
+    stagingFailure(path, `${expectation.label} mode differs from the private snapshot`);
+  }
+}
+
+/** @param {import("node:fs").BigIntStats} left @param {import("node:fs").BigIntStats} right */
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
 }
 
 /** @param {string} sourceDirectory @param {string} virtualPath */
@@ -535,12 +667,13 @@ function sourceStagePath(sourceDirectory, virtualPath) {
 /** @param {string} runRoot @param {readonly {path: string; digest: string; bytes: number}[]} expectedFiles @param {ReadonlySet<string>} expectedDirectories @param {number} deadline @param {AbortSignal | undefined} signal */
 async function verifyStagedTree(runRoot, expectedFiles, expectedDirectories, deadline, signal) {
   const expectedPaths = new Set([
+    runRoot,
     ...expectedFiles.map((entry) => entry.path),
     ...expectedDirectories,
     join(runRoot, "docker-config"),
     join(runRoot, "home"),
   ]);
-  const pending = [...expectedDirectories, join(runRoot, "docker-config"), join(runRoot, "home")];
+  const pending = [runRoot, ...expectedDirectories, join(runRoot, "docker-config"), join(runRoot, "home")];
   for (const directory of pending) {
     const status = await lstat(directory);
     const expectedMode = expectedDirectories.has(directory) ? 0o555 : 0o700;
@@ -724,7 +857,10 @@ function verifyHostConfig(host, expected) {
   if (host.ReadonlyRootfs !== true) containerMismatch("$container.hostConfig.ReadonlyRootfs", "container root must be read-only");
   expectEmptyArray(host.CapAdd, "$container.hostConfig.CapAdd");
   expectExactStringArray(host.CapDrop, ["ALL"], "$container.hostConfig.CapDrop");
-  expectExactStringArray(host.SecurityOpt, ["no-new-privileges=true"], "$container.hostConfig.SecurityOpt");
+  expectExactStringArray(host.SecurityOpt, [
+    "no-new-privileges=true",
+    `seccomp=${expected.seccompProfile}`,
+  ], "$container.hostConfig.SecurityOpt");
   for (const field of [
     "Binds", "Devices", "DeviceRequests", "DeviceCgroupRules", "Dns", "DnsOptions",
     "DnsSearch", "ExtraHosts", "GroupAdd", "Links", "PortBindings", "Ulimits",
@@ -1195,9 +1331,9 @@ function cancelled() {
   fail("BG-COMPILER-CPP-CUTE-AOT-DOCKER-RUN-CANCELLED", "$options.signal", "Docker AOT lifecycle was aborted");
 }
 
-/** @param {string} path @param {string} message @returns {never} */
-function stagingFailure(path, message) {
-  fail("BG-COMPILER-CPP-CUTE-AOT-DOCKER-RUN-STAGING", path, message);
+/** @param {string} path @param {string} message @param {ErrorOptions} [options] @returns {never} */
+function stagingFailure(path, message, options) {
+  fail("BG-COMPILER-CPP-CUTE-AOT-DOCKER-RUN-STAGING", path, message, options);
 }
 
 /** @param {string} path @param {string} message @returns {never} */

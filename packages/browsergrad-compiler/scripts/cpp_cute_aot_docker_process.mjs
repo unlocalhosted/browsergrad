@@ -21,6 +21,7 @@ import {
   CPP_CUTE_AOT_DOCKER_VERSION_FORMAT,
   CPP_CUTE_AOT_DOCKER_VERSION_LIMITS,
   CPP_CUTE_AOT_HARD_FRAME_BYTE_LIMIT,
+  CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE,
   CPP_CUTE_AOT_SANDBOX_POLICY_V1,
 } from "../dist/cpp_cute_aot_policy.js";
 
@@ -167,6 +168,7 @@ export function buildCppCuteAotDockerImageInspectRequest(input) {
  *   executionPlanSha256: string;
  *   memoryBytes: number;
  *   maxProcesses: number;
+ *   seccompProfilePath: string;
  *   signal?: AbortSignal;
  * }>} input
  * @returns {BoundedChildProcessRequest}
@@ -178,6 +180,7 @@ export function buildCppCuteAotDockerCreateRequest(input) {
       "configDirectory", "containerIdFile", "containerName", "controlDirectory",
       "executionPlanSha256", "homeDirectory", "imageReference", "jobId",
       "maxProcesses", "memoryBytes", "runRoot", "sessionNonce", "sourceDirectory",
+      "seccompProfilePath",
     ],
     ["signal"],
     "$input",
@@ -200,6 +203,12 @@ export function buildCppCuteAotDockerCreateRequest(input) {
     context.runRoot,
     "container.cid",
     "$input.containerIdFile",
+  );
+  const seccompProfilePath = exactChildPath(
+    snapshot.seccompProfilePath,
+    context.runRoot,
+    CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE,
+    "$input.seccompProfilePath",
   );
   const containerName = matchingString(
     snapshot.containerName,
@@ -267,6 +276,7 @@ export function buildCppCuteAotDockerCreateRequest(input) {
     "--read-only",
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges=true",
+    `--security-opt=seccomp=${seccompProfilePath}`,
     `--memory=${memoryBytes}`,
     `--memory-swap=${memoryBytes}`,
     `--pids-limit=${maxProcesses}`,

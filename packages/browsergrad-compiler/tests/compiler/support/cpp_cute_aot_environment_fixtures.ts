@@ -12,6 +12,9 @@ import {
   type PreparedCppCuteAotExecutionEnvironment,
 } from "../../../src/cpp_cute_aot_environment.js";
 import {
+  CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256,
+} from "../../../src/cpp_cute_aot_policy.js";
+import {
   prepareCppCuteFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../../src/cpp_cute_frontend_profile.js";
@@ -134,7 +137,7 @@ function createEnvironmentBody(
       },
       seccomp: {
         mode: "filter",
-        profileSha256: "a".repeat(64),
+        profileSha256: CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256,
       },
     },
     image: {

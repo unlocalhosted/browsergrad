@@ -1,13 +1,19 @@
 import {
   chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
+  mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -37,7 +43,10 @@ import {
   CPP_CUTE_AOT_DOCKER_INFO_SCHEMA,
   CPP_CUTE_AOT_DOCKER_IMAGE_INSPECT_SCHEMA,
   CPP_CUTE_AOT_DOCKER_VERSION_SCHEMA,
+  CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE,
   CPP_CUTE_AOT_SANDBOX_POLICY_V1,
+  CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LIMIT,
+  CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256,
 } from "../dist/cpp_cute_aot_policy.js";
 import {
   prepareCppCuteFrontendProfile as prepareDistProfile,
@@ -68,16 +77,29 @@ import {
   type BoundedChildProcessRequest,
   type BoundedChildProcessResult,
 } from "./cpp_cute_aot_docker_process.mjs";
-import {
+import * as lifecycle from "./cpp_cute_aot_docker_lifecycle.mjs";
+
+const {
   __executeCppCuteAotDockerRunWithProcessForTest,
   __unwrapCompletedCppCuteAotDockerRunForTest,
   unwrapCompletedCppCuteAotDockerRun,
-} from "./cpp_cute_aot_docker_lifecycle.mjs";
+} = lifecycle;
+const { __loadCppCuteAotSeccompProfileForTest } = lifecycle as unknown as {
+  __loadCppCuteAotSeccompProfileForTest: (sourcePath: string) => Promise<{
+    readonly bytes: Uint8Array;
+    readonly profile: string;
+    readonly sha256: string;
+    readonly sourceSha256: string;
+  }>;
+};
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const CONTAINER_ID = "1".repeat(64);
 const OTHER_CONTAINER_ID = "2".repeat(64);
+const SECCOMP_SOURCE_PATH = fileURLToPath(
+  new URL("../../../tools/cpp-cute-aot/seccomp.v1.json", import.meta.url),
+);
 
 type RequestKind =
   | "version"
@@ -107,6 +129,8 @@ interface ContainerSessionState {
   sessionNonce?: string;
   sourceDirectory?: string;
   controlDirectory?: string;
+  seccompProfilePath?: string;
+  seccompProfile?: string;
   cidFile?: string;
   memoryBytes?: number;
   maxProcesses?: number;
@@ -281,6 +305,8 @@ function captureCreateState(
   state.cidFile = argumentValue(request.arguments, "--cidfile=");
   state.sourceDirectory = mountSource(request.arguments, CPP_CUTE_AOT_CONTAINER_SOURCE_ROOT);
   state.controlDirectory = mountSource(request.arguments, CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT);
+  state.seccompProfilePath = argumentValue(request.arguments, "--security-opt=seccomp=");
+  state.seccompProfile = decoder.decode(readFileSync(state.seccompProfilePath));
   state.memoryBytes = Number(argumentValue(request.arguments, "--memory="));
   state.maxProcesses = Number(argumentValue(request.arguments, "--pids-limit="));
 }
@@ -407,7 +433,10 @@ function containerProjection(
       Privileged: false,
       PublishAllPorts: false,
       ReadonlyRootfs: true,
-      SecurityOpt: ["no-new-privileges=true"],
+      SecurityOpt: [
+        "no-new-privileges=true",
+        `seccomp=${required(state.seccompProfile, "seccompProfile")}`,
+      ],
       StorageOpt: {},
       Tmpfs: { "/tmp": `rw,noexec,nosuid,nodev,size=${tmpfsBytes},mode=1777` },
       UTSMode: "",
@@ -493,6 +522,7 @@ function snapshotStaging(
     required(state.homeDirectory, "homeDirectory"),
     sourceDirectory,
     controlDirectory,
+    required(state.seccompProfilePath, "seccompProfilePath"),
     join(controlDirectory, "profile.json"),
     join(controlDirectory, "job.json"),
     join(controlDirectory, "execution-environment.json"),
@@ -502,6 +532,7 @@ function snapshotStaging(
     profile: new Uint8Array(readFileSync(join(controlDirectory, "profile.json"))),
     job: new Uint8Array(readFileSync(join(controlDirectory, "job.json"))),
     environment: new Uint8Array(readFileSync(join(controlDirectory, "execution-environment.json"))),
+    seccomp: new Uint8Array(readFileSync(required(state.seccompProfilePath, "seccompProfilePath"))),
   };
   for (const [index, source] of inputs.sourceBlobs.entries()) {
     bytes[`source-${index}`] = new Uint8Array(readFileSync(
@@ -637,6 +668,55 @@ function expectClosedRequests(records: readonly RecordedRequest[]): void {
 }
 
 describe("C++/CuTe AOT Docker lifecycle", () => {
+  it("accepts only the exact single-link seccomp source and emits compact JSON", async () => {
+    const sourceBytes = new Uint8Array(readFileSync(SECCOMP_SOURCE_PATH));
+    const directory = mkdtempSync(join(tmpdir(), "browsergrad-seccomp-source-"));
+    try {
+      const exactPath = join(directory, "exact.json");
+      writeFileSync(exactPath, sourceBytes);
+      const loaded = await __loadCppCuteAotSeccompProfileForTest(exactPath);
+      const expectedProfile = JSON.stringify(JSON.parse(decoder.decode(sourceBytes)));
+      expect(loaded.profile).toBe(expectedProfile);
+      expect(loaded.bytes).toEqual(encoder.encode(expectedProfile));
+      expect(loaded.sourceSha256).toBe(CPP_CUTE_AOT_SECCOMP_PROFILE_SHA256);
+      expect(loaded.profile).not.toMatch(/[\r\n\t]/u);
+
+      const changedLengthPath = join(directory, "changed-length.json");
+      writeFileSync(changedLengthPath, new Uint8Array([...sourceBytes, 0x0a]));
+      await expect(__loadCppCuteAotSeccompProfileForTest(changedLengthPath))
+        .rejects.toThrow(/DOCKER-RUN-STAGING.*size differs from the private snapshot/u);
+
+      const changedDigestBytes = new Uint8Array(sourceBytes);
+      changedDigestBytes[0] = changedDigestBytes[0] === 0x7b ? 0x5b : 0x7b;
+      const changedDigestPath = join(directory, "changed-digest.json");
+      writeFileSync(changedDigestPath, changedDigestBytes);
+      await expect(__loadCppCuteAotSeccompProfileForTest(changedDigestPath))
+        .rejects.toThrow(/DOCKER-RUN-STAGING.*digest differs from policy/u);
+
+      const symlinkPath = join(directory, "symlink.json");
+      symlinkSync(exactPath, symlinkPath);
+      await expect(__loadCppCuteAotSeccompProfileForTest(symlinkPath))
+        .rejects.toThrow(/DOCKER-RUN-STAGING.*without following links/u);
+
+      const linkedPath = join(directory, "linked.json");
+      linkSync(exactPath, linkedPath);
+      await expect(__loadCppCuteAotSeccompProfileForTest(exactPath))
+        .rejects.toThrow(/DOCKER-RUN-STAGING.*single-link/u);
+
+      const directoryPath = join(directory, "directory.json");
+      mkdirSync(directoryPath);
+      await expect(__loadCppCuteAotSeccompProfileForTest(directoryPath))
+        .rejects.toThrow(/DOCKER-RUN-STAGING.*single-link/u);
+
+      const oversizedPath = join(directory, "oversized.json");
+      writeFileSync(oversizedPath, new Uint8Array(CPP_CUTE_AOT_SECCOMP_PROFILE_BYTE_LIMIT + 1));
+      await expect(__loadCppCuteAotSeccompProfileForTest(oversizedPath))
+        .rejects.toThrow(/DOCKER-RUN-STAGING.*closed bounds/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("accepts one exact execution, stages immutable canonical bytes, cleans, and separates authority", async () => {
     const prepared = await prepareFixture();
     const harness = createAdapter(prepared);
@@ -668,12 +748,19 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
     expect(staging.modes[required(harness.state.homeDirectory, "homeDirectory")]).toBe(0o700);
     expect(staging.modes[required(harness.state.sourceDirectory, "sourceDirectory")]).toBe(0o555);
     expect(staging.modes[required(harness.state.controlDirectory, "controlDirectory")]).toBe(0o555);
+    expect(staging.modes[required(harness.state.seccompProfilePath, "seccompProfilePath")]).toBe(0o444);
     expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "profile.json")]).toBe(0o444);
     expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "job.json")]).toBe(0o444);
     expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "execution-environment.json")]).toBe(0o444);
     expect(staging.bytes.profile).toEqual(inputs.profileBytes);
     expect(staging.bytes.job).toEqual(inputs.jobBytes);
     expect(staging.bytes.environment).toEqual(inputs.environmentBytes);
+    const expectedSeccomp = JSON.stringify(JSON.parse(decoder.decode(readFileSync(SECCOMP_SOURCE_PATH))));
+    expect(staging.bytes.seccomp).toEqual(encoder.encode(expectedSeccomp));
+    expect(harness.state.seccompProfilePath).toBe(join(
+      required(harness.state.runRoot, "runRoot"),
+      CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE,
+    ));
     for (const [index, source] of inputs.sourceBlobs.entries()) {
       const sourcePath = join(required(harness.state.sourceDirectory, "sourceDirectory"), source.virtualPath.slice(1));
       expect(staging.modes[sourcePath]).toBe(0o444);
@@ -703,6 +790,7 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
         executionPlanSha256: plan.executionPlanSha256,
         memoryBytes: limits.maxMemoryBytes,
         maxProcesses: limits.maxProcesses,
+        seccompProfilePath: required(harness.state.seccompProfilePath, "seccompProfilePath"),
       }),
       buildCppCuteAotDockerContainerInspectRequest({ ...common, containerId: CONTAINER_ID }),
       buildCppCuteAotDockerStartAttachedRequest({
@@ -787,6 +875,36 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
 
     await expect(__executeCppCuteAotDockerRunWithProcessForTest(prepared.authorized, harness.adapter))
       .rejects.toThrow(/DOCKER-RUN-CONTAINER-MISMATCH/u);
+    expect(harness.requests.map(({ kind }) => kind)).toEqual([
+      "version", "info", "image", "create", "inspect-created", "remove", "absence",
+    ]);
+    expect(harness.state.removeForced).toBe(true);
+    expectRunRootRemoved(harness.state);
+  });
+
+  it.each([
+    {
+      name: "missing profile",
+      value: ["no-new-privileges=true"],
+    },
+    {
+      name: "different profile",
+      value: ["no-new-privileges=true", "seccomp={}"],
+    },
+    {
+      name: "reordered options",
+      value: ["seccomp={}", "no-new-privileges=true"],
+    },
+  ])("force-cleans Docker-reported seccomp drift: $name", async ({ value }) => {
+    const prepared = await prepareFixture();
+    const harness = createAdapter(prepared, {
+      mutateCreated: (projection) => {
+        (projection.hostConfig as Record<string, unknown>).SecurityOpt = value;
+      },
+    });
+
+    await expect(__executeCppCuteAotDockerRunWithProcessForTest(prepared.authorized, harness.adapter))
+      .rejects.toThrow(/DOCKER-RUN-CONTAINER-MISMATCH.*string array differs from policy/u);
     expect(harness.requests.map(({ kind }) => kind)).toEqual([
       "version", "info", "image", "create", "inspect-created", "remove", "absence",
     ]);
@@ -932,6 +1050,7 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
       executionPlanSha256: "c".repeat(64),
       memoryBytes: 1,
       maxProcesses: 1,
+      seccompProfilePath: `${common.runRoot}/${CPP_CUTE_AOT_PRIVATE_SECCOMP_FILE}`,
     });
     expect(minimumMemoryCreate.arguments).toContain(
       "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=1,mode=1777",

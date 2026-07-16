@@ -68,6 +68,7 @@ export function buildCppCuteAotDockerCreateRequest(input: Readonly<{
   executionPlanSha256: string;
   memoryBytes: number;
   maxProcesses: number;
+  seccompProfilePath: string;
   signal?: AbortSignal;
 }>): BoundedChildProcessRequest;
 
