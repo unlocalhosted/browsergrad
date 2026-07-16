@@ -95,6 +95,23 @@ describe("semantic architecture guardrails", () => {
     ]);
   });
 
+  it("keeps Node effects out of compiler production source", () => {
+    for (const specifier of ["node:child_process", "child_process", "node:fs/promises"]) {
+      expect(checkWorkspaceImportSpecifier(
+        "@unlocalhosted/browsergrad-compiler",
+        "packages/browsergrad-compiler/src/escape.ts",
+        specifier,
+      )).toEqual([
+        `packages/browsergrad-compiler/src/escape.ts imports Node built-in ${specifier}; compiler production source must remain browser-safe`,
+      ]);
+    }
+    expect(checkWorkspaceImportSpecifier(
+      "@unlocalhosted/browsergrad-compiler",
+      "packages/browsergrad-compiler/scripts/intentional-node.mjs",
+      "node:child_process",
+    )).toEqual([]);
+  });
+
   it("rejects a new TensorGpuPlan operation", () => {
     const filename = join(repoRoot, "packages/browsergrad-kernels/src/tensor_plan.ts");
     const source = readFileSync(filename, "utf8").replace(

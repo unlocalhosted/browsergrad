@@ -47,6 +47,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
+
+      - name: Verify compiler Node-only Docker shell
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler test:aot-docker-shell:run
+
       - run: pnpm architecture:check
       - run: pnpm -r test
 

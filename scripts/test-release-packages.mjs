@@ -686,6 +686,24 @@ try {
     assertJitEvidenceWorkflowOrder(workflowName, workflow);
   }
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
+  const packedCompilerEntries = listRelativeEntries(compiler);
+  assert(
+    !existsSync(join(compiler, "scripts"))
+      && !packedCompilerEntries.some((entry) => /(?:^|\/)cpp_cute_aot_docker_[^/]+$/u.test(entry)),
+    `packed compiler must exclude all Node-only Docker shell entries: ${packedCompilerEntries.join(", ")}`,
+  );
+  const leakedDockerExports = Object.keys(compilerRoot)
+    .filter((name) => /docker|boundedchildprocess/iu.test(name));
+  assert(
+    leakedDockerExports.length === 0,
+    `compiler root leaked Node-only Docker/process/test exports: ${leakedDockerExports.join(", ")}`,
+  );
+  const leakedDockerSubpaths = Object.keys(compilerPkg.exports ?? {})
+    .filter((subpath) => /docker|bounded[_-]child[_-]process/iu.test(subpath));
+  assert(
+    leakedDockerSubpaths.length === 0,
+    `compiler package leaked Node-only Docker subpath exports: ${leakedDockerSubpaths.join(", ")}`,
+  );
   for (const exportName of [
     "prepareCudaLiteLayoutBindings",
     "createCudaLiteLayoutBindingCompileCacheKey",
@@ -1141,6 +1159,17 @@ function typecheckConsumer(consumer) {
 
 function readPackage(packageDir) {
   return JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+}
+
+function listRelativeEntries(directory, prefix = "") {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const relativeEntry = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+      return entry.isDirectory()
+        ? [relativeEntry, ...listRelativeEntries(join(directory, entry.name), relativeEntry)]
+        : [relativeEntry];
+    })
+    .sort();
 }
 
 function assertRepositoryMetadata(pkg, packageDirectory) {

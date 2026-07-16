@@ -4,12 +4,34 @@
   "contractId": "browsergrad.compiler.cpp-cute.aot@1",
   "runtime": {
     "engine": "docker",
+    "executable": "/usr/bin/docker",
+    "clientVersion": "29.6.1",
+    "engineVersion": "29.6.1",
+    "requestApiVersion": "1.49",
+    "clientDefaultApiVersion": "1.55",
+    "engineApiVersion": "1.55",
+    "engineMinApiVersion": "1.40",
+    "imageStore": "containerd",
     "endpoint": "local-unix",
     "endpointUri": "unix:///var/run/docker.sock",
     "platform": "linux/amd64",
     "imagePull": "forbidden",
-    "createBy": "image-config-digest",
-    "executionEnvironment": "profile-pinned"
+    "createBy": "authorized-manifest-reference",
+    "executionEnvironment": "profile-pinned",
+    "client": {
+      "config": "runner-private-empty-directory",
+      "cwd": "runner-private-directory",
+      "inheritedEnvironment": "forbidden",
+      "environment": [
+        "DOCKER_API_VERSION=1.49",
+        "HOME=runner-private-directory",
+        "LANG=C",
+        "LC_ALL=C",
+        "TZ=UTC"
+      ],
+      "shell": false,
+      "retries": 0
+    }
   },
   "process": {
     "user": { "uid": 65532, "gid": 65532 },
@@ -72,7 +94,52 @@
     "ociMetadata": {
       "authority": "manifest-config-metadata-only",
       "layerBlobs": "not-supplied-or-rehashed",
-      "localDockerObservation": "separate-live-authority-required",
+      "localDockerObservation": {
+        "authority": "shell-owned-point-in-time",
+        "sequence": ["version", "info", "image-inspect"],
+        "runtime": {
+          "version": {
+            "schema": "browsergrad.compiler.cpp-cute.docker-version@1",
+            "format": "{\"client\":{\"apiVersion\":{{json .Client.APIVersion}},\"defaultApiVersion\":{{json .Client.DefaultAPIVersion}},\"version\":{{json .Client.Version}}},\"schema\":\"browsergrad.compiler.cpp-cute.docker-version\",\"server\":{\"apiVersion\":{{json .Server.APIVersion}},\"arch\":{{json .Server.Arch}},\"minApiVersion\":{{json .Server.MinAPIVersion}},\"os\":{{json .Server.Os}},\"version\":{{json .Server.Version}}},\"version\":1}",
+            "limits": {
+              "timeoutMs": 10000,
+              "killGraceMs": 1000,
+              "stdoutBytes": 4096,
+              "stderrBytes": 65536
+            }
+          },
+          "info": {
+            "schema": "browsergrad.compiler.cpp-cute.docker-info@1",
+            "format": "{\"architecture\":{{json .Architecture}},\"driverStatus\":{{json .DriverStatus}},\"osType\":{{json .OSType}},\"schema\":\"browsergrad.compiler.cpp-cute.docker-info\",\"serverVersion\":{{json .ServerVersion}},\"version\":1}",
+            "limits": {
+              "timeoutMs": 10000,
+              "killGraceMs": 1000,
+              "stdoutBytes": 4096,
+              "stderrBytes": 65536,
+              "driverStatusEntries": 1
+            }
+          },
+          "imageStoreEvidence": [
+            "exact-driver-status",
+            "platform-selected-manifest-id"
+          ]
+        },
+        "image": "authorized-manifest-reference",
+        "platform": "linux/amd64",
+        "projectionSchema": "browsergrad.compiler.cpp-cute.docker-image-inspect@1",
+        "projectionFormat": "{\"config\":{{json .Config}},\"descriptor\":{\"digest\":{{json .Descriptor.Digest}},\"mediaType\":{{json .Descriptor.MediaType}},\"size\":{{json .Descriptor.Size}}},\"id\":{{json .Id}},\"platform\":{\"architecture\":{{json .Architecture}},\"os\":{{json .Os}},\"osVersion\":{{json .OsVersion}},\"variant\":{{json .Variant}}},\"repoDigests\":{{json .RepoDigests}},\"rootfs\":{\"diffIds\":{{json .RootFS.Layers}},\"type\":{{json .RootFS.Type}}},\"schema\":\"browsergrad.compiler.cpp-cute.docker-image-inspect\",\"version\":1}",
+        "config": "recursively-semantically-empty",
+        "descriptor": "exact-authorized-manifest",
+        "rootfs": "exact-ordered-authorized-diff-ids",
+        "continuedPresence": "not-claimed",
+        "limits": {
+          "timeoutMs": 10000,
+          "killGraceMs": 1000,
+          "stdoutBytes": 65536,
+          "stderrBytes": 65536,
+          "repoDigests": 256
+        }
+      },
       "resources": {
         "manifestBytes": 1048576,
         "configBytes": 8388608,
@@ -130,6 +197,39 @@
       "maxRank": 64,
       "maxIntegerBits": 256,
       "maxArithmeticOperations": 32768
+    },
+    "dockerVersion": {
+      "maxDocumentBytes": 4096,
+      "maxDepth": 8,
+      "maxNodes": 64,
+      "maxStringBytes": 256,
+      "maxArrayLength": 8,
+      "maxObjectProperties": 16,
+      "maxRank": 8,
+      "maxIntegerBits": 64,
+      "maxArithmeticOperations": 128
+    },
+    "dockerInfo": {
+      "maxDocumentBytes": 4096,
+      "maxDepth": 8,
+      "maxNodes": 64,
+      "maxStringBytes": 256,
+      "maxArrayLength": 8,
+      "maxObjectProperties": 16,
+      "maxRank": 8,
+      "maxIntegerBits": 64,
+      "maxArithmeticOperations": 128
+    },
+    "dockerImageInspect": {
+      "maxDocumentBytes": 65536,
+      "maxDepth": 32,
+      "maxNodes": 32768,
+      "maxStringBytes": 1048576,
+      "maxArrayLength": 1024,
+      "maxObjectProperties": 1024,
+      "maxRank": 64,
+      "maxIntegerBits": 256,
+      "maxArithmeticOperations": 65536
     }
   },
   "semantics": {

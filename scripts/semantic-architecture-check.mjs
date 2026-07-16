@@ -2,7 +2,7 @@
 
 import fs from "node:fs";
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,6 +16,7 @@ function option(name) {
 const cliRepoRoot = option("--repo-root");
 const repoRoot = cliRepoRoot === undefined ? defaultRepoRoot : path.resolve(cliRepoRoot);
 const jsonOutput = process.argv.includes("--json");
+const NODE_BUILTINS = new Set(builtinModules.map((specifier) => specifier.replace(/^node:/u, "")));
 const REQUIRED_FREEZES = new Map([
   ["compiler.pointer-scalar-memory.v0", "compiler-pointer-scalar-memory"],
   ["compiler.cute-static-layout.v0", "cute-static-layout"],
@@ -106,6 +107,13 @@ export function checkWorkspaceImportSpecifier(packageName, file, specifier) {
   if (packageName === "@unlocalhosted/browsergrad-compiler" && /^@unlocalhosted\/browsergrad-(?:jit|grad)(?:\/|$)/u.test(specifier)) {
     failures.push(`${file} imports framework internals from compiler`);
   }
+  if (
+    packageName === "@unlocalhosted/browsergrad-compiler"
+    && file.startsWith("packages/browsergrad-compiler/src/")
+    && isNodeBuiltinSpecifier(specifier)
+  ) {
+    failures.push(`${file} imports Node built-in ${specifier}; compiler production source must remain browser-safe`);
+  }
   if (packageName === "@unlocalhosted/browsergrad-jit" && specifier.startsWith("@unlocalhosted/browsergrad-compiler")) {
     failures.push(`${file} imports compiler from JIT`);
   }
@@ -124,6 +132,12 @@ export function checkWorkspaceImportSpecifier(packageName, file, specifier) {
     failures.push(`${file} imports ${specifier}; runtime may import semantic-core diagnostic/capability/requirement protocols only`);
   }
   return failures;
+}
+
+function isNodeBuiltinSpecifier(specifier) {
+  const normalized = specifier.replace(/^node:/u, "");
+  const root = normalized.split("/", 1)[0];
+  return NODE_BUILTINS.has(normalized) || (root !== undefined && NODE_BUILTINS.has(root));
 }
 
 export function countPythonCustomConstructors(source) {

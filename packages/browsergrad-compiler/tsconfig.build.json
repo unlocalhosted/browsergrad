@@ -7,7 +7,8 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "verbatimModuleSyntax": false
+    "verbatimModuleSyntax": false,
+    "types": ["@webgpu/types"]
   },
   "include": ["src"],
   "exclude": ["tests", "tests-browser", "dist", "node_modules"]

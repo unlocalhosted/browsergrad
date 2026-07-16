@@ -64,11 +64,29 @@
   layer size without claiming unseen layer blob bytes.
 - Pins the raw OCI metadata budgets, exact local Docker socket, supervisor
   control/source paths, and tmpfs mode into the logical sandbox policy. A live
-  Docker observation remains a separate pending process-owned authority;
-  caller-provided inspect JSON cannot establish local image or execution state.
+  Docker observation is a separate process-owned authority; caller-provided
+  inspect JSON cannot establish local image or execution state.
 - Validates OCI timestamps with explicit Gregorian RFC 3339 checks, handles
   cancellation before evidence copying, and keeps strict-parser details out of
   attacker-amplified public diagnostics.
+- Adds an unshipped Node-only Docker shell that owns an exact fail-fast
+  `version` -> `info` -> `image inspect` sequence, a closed environment/private
+  config, hard process/output deadlines, close-before-settlement reaping,
+  strict projection decoding, verified cleanup, and an opaque point-in-time
+  local-image observation. Fake-process tests mint only a disjoint test
+  authority; no caller bytes or adapter can mint production authority.
+- Corrects Docker lookup/create identity from image-config digest to the exact
+  authorized manifest reference. The v1 policy attests Docker CLI/Engine
+  `29.6.1`, forced request API `1.49`, advertised API `1.55`/minimum `1.40`,
+  exact containerd driver status, `linux/amd64` selection, and exact
+  descriptor/rootfs/config cross-checks. Under this pinned containerd path,
+  the platform-selected image ID is the manifest digest; config digest remains
+  transitive raw OCI identity rather than a portable lookup key.
+- Keeps all Node built-ins outside browser-safe compiler source through
+  TypeScript ambient-type narrowing, architecture mutation tests, package
+  exclusion checks, and an explicit CI shell-contract lane. Fake tests prove
+  command/state-machine contracts only; no live daemon, image, producer,
+  Docker-binary trust, or AOT execution-environment evidence is claimed.
 
 ## 0.2.0
 
