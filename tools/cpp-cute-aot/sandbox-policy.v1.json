@@ -19,7 +19,11 @@
       "--job=/run/browsergrad/input/job.json",
       "--protocol=browsergrad.compiler.cpp-cute.aot-result-frame@1"
     ],
-    "environment": [],
+    "environment": {
+      "imageConfig": "must-be-empty",
+      "overrides": [],
+      "effective": []
+    },
     "stdin": "closed",
     "stdout": "single-bounded-frame",
     "stderr": "bounded-diagnostic",
@@ -29,7 +33,7 @@
   },
   "namespaces": {
     "network": "none",
-    "ipc": "private",
+    "ipc": "none",
     "pid": "private",
     "uts": "private",
     "cgroup": "private"
@@ -61,6 +65,30 @@
     "stdout": "maxOutputBytes-plus-receipt-cap",
     "stderrBytes": 65536,
     "receiptBytes": 8388608
+  },
+  "decoding": {
+    "artifact": {
+      "maxDocumentBytes": 67108864,
+      "maxDepth": 64,
+      "maxNodes": 100000,
+      "maxStringBytes": 2097152,
+      "maxArrayLength": 100000,
+      "maxObjectProperties": 10000,
+      "maxRank": 64,
+      "maxIntegerBits": 256,
+      "maxArithmeticOperations": 200000
+    },
+    "receipt": {
+      "maxDocumentBytes": 8388608,
+      "maxDepth": 64,
+      "maxNodes": 100000,
+      "maxStringBytes": 2097152,
+      "maxArrayLength": 100000,
+      "maxObjectProperties": 10000,
+      "maxRank": 64,
+      "maxIntegerBits": 256,
+      "maxArithmeticOperations": 200000
+    }
   },
   "semantics": {
     "linking": "forbidden",

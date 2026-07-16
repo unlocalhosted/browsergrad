@@ -43,6 +43,20 @@
 - Corrects the sandbox claim from all native execution being forbidden to
   user-produced native execution being forbidden; the pinned compiler and
   supervisor are necessarily native programs.
+- Adds an opaque offline-runner input plan that synchronously snapshots and
+  verifies exact job-owned source bytes, including the declaration-token anchor,
+  without accepting caller commands, environment, paths, or output controls.
+- Adds one independently bounded artifact/receipt result frame with strict EOF
+  and canonical artifact-then-receipt decoding. Authoritative bytes remain
+  private; exported accessors return disposable copies. This pure boundary does
+  not claim Docker execution, a real producer, or producer trust.
+- Deep-freezes and re-verifies the built-in sandbox policy during plan hashing,
+  including complete artifact/receipt decoder budgets, no IPC namespace, and
+  an explicitly empty image-config, override, and effective environment.
+- Hardens source/frame bytes with descriptor-only snapshots, pre-copy
+  membership and length checks, intrinsic `Uint8Array` element-kind proof, and
+  rejection of proxies, shared buffers, hostile species, and disguised word
+  arrays.
 
 ## 0.2.0
 

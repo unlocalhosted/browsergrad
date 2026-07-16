@@ -22,13 +22,21 @@ describe("C++/CuTe AOT sandbox policy", () => {
       CPP_CUTE_AOT_SANDBOX_POLICY_SHA256,
     );
     await expect(verifyCppCuteAotSandboxPolicyIdentity()).resolves.toBeUndefined();
+    expect(Object.isFrozen(CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.arguments)).toBe(true);
+    expect(Object.isFrozen(CPP_CUTE_AOT_SANDBOX_POLICY_V1.decoding.artifact)).toBe(true);
+    expect(() => {
+      (CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.arguments as unknown as string[]).push("--escape");
+    }).toThrowError(TypeError);
+    expect(() => {
+      (CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.user as { uid: number }).uid = 0;
+    }).toThrowError(TypeError);
 
     const fixture = await createCppCuteProvenanceFixture();
     expect(await computeCppCuteAotExecutionPlanHash(fixture.job)).toBe(
       fixture.receipt.invocation.executionPlanSha256,
     );
     expect(fixture.receipt.invocation.executionPlanSha256).toBe(
-      "18d1393909e147e16f4b31777da36c674b5651b5085600cb1546cb869781b1f0",
+      "bd107924afcbcaa8822f083c8a5f6008267598fba80e8571c56fc3541e27a9bd",
     );
   });
 });

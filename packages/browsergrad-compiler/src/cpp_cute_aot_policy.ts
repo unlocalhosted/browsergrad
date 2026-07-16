@@ -1,4 +1,5 @@
 import {
+  deepFreezeJson,
   hashCanonicalJson,
   type JsonObject,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
@@ -20,11 +21,35 @@ export const CPP_CUTE_AOT_RESULT_FRAME_PROTOCOL =
 export const CPP_CUTE_AOT_RECEIPT_BYTE_LIMIT = 8_388_608;
 export const CPP_CUTE_AOT_STDERR_BYTE_LIMIT = 65_536;
 
+export const CPP_CUTE_AOT_ARTIFACT_DECODE_LIMITS = deepFreezeJson({
+  maxDocumentBytes: 67_108_864,
+  maxDepth: 64,
+  maxNodes: 100_000,
+  maxStringBytes: 2_097_152,
+  maxArrayLength: 100_000,
+  maxObjectProperties: 10_000,
+  maxRank: 64,
+  maxIntegerBits: 256,
+  maxArithmeticOperations: 200_000,
+} as const satisfies JsonObject);
+
+export const CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS = deepFreezeJson({
+  maxDocumentBytes: CPP_CUTE_AOT_RECEIPT_BYTE_LIMIT,
+  maxDepth: 64,
+  maxNodes: 100_000,
+  maxStringBytes: 2_097_152,
+  maxArrayLength: 100_000,
+  maxObjectProperties: 10_000,
+  maxRank: 64,
+  maxIntegerBits: 256,
+  maxArithmeticOperations: 200_000,
+} as const satisfies JsonObject);
+
 /**
  * Closed logical policy. Host paths, container IDs, timestamps, and other
  * per-run operational values are intentionally absent from its identity.
  */
-export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = Object.freeze({
+export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
   schema: CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA,
   version: { major: 1, minor: 0 },
   contractId: "browsergrad.compiler.cpp-cute.aot@1",
@@ -45,7 +70,11 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = Object.freeze({
       "--job=/run/browsergrad/input/job.json",
       `--protocol=${CPP_CUTE_AOT_RESULT_FRAME_PROTOCOL}`,
     ],
-    environment: [],
+    environment: {
+      imageConfig: "must-be-empty",
+      overrides: [],
+      effective: [],
+    },
     stdin: "closed",
     stdout: "single-bounded-frame",
     stderr: "bounded-diagnostic",
@@ -55,7 +84,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = Object.freeze({
   },
   namespaces: {
     network: "none",
-    ipc: "private",
+    ipc: "none",
     pid: "private",
     uts: "private",
     cgroup: "private",
@@ -88,6 +117,10 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = Object.freeze({
     stderrBytes: CPP_CUTE_AOT_STDERR_BYTE_LIMIT,
     receiptBytes: CPP_CUTE_AOT_RECEIPT_BYTE_LIMIT,
   },
+  decoding: {
+    artifact: CPP_CUTE_AOT_ARTIFACT_DECODE_LIMITS,
+    receipt: CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS,
+  },
   semantics: {
     linking: "forbidden",
     userProducedNativeExecution: "forbidden",
@@ -97,7 +130,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = Object.freeze({
 
 // SHA-256 of canonical JSON for CPP_CUTE_AOT_SANDBOX_POLICY_V1.
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 =
-  "314957ce454406524b0291173ac70a5b8a5a0b7c990df629191b022c966a1bd3";
+  "e63d85ff943b7822e6e8e510951a0bdf17656e31e2422b5d638c768f40489c0a";
 
 export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
   const actual = await hashCanonicalJson(CPP_CUTE_AOT_SANDBOX_POLICY_V1);
@@ -120,6 +153,7 @@ export async function computeCppCuteAotExecutionPlanHash(
   if (profile.deployment.sandboxPolicySha256 !== CPP_CUTE_AOT_SANDBOX_POLICY_SHA256) {
     throw new Error("BG-COMPILER-CPP-CUTE-AOT-POLICY-UNSUPPORTED: prepared profile does not name the built-in sandbox policy");
   }
+  await verifyCppCuteAotSandboxPolicyIdentity();
   return hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.aot-execution-plan.v1",
     policy: CPP_CUTE_AOT_SANDBOX_POLICY_V1,
