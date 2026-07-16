@@ -53,7 +53,7 @@ const EXTRACTION_LIMIT_KEYS = [
   "maxProcesses",
 ] as const;
 
-const COMPILATION_CONTRACT_EXTRACTION_LIMIT_KEYS = [
+export const CPP_CUTE_FRONTEND_SEMANTIC_EXTRACTION_LIMIT_KEYS = [
   "maxSourceFiles",
   "maxSourceBytes",
   "maxHeaderFiles",
@@ -165,14 +165,42 @@ export interface CppCuteFrontendBrowserWorkerProfile extends JsonObject {
   readonly buildId: string;
   /** Package-owned worker module bytes; executable JS is not asset-manifest supplied. */
   readonly moduleSha256: string;
-  readonly scriptType: "module";
+  readonly moduleByteLength: number;
+  readonly moduleFormat: "self-contained-es-module";
+  readonly construction: "host-verified-blob-url";
   readonly isolation: "dedicated-worker";
   readonly threading: "single-thread";
   readonly cancellation: "terminate-worker";
-  readonly sourceNetwork: "forbidden";
-  readonly assetNetwork: "same-origin-root-relative-only";
-  readonly cache: "content-addressed";
-  readonly maxWasmMemoryBytes: number;
+  readonly network: "forbidden";
+  readonly assetDelivery: "host-verified-transfer";
+}
+
+export type CppCuteBrowserRequiredWasmFeature =
+  | "bulk-memory"
+  | "mutable-globals"
+  | "nontrapping-fptoint"
+  | "sign-extension";
+
+export interface CppCuteFrontendBrowserCompilerRuntimeProfile extends JsonObject {
+  readonly runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1";
+  readonly wasmAddressBits: 32;
+  readonly requiredWasmFeatures: readonly CppCuteBrowserRequiredWasmFeature[];
+  readonly importExportContractSha256: string;
+  readonly moduleHandoff: "host-verified-module-or-bytes";
+  readonly workerSideFetch: "forbidden";
+  readonly memory: JsonObject & {
+    readonly sharing: "unshared";
+    readonly ownership: "worker";
+    readonly initialPages: number;
+    readonly maximumPages: number;
+    readonly stackByteLength: number;
+    readonly maxCompilerWorkingByteLength: number;
+  };
+  readonly virtualFileSystem: JsonObject & {
+    readonly storage: "host-backed-lazy";
+    readonly maxRetainedHostPackByteLength: number;
+    readonly maxOpenedWasmFileByteLength: number;
+  };
 }
 
 export interface CppCuteFrontendBrowserAssetLimits extends JsonObject {
@@ -194,6 +222,7 @@ export interface CppCuteFrontendBrowserDeploymentProfile extends JsonObject {
   readonly buildProvenanceLockSha256: string;
   readonly extractor: CppCuteFrontendExtractorProfile;
   readonly worker: CppCuteFrontendBrowserWorkerProfile;
+  readonly compilerRuntime: CppCuteFrontendBrowserCompilerRuntimeProfile;
   readonly assetLimits: CppCuteFrontendBrowserAssetLimits;
 }
 
@@ -291,7 +320,6 @@ export interface CppCuteFrontendIncludeRoot extends JsonObject {
 }
 
 export interface CppCuteFrontendCompatibilityProfile extends JsonObject {
-  readonly expectedHeaderSetSha256: string;
   readonly supportedSourceFeatures: readonly string[];
   readonly unsupportedIntrinsicFamilies: readonly string[];
 }
@@ -326,7 +354,7 @@ export interface CppCuteFrontendCompilationContractV1 extends JsonObject {
   readonly compatibility: CppCuteFrontendCompatibilityProfile;
   readonly semanticAdapterManifestSha256: string;
   readonly extractionLimits: JsonObject & Readonly<Record<
-    (typeof COMPILATION_CONTRACT_EXTRACTION_LIMIT_KEYS)[number],
+    (typeof CPP_CUTE_FRONTEND_SEMANTIC_EXTRACTION_LIMIT_KEYS)[number],
     number
   >>;
 }
@@ -340,7 +368,6 @@ export interface PreparedCppCuteFrontendProfile {
   /** Producer-neutral source-analysis contract used inside frontend artifacts. */
   readonly compilationContractHash: string;
   readonly deploymentMode: "ahead-of-time" | "browser-local";
-  readonly expectedHeaderSetSha256: string;
   readonly extractionLimits: CppCuteFrontendExtractionLimits;
 }
 
@@ -408,7 +435,6 @@ export async function prepareCppCuteFrontendProfile(
     profileHash,
     compilationContractHash,
     deploymentMode: profile.deployment.mode,
-    expectedHeaderSetSha256: profile.compatibility.expectedHeaderSetSha256,
     extractionLimits: profile.extractionLimits,
   }) as PreparedCppCuteFrontendProfile;
   PREPARED_PROFILES.set(prepared, Object.freeze({
@@ -424,7 +450,7 @@ export function cppCuteFrontendCompilationContract(
   profile: CppCuteFrontendProfileV2,
 ): CppCuteFrontendCompilationContractV1 {
   const semanticLimits = Object.fromEntries(
-    COMPILATION_CONTRACT_EXTRACTION_LIMIT_KEYS.map((key) => [key, profile.extractionLimits[key]]),
+    CPP_CUTE_FRONTEND_SEMANTIC_EXTRACTION_LIMIT_KEYS.map((key) => [key, profile.extractionLimits[key]]),
   ) as CppCuteFrontendCompilationContractV1["extractionLimits"];
   return deepFreezeJson({
     profileVersion: profile.version,
@@ -517,11 +543,32 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
       "browser-local profile requires one content-identical monolithic Clang/extractor WASM binary",
     );
   }
-  if (deployment.mode === "browser-local" && extractionLimits.maxMemoryBytes > deployment.worker.maxWasmMemoryBytes) {
-    invalid(
-      "$.extractionLimits.maxMemoryBytes",
-      "browser extraction memory must not exceed the worker WebAssembly memory ceiling",
-    );
+  if (deployment.mode === "browser-local") {
+    const runtime = deployment.compilerRuntime;
+    const maximumLinearBytes = runtime.memory.maximumPages * 65_536;
+    if (extractionLimits.maxMemoryBytes > maximumLinearBytes) {
+      invalid(
+        "$.extractionLimits.maxMemoryBytes",
+        "browser producer memory limit exceeds the runtime maximum linear memory",
+      );
+    }
+    const reservedLinearBytes = runtime.memory.stackByteLength +
+      runtime.memory.maxCompilerWorkingByteLength +
+      runtime.virtualFileSystem.maxOpenedWasmFileByteLength +
+      extractionLimits.maxOutputBytes;
+    if (reservedLinearBytes > extractionLimits.maxMemoryBytes) {
+      invalid(
+        "$.extractionLimits.maxMemoryBytes",
+        "browser producer memory limit cannot cover stack, compiler working memory, opened VFS files, and output reservations",
+      );
+    }
+    if (extractionLimits.maxSourceBytes + extractionLimits.maxHeaderBytes >
+        runtime.virtualFileSystem.maxOpenedWasmFileByteLength) {
+      invalid(
+        "$.deployment.compilerRuntime.virtualFileSystem.maxOpenedWasmFileByteLength",
+        "opened-file ceiling cannot cover the profile source and header byte limits",
+      );
+    }
   }
   const profile = {
     schema: CPP_CUTE_FRONTEND_PROFILE_SCHEMA,
@@ -671,6 +718,7 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       "buildProvenanceLockSha256",
       "extractor",
       "worker",
+      "compilerRuntime",
       "assetLimits",
     ],
     path,
@@ -687,14 +735,14 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       "protocolId",
       "buildId",
       "moduleSha256",
-      "scriptType",
+      "moduleByteLength",
+      "moduleFormat",
+      "construction",
       "isolation",
       "threading",
       "cancellation",
-      "sourceNetwork",
-      "assetNetwork",
-      "cache",
-      "maxWasmMemoryBytes",
+      "network",
+      "assetDelivery",
     ],
     `${path}.worker`,
   );
@@ -703,17 +751,29 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
     "browsergrad.compiler.cpp-cute.browser-worker@1",
     `${path}.worker.protocolId`,
   );
-  requireLiteral(field(workerObject, "scriptType", `${path}.worker`), "module", `${path}.worker.scriptType`);
+  requireLiteral(
+    field(workerObject, "moduleFormat", `${path}.worker`),
+    "self-contained-es-module",
+    `${path}.worker.moduleFormat`,
+  );
+  requireLiteral(
+    field(workerObject, "construction", `${path}.worker`),
+    "host-verified-blob-url",
+    `${path}.worker.construction`,
+  );
   requireLiteral(field(workerObject, "isolation", `${path}.worker`), "dedicated-worker", `${path}.worker.isolation`);
   requireLiteral(field(workerObject, "threading", `${path}.worker`), "single-thread", `${path}.worker.threading`);
   requireLiteral(field(workerObject, "cancellation", `${path}.worker`), "terminate-worker", `${path}.worker.cancellation`);
-  requireLiteral(field(workerObject, "sourceNetwork", `${path}.worker`), "forbidden", `${path}.worker.sourceNetwork`);
   requireLiteral(
-    field(workerObject, "assetNetwork", `${path}.worker`),
-    "same-origin-root-relative-only",
-    `${path}.worker.assetNetwork`,
+    field(workerObject, "network", `${path}.worker`),
+    "forbidden",
+    `${path}.worker.network`,
   );
-  requireLiteral(field(workerObject, "cache", `${path}.worker`), "content-addressed", `${path}.worker.cache`);
+  requireLiteral(
+    field(workerObject, "assetDelivery", `${path}.worker`),
+    "host-verified-transfer",
+    `${path}.worker.assetDelivery`,
+  );
   const worker: CppCuteFrontendBrowserWorkerProfile = {
     protocolId: "browsergrad.compiler.cpp-cute.browser-worker@1",
     buildId: boundedString(field(workerObject, "buildId", `${path}.worker`), `${path}.worker.buildId`, 256),
@@ -721,19 +781,23 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       field(workerObject, "moduleSha256", `${path}.worker`),
       `${path}.worker.moduleSha256`,
     ),
-    scriptType: "module",
+    moduleByteLength: boundedPositiveInteger(
+      field(workerObject, "moduleByteLength", `${path}.worker`),
+      `${path}.worker.moduleByteLength`,
+      64 * 1024 * 1024,
+    ),
+    moduleFormat: "self-contained-es-module",
+    construction: "host-verified-blob-url",
     isolation: "dedicated-worker",
     threading: "single-thread",
     cancellation: "terminate-worker",
-    sourceNetwork: "forbidden",
-    assetNetwork: "same-origin-root-relative-only",
-    cache: "content-addressed",
-    maxWasmMemoryBytes: boundedPositiveInteger(
-      field(workerObject, "maxWasmMemoryBytes", `${path}.worker`),
-      `${path}.worker.maxWasmMemoryBytes`,
-      2 * 1024 * 1024 * 1024,
-    ),
+    network: "forbidden",
+    assetDelivery: "host-verified-transfer",
   };
+  const compilerRuntime = parseBrowserCompilerRuntime(
+    field(object, "compilerRuntime", path),
+    `${path}.compilerRuntime`,
+  );
   const assetLimitsObject = closedObject(
     field(object, "assetLimits", path),
     [
@@ -802,6 +866,20 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       "per-asset file-content ceiling cannot exceed total file-content ceiling",
     );
   }
+  if (compilerRuntime.virtualFileSystem.maxRetainedHostPackByteLength >
+      assetLimits.maxTotalUnpackedByteLength) {
+    invalid(
+      `${path}.compilerRuntime.virtualFileSystem.maxRetainedHostPackByteLength`,
+      "retained host-pack ceiling cannot exceed verified unpacked asset ceiling",
+    );
+  }
+  if (compilerRuntime.virtualFileSystem.maxOpenedWasmFileByteLength >
+      assetLimits.maxTotalFileContentByteLength) {
+    invalid(
+      `${path}.compilerRuntime.virtualFileSystem.maxOpenedWasmFileByteLength`,
+      "opened WASM file ceiling cannot exceed mounted file-content ceiling",
+    );
+  }
   return {
     mode: "browser-local",
     contractId: "browsergrad.compiler.cpp-cute.browser-worker@1",
@@ -812,7 +890,124 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
     ),
     extractor: parseExtractorProfile(field(object, "extractor", path), `${path}.extractor`),
     worker,
+    compilerRuntime,
     assetLimits,
+  };
+}
+
+function parseBrowserCompilerRuntime(
+  value: JsonValue,
+  path: string,
+): CppCuteFrontendBrowserCompilerRuntimeProfile {
+  const object = closedObject(value, [
+    "runtimeAbiId",
+    "wasmAddressBits",
+    "requiredWasmFeatures",
+    "importExportContractSha256",
+    "moduleHandoff",
+    "workerSideFetch",
+    "memory",
+    "virtualFileSystem",
+  ], path);
+  requireLiteral(
+    field(object, "runtimeAbiId", path),
+    "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+    `${path}.runtimeAbiId`,
+  );
+  if (field(object, "wasmAddressBits", path) !== 32) invalid(`${path}.wasmAddressBits`, "runtime v1 is wasm32");
+  requireLiteral(
+    field(object, "moduleHandoff", path),
+    "host-verified-module-or-bytes",
+    `${path}.moduleHandoff`,
+  );
+  requireLiteral(field(object, "workerSideFetch", path), "forbidden", `${path}.workerSideFetch`);
+  const rawFeatures = sortedUniqueStrings(field(object, "requiredWasmFeatures", path), `${path}.requiredWasmFeatures`, 16);
+  const allowedFeatures = new Set<CppCuteBrowserRequiredWasmFeature>([
+    "bulk-memory",
+    "mutable-globals",
+    "nontrapping-fptoint",
+    "sign-extension",
+  ]);
+  if (rawFeatures.length === 0) invalid(`${path}.requiredWasmFeatures`, "runtime must name required WASM features");
+  for (const [index, feature] of rawFeatures.entries()) {
+    if (!allowedFeatures.has(feature as CppCuteBrowserRequiredWasmFeature)) {
+      invalid(`${path}.requiredWasmFeatures[${index}]`, "unknown runtime-v1 WASM feature");
+    }
+  }
+  const memoryObject = closedObject(field(object, "memory", path), [
+    "sharing",
+    "ownership",
+    "initialPages",
+    "maximumPages",
+    "stackByteLength",
+    "maxCompilerWorkingByteLength",
+  ], `${path}.memory`);
+  requireLiteral(field(memoryObject, "sharing", `${path}.memory`), "unshared", `${path}.memory.sharing`);
+  requireLiteral(field(memoryObject, "ownership", `${path}.memory`), "worker", `${path}.memory.ownership`);
+  const initialPages = boundedPositiveInteger(
+    field(memoryObject, "initialPages", `${path}.memory`),
+    `${path}.memory.initialPages`,
+    32_768,
+  );
+  const maximumPages = boundedPositiveInteger(
+    field(memoryObject, "maximumPages", `${path}.memory`),
+    `${path}.memory.maximumPages`,
+    32_768,
+  );
+  if (initialPages > maximumPages) invalid(`${path}.memory.initialPages`, "initial pages exceed maximum pages");
+  const memory = {
+    sharing: "unshared" as const,
+    ownership: "worker" as const,
+    initialPages,
+    maximumPages,
+    stackByteLength: boundedPositiveInteger(
+      field(memoryObject, "stackByteLength", `${path}.memory`),
+      `${path}.memory.stackByteLength`,
+      256 * 1024 * 1024,
+    ),
+    maxCompilerWorkingByteLength: boundedPositiveInteger(
+      field(memoryObject, "maxCompilerWorkingByteLength", `${path}.memory`),
+      `${path}.memory.maxCompilerWorkingByteLength`,
+      2 * 1024 * 1024 * 1024,
+    ),
+  };
+  if (memory.stackByteLength > memory.initialPages * 65_536) {
+    invalid(`${path}.memory.stackByteLength`, "stack reservation exceeds initial linear memory");
+  }
+  const vfsObject = closedObject(field(object, "virtualFileSystem", path), [
+    "storage",
+    "maxRetainedHostPackByteLength",
+    "maxOpenedWasmFileByteLength",
+  ], `${path}.virtualFileSystem`);
+  requireLiteral(
+    field(vfsObject, "storage", `${path}.virtualFileSystem`),
+    "host-backed-lazy",
+    `${path}.virtualFileSystem.storage`,
+  );
+  return {
+    runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+    wasmAddressBits: 32,
+    requiredWasmFeatures: rawFeatures as readonly CppCuteBrowserRequiredWasmFeature[],
+    importExportContractSha256: sha256(
+      field(object, "importExportContractSha256", path),
+      `${path}.importExportContractSha256`,
+    ),
+    moduleHandoff: "host-verified-module-or-bytes",
+    workerSideFetch: "forbidden",
+    memory,
+    virtualFileSystem: {
+      storage: "host-backed-lazy",
+      maxRetainedHostPackByteLength: boundedPositiveInteger(
+        field(vfsObject, "maxRetainedHostPackByteLength", `${path}.virtualFileSystem`),
+        `${path}.virtualFileSystem.maxRetainedHostPackByteLength`,
+        4 * 1024 * 1024 * 1024,
+      ),
+      maxOpenedWasmFileByteLength: boundedPositiveInteger(
+        field(vfsObject, "maxOpenedWasmFileByteLength", `${path}.virtualFileSystem`),
+        `${path}.virtualFileSystem.maxOpenedWasmFileByteLength`,
+        2 * 1024 * 1024 * 1024,
+      ),
+    },
   };
 }
 
@@ -1118,7 +1313,6 @@ function validateProfileReferences(
 
 function parseCompatibility(value: JsonValue, path: string): CppCuteFrontendCompatibilityProfile {
   const object = closedObject(value, [
-    "expectedHeaderSetSha256",
     "supportedSourceFeatures",
     "unsupportedIntrinsicFamilies",
   ], path);
@@ -1130,7 +1324,6 @@ function parseCompatibility(value: JsonValue, path: string): CppCuteFrontendComp
     invalid(`${path}.supportedSourceFeatures`, "profile must name supported source features");
   }
   return {
-    expectedHeaderSetSha256: sha256(field(object, "expectedHeaderSetSha256", path), `${path}.expectedHeaderSetSha256`),
     supportedSourceFeatures,
     unsupportedIntrinsicFamilies: capabilitySet(
       field(object, "unsupportedIntrinsicFamilies", path),

@@ -88,7 +88,7 @@ describe("C++/CuTe AOT sandbox policy", () => {
       fixture.receipt.invocation.executionPlanSha256,
     );
     expect(fixture.receipt.invocation.executionPlanSha256).toBe(
-      "9f649e1e15d35828d6d8e647ce1609e71560fd9f0700324adc782b19a6a55753",
+      "96970fb6614db60a173b0a4ee8a0c079b53181c36fc8a197abbee32fb270ba98",
     );
   });
 });

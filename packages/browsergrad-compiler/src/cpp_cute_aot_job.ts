@@ -189,13 +189,6 @@ export async function prepareCppCuteAotJob(
       "AOT job profile hash differs from the exact prepared frontend profile",
     );
   }
-  if (job.expectedOutput.headerSetSha256 !== profile.expectedHeaderSetSha256) {
-    fail(
-      "BG-COMPILER-CPP-CUTE-AOT-JOB-PROFILE-MISMATCH",
-      "$.expectedOutput.headerSetSha256",
-      "requested header set differs from the exact prepared frontend profile",
-    );
-  }
   for (const [index, file] of job.files.entries()) {
     const expectedFileId = await deriveCppCuteAotSourceFileId(file, { limits });
     if (file.fileId !== expectedFileId) {

@@ -36,7 +36,6 @@ export const CPP_CUTE_FIXTURE_SOURCE_REVISION = Object.freeze({
 
 export interface CppCuteProfileFixtureOptions {
   readonly trustStoreSha256?: string;
-  readonly expectedHeaderSetSha256?: string;
   readonly sourceRoots?: readonly string[];
   readonly includeRoots?: readonly CppCuteFrontendIncludeRoot[];
   readonly sandboxPolicySha256?: string;
@@ -154,7 +153,6 @@ export function createCppCuteProfileInput(
       includeRoots: options.includeRoots ?? createDefaultCppCuteIncludeRoots(sourceRoots[0] ?? "/workspace/src"),
     },
     compatibility: {
-      expectedHeaderSetSha256: options.expectedHeaderSetSha256 ?? CPP_CUTE_FIXTURE_HEADER_SET_HASH,
       supportedSourceFeatures: ["cuda:language@1", "cute:layout-algebra@1", "cxx:templates@1"],
       unsupportedIntrinsicFamilies: ["nvidia:tma@1", "nvidia:wgmma@1"],
     },
@@ -218,14 +216,40 @@ export function createCppCuteBrowserProfileInput(
         protocolId: "browsergrad.compiler.cpp-cute.browser-worker@1",
         buildId: "browsergrad-cpp-cute-browser-worker-0.1.0",
         moduleSha256: "9".repeat(64),
-        scriptType: "module",
+        moduleByteLength: 65_536,
+        moduleFormat: "self-contained-es-module",
+        construction: "host-verified-blob-url",
         isolation: "dedicated-worker",
         threading: "single-thread",
         cancellation: "terminate-worker",
-        sourceNetwork: "forbidden",
-        assetNetwork: "same-origin-root-relative-only",
-        cache: "content-addressed",
-        maxWasmMemoryBytes: 1024 * 1024 * 1024,
+        network: "forbidden",
+        assetDelivery: "host-verified-transfer",
+      },
+      compilerRuntime: {
+        runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+        wasmAddressBits: 32,
+        requiredWasmFeatures: [
+          "bulk-memory",
+          "mutable-globals",
+          "nontrapping-fptoint",
+          "sign-extension",
+        ],
+        importExportContractSha256: "4".repeat(64),
+        moduleHandoff: "host-verified-module-or-bytes",
+        workerSideFetch: "forbidden",
+        memory: {
+          sharing: "unshared",
+          ownership: "worker",
+          initialPages: 4_096,
+          maximumPages: 16_384,
+          stackByteLength: 16 * 1024 * 1024,
+          maxCompilerWorkingByteLength: 512 * 1024 * 1024,
+        },
+        virtualFileSystem: {
+          storage: "host-backed-lazy",
+          maxRetainedHostPackByteLength: 512 * 1024 * 1024,
+          maxOpenedWasmFileByteLength: 384 * 1024 * 1024,
+        },
       },
       assetLimits: {
         maxAssets: 32,
@@ -645,12 +669,10 @@ export async function cloneCppCuteArtifactInput(
 }
 
 export function artifactCompatibleProfileOptions(
-  headerSetSha256: string,
   trustStoreSha256: string,
 ): CppCuteProfileFixtureOptions {
   return {
     trustStoreSha256,
-    expectedHeaderSetSha256: headerSetSha256,
     sourceRoots: ["/src"],
   };
 }

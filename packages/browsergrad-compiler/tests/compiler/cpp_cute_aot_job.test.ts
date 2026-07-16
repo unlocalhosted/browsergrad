@@ -118,7 +118,7 @@ describe("C++/CuTe AOT producer request", () => {
       entryRequestId: fixture.job.entryRequests[0]?.requestId,
     });
     expect(prepared.jobId).toBe(
-      "bg.cpp.aot-job.sha256.79a39a927f11063e146a680e5af554c6a602eeacd48b713fe7767caab209d59a",
+      "bg.cpp.aot-job.sha256.db907469aa5aebc0e06753bb540dfcd6e4687a346e3e6bfac813d5875449a5e6",
     );
     expect(prepared.entryRequestId).toBe(
       "bg.cpp.entry-request.sha256.6f962caa8bc9f13d38abdaab77f296fd412e1323c1d077dbf8152eda4cbbbb5e",
@@ -218,8 +218,8 @@ describe("C++/CuTe AOT producer request", () => {
     const headerDrift = structuredClone(fixture.job) as CppCuteAotJobV2;
     (headerDrift.expectedOutput as { headerSetSha256: string }).headerSetSha256 = "f".repeat(64);
     await expect(prepareCppCuteAotJob(fixture.profile, headerDrift)).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-AOT-JOB-PROFILE-MISMATCH",
-      path: "$.expectedOutput.headerSetSha256",
+      code: "BG-COMPILER-CPP-CUTE-AOT-JOB-HASH-MISMATCH",
+      path: "$.jobId",
     });
 
     const requestDrift = structuredClone(fixture.job) as CppCuteAotJobV2;

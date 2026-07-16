@@ -10,7 +10,6 @@ import {
 import {
   cloneCppCuteProfileInput,
   CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
-  CPP_CUTE_FIXTURE_HEADER_SET_HASH,
   CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH,
   createCppCuteBrowserProfileInput,
   createCppCuteProfileInput,
@@ -30,10 +29,9 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("f570cc6d51b252f4d78b57fd1f7de60355b44314a8622647458fc465d4549d23");
+    expect(first.profileHash).toBe("40f020f44a0577a35c3caa2f741f90922df5ca1e927ca5ff3a1eed9a2a1a6a29");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
-    expect(first.expectedHeaderSetSha256).toBe(CPP_CUTE_FIXTURE_HEADER_SET_HASH);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.extractionLimits)).toBe(true);
     expect(Object.isFrozen(unwrapPreparedCppCuteFrontendProfile(first).profile)).toBe(true);
@@ -45,15 +43,24 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("a35f45ab99a733b19d2c616be6f2133bb0cd7736ed12419c82214678d7479424");
+    expect(first.profileHash).toBe("f075a7596dae001aa124407a583ea3647d0e1e392d594f93686848a399f4b815");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
-    expect(first.compilationContractHash).toBe("41e2b47805aec06b4d4b762cd1e9c0662bc8dc2fcf43f259d00247600ac34052");
+    expect(first.compilationContractHash).toBe("c0329555bbbabbacb65f173d008f77020124e1a685710ce67a7a4ea4a012a67f");
     const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
     expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
     expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
     expect(record.profile.deployment.worker.moduleSha256).toBe("9".repeat(64));
+    expect(record.profile.deployment.worker.moduleByteLength).toBe(65_536);
+    expect(record.profile.deployment.compilerRuntime).toMatchObject({
+      runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+      wasmAddressBits: 32,
+      moduleHandoff: "host-verified-module-or-bytes",
+      workerSideFetch: "forbidden",
+      memory: { sharing: "unshared", ownership: "worker", maximumPages: 16_384 },
+      virtualFileSystem: { storage: "host-backed-lazy" },
+    });
     expect(Object.isFrozen(record.profile.deployment)).toBe(true);
   });
 
@@ -100,18 +107,38 @@ describe("C++/CuTe frontend profile", () => {
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
       "$.deployment.worker.moduleSha256",
     );
+
+    const moduleLength = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const lengthWorker = ((moduleLength["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
+    lengthWorker["moduleByteLength"] = 0;
+    await expectProfileError(
+      moduleLength,
+      "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT",
+      "$.deployment.worker.moduleByteLength",
+    );
+
+    const runtimeInterface = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const runtime = (
+      (runtimeInterface["deployment"] as Record<string, unknown>)["compilerRuntime"] as Record<string, unknown>
+    );
+    runtime["importExportContractSha256"] = "not-a-digest";
+    await expectProfileError(
+      runtimeInterface,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.compilerRuntime.importExportContractSha256",
+    );
   });
 
   it("requires the closed single-threaded dedicated browser worker contract", async () => {
     for (const [field, replacement] of [
       ["protocolId", "other@1"],
-      ["scriptType", "classic"],
+      ["moduleFormat", "classic-script"],
+      ["construction", "unverified-url"],
       ["isolation", "shared-worker"],
       ["threading", "pthreads"],
       ["cancellation", "cooperative"],
-      ["sourceNetwork", "allowed"],
-      ["assetNetwork", "arbitrary"],
-      ["cache", "url-keyed"],
+      ["network", "same-origin"],
+      ["assetDelivery", "worker-fetch"],
     ] as const) {
       const value = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
       const worker = ((value["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
@@ -138,12 +165,15 @@ describe("C++/CuTe frontend profile", () => {
 
   it("bounds browser worker and asset resources with coherent totals", async () => {
     const memory = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
-    const memoryWorker = ((memory["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
-    memoryWorker["maxWasmMemoryBytes"] = 2 * 1024 * 1024 * 1024 + 1;
+    const compilerRuntime = (
+      (memory["deployment"] as Record<string, unknown>)["compilerRuntime"] as Record<string, unknown>
+    );
+    const memoryLimits = compilerRuntime["memory"] as Record<string, unknown>;
+    memoryLimits["maximumPages"] = 32_769;
     await expectProfileError(
       memory,
       "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT",
-      "$.deployment.worker.maxWasmMemoryBytes",
+      "$.deployment.compilerRuntime.memory.maximumPages",
     );
 
     const assetCount = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
@@ -178,8 +208,11 @@ describe("C++/CuTe frontend profile", () => {
     );
 
     const extraction = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
-    const extractionWorker = ((extraction["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
-    extractionWorker["maxWasmMemoryBytes"] = 512 * 1024 * 1024;
+    const extractionRuntime = (
+      (extraction["deployment"] as Record<string, unknown>)["compilerRuntime"] as Record<string, unknown>
+    );
+    const extractionMemory = extractionRuntime["memory"] as Record<string, unknown>;
+    extractionMemory["maximumPages"] = 8_192;
     await expectProfileError(
       extraction,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
@@ -192,7 +225,6 @@ describe("C++/CuTe frontend profile", () => {
       profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
       profileHash: "0".repeat(64),
       deploymentMode: "ahead-of-time",
-      expectedHeaderSetSha256: CPP_CUTE_FIXTURE_HEADER_SET_HASH,
       extractionLimits: createCppCuteProfileInput().extractionLimits,
     } as unknown as PreparedCppCuteFrontendProfile;
 

@@ -66,9 +66,9 @@ const TEST_PRIVATE_JWK: JsonWebKey = Object.freeze({
 export const TEST_CPP_CUTE_SPKI_BASE64 =
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl8h7VCP+TUDyAHiNww/AEpx+H6YG/bXR1bsUEtcquSfen4okTS1aPQ0oyKgQtZPo2Mn2pfS6TSArNTL7ACRmdQ==";
 export const PINNED_CPP_CUTE_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
-export const PINNED_CPP_CUTE_PROFILE_HASH = "5092db2cbe369b22e817cfe2e94e244f5180abf3b80fc9230d5f7f7a3285b64a";
-export const PINNED_CPP_CUTE_ARTIFACT_HASH = "934fc4093bfc0d0af168f845c620592077b444e8df12018f70121be89ddc5427";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "37ba1fd04a4c868de5aa8a3ab4e559aa7948cf54ca83cff45497c522fd5b9709";
+export const PINNED_CPP_CUTE_PROFILE_HASH = "75267d04e9aab9f900b7591de627106fb4218d3c63e323fe60a5477ba792f987";
+export const PINNED_CPP_CUTE_ARTIFACT_HASH = "b6262132cceece13365ee8d2abac26f381953d5da694b4e9b771200c50de47ec";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "5e6dfb606be9026c186b546e7e38485771c9a2f7bbec900cd6bf414bb692df83";
 export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "11088";
 export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46";
 
@@ -118,13 +118,8 @@ export async function createCppCuteProvenanceFixture(
       spkiDerBase64: TEST_CPP_CUTE_SPKI_BASE64,
     }],
   });
-  const preliminaryInput = await createCppCuteArtifactInput();
-  const preliminaryArtifact = await verifyCppCuteFrontendArtifact(preliminaryInput);
   const environmentFixture = await createCppCuteAotExecutionEnvironmentFixture({
-    profile: artifactCompatibleProfileOptions(
-      preliminaryArtifact.headerSetSha256,
-      trustStore.trustStoreHash,
-    ),
+    profile: artifactCompatibleProfileOptions(trustStore.trustStoreHash),
   });
   const profile = environmentFixture.profile;
   const artifactInput = await createCppCuteArtifactInput(profile.compilationContractHash);

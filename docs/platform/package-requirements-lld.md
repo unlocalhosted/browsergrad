@@ -694,7 +694,10 @@ capability result and MUST NOT fall back to an unverified URL worker.
 The host also verifies the separate Clang/extractor WASM bytes, then transfers
 those bytes or a compiled `WebAssembly.Module` into the worker. The bundled
 Emscripten factory MUST accept that verified object and MUST NOT resolve or
-fetch a `.wasm` file relative to the Blob module URL.
+fetch a `.wasm` file relative to the Blob module URL. The worker has no network
+authority: same-origin, redirect-free asset acquisition and content-addressed
+cache admission belong to the host before verified authorities are transferred
+into the worker.
 
 #### Closed browser VFS assets
 
@@ -776,6 +779,15 @@ memory ceilings. The runtime profile names one storage model:
   every opened-file copy resident in WASM; both remain part of the owning
   profile's total memory budget.
 
+For the browser-local profile, `maxMemoryBytes` is the enforced WASM
+linear-memory ceiling. It retains one meaning across the worker lifecycle and
+is not reused for host pack/cache bytes. Stack, compiler working allocation,
+opened VFS file copies, and maximum output reservations MUST fit inside that
+ceiling, which in turn MUST fit the runtime ABI's maximum page count. The stack
+reservation MUST fit initial pages. Host-retained verified pack bytes have a
+separate ceiling; evidence reports host-retained and WASM-owned categories
+separately instead of inventing a JavaScript heap peak.
+
 #### Producer-neutral requests and browser evidence
 
 The common frontend request binds the producer-neutral compilation-contract
@@ -785,6 +797,17 @@ hash, worker/container/assets, compiler arguments, environment, host paths,
 URLs, repository/revision, or pre-known output/header/input-closure hashes.
 Repository identity is detached source provenance. Expected hashes are
 detached conformance assertions, not ordinary compile-request fields.
+
+Request JSON contains content-addressed source descriptors, not executable
+host paths or embedded mutable byte views. Exact source snapshots cross the API
+as unshared bytes, are checked against declared length before allocation,
+copied before asynchronous work, and retained behind opaque request authority.
+Request-owned ceilings may narrow only semantic/input/output ceilings from the
+compilation contract. Wall time, CPU time, producer memory, process count, and
+other deployment limits belong to the later invocation/evidence authority and
+do not fragment the common request identity. Version 1 admits both entry
+families required by this gate: a layout variable or a view-copy function,
+selected by a bounded source-token anchor that the real frontend must resolve.
 
 The profile pins the complete available virtual header universe. A produced
 artifact and worker evidence separately record a canonical unique set of files

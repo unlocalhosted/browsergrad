@@ -100,9 +100,6 @@ export function authorizeAotCppCuteFrontendArtifact(
   if (profile.profileHash !== request.expectedProfileHash) {
     mismatch("$.expectedProfileHash", "prepared profile differs from caller-pinned profile identity");
   }
-  if (artifact.headerSetSha256 !== profile.expectedHeaderSetSha256) {
-    mismatch("$.artifact.headerSetSha256", "artifact header closure differs from prepared profile");
-  }
   if (artifact.sourceSetSha256 !== request.expectedSourceSetSha256) {
     mismatch("$.expectedSourceSetSha256", "artifact source set differs from caller-pinned source manifest");
   }

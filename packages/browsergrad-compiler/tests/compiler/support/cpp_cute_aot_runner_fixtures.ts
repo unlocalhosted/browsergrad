@@ -56,9 +56,8 @@ export async function createCppCuteAotRunnerFixture(
   profileOverrides: Partial<CppCuteProfileFixtureOptions> = {},
   options: CppCuteAotRunnerFixtureOptions = {},
 ): Promise<CppCuteAotRunnerFixture> {
-  const preliminary = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput());
   const profileOptions = {
-    ...artifactCompatibleProfileOptions(preliminary.headerSetSha256, "d".repeat(64)),
+    ...artifactCompatibleProfileOptions("d".repeat(64)),
     ...profileOverrides,
   };
   const environmentLayers = options.environmentLayers;

@@ -130,6 +130,13 @@ export async function createCppCuteBrowserAssetFixture(
   const finalProfileInput = browserProfileInput(options, assetSetSha256);
   if (options.assetLimits !== undefined) {
     Object.assign(finalProfileInput.deployment.assetLimits, options.assetLimits);
+    const runtimeVfs = finalProfileInput.deployment.compilerRuntime.virtualFileSystem as {
+      maxRetainedHostPackByteLength: number;
+    };
+    runtimeVfs.maxRetainedHostPackByteLength = Math.min(
+      runtimeVfs.maxRetainedHostPackByteLength,
+      finalProfileInput.deployment.assetLimits.maxTotalUnpackedByteLength,
+    );
   }
   const profile = await prepareCppCuteFrontendProfile(finalProfileInput);
   const profileRecord = unwrapPreparedCppCuteBrowserFrontendProfile(profile).profile;

@@ -70,12 +70,12 @@ describe("C++/CuTe browser-local asset manifest", () => {
     expect(first.manifestId).toBe(fixture.input.manifestId);
     expect(fixture.input.body.assetSetSha256).toBe(first.assetSetSha256);
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.35a815860fa795850f2f28c0c6b9f78c2b705be3c1aa651512c776432c969279",
+      "bg.cpp.browser-assets.sha256.83a7799b5c99f05454bafcf23df0e825e7d06a275449f40e58b39d111df531ab",
     );
-    expect(first.assetSetSha256).toBe("8c2eb8a57536b24ae280b6f6b71d42b7164d0fa2ae21c92457e468be1b9a32ef");
+    expect(first.assetSetSha256).toBe("fbfffa89d087e1cbb7bf1301d28368f42099d1c85c8b74a356fbd6d98202e402");
     expect(first.assetCount).toBe(7);
-    expect(first.manifestSha256).toBe("afde5ba74242bdd2d92f609d08a52d06cbc3db11d65b626e608a51f2de40c09f");
-    expect(first.manifestByteLength).toBe("8759");
+    expect(first.manifestSha256).toBe("ea5a9ffcc07b7b8d48f2068b77144afe967bba973d86de3e7d86d23749b46a7a");
+    expect(first.manifestByteLength).toBe("8666");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
     expect(record.profile).toBe(fixture.profile);
