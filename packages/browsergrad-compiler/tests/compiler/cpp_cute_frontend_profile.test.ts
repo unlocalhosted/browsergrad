@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR,
+  CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR,
+  CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA,
   CppCuteFrontendProfileError,
+  cppCuteFrontendCompilationContract,
   prepareCppCuteFrontendProfile,
   unwrapPreparedCppCuteAotFrontendProfile,
   unwrapPreparedCppCuteBrowserFrontendProfile,
@@ -10,6 +14,7 @@ import {
 import {
   cloneCppCuteProfileInput,
   CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
+  CPP_CUTE_FIXTURE_RUNTIME_ABI_MANIFEST_SHA256,
   CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH,
   createCppCuteBrowserProfileInput,
   createCppCuteProfileInput,
@@ -29,7 +34,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("d3dba043b28ea0e22e02bd3f23c1196963eedf669dcb561e7048b4f9c2bef945");
+    expect(first.profileHash).toBe("f28e5cc90b12a175aa1da578cd381ec65cf30f98d96c9ad9858861b471952847");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(Object.isFrozen(first)).toBe(true);
@@ -126,17 +131,36 @@ describe("C++/CuTe frontend profile", () => {
     expect(sm90.compilationContractHash).not.toBe(sm80.compilationContractHash);
   });
 
+  it("versions the semantic compilation contract independently from profile wire revisions", () => {
+    const current = createCppCuteProfileInput();
+    const futureProfileWireRevision = structuredClone(current) as unknown as Record<string, unknown>;
+    futureProfileWireRevision["version"] = { major: 2, minor: 99 };
+
+    const contract = cppCuteFrontendCompilationContract(current);
+    expect(contract).toMatchObject({
+      schema: CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA,
+      version: {
+        major: CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR,
+        minor: CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR,
+      },
+    });
+    expect(contract).not.toHaveProperty("profileVersion");
+    expect(cppCuteFrontendCompilationContract(
+      futureProfileWireRevision as unknown as typeof current,
+    )).toEqual(contract);
+  });
+
   it("prepares one deterministic browser-local profile authority", async () => {
     const first = await prepareCppCuteFrontendProfile(createCppCuteBrowserProfileInput());
     const second = await prepareCppCuteFrontendProfile(createCppCuteBrowserProfileInput());
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("8bfe58471daae2033cea7165ca5a4322c6816c6a98f4f5b20303684e26fc147c");
+    expect(first.profileHash).toBe("bfc2ba60f444156827244fe0b5040ff081f89668ba3dbf83d4e6233220d34a94");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
-    expect(first.compilationContractHash).toBe("8a5f5856e3cf36583ac14ba1e07e7d4a36ffde6e2828df67de8e4e78a469a9a8");
+    expect(first.compilationContractHash).toBe("0d4f9a1d7378131cd61a8f1b0f41efd5e8413602b8692dbfc6baecf3c8a1495b");
     const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
     expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
     expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
@@ -144,6 +168,7 @@ describe("C++/CuTe frontend profile", () => {
     expect(record.profile.deployment.worker.moduleByteLength).toBe(65_536);
     expect(record.profile.deployment.compilerRuntime).toMatchObject({
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+      runtimeAbiManifestSha256: CPP_CUTE_FIXTURE_RUNTIME_ABI_MANIFEST_SHA256,
       wasmAddressBits: 32,
       moduleHandoff: "host-verified-module-or-bytes",
       workerSideFetch: "forbidden",
@@ -210,11 +235,22 @@ describe("C++/CuTe frontend profile", () => {
     const runtime = (
       (runtimeInterface["deployment"] as Record<string, unknown>)["compilerRuntime"] as Record<string, unknown>
     );
-    runtime["importExportContractSha256"] = "not-a-digest";
+    runtime["runtimeAbiManifestSha256"] = "not-a-digest";
     await expectProfileError(
       runtimeInterface,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
-      "$.deployment.compilerRuntime.importExportContractSha256",
+      "$.deployment.compilerRuntime.runtimeAbiManifestSha256",
+    );
+
+    const otherRuntimeAbi = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const otherRuntime = (
+      (otherRuntimeAbi["deployment"] as Record<string, unknown>)["compilerRuntime"] as Record<string, unknown>
+    );
+    otherRuntime["runtimeAbiManifestSha256"] = "0".repeat(64);
+    await expectProfileError(
+      otherRuntimeAbi,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.compilerRuntime.runtimeAbiManifestSha256",
     );
   });
 
@@ -305,7 +341,7 @@ describe("C++/CuTe frontend profile", () => {
     await expectProfileError(
       extraction,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
-      "$.extractionLimits.maxMemoryBytes",
+      "$.deployment.compilerRuntime.memory.maximumPages",
     );
   });
 
@@ -334,7 +370,7 @@ describe("C++/CuTe frontend profile", () => {
     await expectProfileError(value, "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION", "$.version.major");
 
     const staleMinor = cloneCppCuteProfileInput();
-    staleMinor["version"] = { major: 2, minor: 1 };
+    staleMinor["version"] = { major: 2, minor: 2 };
     await expectProfileError(
       staleMinor,
       "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION",

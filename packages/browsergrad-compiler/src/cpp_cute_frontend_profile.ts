@@ -7,10 +7,20 @@ import {
   type JsonObject,
   type JsonValue,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+} from "./cpp_cute_browser_runtime_abi.js";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE,
+} from "./resources/cpp_cute_browser_runtime_abi_v1.js";
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 2;
+export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 3;
+export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA =
+  "browsergrad.compiler.cpp-cute.compilation-contract";
+export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR = 1;
+export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR = 0;
 export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
   "https://browsergrad.dev/provenance/cpp-cute-aot/v3";
 
@@ -184,9 +194,10 @@ export type CppCuteBrowserRequiredWasmFeature =
 
 export interface CppCuteFrontendBrowserCompilerRuntimeProfile extends JsonObject {
   readonly runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1";
+  /** SHA-256 of the exact canonical runtime-ABI manifest resource. */
+  readonly runtimeAbiManifestSha256: string;
   readonly wasmAddressBits: 32;
   readonly requiredWasmFeatures: readonly CppCuteBrowserRequiredWasmFeature[];
-  readonly importExportContractSha256: string;
   readonly moduleHandoff: "host-verified-module-or-bytes";
   readonly workerSideFetch: "forbidden";
   readonly memory: JsonObject & {
@@ -200,7 +211,7 @@ export interface CppCuteFrontendBrowserCompilerRuntimeProfile extends JsonObject
   readonly virtualFileSystem: JsonObject & {
     readonly storage: "host-backed-lazy";
     readonly maxRetainedHostPackByteLength: number;
-    readonly maxOpenedWasmFileByteLength: number;
+    readonly maxAggregateOpenedWasmByteLength: number;
   };
 }
 
@@ -369,8 +380,14 @@ export interface CppCuteFrontendProfileV2 extends JsonObject {
   readonly extractionLimits: CppCuteFrontendExtractionLimits;
 }
 
-export interface CppCuteFrontendCompilationContractV2 extends JsonObject {
-  readonly profileVersion: CppCuteFrontendProfileVersion;
+export interface CppCuteFrontendCompilationContractVersionV1 extends JsonObject {
+  readonly major: typeof CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR;
+  readonly minor: typeof CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR;
+}
+
+export interface CppCuteFrontendCompilationContractV1 extends JsonObject {
+  readonly schema: typeof CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA;
+  readonly version: CppCuteFrontendCompilationContractVersionV1;
   readonly language: CppCuteFrontendLanguageProfile;
   readonly target: CppCuteFrontendTargetProfile;
   readonly compiler: JsonObject & {
@@ -427,7 +444,7 @@ export class CppCuteFrontendProfileError extends Error {
 export interface PreparedCppCuteFrontendProfileRecord {
   readonly profile: CppCuteFrontendProfileV2;
   readonly profileHash: string;
-  readonly compilationContract: CppCuteFrontendCompilationContractV2;
+  readonly compilationContract: CppCuteFrontendCompilationContractV1;
   readonly compilationContractHash: string;
 }
 
@@ -456,7 +473,7 @@ export async function prepareCppCuteFrontendProfile(
   });
   const compilationContract = cppCuteFrontendCompilationContract(profile);
   const compilationContractHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.compilation-contract.v2",
+    domain: "browsergrad.compiler.cpp-cute.compilation-contract.v1",
     contract: compilationContract,
   });
   throwIfAborted(options.signal);
@@ -478,12 +495,16 @@ export async function prepareCppCuteFrontendProfile(
 
 export function cppCuteFrontendCompilationContract(
   profile: CppCuteFrontendProfileV2,
-): CppCuteFrontendCompilationContractV2 {
+): CppCuteFrontendCompilationContractV1 {
   const semanticLimits = Object.fromEntries(
     CPP_CUTE_FRONTEND_SEMANTIC_EXTRACTION_LIMIT_KEYS.map((key) => [key, profile.extractionLimits[key]]),
-  ) as CppCuteFrontendCompilationContractV2["extractionLimits"];
+  ) as CppCuteFrontendCompilationContractV1["extractionLimits"];
   return deepFreezeJson({
-    profileVersion: profile.version,
+    schema: CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA,
+    version: {
+      major: CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR,
+      minor: CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR,
+    },
     language: profile.language,
     target: profile.target,
     compiler: {
@@ -577,28 +598,36 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
   }
   if (deployment.mode === "browser-local") {
     const runtime = deployment.compilerRuntime;
-    const maximumLinearBytes = runtime.memory.maximumPages * 65_536;
+    const abiMemory = CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.wasm.memory;
+    const maximumLinearBytes = runtime.memory.maximumPages * abiMemory.pageByteLength;
     if (extractionLimits.maxMemoryBytes > maximumLinearBytes) {
       invalid(
         "$.extractionLimits.maxMemoryBytes",
         "browser producer memory limit exceeds the runtime maximum linear memory",
       );
     }
+    if (extractionLimits.maxOutputBytes > abiMemory.maxResultByteLength) {
+      invalid(
+        "$.extractionLimits.maxOutputBytes",
+        "browser output ceiling exceeds the canonical runtime-ABI result ceiling",
+      );
+    }
     const reservedLinearBytes = runtime.memory.stackByteLength +
       runtime.memory.maxCompilerWorkingByteLength +
-      runtime.virtualFileSystem.maxOpenedWasmFileByteLength +
+      runtime.virtualFileSystem.maxAggregateOpenedWasmByteLength +
+      abiMemory.maxInputFrameByteLength +
       extractionLimits.maxOutputBytes;
     if (reservedLinearBytes > extractionLimits.maxMemoryBytes) {
       invalid(
         "$.extractionLimits.maxMemoryBytes",
-        "browser producer memory limit cannot cover stack, compiler working memory, opened VFS files, and output reservations",
+        "browser producer memory limit cannot cover stack, compiler working memory, aggregate opened VFS bytes, input frame, and output reservations",
       );
     }
     if (extractionLimits.maxSourceBytes + extractionLimits.maxHeaderBytes >
-        runtime.virtualFileSystem.maxOpenedWasmFileByteLength) {
+        runtime.virtualFileSystem.maxAggregateOpenedWasmByteLength) {
       invalid(
-        "$.deployment.compilerRuntime.virtualFileSystem.maxOpenedWasmFileByteLength",
-        "opened-file ceiling cannot cover the profile source and header byte limits",
+        "$.deployment.compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength",
+        "aggregate opened-VFS ceiling cannot cover the profile source and header byte limits",
       );
     }
   }
@@ -905,11 +934,11 @@ function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontend
       "retained host-pack ceiling cannot exceed verified unpacked asset ceiling",
     );
   }
-  if (compilerRuntime.virtualFileSystem.maxOpenedWasmFileByteLength >
+  if (compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength >
       assetLimits.maxTotalFileContentByteLength) {
     invalid(
-      `${path}.compilerRuntime.virtualFileSystem.maxOpenedWasmFileByteLength`,
-      "opened WASM file ceiling cannot exceed mounted file-content ceiling",
+      `${path}.compilerRuntime.virtualFileSystem.maxAggregateOpenedWasmByteLength`,
+      "aggregate opened-WASM ceiling cannot exceed mounted file-content ceiling",
     );
   }
   return {
@@ -933,9 +962,9 @@ function parseBrowserCompilerRuntime(
 ): CppCuteFrontendBrowserCompilerRuntimeProfile {
   const object = closedObject(value, [
     "runtimeAbiId",
+    "runtimeAbiManifestSha256",
     "wasmAddressBits",
     "requiredWasmFeatures",
-    "importExportContractSha256",
     "moduleHandoff",
     "workerSideFetch",
     "memory",
@@ -943,10 +972,23 @@ function parseBrowserCompilerRuntime(
   ], path);
   requireLiteral(
     field(object, "runtimeAbiId", path),
-    "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+    CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.runtimeAbiId,
     `${path}.runtimeAbiId`,
   );
-  if (field(object, "wasmAddressBits", path) !== 32) invalid(`${path}.wasmAddressBits`, "runtime v1 is wasm32");
+  const runtimeAbiManifestSha256 = sha256(
+    field(object, "runtimeAbiManifestSha256", path),
+    `${path}.runtimeAbiManifestSha256`,
+  );
+  if (runtimeAbiManifestSha256 !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256) {
+    invalid(
+      `${path}.runtimeAbiManifestSha256`,
+      "runtime ABI must bind the exact built-in canonical manifest resource",
+    );
+  }
+  if (field(object, "wasmAddressBits", path) !==
+      CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.wasm.addressBits) {
+    invalid(`${path}.wasmAddressBits`, "runtime address width differs from the canonical ABI manifest");
+  }
   requireLiteral(
     field(object, "moduleHandoff", path),
     "host-verified-module-or-bytes",
@@ -954,17 +996,10 @@ function parseBrowserCompilerRuntime(
   );
   requireLiteral(field(object, "workerSideFetch", path), "forbidden", `${path}.workerSideFetch`);
   const rawFeatures = sortedUniqueStrings(field(object, "requiredWasmFeatures", path), `${path}.requiredWasmFeatures`, 16);
-  const allowedFeatures = new Set<CppCuteBrowserRequiredWasmFeature>([
-    "bulk-memory",
-    "mutable-globals",
-    "nontrapping-fptoint",
-    "sign-extension",
-  ]);
-  if (rawFeatures.length === 0) invalid(`${path}.requiredWasmFeatures`, "runtime must name required WASM features");
-  for (const [index, feature] of rawFeatures.entries()) {
-    if (!allowedFeatures.has(feature as CppCuteBrowserRequiredWasmFeature)) {
-      invalid(`${path}.requiredWasmFeatures[${index}]`, "unknown runtime-v1 WASM feature");
-    }
+  const expectedFeatures = CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.wasm.requiredFeatures;
+  if (rawFeatures.length !== expectedFeatures.length ||
+      rawFeatures.some((feature, index) => feature !== expectedFeatures[index])) {
+    invalid(`${path}.requiredWasmFeatures`, "required WASM features differ from the canonical ABI manifest");
   }
   const memoryObject = closedObject(field(object, "memory", path), [
     "sharing",
@@ -987,43 +1022,69 @@ function parseBrowserCompilerRuntime(
     32_768,
   );
   if (initialPages > maximumPages) invalid(`${path}.memory.initialPages`, "initial pages exceed maximum pages");
+  const abiMemory = CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.wasm.memory;
+  if (initialPages !== abiMemory.initialPages) {
+    invalid(`${path}.memory.initialPages`, "initial pages differ from the canonical ABI manifest");
+  }
+  if (maximumPages !== abiMemory.maximumPages) {
+    invalid(`${path}.memory.maximumPages`, "maximum pages differ from the canonical ABI manifest");
+  }
+  const stackByteLength = boundedPositiveInteger(
+    field(memoryObject, "stackByteLength", `${path}.memory`),
+    `${path}.memory.stackByteLength`,
+    256 * 1024 * 1024,
+  );
+  if (stackByteLength !== abiMemory.stackByteLength) {
+    invalid(`${path}.memory.stackByteLength`, "stack reservation differs from the canonical ABI manifest");
+  }
+  const maxCompilerWorkingByteLength = boundedPositiveInteger(
+    field(memoryObject, "maxCompilerWorkingByteLength", `${path}.memory`),
+    `${path}.memory.maxCompilerWorkingByteLength`,
+    2 * 1024 * 1024 * 1024,
+  );
+  if (maxCompilerWorkingByteLength > abiMemory.maxCompilerWorkingByteLength) {
+    invalid(
+      `${path}.memory.maxCompilerWorkingByteLength`,
+      "compiler working ceiling exceeds the canonical ABI manifest",
+    );
+  }
   const memory = {
     sharing: "unshared" as const,
     ownership: "worker" as const,
     initialPages,
     maximumPages,
-    stackByteLength: boundedPositiveInteger(
-      field(memoryObject, "stackByteLength", `${path}.memory`),
-      `${path}.memory.stackByteLength`,
-      256 * 1024 * 1024,
-    ),
-    maxCompilerWorkingByteLength: boundedPositiveInteger(
-      field(memoryObject, "maxCompilerWorkingByteLength", `${path}.memory`),
-      `${path}.memory.maxCompilerWorkingByteLength`,
-      2 * 1024 * 1024 * 1024,
-    ),
+    stackByteLength,
+    maxCompilerWorkingByteLength,
   };
-  if (memory.stackByteLength > memory.initialPages * 65_536) {
+  if (memory.stackByteLength > memory.initialPages * abiMemory.pageByteLength) {
     invalid(`${path}.memory.stackByteLength`, "stack reservation exceeds initial linear memory");
   }
   const vfsObject = closedObject(field(object, "virtualFileSystem", path), [
     "storage",
     "maxRetainedHostPackByteLength",
-    "maxOpenedWasmFileByteLength",
+    "maxAggregateOpenedWasmByteLength",
   ], `${path}.virtualFileSystem`);
   requireLiteral(
     field(vfsObject, "storage", `${path}.virtualFileSystem`),
     "host-backed-lazy",
     `${path}.virtualFileSystem.storage`,
   );
+  const maxAggregateOpenedWasmByteLength = boundedPositiveInteger(
+    field(vfsObject, "maxAggregateOpenedWasmByteLength", `${path}.virtualFileSystem`),
+    `${path}.virtualFileSystem.maxAggregateOpenedWasmByteLength`,
+    2 * 1024 * 1024 * 1024,
+  );
+  if (maxAggregateOpenedWasmByteLength > abiMemory.maxAggregateOpenedVfsByteLength) {
+    invalid(
+      `${path}.virtualFileSystem.maxAggregateOpenedWasmByteLength`,
+      "aggregate opened-WASM ceiling exceeds the canonical ABI manifest",
+    );
+  }
   return {
-    runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
-    wasmAddressBits: 32,
+    runtimeAbiId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.runtimeAbiId,
+    runtimeAbiManifestSha256,
+    wasmAddressBits: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.wasm.addressBits,
     requiredWasmFeatures: rawFeatures as readonly CppCuteBrowserRequiredWasmFeature[],
-    importExportContractSha256: sha256(
-      field(object, "importExportContractSha256", path),
-      `${path}.importExportContractSha256`,
-    ),
     moduleHandoff: "host-verified-module-or-bytes",
     workerSideFetch: "forbidden",
     memory,
@@ -1034,11 +1095,7 @@ function parseBrowserCompilerRuntime(
         `${path}.virtualFileSystem.maxRetainedHostPackByteLength`,
         4 * 1024 * 1024 * 1024,
       ),
-      maxOpenedWasmFileByteLength: boundedPositiveInteger(
-        field(vfsObject, "maxOpenedWasmFileByteLength", `${path}.virtualFileSystem`),
-        `${path}.virtualFileSystem.maxOpenedWasmFileByteLength`,
-        2 * 1024 * 1024 * 1024,
-      ),
+      maxAggregateOpenedWasmByteLength,
     },
   };
 }
@@ -1236,13 +1293,13 @@ function parseTarget(value: JsonValue, path: string): CppCuteFrontendTargetProfi
     invalid(`${devicePath}.architecture`, "device architecture must be an sm_NN Clang CUDA target CPU");
   }
   if (device.triple !== "nvptx64-nvidia-cuda") {
-    invalid(`${devicePath}.triple`, "profile v2.2 requires the nvptx64-nvidia-cuda device triple");
+    invalid(`${devicePath}.triple`, "profile v2.3 requires the nvptx64-nvidia-cuda device triple");
   }
   if (host.endianness !== "little" || device.endianness !== "little") {
-    invalid(path, "CUDA profile v2.2 requires little-endian host and NVPTX targets");
+    invalid(path, "CUDA profile v2.3 requires little-endian host and NVPTX targets");
   }
   if (host.pointerBits !== 64 || device.pointerBits !== 64) {
-    invalid(path, "CUDA profile v2.2 requires matching 64-bit host and device pointer widths");
+    invalid(path, "CUDA profile v2.3 requires matching 64-bit host and device pointer widths");
   }
   const hostDataLayout = boundedString(field(host, "dataLayout", hostPath), `${hostPath}.dataLayout`, 1_024);
   const deviceDataLayout = boundedString(field(device, "dataLayout", devicePath), `${devicePath}.dataLayout`, 1_024);

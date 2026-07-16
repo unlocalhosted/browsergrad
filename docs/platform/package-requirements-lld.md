@@ -596,6 +596,14 @@ Optional parity flow:
 native/Docker CI producer -> same verified frontend artifact -> parity policy
 ```
 
+Docker appears only in the optional native/AOT producer flow and in the
+reproducible build that produces pinned browser assets. It is never part of the
+portable browser execution graph. Shipping or using the browser-local profile
+MUST NOT require a Docker daemon, container runtime, native compiler
+installation, or compiler service. The browser executes the verified Worker
+and Clang-WASM assets; Docker may only produce or independently compare those
+content-addressed assets and artifacts.
+
 For the portable BrowserGrad product, the browser-local frontend is the
 primary Gate 3 path. A normal user MUST be able to compile a supported,
 profile-pinned C++/CuTe source unit in the browser without Docker, a native
@@ -684,10 +692,42 @@ path; no builder, cache, Blob, or browser path may enter source semantics.
 
 The source ABI and compiler runtime ABI are distinct contracts. The source ABI
 describes the program being analyzed. The compiler runtime ABI separately pins
-WASM width/features, import/export interface hash, memory-sharing mode and
-ownership, initial and maximum pages, stack ceiling, VFS storage model, and
-worker/module compatibility. Version 1 requires one unshared memory. Source
-target pointer width MUST NOT be used as evidence about the Clang-WASM runtime.
+WASM width/features, the complete import/export interface, memory-sharing mode
+and ownership, initial and maximum pages, stack ceiling, VFS storage model,
+input/result framing, lifecycle, and worker/module compatibility. Version 1
+requires one unshared memory. Source target pointer width MUST NOT be used as
+evidence about the Clang-WASM runtime.
+
+The canonical runtime-ABI manifest is design authority, not evidence that a
+particular `.wasm` file conforms. Release requires a separate bounded raw-WASM
+inspection authority that compares the complete observed module against the
+independently reviewed manifest. The observed module MUST NOT extend its own
+allowlist. In particular, every Emscripten-generated import, support export,
+table/global projection, memory limit, tag/start policy, and allowed custom
+section MUST be closed and reviewed independently before release. The
+`target_features` section is metadata to cross-check against decoded structure
+and opcodes; it is not browser capability evidence. Browser reflection APIs
+that expose only import/export names and kinds are insufficient for this gate
+because function signatures, memory limits, and structural feature use remain
+unproved. The manifest MUST name one instruction-set baseline, the exact
+allowed extensions, and forbid every unlisted extension.
+
+Every synchronous VFS import MUST use checked non-wrapping wasm32 range
+arithmetic, validate all input and output ranges before the first access,
+snapshot path bytes before any overlapping output write, reject overlapping
+output ranges, enforce the declared record alignment, forbid memory growth
+during the call, and leave memory unchanged on invalid ranges. The opened-file
+linear-memory ceiling is aggregate across all live session materializations,
+not a per-file allowance. Linear-memory coexistence arithmetic includes stack,
+compiler working bytes, aggregate opened VFS bytes, the live input frame, and
+the maximum result bytes.
+
+The reusable semantic compilation contract has its own schema and version,
+independent from the full frontend-profile wire version. Deployment-only
+profile changes such as Worker packaging, container policy, or browser asset
+delivery MUST NOT invalidate semantic compilation identities or caches when
+language, target, compiler resources, dependencies, VFS semantics, adapter,
+and semantic limits are unchanged.
 
 The package emits one self-contained module-worker resource without static or
 dynamic imports. Because module workers have no subresource-integrity option,

@@ -1,0 +1,819 @@
+import {
+  SCHEMA_DIAGNOSTIC_CODES,
+  SemanticSchemaError,
+  canonicalJsonBytes,
+  decodeWireJson,
+  hashCanonicalJson,
+  sha256Hex,
+  type DecodeLimits,
+  type JsonObject,
+  type JsonValue,
+} from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
+  copyInspectedUnsharedUint8Array,
+  inspectUnsharedPlainUint8Array,
+} from "./cpp_cute_aot_bytes.js";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE,
+  type CppCuteBrowserRuntimeAbiManifestV1Resource,
+} from "./resources/cpp_cute_browser_runtime_abi_v1.js";
+
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
+  "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 0;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
+  "bg.cpp.browser-runtime-abi.sha256.21d1cc280be689ccd4c3c600d6f65dbfd7912dd67c18f7041bdca6e60e7398fb";
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
+  "0f6b8140fd5b55d214db31a89d9f1d800084280fb35dedd272dfd300eea189c7";
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
+  "3e5cf7079d8ca4a691732aa8ea7c0bc06fdd80bfc6c4df6ecb4b24d7b63fb318";
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
+  "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075";
+
+const MANIFEST_ID = /^bg\.cpp\.browser-runtime-abi\.sha256\.[0-9a-f]{64}$/u;
+const PREPARED_MANIFESTS = new WeakMap<object, StoredCppCuteBrowserRuntimeAbiManifest>();
+const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
+  ? undefined
+  : Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
+
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_DECODE_LIMITS: DecodeLimits = Object.freeze({
+  maxDocumentBytes: CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT,
+  maxDepth: 16,
+  maxNodes: 4_096,
+  maxStringBytes: 48 * 1024,
+  maxArrayLength: 128,
+  maxObjectProperties: 32,
+  maxRank: 1,
+  maxIntegerBits: 64,
+  maxArithmeticOperations: 8_192,
+});
+
+export type CppCuteBrowserRuntimeAbiManifestV1 = CppCuteBrowserRuntimeAbiManifestV1Resource;
+export type CppCuteBrowserRuntimeAbiBodyV1 = CppCuteBrowserRuntimeAbiManifestV1["body"];
+
+declare const preparedCppCuteBrowserRuntimeAbiManifestBrand: unique symbol;
+
+/**
+ * Opaque authority over the exact canonical runtime-ABI design contract.
+ *
+ * It deliberately proves neither conformance of any Wasm bytes nor release or
+ * Worker-execution readiness. Those require separate observed authorities.
+ */
+export interface PreparedCppCuteBrowserRuntimeAbiManifest {
+  readonly [preparedCppCuteBrowserRuntimeAbiManifestBrand]: true;
+  readonly manifestId: string;
+  readonly runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1";
+  readonly resourceSha256: string;
+  readonly contractSha256: string;
+  readonly generatedImportAllowlistSha256: string;
+  readonly resourceByteLength: number;
+  readonly designAuthority: true;
+  readonly interfaceReviewReady: false;
+  readonly observedWasmVerified: false;
+  readonly releaseReady: false;
+}
+
+export interface PreparedCppCuteBrowserRuntimeAbiManifestRecord {
+  readonly manifest: CppCuteBrowserRuntimeAbiManifestV1;
+}
+
+interface StoredCppCuteBrowserRuntimeAbiManifest
+  extends PreparedCppCuteBrowserRuntimeAbiManifestRecord {
+  readonly bytes: Uint8Array;
+}
+
+export interface DecodeCppCuteBrowserRuntimeAbiManifestOptions {
+  readonly signal?: AbortSignal;
+}
+
+export type CppCuteBrowserRuntimeAbiManifestErrorCode =
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-CANCELLED"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-INVALID"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-UNSUPPORTED-VERSION"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-RESOURCE-LIMIT"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-HASH-MISMATCH"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-HASH-UNAVAILABLE"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-NONCANONICAL-BYTES"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-UNVERIFIED";
+
+export class CppCuteBrowserRuntimeAbiManifestError extends Error {
+  constructor(
+    readonly code: CppCuteBrowserRuntimeAbiManifestErrorCode,
+    readonly path: string,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(`${code}: ${message}`, options);
+    this.name = "CppCuteBrowserRuntimeAbiManifestError";
+  }
+}
+
+validateBodyInvariants(CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body);
+if (CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.manifestId !==
+    CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID) {
+  invalid("$.manifestId", "built-in manifest ID does not equal the pinned v1 identity");
+}
+
+const BUILTIN_RESOURCE_BYTES = canonicalResourceBytes(CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE);
+const BUILTIN_BODY_BYTES = canonicalResourceBytes(CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body);
+
+/** Returns a disposable copy of the exact canonical ABI-manifest resource. */
+export function cppCuteBrowserRuntimeAbiManifestResourceBytes(): Uint8Array {
+  return new Uint8Array(BUILTIN_RESOURCE_BYTES);
+}
+
+export async function decodeCppCuteBrowserRuntimeAbiManifest(
+  bytes: Uint8Array,
+  options: DecodeCppCuteBrowserRuntimeAbiManifestOptions = {},
+): Promise<PreparedCppCuteBrowserRuntimeAbiManifest> {
+  const signal = normalizeOptions(options);
+  const snapshot = snapshotBytes(bytes);
+  throwIfAborted(signal);
+  let value: JsonValue;
+  try {
+    value = decodeWireJson(snapshot, { limits: CPP_CUTE_BROWSER_RUNTIME_ABI_DECODE_LIMITS });
+  } catch (cause) {
+    if (isSchemaResourceLimit(cause)) {
+      resource("$bytes", "runtime-ABI manifest decoding exceeded fixed resource limits", { cause });
+    }
+    invalid("$bytes", "runtime-ABI manifest bytes are not bounded strict JSON", { cause });
+  }
+  const manifest = parseManifest(value);
+  const canonical = canonicalResourceBytes(manifest);
+  if (!equalBytes(snapshot, canonical)) {
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-NONCANONICAL-BYTES",
+      "$bytes",
+      "runtime-ABI manifest bytes must exactly equal canonical JSON bytes",
+    );
+  }
+  throwIfAborted(signal);
+  const expectedManifestId = await deriveCppCuteBrowserRuntimeAbiManifestId(manifest.body);
+  if (manifest.manifestId !== expectedManifestId) {
+    hashMismatch("$.manifestId", `manifest ID must equal ${expectedManifestId}`);
+  }
+  throwIfAborted(signal);
+  const [resourceSha256, contractSha256, generatedImportAllowlistSha256] = await Promise.all([
+    hashBytes(snapshot, "$bytes"),
+    hashJson({
+      domain: "browsergrad.compiler.cpp-cute.browser-runtime-abi-contract.v1",
+      body: manifest.body,
+    }, "$.body"),
+    deriveGeneratedImportAllowlistSha256(manifest.body),
+  ]);
+  if (resourceSha256 !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256) {
+    hashMismatch("$bytes", "canonical resource SHA-256 does not equal the pinned v1 resource identity");
+  }
+  if (contractSha256 !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256) {
+    hashMismatch("$.body", "runtime-ABI contract SHA-256 does not equal the pinned v1 contract identity");
+  }
+  if (generatedImportAllowlistSha256 !==
+      CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 ||
+      manifest.body.hostImports.generatedImportAllowlist.allowlistSha256 !==
+        generatedImportAllowlistSha256) {
+    hashMismatch(
+      "$.body.hostImports.generatedImportAllowlist.allowlistSha256",
+      "generated-import allowlist SHA-256 does not equal the closed v1 policy projection",
+    );
+  }
+  throwIfAborted(signal);
+  const prepared = Object.freeze({
+    manifestId: expectedManifestId,
+    runtimeAbiId: manifest.body.runtimeAbiId,
+    resourceSha256,
+    contractSha256,
+    generatedImportAllowlistSha256,
+    resourceByteLength: snapshot.byteLength,
+    designAuthority: true,
+    interfaceReviewReady: false,
+    observedWasmVerified: false,
+    releaseReady: false,
+  }) as PreparedCppCuteBrowserRuntimeAbiManifest;
+  PREPARED_MANIFESTS.set(prepared, Object.freeze({
+    manifest,
+    bytes: new Uint8Array(snapshot),
+  }));
+  return prepared;
+}
+
+export async function deriveCppCuteBrowserRuntimeAbiManifestId(
+  body: CppCuteBrowserRuntimeAbiBodyV1,
+): Promise<string> {
+  const digest = await hashJson({
+    domain: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest-id.v1",
+    body,
+  }, "$.manifestId");
+  return `bg.cpp.browser-runtime-abi.sha256.${digest}`;
+}
+
+export async function deriveCppCuteBrowserGeneratedImportAllowlistSha256(
+  body: CppCuteBrowserRuntimeAbiBodyV1,
+): Promise<string> {
+  return deriveGeneratedImportAllowlistSha256(body);
+}
+
+export function unwrapPreparedCppCuteBrowserRuntimeAbiManifest(
+  prepared: PreparedCppCuteBrowserRuntimeAbiManifest,
+): PreparedCppCuteBrowserRuntimeAbiManifestRecord {
+  return Object.freeze({ manifest: storedManifest(prepared).manifest });
+}
+
+export function canonicalCppCuteBrowserRuntimeAbiManifestBytes(
+  prepared: PreparedCppCuteBrowserRuntimeAbiManifest,
+): Uint8Array {
+  return new Uint8Array(storedManifest(prepared).bytes);
+}
+
+function parseManifest(value: JsonValue): CppCuteBrowserRuntimeAbiManifestV1 {
+  const object = closedObject(value, ["schema", "version", "manifestId", "body"], "$", true);
+  literal(field(object, "schema", "$"), CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA, "$.schema");
+  const version = closedObject(field(object, "version", "$"), ["major", "minor"], "$.version", true);
+  if (version.major !== CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR) {
+    unsupported("$.version.major", `reader supports major ${CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR}`);
+  }
+  if (version.minor !== CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR) {
+    unsupported(
+      "$.version.minor",
+      `closed reader supports ${CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR}.${CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR} only`,
+    );
+  }
+  const manifestId = boundedPattern(field(object, "manifestId", "$"), "$.manifestId", MANIFEST_ID);
+  const body = field(object, "body", "$" );
+  if (typeof body !== "object" || body === null || Array.isArray(body)) invalid("$.body", "expected object");
+  validateBodyInvariants(body as JsonObject);
+  if (!equalBytes(canonicalResourceBytes(body), BUILTIN_BODY_BYTES)) {
+    invalid("$.body", "body does not equal the single supported runtime-ABI design contract");
+  }
+  return Object.freeze({
+    schema: CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA,
+    version: Object.freeze({
+      major: CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR,
+      minor: CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR,
+    }),
+    manifestId,
+    body: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body,
+  }) as CppCuteBrowserRuntimeAbiManifestV1;
+}
+
+function validateBodyInvariants(value: JsonObject): void {
+  const body = value as unknown as CppCuteBrowserRuntimeAbiBodyV1;
+  try {
+    if (body.runtimeAbiId !== "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1") {
+      invalid("$.body.runtimeAbiId", "unknown runtime ABI");
+    }
+    if (body.authority.kind !== "design-contract-only" ||
+        body.authority.observedWasm !== "detached-verification-required" ||
+        body.authority.workerExecution !== "not-authorized" ||
+        body.authority.releaseReadiness !== "not-authorized") {
+      invalid("$.body.authority", "manifest must not claim Wasm observation, execution, or release authority");
+    }
+    if (body.wasm.moduleRole !== "compiler-extractor-only-user-programs-never-linked-or-executed" ||
+        body.wasm.cAbiVersion !== 65_536 ||
+        body.wasm.cAbiVersionEncoding !== "major-shift-left-16-bitwise-or-minor" ||
+        body.wasm.startSection !== "forbidden" || body.wasm.unlistedCExports !== "forbidden") {
+      invalid("$.body.wasm", "module role, ABI version, start, or export closure differs from runtime v1");
+    }
+    const supportExports = body.wasm.supportExports;
+    if (supportExports.status !== "unresolved-first-build-review-required" ||
+        supportExports.exactFunctionAllowlist.length !== 0 ||
+        supportExports.exactGlobalAllowlist.length !== 0 ||
+        supportExports.exactTableAllowlist.length !== 0 ||
+        supportExports.unlistedExports !== "forbidden" ||
+        supportExports.observedModuleCannotExtendAllowlist !== true ||
+        supportExports.releaseConformance !==
+          "forbidden-until-independent-review-and-manifest-repin") {
+      invalid("$.body.wasm.supportExports", "support exports must remain empty and release-blocked pending review");
+    }
+    const structural = body.wasm.structuralPolicy;
+    if (structural.status !== "unresolved-first-build-review-required" ||
+        structural.releaseConformance !==
+          "forbidden-until-exact-first-build-projection-is-reviewed-and-repinned") {
+      invalid("$.body.wasm.structuralPolicy", "Wasm structural projection must remain release-blocked pending review");
+    }
+    if (structural.tables.maximumCount !== 1 ||
+        structural.tables.imported !== "forbidden" ||
+        structural.tables.declaredMaximumRequired !== true ||
+        structural.tables.maximumElementsCeiling !== 65_536 ||
+        structural.tables.exactReviewedProjection.length !== 0) {
+      invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the bounded unresolved v1 policy");
+    }
+    assertExactStrings(
+      structural.tables.allowedElementTypes,
+      ["funcref"],
+      "$.body.wasm.structuralPolicy.tables.allowedElementTypes",
+    );
+    if (structural.globals.maximumCount !== 4_096 || structural.globals.imported !== "forbidden" ||
+        structural.globals.exactReviewedExports.length !== 0) {
+      invalid("$.body.wasm.structuralPolicy.globals", "global policy differs from the bounded unresolved v1 policy");
+    }
+    assertExactStrings(structural.globals.allowedValueTypes, [
+      "f32", "f64", "i32", "i64",
+    ], "$.body.wasm.structuralPolicy.globals.allowedValueTypes");
+    if (structural.tags.exactCount !== 0 || structural.tags.imported !== "forbidden" ||
+        structural.tags.exported !== "forbidden") {
+      invalid("$.body.wasm.structuralPolicy.tags", "runtime v1 forbids Wasm exception tags");
+    }
+    const customSections = structural.customSections;
+    if (customSections.maximumCount !== 4 || customSections.maximumSectionByteLength !== 524_288 ||
+        customSections.maximumTotalByteLength !== 1_048_576 ||
+        customSections.duplicateNames !== "forbidden" ||
+        customSections.exactReviewedNameAllowlist.length !== 0 ||
+        customSections.unlistedNames !== "forbidden") {
+      invalid("$.body.wasm.structuralPolicy.customSections", "custom-section policy differs from bounded unresolved v1");
+    }
+    assertExactStrings(customSections.explicitlyForbiddenNames, [
+      "dylink.0", "producers", "sourceMappingURL",
+    ], "$.body.wasm.structuralPolicy.customSections.explicitlyForbiddenNames");
+    if (customSections.targetFeatures.sectionName !== "target_features" ||
+        customSections.targetFeatures.status !== "unresolved-first-build-review-required" ||
+        customSections.targetFeatures.exactRawSectionProjection.length !== 0) {
+      invalid("$.body.wasm.structuralPolicy.customSections.targetFeatures", "target_features review remains unresolved");
+    }
+    assertExactStrings(
+      customSections.targetFeatures.requiredDeclarations,
+      body.wasm.requiredFeatures,
+      "$.body.wasm.structuralPolicy.customSections.targetFeatures.requiredDeclarations",
+    );
+    assertExactStrings(
+      customSections.targetFeatures.forbiddenDeclarations,
+      body.wasm.forbiddenFeatures,
+      "$.body.wasm.structuralPolicy.customSections.targetFeatures.forbiddenDeclarations",
+    );
+    assertExactStrings(body.wasm.requiredFeatures, [
+      "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-extension",
+    ], "$.body.wasm.requiredFeatures");
+    assertExactStrings(body.wasm.forbiddenFeatures, [
+      "atomics", "exception-handling", "memory64", "multi-memory", "simd128", "threads",
+    ], "$.body.wasm.forbiddenFeatures");
+    const featurePolicy = body.wasm.featurePolicy;
+    if (featurePolicy.instructionSetBaseline !== "webassembly-mvp" ||
+        featurePolicy.unlistedExtensions !== "forbidden" ||
+        featurePolicy.staticOpcodeAndSectionInspection !== "required" ||
+        featurePolicy.targetFeaturesCrossCheck !== "required-but-not-authoritative") {
+      invalid("$.body.wasm.featurePolicy", "Wasm extension policy must reject every undeclared extension");
+    }
+    assertExactStrings(
+      featurePolicy.allowedExtensions,
+      body.wasm.requiredFeatures,
+      "$.body.wasm.featurePolicy.allowedExtensions",
+    );
+    const memory = body.wasm.memory;
+    if (body.wasm.addressBits !== 32 || memory.count !== 1 || memory.addressType !== "i32" ||
+        memory.imported !== false || memory.exported !== true || memory.exportName !== "memory" ||
+        memory.sharing !== "unshared" ||
+        memory.ownership !== "module-instance-owned-by-dedicated-worker" ||
+        memory.growth !== "allowed-to-maximum") {
+      invalid("$.body.wasm.memory", "runtime v1 requires one module-exported unshared wasm32 memory");
+    }
+    if (memory.initialPages * memory.pageByteLength !== 268_435_456 ||
+        memory.maximumPages * memory.pageByteLength !== 1_073_741_824 ||
+        memory.growthLinearStepPages * memory.pageByteLength !== 67_108_864) {
+      invalid("$.body.wasm.memory", "memory pages do not match the fixed runtime-v1 byte contract");
+    }
+    const reservedBytes = memory.stackByteLength + memory.maxCompilerWorkingByteLength +
+      memory.maxAggregateOpenedVfsByteLength + memory.maxInputFrameByteLength +
+      memory.maxResultByteLength;
+    if (reservedBytes > memory.maximumPages * memory.pageByteLength) {
+      invalid("$.body.wasm.memory", "declared reservations exceed maximum linear memory");
+    }
+    const expectedExports = [
+      ["bg_cpp_cute_abi_version", "uint32_t bg_cpp_cute_abi_version(void)", 0, 1, "u32-packed-abi-version"],
+      ["bg_cpp_cute_alloc", "uint32_t bg_cpp_cute_alloc(uint32_t byte_length)", 1, 1, "u32-input-pointer-zero-on-failure"],
+      ["bg_cpp_cute_compile", "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)", 2, 1, "typed-compile-status"],
+      ["bg_cpp_cute_free", "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)", 2, 0, "void-status-readable-separately"],
+      ["bg_cpp_cute_reset", "void bg_cpp_cute_reset(void)", 0, 0, "void-infallible-for-live-instance"],
+      ["bg_cpp_cute_result_length", "uint32_t bg_cpp_cute_result_length(void)", 0, 1, "u32-result-length-zero-unless-artifact-ready"],
+      ["bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", 0, 1, "u32-result-pointer-zero-unless-artifact-ready"],
+      ["bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", 0, 1, "current-typed-status-without-state-mutation"],
+    ] as const;
+    if (body.cExports.length !== expectedExports.length) invalid("$.body.cExports", "expected exactly eight C exports");
+    for (const [index, expected] of expectedExports.entries()) {
+      const actual = body.cExports[index];
+      if (actual?.ordinal !== index || actual.cSymbol !== expected[0] || actual.wasmExportName !== expected[0] ||
+          actual.cSignature !== expected[1] || actual.wasmParameters.length !== expected[2] ||
+          actual.wasmResults.length !== expected[3] || actual.resultSemantics !== expected[4] ||
+          [...actual.wasmParameters, ...actual.wasmResults].some((type) => type !== "i32")) {
+        invalid(`$.body.cExports[${index}]`, "C export does not match the exact runtime-v1 signature inventory");
+      }
+    }
+    const expectedImports = [
+      ["bg_vfs_status", "int32_t bg_vfs_status(uint32_t path_pointer, uint32_t path_length, uint32_t metadata_pointer)", 3, "write-one-32-byte-metadata-record-for-an-existing-file-or-directory"],
+      ["bg_vfs_open", "int32_t bg_vfs_open(uint32_t path_pointer, uint32_t path_length, uint32_t open_result_pointer)", 3, "open-one-existing-file-and-write-one-16-byte-open-result"],
+      ["bg_vfs_read", "int32_t bg_vfs_read(uint32_t handle, uint32_t offset_low, uint32_t offset_high, uint32_t destination_pointer, uint32_t byte_length)", 5, "copy-the-exact-requested-range-or-copy-nothing"],
+      ["bg_vfs_close", "int32_t bg_vfs_close(uint32_t handle)", 1, "close-one-live-file-handle-exactly-once"],
+      ["bg_vfs_directory_count", "int32_t bg_vfs_directory_count(uint32_t path_pointer, uint32_t path_length, uint32_t count_pointer)", 3, "write-the-stable-immediate-child-count-for-one-directory"],
+      ["bg_vfs_directory_entry", "int32_t bg_vfs_directory_entry(uint32_t path_pointer, uint32_t path_length, uint32_t index, uint32_t name_pointer, uint32_t name_capacity, uint32_t metadata_pointer)", 6, "write-one-byte-sorted-child-basename-and-one-32-byte-metadata-record"],
+    ] as const;
+    if (body.hostImports.moduleName !== "browsergrad_vfs_v1" ||
+        body.hostImports.invocation !== "synchronous-non-reentrant" ||
+        body.hostImports.pointerLifetime !== "only-for-import-call-duration" ||
+        body.hostImports.unlistedApplicationImports !== "forbidden" ||
+        body.hostImports.functions.length !== expectedImports.length) {
+      invalid("$.body.hostImports", "host import surface does not match runtime v1");
+    }
+    const generatedImports = body.hostImports.generatedImportAllowlist;
+    if (generatedImports.policyId !== "browsergrad.compiler.cpp-cute.emscripten-generated-imports@1" ||
+        generatedImports.status !== "unresolved-first-build-review-required" ||
+        generatedImports.allowlistSha256 !==
+          CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 ||
+        generatedImports.exactFunctions.length !== 0 ||
+        generatedImports.unlistedGeneratedImports !== "forbidden" ||
+        generatedImports.observedModuleCannotExtendAllowlist !== true ||
+        generatedImports.capabilityCeiling !==
+          "no-clock-random-network-process-or-ambient-filesystem" ||
+        generatedImports.releaseConformance !==
+          "forbidden-until-independent-review-and-manifest-repin") {
+      invalid(
+        "$.body.hostImports.generatedImportAllowlist",
+        "generated imports must remain an empty hash-pinned release blocker pending independent review",
+      );
+    }
+    const memoryAccess = body.hostImports.memoryAccess;
+    if (memoryAccess.rangeArithmetic !== "checked-u32-no-wrap" ||
+        memoryAccess.completeRangeValidation !==
+          "required-before-first-input-read-or-output-write" ||
+        memoryAccess.pathInputSnapshot !==
+          "after-complete-range-validation-before-any-output-write" ||
+        memoryAccess.inputOutputOverlap !==
+          "allowed-only-after-complete-input-snapshot" ||
+        memoryAccess.outputOutputOverlap !== "forbidden" ||
+        memoryAccess.memoryGrowthDuringImport !== "forbidden" ||
+        memoryAccess.invalidRangeMemoryMutation !== "forbidden" ||
+        memoryAccess.alignmentByteLength.byteOutput !== 1 ||
+        memoryAccess.alignmentByteLength.u32Output !== 4 ||
+        memoryAccess.alignmentByteLength.u64ContainingRecord !== 8) {
+      invalid(
+        "$.body.hostImports.memoryAccess",
+        "host imports require checked ranges, stable snapshots, aligned disjoint outputs, and failure atomicity",
+      );
+    }
+    for (const [index, expected] of expectedImports.entries()) {
+      const actual = body.hostImports.functions[index];
+      if (actual?.ordinal !== index || actual.fieldName !== expected[0] ||
+          actual.cSignature !== expected[1] || actual.wasmParameters.length !== expected[2] ||
+          actual.wasmResults.length !== 1 || actual.semantics !== expected[3] ||
+          [...actual.wasmParameters, ...actual.wasmResults].some((type) => type !== "i32")) {
+        invalid(`$.body.hostImports.functions[${index}]`, "VFS import signature does not match runtime v1");
+      }
+    }
+    if (body.vfs.storage !== "host-backed-lazy-verified-pack-files-only" ||
+        body.vfs.physicalFilesystemFallback !== "forbidden" ||
+        body.vfs.networkFallback !== "forbidden" || body.vfs.pathEncoding !== "utf8" ||
+        body.vfs.pathForm !== "canonical-absolute-forward-slash-no-nul-dot-or-parent-segments" ||
+        body.vfs.maxPathByteLength !== 4_096 ||
+        body.vfs.directoryOrder !== "strict-ascending-utf8-byte-order" ||
+        body.vfs.failureAtomicity !==
+          "nonzero-status-writes-no-output-except-required-name-length-in-metadata") {
+      invalid("$.body.vfs", "VFS storage, path, ordering, or failure semantics differ from runtime v1");
+    }
+    if (body.vfs.metadataRecord.byteLength !== 32 || body.vfs.openResultRecord.byteLength !== 16) {
+      invalid("$.body.vfs", "VFS binary records have incorrect byte lengths");
+    }
+    assertExactStrings(body.vfs.metadataRecord.fields.map((entry) => entry.name), [
+      "kind", "nameByteLength", "fileByteLength", "uniqueIdDevice", "uniqueIdFile",
+    ], "$.body.vfs.metadataRecord.fields[*].name");
+    assertExactNumbers(body.vfs.metadataRecord.fields.map((entry) => entry.offset), [
+      0, 4, 8, 16, 24,
+    ], "$.body.vfs.metadataRecord.fields[*].offset");
+    assertExactStrings(body.vfs.metadataRecord.fields.map((entry) => entry.encoding), [
+      "u32le", "u32le", "u64le", "u64le", "u64le",
+    ], "$.body.vfs.metadataRecord.fields[*].encoding");
+    assertExactStrings(body.vfs.metadataRecord.fields.flatMap((entry) => entry.values), [
+      "file=1", "directory=2", "zero-for-status", "zero-for-directory", "session-stable",
+      "session-stable",
+    ], "$.body.vfs.metadataRecord.fields[*].values");
+    assertExactStrings(body.vfs.openResultRecord.fields.map((entry) => entry.name), [
+      "handle", "reserved", "fileByteLength",
+    ], "$.body.vfs.openResultRecord.fields[*].name");
+    assertExactNumbers(body.vfs.openResultRecord.fields.map((entry) => entry.offset), [
+      0, 4, 8,
+    ], "$.body.vfs.openResultRecord.fields[*].offset");
+    assertExactStrings(body.vfs.openResultRecord.fields.map((entry) => entry.encoding), [
+      "u32le", "u32le-zero", "u64le",
+    ], "$.body.vfs.openResultRecord.fields[*].encoding");
+    assertContiguousCodes(body.vfs.statuses, 0, "$.body.vfs.statuses");
+    assertExactStrings(body.vfs.statuses.map((entry) => entry.name), [
+      "ok", "not-found", "not-directory", "is-directory", "invalid-path", "buffer-too-small",
+      "out-of-range", "invalid-handle", "resource-limit", "session-closed", "internal-error",
+    ], "$.body.vfs.statuses[*].name");
+    assertExactStrings(body.vfs.noAmbientInputs, [
+      "clock", "current-directory", "environment", "locale", "random", "timezone",
+    ], "$.body.vfs.noAmbientInputs");
+    assertUniqueCodes(body.compileStatuses, "$.body.compileStatuses");
+    if (body.inputFrame.magicAscii !== "BGCCABI1" || body.inputFrame.headerByteLength !== 64 ||
+        body.inputFrame.alignmentByteLength !== 8 ||
+        body.inputFrame.maxFrameByteLength !== memory.maxInputFrameByteLength) {
+      invalid("$.body.inputFrame", "input frame does not match the fixed runtime-v1 framing contract");
+    }
+    const expectedFieldNames = [
+      "magic", "major", "minor", "headerByteLength", "totalByteLength", "flags",
+      "profileOffset", "profileByteLength", "requestOffset", "requestByteLength", "reserved",
+    ];
+    const expectedOffsets = [0, 8, 10, 12, 16, 20, 24, 28, 32, 36, 40];
+    if (body.inputFrame.fields.length !== expectedOffsets.length ||
+        body.inputFrame.fields.some((entry, index) =>
+          entry.name !== expectedFieldNames[index] || entry.offset !== expectedOffsets[index])) {
+      invalid("$.body.inputFrame.fields", "input-frame fields do not match the fixed header layout");
+    }
+    assertExactStrings(body.inputFrame.fields.map((entry) => entry.encoding), [
+      "ascii[8]", "u16le", "u16le", "u32le", "u32le", "u32le-zero",
+      "u32le-must-equal-64", "u32le", "u32le-aligned-8", "u32le", "zero[24]",
+    ], "$.body.inputFrame.fields[*].encoding");
+    if (body.inputFrame.encoding !== "little-endian-binary-header-with-canonical-json-regions" ||
+        body.inputFrame.profileRegion !== "exact-canonical-prepared-frontend-profile-json" ||
+        body.inputFrame.requestRegion !== "exact-canonical-producer-neutral-frontend-request-json" ||
+        body.inputFrame.regionOrder !== "profile-then-zero-padding-then-request-then-zero-padding" ||
+        body.inputFrame.totalLengthRule !==
+          "aligned-request-end-equals-total-byte-length-and-all-regions-are-in-bounds" ||
+        body.inputFrame.sourceBytes !== "out-of-band-through-worker-owned-vfs-session" ||
+        body.inputFrame.compileReadRule !==
+          "synchronous-complete-frame-validation-before-vfs-access") {
+      invalid("$.body.inputFrame", "input-frame region or validation semantics differ from runtime v1");
+    }
+    assertExactNumbers(body.compileStatuses.map((entry) => entry.code), [
+      0, 1, 2, 100, 101, 102, 103, 104, 105, 106,
+    ], "$.body.compileStatuses[*].code");
+    assertExactStrings(body.compileStatuses.map((entry) => entry.name), [
+      "artifact-ready", "idle", "input-allocated", "invalid-state", "invalid-argument",
+      "invalid-frame", "abi-mismatch", "vfs-error", "resource-limit", "internal-error",
+    ], "$.body.compileStatuses[*].name");
+    assertExactStrings(body.compileStatuses.map((entry) => entry.retry), [
+      "reset-then-new-invocation", "allocate-input", "compile-or-free", "reset-required",
+      "reset-required", "reset-required", "module-must-not-be-reused", "reset-required",
+      "reset-required", "module-must-not-be-reused",
+    ], "$.body.compileStatuses[*].retry");
+    if (body.lifecycle.initialState !== "idle") invalid("$.body.lifecycle.initialState", "initial state must be idle");
+    assertExactStrings(body.lifecycle.states, [
+      "idle", "input-allocated", "compiling-internal", "artifact-ready", "failed",
+    ], "$.body.lifecycle.states");
+    assertExactStrings(body.lifecycle.rules, [
+      "alloc-is-valid-only-in-idle-with-byte-length-from-1-through-max-input-frame-byte-length",
+      "only-one-live-input-allocation-is-permitted",
+      "compile-is-valid-only-for-the-exact-live-input-pointer-and-length",
+      "compile-is-synchronous-and-not-reentrant",
+      "compile-status-zero-means-one-complete-canonical-artifact-is-ready-even-when-that-artifact-rejects-source",
+      "infrastructure-failure-never-masquerades-as-a-rejected-source-artifact",
+      "free-is-valid-only-for-the-exact-live-input-pointer-and-length-and-never-for-result-memory",
+      "free-after-success-preserves-the-artifact-ready-result",
+      "result-getters-return-zero-unless-state-is-artifact-ready",
+      "result-bytes-are-immutable-until-reset",
+      "reset-releases-input-result-and-module-side-vfs-state-and-returns-to-idle",
+      "after-abi-mismatch-or-internal-error-the-worker-discards-the-module-instance-after-reading-status",
+      "wasm-trap-abort-or-out-of-memory-is-a-worker-infrastructure-failure-with-no-readable-status-guarantee",
+    ], "$.body.lifecycle.rules");
+    if (body.result.maximumByteLength !== memory.maxResultByteLength ||
+        body.result.schema !== "browsergrad.compiler.cpp-cute.frontend-artifact" ||
+        body.result.version.major !== 3 || body.result.version.minor !== 0 ||
+        body.result.encoding !== "canonical-json-bytes" ||
+        body.result.ownership !== "module-owned-worker-must-copy-before-reset" ||
+        body.result.lifetime !== "from-artifact-ready-until-reset-or-worker-termination" ||
+        body.result.emptyResult !== "forbidden-when-status-is-artifact-ready") {
+      invalid("$.body.result", "result contract does not match canonical artifact v3.0");
+    }
+    if (body.cancellation.mechanism !== "terminate-dedicated-worker" ||
+        body.cancellation.cooperativeImport !== "forbidden" ||
+        body.cancellation.reason !==
+          "synchronous-unshared-wasm-cannot-service-worker-messages-during-compile" ||
+        body.cancellation.effect !==
+          "invalidates-module-memory-input-result-vfs-handles-and-session-authority" ||
+        body.cancellation.workerReuseAfterCancellation !== "forbidden") {
+      invalid("$.body.cancellation", "runtime v1 cancellation must terminate and discard the Worker");
+    }
+  } catch (cause) {
+    if (cause instanceof CppCuteBrowserRuntimeAbiManifestError) throw cause;
+    invalid("$.body", "runtime-ABI body violates required invariants", { cause });
+  }
+}
+
+function assertContiguousCodes(
+  values: readonly { readonly code: number }[],
+  first: number,
+  path: string,
+): void {
+  if (values.some((entry, index) => entry.code !== first + index)) {
+    invalid(path, "status codes must be contiguous and ordered");
+  }
+}
+
+function assertUniqueCodes(values: readonly { readonly code: number }[], path: string): void {
+  const codes = values.map((entry) => entry.code);
+  if (new Set(codes).size !== codes.length || codes.some((code) => !Number.isSafeInteger(code) || code < 0)) {
+    invalid(path, "status codes must be unique nonnegative safe integers");
+  }
+}
+
+function assertExactStrings(actual: readonly string[], expected: readonly string[], path: string): void {
+  if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index])) {
+    invalid(path, "values do not equal the exact ordered runtime-v1 inventory");
+  }
+}
+
+function assertExactNumbers(actual: readonly number[], expected: readonly number[], path: string): void {
+  if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index])) {
+    invalid(path, "numbers do not equal the exact ordered runtime-v1 inventory");
+  }
+}
+
+async function deriveGeneratedImportAllowlistSha256(
+  body: CppCuteBrowserRuntimeAbiBodyV1,
+): Promise<string> {
+  const policy = body.hostImports.generatedImportAllowlist;
+  return hashJson({
+    domain: "browsergrad.compiler.cpp-cute.emscripten-generated-import-allowlist.v1",
+    policyId: policy.policyId,
+    exactFunctions: policy.exactFunctions,
+  }, "$.body.hostImports.generatedImportAllowlist.allowlistSha256");
+}
+
+function storedManifest(
+  prepared: PreparedCppCuteBrowserRuntimeAbiManifest,
+): StoredCppCuteBrowserRuntimeAbiManifest {
+  if (typeof prepared !== "object" || prepared === null) unverified();
+  const stored = PREPARED_MANIFESTS.get(prepared as object);
+  if (stored === undefined) unverified();
+  return stored;
+}
+
+function snapshotBytes(value: unknown): Uint8Array {
+  let inspected;
+  try {
+    inspected = inspectUnsharedPlainUint8Array(value);
+  } catch (cause) {
+    invalid("$bytes", "runtime-ABI manifest must be an unshared plain Uint8Array", { cause });
+  }
+  if (inspected.byteLength === 0) invalid("$bytes", "runtime-ABI manifest bytes must be nonempty");
+  if (inspected.byteLength > CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT) {
+    resource("$bytes", `runtime-ABI manifest exceeds ${CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT} bytes`);
+  }
+  try {
+    return copyInspectedUnsharedUint8Array(value, inspected);
+  } catch (cause) {
+    invalid("$bytes", "runtime-ABI manifest bytes became unreadable while snapshotting", { cause });
+  }
+}
+
+function normalizeOptions(options: DecodeCppCuteBrowserRuntimeAbiManifestOptions): AbortSignal | undefined {
+  let prototype: object | null;
+  let descriptors: PropertyDescriptorMap;
+  try {
+    prototype = Object.getPrototypeOf(options);
+    descriptors = Object.getOwnPropertyDescriptors(options);
+  } catch (cause) {
+    invalid("$options", "options must be an inspectable plain object", { cause });
+  }
+  if (typeof options !== "object" || options === null || prototype !== Object.prototype) {
+    invalid("$options", "options must be a plain object");
+  }
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.length > 1 || keys.some((key) => key !== "signal")) invalid("$options", "options contain unknown fields");
+  const descriptor = descriptors.signal;
+  if (descriptor !== undefined && (descriptor.enumerable !== true || !("value" in descriptor))) {
+    invalid("$options.signal", "signal must be an enumerable data property");
+  }
+  const signal = descriptor?.value as unknown;
+  if (signal !== undefined && !isAbortSignal(signal)) invalid("$options.signal", "signal must be an AbortSignal");
+  return signal;
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  if (ABORT_SIGNAL_ABORTED_GETTER === undefined) return false;
+  try {
+    return typeof ABORT_SIGNAL_ABORTED_GETTER.call(value) === "boolean";
+  } catch {
+    return false;
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal === undefined) return;
+  let aborted: unknown;
+  try {
+    aborted = ABORT_SIGNAL_ABORTED_GETTER?.call(signal);
+  } catch (cause) {
+    invalid("$options.signal", "signal is not a readable AbortSignal", { cause });
+  }
+  if (aborted === true) {
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-CANCELLED",
+      "$options.signal",
+      "runtime-ABI manifest preparation was cancelled",
+    );
+  }
+}
+
+function closedObject(value: JsonValue, keys: readonly string[], path: string, requireAll: boolean): JsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalid(path, "expected object");
+  const object = value as JsonObject;
+  for (const key of Object.keys(object)) if (!keys.includes(key)) invalid(path, `unknown field ${key}`);
+  if (requireAll) {
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(object, key)) invalid(`${path}.${key}`, "required field is missing");
+    }
+  }
+  return object;
+}
+
+function field(value: JsonObject, key: string, path: string): JsonValue {
+  if (!Object.prototype.hasOwnProperty.call(value, key)) invalid(`${path}.${key}`, "required field is missing");
+  return value[key] as JsonValue;
+}
+
+function boundedPattern(value: JsonValue, path: string, pattern: RegExp): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 128 || !pattern.test(value)) {
+    invalid(path, "string does not match required closed format");
+  }
+  return value;
+}
+
+function literal<T extends string>(value: JsonValue, expected: T, path: string): asserts value is T {
+  if (value !== expected) invalid(path, `must equal ${JSON.stringify(expected)}`);
+}
+
+function canonicalResourceBytes(value: JsonValue): Uint8Array {
+  try {
+    return canonicalJsonBytes(value, { limits: CPP_CUTE_BROWSER_RUNTIME_ABI_DECODE_LIMITS });
+  } catch (cause) {
+    if (isSchemaResourceLimit(cause)) resource("$", "canonical runtime-ABI manifest exceeds fixed limits", { cause });
+    invalid("$", "runtime-ABI manifest cannot be canonically encoded", { cause });
+  }
+}
+
+async function hashJson(value: JsonValue, path: string): Promise<string> {
+  try {
+    return await hashCanonicalJson(value, { limits: CPP_CUTE_BROWSER_RUNTIME_ABI_DECODE_LIMITS });
+  } catch (cause) {
+    if (isHashUnavailable(cause)) hashUnavailable(path, cause);
+    if (isSchemaResourceLimit(cause)) resource(path, "hash projection exceeds fixed limits", { cause });
+    invalid(path, "hash projection is invalid", { cause });
+  }
+}
+
+async function hashBytes(value: Uint8Array, path: string): Promise<string> {
+  try {
+    return await sha256Hex(value);
+  } catch (cause) {
+    if (isHashUnavailable(cause)) hashUnavailable(path, cause);
+    invalid(path, "SHA-256 calculation failed", { cause });
+  }
+}
+
+function isHashUnavailable(cause: unknown): boolean {
+  return cause instanceof Error && /Web Crypto|crypto\.subtle|SHA-256 unavailable/iu.test(cause.message);
+}
+
+function isSchemaResourceLimit(cause: unknown): boolean {
+  return cause instanceof SemanticSchemaError && cause.diagnostic.code === SCHEMA_DIAGNOSTIC_CODES.resourceLimit;
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
+  }
+  return difference === 0;
+}
+
+function invalid(path: string, message: string, options?: ErrorOptions): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-INVALID", path, message, options);
+}
+
+function unsupported(path: string, message: string): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-UNSUPPORTED-VERSION", path, message);
+}
+
+function resource(path: string, message: string, options?: ErrorOptions): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-RESOURCE-LIMIT", path, message, options);
+}
+
+function hashMismatch(path: string, message: string): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-HASH-MISMATCH", path, message);
+}
+
+function hashUnavailable(path: string, cause: unknown): never {
+  fail(
+    "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-HASH-UNAVAILABLE",
+    path,
+    "SHA-256 is unavailable",
+    { cause },
+  );
+}
+
+function unverified(): never {
+  fail(
+    "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-UNVERIFIED",
+    "$prepared",
+    "runtime-ABI manifest authority was not created by this module instance",
+  );
+}
+
+function fail(
+  code: CppCuteBrowserRuntimeAbiManifestErrorCode,
+  path: string,
+  message: string,
+  options?: ErrorOptions,
+): never {
+  throw new CppCuteBrowserRuntimeAbiManifestError(code, path, message, options);
+}

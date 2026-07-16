@@ -5,6 +5,9 @@ import {
   type CppCuteFrontendIncludeRoot,
   type CppCuteFrontendProfileV2,
 } from "../../../src/cpp_cute_frontend_profile.js";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+} from "../../../src/cpp_cute_browser_runtime_abi.js";
 import { CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 } from "../../../src/cpp_cute_aot_policy.js";
 import { deriveCppCuteFrontendArtifactId } from "../../../src/cpp_cute_frontend_artifact.js";
 import {
@@ -26,6 +29,8 @@ export const CPP_CUTE_FIXTURE_HEADER_SET_HASH = "2".repeat(64);
 export const CPP_CUTE_FIXTURE_COMPILER_HASH = "3".repeat(64);
 export const CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH = "b".repeat(64);
 export const CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH = "e".repeat(64);
+export const CPP_CUTE_FIXTURE_RUNTIME_ABI_MANIFEST_SHA256 =
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256;
 export const CPP_CUTE_FIXTURE_CONTAINER_DIGEST = `sha256:${"4".repeat(64)}`;
 export const CPP_CUTE_FIXTURE_CONTAINER_CONFIG_DIGEST = `sha256:${"1".repeat(64)}`;
 export const CPP_CUTE_FIXTURE_EXECUTION_ENVIRONMENT_HASH = "0".repeat(64);
@@ -56,6 +61,7 @@ export interface CppCuteProfileFixtureOptions {
 export interface CppCuteBrowserProfileFixtureOptions extends CppCuteProfileFixtureOptions {
   readonly assetSetSha256?: string;
   readonly buildProvenanceLockSha256?: string;
+  readonly runtimeAbiManifestSha256?: string;
 }
 
 export function createCppCuteProfileInput(
@@ -64,7 +70,7 @@ export function createCppCuteProfileInput(
   const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
-    version: { major: 2, minor: 2 },
+    version: { major: 2, minor: 3 },
     profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
     deployment: {
       mode: "ahead-of-time",
@@ -266,6 +272,8 @@ export function createCppCuteBrowserProfileInput(
       },
       compilerRuntime: {
         runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+        runtimeAbiManifestSha256:
+          options.runtimeAbiManifestSha256 ?? CPP_CUTE_FIXTURE_RUNTIME_ABI_MANIFEST_SHA256,
         wasmAddressBits: 32,
         requiredWasmFeatures: [
           "bulk-memory",
@@ -273,7 +281,6 @@ export function createCppCuteBrowserProfileInput(
           "nontrapping-fptoint",
           "sign-extension",
         ],
-        importExportContractSha256: "4".repeat(64),
         moduleHandoff: "host-verified-module-or-bytes",
         workerSideFetch: "forbidden",
         memory: {
@@ -287,7 +294,7 @@ export function createCppCuteBrowserProfileInput(
         virtualFileSystem: {
           storage: "host-backed-lazy",
           maxRetainedHostPackByteLength: 512 * 1024 * 1024,
-          maxOpenedWasmFileByteLength: 384 * 1024 * 1024,
+          maxAggregateOpenedWasmByteLength: 384 * 1024 * 1024,
         },
       },
       assetLimits: {
