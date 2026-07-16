@@ -1,0 +1,791 @@
+import {
+  encodeWireU64,
+  hashCanonicalJson,
+  sha256Hex,
+  type WireU64,
+} from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
+  copyInspectedUnsharedUint8Array,
+  inspectUnsharedPlainUint8Array,
+} from "./cpp_cute_aot_bytes.js";
+import {
+  CPP_CUTE_BROWSER_WORKER_RESULT_CONTROL_BYTE_LIMIT,
+  type CppCuteBrowserWorkerInvocationDiscardReason,
+  type PrepareCppCuteBrowserWorkerInvocationInput,
+  type ValidatedCppCuteBrowserWorkerResultFrame,
+} from "./cpp_cute_browser_worker_protocol.js";
+
+export const CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL =
+  "browsergrad.compiler.cpp-cute.browser-worker-controller@1";
+export const CPP_CUTE_BROWSER_WORKER_RUNTIME_IMPLEMENTATION_STATUS =
+  "missing-self-contained-package-worker-and-transferred-emscripten-factory";
+
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
+const INVOCATION_ID = /^bg\.cpp\.browser-worker-invocation\.sha256\.[0-9a-f]{64}$/u;
+const REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
+
+export interface CppCuteBrowserWorkerControllerLaunchMessage {
+  readonly kind: "browsergrad-cpp-cute-worker-launch";
+  readonly version: 1;
+  readonly controllerProtocol: typeof CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL;
+  readonly invocationId: string;
+  readonly invocationNonceSha256: string;
+  readonly invocationBytes: Uint8Array;
+  readonly profileRegionBytes: Uint8Array;
+  readonly requestRegionBytes: Uint8Array;
+  readonly clangWasmBytes: Uint8Array;
+  readonly sourceSnapshots: readonly {
+    readonly virtualPath: string;
+    readonly bytes: Uint8Array;
+  }[];
+}
+
+export interface CppCuteBrowserWorkerControllerTerminalMessage {
+  readonly kind: "browsergrad-cpp-cute-worker-terminal";
+  readonly version: 1;
+  readonly controllerProtocol: typeof CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL;
+  readonly invocationId: string;
+  readonly invocationNonceSha256: string;
+  readonly controlBytes: Uint8Array;
+  readonly artifactBytes: Uint8Array;
+}
+
+export interface CppCuteBrowserWorkerPlatformWorker {
+  postMessage(message: CppCuteBrowserWorkerControllerLaunchMessage, transfer: Transferable[]): void;
+  addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void;
+  addEventListener(type: "error" | "messageerror", listener: (event: unknown) => void): void;
+  removeEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void;
+  removeEventListener(type: "error" | "messageerror", listener: (event: unknown) => void): void;
+  terminate(): void;
+}
+
+/** Exact effect surface used only by the disjoint test issuer. */
+export interface CppCuteBrowserWorkerControllerTestPlatform {
+  readonly createModuleBlobUrl: (verifiedWorkerModuleBytes: Uint8Array) => string;
+  readonly createModuleWorker: (blobUrl: string, workerName: string) => CppCuteBrowserWorkerPlatformWorker;
+  readonly revokeModuleBlobUrl: (blobUrl: string) => void;
+  readonly monotonicNowMilliseconds: () => number;
+  readonly setHostTimeout: (callback: () => void, delayMilliseconds: number) => unknown;
+  readonly clearHostTimeout: (handle: unknown) => void;
+}
+
+declare const observedExecutionBrand: unique symbol;
+
+export interface ObservedCppCuteBrowserWorkerExecution {
+  readonly [observedExecutionBrand]: true;
+  readonly authority: "host-owned-browser-worker-execution";
+  readonly evidenceId: string;
+  readonly invocationId: string;
+  readonly profileHash: string;
+  readonly requestId: string;
+  readonly workerModuleSha256: string;
+  readonly invocationNonceSha256: string;
+  readonly hostElapsedMicroseconds: WireU64;
+  readonly acceptedTerminalMessages: "1";
+  readonly workerExecutionObserved: true;
+  readonly workerLifecycle: "terminate-called-not-reused-next-invocation-creates-replacement";
+  readonly blobUrlRevoked: true;
+  readonly loweringAuthorityMinted: false;
+}
+
+export interface ObservedCppCuteBrowserWorkerExecutionRecord {
+  readonly validatedResultFrame: ValidatedCppCuteBrowserWorkerResultFrame;
+  readonly productionAuthority: true;
+}
+
+export interface CppCuteBrowserWorkerTestSimulationRecord {
+  readonly testValidationId: string;
+  readonly simulationOnly: true;
+}
+
+declare const testSimulationBrand: unique symbol;
+
+/** Test-platform lifecycle simulation only; it is never execution evidence. */
+export interface CppCuteBrowserWorkerTestSimulation {
+  readonly [testSimulationBrand]: true;
+  readonly authority: "test-platform-simulation";
+  readonly simulationId: string;
+  readonly invocationId: string;
+  readonly testValidationId: string;
+  readonly simulatedElapsedMicroseconds: WireU64;
+  readonly workerExecutionObserved: false;
+}
+
+export interface ExecuteCppCuteBrowserWorkerOptions {
+  readonly signal?: AbortSignal;
+}
+
+export type CppCuteBrowserWorkerControllerErrorCode =
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-INVALID"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CAPABILITY"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-MODULE-MISMATCH"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CANCELLED"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TIMEOUT"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-ERROR"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-UNVERIFIED";
+
+export class CppCuteBrowserWorkerControllerError extends Error {
+  constructor(
+    readonly code: CppCuteBrowserWorkerControllerErrorCode,
+    readonly path: string,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(`${code}: ${message}`, options);
+    this.name = "CppCuteBrowserWorkerControllerError";
+  }
+}
+
+interface InvocationAdapter {
+  readonly invocationId: string;
+  readonly profileHash: string;
+  readonly requestId: string;
+  readonly invocationNonceSha256: string;
+  readonly workerModuleSha256: string;
+  readonly workerModuleByteLength: number;
+  readonly maxWallTimeMs: number;
+  readonly maxArtifactByteLength: number;
+  readonly copyLaunch: () => LaunchCopies;
+  readonly validateTerminal: (
+    controlBytes: Uint8Array,
+    artifactBytes: Uint8Array,
+  ) => Promise<ControllerTerminalValidation>;
+  readonly discard: (reason: CppCuteBrowserWorkerInvocationDiscardReason) => void;
+}
+
+interface LaunchCopies {
+  readonly workerModuleBytes: Uint8Array;
+  readonly invocationBytes: Uint8Array;
+  readonly profileRegionBytes: Uint8Array;
+  readonly requestRegionBytes: Uint8Array;
+  readonly clangWasmBytes: Uint8Array;
+  readonly sourceSnapshots: readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[];
+}
+
+interface ControllerTerminalValidation {
+  readonly validationId: string;
+}
+
+const LIVE_EXECUTIONS = new WeakMap<object, ObservedCppCuteBrowserWorkerExecutionRecord>();
+const TEST_EXECUTIONS = new WeakMap<object, CppCuteBrowserWorkerTestSimulationRecord>();
+
+/**
+ * Production is fail-closed before inspecting caller input or ambient browser
+ * globals. Future enablement must bind an internally pinned package Worker
+ * module; a caller profile/module byte pair is not package-code authority.
+ */
+export async function executeCppCuteBrowserWorker(
+  _input: PrepareCppCuteBrowserWorkerInvocationInput,
+  _options: ExecuteCppCuteBrowserWorkerOptions = {},
+): Promise<ObservedCppCuteBrowserWorkerExecution> {
+  capability(
+    "$.runtime",
+    "production browser Worker execution is disabled while the self-contained package Worker and transferred Emscripten factory are missing; enabling it requires internally pinned package module bytes and cannot trust caller profile bytes",
+  );
+}
+
+export function unwrapObservedCppCuteBrowserWorkerExecution(
+  observed: ObservedCppCuteBrowserWorkerExecution,
+): ObservedCppCuteBrowserWorkerExecutionRecord {
+  return unwrapProductionExecution(observed);
+}
+
+declare const testInvocationBrand: unique symbol;
+
+export interface PreparedCppCuteBrowserWorkerControllerTestInvocation {
+  readonly [testInvocationBrand]: true;
+  readonly invocationId: string;
+}
+
+export interface PrepareCppCuteBrowserWorkerControllerTestInvocationInput {
+  readonly invocationId: string;
+  readonly profileHash: string;
+  readonly requestId: string;
+  readonly invocationNonceSha256: string;
+  readonly workerModuleBytes: Uint8Array;
+  readonly invocationBytes: Uint8Array;
+  readonly profileRegionBytes: Uint8Array;
+  readonly requestRegionBytes: Uint8Array;
+  readonly clangWasmBytes: Uint8Array;
+  readonly sourceSnapshots: readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[];
+  readonly maxWallTimeMs: number;
+  readonly expectedControlBytes: Uint8Array;
+  readonly expectedArtifactBytes: Uint8Array;
+}
+
+interface StoredTestInvocation {
+  readonly adapter: InvocationAdapter;
+}
+
+const TEST_INVOCATIONS = new WeakMap<object, StoredTestInvocation>();
+
+/** Test-only issuer. It is deliberately unable to populate LIVE_EXECUTIONS. */
+export async function __prepareCppCuteBrowserWorkerControllerInvocationForTest(
+  input: PrepareCppCuteBrowserWorkerControllerTestInvocationInput,
+): Promise<PreparedCppCuteBrowserWorkerControllerTestInvocation> {
+  const values = exactDataRecord(input, "$.input", [
+    "invocationId", "profileHash", "requestId", "invocationNonceSha256", "workerModuleBytes",
+    "invocationBytes", "profileRegionBytes", "requestRegionBytes", "clangWasmBytes",
+    "sourceSnapshots", "maxWallTimeMs", "expectedControlBytes", "expectedArtifactBytes",
+  ]);
+  const invocationId = pattern(values["invocationId"], INVOCATION_ID, "$.input.invocationId");
+  const profileHash = pattern(values["profileHash"], SHA256_HEX, "$.input.profileHash");
+  const requestId = pattern(values["requestId"], REQUEST_ID, "$.input.requestId");
+  const nonce = pattern(values["invocationNonceSha256"], SHA256_HEX, "$.input.invocationNonceSha256");
+  const workerModuleBytes = snapshotBytes(values["workerModuleBytes"], "$.input.workerModuleBytes");
+  const launchCopies = Object.freeze({
+    workerModuleBytes,
+    invocationBytes: snapshotBytes(values["invocationBytes"], "$.input.invocationBytes"),
+    profileRegionBytes: snapshotBytes(values["profileRegionBytes"], "$.input.profileRegionBytes"),
+    requestRegionBytes: snapshotBytes(values["requestRegionBytes"], "$.input.requestRegionBytes"),
+    clangWasmBytes: snapshotBytes(values["clangWasmBytes"], "$.input.clangWasmBytes"),
+    sourceSnapshots: snapshotTestSources(values["sourceSnapshots"]),
+  });
+  const expectedControl = snapshotBytes(values["expectedControlBytes"], "$.input.expectedControlBytes");
+  const expectedArtifact = snapshotBytes(values["expectedArtifactBytes"], "$.input.expectedArtifactBytes");
+  const maxWallTimeMs = positiveInteger(values["maxWallTimeMs"], "$.input.maxWallTimeMs");
+  const workerModuleSha256 = await sha256Hex(workerModuleBytes);
+  let started = false;
+  let consumed = false;
+  const adapter: InvocationAdapter = Object.freeze({
+    invocationId,
+    profileHash,
+    requestId,
+    invocationNonceSha256: nonce,
+    workerModuleSha256,
+    workerModuleByteLength: workerModuleBytes.byteLength,
+    maxWallTimeMs,
+    maxArtifactByteLength: Math.max(expectedArtifact.byteLength, 1),
+    copyLaunch: () => {
+      if (started) terminal("$.testInvocation", "test invocation was already started");
+      started = true;
+      return copyLaunch(launchCopies);
+    },
+    validateTerminal: async (controlBytes: Uint8Array, artifactBytes: Uint8Array) => {
+      if (consumed) terminal("$.testInvocation", "test invocation was already consumed");
+      consumed = true;
+      if (!equalBytes(controlBytes, expectedControl) || !equalBytes(artifactBytes, expectedArtifact)) {
+        terminal("$.terminal", "test terminal bytes differ from the separately prepared expectation");
+      }
+      return Object.freeze({
+        validationId: `bg.cpp.browser-worker-controller-test-frame.sha256.${await sha256Hex(controlBytes)}`,
+      });
+    },
+    discard: () => {
+      if (consumed) terminal("$.testInvocation", "test invocation was already consumed");
+      consumed = true;
+    },
+  });
+  const prepared = Object.freeze({ invocationId }) as PreparedCppCuteBrowserWorkerControllerTestInvocation;
+  TEST_INVOCATIONS.set(prepared, Object.freeze({ adapter }));
+  return prepared;
+}
+
+export async function __executeCppCuteBrowserWorkerWithPlatformForTest(
+  invocation: PreparedCppCuteBrowserWorkerControllerTestInvocation,
+  platform: CppCuteBrowserWorkerControllerTestPlatform,
+  options: ExecuteCppCuteBrowserWorkerOptions = {},
+): Promise<CppCuteBrowserWorkerTestSimulation> {
+  const stored = testInvocation(invocation);
+  return executeWithPlatform(
+    stored.adapter,
+    exactTestPlatform(platform),
+    normalizeOptions(options),
+  );
+}
+
+export function __unwrapCppCuteBrowserWorkerTestSimulationForTest(
+  simulation: CppCuteBrowserWorkerTestSimulation,
+): CppCuteBrowserWorkerTestSimulationRecord {
+  return unwrapTestSimulation(simulation);
+}
+
+async function executeWithPlatform(
+  invocation: InvocationAdapter,
+  platform: CppCuteBrowserWorkerControllerTestPlatform,
+  signal: AbortSignal | undefined,
+): Promise<CppCuteBrowserWorkerTestSimulation> {
+  throwIfAborted(signal, () => invocation.discard("caller-cancelled"));
+  const launch = invocation.copyLaunch();
+  const actualWorkerHash = await sha256Hex(launch.workerModuleBytes);
+  if (launch.workerModuleBytes.byteLength !== invocation.workerModuleByteLength ||
+      actualWorkerHash !== invocation.workerModuleSha256) {
+    invocation.discard("worker-unavailable");
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-MODULE-MISMATCH",
+      "$.workerModuleBytes",
+      "package-owned Worker bytes differ before Blob Worker creation",
+    );
+  }
+  throwIfAborted(signal, () => invocation.discard("caller-cancelled"));
+
+  let start: number;
+  try {
+    start = checkedNow(platform.monotonicNowMilliseconds(), "$.hostTime.start");
+  } catch (cause) {
+    invocation.discard("worker-unavailable");
+    throw cause;
+  }
+
+  let blobUrl: string | undefined;
+  let worker: CppCuteBrowserWorkerPlatformWorker | undefined;
+  try {
+    blobUrl = platform.createModuleBlobUrl(new Uint8Array(launch.workerModuleBytes));
+    if (typeof blobUrl !== "string" || blobUrl.length === 0) capability("$.blobUrl", "Blob URL creation failed");
+    worker = checkedWorker(platform.createModuleWorker(
+      blobUrl,
+      `browsergrad-cpp-cute-${invocation.invocationId.slice(-16)}`,
+    ));
+  } catch (cause) {
+    if (blobUrl !== undefined) tryRevoke(platform, blobUrl);
+    invocation.discard("worker-unavailable");
+    if (cause instanceof CppCuteBrowserWorkerControllerError) throw cause;
+    capability("$.worker", "verified Blob module Worker creation failed", { cause });
+  }
+
+  const ownedWorker = worker;
+  const ownedBlobUrl = blobUrl;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: unknown;
+    let terminalStarted = false;
+
+    const cleanup = (): Error | undefined => {
+      let cleanupError: Error | undefined;
+      if (timer !== undefined) {
+        try { platform.clearHostTimeout(timer); } catch (cause) {
+          cleanupError = controllerError("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP", "$.timer", "host timer cleanup failed", cause);
+        }
+      }
+      try { ownedWorker.removeEventListener("message", onMessage); } catch (cause) {
+        cleanupError ??= controllerError("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP", "$.worker", "message-listener cleanup failed", cause);
+      }
+      try { ownedWorker.removeEventListener("error", onError); } catch (cause) {
+        cleanupError ??= controllerError("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP", "$.worker", "error-listener cleanup failed", cause);
+      }
+      try { ownedWorker.removeEventListener("messageerror", onMessageError); } catch (cause) {
+        cleanupError ??= controllerError("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP", "$.worker", "messageerror-listener cleanup failed", cause);
+      }
+      try { signal?.removeEventListener("abort", onAbort); } catch (cause) {
+        cleanupError ??= controllerError("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP", "$.signal", "abort-listener cleanup failed", cause);
+      }
+      try { ownedWorker.terminate(); } catch (cause) {
+        cleanupError ??= controllerError("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP", "$.worker", "Worker termination failed", cause);
+      }
+      try { platform.revokeModuleBlobUrl(ownedBlobUrl); } catch (cause) {
+        cleanupError ??= controllerError("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP", "$.blobUrl", "Blob URL revocation failed", cause);
+      }
+      return cleanupError;
+    };
+
+    const failTerminal = (
+      error: Error,
+      reason: CppCuteBrowserWorkerInvocationDiscardReason,
+    ): void => {
+      if (settled) return;
+      settled = true;
+      const cleanupError = cleanup();
+      if (!terminalStarted) {
+        try { invocation.discard(reason); } catch (discardError) {
+          reject(discardError);
+          return;
+        }
+      }
+      reject(cleanupError ?? error);
+    };
+
+    const onMessage = (event: { readonly data: unknown }): void => {
+      if (settled) return;
+      settled = true;
+      let terminalMessage: CppCuteBrowserWorkerControllerTerminalMessage;
+      let end: number;
+      try {
+        end = checkedNow(platform.monotonicNowMilliseconds(), "$.hostTime.terminal");
+        if (end - start > invocation.maxWallTimeMs) {
+          settled = false;
+          failTerminal(controllerError(
+            "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TIMEOUT",
+            "$.hostTime.terminal",
+            "owned Worker terminal message arrived after the absolute prepared wall-time deadline",
+          ), "caller-timeout");
+          return;
+        }
+        terminalMessage = parseTerminalMessage(event.data, invocation);
+      } catch (cause) {
+        settled = false;
+        failTerminal(asControllerTerminalError(cause), "malformed-frame");
+        return;
+      }
+      const cleanupError = cleanup();
+      if (cleanupError !== undefined) {
+        try { invocation.discard("worker-unavailable"); } catch { /* preserve cleanup failure */ }
+        reject(cleanupError);
+        return;
+      }
+      terminalStarted = true;
+      void invocation.validateTerminal(terminalMessage.controlBytes, terminalMessage.artifactBytes)
+        .then(async (validated) => {
+          const elapsed = elapsedMicroseconds(start, end);
+          const simulationHash = await hashCanonicalJson({
+            domain: "browsergrad.compiler.cpp-cute.browser-worker-controller-test-simulation.v1",
+            invocationId: invocation.invocationId,
+            validationId: validated.validationId,
+            simulatedElapsedMicroseconds: elapsed,
+          });
+          const simulation = Object.freeze({
+            authority: "test-platform-simulation",
+            simulationId: `bg.cpp.browser-worker-test-simulation.sha256.${simulationHash}`,
+            invocationId: invocation.invocationId,
+            testValidationId: validated.validationId,
+            simulatedElapsedMicroseconds: elapsed,
+            workerExecutionObserved: false,
+          }) as CppCuteBrowserWorkerTestSimulation;
+          TEST_EXECUTIONS.set(simulation, Object.freeze({
+            testValidationId: validated.validationId,
+            simulationOnly: true,
+          }));
+          resolve(simulation);
+        })
+        .catch((cause: unknown) => reject(cause));
+    };
+    const onError = (): void => failTerminal(controllerError(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-ERROR",
+      "$.worker.error",
+      "owned Worker emitted an error before its terminal result",
+    ), "worker-unavailable");
+    const onMessageError = (): void => failTerminal(controllerError(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+      "$.worker.messageerror",
+      "owned Worker emitted an unreadable terminal message",
+    ), "malformed-frame");
+    const onAbort = (): void => failTerminal(controllerError(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CANCELLED",
+      "$.signal",
+      "browser Worker invocation was cancelled",
+    ), "caller-cancelled");
+
+    try {
+      ownedWorker.addEventListener("message", onMessage);
+      ownedWorker.addEventListener("error", onError);
+      ownedWorker.addEventListener("messageerror", onMessageError);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted === true) {
+        onAbort();
+        return;
+      }
+      timer = platform.setHostTimeout(() => failTerminal(controllerError(
+        "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TIMEOUT",
+        "$.hostTimer",
+        "owned host timer reached the prepared frontend wall-time ceiling",
+      ), "caller-timeout"), invocation.maxWallTimeMs);
+      if (timer === undefined) invalid("$.hostTimer", "platform returned no host timer handle");
+      if (settled) {
+        try { platform.clearHostTimeout(timer); } catch { /* terminal failure remains primary */ }
+        return;
+      }
+      const message = createLaunchMessage(invocation, launch);
+      ownedWorker.postMessage(message, transferList(message));
+    } catch (cause) {
+      failTerminal(controllerError(
+        "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-ERROR",
+        "$.worker",
+        "owned Worker launch failed",
+        cause,
+      ), "worker-unavailable");
+    }
+  });
+}
+
+function createLaunchMessage(
+  invocation: InvocationAdapter,
+  launch: LaunchCopies,
+): CppCuteBrowserWorkerControllerLaunchMessage {
+  return {
+    kind: "browsergrad-cpp-cute-worker-launch",
+    version: 1,
+    controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
+    invocationId: invocation.invocationId,
+    invocationNonceSha256: invocation.invocationNonceSha256,
+    invocationBytes: launch.invocationBytes,
+    profileRegionBytes: launch.profileRegionBytes,
+    requestRegionBytes: launch.requestRegionBytes,
+    clangWasmBytes: launch.clangWasmBytes,
+    sourceSnapshots: launch.sourceSnapshots,
+  };
+}
+
+function transferList(message: CppCuteBrowserWorkerControllerLaunchMessage): Transferable[] {
+  return [
+    message.invocationBytes.buffer,
+    message.profileRegionBytes.buffer,
+    message.requestRegionBytes.buffer,
+    message.clangWasmBytes.buffer,
+    ...message.sourceSnapshots.map((source) => source.bytes.buffer),
+  ];
+}
+
+function parseTerminalMessage(
+  value: unknown,
+  invocation: InvocationAdapter,
+): CppCuteBrowserWorkerControllerTerminalMessage {
+  const data = exactDataRecord(value, "$.terminal", [
+    "kind", "version", "controllerProtocol", "invocationId", "invocationNonceSha256",
+    "controlBytes", "artifactBytes",
+  ]);
+  if (data["kind"] !== "browsergrad-cpp-cute-worker-terminal" || data["version"] !== 1 ||
+      data["controllerProtocol"] !== CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL) {
+    terminal("$.terminal", "terminal envelope differs from controller protocol v1");
+  }
+  if (data["invocationId"] !== invocation.invocationId ||
+      data["invocationNonceSha256"] !== invocation.invocationNonceSha256) {
+    terminal("$.terminal.invocationId", "terminal envelope differs from the controller-owned invocation or nonce");
+  }
+  return Object.freeze({
+    kind: "browsergrad-cpp-cute-worker-terminal",
+    version: 1,
+    controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
+    invocationId: invocation.invocationId,
+    invocationNonceSha256: invocation.invocationNonceSha256,
+    controlBytes: snapshotBytesWithinLimit(
+      data["controlBytes"],
+      "$.terminal.controlBytes",
+      CPP_CUTE_BROWSER_WORKER_RESULT_CONTROL_BYTE_LIMIT,
+    ),
+    artifactBytes: snapshotBytesWithinLimit(
+      data["artifactBytes"],
+      "$.terminal.artifactBytes",
+      invocation.maxArtifactByteLength,
+    ),
+  });
+}
+
+function exactTestPlatform(value: unknown): CppCuteBrowserWorkerControllerTestPlatform {
+  const data = exactDataRecord(value, "$.platform", [
+    "createModuleBlobUrl", "createModuleWorker", "revokeModuleBlobUrl",
+    "monotonicNowMilliseconds", "setHostTimeout", "clearHostTimeout",
+  ]);
+  for (const [key, member] of Object.entries(data)) {
+    if (typeof member !== "function") invalid(`$.platform.${key}`, "platform member must be a function data property");
+  }
+  return data as unknown as CppCuteBrowserWorkerControllerTestPlatform;
+}
+
+function checkedWorker(value: unknown): CppCuteBrowserWorkerPlatformWorker {
+  if (typeof value !== "object" || value === null) capability("$.worker", "platform did not create a Worker instance");
+  for (const key of ["postMessage", "addEventListener", "removeEventListener", "terminate"] as const) {
+    if (typeof (value as Record<string, unknown>)[key] !== "function") {
+      capability(`$.worker.${key}`, "Worker instance lacks a required lifecycle operation");
+    }
+  }
+  return value as CppCuteBrowserWorkerPlatformWorker;
+}
+
+function testInvocation(
+  value: PreparedCppCuteBrowserWorkerControllerTestInvocation,
+): StoredTestInvocation {
+  if (typeof value !== "object" || value === null) unverified("$.testInvocation");
+  const stored = TEST_INVOCATIONS.get(value as object);
+  if (stored === undefined) unverified("$.testInvocation");
+  return stored;
+}
+
+function unwrapProductionExecution(
+  value: ObservedCppCuteBrowserWorkerExecution,
+): ObservedCppCuteBrowserWorkerExecutionRecord {
+  if (typeof value !== "object" || value === null) unverified("$.executionEvidence");
+  const stored = LIVE_EXECUTIONS.get(value as object);
+  if (stored === undefined) unverified("$.executionEvidence");
+  return stored;
+}
+
+function unwrapTestSimulation(
+  value: CppCuteBrowserWorkerTestSimulation,
+): CppCuteBrowserWorkerTestSimulationRecord {
+  if (typeof value !== "object" || value === null) unverified("$.testSimulation");
+  const stored = TEST_EXECUTIONS.get(value as object);
+  if (stored === undefined) unverified("$.testSimulation");
+  return stored;
+}
+
+function copyLaunch(value: LaunchCopies): LaunchCopies {
+  return {
+    workerModuleBytes: new Uint8Array(value.workerModuleBytes),
+    invocationBytes: new Uint8Array(value.invocationBytes),
+    profileRegionBytes: new Uint8Array(value.profileRegionBytes),
+    requestRegionBytes: new Uint8Array(value.requestRegionBytes),
+    clangWasmBytes: new Uint8Array(value.clangWasmBytes),
+    sourceSnapshots: value.sourceSnapshots.map((source) => ({
+      virtualPath: source.virtualPath,
+      bytes: new Uint8Array(source.bytes),
+    })),
+  };
+}
+
+function snapshotTestSources(value: unknown): readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[] {
+  if (!Array.isArray(value)) invalid("$.input.sourceSnapshots", "expected source snapshot array");
+  return Object.freeze(value.map((entry, index) => {
+    const data = exactDataRecord(entry, `$.input.sourceSnapshots[${index}]`, ["virtualPath", "bytes"]);
+    if (typeof data["virtualPath"] !== "string" || !data["virtualPath"].startsWith("/")) {
+      invalid(`$.input.sourceSnapshots[${index}].virtualPath`, "expected absolute virtual path");
+    }
+    return Object.freeze({
+      virtualPath: data["virtualPath"],
+      bytes: snapshotBytes(data["bytes"], `$.input.sourceSnapshots[${index}].bytes`),
+    });
+  }));
+}
+
+function snapshotBytes(value: unknown, path: string): Uint8Array {
+  const inspected = inspectBytes(value, path);
+  try {
+    return copyInspectedUnsharedUint8Array(value, inspected);
+  } catch (cause) {
+    invalid(path, "bytes became unreadable while snapshotting", { cause });
+  }
+}
+
+function snapshotBytesWithinLimit(value: unknown, path: string, maximumByteLength: number): Uint8Array {
+  const inspected = inspectBytes(value, path);
+  if (inspected.byteLength > maximumByteLength) {
+    terminal(path, `terminal bytes exceed the pre-copy ceiling ${maximumByteLength}`);
+  }
+  try {
+    return copyInspectedUnsharedUint8Array(value, inspected);
+  } catch (cause) {
+    invalid(path, "bytes became unreadable while snapshotting", { cause });
+  }
+}
+
+function inspectBytes(value: unknown, path: string): ReturnType<typeof inspectUnsharedPlainUint8Array> {
+  try {
+    return inspectUnsharedPlainUint8Array(value);
+  } catch (cause) {
+    invalid(path, "expected unshared plain Uint8Array bytes", { cause });
+  }
+}
+
+function exactDataRecord(value: unknown, path: string, keys: readonly string[]): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null ||
+      (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
+    invalid(path, "expected plain data object");
+  }
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== keys.length || ownKeys.some((key) => typeof key !== "string" || !keys.includes(key))) {
+    invalid(path, `expected exactly data fields ${keys.join(", ")}`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
+      invalid(`${path}.${key}`, "field must be one enumerable data property");
+    }
+    result[key] = descriptor.value;
+  }
+  return Object.freeze(result);
+}
+
+function normalizeOptions(options: ExecuteCppCuteBrowserWorkerOptions): AbortSignal | undefined {
+  const optionKeys = Object.prototype.hasOwnProperty.call(options, "signal") ? ["signal"] : [];
+  const data = exactDataRecord(options, "$.options", optionKeys);
+  const signal = data["signal"];
+  if (signal === undefined) return undefined;
+  if (!(signal instanceof AbortSignal)) invalid("$.options.signal", "expected AbortSignal");
+  return signal;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, beforeThrow?: () => void): void {
+  if (signal?.aborted !== true) return;
+  beforeThrow?.();
+  fail(
+    "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CANCELLED",
+    "$.signal",
+    "browser Worker invocation was cancelled",
+  );
+}
+
+function checkedNow(value: number, path: string): number {
+  if (!Number.isFinite(value) || value < 0) invalid(path, "host monotonic time must be finite and nonnegative");
+  return value;
+}
+
+function elapsedMicroseconds(start: number, end: number): WireU64 {
+  if (end < start) invalid("$.hostTime", "host monotonic time moved backwards");
+  return encodeWireU64(BigInt(Math.ceil((end - start) * 1_000)));
+}
+
+function positiveInteger(value: unknown, path: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) invalid(path, "expected positive safe integer");
+  return value as number;
+}
+
+function pattern(value: unknown, expected: RegExp, path: string): string {
+  if (typeof value !== "string" || !expected.test(value)) invalid(path, `string does not match ${expected.source}`);
+  return value;
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) difference |= left[index]! ^ right[index]!;
+  return difference === 0;
+}
+
+function checkedCause(cause: unknown): ErrorOptions | undefined {
+  return cause === undefined ? undefined : { cause };
+}
+
+function controllerError(
+  code: CppCuteBrowserWorkerControllerErrorCode,
+  path: string,
+  message: string,
+  cause?: unknown,
+): CppCuteBrowserWorkerControllerError {
+  return new CppCuteBrowserWorkerControllerError(code, path, message, checkedCause(cause));
+}
+
+function asControllerTerminalError(cause: unknown): CppCuteBrowserWorkerControllerError {
+  return cause instanceof CppCuteBrowserWorkerControllerError
+    ? cause
+    : controllerError(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+      "$.terminal",
+      "owned Worker terminal envelope is invalid",
+      cause,
+    );
+}
+
+function tryRevoke(platform: CppCuteBrowserWorkerControllerTestPlatform, blobUrl: string): void {
+  try { platform.revokeModuleBlobUrl(blobUrl); } catch { /* creation failure remains primary */ }
+}
+
+function invalid(path: string, message: string, options?: ErrorOptions): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-INVALID", path, message, options);
+}
+
+function capability(path: string, message: string, options?: ErrorOptions): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CAPABILITY", path, message, options);
+}
+
+function terminal(path: string, message: string, options?: ErrorOptions): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL", path, message, options);
+}
+
+function unverified(path: string): never {
+  fail(
+    "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-UNVERIFIED",
+    path,
+    "value is not an opaque execution authority from the selected issuer",
+  );
+}
+
+function fail(
+  code: CppCuteBrowserWorkerControllerErrorCode,
+  path: string,
+  message: string,
+  options?: ErrorOptions,
+): never {
+  throw new CppCuteBrowserWorkerControllerError(code, path, message, options);
+}
