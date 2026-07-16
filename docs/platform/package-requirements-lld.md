@@ -646,9 +646,14 @@ driver, or execution of user-produced code. A reproducible build MAY run in a
 pinned container; that is a maintainer/build-time input, never a browser or
 end-user runtime dependency.
 
-The implementation uses a custom `FrontendAction`/AST consumer and an
-in-memory LLVM VFS. It does not depend on an unofficial prebuilt browser Clang
-distribution. Release evidence therefore owns the LLVM revision, Emscripten
+The implementation uses a custom `FrontendAction`/AST consumer and a custom
+`llvm::vfs::FileSystem` with no physical/ambient fallback. The browser-local
+profile materializes verified files lazily from host-owned packs into the
+Worker's WASM memory; it does not eagerly duplicate the complete mounted file
+universe in linear memory. One Worker-execution session owns aggregate opened-
+file metering, transfer/disposal, and cancellation. It does not depend on an
+unofficial prebuilt browser Clang distribution. Release evidence therefore
+owns the LLVM revision, Emscripten
 revision, native TableGen tools, builder image, patches, build flags, source
 epoch, license inventory, and reproducibility proof. The selected profile owns
 an exact file-level license/notice allowlist for every distributed asset. It

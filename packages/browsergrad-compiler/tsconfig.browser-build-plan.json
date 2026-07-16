@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "scripts/cpp_cute_browser_build/cpp_cute_browser_build_plan.mjs",
+    "scripts/cpp_cute_browser_build/cpp_cute_browser_build_plan.d.mts",
+    "scripts/cpp_cute_browser_build/cpp_cute_browser_build_plan.test.ts",
+    "scripts/cpp_cute_browser_build/vitest.config.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}

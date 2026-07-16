@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-17
-- **Current implementation slice:** Gate 3 browser asset acquisition and VFS installation
+- **Current implementation slice:** Gate 3 pinned Clang-WASM build inputs and deterministic planner
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -33,7 +33,7 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
 | Gate 2 — multi-frontend, multi-backend view slice | `verified` | Semantic-core `0.2.0` owns verified view-copy meaning, shared specialization, and the sole canonical frontend construction sink. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix. Compiler L1 preserves its six-case non-padded contract; sibling L2 binds the exact verified operation and proves rank-2/rank-3 guarded padding through CPU, structured IR, WGSL, and actual WebGPU. JIT `0.9.0` emits a closed typed permutation request and executes the same canonical operation through materializing/resident production routes without recovering semantic args from the frozen plan. All strict lanes passed from one clean detached worktree at exact source revision `aa605421410e9d4190d8939c24b1057731111231`. | None for the initial Gate 2 profile. Release CI must repeat the exact-source lanes before publication; registry publication is a separate release operation. | Exact clean-source Apple Metal 3 records: compiler L2 3 cases, compiler L1 6 cases, kernels 9 cases, and JIT 2 cases; compiler `verify:compiler` passed 35 files/1004 tests; release package gate passed 19 hostile-archive and 35 Node security tests plus packed/fresh consumers; combined publish guards accepted only exact L1/L2/JIT/kernels markers. |
-| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Browser-local Clang-WASM is the primary portable-product producer. Closed AOT/browser profiles, deployment-versus-compilation identity, a producer-neutral local-source request, source-independent available-header profiles, a distinct compiler-runtime ABI, strict browser asset/VFS-pack authorities, common lowering authorization, and an explicit CUDA device-extraction/host-validation contract now exist. Optional AOT composes around that same request and artifact through run metadata, a host-derived request binding, receipt, and detached attestation; it owns no second source-intent authority. The device pass exclusively owns the canonical semantic graph; host ABI is keyed through content-derived canonical source-entity records and cannot reference device graph IDs. Successful passes must report the same nonempty content-derived selected-root projection; source domains derive from pass observations plus ABI ownership. Each pass owns its observed VFS closure and exact diagnostics. Same-origin redirect-free acquisition, exact length/hash verification, cache rehash/admission, manifest-complete pack binding, collision-free mount construction, retained-pack accounting, cancellation, and typed failure now mint separate opaque host authorities. Existing source-spelling CuTe adapters remain frozen. All browser hashes/assets remain synthetic: no tracked Clang-WASM build, worker-owned aggregate lazy-VFS session, worker invocation/result/evidence, browser authorization adapter, browser-produced artifact, real CuTe source proof, dynamic tensor/storage meaning, or browser-local source-compatibility evidence exists. Docker/native contracts remain optional synthetic CI/reference infrastructure only. | Close exact build-provenance/license authority; build/pin the LibTooling extractor and full declared header packs; implement worker-owned aggregate lazy-VFS and worker evidence; emit the canonical artifact from unmodified source in-browser; then prove Gate 2 semantic convergence, dynamic tensor copy, and required real WebGPU execution. | Gate 2 exact-source baseline at `aa605421`; asset acquisition/install focused suite 3 files/30 tests; full current-worktree compiler gate 52 files/1172 tests plus optional Docker 2 files/96 tests; release-package gate; zero browser-local C++ producer executions. |
+| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Browser-local Clang-WASM is the primary portable-product producer. Closed AOT/browser profiles, deployment-versus-compilation identity, a producer-neutral local-source request, source-independent available-header profiles, a distinct compiler-runtime ABI, strict browser asset/VFS-pack authorities, common lowering authorization, and an explicit CUDA device-extraction/host-validation contract now exist. Optional AOT composes around that same request and artifact through run metadata, a host-derived request binding, receipt, and detached attestation; it owns no second source-intent authority. The device pass exclusively owns the canonical semantic graph; host ABI is keyed through content-derived canonical source-entity records and cannot reference device graph IDs. Successful passes must report the same nonempty content-derived selected-root projection; source domains derive from pass observations plus ABI ownership. Each pass owns its observed VFS closure and exact diagnostics. Same-origin redirect-free acquisition, exact length/hash verification, cache rehash/admission, manifest-complete pack binding, collision-free mount construction, retained-pack accounting, cancellation, and typed failure now mint separate opaque host authorities. One input-only build lock now pins exact LLVM/CUTLASS/emsdk/OCI identities, the native-TableGen-to-Emscripten recipe, output plan, and reviewed notice bytes; a pure planner materializes that verified recipe without execution or release authority. Existing source-spelling CuTe adapters remain frozen. All browser hashes/assets remain synthetic: no tracked Clang-WASM build, worker-owned aggregate lazy-VFS session, worker invocation/result/evidence, browser authorization adapter, browser-produced artifact, real CuTe source proof, dynamic tensor/storage meaning, or browser-local source-compatibility evidence exists. Docker/native contracts remain optional synthetic CI/reference infrastructure only. | Resolve the build lock's seven explicit release blockers; build/pin the LibTooling extractor and full declared header packs; implement worker-owned aggregate lazy-VFS and worker evidence; emit the canonical artifact from unmodified source in-browser; then prove Gate 2 semantic convergence, dynamic tensor copy, and required real WebGPU execution. | Gate 2 exact-source baseline at `aa605421`; asset acquisition/install focused suite 3 files/30 tests; build-lock 1 file/21 tests; planner 1 file/25 tests; zero browser-local C++ producer executions. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
 | Gate 6 — framework convergence | `not-started` | No implementation in this workstream. | All Gate 6 exit criteria. | None. |
@@ -71,7 +71,7 @@ browser-local producer evidence or make Docker a product dependency.
 | Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus compiler L1 read binding and sibling L2 guarded materializing view copy. The full required matrix and strict exact-source WebGPU proof now pass; broader view families must add typed operation variants rather than reinterpret frozen plans. |
 | Gate 3 legacy CuTe motif freeze | `verified` | Existing transpose, GEMV, GEMM, affine-tile, flash-attention, and WGMMA/TMA source-spelling normalizers are explicitly frozen compatibility debt. Exact exception-file membership and source hashes are architecture-guarded; new motifs, replacement bodies, files, or call sites require an accepted architecture decision. | Delete these adapters after pinned resolved frontend artifacts cover their retained fixtures through shared semantics. | Architecture guard and two mutation tests. |
 | Gate 3 browser-local Clang-WASM producer | `partial` | Closed browser-local profile, producer-neutral request, artifact v3, host-derived request binding, asset-manifest, compilation identity, common authorization, and explicit CUDA semantic-pass authorities exist. Optional AOT now composes around the same request and binding; no second source-intent authority remains. Request v1 binds only compilation semantics, exact copied source snapshots/descriptors, entry anchor, expected artifact version, and shared semantic/input/output ceilings; deployment identity, declared source reference, conformance hashes, process limits, expected output, and opened closure stay detached. Runtime ABI pins wasm32/Worker/VFS/memory boundaries. Closed manifest-bound VFS packs supply deterministic files. Host acquisition, cache, verification, and collision-free installation now close the pre-worker asset chain with opaque authority and exact resident-pack accounting. Worker file opening remains intentionally absent until one worker-owned session can meter aggregate WASM-resident copies. Docker may reproduce release assets but is not browser runtime. All current identities/assets remain fixtures. | Close build-provenance/license authority; implement aggregate lazy-VFS worker session, worker invocation/evidence/browser authorization, real build assets, and one unmodified browser-local fixture. | Asset acquisition/install 3 files/30 tests; optional Docker 2 files/96 tests; zero worker spawns or browser-local C++ producer executions. |
-| Gate 3 Clang-WASM build and distribution | `audit` | No extractor source, CMake/Emscripten build, production Worker bundle, verified build-provenance/license authority, release asset export, or required browser lane exists. Canonical VFS-pack writing plus exact host acquisition/cache/verification/install authority is landed. Candidate LLVM 22.1.8, emsdk/Emscripten 6.0.3, and CUTLASS 3.7.0 revisions remain feasibility inputs only. Current fixtures mix synthetic Clang/libc++ versions and invented byte/feature identities. Local machine lacks Ninja, Emscripten, Binaryen, and TableGen tools; Docker daemon is unavailable. | Review and narrow the draft build-provenance contract to the exact selected build recipe and shipped license/notice files. Then add pinned toolchain lock, extractor/C API, reproducible cross-build, package worker build/assets/notices, real VFS packs, aggregate lazy-VFS Worker ownership, and strict browser/release proof. | Asset acquisition/install focused suite 3 files/30 tests; full compiler 52 files/1172 tests. No real pack, build command, binary, license closure, reproducibility result, Worker, or browser execution exists. |
+| Gate 3 Clang-WASM build and distribution | `partial` | Exact input selection now pins LLVM 22.1.8 and CUTLASS 3.7.0 archives/Git identities, emsdk 6.0.3 release components, one `linux/amd64` OCI platform closure, deterministic environment/prefix mapping, native TableGen before the Emscripten cross-build, a narrowed static link policy, the exact planned distributed paths, and reviewed upstream notice bytes. The opaque lock is permanently input-only and release-blocked. A side-effect-free planner accepts only that opaque lock, closes ambient environment and path interpolation, writes nondistributed link evidence under state, and performs no acquisition, process, network, Docker, runtime, or artifact authorization. Canonical VFS-pack writing plus exact host acquisition/cache/verification/install authority is also landed. | Resolve exact extractor source, CUDA-header redistribution, Linux-sysroot redistribution, distributed-file license mapping, canonical runtime ABI manifest, observed Wasm interface evidence, and two-clean-build signed reproducibility evidence. Then build/package the extractor, Worker, real VFS packs, and browser lane. | Build-lock 1 file/21 tests; planner 1 file/25 tests using the real opaque decoded lock. No real pack, build execution, binary, complete license closure, reproducibility result, Worker, or browser execution exists. |
 
 ### Optional native/AOT parity ledger
 
@@ -293,6 +293,8 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-073 | 2026-07-16 | accepted | Give closed VFS-pack v1 one canonical writer. Validate bounded path length before UTF-8 allocation, require safe portable paths, snapshot each file immediately after intrinsic byte-view inspection and before inspecting the next caller record, sort by encoded path bytes, reject duplicate/file-as-parent paths, enforce independent index/content/pack ceilings, and compute every file/index/content-set digest from the retained snapshots. Writer output remains non-authoritative until the existing inspector and manifest-instance binder accept its exact bytes. | A reader without one writer invites format drift. Encoding an unbounded string first permits avoidable allocation, while deferring byte copies across hostile proxy or resizable-buffer reentrancy permits mixed-time or fabricated content. Immediate per-record snapshots give one deterministic invocation boundary without weakening the separate use-authority contract. |
 | D-074 | 2026-07-16 | accepted | Delete the unpublished AOT job authority. Compose optional AOT as `frontend request -> run metadata -> verified artifact -> host-derived request binding -> receipt -> detached attestation -> common authorization`. Run metadata owns only AOT profile, request, and a declared Git source reference; source snapshots remain request-owned. The reference is signed metadata, not source-acquisition provenance. Receipt v3 names exact `runMetadataId`, `requestId`, and `requestBindingId`, but does not duplicate source descriptors, expected outputs, or resolved selection. Common lowering authorization exposes no AOT-only run field and advertises only evidence kinds with a real mint path. Profile 2.2 pins provenance predicate `/v3`. Policy 1.4 stages separate request and run-metadata controls; Docker labels those exact identities. Artifact v3 requires an exact declaration identity-token span for source-anchor binding. | Parallel source/job/output authorities let browser and AOT disagree while each appears internally valid. Producer-declared selection lets a receipt self-authorize its source relation. Calling caller-declared repository/revision provenance overclaims a relation not bound to exact request bytes. AOT-only or nonexistent evidence kinds on common authorization make browser work require fake metadata or misleading capability. One opaque chain keeps producer mechanics distinct while preserving one request, artifact, semantic lowerer, and future parity comparison. |
 | D-075 | 2026-07-17 | accepted | Host asset acquisition accepts only the prepared manifest's exact same-origin, redirect-free identity resources; verifies exact response URL/status/optional content length, streamed byte ceiling, final length, and SHA-256; rehashes every cache hit; snapshots cache methods and bytes; and mints separate opaque acquisition, cache-admission, and VFS-installation authorities. Pack installation rebinds each exact manifest asset, rejects all cross-pack file/directory collisions after mounting, and counts both source-set and independently verified pack copies against the host-retained ceiling. Do not expose a generic installed-file copy API. Lazy file reads belong to one future worker-execution session that meters the aggregate WASM-resident opened-file reservation and owns transfer/disposal/cancellation. | A per-file size check would let repeated opens exceed the single linear-memory reservation. A generic copy would also split ownership from the Worker lifecycle and invite prototype/retention bugs. Keeping installation metadata-only closes the host trust chain without pretending to enforce memory that only the Worker can own. |
+| D-076 | 2026-07-17 | accepted | Separate the canonical Clang-WASM build-input lock from final build provenance. The lock may select exact upstream archives, builder image, toolchain components, recipe, output plan, and reviewed notices, but its opaque authority always reports `releaseReady: false`, carries derived blockers, and cannot mint or satisfy the browser profile's build-provenance identity. Output hashes, runtime ABI conformance, observed Wasm interface, license-file closure, reproducibility, and producer trust require independent authorities and detached evidence. | A self-hashing recipe proves selected bytes and policy only. Treating it as build proof would let an unexecuted plan authorize fabricated outputs and hide missing licensing, ABI, and two-build evidence. |
+| D-077 | 2026-07-17 | accepted | Materialize the verified build-lock recipe through one deterministic, side-effect-free planner. The planner substitutes only verified absolute tool/root bindings and reproducibility prefix maps, emits native TableGen before the Emscripten cross-build, constructs a closed environment, and never acquires inputs, starts processes, invokes Docker, touches runtime state, or authorizes artifacts. The decoded lock recipe remains the sole build-command authority; direct integration tests must materialize the real builtin lock. | Keeping command construction separate from execution makes recipe drift testable and prevents ambient environment or convenience shell code from becoming an undocumented second build definition. Direct real-lock coverage closes the gap left by mutable mirrored test fixtures. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -1305,12 +1307,36 @@ affected implementation slice is marked complete.
 | 2026-07-16 | Gate 3 canonical VFS-pack writer | `corepack pnpm --filter @unlocalhosted/browsergrad-compiler typecheck`; focused VFS reader/writer Vitest; focused source oxlint; independent adversarial review; `git diff --check` | Passed before commit: strict typecheck, 2 files/15 tests, lint, and whitespace. Coverage includes deterministic caller-order independence, canonical round trip, immediate per-file snapshot against same-length mutation and resizable-buffer shrink during hostile later-record inspection, path pre-allocation ceiling, duplicate/file-parent rejection, sparse/accessor/proxy/shared input rejection, independent file/content/index/pack ceilings, and cancellation. No real toolchain/header pack was produced. | Land writer as a separate coherent chunk. Fetch/cache/mount authority and real release packs remain pending. |
 | 2026-07-17 | Gate 3 producer-neutral AOT composition | Focused 12-file artifact/request/run-metadata/request-binding/runner/receipt/provenance/lowering Vitest; strict compiler typecheck; independent authority and terminology reviews; `corepack pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler`; serial `corepack pnpm test:release-packages`; legacy-authority/stale-term searches; `git diff --check` | Passed: focused 12 files/121 tests; compatibility regression plus run-metadata suite 2 files/183 tests; final full current-worktree compiler gate 52 files/1167 tests; optional Docker shell/lifecycle 2 files/96 tests; both architecture checks; kernels/compiler builds; strict typecheck/lint; synthetic-input/frozen-normalizer/WebGPU-fixture/scope/status/CLI/tool-lock/corpus gates; release 19 hostile-archive and 35 Node security tests plus packed/fresh consumers. Final review found no P0; four P1 naming/documentation/version-axis gaps were fixed. Full gate also saw one uncommitted browser-asset-installation next-slice file; it is not counted as AOT evidence. | Commit the producer-neutral AOT chain. Then review and land verified browser asset installation separately. No live Docker, native extractor, Clang-WASM, worker, or browser C++ execution is claimed. |
 | 2026-07-17 | Gate 3 browser asset acquisition and VFS installation | `corepack pnpm --filter @unlocalhosted/browsergrad-compiler typecheck`; focused asset/manifest/VFS Vitest; focused oxlint; two independent P0/P1 reviews; `corepack pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler`; `corepack pnpm test:release-packages`; `git diff --check` | Passed: focused 3 files/30 tests; full compiler 52 files/1172 tests; optional Docker 2 files/96 tests; both architecture checks; kernels/compiler builds; strict typecheck/lint; synthetic-input/frozen-normalizer/WebGPU-fixture/scope/status/CLI/tool-lock/corpus gates; release 19 hostile-archive and 35 Node security tests plus packed/fresh consumers; whitespace clean. Coverage includes exact same-origin redirect-free streamed fetch, length/hash verification, cache copy/rehash/admission, late-response/body cleanup, hostile platform/adaptor properties, cancellation precedence, exact manifest-pack rebinding, collision-free installation, opaque authorities, and both retained pack copies. Final review found no P0/P1. No real asset, Worker, Clang-WASM, Docker, or browser execution occurred. | Commit acquisition/install authority. Next close exact build/provenance/license recipe. Aggregate opened-file accounting remains Worker-session-owned. |
+| 2026-07-17 | Gate 3 Clang-WASM input lock and deterministic planner | Compiler typecheck; focused build-lock Vitest/oxlint; `corepack pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan`; `corepack pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler`; `corepack pnpm test:release-packages`; `git diff --check` | Passed after fixes: strict compiler typecheck; build-lock 1 file/21 tests; planner typecheck/oxlint and 1 file/25 tests using the real opaque decoded lock; full compiler 53 files/1193 tests; optional Docker 2 files/96 tests; both architecture checks; kernels/compiler builds; synthetic-input/frozen-normalizer/WebGPU-fixture/scope/status/CLI/tool-lock/corpus gates; release 19 hostile-archive and 35 Node security tests plus packed/fresh consumers; whitespace clean. Initial review found three P1s—structural lock forgery, link-map output leakage, and unsafe path interpolation—which are fixed; final independent review found no remaining P0/P1. The lock stays release-blocked and no Docker process, Clang-WASM build, asset, Worker, or browser execution occurred. | Commit coherent input-only slice. Then define canonical runtime ABI and Worker session contracts. |
 
 ## Failure and Recovery Log
 
 Record failures that may matter after context loss. Include the exact failing
 command, concise error, suspected cause, resolution or next experiment, and
 whether any files may be left partially changed.
+
+- Extractor-design review found five P0 gaps that remain after the input-lock
+  slice: real unannotated CuTe layout `VarDecl` roots conflict with artifact-v3
+  CUDA-attribute admission; compiler runtime ABI still lacks one canonical
+  manifest with exact C signatures, imports, memory, framing, status, and
+  lifecycle; Worker invocation/result/evidence authorities do not exist;
+  host-backed lazy VFS needs one Worker-owned transfer/session budget across
+  JavaScript-retained packs and WASM-opened copies; and declared preprocessing,
+  template, constexpr, AST, and working-memory ceilings lack pinned Clang hooks
+  or must be narrowed. P1 follow-ups separate wall time from unavailable browser
+  CPU/process metrics, reconcile profile/request maxima with decoder caps,
+  separate logical opened bytes from allocator-resident bytes, and validate
+  primary/auxiliary target data before parsing. These are next-slice work, not
+  claims hidden by the green input-lock tests.
+
+- First post-review full compiler rerun reached the final corpus audit, then
+  transiently reported `ERR_MODULE_NOT_FOUND` for compiler `dist/index.js`
+  while shared-workspace agents were still rebuilding the same package. The
+  focused corpus audit passed immediately; after all writing agents completed,
+  a fully serial `verify:compiler` passed 53 files/1193 tests and every trailing
+  gate, followed by the release-package gate. Treat this as a shared-worktree
+  verification-order hazard, not a product failure: do not run final build/
+  clean gates concurrently with agent-owned package builds.
 
 - Initial browser asset review found seven P1 boundary bugs: cancellation
   awaited hostile stream cleanup; terminal response bodies were not always
@@ -2252,6 +2278,33 @@ whether any files may be left partially changed.
   Independent final review found no P0/P1. Assets remain synthetic; no Worker,
   Clang-WASM, Docker, or browser C++ execution occurred.
 
+### 2026-07-17 — Gate 3 pinned Clang-WASM build inputs and planner
+
+- Added one strict canonical input-only lock for exact LLVM 22.1.8, CUTLASS
+  3.7.0, emsdk 6.0.3, and `linux/amd64` OCI identities. It binds archive and
+  notice hashes/lengths, a deterministic two-stage native-TableGen then
+  Emscripten recipe, selected link closure, and the exact planned distribution.
+- Kept release authority impossible. Seven blockers are derived from unresolved
+  extractor, licensing, runtime-ABI, observed-Wasm-interface, and reproducible-
+  build requirements; the lock always reports `releaseReady: false` and its
+  assertion API always fails closed.
+- Added one pure planner that consumes the verified lock recipe, substitutes
+  only materialized absolute roots/tools and prefix maps, closes environment
+  discovery, and emits deterministic configure/build steps. It performs no
+  acquisition, process, network, Docker, runtime, filesystem, or artifact-
+  authorization effect.
+- Closed final-review gaps: planner now accepts only the opaque prepared lock
+  and unwraps it inside the built authority module; copied structural lookalikes
+  fail. Link-map evidence writes under the disjoint state root, never the exact
+  distributed-output root. Every interpolated root/tool/PATH value uses one
+  closed portable-safe absolute-path grammar.
+- Wired planner typecheck/lint/Vitest into `verify:compiler`. Direct integration
+  coverage materializes the actual decoded builtin lock, preventing mirrored
+  fixture success from hiding recipe drift.
+- Corrected the LLD's VFS direction: the browser extractor uses a custom
+  `llvm::vfs::FileSystem` with no physical fallback and one Worker session owns
+  lazy-copy accounting and lifecycle. No build or browser execution occurred.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -2265,27 +2318,34 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Optional AOT composition and browser host acquisition/install authority are
-closed. Keep AOT frozen unless parity work requires a change. Keep installation
-metadata-only: aggregate opened-file copies, transfer/disposal, and cancellation
-belong to the future Worker execution session. Closed VFS pack v1 remains
-identity-only; there is no general archive extraction or decompression.
+Build-input selection and deterministic command materialization are closed.
+They are not build provenance. Keep the lock release-blocked until exact
+extractor source, CUDA/sysroot redistribution, file-level license closure,
+canonical runtime ABI, observed Wasm interface, and two distinct clean builds
+produce independently signed evidence. Keep optional AOT frozen.
 
-Then narrow the draft build-provenance/license authority to one exact selected
-build recipe, every source/tool/builder input, actual shipped license/notice
-file, build flag, output, and independently produced clean-build result. Do not
-let a self-declared result or generic inventory masquerade as build proof.
-Build the custom LibTooling extractor from the pinned LLVM/Emscripten spike,
-license-audit the complete declared CUDA/CuTe header profile, and replace
-fixture identities only after reproducible-build, browser, corpus, size, and
-memory gates pass.
-
-Then define the closed dedicated-worker request/result protocol. It must bind
+Next define the canonical compiler-runtime ABI manifest and closed dedicated-
+worker request/result protocol. The ABI must own exact C signatures, imports,
+memory/state lifecycle, input framing, result lifetime, typed status, and reset
+rules; observed module imports/exports/features/pages must be checked against
+it rather than inferred from link flags. The Worker protocol must bind
 the exact prepared browser profile, prepared asset manifest, source snapshots,
 entry anchor, compilation contract, worker module identity, actual opened
 inputs, artifact bytes, diagnostics, resource outcome, timeout, and
 terminate-on-cancel result. Only that verified evidence may mint the browser
 branch of common lowering authorization.
+
+Implement one Worker-owned VFS execution session before exposing file reads.
+Transfer/disposal, main-thread handoff transient bytes, Worker-JavaScript pack
+residency, actual WASM allocation bytes, logical opened bytes, cancellation,
+and aggregate ceilings must have one owner. Closed VFS pack v1 remains
+identity-only; no general archive extraction or decompression exists.
+
+Then build the LibTooling extractor and first reviewed header packs from the
+pinned inputs. Correct artifact-v3 root ownership for real unannotated CuTe
+layout declarations before emitting C++: device-pass selection evidence owns
+root membership while CUDA attributes remain source facts. Enforce declared
+Clang work ceilings with real hooks or narrow the profile claims.
 
 The first executable checkpoint is one unmodified pinned layout-only source
 compiled in a supported browser with network and Docker absent. Its canonical
