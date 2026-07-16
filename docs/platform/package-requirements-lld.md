@@ -712,6 +712,30 @@ because function signatures, memory limits, and structural feature use remain
 unproved. The manifest MUST name one instruction-set baseline, the exact
 allowed extensions, and forbid every unlisted extension.
 
+Raw inspection MUST distinguish WebAssembly validity, exact byte identity, and
+BrowserGrad ABI conformance. It MUST accept every encoding permitted by the
+selected WebAssembly binary-format version, including padded LEB128 integers
+within the format's width limit, while rejecting overflow, invalid unused
+terminal bits, malformed section boundaries, and invalid indices or function
+bodies. It MUST NOT silently normalize or re-encode the module; the asset hash
+continues to bind the exact distributed bytes. After bounded structural and
+opcode inspection, standards-compliant module validation MUST succeed before
+exact ABI conformance authority can be minted. Generic WebAssembly names are
+validated UTF-8; the independent ABI allowlists, not a parser-wide ASCII
+restriction, decide which import, export, and custom-section names are allowed.
+Because engine validation and hashing are not synchronously preemptible, an
+untrusted or large compiler module MUST be inspected in a disposable verifier
+Worker. Host cancellation terminates and replaces that Worker; an
+`AbortSignal` checked inside a synchronous parser is not claimed as hard
+preemption or main-thread responsiveness.
+
+The `target_features` parser follows the WebAssembly tool-conventions wire
+vocabulary. Feature names MUST be unique but are not assumed to be sorted.
+Their observed order is retained in the raw projection and compared with the
+independently reviewed manifest. Recognized-but-unlisted proposals are rejected
+by the closed extension policy; they are not misclassified as malformed
+metadata or as an allowed parent feature.
+
 Every synchronous VFS import MUST use checked non-wrapping wasm32 range
 arithmetic, validate all input and output ranges before the first access,
 snapshot path bytes before any overlapping output write, reject overlapping
@@ -743,6 +767,14 @@ fetch a `.wasm` file relative to the Blob module URL. The worker has no network
 authority: same-origin, redirect-free asset acquisition and content-addressed
 cache admission belong to the host before verified authorities are transferred
 into the worker.
+
+Decoding a caller-supplied result frame proves only that the frame and artifact
+are internally consistent. It MUST NOT mint Worker-execution or lowering
+authority. Browser execution evidence requires a host-owned controller that
+creates the exact verified Worker, binds a fresh package-generated invocation
+nonce, accepts one terminal message only from that Worker instance, measures
+host time, and owns terminate-and-replace cleanup. The pure result verifier is
+wrapped by that controller; it is not a public self-attestation path.
 
 #### Closed browser VFS assets
 

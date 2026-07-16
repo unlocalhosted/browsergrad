@@ -9,13 +9,18 @@ import {
   admitCppCuteBrowserAssetSetToCache,
   copyVerifiedCppCuteBrowserAssetBytes,
   CppCuteBrowserAssetInstallationError,
+  decodeAcquiredCppCuteBrowserRuntimeAbiAsset,
   installCppCuteBrowserVfs,
   loadCppCuteBrowserAssetSetFromCache,
+  unwrapVerifiedCppCuteBrowserRuntimeAbiAsset,
   unwrapVerifiedCppCuteBrowserVfsInstallation,
+  type VerifiedCppCuteBrowserRuntimeAbiAsset,
   type CppCuteBrowserContentCache,
   type CppCuteBrowserHostFetch,
 } from "../../src/cpp_cute_browser_asset_installation.js";
 import {
+  CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
+  CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA,
   cppCuteBrowserSourceAbi,
   deriveCppCuteBrowserAssetManifestId,
@@ -26,6 +31,11 @@ import {
   type CppCuteBrowserAssetV1,
   type PreparedCppCuteBrowserAssetManifest,
 } from "../../src/cpp_cute_browser_assets.js";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+  cppCuteBrowserRuntimeAbiManifestResourceBytes,
+} from "../../src/cpp_cute_browser_runtime_abi.js";
 import {
   prepareCppCuteFrontendProfile,
   unwrapPreparedCppCuteBrowserFrontendProfile,
@@ -119,6 +129,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
 
   const adapterBytes = Uint8Array.of(1, 2, 3);
   const wasmBytes = Uint8Array.of(4, 5, 6, 7);
+  const runtimeAbiBytes = cppCuteBrowserRuntimeAbiManifestResourceBytes();
   const adapterSha256 = await sha256Hex(adapterBytes);
   const wasmSha256 = await sha256Hex(wasmBytes);
   (input.toolchain.compiler as { binarySha256: string }).binarySha256 = wasmSha256;
@@ -201,6 +212,20 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
       buildProvenanceId: PROVENANCE_ID,
       sourceAbiSha256,
     },
+    {
+      assetId: "runtime-abi",
+      kind: "runtime-abi-manifest",
+      url: "/assets/runtime-abi-manifest.json",
+      urlPolicy: "same-origin-root-relative",
+      sha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+      byteLength: wire(runtimeAbiBytes.byteLength),
+      unpackedByteLength: wire(runtimeAbiBytes.byteLength),
+      mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      compression: "identity",
+      buildProvenanceId: PROVENANCE_ID,
+      runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+      runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+    },
   ];
   for (const root of provisionalProfile.virtualFileSystem.includeRoots) {
     if (root.owner.kind === "source") continue;
@@ -265,7 +290,10 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
   };
   const manifestInput: CppCuteBrowserAssetManifestV1 = {
     schema: CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: {
+      major: CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
+      minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
+    },
     manifestId: await deriveCppCuteBrowserAssetManifestId(body),
     body,
   };
@@ -273,6 +301,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
   const bytesByUrl = new Map<string, Uint8Array>([
     [`${ORIGIN}/assets/adapter.json`, adapterBytes],
     [`${ORIGIN}/assets/clang.wasm`, wasmBytes],
+    [`${ORIGIN}/assets/runtime-abi-manifest.json`, runtimeAbiBytes],
   ]);
   for (const root of provisionalProfile.virtualFileSystem.includeRoots) {
     if (root.owner.kind === "source") continue;
@@ -302,7 +331,7 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
     const record = unwrapVerifiedCppCuteBrowserVfsInstallation(installation);
     expect(installation.packCount).toBe(record.mounts.length);
     expect(installation.fileCount).toBe(record.files.length);
-    expect(record.mounts).toHaveLength(environment.bytesByUrl.size - 2);
+    expect(record.mounts).toHaveLength(environment.bytesByUrl.size - 3);
     expect(new Set(record.files.map((entry) => entry.virtualPath)).size).toBe(record.files.length);
     const onePackCopy = record.mounts.reduce((total, mount) => total + BigInt(mount.pack.packByteLength), 0n);
     expect(BigInt(installation.sourcePackByteLength)).toBe(onePackCopy);
@@ -317,6 +346,26 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
     expect(copyVerifiedCppCuteBrowserAssetBytes(assetSet, "clang-wasm")).toEqual(
       environment.bytesByUrl.get(`${ORIGIN}/assets/clang.wasm`),
     );
+    const runtimeAbi = await decodeAcquiredCppCuteBrowserRuntimeAbiAsset(assetSet);
+    expect(runtimeAbi).toMatchObject({
+      assetManifestId: assetSet.manifestId,
+      assetSetSha256: assetSet.assetSetSha256,
+      assetId: "runtime-abi",
+      runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+      runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+      runtimeAbiResourceByteLength: String(cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength),
+      designAuthority: true,
+      observedWasmVerified: false,
+      workerExecutionReady: false,
+      releaseReady: false,
+    });
+    expect(unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(runtimeAbi).assetSet).toBe(assetSet);
+    expect(() => unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(
+      { ...runtimeAbi } as VerifiedCppCuteBrowserRuntimeAbiAsset,
+    )).toThrowError(expect.objectContaining({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED",
+      path: "$.runtimeAbi",
+    }));
   });
 
   it("admits isolated copies and rehashes every cache hit before authority", async () => {

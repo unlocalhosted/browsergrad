@@ -4,6 +4,8 @@ import {
   type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
+  CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
+  CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA,
   cppCuteBrowserSourceAbi,
   deriveCppCuteBrowserAssetSetSha256,
@@ -12,6 +14,11 @@ import {
   type CppCuteBrowserAssetManifestV1,
   type CppCuteBrowserAssetV1,
 } from "../../../src/cpp_cute_browser_assets.js";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+  cppCuteBrowserRuntimeAbiManifestResourceBytes,
+} from "../../../src/cpp_cute_browser_runtime_abi.js";
 import {
   prepareCppCuteFrontendProfile,
   unwrapPreparedCppCuteBrowserFrontendProfile,
@@ -81,6 +88,20 @@ export async function createCppCuteBrowserAssetFixture(
       compression: "identity",
       buildProvenanceId: PROVENANCE_ID,
       sourceAbiSha256,
+    },
+    {
+      assetId: "runtime-abi",
+      kind: "runtime-abi-manifest",
+      url: "/browsergrad/cpp-cute/runtime-abi-manifest.json",
+      urlPolicy: "same-origin-root-relative",
+      sha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+      byteLength: wire(cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength),
+      unpackedByteLength: wire(cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength),
+      mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      compression: "identity",
+      buildProvenanceId: PROVENANCE_ID,
+      runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+      runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     },
     compilerResourceAsset(provisionalRecord, PROVENANCE_ID, options.packOverrides),
     ...provisionalRecord.virtualFileSystem.includeRoots
@@ -157,7 +178,10 @@ export async function createCppCuteBrowserAssetFixture(
   };
   const input: CppCuteBrowserAssetManifestV1 = {
     schema: CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: {
+      major: CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
+      minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
+    },
     manifestId: await deriveCppCuteBrowserAssetManifestId(body),
     body,
   };

@@ -24,11 +24,11 @@ export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 0;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.21d1cc280be689ccd4c3c600d6f65dbfd7912dd67c18f7041bdca6e60e7398fb";
+  "bg.cpp.browser-runtime-abi.sha256.8f044c859e7d9ce2127a3fb83dd898c3924b6b3fdc43fe02cdd8bb84268e9553";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "0f6b8140fd5b55d214db31a89d9f1d800084280fb35dedd272dfd300eea189c7";
+  "94db09b1af3c92d57e5843bb33bccce18f49e878000a125aa22392a6c654bd1b";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "3e5cf7079d8ca4a691732aa8ea7c0bc06fdd80bfc6c4df6ecb4b24d7b63fb318";
+  "02fabd8764d7bebb5303b16152d37ebb2dbf05ac44930dcd8cc40a5dd4276fc4";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075";
 
@@ -331,16 +331,14 @@ function validateBodyInvariants(value: JsonObject): void {
         customSections.targetFeatures.exactRawSectionProjection.length !== 0) {
       invalid("$.body.wasm.structuralPolicy.customSections.targetFeatures", "target_features review remains unresolved");
     }
-    assertExactStrings(
-      customSections.targetFeatures.requiredDeclarations,
-      body.wasm.requiredFeatures,
-      "$.body.wasm.structuralPolicy.customSections.targetFeatures.requiredDeclarations",
-    );
-    assertExactStrings(
-      customSections.targetFeatures.forbiddenDeclarations,
-      body.wasm.forbiddenFeatures,
-      "$.body.wasm.structuralPolicy.customSections.targetFeatures.forbiddenDeclarations",
-    );
+    // Tool-conventions names are wire vocabulary, not BrowserGrad feature
+    // vocabulary (`sign-ext`/`multimemory` differ intentionally).
+    assertExactStrings(customSections.targetFeatures.requiredDeclarations, [
+      "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-ext",
+    ], "$.body.wasm.structuralPolicy.customSections.targetFeatures.requiredDeclarations");
+    assertExactStrings(customSections.targetFeatures.forbiddenDeclarations, [
+      "atomics", "exception-handling", "memory64", "multimemory", "simd128",
+    ], "$.body.wasm.structuralPolicy.customSections.targetFeatures.forbiddenDeclarations");
     assertExactStrings(body.wasm.requiredFeatures, [
       "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-extension",
     ], "$.body.wasm.requiredFeatures");
@@ -462,7 +460,8 @@ function validateBodyInvariants(value: JsonObject): void {
         body.vfs.physicalFilesystemFallback !== "forbidden" ||
         body.vfs.networkFallback !== "forbidden" || body.vfs.pathEncoding !== "utf8" ||
         body.vfs.pathForm !== "canonical-absolute-forward-slash-no-nul-dot-or-parent-segments" ||
-        body.vfs.maxPathByteLength !== 4_096 ||
+        body.vfs.maxPathByteLength !== 4_096 || body.vfs.maxLiveFileHandles !== 65_536 ||
+        body.vfs.maxSessionCalls !== 1_000_000 ||
         body.vfs.directoryOrder !== "strict-ascending-utf8-byte-order" ||
         body.vfs.failureAtomicity !==
           "nonzero-status-writes-no-output-except-required-name-length-in-metadata") {

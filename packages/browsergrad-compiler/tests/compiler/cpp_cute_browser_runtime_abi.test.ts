@@ -70,7 +70,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       contractSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256,
       generatedImportAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
-      resourceByteLength: 13_219,
+      resourceByteLength: 13_255,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -213,6 +213,8 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       networkFallback: "forbidden",
       pathEncoding: "utf8",
       maxPathByteLength: 4_096,
+      maxLiveFileHandles: 65_536,
+      maxSessionCalls: 1_000_000,
       directoryOrder: "strict-ascending-utf8-byte-order",
       failureAtomicity: "nonzero-status-writes-no-output-except-required-name-length-in-metadata",
     });
@@ -284,10 +286,10 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
           sectionName: "target_features",
           status: "unresolved-first-build-review-required",
           requiredDeclarations: [
-            "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-extension",
+            "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-ext",
           ],
           forbiddenDeclarations: [
-            "atomics", "exception-handling", "memory64", "multi-memory", "simd128", "threads",
+            "atomics", "exception-handling", "memory64", "multimemory", "simd128",
           ],
           exactRawSectionProjection: [],
         },
@@ -443,6 +445,12 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       const access = objectField(objectField(body(value), "hostImports"), "memoryAccess");
       access.outputOutputOverlap = "allowed";
     }, "memoryAccess"],
+    ["unbounded live VFS handles", (value: MutableJson) => {
+      objectField(body(value), "vfs").maxLiveFileHandles = Number.MAX_SAFE_INTEGER;
+    }, "vfs"],
+    ["unbounded VFS calls", (value: MutableJson) => {
+      objectField(body(value), "vfs").maxSessionCalls = Number.MAX_SAFE_INTEGER;
+    }, "vfs"],
     ["self-authorized generated import", (value: MutableJson) => {
       const generated = objectField(objectField(body(value), "hostImports"), "generatedImportAllowlist");
       (generated.exactFunctions as unknown[]).push({

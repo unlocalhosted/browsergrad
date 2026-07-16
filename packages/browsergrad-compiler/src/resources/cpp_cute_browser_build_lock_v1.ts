@@ -15,7 +15,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.4a4c6dcbb084085b9597e8f0603dfbe1a334168668fc932b36dbb66ce1489560",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.7fe7b1aecc31e9d259c53b4032d8bcbf2c66e53d3e0234c1a423ec6831bf7c6a",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -26,6 +26,16 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       dockerUse: "pinned-build-time-only",
       runtimeDocker: "forbidden",
       networkDuringBuild: "forbidden",
+    },
+    runtimeAbiResource: {
+      outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
+      mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+      manifestId: "bg.cpp.browser-runtime-abi.sha256.8f044c859e7d9ce2127a3fb83dd898c3924b6b3fdc43fe02cdd8bb84268e9553",
+      resourceSha256: "94db09b1af3c92d57e5843bb33bccce18f49e878000a125aa22392a6c654bd1b",
+      resourceByteLength: "13255",
+      byteIdentity: "must-equal-package-canonical-resource",
+      authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
     },
     sources: [
       {
@@ -337,7 +347,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           {
             path: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
             role: "runtime-abi-manifest",
-            mediaType: "application/json",
+            mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
             reproducibilityClass: "deterministic-subject",
           },
           {
@@ -549,7 +559,6 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         "linux-sysroot-redistribution",
         "observed-wasm-interface-evidence",
         "reproducible-build-evidence",
-        "runtime-abi-manifest",
       ],
       requiredExternalAuthorities: [
         "canonical-runtime-abi-manifest",

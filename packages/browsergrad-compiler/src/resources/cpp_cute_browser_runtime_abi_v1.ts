@@ -13,7 +13,7 @@ import {
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
   version: { major: 1, minor: 0 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.21d1cc280be689ccd4c3c600d6f65dbfd7912dd67c18f7041bdca6e60e7398fb",
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.8f044c859e7d9ce2127a3fb83dd898c3924b6b3fdc43fe02cdd8bb84268e9553",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -101,15 +101,14 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
               "bulk-memory",
               "mutable-globals",
               "nontrapping-fptoint",
-              "sign-extension",
+              "sign-ext",
             ],
             forbiddenDeclarations: [
               "atomics",
               "exception-handling",
               "memory64",
-              "multi-memory",
+              "multimemory",
               "simd128",
-              "threads",
             ],
             exactRawSectionProjection: [],
           },
@@ -296,6 +295,8 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       pathEncoding: "utf8",
       pathForm: "canonical-absolute-forward-slash-no-nul-dot-or-parent-segments",
       maxPathByteLength: 4_096,
+      maxLiveFileHandles: 65_536,
+      maxSessionCalls: 1_000_000,
       directoryOrder: "strict-ascending-utf8-byte-order",
       metadataRecord: {
         byteLength: 32,

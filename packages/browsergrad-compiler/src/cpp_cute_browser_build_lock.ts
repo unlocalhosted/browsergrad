@@ -14,6 +14,13 @@ import {
   inspectUnsharedPlainUint8Array,
 } from "./cpp_cute_aot_bytes.js";
 import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+  cppCuteBrowserRuntimeAbiManifestResourceBytes,
+  decodeCppCuteBrowserRuntimeAbiManifest,
+  type PreparedCppCuteBrowserRuntimeAbiManifest,
+} from "./cpp_cute_browser_runtime_abi.js";
+import {
   CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_RESOURCE,
   type CppCuteBrowserBuildInputLockV1Resource,
 } from "./resources/cpp_cute_browser_build_lock_v1.js";
@@ -67,6 +74,9 @@ export interface PreparedCppCuteBrowserBuildInputLock {
   readonly resourceSha256: string;
   readonly recipeSha256: string;
   readonly noticeInventorySha256: string;
+  readonly runtimeAbiManifestId: string;
+  readonly runtimeAbiResourceSha256: string;
+  readonly runtimeAbiResourceByteLength: number;
   readonly resourceByteLength: number;
   readonly releaseReady: false;
   readonly releaseBlockerIds: readonly string[];
@@ -161,6 +171,29 @@ export async function decodeCppCuteBrowserBuildInputLock(
   throwIfAborted(signal);
   const releaseBlockerIds = deriveReleaseBlockerIds(lock.body);
   verifyReleasePolicy(lock.body, releaseBlockerIds);
+  let runtimeAbi: PreparedCppCuteBrowserRuntimeAbiManifest;
+  try {
+    runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
+      cppCuteBrowserRuntimeAbiManifestResourceBytes(),
+    );
+  } catch (cause) {
+    throwIfAborted(signal);
+    invalid(
+      "$.body.runtimeAbiResource",
+      "package canonical runtime-ABI resource failed strict decoding",
+      { cause },
+    );
+  }
+  if (runtimeAbi.manifestId !== lock.body.runtimeAbiResource.manifestId ||
+      runtimeAbi.runtimeAbiId !== lock.body.runtimeAbiResource.runtimeAbiId ||
+      runtimeAbi.resourceSha256 !== lock.body.runtimeAbiResource.resourceSha256 ||
+      runtimeAbi.resourceByteLength !== Number(BigInt(lock.body.runtimeAbiResource.resourceByteLength))) {
+    hashMismatch(
+      "$.body.runtimeAbiResource",
+      "build binding differs from strict-decoded package canonical runtime-ABI bytes",
+    );
+  }
+  throwIfAborted(signal);
   const [resourceSha256, recipeSha256, noticeInventorySha256] = await Promise.all([
     hashBytes(snapshot, "$bytes"),
     hashJson({
@@ -178,6 +211,9 @@ export async function decodeCppCuteBrowserBuildInputLock(
     resourceSha256,
     recipeSha256,
     noticeInventorySha256,
+    runtimeAbiManifestId: runtimeAbi.manifestId,
+    runtimeAbiResourceSha256: runtimeAbi.resourceSha256,
+    runtimeAbiResourceByteLength: runtimeAbi.resourceByteLength,
     resourceByteLength: snapshot.byteLength,
     releaseReady: false,
     releaseBlockerIds: Object.freeze([...releaseBlockerIds]),
@@ -266,6 +302,25 @@ function parseLock(value: JsonValue): CppCuteBrowserBuildInputLockV1 {
 function validateBodyInvariants(value: JsonObject): void {
   const body = value as unknown as CppCuteBrowserBuildInputLockBodyV1;
   try {
+    const runtimeAbiResourceBytes = cppCuteBrowserRuntimeAbiManifestResourceBytes();
+    if (body.runtimeAbiResource.outputPath !==
+          "assets/browsergrad-cpp-cute/runtime-abi-manifest.json" ||
+        body.runtimeAbiResource.mediaType !==
+          "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json" ||
+        body.runtimeAbiResource.runtimeAbiId !==
+          "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1" ||
+        body.runtimeAbiResource.manifestId !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID ||
+        body.runtimeAbiResource.resourceSha256 !==
+          CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 ||
+        body.runtimeAbiResource.resourceByteLength !== String(runtimeAbiResourceBytes.byteLength) ||
+        body.runtimeAbiResource.byteIdentity !== "must-equal-package-canonical-resource" ||
+        body.runtimeAbiResource.authority !==
+          "design-reference-only-no-wasm-conformance-worker-or-release-authority") {
+      invalid(
+        "$.body.runtimeAbiResource",
+        "runtime-ABI build binding must equal the package canonical design resource without granting execution or release authority",
+      );
+    }
     assertSortedUniqueStrings(body.sources.map((source) => source.sourceId), "$.body.sources[*].sourceId");
     for (const [index, source] of body.sources.entries()) {
       const path = `$.body.sources[${index}]`;
@@ -361,6 +416,15 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid(
         "$.body.recipe.distributedOutputPlan.outputs",
         "only the detached build-provenance envelope may vary across clean builds",
+      );
+    }
+    const runtimeAbiOutput = outputByPath.get(body.runtimeAbiResource.outputPath);
+    if (runtimeAbiOutput?.role !== "runtime-abi-manifest" ||
+        runtimeAbiOutput.mediaType !== body.runtimeAbiResource.mediaType ||
+        runtimeAbiOutput.reproducibilityClass !== "deterministic-subject") {
+      invalid(
+        "$.body.runtimeAbiResource.outputPath",
+        "runtime-ABI resource must bind one exact deterministic distribution output",
       );
     }
 
@@ -519,7 +583,6 @@ function deriveReleaseBlockerIds(body: CppCuteBrowserBuildInputLockBodyV1): read
   }
   blockers.add("reproducible-build-evidence");
   blockers.add("observed-wasm-interface-evidence");
-  blockers.add("runtime-abi-manifest");
   return [...blockers].sort();
 }
 

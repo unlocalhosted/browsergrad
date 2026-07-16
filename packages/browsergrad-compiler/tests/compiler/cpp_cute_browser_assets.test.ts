@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
+  CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_BYTE_LIMIT,
   CppCuteBrowserAssetManifestError,
   canonicalCppCuteBrowserAssetManifestBytes,
@@ -69,13 +71,17 @@ describe("C++/CuTe browser-local asset manifest", () => {
     expect(first).toEqual(second);
     expect(first.manifestId).toBe(fixture.input.manifestId);
     expect(fixture.input.body.assetSetSha256).toBe(first.assetSetSha256);
+    expect(fixture.input.version).toEqual({
+      major: CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
+      minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
+    });
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.aebefc065e791f9f7210de0f9362a3e44f62fa52136c4ef8b1dbdc68550acb14",
+      "bg.cpp.browser-assets.sha256.c2a56d3bfabc58b837abd1172e992cd8c7a4dabfcae7544b624b62bfd4e95fe6",
     );
-    expect(first.assetSetSha256).toBe("44520f6d9f9ef9aa403a3c281142b463a66adc874d3b914d97c04f9b02af2829");
-    expect(first.assetCount).toBe(7);
-    expect(first.manifestSha256).toBe("b596452a6307179e201b2701e266976e09121801a19f77a3024d294a6ef58022");
-    expect(first.manifestByteLength).toBe("9315");
+    expect(first.assetSetSha256).toBe("0dd797baa7feef5e8d5fc4684704428251f6298ba64131713a89fe60d4f8e7c3");
+    expect(first.assetCount).toBe(8);
+    expect(first.manifestSha256).toBe("377626e908bac3e4182190ba8878206b62bd3da87413e6c0e636b34818ec4b68");
+    expect(first.manifestByteLength).toBe("10004");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
     expect(record.profile).toBe(fixture.profile);
@@ -121,6 +127,17 @@ describe("C++/CuTe browser-local asset manifest", () => {
       decodeCppCuteBrowserAssetManifest(Uint8Array.of(0xff), fixture.profile),
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
       "$bytes",
+    );
+  });
+
+  it("rejects the old 1.0 wire instead of accepting a manifest without ABI bytes", async () => {
+    const fixture = await createCppCuteBrowserAssetFixture();
+    const oldWire = cloneCppCuteBrowserAssetInput(fixture.input);
+    (oldWire["version"] as Record<string, unknown>)["minor"] = 0;
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(oldWire, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-UNSUPPORTED-VERSION",
+      "$.version.minor",
     );
   });
 
@@ -184,6 +201,56 @@ describe("C++/CuTe browser-local asset manifest", () => {
     }
   });
 
+  it("requires one exact runtime-ABI asset and rejects cross-wired lookalikes", async () => {
+    const fixture = await createCppCuteBrowserAssetFixture();
+    const missing = cloneCppCuteBrowserAssetInput(fixture.input);
+    const runtimeIndex = assets(missing).findIndex((asset) => asset["kind"] === "runtime-abi-manifest");
+    if (runtimeIndex < 0) throw new Error("fixture lost runtime ABI");
+    assets(missing).splice(runtimeIndex, 1);
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(missing, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+      "$.body.assets",
+    );
+
+    const duplicate = cloneCppCuteBrowserAssetInput(fixture.input);
+    const runtime = structuredClone(
+      assets(duplicate).find((asset) => asset["kind"] === "runtime-abi-manifest"),
+    );
+    if (runtime === undefined) throw new Error("fixture lost runtime ABI");
+    runtime["assetId"] = "runtime-abi.second";
+    runtime["url"] = "/browsergrad/cpp-cute/runtime-abi-manifest.second.json";
+    assets(duplicate).push(runtime);
+    assets(duplicate).sort((left, right) => String(left["assetId"]).localeCompare(String(right["assetId"])));
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(duplicate, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+      "$.body.assets",
+    );
+
+    const crossWired = cloneCppCuteBrowserAssetInput(fixture.input);
+    const crossWiredRuntime = assets(crossWired).find((asset) => asset["kind"] === "runtime-abi-manifest");
+    if (crossWiredRuntime === undefined) throw new Error("fixture lost runtime ABI");
+    crossWiredRuntime["runtimeAbiManifestId"] = `bg.cpp.browser-runtime-abi.sha256.${"0".repeat(64)}`;
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(crossWired, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+      "$.body.assets[7].runtimeAbiManifestId",
+    );
+
+    const structuralLookalike = cloneCppCuteBrowserAssetInput(fixture.input);
+    const structuralRuntime = assets(structuralLookalike).find((asset) =>
+      asset["kind"] === "runtime-abi-manifest");
+    if (structuralRuntime === undefined) throw new Error("fixture lost runtime ABI");
+    delete structuralRuntime["runtimeAbiId"];
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(structuralLookalike, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+      "$.body.assets[7]",
+    );
+
+  });
+
   it("accepts only unique normalized root-relative URLs", async () => {
     const fixture = await createCppCuteBrowserAssetFixture();
     for (const badUrl of [
@@ -237,7 +304,7 @@ describe("C++/CuTe browser-local asset manifest", () => {
     (compilerRoot as { virtualPath: string }).virtualPath = "/";
     const rootFixture = await createCppCuteBrowserAssetFixture({ profile: { includeRoots: roots } });
     await expect(prepareCppCuteBrowserAssetManifest(rootFixture.input, rootFixture.profile)).resolves.toMatchObject({
-      assetCount: 7,
+      assetCount: 8,
     });
   });
 
@@ -284,6 +351,24 @@ describe("C++/CuTe browser-local asset manifest", () => {
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-HASH-MISMATCH",
       "$.body.assets",
     );
+
+    for (const field of ["sha256", "byteLength"] as const) {
+      const runtimeDrift = cloneCppCuteBrowserAssetInput(fixture.input);
+      const runtimeAbi = assets(runtimeDrift).find((asset) => asset["kind"] === "runtime-abi-manifest");
+      if (runtimeAbi === undefined) throw new Error("fixture lost runtime ABI");
+      if (field === "sha256") {
+        runtimeAbi[field] = "0".repeat(64);
+      } else {
+        runtimeAbi["byteLength"] = String(Number(runtimeAbi["byteLength"]) + 1);
+        runtimeAbi["unpackedByteLength"] = runtimeAbi["byteLength"];
+      }
+      const reboundProfile = await rebindProfileToMutatedAssetSet(runtimeDrift);
+      await expectAssetError(
+        prepareCppCuteBrowserAssetManifest(runtimeDrift, reboundProfile),
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-HASH-MISMATCH",
+        "$.body.assets",
+      );
+    }
 
     for (const kind of ["compiler-resource-pack", "dependency-header-pack"]) {
       const packHash = cloneCppCuteBrowserAssetInput(fixture.input);

@@ -14,6 +14,11 @@ import {
   type CppCuteBrowserAssetV1,
   type PreparedCppCuteBrowserAssetManifest,
 } from "./cpp_cute_browser_assets.js";
+import {
+  CppCuteBrowserRuntimeAbiManifestError,
+  decodeCppCuteBrowserRuntimeAbiManifest,
+  type PreparedCppCuteBrowserRuntimeAbiManifest,
+} from "./cpp_cute_browser_runtime_abi.js";
 import { unwrapPreparedCppCuteBrowserFrontendProfile } from "./cpp_cute_frontend_profile.js";
 import {
   CppCuteBrowserVfsPackError,
@@ -50,6 +55,7 @@ const READER_RELEASE_LOCK = typeof ReadableStreamDefaultReader === "undefined"
   ? undefined
   : ReadableStreamDefaultReader.prototype.releaseLock;
 const VERIFIED_ASSET_SETS = new WeakMap<object, StoredVerifiedAssetSet>();
+const VERIFIED_RUNTIME_ABI_ASSETS = new WeakMap<object, StoredVerifiedRuntimeAbiAsset>();
 const CACHE_ADMISSIONS = new WeakMap<object, StoredCacheAdmission>();
 const VFS_INSTALLATIONS = new WeakMap<object, StoredVfsInstallation>();
 
@@ -94,6 +100,36 @@ interface StoredVerifiedAssetSet {
 interface StoredVerifiedAsset {
   readonly asset: CppCuteBrowserAssetV1;
   readonly bytes: Uint8Array;
+}
+
+declare const verifiedRuntimeAbiAssetBrand: unique symbol;
+
+/**
+ * Opaque link from one acquired asset set to its strict-decoded canonical ABI.
+ * This remains design authority only; it proves no Wasm conformance or Worker
+ * execution/release readiness.
+ */
+export interface VerifiedCppCuteBrowserRuntimeAbiAsset {
+  readonly [verifiedRuntimeAbiAssetBrand]: true;
+  readonly assetManifestId: string;
+  readonly assetSetSha256: string;
+  readonly assetId: string;
+  readonly runtimeAbiManifestId: string;
+  readonly runtimeAbiResourceSha256: string;
+  readonly runtimeAbiResourceByteLength: WireU64;
+  readonly designAuthority: true;
+  readonly observedWasmVerified: false;
+  readonly workerExecutionReady: false;
+  readonly releaseReady: false;
+}
+
+export interface VerifiedCppCuteBrowserRuntimeAbiAssetRecord {
+  readonly assetSet: VerifiedCppCuteBrowserAssetSet;
+  readonly runtimeAbi: PreparedCppCuteBrowserRuntimeAbiManifest;
+}
+
+interface StoredVerifiedRuntimeAbiAsset {
+  readonly record: VerifiedCppCuteBrowserRuntimeAbiAssetRecord;
 }
 
 declare const cacheAdmissionBrand: unique symbol;
@@ -169,6 +205,7 @@ export type CppCuteBrowserAssetInstallationErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-CACHE-MISS"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-CACHE-FAILED"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-PACK-INVALID"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-RUNTIME-ABI-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-MOUNT-COLLISION"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED";
 
@@ -300,6 +337,75 @@ export function unwrapVerifiedCppCuteBrowserAssetSet(
       asset: entry.asset,
     }))),
   });
+}
+
+/** Strict-decodes the exact acquired ABI asset before any later Worker authority. */
+export async function decodeAcquiredCppCuteBrowserRuntimeAbiAsset(
+  assetSet: VerifiedCppCuteBrowserAssetSet,
+  options: CppCuteBrowserAssetOperationOptions = {},
+): Promise<VerifiedCppCuteBrowserRuntimeAbiAsset> {
+  const signal = normalizeSignal(options.signal);
+  throwIfAborted(signal);
+  const stored = storedAssetSet(assetSet);
+  const entry = stored.assets.find((candidate) => candidate.asset.kind === "runtime-abi-manifest");
+  if (entry?.asset.kind !== "runtime-abi-manifest") {
+    invalid("$.runtimeAbi", "verified asset set has no runtime-ABI manifest asset");
+  }
+  let runtimeAbi: PreparedCppCuteBrowserRuntimeAbiManifest;
+  try {
+    runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
+      entry.bytes,
+      signal === undefined ? {} : { signal },
+    );
+  } catch (cause) {
+    if (cause instanceof CppCuteBrowserRuntimeAbiManifestError) {
+      if (cause.code === "BG-COMPILER-CPP-CUTE-BROWSER-RUNTIME-ABI-CANCELLED" || isAborted(signal)) {
+        cancelled();
+      }
+      fail(
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-RUNTIME-ABI-INVALID",
+        "$.runtimeAbi",
+        "acquired runtime-ABI bytes failed strict canonical decoding",
+        { cause },
+      );
+    }
+    throw cause;
+  }
+  throwIfAborted(signal);
+  if (runtimeAbi.manifestId !== entry.asset.runtimeAbiManifestId ||
+      runtimeAbi.runtimeAbiId !== entry.asset.runtimeAbiId ||
+      runtimeAbi.resourceSha256 !== entry.asset.sha256 ||
+      BigInt(runtimeAbi.resourceByteLength) !== wireIntegerToBigInt(entry.asset.byteLength)) {
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-RUNTIME-ABI-INVALID",
+      "$.runtimeAbi",
+      "decoded runtime-ABI authority differs from acquired asset binding",
+    );
+  }
+  const verified = Object.freeze({
+    assetManifestId: assetSet.manifestId,
+    assetSetSha256: assetSet.assetSetSha256,
+    assetId: entry.asset.assetId,
+    runtimeAbiManifestId: runtimeAbi.manifestId,
+    runtimeAbiResourceSha256: runtimeAbi.resourceSha256,
+    runtimeAbiResourceByteLength: encodeWireU64(BigInt(runtimeAbi.resourceByteLength)),
+    designAuthority: true,
+    observedWasmVerified: false,
+    workerExecutionReady: false,
+    releaseReady: false,
+  }) as VerifiedCppCuteBrowserRuntimeAbiAsset;
+  const record = Object.freeze({ assetSet, runtimeAbi });
+  VERIFIED_RUNTIME_ABI_ASSETS.set(verified, Object.freeze({ record }));
+  return verified;
+}
+
+export function unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(
+  verified: VerifiedCppCuteBrowserRuntimeAbiAsset,
+): VerifiedCppCuteBrowserRuntimeAbiAssetRecord {
+  if (typeof verified !== "object" || verified === null) unverified("$.runtimeAbi");
+  const stored = VERIFIED_RUNTIME_ABI_ASSETS.get(verified as object);
+  if (stored === undefined) unverified("$.runtimeAbi");
+  return stored.record;
 }
 
 export async function installCppCuteBrowserVfs(

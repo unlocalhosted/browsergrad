@@ -20,6 +20,11 @@ import {
   inspectUnsharedPlainUint8Array,
 } from "./cpp_cute_aot_bytes.js";
 import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+  cppCuteBrowserRuntimeAbiManifestResourceBytes,
+} from "./cpp_cute_browser_runtime_abi.js";
+import {
   unwrapPreparedCppCuteBrowserFrontendProfile,
   type CppCuteFrontendBrowserAssetLimits,
   type CppCuteFrontendCompatibilityProfile,
@@ -33,7 +38,7 @@ import {
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-asset-manifest";
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR = 1;
-export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 0;
+export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 1;
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_BYTE_LIMIT = 256 * 1024;
 
 const MANIFEST_ID = /^bg\.cpp\.browser-assets\.sha256\.[0-9a-f]{64}$/u;
@@ -46,6 +51,7 @@ const HARD_MAX_ASSET_COMPRESSED_BYTES = 1024n * 1024n * 1024n;
 const HARD_MAX_ASSET_UNPACKED_BYTES = 4n * 1024n * 1024n * 1024n;
 const HARD_MAX_TOTAL_COMPRESSED_BYTES = 2n * 1024n * 1024n * 1024n;
 const HARD_MAX_TOTAL_UNPACKED_BYTES = 8n * 1024n * 1024n * 1024n;
+const RUNTIME_ABI_RESOURCE_BYTE_LENGTH = cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength;
 const TEXT_ENCODER = new TextEncoder();
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
@@ -125,6 +131,13 @@ export type CppCuteBrowserAssetV1 =
       readonly kind: "semantic-adapter-manifest";
       readonly mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json";
       readonly compression: "identity";
+    })
+  | (CppCuteBrowserAssetCommonV1 & {
+      readonly kind: "runtime-abi-manifest";
+      readonly mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json";
+      readonly compression: "identity";
+      readonly runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1";
+      readonly runtimeAbiManifestId: typeof CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID;
     });
 
 export interface CppCuteBrowserAssetManifestBodyV1 extends JsonObject {
@@ -522,7 +535,7 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
     "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
     "mediaType", "compression", "buildProvenanceId", "sourceAbiSha256", "dependencyId",
     "includeRootId", "mountedVirtualRoot", "contentSetSha256",
-    "fileContentByteLength",
+    "fileContentByteLength", "runtimeAbiId", "runtimeAbiManifestId",
   ], path, false);
   const kind = boundedString(field(base, "kind", path), `${path}.kind`, 64);
   const common = {
@@ -633,6 +646,35 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
       compression: "identity",
     };
   }
+  if (kind === "runtime-abi-manifest") {
+    requireExactFields(base, [
+      "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
+      "mediaType", "compression", "buildProvenanceId", "runtimeAbiId", "runtimeAbiManifestId",
+    ], path);
+    exactString(
+      field(base, "mediaType", path),
+      "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      `${path}.mediaType`,
+    );
+    exactString(field(base, "compression", path), "identity", `${path}.compression`);
+    requireIdentityLength(common, path);
+    return {
+      ...common,
+      kind,
+      mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      compression: "identity",
+      runtimeAbiId: exactString(
+        field(base, "runtimeAbiId", path),
+        "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
+        `${path}.runtimeAbiId`,
+      ),
+      runtimeAbiManifestId: exactString(
+        field(base, "runtimeAbiManifestId", path),
+        CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+        `${path}.runtimeAbiManifestId`,
+      ),
+    };
+  }
   invalid(`${path}.kind`, `unknown browser asset kind ${JSON.stringify(kind)}`);
 }
 
@@ -714,7 +756,18 @@ function validateAssetProfileClosure(
   if (adapter?.sha256 !== profile.deployment.extractor.semanticAdapterManifestSha256) {
     hashMismatch("$.body.assets", "semantic-adapter asset must bind prepared profile adapter manifest hash");
   }
-
+  const runtimeAbi = body.assets.find((asset) => asset.kind === "runtime-abi-manifest");
+  if (runtimeAbi?.kind !== "runtime-abi-manifest" ||
+      runtimeAbi.runtimeAbiId !== profile.deployment.compilerRuntime.runtimeAbiId ||
+      runtimeAbi.runtimeAbiManifestId !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID ||
+      runtimeAbi.sha256 !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 ||
+      runtimeAbi.sha256 !== profile.deployment.compilerRuntime.runtimeAbiManifestSha256 ||
+      wireIntegerToBigInt(runtimeAbi.byteLength) !== BigInt(RUNTIME_ABI_RESOURCE_BYTE_LENGTH)) {
+    hashMismatch(
+      "$.body.assets",
+      "runtime-ABI asset must bind exact canonical profile resource identity, hash, and byte length",
+    );
+  }
   const expectedDependencyIds = profile.toolchain.dependencies.map((dependency) => dependency.dependencyId);
   if (!equalStrings(body.dependencyIds, expectedDependencyIds)) {
     invalid("$.body.dependencyIds", "dependency IDs must exactly equal sorted profile toolchain dependencies");
@@ -754,6 +807,7 @@ function validateAssetProfileClosure(
 function validateAssetCardinalities(assets: readonly CppCuteBrowserAssetV1[]): void {
   requireCardinality(assets, "clang-extractor-wasm", 1);
   requireCardinality(assets, "compiler-resource-pack", 1);
+  requireCardinality(assets, "runtime-abi-manifest", 1);
   requireCardinality(assets, "semantic-adapter-manifest", 1);
 }
 

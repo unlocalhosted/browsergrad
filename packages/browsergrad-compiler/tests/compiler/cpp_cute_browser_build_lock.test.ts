@@ -14,11 +14,17 @@ import {
   unwrapPreparedCppCuteBrowserBuildInputLock,
   type PreparedCppCuteBrowserBuildInputLock,
 } from "../../src/cpp_cute_browser_build_lock.js";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+  cppCuteBrowserRuntimeAbiManifestResourceBytes,
+  decodeCppCuteBrowserRuntimeAbiManifest,
+} from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.4a4c6dcbb084085b9597e8f0603dfbe1a334168668fc932b36dbb66ce1489560";
-const RESOURCE_SHA256 = "42cb1a3f722af78315b8be5ab2eb9b75f280689d5f20823ca4f3404217dd16a6";
-const RECIPE_SHA256 = "f4f6beecf574c30068563d4780f206db5b6edc8a9519f485d0436881dd1a32f9";
+  "bg.cpp.browser-build-input-lock.sha256.7fe7b1aecc31e9d259c53b4032d8bcbf2c66e53d3e0234c1a423ec6831bf7c6a";
+const RESOURCE_SHA256 = "be50d00350d60a4cc993208e8e41f1651a769c7ad417618f28517c8d907fca6e";
+const RECIPE_SHA256 = "1308026a3216a76509d25dcf1036adf91e7a77cde8f58a1e805393df18148a07";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
   "browsergrad-extractor-source",
@@ -27,7 +33,6 @@ const BLOCKERS = [
   "linux-sysroot-redistribution",
   "observed-wasm-interface-evidence",
   "reproducible-build-evidence",
-  "runtime-abi-manifest",
 ];
 
 describe("browser Clang-WASM build-input lock", () => {
@@ -40,7 +45,10 @@ describe("browser Clang-WASM build-input lock", () => {
       resourceSha256: RESOURCE_SHA256,
       recipeSha256: RECIPE_SHA256,
       noticeInventorySha256: NOTICE_SHA256,
-      resourceByteLength: 18_035,
+      runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
+      runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+      runtimeAbiResourceByteLength: cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength,
+      resourceByteLength: 18_667,
       releaseReady: false,
       releaseBlockerIds: BLOCKERS,
     });
@@ -48,6 +56,34 @@ describe("browser Clang-WASM build-input lock", () => {
     expect(await deriveCppCuteBrowserBuildInputLockId(
       unwrapPreparedCppCuteBrowserBuildInputLock(prepared).lock.body,
     )).toBe(LOCK_ID);
+  });
+
+  it("binds exact canonical ABI bytes into one deterministic distribution output", async () => {
+    const build = await decodeCppCuteBrowserBuildInputLock(
+      cppCuteBrowserBuildInputLockResourceBytes(),
+    );
+    const runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
+      cppCuteBrowserRuntimeAbiManifestResourceBytes(),
+    );
+    const body = unwrapPreparedCppCuteBrowserBuildInputLock(build).lock.body;
+
+    expect(body.runtimeAbiResource).toEqual({
+      outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
+      mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      runtimeAbiId: runtimeAbi.runtimeAbiId,
+      manifestId: runtimeAbi.manifestId,
+      resourceSha256: runtimeAbi.resourceSha256,
+      resourceByteLength: String(runtimeAbi.resourceByteLength),
+      byteIdentity: "must-equal-package-canonical-resource",
+      authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
+    });
+    expect(build).toMatchObject({
+      runtimeAbiManifestId: runtimeAbi.manifestId,
+      runtimeAbiResourceSha256: runtimeAbi.resourceSha256,
+      runtimeAbiResourceByteLength: runtimeAbi.resourceByteLength,
+      releaseReady: false,
+    });
+    expect(body.releasePolicy.blockerIds).not.toContain("runtime-abi-manifest");
   });
 
   it("pins exact upstream archives, Git identities, and build-only OCI image", async () => {
@@ -244,6 +280,13 @@ describe("browser Clang-WASM build-input lock", () => {
       (output) => output.role === "detached-build-provenance" ||
         output.reproducibilityClass === "deterministic-subject",
     )).toBe(true);
+    expect(recipe.distributedOutputPlan.outputs.find(
+      (output) => output.role === "runtime-abi-manifest",
+    )).toMatchObject({
+      path: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
+      mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      reproducibilityClass: "deterministic-subject",
+    });
   });
 
   it("pins reviewed notices but leaves CUDA, sysroot, and file-level closure unresolved", async () => {
@@ -338,6 +381,12 @@ describe("browser Clang-WASM build-input lock", () => {
     }],
     ["runtime Docker", (input: MutableResource) => {
       objectField(body(input), "scope").runtimeDocker = "allowed";
+    }],
+    ["runtime ABI resource hash", (input: MutableResource) => {
+      objectField(body(input), "runtimeAbiResource").resourceSha256 = "0".repeat(64);
+    }],
+    ["runtime ABI release authority", (input: MutableResource) => {
+      objectField(body(input), "runtimeAbiResource").authority = "release-ready";
     }],
   ])("rejects mutated supported selection: %s", async (_name, mutate) => {
     const input = mutableResource();
