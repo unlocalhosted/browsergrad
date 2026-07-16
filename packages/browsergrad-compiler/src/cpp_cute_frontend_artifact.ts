@@ -29,6 +29,7 @@ import {
 } from "./cpp_cute_frontend_verify.js";
 
 const VERIFIED_ARTIFACTS = new WeakMap<object, VerifiedCppCuteFrontendArtifactRecord>();
+const VERIFIED_ARTIFACT_RESOURCES = new WeakMap<object, VerifiedCppCuteFrontendArtifact>();
 const STABLE_ID_KIND = /^[a-z][a-z0-9-]*$/u;
 
 declare const verifiedCppCuteFrontendArtifactBrand: unique symbol;
@@ -45,6 +46,17 @@ export interface VerifiedCppCuteFrontendArtifact {
   readonly headerSetSha256: string;
   readonly inputClosureSha256: string;
   readonly outcome: "accepted" | "rejected";
+}
+
+declare const verifiedCppCuteFrontendArtifactResourceBrand: unique symbol;
+
+/** Opaque proof that exact canonical artifact bytes passed strict decoding. */
+export interface VerifiedCppCuteFrontendArtifactResource {
+  readonly [verifiedCppCuteFrontendArtifactResourceBrand]: true;
+  readonly artifactId: string;
+  readonly artifactHash: string;
+  readonly artifactBytesSha256: string;
+  readonly artifactByteLength: WireU64;
 }
 
 export interface VerifyCppCuteFrontendArtifactOptions {
@@ -147,7 +159,7 @@ export async function verifyCppCuteFrontendArtifact(
 export async function decodeCppCuteFrontendArtifact(
   bytes: Uint8Array,
   options: VerifyCppCuteFrontendArtifactOptions = {},
-): Promise<VerifiedCppCuteFrontendArtifact> {
+): Promise<VerifiedCppCuteFrontendArtifactResource> {
   throwIfAborted(options.signal);
   const snapshot = new Uint8Array(bytes);
   const artifact = await verifyCppCuteFrontendArtifact(
@@ -165,7 +177,30 @@ export async function decodeCppCuteFrontendArtifact(
       "producer artifact bytes must exactly equal the canonical normalized envelope",
     );
   }
+  const resource = Object.freeze({
+    artifactId: artifact.artifactId,
+    artifactHash: artifact.artifactHash,
+    artifactBytesSha256: artifact.artifactBytesSha256,
+    artifactByteLength: artifact.artifactByteLength,
+  }) as VerifiedCppCuteFrontendArtifactResource;
+  VERIFIED_ARTIFACT_RESOURCES.set(resource, artifact);
+  return resource;
+}
+
+export function unwrapVerifiedCppCuteFrontendArtifactResource(
+  resource: VerifiedCppCuteFrontendArtifactResource,
+): VerifiedCppCuteFrontendArtifact {
+  if (typeof resource !== "object" || resource === null) unverified();
+  const artifact = VERIFIED_ARTIFACT_RESOURCES.get(resource as object);
+  if (artifact === undefined) unverified();
   return artifact;
+}
+
+export function canonicalCppCuteFrontendArtifactResourceBytes(
+  resource: VerifiedCppCuteFrontendArtifactResource,
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
+): Uint8Array {
+  return canonicalCppCuteFrontendArtifactBytes(unwrapVerifiedCppCuteFrontendArtifactResource(resource), options);
 }
 
 export function canonicalCppCuteFrontendArtifactBytes(

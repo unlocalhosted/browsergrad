@@ -20,6 +20,14 @@
 - Changes the in-toto subject and signed output manifest to bind those exact
   canonical bytes. Authorization and layout-origin records retain both raw
   resource identity and semantic identity; no observed producer run is claimed.
+- Adds a closed, content-addressed AOT runner-receipt verifier over exact pre-run
+  job intent, opened source projections, deterministic invocation identity,
+  pinned toolchain/container/sandbox facts, selected or rejected frontend
+  outcome, canonical output resource, and all extraction/process ceilings.
+- Separates structural artifact verification from strict artifact-byte authority,
+  and structural receipt verification from strict receipt-byte authority. A
+  future attestation must consume the byte-origin receipt resource; this change
+  alone does not establish producer trust or execution.
 
 ## 0.2.0
 

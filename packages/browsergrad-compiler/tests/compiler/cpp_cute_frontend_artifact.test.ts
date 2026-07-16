@@ -4,6 +4,7 @@ import {
   canonicalCppCuteFrontendArtifactBytes,
   decodeCppCuteFrontendArtifact,
   deriveCppCuteStableId,
+  unwrapVerifiedCppCuteFrontendArtifactResource,
   unwrapVerifiedCppCuteFrontendArtifact,
   verifyCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
@@ -55,13 +56,22 @@ describe("C++/CuTe frontend artifact", () => {
   it("decodes bounded UTF-8 bytes through the untrusted wire parser", async () => {
     const prepared = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput());
     const bytes = canonicalCppCuteFrontendArtifactBytes(prepared);
-    const verified = await decodeCppCuteFrontendArtifact(bytes);
+    const resource = await decodeCppCuteFrontendArtifact(bytes);
+    const verified = unwrapVerifiedCppCuteFrontendArtifactResource(resource);
     expect(await sha256Hex(bytes)).toBe(prepared.artifactBytesSha256);
-    expect(verified).toMatchObject({
-      outcome: "accepted",
+    expect(resource).toMatchObject({
       artifactBytesSha256: prepared.artifactBytesSha256,
       artifactByteLength: String(bytes.byteLength),
     });
+    expect(verified.outcome).toBe("accepted");
+    expect(() => unwrapVerifiedCppCuteFrontendArtifactResource({ ...resource } as never)).toThrowError(
+      expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-ARTIFACT-UNVERIFIED" }),
+    );
+
+    const callerOwnedBytes = new Uint8Array(bytes);
+    const pending = decodeCppCuteFrontendArtifact(callerOwnedBytes);
+    callerOwnedBytes.fill(0);
+    await expect(pending).resolves.toMatchObject({ artifactBytesSha256: prepared.artifactBytesSha256 });
 
     const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
     const noncanonical = new TextEncoder().encode(JSON.stringify(parsed, null, 2));
