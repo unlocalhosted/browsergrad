@@ -58,6 +58,11 @@ export interface VerifyCppCuteBrowserVfsPackOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface CppCuteBrowserVfsPackFileInput {
+  readonly virtualPath: string;
+  readonly bytes: Uint8Array;
+}
+
 declare const inspectedCppCuteBrowserVfsPackBrand: unique symbol;
 
 /**
@@ -125,6 +130,146 @@ export class CppCuteBrowserVfsPackError extends Error {
     super(`${code}: ${message}`, options);
     this.name = "CppCuteBrowserVfsPackError";
   }
+}
+
+/**
+ * Canonical release/build-time writer for the closed v1 pack format. Input
+ * order is irrelevant. Returned bytes carry no verification authority until
+ * inspected and bound to one prepared asset manifest.
+ */
+export async function encodeCppCuteBrowserVfsPack(
+  value: unknown,
+  options: VerifyCppCuteBrowserVfsPackOptions = {},
+): Promise<Uint8Array> {
+  const { limits, signal } = normalizeOptions(options);
+  throwIfAborted(signal);
+  const rawFiles = inspectDenseInputArray(value, limits.maxFiles);
+  const inspectedFiles: Array<{
+    readonly inputIndex: number;
+    readonly virtualPath: string;
+    readonly pathBytes: Uint8Array;
+    readonly bytes: Uint8Array;
+  }> = [];
+  const seenFiles = new Set<string>();
+  const seenImplicitDirectories = new Set<string>();
+  let fileContentByteLength = 0;
+  let indexByteLength = 0;
+  for (const [index, rawFile] of rawFiles.entries()) {
+    throwIfAborted(signal);
+    const path = `$.files[${index}]`;
+    const descriptors = plainDataRecord(rawFile, path, ["virtualPath", "bytes"], true);
+    const rawVirtualPath = requiredDescriptorValue(descriptors, "virtualPath", path);
+    if (typeof rawVirtualPath !== "string") invalid(`${path}.virtualPath`, "expected string");
+    if (rawVirtualPath.length > limits.maxPathBytes) {
+      resource(`${path}.virtualPath`, `path exceeds maxPathBytes ${limits.maxPathBytes}`);
+    }
+    const pathBytes = TEXT_ENCODER.encode(rawVirtualPath);
+    if (pathBytes.byteLength > limits.maxPathBytes) {
+      resource(`${path}.virtualPath`, `path exceeds maxPathBytes ${limits.maxPathBytes}`);
+    }
+    const virtualPath = decodeVirtualPath(pathBytes, `${path}.virtualPath`);
+    if (seenFiles.has(virtualPath)) invalid("$.files", "virtual paths must be unique");
+    if (seenImplicitDirectories.has(virtualPath)) {
+      invalid("$.files", "a regular file cannot also be an implicit parent directory");
+    }
+    const segments = virtualPath.split("/");
+    let parent = "";
+    for (const segment of segments.slice(0, -1)) {
+      parent = parent.length === 0 ? segment : `${parent}/${segment}`;
+      if (seenFiles.has(parent)) {
+        invalid("$.files", "a regular file cannot also be an implicit parent directory");
+      }
+      seenImplicitDirectories.add(parent);
+    }
+    seenFiles.add(virtualPath);
+    const rawBytes = requiredDescriptorValue(descriptors, "bytes", path);
+    let inspection: ReturnType<typeof inspectUnsharedPlainUint8Array>;
+    try {
+      inspection = inspectUnsharedPlainUint8Array(rawBytes);
+    } catch (error) {
+      invalid(`${path}.bytes`, "bytes must be an unshared plain Uint8Array", { cause: error });
+    }
+    if (inspection.byteLength > limits.maxFileBytes) {
+      resource(`${path}.bytes`, `file exceeds maxFileBytes ${limits.maxFileBytes}`);
+    }
+    const prospectiveFileContentByteLength = fileContentByteLength + inspection.byteLength;
+    if (prospectiveFileContentByteLength > limits.maxFileContentBytes) {
+      resource("$.files", `file content exceeds maxFileContentBytes ${limits.maxFileContentBytes}`);
+    }
+    const prospectiveIndexByteLength = indexByteLength + ENTRY_FIXED_BYTES + pathBytes.byteLength;
+    if (prospectiveIndexByteLength > limits.maxIndexBytes) {
+      resource("$.files", `index exceeds maxIndexBytes ${limits.maxIndexBytes}`);
+    }
+    if (CPP_CUTE_BROWSER_VFS_PACK_HEADER_BYTES + prospectiveIndexByteLength +
+        prospectiveFileContentByteLength > limits.maxPackBytes) {
+      resource("$.files", `pack exceeds maxPackBytes ${limits.maxPackBytes}`);
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = copyInspectedUnsharedUint8Array(rawBytes, inspection);
+    } catch (error) {
+      invalid(`${path}.bytes`, "bytes changed after exact inspection", { cause: error });
+    }
+    fileContentByteLength = prospectiveFileContentByteLength;
+    indexByteLength = prospectiveIndexByteLength;
+    inspectedFiles.push({ inputIndex: index, virtualPath, pathBytes, bytes });
+  }
+  inspectedFiles.sort((left, right) => compareBytes(left.pathBytes, right.pathBytes));
+  validateCanonicalInputPaths(inspectedFiles);
+  const packByteLength = CPP_CUTE_BROWSER_VFS_PACK_HEADER_BYTES + indexByteLength + fileContentByteLength;
+  if (packByteLength > limits.maxPackBytes) {
+    resource("$.files", `pack exceeds maxPackBytes ${limits.maxPackBytes}`);
+  }
+
+  const files: Array<{
+    readonly inputIndex: number;
+    readonly virtualPath: string;
+    readonly pathBytes: Uint8Array;
+    readonly bytes: Uint8Array;
+    readonly contentSha256: string;
+  }> = [];
+  for (const file of inspectedFiles) {
+    const contentSha256 = await hash(file.bytes, `$.files[${file.inputIndex}].contentSha256`);
+    throwIfAborted(signal);
+    files.push({ ...file, contentSha256 });
+  }
+
+  const entries: CppCuteBrowserVfsPackEntry[] = files.map((file) => ({
+    virtualPath: file.virtualPath,
+    contentSha256: file.contentSha256,
+    byteLength: encodeWireU64(BigInt(file.bytes.byteLength)),
+  }));
+  const contentSetSha256 = await deriveCppCuteBrowserVfsContentSetSha256(entries);
+  throwIfAborted(signal);
+  const bytes = new Uint8Array(packByteLength);
+  bytes.set(MAGIC, 0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint16(8, CPP_CUTE_BROWSER_VFS_PACK_MAJOR, true);
+  view.setUint16(10, CPP_CUTE_BROWSER_VFS_PACK_MINOR, true);
+  view.setUint32(12, files.length, true);
+  view.setBigUint64(16, BigInt(indexByteLength), true);
+  view.setBigUint64(24, BigInt(fileContentByteLength), true);
+  const indexStart = CPP_CUTE_BROWSER_VFS_PACK_HEADER_BYTES;
+  const dataStart = indexStart + indexByteLength;
+  let indexOffset = indexStart;
+  let dataOffset = dataStart;
+  for (const file of files) {
+    view.setUint16(indexOffset, file.pathBytes.byteLength, true);
+    indexOffset += 2;
+    bytes.set(file.pathBytes, indexOffset);
+    indexOffset += file.pathBytes.byteLength;
+    view.setBigUint64(indexOffset, BigInt(file.bytes.byteLength), true);
+    indexOffset += 8;
+    bytes.set(hexBytes(file.contentSha256), indexOffset);
+    indexOffset += SHA256_BYTES;
+    bytes.set(file.bytes, dataOffset);
+    dataOffset += file.bytes.byteLength;
+  }
+  const indexSha256 = await hash(bytes.subarray(indexStart, dataStart), "$bytes.indexSha256");
+  throwIfAborted(signal);
+  bytes.set(hexBytes(indexSha256), 32);
+  bytes.set(hexBytes(contentSetSha256), 64);
+  return bytes;
 }
 
 export async function inspectCppCuteBrowserVfsPack(
@@ -374,6 +519,67 @@ function snapshotBytes(value: unknown, maxPackBytes: number): Uint8Array {
   }
 }
 
+function inspectDenseInputArray(value: unknown, maxFiles: number): readonly unknown[] {
+  let prototype: object | null;
+  let descriptors: PropertyDescriptorMap;
+  try {
+    if (!Array.isArray(value)) invalid("$.files", "files must be an array");
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+  } catch (error) {
+    invalid("$.files", "files array cannot be inspected safely", { cause: error });
+  }
+  if (prototype !== Array.prototype) invalid("$.files", "files must be a plain array");
+  const lengthDescriptor = descriptors["length"];
+  if (lengthDescriptor === undefined || !("value" in lengthDescriptor)) {
+    invalid("$.files.length", "array length must be a data property");
+  }
+  const length = lengthDescriptor.value;
+  if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) {
+    invalid("$.files.length", "array length is invalid");
+  }
+  if (length > maxFiles) resource("$.files", `file count exceeds maxFiles ${maxFiles}`);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (key === "length") continue;
+    if (typeof key !== "string") invalid("$.files", "array contains symbol properties");
+    const index = Number(key);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= length || String(index) !== key) {
+      invalid("$.files", "array contains non-index properties");
+    }
+  }
+  const result: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
+      invalid(`$.files[${index}]`, "files must be dense enumerable data properties");
+    }
+    result.push(descriptor.value);
+  }
+  return Object.freeze(result);
+}
+
+function validateCanonicalInputPaths(
+  files: readonly { readonly virtualPath: string; readonly pathBytes: Uint8Array }[],
+): void {
+  const seenFiles = new Set<string>();
+  let previousPathBytes: Uint8Array | undefined;
+  for (const file of files) {
+    if (previousPathBytes !== undefined && compareBytes(previousPathBytes, file.pathBytes) === 0) {
+      invalid("$.files", "virtual paths must be unique");
+    }
+    const segments = file.virtualPath.split("/");
+    let parent = "";
+    for (const segment of segments.slice(0, -1)) {
+      parent = parent.length === 0 ? segment : `${parent}/${segment}`;
+      if (seenFiles.has(parent)) {
+        invalid("$.files", "a regular file cannot also be an implicit parent directory");
+      }
+    }
+    seenFiles.add(file.virtualPath);
+    previousPathBytes = file.pathBytes;
+  }
+}
+
 function decodeVirtualPath(bytes: Uint8Array, path: string): string {
   let value: string;
   try {
@@ -421,6 +627,14 @@ function hex(bytes: Uint8Array): string {
   let result = "";
   for (const byte of bytes) result += byte.toString(16).padStart(2, "0");
   return result;
+}
+
+function hexBytes(value: string): Uint8Array {
+  const bytes = new Uint8Array(SHA256_BYTES);
+  for (let index = 0; index < SHA256_BYTES; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
 }
 
 async function hash(bytes: Uint8Array, path: string): Promise<string> {
@@ -523,6 +737,16 @@ function plainDataRecord(
 function optionalDescriptorValue(descriptors: PropertyDescriptorMap, name: string): unknown {
   const descriptor = descriptors[name];
   return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
+}
+
+function requiredDescriptorValue(
+  descriptors: PropertyDescriptorMap,
+  name: string,
+  path: string,
+): unknown {
+  const descriptor = descriptors[name];
+  if (descriptor === undefined || !("value" in descriptor)) invalid(`${path}.${name}`, "field is required");
+  return descriptor.value;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
