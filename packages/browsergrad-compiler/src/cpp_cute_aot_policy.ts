@@ -9,6 +9,11 @@ import {
   computeCppCuteAotLimitsManifestHash,
 } from "./cpp_cute_aot_manifests.js";
 import {
+  CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_DECODE_LIMITS,
+  unwrapPreparedCppCuteAotExecutionEnvironment,
+  type PreparedCppCuteAotExecutionEnvironment,
+} from "./cpp_cute_aot_environment.js";
+import {
   unwrapPreparedCppCuteAotJob,
   type PreparedCppCuteAotJob,
 } from "./cpp_cute_aot_job.js";
@@ -37,6 +42,8 @@ export const CPP_CUTE_AOT_CONTAINER_PROFILE_PATH =
   `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/profile.json`;
 export const CPP_CUTE_AOT_CONTAINER_JOB_PATH =
   `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/job.json`;
+export const CPP_CUTE_AOT_CONTAINER_EXECUTION_ENVIRONMENT_PATH =
+  `${CPP_CUTE_AOT_CONTAINER_CONTROL_ROOT}/execution-environment.json`;
 export const CPP_CUTE_AOT_DOCKER_DEFAULT_PATH =
   "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 export const CPP_CUTE_AOT_DOCKER_CLIENT_VERSION = "29.6.1";
@@ -240,7 +247,7 @@ export const CPP_CUTE_AOT_DOCKER_CONTAINER_INSPECT_DECODE_LIMITS = deepFreezeJso
  */
 export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
   schema: CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA,
-  version: { major: 1, minor: 1 },
+  version: { major: 1, minor: 2 },
   contractId: "browsergrad.compiler.cpp-cute.aot@1",
   runtime: {
     engine: "docker",
@@ -289,6 +296,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
     arguments: [
       "--profile=/run/browsergrad/control/profile.json",
       "--job=/run/browsergrad/control/job.json",
+      "--execution-environment=/run/browsergrad/control/execution-environment.json",
       "--source-root=/run/browsergrad/source",
       `--protocol=${CPP_CUTE_AOT_RESULT_FRAME_PROTOCOL}`,
     ],
@@ -417,6 +425,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
   decoding: {
     artifact: CPP_CUTE_AOT_ARTIFACT_DECODE_LIMITS,
     receipt: CPP_CUTE_AOT_RECEIPT_DECODE_LIMITS,
+    executionEnvironment: CPP_CUTE_AOT_EXECUTION_ENVIRONMENT_DECODE_LIMITS,
     ociManifest: CPP_CUTE_AOT_OCI_MANIFEST_DECODE_LIMITS,
     ociConfig: CPP_CUTE_AOT_OCI_CONFIG_DECODE_LIMITS,
     dockerVersion: CPP_CUTE_AOT_DOCKER_VERSION_DECODE_LIMITS,
@@ -433,7 +442,7 @@ export const CPP_CUTE_AOT_SANDBOX_POLICY_V1 = deepFreezeJson({
 
 // SHA-256 of canonical JSON for CPP_CUTE_AOT_SANDBOX_POLICY_V1.
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 =
-  "86d5ccd7ca20ebdc72431358b9e02c581381a6191cea161a15635cc04c08cb78";
+  "d626d88e137cae80d3df7ccade30b5317f1ecc1906e3604133c5dab32dd278e0";
 
 export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
   const actual = await hashCanonicalJson(CPP_CUTE_AOT_SANDBOX_POLICY_V1);
@@ -449,19 +458,31 @@ export async function verifyCppCuteAotSandboxPolicyIdentity(): Promise<void> {
  */
 export async function computeCppCuteAotExecutionPlanHash(
   job: PreparedCppCuteAotJob,
+  environment: PreparedCppCuteAotExecutionEnvironment,
 ): Promise<string> {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
   const profileRecord = unwrapPreparedCppCuteFrontendProfile(jobRecord.profile);
+  const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(environment);
+  if (environmentRecord.profile !== jobRecord.profile || environment.profileHash !== job.profileHash) {
+    throw new Error("BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-PROFILE-MISMATCH: execution environment belongs to a different prepared profile");
+  }
   const profile = profileRecord.profile;
   if (profile.deployment.sandboxPolicySha256 !== CPP_CUTE_AOT_SANDBOX_POLICY_SHA256) {
     throw new Error("BG-COMPILER-CPP-CUTE-AOT-POLICY-UNSUPPORTED: prepared profile does not name the built-in sandbox policy");
   }
   await verifyCppCuteAotSandboxPolicyIdentity();
+  verifyExecutionEnvironmentPolicy(environmentRecord.manifest);
   return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.aot-execution-plan.v1",
+    domain: "browsergrad.compiler.cpp-cute.aot-execution-plan.v2",
     policy: CPP_CUTE_AOT_SANDBOX_POLICY_V1,
     jobId: job.jobId,
     profileHash: job.profileHash,
+    executionEnvironment: {
+      manifestId: environment.manifestId,
+      manifestSha256: environment.manifestSha256,
+      manifestByteLength: environment.manifestByteLength,
+      bodySha256: environment.bodySha256,
+    },
     invocationManifestSha256: await computeCppCuteAotInvocationManifestHash(job),
     dependencyManifestSha256: await computeCppCuteAotDependencyManifestHash(jobRecord.profile),
     limitsManifestSha256: await computeCppCuteAotLimitsManifestHash(profile.extractionLimits),
@@ -472,4 +493,22 @@ export async function computeCppCuteAotExecutionPlanHash(
     virtualFileSystem: profile.virtualFileSystem,
     sourceFiles: jobRecord.job.files,
   });
+}
+
+function verifyExecutionEnvironmentPolicy(
+  manifest: ReturnType<typeof unwrapPreparedCppCuteAotExecutionEnvironment>["manifest"],
+): void {
+  const body = manifest.body;
+  if (
+    body.scope.sandboxPolicySha256 !== CPP_CUTE_AOT_SANDBOX_POLICY_SHA256
+    || body.runtime.docker.clientVersion !== CPP_CUTE_AOT_DOCKER_CLIENT_VERSION
+    || body.runtime.docker.engineVersion !== CPP_CUTE_AOT_DOCKER_ENGINE_VERSION
+    || body.runtime.docker.requestApiVersion !== CPP_CUTE_AOT_DOCKER_API_VERSION
+    || body.runtime.docker.imageStore !== "containerd"
+    || body.image.platform !== "linux/amd64"
+    || body.platform.runnerIdentity.uid !== CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.user.uid
+    || body.platform.runnerIdentity.gid !== CPP_CUTE_AOT_SANDBOX_POLICY_V1.process.user.gid
+  ) {
+    throw new Error("BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-POLICY-MISMATCH: execution environment differs from the built-in sandbox policy");
+  }
 }

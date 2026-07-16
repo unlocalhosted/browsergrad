@@ -17,6 +17,9 @@ import {
   type AuthorizedCppCuteAotOciMetadata,
   type VerifiedCppCuteAotOciMetadata,
 } from "../dist/cpp_cute_aot_oci.js";
+import {
+  prepareCppCuteAotExecutionEnvironment as prepareDistEnvironment,
+} from "../dist/cpp_cute_aot_environment.js";
 import { prepareCppCuteAotJob as prepareDistJob } from "../dist/cpp_cute_aot_job.js";
 import {
   copyCppCuteAotOfflineRunStagingInputs,
@@ -41,6 +44,9 @@ import {
   unwrapPreparedCppCuteFrontendProfile as unwrapDistProfile,
 } from "../dist/cpp_cute_frontend_profile.js";
 import { unwrapPreparedCppCuteAotJob } from "../src/cpp_cute_aot_job.js";
+import {
+  copyPreparedCppCuteAotExecutionEnvironmentBytes,
+} from "../src/cpp_cute_aot_environment.js";
 import {
   copyCppCuteAotOfflineRunSourceBlobs,
   unwrapPreparedCppCuteAotOfflineRun,
@@ -140,8 +146,13 @@ async function prepareFixture(): Promise<PreparedLifecycleFixture> {
   const sourceProfile = unwrapPreparedCppCuteFrontendProfile(sourceJob.profile);
   const distProfile = await prepareDistProfile(structuredClone(sourceProfile.profile));
   const distJob = await prepareDistJob(distProfile, structuredClone(sourceJob.job));
+  const distEnvironment = await prepareDistEnvironment(
+    distProfile,
+    copyPreparedCppCuteAotExecutionEnvironmentBytes(sourcePlan.executionEnvironment),
+  );
   const distPlan = await prepareDistOfflineRun(
     distJob,
+    distEnvironment,
     copyCppCuteAotOfflineRunSourceBlobs(fixture.plan).map(({ fileId, bytes }) => ({
       fileId,
       bytes: new Uint8Array(bytes),
@@ -484,11 +495,13 @@ function snapshotStaging(
     controlDirectory,
     join(controlDirectory, "profile.json"),
     join(controlDirectory, "job.json"),
+    join(controlDirectory, "execution-environment.json"),
     ...inputs.sourceBlobs.map((source) => join(sourceDirectory, source.virtualPath.slice(1))),
   ];
   const bytes: Record<string, Uint8Array> = {
     profile: new Uint8Array(readFileSync(join(controlDirectory, "profile.json"))),
     job: new Uint8Array(readFileSync(join(controlDirectory, "job.json"))),
+    environment: new Uint8Array(readFileSync(join(controlDirectory, "execution-environment.json"))),
   };
   for (const [index, source] of inputs.sourceBlobs.entries()) {
     bytes[`source-${index}`] = new Uint8Array(readFileSync(
@@ -657,8 +670,10 @@ describe("C++/CuTe AOT Docker lifecycle", () => {
     expect(staging.modes[required(harness.state.controlDirectory, "controlDirectory")]).toBe(0o555);
     expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "profile.json")]).toBe(0o444);
     expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "job.json")]).toBe(0o444);
+    expect(staging.modes[join(required(harness.state.controlDirectory, "controlDirectory"), "execution-environment.json")]).toBe(0o444);
     expect(staging.bytes.profile).toEqual(inputs.profileBytes);
     expect(staging.bytes.job).toEqual(inputs.jobBytes);
+    expect(staging.bytes.environment).toEqual(inputs.environmentBytes);
     for (const [index, source] of inputs.sourceBlobs.entries()) {
       const sourcePath = join(required(harness.state.sourceDirectory, "sourceDirectory"), source.virtualPath.slice(1));
       expect(staging.modes[sourcePath]).toBe(0o444);

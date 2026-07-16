@@ -25,7 +25,11 @@ import {
 
 async function createFixture() {
   const base = await createCppCuteProvenanceFixture();
-  return createCppCuteAotReceiptFixture(base.profile, base.artifact);
+  return createCppCuteAotReceiptFixture(
+    base.profile,
+    base.executionEnvironment,
+    base.artifact,
+  );
 }
 
 describe("C++/CuTe AOT runner receipt", () => {
@@ -33,6 +37,7 @@ describe("C++/CuTe AOT runner receipt", () => {
     const fixture = await createFixture();
     const verified = await verifyCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       fixture.receipt,
     );
@@ -66,6 +71,7 @@ describe("C++/CuTe AOT runner receipt", () => {
     });
     expect(record.job).toBe(fixture.job);
     expect(record.profile).toBe(fixture.profile);
+    expect(record.executionEnvironment).toBe(fixture.executionEnvironment);
     expect(record.artifactResource).toBe(fixture.artifactResource);
     expect(record.artifact).toEqual(fixture.artifact);
     expect(Object.isFrozen(verified)).toBe(true);
@@ -79,12 +85,14 @@ describe("C++/CuTe AOT runner receipt", () => {
     const fixture = await createFixture();
     const structural = await verifyCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       fixture.receipt,
     );
     const bytes = canonicalCppCuteAotRunnerReceiptBytes(structural);
     const resource = await decodeCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       bytes,
     );
@@ -102,6 +110,7 @@ describe("C++/CuTe AOT runner receipt", () => {
     const callerOwnedBytes = new Uint8Array(bytes);
     const pending = decodeCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       callerOwnedBytes,
     );
@@ -112,6 +121,7 @@ describe("C++/CuTe AOT runner receipt", () => {
     const noncanonical = new TextEncoder().encode(JSON.stringify(parsed, null, 2));
     await expect(decodeCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       noncanonical,
     )).rejects.toMatchObject({
@@ -124,11 +134,17 @@ describe("C++/CuTe AOT runner receipt", () => {
     const first = await createFixture();
     await expect(verifyCppCuteAotRunnerReceipt(
       first.job,
+      first.executionEnvironment,
       first.artifact as never,
       first.receipt,
     )).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-ARTIFACT-UNVERIFIED" });
 
-    const verified = await verifyCppCuteAotRunnerReceipt(first.job, first.artifactResource, first.receipt);
+    const verified = await verifyCppCuteAotRunnerReceipt(
+      first.job,
+      first.executionEnvironment,
+      first.artifactResource,
+      first.receipt,
+    );
     expect(() => unwrapVerifiedCppCuteAotRunnerReceipt({ ...verified } as never)).toThrowError(
       expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-UNVERIFIED" }),
     );
@@ -219,6 +235,7 @@ describe("C++/CuTe AOT runner receipt", () => {
       testCase.mutate(receipt);
       await expect(verifyCppCuteAotRunnerReceipt(
         fixture.job,
+        fixture.executionEnvironment,
         fixture.artifactResource,
         receipt,
       )).rejects.toMatchObject({ code: testCase.code, path: testCase.path });
@@ -250,8 +267,17 @@ describe("C++/CuTe AOT runner receipt", () => {
         };
       },
     });
-    const fixture = await createCppCuteAotReceiptFixture(base.profile, base.artifact);
-    const verified = await verifyCppCuteAotRunnerReceipt(fixture.job, fixture.artifactResource, fixture.receipt);
+    const fixture = await createCppCuteAotReceiptFixture(
+      base.profile,
+      base.executionEnvironment,
+      base.artifact,
+    );
+    const verified = await verifyCppCuteAotRunnerReceipt(
+      fixture.job,
+      fixture.executionEnvironment,
+      fixture.artifactResource,
+      fixture.receipt,
+    );
     expect(unwrapVerifiedCppCuteAotRunnerReceipt(verified).receipt.selection).toMatchObject({
       kind: "rejected",
       blockingDiagnosticIds: [`bg.cpp.diagnostic.sha256.${"1".repeat(64)}`],
@@ -293,6 +319,7 @@ describe("C++/CuTe AOT runner receipt", () => {
       resources[field] = parseWireU64(String(BigInt(maximum) + 1n));
       await expect(verifyCppCuteAotRunnerReceipt(
         fixture.job,
+        fixture.executionEnvironment,
         fixture.artifactResource,
         receipt,
       )).rejects.toMatchObject({
@@ -306,6 +333,7 @@ describe("C++/CuTe AOT runner receipt", () => {
     resources["sourceFiles"] = "2";
     await expect(verifyCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       counterDrift,
     )).rejects.toMatchObject({
@@ -320,20 +348,21 @@ describe("C++/CuTe AOT runner receipt", () => {
     (hashDrift as { receiptId: string }).receiptId = `bg.cpp.aot-receipt.sha256.${"0".repeat(64)}`;
     await expect(verifyCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       hashDrift,
     )).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-HASH-MISMATCH" });
 
-    await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.artifactResource, {
+    await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.executionEnvironment, fixture.artifactResource, {
       ...fixture.receipt,
       version: { major: 2, minor: 0 },
     })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-UNSUPPORTED-VERSION" });
-    await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.artifactResource, {
+    await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.executionEnvironment, fixture.artifactResource, {
       ...fixture.receipt,
       outcome: "failed",
       exitCode: 1,
     })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVALID" });
-    await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.artifactResource, {
+    await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.executionEnvironment, fixture.artifactResource, {
       ...fixture.receipt,
       command: ["clang++"],
     })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVALID" });
@@ -342,6 +371,7 @@ describe("C++/CuTe AOT runner receipt", () => {
     controller.abort();
     await expect(verifyCppCuteAotRunnerReceipt(
       fixture.job,
+      fixture.executionEnvironment,
       fixture.artifactResource,
       fixture.receipt,
       { signal: controller.signal },
@@ -349,7 +379,12 @@ describe("C++/CuTe AOT runner receipt", () => {
 
     const hostile = {};
     Object.defineProperty(hostile, "schema", { enumerable: true, get: () => CPP_CUTE_AOT_RECEIPT_SCHEMA });
-    await expect(verifyCppCuteAotRunnerReceipt(fixture.job, fixture.artifactResource, hostile)).rejects.toThrow();
+    await expect(verifyCppCuteAotRunnerReceipt(
+      fixture.job,
+      fixture.executionEnvironment,
+      fixture.artifactResource,
+      hostile,
+    )).rejects.toThrow();
     expect(canonicalJsonBytes(fixture.receipt).byteLength).toBeGreaterThan(0);
     expect(await deriveCppCuteAotRunnerReceiptId(fixture.receipt)).toBe(fixture.receipt.receiptId);
   });

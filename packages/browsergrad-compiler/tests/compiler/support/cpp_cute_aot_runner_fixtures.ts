@@ -10,8 +10,12 @@ import {
   verifyCppCuteFrontendArtifact,
 } from "../../../src/cpp_cute_frontend_artifact.js";
 import {
-  prepareCppCuteFrontendProfile,
+  type PreparedCppCuteFrontendProfile,
 } from "../../../src/cpp_cute_frontend_profile.js";
+import type {
+  CppCuteAotExecutionEnvironmentLayer,
+  PreparedCppCuteAotExecutionEnvironment,
+} from "../../../src/cpp_cute_aot_environment.js";
 import {
   computeCppCuteInputHashes,
 } from "../../../src/cpp_cute_frontend_verify.js";
@@ -27,15 +31,17 @@ import {
 import {
   artifactCompatibleProfileOptions,
   createCppCuteArtifactInput,
-  createCppCuteProfileInput,
   type CppCuteProfileFixtureOptions,
 } from "./cpp_cute_frontend_fixtures.js";
 import {
   createCppCuteAotReceiptFixture,
 } from "./cpp_cute_aot_receipt_fixtures.js";
+import { createCppCuteAotExecutionEnvironmentFixture } from "./cpp_cute_aot_environment_fixtures.js";
 
 export interface CppCuteAotRunnerFixture {
   readonly plan: PreparedCppCuteAotOfflineRun;
+  readonly profile: PreparedCppCuteFrontendProfile;
+  readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
   readonly sourceBlob: CppCuteAotSourceBlob;
   readonly artifactBytes: Uint8Array;
   readonly receiptBytes: Uint8Array;
@@ -43,6 +49,7 @@ export interface CppCuteAotRunnerFixture {
 
 export interface CppCuteAotRunnerFixtureOptions {
   readonly outcome?: "accepted" | "rejected";
+  readonly environmentLayers?: readonly CppCuteAotExecutionEnvironmentLayer[];
 }
 
 export async function createCppCuteAotRunnerFixture(
@@ -54,25 +61,48 @@ export async function createCppCuteAotRunnerFixture(
     ...artifactCompatibleProfileOptions(preliminary.headerSetSha256, "d".repeat(64)),
     ...profileOverrides,
   };
-  const profile = await prepareCppCuteFrontendProfile(createCppCuteProfileInput(profileOptions));
+  const environmentLayers = options.environmentLayers;
+  const environmentFixture = await createCppCuteAotExecutionEnvironmentFixture({
+    profile: profileOptions,
+    ...(environmentLayers === undefined
+      ? {}
+      : {
+          mutateBody: (body) => {
+            (body.image as { layers: readonly CppCuteAotExecutionEnvironmentLayer[] }).layers =
+              structuredClone(environmentLayers);
+          },
+        }),
+  });
+  const profile = environmentFixture.profile;
   const artifactInput = await createRealSourceBackedArtifact(
     profile.profileHash,
     options.outcome ?? "accepted",
   );
   const artifact = await verifyCppCuteFrontendArtifact(artifactInput);
-  const receiptFixture = await createCppCuteAotReceiptFixture(profile, artifact);
+  const receiptFixture = await createCppCuteAotReceiptFixture(
+    profile,
+    environmentFixture.environment,
+    artifact,
+  );
   const sourceFile = receiptFixture.receipt.openedInputs.files.find((file) => file.role === "main-source");
   if (sourceFile === undefined) throw new Error("runner fixture lost main source");
   const sourceBytes = fixtureSourceBytes();
   const sourceBlob = Object.freeze({ fileId: sourceFile.fileId, bytes: sourceBytes });
-  const plan = await prepareCppCuteAotOfflineRun(receiptFixture.job, [sourceBlob]);
+  const plan = await prepareCppCuteAotOfflineRun(
+    receiptFixture.job,
+    environmentFixture.environment,
+    [sourceBlob],
+  );
   const receipt = await verifyCppCuteAotRunnerReceipt(
     receiptFixture.job,
+    environmentFixture.environment,
     receiptFixture.artifactResource,
     receiptFixture.receipt,
   );
   return {
     plan,
+    profile,
+    executionEnvironment: environmentFixture.environment,
     sourceBlob,
     artifactBytes: canonicalCppCuteFrontendArtifactBytes(artifact),
     receiptBytes: canonicalCppCuteAotRunnerReceiptBytes(receipt),

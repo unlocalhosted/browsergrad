@@ -32,11 +32,14 @@ describe("C++/CuTe AOT sandbox policy", () => {
     }).toThrowError(TypeError);
 
     const fixture = await createCppCuteProvenanceFixture();
-    expect(await computeCppCuteAotExecutionPlanHash(fixture.job)).toBe(
+    expect(await computeCppCuteAotExecutionPlanHash(
+      fixture.job,
+      fixture.executionEnvironment,
+    )).toBe(
       fixture.receipt.invocation.executionPlanSha256,
     );
     expect(fixture.receipt.invocation.executionPlanSha256).toBe(
-      "8b8b3809df6e20dde842a3488553b2f84093426aca0c95f7b1bcfb53b04091c7",
+      "cb1af6b99fb471eaf791897525dae6f9995c1d576082a0527effc0934246d7bc",
     );
   });
 });

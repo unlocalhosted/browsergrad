@@ -19,10 +19,10 @@ import {
   type VerifiedCppCuteFrontendArtifactResource,
 } from "../../../src/cpp_cute_frontend_artifact.js";
 import {
-  prepareCppCuteFrontendProfile,
   unwrapPreparedCppCuteFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../../src/cpp_cute_frontend_profile.js";
+import type { PreparedCppCuteAotExecutionEnvironment } from "../../../src/cpp_cute_aot_environment.js";
 import {
   authorizeCppCuteFrontendArtifact,
   CPP_CUTE_FRONTEND_BUILD_TYPE,
@@ -46,9 +46,9 @@ import {
   CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
   CPP_CUTE_FIXTURE_SOURCE_REVISION,
   createCppCuteArtifactInput,
-  createCppCuteProfileInput,
 } from "./cpp_cute_frontend_fixtures.js";
 import { createCppCuteAotReceiptFixture } from "./cpp_cute_aot_receipt_fixtures.js";
+import { createCppCuteAotExecutionEnvironmentFixture } from "./cpp_cute_aot_environment_fixtures.js";
 
 const TEST_PRIVATE_JWK: JsonWebKey = Object.freeze({
   key_ops: ["sign"],
@@ -63,9 +63,9 @@ const TEST_PRIVATE_JWK: JsonWebKey = Object.freeze({
 export const TEST_CPP_CUTE_SPKI_BASE64 =
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl8h7VCP+TUDyAHiNww/AEpx+H6YG/bXR1bsUEtcquSfen4okTS1aPQ0oyKgQtZPo2Mn2pfS6TSArNTL7ACRmdQ==";
 export const PINNED_CPP_CUTE_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
-export const PINNED_CPP_CUTE_PROFILE_HASH = "dd2bf549a9f0237d18c041e46ed67bd4f1286bc89d6b1546a7451185ec5b1663";
-export const PINNED_CPP_CUTE_ARTIFACT_HASH = "7adc1c085a31a6a41cdb3e63aee5b2f68de45a36fca594f30aa3dbacc3160a59";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "099d63030f7f3e26f2de73cb1604a7b968385133c662d509bc4543b6749c41b0";
+export const PINNED_CPP_CUTE_PROFILE_HASH = "061fb3f7f13e16f4dcac7ae600f87d6768be061bc4433f467432996294d230ab";
+export const PINNED_CPP_CUTE_ARTIFACT_HASH = "1670047979980aa41fa0a601ddaa0104085dcd27493cd1f9e980cf248bf55a9a";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "2238c035aaf429be49894dcd299588df85bf07cbefbed31ce4bca7c328b320a9";
 export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "9068";
 export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "9a122d8462fc232451f6e758bcda17f48dcf2614d67aa641e951a5886fac6975";
 
@@ -74,6 +74,7 @@ export interface CppCuteProvenanceFixture {
   readonly keyId: string;
   readonly trustStore: PreparedCppCuteAttestationTrustStore;
   readonly profile: PreparedCppCuteFrontendProfile;
+  readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly artifactResource: VerifiedCppCuteFrontendArtifactResource;
   readonly job: PreparedCppCuteAotJob;
@@ -116,24 +117,33 @@ export async function createCppCuteProvenanceFixture(
   });
   const preliminaryInput = await createCppCuteArtifactInput();
   const preliminaryArtifact = await verifyCppCuteFrontendArtifact(preliminaryInput);
-  const profile = await prepareCppCuteFrontendProfile(createCppCuteProfileInput(artifactCompatibleProfileOptions(
-    preliminaryArtifact.headerSetSha256,
-    trustStore.trustStoreHash,
-  )));
+  const environmentFixture = await createCppCuteAotExecutionEnvironmentFixture({
+    profile: artifactCompatibleProfileOptions(
+      preliminaryArtifact.headerSetSha256,
+      trustStore.trustStoreHash,
+    ),
+  });
+  const profile = environmentFixture.profile;
   const artifactInput = await createCppCuteArtifactInput(profile.profileHash);
   options.mutatePayload?.(artifactInput.payload);
   if (options.mutatePayload !== undefined) {
     (artifactInput as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(artifactInput.payload);
   }
   const inMemoryArtifact = await verifyCppCuteFrontendArtifact(artifactInput);
-  const receiptFixture = await createCppCuteAotReceiptFixture(profile, inMemoryArtifact);
+  const receiptFixture = await createCppCuteAotReceiptFixture(
+    profile,
+    environmentFixture.environment,
+    inMemoryArtifact,
+  );
   const structuralReceipt = await verifyCppCuteAotRunnerReceipt(
     receiptFixture.job,
+    environmentFixture.environment,
     receiptFixture.artifactResource,
     receiptFixture.receipt,
   );
   const receiptResource = await decodeCppCuteAotRunnerReceipt(
     receiptFixture.job,
+    environmentFixture.environment,
     receiptFixture.artifactResource,
     canonicalCppCuteAotRunnerReceiptBytes(structuralReceipt),
   );
@@ -148,6 +158,7 @@ export async function createCppCuteProvenanceFixture(
     keyId,
     trustStore,
     profile,
+    executionEnvironment: environmentFixture.environment,
     artifact,
     artifactResource,
     job: receiptRecord.job,

@@ -27,6 +27,7 @@ export interface CppCuteAotOciFixtureOptions {
   readonly history?: readonly MutableJsonObject[] | null;
   readonly imageConfig?: unknown;
   readonly omitImageConfig?: boolean;
+  readonly environmentMatchesOciLayers?: boolean;
 }
 
 export interface CppCuteAotOciFixture {
@@ -82,10 +83,22 @@ export async function createCppCuteAotOciFixture(
     ? textEncoder.encode(JSON.stringify(manifest))
     : new Uint8Array(options.rawManifestBytes);
   const manifestDigest = `sha256:${await sha256Hex(manifestBytes)}`;
-  const runner = await createCppCuteAotRunnerFixture({
-    containerManifestDigest: manifestDigest,
-    containerConfigDigest: configDigest,
-  });
+  const runner = await createCppCuteAotRunnerFixture(
+    {
+      containerManifestDigest: manifestDigest,
+      containerConfigDigest: configDigest,
+    },
+    options.environmentMatchesOciLayers === true
+      ? {
+          environmentLayers: layers.map((layer, index) => ({
+            mediaType: layer.mediaType as "application/vnd.oci.image.layer.v1.tar+gzip",
+            digest: layer.digest as string,
+            size: String(layer.size) as never,
+            diffId: diffIds[index] as string,
+          })),
+        }
+      : {},
+  );
   return {
     plan: runner.plan,
     runner,

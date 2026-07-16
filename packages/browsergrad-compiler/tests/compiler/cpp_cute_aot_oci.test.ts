@@ -79,12 +79,7 @@ describe("C++/CuTe AOT OCI manifest/config metadata", () => {
   });
 
   it("retains exact ordered layer closure behind deeply frozen plan-neutral authority", async () => {
-    const secondLayerDigest = `sha256:${"c".repeat(64)}`;
-    const secondDiffId = `sha256:${"d".repeat(64)}`;
-    const fixture = await createCppCuteAotOciFixture({
-      layers: [defaultLayer(), defaultLayer({ digest: secondLayerDigest, size: 456 })],
-      diffIds: [DEFAULT_DIFF_ID, secondDiffId],
-    });
+    const fixture = await createCppCuteAotOciFixture();
     const raw = await verifyCppCuteAotOciMetadata(fixture.evidence);
     const first = authorizeCppCuteAotOciMetadata(fixture.plan, raw);
     const secondRunner = await createCppCuteAotRunnerFixture({
@@ -98,19 +93,57 @@ describe("C++/CuTe AOT OCI manifest/config metadata", () => {
     expect(first.profileHash).not.toBe(second.profileHash);
     expect(unwrapAuthorizedCppCuteAotOciMetadata(first).metadata).toBe(raw);
     expect(unwrapAuthorizedCppCuteAotOciMetadata(second).metadata).toBe(raw);
-    expect(projection.layers).toEqual([
-      defaultLayer(),
-      defaultLayer({ digest: secondLayerDigest, size: 456 }),
-    ]);
-    expect(projection.diffIds).toEqual([DEFAULT_DIFF_ID, secondDiffId]);
-    expect(first.totalLayerBytes).toBe(579);
+    expect(projection.layers).toEqual([defaultLayer()]);
+    expect(projection.diffIds).toEqual([DEFAULT_DIFF_ID]);
+    expect(first.totalLayerBytes).toBe(123);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(projection)).toBe(true);
     expect(Object.isFrozen(projection.layers)).toBe(true);
     expect(Object.isFrozen(projection.layers[0])).toBe(true);
     expect(Object.isFrozen(projection.diffIds)).toBe(true);
-    expect(() => { (projection.diffIds as string[])[0] = secondDiffId; }).toThrow(TypeError);
-    expect(inspectAuthorizedCppCuteAotOciMetadata(first).diffIds).toEqual([DEFAULT_DIFF_ID, secondDiffId]);
+    expect(() => { (projection.diffIds as string[])[0] = `sha256:${"d".repeat(64)}`; }).toThrow(TypeError);
+    expect(inspectAuthorizedCppCuteAotOciMetadata(first).diffIds).toEqual([DEFAULT_DIFF_ID]);
+  });
+
+  it("fails closed when OCI layer closure differs from the execution environment", async () => {
+    const cases = [
+      {
+        layers: [defaultLayer({ mediaType: "application/vnd.oci.image.layer.v1.tar" })],
+        diffIds: [DEFAULT_DIFF_ID],
+        path: "$.manifest.layers[0].mediaType",
+      },
+      {
+        layers: [defaultLayer({ digest: `sha256:${"c".repeat(64)}` })],
+        diffIds: [DEFAULT_DIFF_ID],
+        path: "$.manifest.layers[0].digest",
+      },
+      {
+        layers: [defaultLayer({ size: 124 })],
+        diffIds: [DEFAULT_DIFF_ID],
+        path: "$.manifest.layers[0].size",
+      },
+      {
+        layers: [defaultLayer()],
+        diffIds: [`sha256:${"c".repeat(64)}`],
+        path: "$.config.rootfs.diff_ids[0]",
+      },
+      {
+        layers: [defaultLayer(), defaultLayer({ digest: `sha256:${"c".repeat(64)}` })],
+        diffIds: [DEFAULT_DIFF_ID, `sha256:${"d".repeat(64)}`],
+        path: "$.manifest.layers",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const fixture = await createCppCuteAotOciFixture(testCase);
+      const metadata = await verifyCppCuteAotOciMetadata(fixture.evidence);
+      expect(() => authorizeCppCuteAotOciMetadata(fixture.plan, metadata)).toThrowError(
+        expect.objectContaining({
+          code: "BG-COMPILER-CPP-CUTE-AOT-OCI-IMAGE-MISMATCH",
+          path: testCase.path,
+        }),
+      );
+    }
   });
 
   it("rejects manifest, config, embedded-config digest, and exact-size drift", async () => {

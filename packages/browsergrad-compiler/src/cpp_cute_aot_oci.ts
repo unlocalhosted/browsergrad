@@ -15,6 +15,10 @@ import {
   CPP_CUTE_AOT_OCI_RESOURCE_LIMITS,
 } from "./cpp_cute_aot_policy.js";
 import {
+  unwrapPreparedCppCuteAotExecutionEnvironment,
+  type CppCuteAotExecutionEnvironmentLayer,
+} from "./cpp_cute_aot_environment.js";
+import {
   unwrapPreparedCppCuteAotOfflineRun,
   type PreparedCppCuteAotOfflineRun,
 } from "./cpp_cute_aot_runner_plan.js";
@@ -179,7 +183,7 @@ export function authorizeCppCuteAotOciMetadata(
   plan: PreparedCppCuteAotOfflineRun,
   metadata: VerifiedCppCuteAotOciMetadata,
 ): AuthorizedCppCuteAotOciMetadata {
-  unwrapPreparedCppCuteAotOfflineRun(plan);
+  const planRecord = unwrapPreparedCppCuteAotOfflineRun(plan);
   const metadataRecord = storedMetadata(metadata);
   const expectedManifestDigest = digestFromImageReference(plan.imageReference);
   if (metadata.manifest.digest !== expectedManifestDigest) {
@@ -188,6 +192,13 @@ export function authorizeCppCuteAotOciMetadata(
   if (metadata.config.digest !== plan.imageConfigDigest) {
     digestMismatch("$.plan.imageConfigDigest", "prepared plan names a different raw OCI config");
   }
+  const environment = unwrapPreparedCppCuteAotExecutionEnvironment(
+    planRecord.executionEnvironment,
+  );
+  verifyEnvironmentImageClosure(
+    metadataRecord,
+    environment.manifest.body.image.layers,
+  );
   const authorized = Object.freeze({
     jobId: plan.jobId,
     profileHash: plan.profileHash,
@@ -205,6 +216,57 @@ export function authorizeCppCuteAotOciMetadata(
     diffIds: metadataRecord.diffIds,
   }));
   return authorized;
+}
+
+function verifyEnvironmentImageClosure(
+  metadata: StoredCppCuteAotOciMetadata,
+  expectedLayers: readonly CppCuteAotExecutionEnvironmentLayer[],
+): void {
+  if (metadata.layers.length !== expectedLayers.length) {
+    imageMismatch(
+      "$.manifest.layers",
+      "OCI layer count differs from the prepared execution environment",
+    );
+  }
+  if (metadata.diffIds.length !== expectedLayers.length) {
+    imageMismatch(
+      "$.config.rootfs.diff_ids",
+      "OCI diff-ID count differs from the prepared execution environment",
+    );
+  }
+  for (let index = 0; index < expectedLayers.length; index += 1) {
+    const expected = expectedLayers[index];
+    const layer = metadata.layers[index];
+    const diffId = metadata.diffIds[index];
+    if (expected === undefined || layer === undefined || diffId === undefined) {
+      imageMismatch("$.manifest.layers", "OCI layer closure is incomplete");
+    }
+    const path = `$.manifest.layers[${index}]`;
+    if (layer.mediaType !== expected.mediaType) {
+      imageMismatch(
+        `${path}.mediaType`,
+        "OCI layer media type differs from the prepared execution environment",
+      );
+    }
+    if (layer.digest !== expected.digest) {
+      imageMismatch(
+        `${path}.digest`,
+        "OCI layer digest differs from the prepared execution environment",
+      );
+    }
+    if (BigInt(layer.size) !== BigInt(expected.size)) {
+      imageMismatch(
+        `${path}.size`,
+        "OCI layer size differs from the prepared execution environment",
+      );
+    }
+    if (diffId !== expected.diffId) {
+      imageMismatch(
+        `$.config.rootfs.diff_ids[${index}]`,
+        "OCI diff ID differs from the prepared execution environment",
+      );
+    }
+  }
 }
 
 export function unwrapAuthorizedCppCuteAotOciMetadata(

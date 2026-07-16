@@ -18,6 +18,9 @@ import {
   type AuthorizedCppCuteAotOciMetadata,
   type VerifiedCppCuteAotOciMetadata,
 } from "../dist/cpp_cute_aot_oci.js";
+import {
+  prepareCppCuteAotExecutionEnvironment as prepareDistEnvironment,
+} from "../dist/cpp_cute_aot_environment.js";
 import { prepareCppCuteAotJob as prepareDistJob } from "../dist/cpp_cute_aot_job.js";
 import { prepareCppCuteAotOfflineRun as prepareDistOfflineRun } from "../dist/cpp_cute_aot_runner_plan.js";
 import { prepareCppCuteFrontendProfile as prepareDistProfile } from "../dist/cpp_cute_frontend_profile.js";
@@ -48,6 +51,9 @@ import {
   unwrapObservedCppCuteAotLocalDockerImage,
 } from "./cpp_cute_aot_docker_shell.mjs";
 import { unwrapPreparedCppCuteAotJob } from "../src/cpp_cute_aot_job.js";
+import {
+  copyPreparedCppCuteAotExecutionEnvironmentBytes,
+} from "../src/cpp_cute_aot_environment.js";
 import {
   copyCppCuteAotOfflineRunSourceBlobs,
   unwrapPreparedCppCuteAotOfflineRun,
@@ -176,6 +182,7 @@ async function prepareFixture(twoLayers = false): Promise<PreparedDockerFixture>
     ? {
         layers: [defaultLayer(), defaultLayer({ digest: `sha256:${"d".repeat(64)}` })],
         diffIds: [DEFAULT_DIFF_ID, secondDiffId],
+        environmentMatchesOciLayers: true,
       }
     : {});
   const sourcePlan = unwrapPreparedCppCuteAotOfflineRun(fixture.plan);
@@ -183,8 +190,13 @@ async function prepareFixture(twoLayers = false): Promise<PreparedDockerFixture>
   const sourceProfile = unwrapPreparedCppCuteFrontendProfile(sourceJob.profile);
   const distProfile = await prepareDistProfile(structuredClone(sourceProfile.profile));
   const distJob = await prepareDistJob(distProfile, structuredClone(sourceJob.job));
+  const distEnvironment = await prepareDistEnvironment(
+    distProfile,
+    copyPreparedCppCuteAotExecutionEnvironmentBytes(sourcePlan.executionEnvironment),
+  );
   const distPlan = await prepareDistOfflineRun(
     distJob,
+    distEnvironment,
     copyCppCuteAotOfflineRunSourceBlobs(fixture.plan).map(({ fileId, bytes }) => ({
       fileId,
       bytes: new Uint8Array(bytes),

@@ -18,6 +18,11 @@ import {
   verifyCppCuteAotSandboxPolicyIdentity,
 } from "./cpp_cute_aot_policy.js";
 import {
+  copyPreparedCppCuteAotExecutionEnvironmentBytes,
+  unwrapPreparedCppCuteAotExecutionEnvironment,
+  type PreparedCppCuteAotExecutionEnvironment,
+} from "./cpp_cute_aot_environment.js";
+import {
   decodeCppCuteAotRunnerReceipt,
   type VerifiedCppCuteAotRunnerReceiptResource,
 } from "./cpp_cute_aot_receipt.js";
@@ -76,6 +81,7 @@ export interface PreparedCppCuteAotOfflineRun {
 export interface PreparedCppCuteAotOfflineRunRecord {
   readonly job: PreparedCppCuteAotJob;
   readonly profile: PreparedCppCuteFrontendProfile;
+  readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
   readonly sourceFiles: readonly CppCuteAotSourceFileV1[];
   readonly executionPlanSha256: string;
   readonly artifactByteLimit: number;
@@ -129,6 +135,7 @@ export interface CppCuteAotOfflineStagingSourceBlob extends CppCuteAotSourceBlob
 export interface CppCuteAotOfflineStagingInputs {
   readonly profileBytes: Uint8Array;
   readonly jobBytes: Uint8Array;
+  readonly environmentBytes: Uint8Array;
   readonly sourceBlobs: readonly CppCuteAotOfflineStagingSourceBlob[];
 }
 
@@ -168,6 +175,7 @@ export class CppCuteAotOfflineRunnerError extends Error {
  */
 export async function prepareCppCuteAotOfflineRun(
   job: PreparedCppCuteAotJob,
+  executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   sourceBlobs: readonly CppCuteAotSourceBlob[],
   options: PrepareCppCuteAotOfflineRunOptions = {},
 ): Promise<PreparedCppCuteAotOfflineRun> {
@@ -178,6 +186,14 @@ export async function prepareCppCuteAotOfflineRun(
   throwIfAborted(signal);
   const snapshots = snapshotSourceBlobs(sourceBlobs, jobRecord.job.files);
   throwIfAborted(signal);
+  const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(executionEnvironment);
+  if (environmentRecord.profile !== profile || executionEnvironment.profileHash !== profile.profileHash) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-AOT-RUNNER-POLICY-MISMATCH",
+      "$.executionEnvironment",
+      "execution environment belongs to a different prepared profile",
+    );
+  }
   if (profileRecord.profile.deployment.sandboxPolicySha256 !== CPP_CUTE_AOT_SANDBOX_POLICY_SHA256) {
     mismatch(
       "BG-COMPILER-CPP-CUTE-AOT-RUNNER-POLICY-MISMATCH",
@@ -188,7 +204,7 @@ export async function prepareCppCuteAotOfflineRun(
   await verifyCppCuteAotSandboxPolicyIdentity();
   const verifiedSources = await verifySourceSnapshots(jobRecord.job.files, snapshots, jobRecord.job.entryRequests[0]);
   throwIfAborted(signal);
-  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job);
+  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job, executionEnvironment);
   throwIfAborted(signal);
   const artifactByteLimit = Math.min(
     profile.extractionLimits.maxOutputBytes,
@@ -208,7 +224,7 @@ export async function prepareCppCuteAotOfflineRun(
     imageReference: `${container.repository}@${container.manifestDigest}`,
     imageConfigDigest: container.configDigest,
     executionEnvironmentManifestSha256:
-      profileRecord.profile.deployment.executionEnvironmentManifestSha256,
+      executionEnvironment.manifestSha256,
     sourceFileCount: verifiedSources.length,
     sourceBytes: encodeWireU64(sourceBytes),
     artifactByteLimit,
@@ -218,6 +234,7 @@ export async function prepareCppCuteAotOfflineRun(
   PREPARED_RUNS.set(prepared, Object.freeze({
     job,
     profile,
+    executionEnvironment,
     sourceFiles: jobRecord.job.files,
     sourceBlobs: verifiedSources,
     executionPlanSha256,
@@ -237,6 +254,7 @@ export function unwrapPreparedCppCuteAotOfflineRun(
   return Object.freeze({
     job: record.job,
     profile: record.profile,
+    executionEnvironment: record.executionEnvironment,
     sourceFiles: record.sourceFiles,
     executionPlanSha256: record.executionPlanSha256,
     artifactByteLimit: record.artifactByteLimit,
@@ -273,6 +291,7 @@ export function copyCppCuteAotOfflineRunStagingInputs(
   return Object.freeze({
     profileBytes: new Uint8Array(canonicalJsonBytes(profile)),
     jobBytes: new Uint8Array(canonicalJsonBytes(job)),
+    environmentBytes: copyPreparedCppCuteAotExecutionEnvironmentBytes(record.executionEnvironment),
     sourceBlobs: Object.freeze(record.sourceBlobs.map(({ file, bytes }) => Object.freeze({
       fileId: file.fileId,
       virtualPath: file.virtualPath,
@@ -334,6 +353,7 @@ export async function decodeCppCuteAotResultFrame(
   const artifact = unwrapVerifiedCppCuteFrontendArtifactResource(artifactResource);
   const receiptResource = await decodeCppCuteAotRunnerReceipt(
     record.job,
+    record.executionEnvironment,
     artifactResource,
     receiptBytes,
     signal === undefined

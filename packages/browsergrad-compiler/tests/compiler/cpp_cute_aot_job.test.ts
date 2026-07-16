@@ -119,7 +119,7 @@ describe("C++/CuTe AOT producer request", () => {
       expectedEntryId: CPP_CUTE_FIXTURE_ENTRY_ID,
     });
     expect(prepared.jobId).toBe(
-      "bg.cpp.aot-job.sha256.0eb727a0e98c2f23eaa44a0671f5822d9a18ffc281ee18b01b13da8609bf7d37",
+      "bg.cpp.aot-job.sha256.37ab6686a4a87f04aa93d3413ea73d055ee4ebafee4706a84f9cc604480be0a2",
     );
     expect(prepared.entryRequestId).toBe(
       "bg.cpp.entry-request.sha256.b3bcfcdba40d2d0980480de85525f5ec9e30370d404b8fec4815f5b2ecaa9af2",

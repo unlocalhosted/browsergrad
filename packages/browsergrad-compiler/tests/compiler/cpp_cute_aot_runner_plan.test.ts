@@ -45,7 +45,7 @@ describe("C++/CuTe offline AOT runner plan", () => {
     );
 
     const callerBytes = new Uint8Array(fixture.sourceBlob.bytes);
-    const pending = prepareCppCuteAotOfflineRun(record.job, [{
+    const pending = prepareCppCuteAotOfflineRun(record.job, record.executionEnvironment, [{
       fileId: fixture.sourceBlob.fileId,
       bytes: callerBytes,
     }]);
@@ -59,16 +59,20 @@ describe("C++/CuTe offline AOT runner plan", () => {
   it("rejects missing, extra, mutated, shared, and accessor source blobs", async () => {
     const fixture = await createCppCuteAotRunnerFixture();
     const { job } = unwrapPreparedCppCuteAotOfflineRun(fixture.plan);
-    await expect(prepareCppCuteAotOfflineRun(job, [])).rejects.toMatchObject({
+    await expect(prepareCppCuteAotOfflineRun(job, fixture.executionEnvironment, [])).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
       path: "$sourceBlobs",
     });
-    await expect(prepareCppCuteAotOfflineRun(job, [fixture.sourceBlob, fixture.sourceBlob])).rejects.toMatchObject({
+    await expect(prepareCppCuteAotOfflineRun(
+      job,
+      fixture.executionEnvironment,
+      [fixture.sourceBlob, fixture.sourceBlob],
+    )).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
     });
     const mutated = new Uint8Array(fixture.sourceBlob.bytes);
     mutated[1] = (mutated[1] ?? 0) ^ 1;
-    await expect(prepareCppCuteAotOfflineRun(job, [{
+    await expect(prepareCppCuteAotOfflineRun(job, fixture.executionEnvironment, [{
       fileId: fixture.sourceBlob.fileId,
       bytes: mutated,
     }])).rejects.toMatchObject({
@@ -76,14 +80,14 @@ describe("C++/CuTe offline AOT runner plan", () => {
       path: "$sourceBlobs[0].bytes",
     });
     if (typeof SharedArrayBuffer !== "undefined") {
-      await expect(prepareCppCuteAotOfflineRun(job, [{
+      await expect(prepareCppCuteAotOfflineRun(job, fixture.executionEnvironment, [{
         fileId: fixture.sourceBlob.fileId,
         bytes: new Uint8Array(new SharedArrayBuffer(100)),
       }])).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-INVALID" });
     }
     const disguisedWords = new Uint16Array(50);
     Object.setPrototypeOf(disguisedWords, Uint8Array.prototype);
-    await expect(prepareCppCuteAotOfflineRun(job, [{
+    await expect(prepareCppCuteAotOfflineRun(job, fixture.executionEnvironment, [{
       fileId: fixture.sourceBlob.fileId,
       bytes: disguisedWords as unknown as Uint8Array,
     }])).rejects.toMatchObject({
@@ -95,7 +99,11 @@ describe("C++/CuTe offline AOT runner plan", () => {
       enumerable: true,
       get: () => fixture.sourceBlob.bytes,
     });
-    await expect(prepareCppCuteAotOfflineRun(job, [accessor as never])).rejects.toMatchObject({
+    await expect(prepareCppCuteAotOfflineRun(
+      job,
+      fixture.executionEnvironment,
+      [accessor as never],
+    )).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-INVALID",
       path: "$sourceBlobs[0].bytes",
     });
@@ -104,13 +112,17 @@ describe("C++/CuTe offline AOT runner plan", () => {
       enumerable: true,
       get: () => fixture.sourceBlob,
     });
-    await expect(prepareCppCuteAotOfflineRun(job, accessorArray as never)).rejects.toMatchObject({
+    await expect(prepareCppCuteAotOfflineRun(
+      job,
+      fixture.executionEnvironment,
+      accessorArray as never,
+    )).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-INVALID",
       path: "$sourceBlobs[0]",
     });
 
     const oversized = new Uint8Array(fixture.sourceBlob.bytes.byteLength + 1_048_576);
-    await expect(prepareCppCuteAotOfflineRun(job, [{
+    await expect(prepareCppCuteAotOfflineRun(job, fixture.executionEnvironment, [{
       fileId: fixture.sourceBlob.fileId,
       bytes: oversized,
     }])).rejects.toMatchObject({
@@ -165,7 +177,12 @@ describe("C++/CuTe offline AOT runner plan", () => {
       },
     });
 
-    await expect(prepareCppCuteAotOfflineRun(job, sourceBlobs, options)).resolves.toMatchObject({
+    await expect(prepareCppCuteAotOfflineRun(
+      job,
+      fixture.executionEnvironment,
+      sourceBlobs,
+      options,
+    )).resolves.toMatchObject({
       jobId: job.jobId,
     });
     expect({ arrayOwnKeysCalls, entryOwnKeysCalls, optionsOwnKeysCalls }).toEqual({
@@ -195,14 +212,14 @@ describe("C++/CuTe offline AOT runner plan", () => {
     (jobValue as { jobId: string }).jobId = await deriveCppCuteAotJobId(jobValue);
     const twoFileJob = await prepareCppCuteAotJob(jobRecord.profile, jobValue);
 
-    await expect(prepareCppCuteAotOfflineRun(twoFileJob, [
+    await expect(prepareCppCuteAotOfflineRun(twoFileJob, fixture.executionEnvironment, [
       fixture.sourceBlob,
       { fileId: fixture.sourceBlob.fileId, bytes: headerBytes },
     ])).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
       path: "$sourceBlobs[1].fileId",
     });
-    await expect(prepareCppCuteAotOfflineRun(twoFileJob, [
+    await expect(prepareCppCuteAotOfflineRun(twoFileJob, fixture.executionEnvironment, [
       fixture.sourceBlob,
       { fileId: `bg.cpp.file.sha256.${"f".repeat(64)}`, bytes: headerBytes },
     ])).rejects.toMatchObject({
@@ -223,7 +240,11 @@ describe("C++/CuTe offline AOT runner plan", () => {
     (jobValue as { jobId: string }).jobId = await deriveCppCuteAotJobId(jobValue);
     const anchorMismatchJob = await prepareCppCuteAotJob(jobRecord.profile, jobValue);
 
-    await expect(prepareCppCuteAotOfflineRun(anchorMismatchJob, [fixture.sourceBlob])).rejects.toMatchObject({
+    await expect(prepareCppCuteAotOfflineRun(
+      anchorMismatchJob,
+      fixture.executionEnvironment,
+      [fixture.sourceBlob],
+    )).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH",
       path: "$.job.entryRequests[0].anchor.tokenSha256",
     });
@@ -394,7 +415,7 @@ describe("C++/CuTe offline AOT runner plan", () => {
     const { job } = unwrapPreparedCppCuteAotOfflineRun(fixture.plan);
     const controller = new AbortController();
     controller.abort();
-    await expect(prepareCppCuteAotOfflineRun(job, [fixture.sourceBlob], {
+    await expect(prepareCppCuteAotOfflineRun(job, fixture.executionEnvironment, [fixture.sourceBlob], {
       signal: controller.signal,
     })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RUNNER-CANCELLED" });
     await expect(decodeCppCuteAotResultFrame(

@@ -24,6 +24,10 @@ import {
   computeCppCuteAotLimitsManifestHash,
   computeCppCuteAotOutputManifestHash,
 } from "./cpp_cute_aot_manifests.js";
+import {
+  unwrapPreparedCppCuteAotExecutionEnvironment,
+  type PreparedCppCuteAotExecutionEnvironment,
+} from "./cpp_cute_aot_environment.js";
 import { computeCppCuteAotExecutionPlanHash } from "./cpp_cute_aot_policy.js";
 import {
   unwrapPreparedCppCuteAotJob,
@@ -47,7 +51,7 @@ import {
 
 export const CPP_CUTE_AOT_RECEIPT_SCHEMA = "browsergrad.compiler.cpp-cute.aot-runner-receipt";
 export const CPP_CUTE_AOT_RECEIPT_MAJOR = 1;
-export const CPP_CUTE_AOT_RECEIPT_MINOR = 0;
+export const CPP_CUTE_AOT_RECEIPT_MINOR = 1;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const OCI_SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -208,6 +212,7 @@ export interface VerifiedCppCuteAotRunnerReceiptRecord {
   readonly receipt: CppCuteAotRunnerReceiptV1;
   readonly job: PreparedCppCuteAotJob;
   readonly profile: PreparedCppCuteFrontendProfile;
+  readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
   readonly artifactResource: VerifiedCppCuteFrontendArtifactResource;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
 }
@@ -249,6 +254,7 @@ export class CppCuteAotRunnerReceiptError extends Error {
  */
 export async function verifyCppCuteAotRunnerReceipt(
   job: PreparedCppCuteAotJob,
+  executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   artifactResource: VerifiedCppCuteFrontendArtifactResource,
   value: unknown,
   options: VerifyCppCuteAotRunnerReceiptOptions = {},
@@ -256,6 +262,14 @@ export async function verifyCppCuteAotRunnerReceipt(
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
   const profile = jobRecord.profile;
   const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
+  const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(executionEnvironment);
+  if (environmentRecord.profile !== profile || executionEnvironment.profileHash !== profile.profileHash) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INVOCATION-MISMATCH",
+      "$.invocation.executionEnvironmentManifestSha256",
+      "execution environment belongs to a different prepared profile",
+    );
+  }
   const artifact = unwrapVerifiedCppCuteFrontendArtifactResource(artifactResource);
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
   const limits = normalizeOptions(options);
@@ -274,7 +288,7 @@ export async function verifyCppCuteAotRunnerReceipt(
   }
 
   verifyJobAndArtifactBindings(receipt, job, artifact, artifactRecord, profileRecord);
-  await verifyInvocationBindings(receipt, job, profile, profileRecord);
+  await verifyInvocationBindings(receipt, job, executionEnvironment, profile, profileRecord);
   await verifyOutputBindings(receipt, artifact);
   verifyResourceBindings(receipt.resources, profile, artifact, artifactRecord);
   const expectedReceiptId = await deriveCppCuteAotRunnerReceiptId(receipt, { limits });
@@ -304,12 +318,20 @@ export async function verifyCppCuteAotRunnerReceipt(
     artifactBytesSha256: receipt.output.artifactBytesSha256,
     artifactByteLength: receipt.output.artifactByteLength,
   }) as VerifiedCppCuteAotRunnerReceipt;
-  VERIFIED_RECEIPTS.set(verified, Object.freeze({ receipt, job, profile, artifactResource, artifact }));
+  VERIFIED_RECEIPTS.set(verified, Object.freeze({
+    receipt,
+    job,
+    profile,
+    executionEnvironment,
+    artifactResource,
+    artifact,
+  }));
   return verified;
 }
 
 export async function decodeCppCuteAotRunnerReceipt(
   job: PreparedCppCuteAotJob,
+  executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   artifactResource: VerifiedCppCuteFrontendArtifactResource,
   bytes: Uint8Array,
   options: VerifyCppCuteAotRunnerReceiptOptions = {},
@@ -318,6 +340,7 @@ export async function decodeCppCuteAotRunnerReceipt(
   const snapshot = new Uint8Array(bytes);
   const verified = await verifyCppCuteAotRunnerReceipt(
     job,
+    executionEnvironment,
     artifactResource,
     decodeWireJson(snapshot, options.limits === undefined ? {} : { limits: options.limits }),
     options,
@@ -734,17 +757,18 @@ function verifyJobAndArtifactBindings(
 async function verifyInvocationBindings(
   receipt: CppCuteAotRunnerReceiptV1,
   job: PreparedCppCuteAotJob,
+  executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   profile: PreparedCppCuteFrontendProfile,
   profileRecord: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>,
 ): Promise<void> {
   const configured = profileRecord.profile;
   const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(job);
-  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job);
+  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job, executionEnvironment);
   const expected: CppCuteAotReceiptInvocationV1 = {
     invocationId: `bg.cpp.aot-invocation.sha256.${invocationManifestSha256}`,
     invocationManifestSha256,
     executionPlanSha256,
-    executionEnvironmentManifestSha256: configured.deployment.executionEnvironmentManifestSha256,
+    executionEnvironmentManifestSha256: executionEnvironment.manifestSha256,
     runner: configured.deployment.runner,
     container: configured.deployment.container,
     extractor: configured.deployment.extractor,

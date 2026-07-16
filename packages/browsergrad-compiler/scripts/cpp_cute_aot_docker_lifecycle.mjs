@@ -422,6 +422,14 @@ async function stageInputs(runRoot, plan, signal, deadline) {
     signal,
     deadline,
   ));
+  checkLifecycleDeadline(deadline, signal);
+  expectedFiles.push(await stageFile(
+    join(controlDirectory, "execution-environment.json"),
+    inputs.environmentBytes,
+    await sha256Hex(inputs.environmentBytes),
+    signal,
+    deadline,
+  ));
   const createdDirectories = new Set([sourceDirectory, controlDirectory]);
   for (const source of inputs.sourceBlobs) {
     checkLifecycleDeadline(deadline, signal);

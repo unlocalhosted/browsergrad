@@ -1,6 +1,9 @@
 {
   "schema": "browsergrad.compiler.cpp-cute.aot-sandbox-policy",
-  "version": { "major": 1, "minor": 1 },
+  "version": {
+    "major": 1,
+    "minor": 2
+  },
   "contractId": "browsergrad.compiler.cpp-cute.aot@1",
   "runtime": {
     "engine": "docker",
@@ -42,13 +45,17 @@
     }
   },
   "process": {
-    "user": { "uid": 65532, "gid": 65532 },
+    "user": {
+      "uid": 65532,
+      "gid": 65532
+    },
     "hostname": "browsergrad-cpp-cute-aot",
     "entrypoint": "/opt/browsergrad/bin/cpp-cute-aot-supervisor",
     "workingDirectory": "/run/browsergrad",
     "arguments": [
       "--profile=/run/browsergrad/control/profile.json",
       "--job=/run/browsergrad/control/job.json",
+      "--execution-environment=/run/browsergrad/control/execution-environment.json",
       "--source-root=/run/browsergrad/source",
       "--protocol=browsergrad.compiler.cpp-cute.aot-result-frame@1"
     ],
@@ -80,7 +87,9 @@
   "privileges": {
     "privileged": false,
     "capabilitiesAdded": [],
-    "capabilitiesDropped": ["ALL"],
+    "capabilitiesDropped": [
+      "ALL"
+    ],
     "noNewPrivileges": true,
     "seccomp": "runtime-default-requested-effective-profile-requires-external-attestation"
   },
@@ -98,7 +107,13 @@
     "source": "runner-snapshot-read-only-rprivate",
     "control": "runner-snapshot-read-only-rprivate",
     "temporaryPath": "/tmp",
-    "temporary": ["rw", "noexec", "nosuid", "nodev", "mode=1777"],
+    "temporary": [
+      "rw",
+      "noexec",
+      "nosuid",
+      "nodev",
+      "mode=1777"
+    ],
     "temporaryBytes": "max(1,min(floor(maxMemoryBytes/4),536870912))",
     "dockerSocket": "forbidden",
     "devices": "runtime-minimal-defaults",
@@ -120,7 +135,11 @@
       "layerBlobs": "not-supplied-or-rehashed",
       "localDockerObservation": {
         "authority": "shell-owned-point-in-time",
-        "sequence": ["version", "info", "image-inspect"],
+        "sequence": [
+          "version",
+          "info",
+          "image-inspect"
+        ],
         "runtime": {
           "version": {
             "schema": "browsergrad.compiler.cpp-cute.docker-version@1",
@@ -256,6 +275,17 @@
       "maxRank": 64,
       "maxIntegerBits": 256,
       "maxArithmeticOperations": 200000
+    },
+    "executionEnvironment": {
+      "maxDocumentBytes": 1048576,
+      "maxDepth": 24,
+      "maxNodes": 32768,
+      "maxStringBytes": 262144,
+      "maxArrayLength": 4096,
+      "maxObjectProperties": 1024,
+      "maxRank": 64,
+      "maxIntegerBits": 128,
+      "maxArithmeticOperations": 65536
     },
     "ociManifest": {
       "maxDocumentBytes": 1048576,

@@ -11,6 +11,7 @@ import {
   computeCppCuteAotOutputManifestHash,
 } from "../../../src/cpp_cute_aot_manifests.js";
 import { computeCppCuteAotExecutionPlanHash } from "../../../src/cpp_cute_aot_policy.js";
+import type { PreparedCppCuteAotExecutionEnvironment } from "../../../src/cpp_cute_aot_environment.js";
 import {
   deriveCppCuteAotEntryRequestId,
   deriveCppCuteAotJobId,
@@ -48,14 +49,15 @@ import {
 
 const wire = (value: number | bigint): WireU64 => parseWireU64(String(value));
 
-export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.45ae306ec7e567294cdca73577e0eba743c2747e103943d25b3bc5f420690f7f";
-export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.a535779e31e8f37014c2a99185c62525b96b5934d12412ce01bcb4718d742a94";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.1010afe26071259d15c107c619a7dc5d4ee3db7d442a5503cecb047ecd337823";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "33753d51d701e5d3eb36df4ae198b358e5da95dd4b611bc13ff9e83375b23390";
+export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.597e530b1d800a5904cdda4d57fa5d150fae6677324ecc44838b0ae8b3adf1f8";
+export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.263830435629927cb16f7d60a5977c19eb897cadde6915411dd9947d54e9d983";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.7a2c3ec92a6948ea8c9bac3949817aa82be07a5feb3b2f004592d3b92c2f2a35";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "d4a2dc9995d1005e88afd6350bcc991fb9ea05a60a57f832466d570d9b97d1df";
 export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH = "4131";
 
 export interface CppCuteAotReceiptFixture {
   readonly profile: PreparedCppCuteFrontendProfile;
+  readonly executionEnvironment: PreparedCppCuteAotExecutionEnvironment;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly artifactResource: VerifiedCppCuteFrontendArtifactResource;
   readonly job: PreparedCppCuteAotJob;
@@ -64,6 +66,7 @@ export interface CppCuteAotReceiptFixture {
 
 export async function createCppCuteAotReceiptFixture(
   profile: PreparedCppCuteFrontendProfile,
+  executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   artifact: VerifiedCppCuteFrontendArtifact,
 ): Promise<CppCuteAotReceiptFixture> {
   const artifactResource = await decodeCppCuteFrontendArtifact(canonicalCppCuteFrontendArtifactBytes(artifact));
@@ -126,16 +129,17 @@ export async function createCppCuteAotReceiptFixture(
   } satisfies CppCuteAotJobBodyV1;
   const jobValue: CppCuteAotJobV1 = { ...body, jobId: await deriveCppCuteAotJobId(body) };
   const job = await prepareCppCuteAotJob(profile, jobValue);
-  const receiptBody = await createCppCuteAotReceiptBody(job, artifact);
+  const receiptBody = await createCppCuteAotReceiptBody(job, executionEnvironment, artifact);
   const receipt: CppCuteAotRunnerReceiptV1 = {
     ...receiptBody,
     receiptId: await deriveCppCuteAotRunnerReceiptId(receiptBody),
   };
-  return { profile, artifact, artifactResource, job, receipt };
+  return { profile, executionEnvironment, artifact, artifactResource, job, receipt };
 }
 
 export async function createCppCuteAotReceiptBody(
   job: PreparedCppCuteAotJob,
+  executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   artifact: VerifiedCppCuteFrontendArtifact,
 ): Promise<CppCuteAotRunnerReceiptBodyV1> {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
@@ -146,18 +150,18 @@ export async function createCppCuteAotReceiptBody(
   const request = jobRecord.job.entryRequests[0];
   if (request === undefined) throw new Error("fixture job lost entry request");
   const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(job);
-  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job);
+  const executionPlanSha256 = await computeCppCuteAotExecutionPlanHash(job, executionEnvironment);
   const resources = createResourceObservations(artifact);
   return {
     schema: CPP_CUTE_AOT_RECEIPT_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: { major: 1, minor: 1 },
     jobId: job.jobId,
     profileHash: profile.profileHash,
     invocation: {
       invocationId: `bg.cpp.aot-invocation.sha256.${invocationManifestSha256}`,
       invocationManifestSha256,
       executionPlanSha256,
-      executionEnvironmentManifestSha256: configured.deployment.executionEnvironmentManifestSha256,
+      executionEnvironmentManifestSha256: executionEnvironment.manifestSha256,
       runner: configured.deployment.runner,
       container: configured.deployment.container,
       extractor: configured.deployment.extractor,
