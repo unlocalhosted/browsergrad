@@ -7,7 +7,12 @@ import {
 } from "../../../src/cpp_cute_frontend_profile.js";
 import { CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 } from "../../../src/cpp_cute_aot_policy.js";
 import { deriveCppCuteFrontendArtifactId } from "../../../src/cpp_cute_frontend_artifact.js";
-import { computeCppCuteInputHashes } from "../../../src/cpp_cute_frontend_verify.js";
+import {
+  computeCppCuteInputHashes,
+  computeCppCuteSemanticPassInputClosureHash,
+  computeCppCuteSharedSurfaceHash,
+  deriveCppCuteSourceEntityId,
+} from "../../../src/cpp_cute_frontend_verify.js";
 import type {
   CppCuteFrontendArtifactV2,
   CppCuteFrontendPayloadV2,
@@ -55,7 +60,7 @@ export function createCppCuteProfileInput(
   const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
-    version: { major: 2, minor: 0 },
+    version: { major: 2, minor: 1 },
     profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
     deployment: {
       mode: "ahead-of-time",
@@ -92,6 +97,28 @@ export function createCppCuteProfileInput(
     language: {
       cxxStandard: "c++17",
       cudaCompatibility: "12.6",
+      semanticPasses: [
+        {
+          ordinal: 0,
+          passId: "cuda-device-sema",
+          domain: "device",
+          role: "semantic-extraction",
+          invocationMode: "cuda-device-only",
+          targetTriple: "nvptx64-nvidia-cuda",
+          auxiliaryTargetTriple: "x86_64-unknown-linux-gnu",
+          deviceArchitecture: "sm_80",
+        },
+        {
+          ordinal: 1,
+          passId: "cuda-host-sema",
+          domain: "host",
+          role: "validation",
+          invocationMode: "cuda-host-only",
+          targetTriple: "x86_64-unknown-linux-gnu",
+          auxiliaryTargetTriple: "nvptx64-nvidia-cuda",
+          deviceArchitecture: "sm_80",
+        },
+      ],
       options: [
         { kind: "define", name: "CUTE_SM80_ENABLED", value: "1" },
         {
@@ -99,15 +126,23 @@ export function createCppCuteProfileInput(
           includeRootId: "clang-resource",
           virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
         },
-        { kind: "frontend-option", id: "cuda-host-only", value: null },
         { kind: "frontend-option", id: "syntax-only", value: null },
       ],
     },
     target: {
-      hostTriple: "x86_64-unknown-linux-gnu",
-      deviceArchitecture: "sm_80",
-      endianness: "little",
-      pointerBits: 64,
+      host: {
+        triple: "x86_64-unknown-linux-gnu",
+        endianness: "little",
+        pointerBits: 64,
+        dataLayout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128",
+      },
+      device: {
+        triple: "nvptx64-nvidia-cuda",
+        architecture: "sm_80",
+        endianness: "little",
+        pointerBits: 64,
+        dataLayout: "e-i64:64-i128:128-v16:16-v32:32-n16:32:64",
+      },
     },
     toolchain: {
       compiler: {
@@ -336,6 +371,8 @@ export const CPP_CUTE_FIXTURE_INCLUDE_EDGE_ID = stableId("include-edge", "0");
 export const CPP_CUTE_FIXTURE_FORCED_INCLUDE_EDGE_ID = stableId("include-edge", "1");
 export const CPP_CUTE_FIXTURE_SPAN_ID = stableId("span", "2");
 export const CPP_CUTE_FIXTURE_INT_TYPE_ID = stableId("type", "3");
+const CPP_CUTE_FIXTURE_INT_SOURCE_ENTITY_PLACEHOLDER = stableId("source-entity", "3");
+const CPP_CUTE_FIXTURE_LAYOUT_SOURCE_ENTITY_PLACEHOLDER = stableId("source-entity", "7");
 export const CPP_CUTE_FIXTURE_LAYOUT_TYPE_ID = stableId("type", "4");
 export const CPP_CUTE_FIXTURE_TEMPLATE_DECLARATION_ID = stableId("declaration", "5");
 export const CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID = stableId("declaration", "6");
@@ -471,6 +508,53 @@ export async function createCppCutePayloadInput(
       headerSetSha256: ZERO_HASH,
       closureSha256: ZERO_HASH,
     },
+    semanticPasses: [
+      {
+        ordinal: 0,
+        passId: "cuda-device-sema",
+        domain: "device",
+        role: "semantic-extraction",
+        invocationMode: "cuda-device-only",
+        targetTriple: "nvptx64-nvidia-cuda",
+        auxiliaryTargetTriple: "x86_64-unknown-linux-gnu",
+        deviceArchitecture: "sm_80",
+        status: "succeeded",
+        openedFileIds: [
+          CPP_CUTE_FIXTURE_MAIN_FILE_ID,
+          CPP_CUTE_FIXTURE_COMPILER_HEADER_FILE_ID,
+          CPP_CUTE_FIXTURE_HEADER_FILE_ID,
+        ].sort(),
+        includeEdgeIds: [CPP_CUTE_FIXTURE_INCLUDE_EDGE_ID, CPP_CUTE_FIXTURE_FORCED_INCLUDE_EDGE_ID].sort(),
+        observedInputClosureSha256: ZERO_HASH,
+        sharedSurfaceSha256: ZERO_HASH,
+        selectedSourceRootEntityIds: [CPP_CUTE_FIXTURE_LAYOUT_SOURCE_ENTITY_PLACEHOLDER],
+        factIds: [CPP_CUTE_FIXTURE_LAYOUT_FACT_ID, CPP_CUTE_FIXTURE_INTRINSIC_FACT_ID],
+        diagnosticIds: [CPP_CUTE_FIXTURE_DIAGNOSTIC_ID],
+      },
+      {
+        ordinal: 1,
+        passId: "cuda-host-sema",
+        domain: "host",
+        role: "validation",
+        invocationMode: "cuda-host-only",
+        targetTriple: "x86_64-unknown-linux-gnu",
+        auxiliaryTargetTriple: "nvptx64-nvidia-cuda",
+        deviceArchitecture: "sm_80",
+        status: "succeeded",
+        openedFileIds: [
+          CPP_CUTE_FIXTURE_MAIN_FILE_ID,
+          CPP_CUTE_FIXTURE_COMPILER_HEADER_FILE_ID,
+          CPP_CUTE_FIXTURE_HEADER_FILE_ID,
+        ].sort(),
+        includeEdgeIds: [CPP_CUTE_FIXTURE_INCLUDE_EDGE_ID, CPP_CUTE_FIXTURE_FORCED_INCLUDE_EDGE_ID].sort(),
+        observedInputClosureSha256: ZERO_HASH,
+        sharedSurfaceSha256: ZERO_HASH,
+        selectedSourceRootEntityIds: [CPP_CUTE_FIXTURE_LAYOUT_SOURCE_ENTITY_PLACEHOLDER],
+        factIds: [],
+        diagnosticIds: [],
+      },
+    ],
+    semanticGraphOwnerPassId: "cuda-device-sema",
     spans: [{
       spanId: CPP_CUTE_FIXTURE_SPAN_ID,
       spelling: {
@@ -522,7 +606,7 @@ export async function createCppCutePayloadInput(
         definitionKind: "external",
         linkage: "external",
         storageDuration: "none",
-        memorySpace: "host",
+        memorySpace: "generic",
         mangledName: null,
         cudaAttributes: { host: true, device: true, global: false, forceInline: true },
       },
@@ -558,9 +642,9 @@ export async function createCppCutePayloadInput(
         definitionKind: "definition",
         linkage: "internal",
         storageDuration: "static",
-        memorySpace: "host",
+        memorySpace: "generic",
         mangledName: "_ZL6layout",
-        cudaAttributes: { host: true, device: false, global: false, forceInline: false },
+        cudaAttributes: { host: true, device: true, global: false, forceInline: false },
       },
     ],
     templateInstantiations: [{
@@ -573,7 +657,47 @@ export async function createCppCutePayloadInput(
       depth: 0,
     }],
     overloadResolutions: [],
-    sourceAbi: { types: [], functions: [] },
+    sourceEntities: [
+      {
+        sourceEntityId: CPP_CUTE_FIXTURE_INT_SOURCE_ENTITY_PLACEHOLDER,
+        entityKind: "type",
+        canonicalIdentity: "int",
+        origin: sourceOrigin(),
+        domains: ["device", "host"],
+      },
+      {
+        sourceEntityId: CPP_CUTE_FIXTURE_LAYOUT_SOURCE_ENTITY_PLACEHOLDER,
+        entityKind: "variable",
+        canonicalIdentity: "c:@layout",
+        origin: sourceOrigin(),
+        domains: ["device", "host"],
+      },
+    ],
+    sourceAbi: {
+      types: [
+        {
+          domain: "device",
+          shared: true,
+          sourceTypeEntityId: CPP_CUTE_FIXTURE_INT_SOURCE_ENTITY_PLACEHOLDER,
+          deviceTypeId: CPP_CUTE_FIXTURE_INT_TYPE_ID,
+          sizeBits: "32" as never,
+          alignmentBits: "32" as never,
+          fields: [],
+          bases: [],
+        },
+        {
+          domain: "host",
+          shared: true,
+          sourceTypeEntityId: CPP_CUTE_FIXTURE_INT_SOURCE_ENTITY_PLACEHOLDER,
+          deviceTypeId: null,
+          sizeBits: "32" as never,
+          alignmentBits: "32" as never,
+          fields: [],
+          bases: [],
+        },
+      ],
+      functions: [],
+    },
     functionBodies: [],
     facts: [
       {
@@ -635,17 +759,55 @@ export async function createCppCutePayloadInput(
       appliedTransforms: [],
     },
   };
-  const hashes = await computeCppCuteInputHashes(payload);
-  return {
+  const intEntity = payload.sourceEntities.find((entity) => entity.entityKind === "type");
+  const layoutEntity = payload.sourceEntities.find((entity) => entity.entityKind === "variable");
+  if (intEntity === undefined) throw new Error("fixture lost integer source identity");
+  if (layoutEntity === undefined) throw new Error("fixture lost layout source identity");
+  const intSourceEntityId = await deriveCppCuteSourceEntityId(payload, {
+    entityKind: intEntity.entityKind,
+    canonicalIdentity: intEntity.canonicalIdentity,
+    origin: intEntity.origin,
+    domains: intEntity.domains,
+  });
+  const layoutSourceEntityId = await deriveCppCuteSourceEntityId(payload, {
+    entityKind: layoutEntity.entityKind,
+    canonicalIdentity: layoutEntity.canonicalIdentity,
+    origin: layoutEntity.origin,
+    domains: layoutEntity.domains,
+  });
+  const sourceEntities = [
+    { ...intEntity, sourceEntityId: intSourceEntityId },
+    { ...layoutEntity, sourceEntityId: layoutSourceEntityId },
+  ].sort((left, right) => left.sourceEntityId.localeCompare(right.sourceEntityId));
+  const identityPayload: CppCuteFrontendPayloadV2 = {
     ...payload,
+    semanticPasses: payload.semanticPasses.map((pass) => ({
+      ...pass,
+      selectedSourceRootEntityIds: [layoutSourceEntityId],
+    })),
+    sourceEntities,
+    sourceAbi: {
+      ...payload.sourceAbi,
+      types: payload.sourceAbi.types.map((entry) => ({ ...entry, sourceTypeEntityId: intSourceEntityId })),
+    },
+  };
+  const hashes = await computeCppCuteInputHashes(identityPayload);
+  const boundPayload: CppCuteFrontendPayloadV2 = {
+    ...identityPayload,
     inputs: {
-      ...payload.inputs,
+      ...identityPayload.inputs,
       sourceSetSha256: hashes.sourceSetSha256,
       headerSetSha256: hashes.headerSetSha256,
       closureSha256: hashes.closureSha256,
     },
-    extraction: { ...payload.extraction, inputClosureSha256: hashes.closureSha256 },
+    extraction: { ...identityPayload.extraction, inputClosureSha256: hashes.closureSha256 },
   };
+  const semanticPasses = await Promise.all(boundPayload.semanticPasses.map(async (pass, index) => ({
+    ...pass,
+    observedInputClosureSha256: await computeCppCuteSemanticPassInputClosureHash(boundPayload, index),
+    sharedSurfaceSha256: await computeCppCuteSharedSurfaceHash(boundPayload, pass.domain),
+  })));
+  return { ...boundPayload, semanticPasses };
 }
 
 export async function createCppCuteArtifactInput(
@@ -654,7 +816,7 @@ export async function createCppCuteArtifactInput(
   const payload = await createCppCutePayloadInput(compilationContractHash);
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
-    version: { major: 2, minor: 0 },
+    version: { major: 2, minor: 1 },
     producer: { id: "browsergrad-tools/cpp-cute-frontend", version: "0.1.0" },
     artifactId: await deriveCppCuteFrontendArtifactId(payload),
     payload,
@@ -666,6 +828,54 @@ export async function cloneCppCuteArtifactInput(
   compilationContractHash = CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
 ): Promise<Record<string, unknown>> {
   return structuredClone(await createCppCuteArtifactInput(compilationContractHash)) as unknown as Record<string, unknown>;
+}
+
+export async function rebindCppCuteFixtureSourceEntityIds(payload: CppCuteFrontendPayloadV2): Promise<void> {
+  const replacements = new Map<string, string>();
+  const sourceEntities = await Promise.all(payload.sourceEntities.map(async (entity) => {
+    const sourceEntityId = await deriveCppCuteSourceEntityId(payload, {
+      entityKind: entity.entityKind,
+      canonicalIdentity: entity.canonicalIdentity,
+      origin: entity.origin,
+      domains: entity.domains,
+    });
+    replacements.set(entity.sourceEntityId, sourceEntityId);
+    return { ...entity, sourceEntityId };
+  }));
+  sourceEntities.sort((left, right) => left.sourceEntityId.localeCompare(right.sourceEntityId));
+  const replace = (sourceEntityId: string): string => replacements.get(sourceEntityId) ?? sourceEntityId;
+  const sourceAbi: CppCuteFrontendPayloadV2["sourceAbi"] = {
+    types: payload.sourceAbi.types.map((entry) => ({
+      ...entry,
+      sourceTypeEntityId: replace(entry.sourceTypeEntityId),
+      fields: entry.fields.map((field) => ({
+        ...field,
+        sourceEntityId: replace(field.sourceEntityId),
+        sourceTypeEntityId: replace(field.sourceTypeEntityId),
+      })),
+      bases: entry.bases.map((base) => ({
+        ...base,
+        sourceTypeEntityId: replace(base.sourceTypeEntityId),
+      })),
+    })),
+    functions: payload.sourceAbi.functions.map((entry) => ({
+      ...entry,
+      sourceEntityId: replace(entry.sourceEntityId),
+      returnSourceTypeEntityId: replace(entry.returnSourceTypeEntityId),
+      parameters: entry.parameters.map((parameter) => ({
+        ...parameter,
+        sourceEntityId: replace(parameter.sourceEntityId),
+        sourceTypeEntityId: replace(parameter.sourceTypeEntityId),
+      })),
+    })),
+  };
+  (payload as { sourceEntities: CppCuteFrontendPayloadV2["sourceEntities"] }).sourceEntities = sourceEntities;
+  (payload as { semanticPasses: CppCuteFrontendPayloadV2["semanticPasses"] }).semanticPasses =
+    payload.semanticPasses.map((pass) => ({
+      ...pass,
+      selectedSourceRootEntityIds: pass.selectedSourceRootEntityIds.map(replace).sort(),
+    }));
+  (payload as { sourceAbi: CppCuteFrontendPayloadV2["sourceAbi"] }).sourceAbi = sourceAbi;
 }
 
 export function artifactCompatibleProfileOptions(

@@ -8,6 +8,7 @@ import {
 } from "./support/cpp_cute_aot_receipt_fixtures.js";
 import {
   CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE,
+  CPP_CUTE_FRONTEND_BUILD_TYPE,
   cppCuteFrontendProvenancePayloadBytes,
   cppCuteFrontendProvenanceSigningBytes,
   prepareCppCuteAttestationTrustStore,
@@ -17,6 +18,7 @@ import {
   type PreparedCppCuteAttestationTrustStore,
   type VerifiedCppCuteFrontendAttestation,
 } from "../../src/cpp_cute_frontend_provenance.js";
+import { CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE } from "../../src/cpp_cute_frontend_profile.js";
 import {
   authorizeAotCppCuteFrontendArtifact,
   unwrapAuthorizedCppCuteFrontendArtifact,
@@ -78,6 +80,10 @@ describe("C++/CuTe frontend provenance", () => {
       jobId: PINNED_CPP_CUTE_AOT_JOB_ID,
       sourceSetSha256: PINNED_SOURCE_SET_HASH,
     });
+    expect(fixture.statement.predicateType).toBe("https://browsergrad.dev/provenance/cpp-cute-aot/v2");
+    expect(fixture.statement.predicateType).toBe(CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE);
+    expect(fixture.statement.predicate.buildType).toBe("https://browsergrad.dev/build-types/cpp-cute-aot/v2");
+    expect(fixture.statement.predicate.buildType).toBe(CPP_CUTE_FRONTEND_BUILD_TYPE);
     expect(attestation).toMatchObject({
       builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
       keyId: fixture.keyId,
@@ -454,12 +460,16 @@ describe("C++/CuTe frontend provenance", () => {
           severity: "error",
           code: "browsergrad.cpp-cute:fixture-rejected",
           renderedMessage: "Fixture rejection for authorization boundary coverage.",
-          location: structuredClone(diagnostic.location),
-          subject: structuredClone(diagnostic.subject),
+          location: { kind: "none" },
+          subject: { kind: "compiler" },
           parentDiagnosticId: null,
         });
         (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((left, right) =>
           left.diagnosticId.localeCompare(right.diagnosticId));
+        const hostPass = payload.semanticPasses[1];
+        if (hostPass === undefined) throw new Error("fixture lost host validation pass");
+        (hostPass as { status: string }).status = "failed";
+        (hostPass as { diagnosticIds: readonly string[] }).diagnosticIds = [blockingDiagnosticId];
         (payload as { outcome: unknown }).outcome = {
           kind: "rejected",
           blockingDiagnosticIds: [blockingDiagnosticId],

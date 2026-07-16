@@ -21,6 +21,7 @@ import type {
   CppCuteIntegerExprV1,
   CppCuteResolvedFactV1,
   CppCuteResolvedTypeV1,
+  CppCuteSourceEntityV1,
   CppCuteSourceOriginV1,
   CppCuteStatementV1,
   CppCuteTemplateArgumentV1,
@@ -48,12 +49,13 @@ export async function verifyCppCuteFrontendPayload(
   verifyDeclarations(payload, indexes);
   verifyTemplateInstantiations(payload, indexes);
   verifyOverloadResolutions(payload, indexes);
-  verifySourceAbi(payload, indexes);
+  await verifySourceAbi(payload, indexes);
   verifyDeclarationInitializers(payload, indexes);
   verifyFunctionBodies(payload, indexes);
   verifyFacts(payload, indexes, options.limits);
   verifyEntries(payload, indexes);
   verifyDiagnosticsAndOutcome(payload, indexes);
+  await verifySemanticPasses(payload, indexes);
 
   const hashes = await computeCppCuteInputHashes(payload);
   if (payload.inputs.sourceSetSha256 !== hashes.sourceSetSha256) {
@@ -79,6 +81,7 @@ export async function verifyCppCuteFrontendPayload(
 
 interface ArtifactIndexes {
   readonly files: ReadonlyMap<string, CppCuteFrontendPayloadV2["inputs"]["files"][number]>;
+  readonly includeEdges: ReadonlyMap<string, CppCuteFrontendPayloadV2["inputs"]["includeEdges"][number]>;
   readonly includeRoots: ReadonlyMap<string, CppCuteFrontendPayloadV2["inputs"]["includeRoots"][number]>;
   readonly spans: ReadonlyMap<string, CppCuteFrontendPayloadV2["spans"][number]>;
   readonly macros: ReadonlyMap<string, CppCuteFrontendPayloadV2["macroExpansions"][number]>;
@@ -112,6 +115,7 @@ function buildIndexes(payload: CppCuteFrontendPayloadV2): ArtifactIndexes {
   }
   return {
     files: mapBy(payload.inputs.files, (entry) => entry.fileId),
+    includeEdges: mapBy(payload.inputs.includeEdges, (entry) => entry.includeEdgeId),
     includeRoots: mapByChecked(payload.inputs.includeRoots, (entry) => entry.includeRootId, "$.payload.inputs.includeRoots"),
     spans: mapBy(payload.spans, (entry) => entry.spanId),
     macros: mapBy(payload.macroExpansions, (entry) => entry.macroExpansionId),
@@ -486,57 +490,626 @@ function verifyOverloadResolutions(payload: CppCuteFrontendPayloadV2, indexes: A
   }
 }
 
-function verifySourceAbi(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
-  const typeAbi = new Map(payload.sourceAbi.types.map((entry) => [entry.typeId, entry]));
+async function verifySourceAbi(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): Promise<void> {
+  const sourceEntities = await verifySourceEntities(payload, indexes);
+  const observedDomains = new Map<string, Set<"host" | "device">>();
+  const abiOwners = new Map<string, Set<"host" | "device">>();
+  for (const [passIndex, pass] of payload.semanticPasses.entries()) {
+    for (const [entityIndex, sourceEntityId] of pass.selectedSourceRootEntityIds.entries()) {
+      ref(
+        sourceEntities,
+        sourceEntityId,
+        `$.payload.semanticPasses[${passIndex}].selectedSourceRootEntityIds[${entityIndex}]`,
+        "source entity",
+      );
+      addSourceEntityDomain(observedDomains, sourceEntityId, pass.domain);
+    }
+  }
+  const ownSourceEntity = (
+    sourceEntityId: string,
+    expectedKind: CppCuteSourceEntityV1["entityKind"],
+    domain: "host" | "device",
+    path: string,
+  ): CppCuteSourceEntityV1 => {
+    const entity = ref(sourceEntities, sourceEntityId, path, "source entity");
+    if (entity.entityKind !== expectedKind) invalid(path, `source entity must have kind ${expectedKind}`);
+    if (!entity.domains.includes(domain)) invalid(path, `source entity is not declared in ${domain} semantic domain`);
+    let domains = abiOwners.get(sourceEntityId);
+    if (domains === undefined) {
+      domains = new Set();
+      abiOwners.set(sourceEntityId, domains);
+    }
+    if (domains.has(domain)) invalid(path, "source entity has multiple ABI owners in one semantic domain");
+    domains.add(domain);
+    addSourceEntityDomain(observedDomains, sourceEntityId, domain);
+    return entity;
+  };
+  const referenceSourceType = (
+    sourceEntityId: string,
+    domain: "host" | "device",
+    path: string,
+  ): CppCuteSourceEntityV1 => {
+    const entity = ref(sourceEntities, sourceEntityId, path, "source type entity");
+    if (entity.entityKind !== "type") invalid(path, "ABI type reference requires a type source entity");
+    if (!entity.domains.includes(domain)) invalid(path, `source type is not declared in ${domain} semantic domain`);
+    return entity;
+  };
+  const typeAbi = new Map(
+    payload.sourceAbi.types.map((entry) => [abiDomainKey(entry.domain, entry.sourceTypeEntityId), entry]),
+  );
   for (const [index, abi] of payload.sourceAbi.types.entries()) {
     const path = `$.payload.sourceAbi.types[${index}]`;
-    const type = ref(indexes.types, abi.typeId, `${path}.typeId`, "type");
+    const sourceEntity = ownSourceEntity(abi.sourceTypeEntityId, "type", abi.domain, `${path}.sourceTypeEntityId`);
+    if (abi.shared !== (sourceEntity.domains.length === 2)) {
+      invalid(`${path}.shared`, "ABI shared flag must derive from the verified source entity domain set");
+    }
+    let deviceType: CppCuteResolvedTypeV1 | undefined;
+    if (abi.domain === "device") {
+      if (abi.deviceTypeId === null) invalid(`${path}.deviceTypeId`, "device ABI type requires device graph identity");
+      deviceType = ref(indexes.types, abi.deviceTypeId, `${path}.deviceTypeId`, "type");
+      if (sourceEntity.canonicalIdentity !== deviceType.canonicalName ||
+          !sameSourceOrigin(sourceEntity.origin, deviceType.origin)) {
+        invalid(`${path}.sourceTypeEntityId`, "device ABI source identity differs from the canonical device type");
+      }
+    } else if (abi.deviceTypeId !== null) {
+      invalid(`${path}.deviceTypeId`, "host ABI cannot reference the device-resolved type graph");
+    }
     const size = wireIntegerToBigInt(abi.sizeBits);
     const alignment = wireIntegerToBigInt(abi.alignmentBits);
-    if (size === 0n || alignment === 0n || (alignment & (alignment - 1n)) !== 0n) {
-      invalid(path, "complete ABI type requires positive size and power-of-two alignment in bits");
+    if (size === 0n || alignment === 0n || (alignment & (alignment - 1n)) !== 0n || alignment > size) {
+      invalid(path, "ABI size/alignment must be positive, power-of-two aligned, and alignment cannot exceed size");
     }
-    if (type.kind === "record" && !type.complete) invalid(`${path}.typeId`, "incomplete record cannot have a type-layout ABI record");
+    if (deviceType?.kind === "record" && !deviceType.complete) {
+      invalid(`${path}.deviceTypeId`, "incomplete device record cannot have a type-layout ABI record");
+    }
+    if (deviceType !== undefined && deviceType.kind !== "record" && (abi.fields.length !== 0 || abi.bases.length !== 0)) {
+      invalid(path, "non-record device ABI cannot contain fields or bases");
+    }
+    uniqueValues(abi.fields.map((field) => field.sourceEntityId), `${path}.fields`, "source field identity");
     for (const [fieldIndex, field] of abi.fields.entries()) {
       const fieldPath = `${path}.fields[${fieldIndex}]`;
-      const declaration = ref(indexes.declarations, field.declarationId, `${fieldPath}.declarationId`, "declaration");
-      if (declaration.kind !== "field" || declaration.typeId !== field.typeId) invalid(fieldPath, "ABI field must match its resolved field declaration and type");
-      ref(indexes.types, field.typeId, `${fieldPath}.typeId`, "type");
-      const fieldAbi = typeAbi.get(field.typeId);
-      const end = wireIntegerToBigInt(field.bitOffset) + (fieldAbi === undefined ? 1n : wireIntegerToBigInt(fieldAbi.sizeBits));
+      ownSourceEntity(field.sourceEntityId, "field", abi.domain, `${fieldPath}.sourceEntityId`);
+      referenceSourceType(field.sourceTypeEntityId, abi.domain, `${fieldPath}.sourceTypeEntityId`);
+      const fieldAbi = typeAbi.get(abiDomainKey(abi.domain, field.sourceTypeEntityId));
+      if (fieldAbi === undefined) invalid(`${fieldPath}.sourceTypeEntityId`, "ABI field type is absent from its target domain");
+      const end = wireIntegerToBigInt(field.bitOffset) + wireIntegerToBigInt(fieldAbi.sizeBits);
       if (end > size) invalid(`${fieldPath}.bitOffset`, "ABI field extends beyond record size");
     }
     for (const [baseIndex, base] of abi.bases.entries()) {
       const basePath = `${path}.bases[${baseIndex}]`;
-      ref(indexes.types, base.typeId, `${basePath}.typeId`, "type");
-      const baseAbi = typeAbi.get(base.typeId);
-      const end = wireIntegerToBigInt(base.bitOffset) + (baseAbi === undefined ? 1n : wireIntegerToBigInt(baseAbi.sizeBits));
+      referenceSourceType(base.sourceTypeEntityId, abi.domain, `${basePath}.sourceTypeEntityId`);
+      const baseAbi = typeAbi.get(abiDomainKey(abi.domain, base.sourceTypeEntityId));
+      if (baseAbi === undefined) invalid(`${basePath}.sourceTypeEntityId`, "ABI base type is absent from its target domain");
+      const end = wireIntegerToBigInt(base.bitOffset) + wireIntegerToBigInt(baseAbi.sizeBits);
       if (end > size) invalid(`${basePath}.bitOffset`, "ABI base extends beyond record size");
     }
   }
-  verifyValueContainmentCycles(payload, typeAbi);
+  verifyAbiValueContainmentCycles(payload);
 
   for (const [index, abi] of payload.sourceAbi.functions.entries()) {
     const path = `$.payload.sourceAbi.functions[${index}]`;
-    const declaration = ref(indexes.declarations, abi.declarationId, `${path}.declarationId`, "declaration");
-    if (declaration.kind !== "function") invalid(`${path}.declarationId`, "function ABI must reference a function declaration");
-    const functionType = declaration.typeId === null ? undefined : indexes.types.get(declaration.typeId);
-    if (functionType?.kind !== "function") invalid(`${path}.declarationId`, "function declaration must reference a resolved function type");
-    if (functionType.callingConvention !== abi.callingConvention || functionType.returnTypeId !== abi.returnTypeId) {
-      invalid(path, "function ABI calling convention or return type differs from resolved function type");
+    const sourceEntity = ownSourceEntity(abi.sourceEntityId, "function", abi.domain, `${path}.sourceEntityId`);
+    if (abi.shared !== (sourceEntity.domains.length === 2)) {
+      invalid(`${path}.shared`, "ABI shared flag must derive from the verified source entity domain set");
     }
-    if (functionType.parameterTypeIds.length !== abi.parameters.length) invalid(`${path}.parameters`, "function ABI parameter count differs from function type");
+    let functionType: Extract<CppCuteResolvedTypeV1, { readonly kind: "function" }> | undefined;
+    if (abi.domain === "device") {
+      if (abi.deviceDeclarationId === null) {
+        invalid(`${path}.deviceDeclarationId`, "device function ABI requires device graph declaration identity");
+      }
+      const declaration = ref(
+        indexes.declarations,
+        abi.deviceDeclarationId,
+        `${path}.deviceDeclarationId`,
+        "declaration",
+      );
+      if (declaration.kind !== "function") {
+        invalid(`${path}.deviceDeclarationId`, "device function ABI must reference a function declaration");
+      }
+      if (sourceEntity.canonicalIdentity !== declaration.canonicalUsr ||
+          !sameSourceOrigin(sourceEntity.origin, declaration.origin)) {
+        invalid(`${path}.sourceEntityId`, "device function ABI source identity differs from canonical declaration");
+      }
+      const resolved = declaration.typeId === null ? undefined : indexes.types.get(declaration.typeId);
+      if (resolved?.kind !== "function") {
+        invalid(`${path}.deviceDeclarationId`, "device function declaration must reference a resolved function type");
+      }
+      functionType = resolved;
+      const expectedConvention = declaration.cudaAttributes.global
+        ? "nvptx-kernel"
+        : declaration.cudaAttributes.device
+          ? "nvptx-device"
+          : null;
+      if (expectedConvention === null || abi.loweredCallingConvention !== expectedConvention) {
+        invalid(`${path}.loweredCallingConvention`, "device ABI convention must match device/global source attributes");
+      }
+    } else {
+      if (abi.deviceDeclarationId !== null) {
+        invalid(`${path}.deviceDeclarationId`, "host ABI cannot reference a device-resolved declaration");
+      }
+      if (abi.loweredCallingConvention === "nvptx-kernel" || abi.loweredCallingConvention === "nvptx-device") {
+        invalid(`${path}.loweredCallingConvention`, "NVPTX conventions belong to the device ABI domain");
+      }
+    }
+    const returnAbi = typeAbi.get(abiDomainKey(abi.domain, abi.returnSourceTypeEntityId));
+    referenceSourceType(abi.returnSourceTypeEntityId, abi.domain, `${path}.returnSourceTypeEntityId`);
+    if (returnAbi === undefined) {
+      invalid(`${path}.returnSourceTypeEntityId`, "function return type is absent from its target ABI domain");
+    }
+    if (functionType !== undefined && returnAbi.deviceTypeId !== functionType.returnTypeId) {
+      invalid(`${path}.returnSourceTypeEntityId`, "device function ABI return type differs from resolved function type");
+    }
+    if (functionType !== undefined && functionType.parameterTypeIds.length !== abi.parameters.length) {
+      invalid(`${path}.parameters`, "device function ABI parameter count differs from resolved function type");
+    }
     abi.parameters.forEach((parameter, parameterIndex) => {
       const parameterPath = `${path}.parameters[${parameterIndex}]`;
-      const parameterDeclaration = ref(indexes.declarations, parameter.declarationId, `${parameterPath}.declarationId`, "declaration");
-      if (parameterDeclaration.kind !== "parameter" || parameterDeclaration.semanticParentId !== abi.declarationId) {
-        invalid(`${parameterPath}.declarationId`, "ABI parameter must be an ordered parameter of the function declaration");
+      if (parameter.ordinal !== parameterIndex) {
+        invalid(`${parameterPath}.ordinal`, "ABI parameter ordinals must be contiguous and match array position");
       }
-      if (parameterDeclaration.typeId !== parameter.typeId || functionType.parameterTypeIds[parameterIndex] !== parameter.typeId) {
-        invalid(`${parameterPath}.typeId`, "ABI parameter type differs from declaration or function type");
+      ownSourceEntity(parameter.sourceEntityId, "parameter", abi.domain, `${parameterPath}.sourceEntityId`);
+      referenceSourceType(parameter.sourceTypeEntityId, abi.domain, `${parameterPath}.sourceTypeEntityId`);
+      const parameterType = typeAbi.get(abiDomainKey(abi.domain, parameter.sourceTypeEntityId));
+      if (parameterType === undefined) {
+        invalid(`${parameterPath}.sourceTypeEntityId`, "ABI parameter type is absent from its target domain");
+      }
+      if (functionType !== undefined && parameterType.deviceTypeId !== functionType.parameterTypeIds[parameterIndex]) {
+        invalid(`${parameterPath}.sourceTypeEntityId`, "device ABI parameter type differs from resolved function type");
       }
     });
+    uniqueValues(abi.parameters.map((parameter) => parameter.sourceEntityId), `${path}.parameters`, "source parameter identity");
   }
+  for (const [index, entity] of payload.sourceEntities.entries()) {
+    const observed = observedDomains.get(entity.sourceEntityId);
+    if (observed === undefined || observed.size !== entity.domains.length ||
+        entity.domains.some((domain) => !observed.has(domain))) {
+      invalid(
+        `$.payload.sourceEntities[${index}].domains`,
+        "source entity domains must equal exact semantic-pass and ABI observations",
+      );
+    }
+  }
+}
+
+function addSourceEntityDomain(
+  domainsByEntity: Map<string, Set<"host" | "device">>,
+  sourceEntityId: string,
+  domain: "host" | "device",
+): void {
+  let domains = domainsByEntity.get(sourceEntityId);
+  if (domains === undefined) {
+    domains = new Set();
+    domainsByEntity.set(sourceEntityId, domains);
+  }
+  domains.add(domain);
+}
+
+async function verifySourceEntities(
+  payload: CppCuteFrontendPayloadV2,
+  indexes: ArtifactIndexes,
+): Promise<ReadonlyMap<string, CppCuteSourceEntityV1>> {
+  const entities = mapBy(payload.sourceEntities, (entry) => entry.sourceEntityId);
+  for (const [index, entity] of payload.sourceEntities.entries()) {
+    const path = `$.payload.sourceEntities[${index}]`;
+    verifyOrigin(entity.origin, `${path}.origin`, indexes);
+    const expected = await deriveSourceEntityId(entity, indexes);
+    if (entity.sourceEntityId !== expected) {
+      mismatch(`${path}.sourceEntityId`, "source entity ID is not derived from canonical source identity and resolved origin");
+    }
+  }
+  return entities;
+}
+
+type CppCuteSourceEntityIdentity = {
+  readonly entityKind: CppCuteSourceEntityV1["entityKind"];
+  readonly canonicalIdentity: string;
+  readonly origin: CppCuteSourceOriginV1;
+  readonly domains: readonly ("host" | "device")[];
+};
+
+export async function deriveCppCuteSourceEntityId(
+  payload: CppCuteFrontendPayloadV2,
+  entity: CppCuteSourceEntityIdentity,
+): Promise<string> {
+  return deriveSourceEntityId(entity, buildIndexes(payload));
+}
+
+async function deriveSourceEntityId(
+  entity: CppCuteSourceEntityIdentity,
+  indexes: ArtifactIndexes,
+): Promise<string> {
+  const digest = await hashCanonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.source-entity-id.v1",
+    entityKind: entity.entityKind,
+    canonicalIdentity: entity.canonicalIdentity,
+    origin: canonicalSourceOrigin(entity.origin, indexes),
+  });
+  return `bg.cpp.source-entity.sha256.${digest}`;
+}
+
+function canonicalSourceOrigin(origin: CppCuteSourceOriginV1, indexes: ArtifactIndexes): object {
+  if (origin.kind === "source") {
+    return { kind: "source", span: canonicalSourceSpan(origin.spanId, indexes) };
+  }
+  return {
+    kind: "implicit",
+    reason: origin.reason,
+    anchor: canonicalSourceSpan(origin.anchorSpanId, indexes),
+  };
+}
+
+function canonicalSourceSpan(spanId: string, indexes: ArtifactIndexes): object {
+  const span = ref(indexes.spans, spanId, "$.payload.sourceEntities.origin", "span");
+  return {
+    spelling: canonicalSourceRange(span.spelling, indexes),
+    expansion: canonicalSourceRange(span.expansion, indexes),
+  };
+}
+
+function canonicalSourceRange(
+  range: CppCuteFrontendPayloadV2["spans"][number]["spelling"],
+  indexes: ArtifactIndexes,
+): object {
+  const file = ref(indexes.files, range.fileId, "$.payload.sourceEntities.origin", "file");
+  return {
+    virtualPath: file.virtualPath,
+    contentSha256: file.contentSha256,
+    startByte: range.startByte,
+    endByte: range.endByte,
+  };
+}
+
+function sameSourceOrigin(left: CppCuteSourceOriginV1, right: CppCuteSourceOriginV1): boolean {
+  return left.kind === right.kind && (left.kind === "source"
+    ? right.kind === "source" && left.spanId === right.spanId
+    : right.kind === "implicit" && left.anchorSpanId === right.anchorSpanId && left.reason === right.reason);
+}
+
+async function verifySemanticPasses(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): Promise<void> {
+  const factOwner = new Map<string, number>();
+  const diagnosticOwner = new Map<string, number>();
+  const openedFileUnion = new Set<string>();
+  const includeEdgeUnion = new Set<string>();
+  const sourceEntities = mapBy(payload.sourceEntities, (entry) => entry.sourceEntityId);
+  const selectedSourceRootEntityIds = await deriveSelectedSourceRootEntityIds(payload, indexes, sourceEntities);
+  for (const [passIndex, pass] of payload.semanticPasses.entries()) {
+    const path = `$.payload.semanticPasses[${passIndex}]`;
+    for (const [entityIndex, sourceEntityId] of pass.selectedSourceRootEntityIds.entries()) {
+      ref(
+        sourceEntities,
+        sourceEntityId,
+        `${path}.selectedSourceRootEntityIds[${entityIndex}]`,
+        "source entity",
+      );
+    }
+    for (const [fileIndex, fileId] of pass.openedFileIds.entries()) {
+      ref(indexes.files, fileId, `${path}.openedFileIds[${fileIndex}]`, "file");
+      openedFileUnion.add(fileId);
+    }
+    for (const [edgeIndex, edgeId] of pass.includeEdgeIds.entries()) {
+      ref(indexes.includeEdges, edgeId, `${path}.includeEdgeIds[${edgeIndex}]`, "include edge");
+      includeEdgeUnion.add(edgeId);
+    }
+    for (const [factIndex, factId] of pass.factIds.entries()) {
+      ref(indexes.facts, factId, `${path}.factIds[${factIndex}]`, "fact");
+      if (factOwner.has(factId)) invalid(`${path}.factIds[${factIndex}]`, "fact belongs to more than one semantic pass");
+      factOwner.set(factId, passIndex);
+    }
+    for (const [diagnosticIndex, diagnosticId] of pass.diagnosticIds.entries()) {
+      ref(
+        indexes.diagnostics,
+        diagnosticId,
+        `${path}.diagnosticIds[${diagnosticIndex}]`,
+        "diagnostic",
+      );
+      if (diagnosticOwner.has(diagnosticId)) {
+        invalid(`${path}.diagnosticIds[${diagnosticIndex}]`, "diagnostic belongs to more than one semantic pass");
+      }
+      diagnosticOwner.set(diagnosticId, passIndex);
+    }
+    if (pass.status === "not-run") {
+      if (pass.openedFileIds.length !== 0 || pass.includeEdgeIds.length !== 0 ||
+          pass.observedInputClosureSha256 !== null || pass.sharedSurfaceSha256 !== null ||
+          pass.selectedSourceRootEntityIds.length !== 0 || pass.factIds.length !== 0 || pass.diagnosticIds.length !== 0) {
+        invalid(`${path}.status`, "not-run semantic pass cannot claim input, root, surface, fact, or diagnostic evidence");
+      }
+    } else {
+      if (!pass.openedFileIds.includes(payload.inputs.mainFileId)) {
+        invalid(`${path}.openedFileIds`, "executed semantic pass must open the main source");
+      }
+      verifySemanticPassInputClosure(payload, passIndex, indexes);
+      const observedHash = await computeCppCuteSemanticPassInputClosureHash(payload, passIndex);
+      if (pass.observedInputClosureSha256 !== observedHash) {
+        mismatch(`${path}.observedInputClosureSha256`, "semantic pass observed-input hash is not canonical");
+      }
+    }
+    const blocking = pass.diagnosticIds.filter((id) => {
+      const diagnostic = indexes.diagnostics.get(id);
+      return diagnostic?.parentDiagnosticId === null &&
+        (diagnostic.severity === "error" || diagnostic.severity === "fatal");
+    });
+    if (pass.status === "succeeded" && blocking.length !== 0) {
+      invalid(`${path}.status`, "succeeded semantic pass cannot own blocking diagnostics");
+    }
+    if (pass.status === "failed" && blocking.length === 0) {
+      invalid(`${path}.status`, "failed semantic pass requires an owned root error or fatal diagnostic");
+    }
+    if (pass.status === "failed" && pass.selectedSourceRootEntityIds.some(
+      (sourceEntityId) => !selectedSourceRootEntityIds.includes(sourceEntityId),
+    )) {
+      mismatch(`${path}.selectedSourceRootEntityIds`, "failed semantic pass claimed a noncanonical selected root");
+    }
+    if (pass.status === "succeeded" && !sameStrings(pass.selectedSourceRootEntityIds, selectedSourceRootEntityIds)) {
+      mismatch(
+        `${path}.selectedSourceRootEntityIds`,
+        "successful semantic pass must observe exact content-derived roots of every serialized device entry",
+      );
+    }
+    if (pass.status === "succeeded" && pass.sharedSurfaceSha256 === null) {
+      invalid(`${path}.sharedSurfaceSha256`, "successful semantic pass requires shared source-surface evidence");
+    }
+    if (pass.sharedSurfaceSha256 !== null) {
+      const surfaceHash = await computeCppCuteSharedSurfaceHash(payload, pass.domain);
+      if (pass.sharedSurfaceSha256 !== surfaceHash) {
+        mismatch(`${path}.sharedSurfaceSha256`, "shared source-surface hash is not canonical for pass ABI projection");
+      }
+    }
+  }
+
+  const devicePass = payload.semanticPasses[0];
+  const hostPass = payload.semanticPasses[1];
+  if (devicePass === undefined || hostPass === undefined) invalid("$.payload.semanticPasses", "two semantic passes required");
+  if (devicePass.status === "not-run") {
+    invalid("$.payload.semanticPasses[0].status", "device extraction pass must run");
+  }
+  if (devicePass.status === "failed" && hostPass.status !== "not-run") {
+    invalid("$.payload.semanticPasses[1].status", "host validation must not run after device extraction failure");
+  }
+  if (devicePass.status === "succeeded" && hostPass.status === "not-run") {
+    invalid("$.payload.semanticPasses[1].status", "host validation must run after successful device extraction");
+  }
+  const bothSucceeded = devicePass.status === "succeeded" && hostPass.status === "succeeded";
+  if ((payload.outcome.kind === "accepted") !== bothSucceeded) {
+    invalid("$.payload.outcome", "accepted outcome is equivalent to successful device extraction and host validation");
+  }
+  if (bothSucceeded && devicePass.sharedSurfaceSha256 !== hostPass.sharedSurfaceSha256) {
+    mismatch("$.payload.semanticPasses", "host and device selected source-surface identities do not converge");
+  }
+  if (bothSucceeded && (
+    devicePass.selectedSourceRootEntityIds.length === 0 ||
+    !sameStrings(devicePass.selectedSourceRootEntityIds, hostPass.selectedSourceRootEntityIds)
+  )) {
+    mismatch(
+      "$.payload.semanticPasses[1].selectedSourceRootEntityIds",
+      "accepted host/device passes require one nonempty identical selected-root source projection",
+    );
+  }
+  if (devicePass.factIds.length !== payload.facts.length ||
+      !sameStrings(devicePass.factIds, payload.facts.map((fact) => fact.factId))) {
+    invalid("$.payload.semanticPasses[0].factIds", "device extraction pass must own the complete canonical fact graph");
+  }
+  if (hostPass.factIds.length !== 0) {
+    invalid("$.payload.semanticPasses[1].factIds", "host validation pass cannot contribute to the canonical semantic graph");
+  }
+  if (openedFileUnion.size !== payload.inputs.files.length ||
+      payload.inputs.files.some((file) => !openedFileUnion.has(file.fileId))) {
+    invalid("$.payload.semanticPasses", "per-pass opened-file observations must cover the exact union input file set");
+  }
+  if (includeEdgeUnion.size !== payload.inputs.includeEdges.length ||
+      payload.inputs.includeEdges.some((edge) => !includeEdgeUnion.has(edge.includeEdgeId))) {
+    invalid("$.payload.semanticPasses", "per-pass include-edge observations must cover the exact union input edge set");
+  }
+
+  for (const [factIndex, fact] of payload.facts.entries()) {
+    const owner = factOwner.get(fact.factId);
+    if (owner === undefined) invalid(`$.payload.facts[${factIndex}]`, "fact is missing semantic-pass ownership");
+    if (owner !== 0) {
+      invalid(`$.payload.facts[${factIndex}]`, "canonical semantic facts must belong to device extraction pass");
+    }
+    if (fact.kind === "tensor") {
+      const layoutOwner = factOwner.get(fact.layoutFactId);
+      if (layoutOwner !== owner) {
+        invalid(`$.payload.facts[${factIndex}].layoutFactId`, "tensor and layout facts must share one semantic domain");
+      }
+    }
+    if (fact.kind === "target-intrinsic" && fact.availability.kind === "recognized-unsupported") {
+      if (diagnosticOwner.get(fact.availability.diagnosticId) !== owner) {
+        invalid(
+          `$.payload.facts[${factIndex}].availability.diagnosticId`,
+          "target-intrinsic diagnostic must share its semantic domain",
+        );
+      }
+    }
+  }
+  for (const [diagnosticIndex, diagnostic] of payload.diagnostics.entries()) {
+    const owner = diagnosticOwner.get(diagnostic.diagnosticId);
+    if (owner === undefined) {
+      invalid(`$.payload.diagnostics[${diagnosticIndex}]`, "compiler diagnostic is missing exact semantic-pass ownership");
+    }
+    if (diagnostic.parentDiagnosticId !== null &&
+        diagnosticOwner.get(diagnostic.parentDiagnosticId) !== owner) {
+      invalid(`$.payload.diagnostics[${diagnosticIndex}].parentDiagnosticId`, "diagnostic note crosses pass ownership");
+    }
+    if (owner === 1 && (
+      diagnostic.subject.kind === "declaration" ||
+      diagnostic.subject.kind === "type" ||
+      diagnostic.subject.kind === "expression" ||
+      diagnostic.subject.kind === "fact"
+    )) {
+      invalid(
+        `$.payload.diagnostics[${diagnosticIndex}].subject`,
+        "host validation diagnostic cannot reference the device canonical graph",
+      );
+    }
+    if (diagnostic.subject.kind === "fact") {
+      const expectedOwner = factOwner.get(diagnostic.subject.factId);
+      if (owner !== expectedOwner) {
+        invalid(`$.payload.diagnostics[${diagnosticIndex}].subject`, "fact diagnostic crosses semantic domains");
+      }
+    }
+  }
+  for (const [edgeIndex, edge] of payload.inputs.includeEdges.entries()) {
+    if (edge.kind !== "source-directive" || edge.resolution.kind !== "unresolved") continue;
+    const owner = diagnosticOwner.get(edge.resolution.diagnosticId);
+    const owningPass = owner === undefined ? undefined : payload.semanticPasses[owner];
+    if (owningPass === undefined || !owningPass.includeEdgeIds.includes(edge.includeEdgeId)) {
+      invalid(
+        `$.payload.inputs.includeEdges[${edgeIndex}].resolution.diagnosticId`,
+        "unresolved-include diagnostic owner must have observed the unresolved edge",
+      );
+    }
+  }
+  for (const [entryIndex, entry] of payload.entries.entries()) {
+    const owners = entry.kind === "layout"
+      ? [factOwner.get(entry.layoutFactId)]
+      : [factOwner.get(entry.sourceTensorFactId), factOwner.get(entry.destinationTensorFactId)];
+    if (owners.some((owner) => owner !== 0)) {
+      invalid(`$.payload.entries[${entryIndex}]`, "frontend entries must select only the device canonical semantic graph");
+    }
+  }
+  for (const domain of ["device", "host"] as const) {
+    const pass = domain === "device" ? devicePass : hostPass;
+    if (pass.status === "not-run" && (
+      payload.sourceAbi.types.some((entry) => entry.domain === domain) ||
+      payload.sourceAbi.functions.some((entry) => entry.domain === domain)
+    )) {
+      invalid("$.payload.sourceAbi", `not-run ${domain} pass cannot claim ${domain} ABI evidence`);
+    }
+  }
+}
+
+async function deriveSelectedSourceRootEntityIds(
+  payload: CppCuteFrontendPayloadV2,
+  indexes: ArtifactIndexes,
+  sourceEntities: ReadonlyMap<string, CppCuteSourceEntityV1>,
+): Promise<readonly string[]> {
+  const declarationIds = [...new Set(payload.entries.flatMap((entry) => entry.selectedRootDeclarationIds))].sort();
+  const sourceEntityIds = await Promise.all(declarationIds.map(async (declarationId, index) => {
+    const path = `$.payload.entries.selectedRootDeclarationIds[${index}]`;
+    const declaration = ref(indexes.declarations, declarationId, path, "declaration");
+    if (declaration.kind !== "function" && declaration.kind !== "variable") {
+      invalid(path, "selected root must be a function or variable source declaration");
+    }
+    if (!declaration.cudaAttributes.device && !declaration.cudaAttributes.global) {
+      invalid(path, "selected root must belong to the canonical device semantic pass");
+    }
+    const entityKind = declaration.kind;
+    const sourceEntityId = await deriveSourceEntityId({
+      entityKind,
+      canonicalIdentity: declaration.canonicalUsr,
+      origin: declaration.origin,
+      domains: [],
+    }, indexes);
+    const entity = ref(sourceEntities, sourceEntityId, path, "selected-root source entity");
+    if (entity.entityKind !== entityKind || entity.canonicalIdentity !== declaration.canonicalUsr ||
+        !sameSourceOrigin(entity.origin, declaration.origin)) {
+      invalid(path, "selected root source identity differs from canonical device declaration");
+    }
+    return sourceEntityId;
+  }));
+  return sourceEntityIds.sort();
+}
+
+function verifySemanticPassInputClosure(
+  payload: CppCuteFrontendPayloadV2,
+  passIndex: number,
+  indexes: ArtifactIndexes,
+): void {
+  const pass = payload.semanticPasses[passIndex];
+  if (pass === undefined) invalid(`$.payload.semanticPasses[${passIndex}]`, "semantic pass required");
+  const path = `$.payload.semanticPasses[${passIndex}]`;
+  const opened = new Set(pass.openedFileIds);
+  const edgeIds = new Set(pass.includeEdgeIds);
+  const reachable = new Set<string>([payload.inputs.mainFileId]);
+  for (const [edgeIndex, edgeId] of pass.includeEdgeIds.entries()) {
+    const edge = ref(indexes.includeEdges, edgeId, `${path}.includeEdgeIds[${edgeIndex}]`, "include edge");
+    if (edge.kind === "compiler-forced") {
+      if (!opened.has(edge.fileId)) invalid(`${path}.includeEdgeIds[${edgeIndex}]`, "forced include is absent from pass opened files");
+      reachable.add(edge.fileId);
+      continue;
+    }
+    if (!opened.has(edge.includingFileId)) {
+      invalid(`${path}.includeEdgeIds[${edgeIndex}]`, "include edge source is absent from pass opened files");
+    }
+    if (edge.resolution.kind === "resolved" && !opened.has(edge.resolution.fileId)) {
+      invalid(`${path}.includeEdgeIds[${edgeIndex}]`, "resolved include is absent from pass opened files");
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of payload.inputs.includeEdges) {
+      if (!edgeIds.has(edge.includeEdgeId) || edge.kind !== "source-directive" ||
+          !reachable.has(edge.includingFileId) || edge.resolution.kind !== "resolved") continue;
+      if (!reachable.has(edge.resolution.fileId)) {
+        reachable.add(edge.resolution.fileId);
+        changed = true;
+      }
+    }
+  }
+  for (const fileId of opened) {
+    if (!reachable.has(fileId)) invalid(`${path}.openedFileIds`, `pass opened unreachable file ${fileId}`);
+  }
+  for (const edge of payload.inputs.includeEdges) {
+    if (edge.kind !== "compiler-forced") continue;
+    if (!pass.includeEdgeIds.includes(edge.includeEdgeId)) {
+      invalid(`${path}.includeEdgeIds`, "executed semantic pass omitted a compiler-forced include edge");
+    }
+    if (!opened.has(edge.fileId)) invalid(`${path}.openedFileIds`, "pass omitted compiler-forced file");
+  }
+}
+
+export async function computeCppCuteSemanticPassInputClosureHash(
+  payload: CppCuteFrontendPayloadV2,
+  passIndex: number,
+): Promise<string> {
+  const pass = payload.semanticPasses[passIndex];
+  if (pass === undefined) invalid(`$.payload.semanticPasses[${passIndex}]`, "semantic pass required");
+  const opened = new Set(pass.openedFileIds);
+  const edges = new Set(pass.includeEdgeIds);
+  return hashCanonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.semantic-pass-input-closure.v1",
+    passId: pass.passId,
+    includeRoots: payload.inputs.includeRoots,
+    files: payload.inputs.files.filter((file) => opened.has(file.fileId)),
+    includeEdges: payload.inputs.includeEdges.filter((edge) => edges.has(edge.includeEdgeId)),
+  });
+}
+
+export async function computeCppCuteSharedSurfaceHash(
+  payload: CppCuteFrontendPayloadV2,
+  domain: "host" | "device",
+): Promise<string> {
+  const pass = payload.semanticPasses.find((entry) => entry.domain === domain);
+  if (pass === undefined) invalid("$.payload.semanticPasses", `missing ${domain} semantic pass`);
+  return hashCanonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.shared-source-surface.v2",
+    selectedSourceRootEntityIds: pass.selectedSourceRootEntityIds,
+    types: payload.sourceAbi.types
+      .filter((entry) => entry.domain === domain && entry.shared)
+      .map((entry) => ({
+        sourceTypeEntityId: entry.sourceTypeEntityId,
+        fields: entry.fields.map((field) => ({
+          sourceEntityId: field.sourceEntityId,
+          sourceTypeEntityId: field.sourceTypeEntityId,
+        })),
+        bases: entry.bases.map((base) => ({
+          sourceTypeEntityId: base.sourceTypeEntityId,
+          virtual: base.virtual,
+        })),
+      })),
+    functions: payload.sourceAbi.functions
+      .filter((entry) => entry.domain === domain && entry.shared)
+      .map((entry) => ({
+        sourceEntityId: entry.sourceEntityId,
+        returnSourceTypeEntityId: entry.returnSourceTypeEntityId,
+        parameters: entry.parameters.map((parameter) => ({
+          ordinal: parameter.ordinal,
+          sourceEntityId: parameter.sourceEntityId,
+          sourceTypeEntityId: parameter.sourceTypeEntityId,
+        })),
+      })),
+  });
 }
 
 function verifyFunctionBodies(payload: CppCuteFrontendPayloadV2, indexes: ArtifactIndexes): void {
@@ -819,18 +1392,8 @@ function verifyDiagnosticsAndOutcome(payload: CppCuteFrontendPayloadV2, indexes:
         `${path}.location.related[${relatedIndex}].spanId`,
         "span",
       ));
-    } else if (
-      diagnostic.subject.kind !== "invocation" &&
-      diagnostic.subject.kind !== "profile" &&
-      diagnostic.subject.kind !== "compiler"
-    ) {
-      invalid(`${path}.location`, "locationless diagnostics require an invocation, profile, or compiler subject");
-    }
-    if (diagnostic.subject.kind === "invocation" && diagnostic.phase !== "invocation") {
-      invalid(`${path}.phase`, "invocation subject requires invocation phase");
-    }
-    if (diagnostic.subject.kind === "profile" && diagnostic.phase !== "profile-validation") {
-      invalid(`${path}.phase`, "profile subject requires profile-validation phase");
+    } else if (diagnostic.subject.kind !== "compiler") {
+      invalid(`${path}.location`, "locationless compiler-pass diagnostics require a compiler subject");
     }
     if (diagnostic.severity === "note") {
       if (diagnostic.parentDiagnosticId === null) invalid(`${path}.parentDiagnosticId`, "note diagnostic requires a parent");
@@ -976,28 +1539,34 @@ function verifyUnsignedBitWidth(value: string, bits: number, path: string): void
   if (bigint < 0n || bigint >= (1n << BigInt(bits))) invalid(path, `unsigned constant does not fit declared ${bits}-bit width`);
 }
 
-function verifyValueContainmentCycles(
-  payload: CppCuteFrontendPayloadV2,
-  typeAbi: ReadonlyMap<string, CppCuteFrontendPayloadV2["sourceAbi"]["types"][number]>,
-): void {
-  const edges = new Map<string, string[]>();
-  for (const type of payload.types) {
-    const contained: string[] = [];
-    if (type.kind === "array" || type.kind === "vector") contained.push(type.elementTypeId);
-    if (type.kind === "record") contained.push(...(typeAbi.get(type.typeId)?.fields.map((field) => field.typeId) ?? []));
-    edges.set(type.typeId, contained);
+function verifyAbiValueContainmentCycles(payload: CppCuteFrontendPayloadV2): void {
+  for (const domain of ["host", "device"] as const) {
+    const edges = new Map<string, string[]>();
+    for (const type of payload.sourceAbi.types.filter((entry) => entry.domain === domain)) {
+      edges.set(
+        type.sourceTypeEntityId,
+        [
+          ...type.fields.map((field) => field.sourceTypeEntityId),
+          ...type.bases.map((base) => base.sourceTypeEntityId),
+        ],
+      );
+    }
+    const active = new Set<string>();
+    const done = new Set<string>();
+    const visit = (id: string): void => {
+      if (done.has(id)) return;
+      if (active.has(id)) invalid("$.payload.sourceAbi.types", "value-recursive type containment requires pointer/reference indirection");
+      active.add(id);
+      for (const child of edges.get(id) ?? []) visit(child);
+      active.delete(id);
+      done.add(id);
+    };
+    for (const id of edges.keys()) visit(id);
   }
-  const active = new Set<string>();
-  const done = new Set<string>();
-  const visit = (id: string): void => {
-    if (done.has(id)) return;
-    if (active.has(id)) invalid("$.payload.sourceAbi.types", "value-recursive type containment requires pointer/reference indirection");
-    active.add(id);
-    for (const child of edges.get(id) ?? []) visit(child);
-    active.delete(id);
-    done.add(id);
-  };
-  for (const id of edges.keys()) visit(id);
+}
+
+function abiDomainKey(domain: "host" | "device", id: string): string {
+  return `${domain}:${id}`;
 }
 
 export async function computeCppCuteInputFileSetHash(

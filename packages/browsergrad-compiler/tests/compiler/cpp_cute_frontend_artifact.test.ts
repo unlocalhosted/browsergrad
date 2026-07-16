@@ -10,7 +10,13 @@ import {
   verifyCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifact,
 } from "../../src/cpp_cute_frontend_artifact.js";
-import { computeCppCuteInputHashes } from "../../src/cpp_cute_frontend_verify.js";
+import {
+  computeCppCuteInputHashes,
+  computeCppCuteSemanticPassInputClosureHash,
+  computeCppCuteSharedSurfaceHash,
+  deriveCppCuteSourceEntityId,
+} from "../../src/cpp_cute_frontend_verify.js";
+import { findCppCuteFrontendProfileBindingMismatch } from "../../src/cpp_cute_frontend_profile_binding.js";
 import {
   cloneCppCuteArtifactInput,
   CPP_CUTE_FIXTURE_DIAGNOSTIC_ID,
@@ -18,6 +24,7 @@ import {
   CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID,
   CPP_CUTE_FIXTURE_SPAN_ID,
   createCppCuteArtifactInput,
+  createCppCuteProfileInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
 
 function stableId(kind: string, digit: string): string {
@@ -26,6 +33,37 @@ function stableId(kind: string, digit: string): string {
 
 async function rebindArtifactId(value: Record<string, unknown>): Promise<void> {
   value["artifactId"] = await deriveCppCuteFrontendArtifactId(value["payload"] as never);
+}
+
+async function rebindInputAndPassEvidence(value: Record<string, unknown>): Promise<void> {
+  const payload = value["payload"] as Record<string, unknown>;
+  const inputs = payload["inputs"] as Record<string, unknown>;
+  const hashes = await computeCppCuteInputHashes(payload as never);
+  inputs["sourceSetSha256"] = hashes.sourceSetSha256;
+  inputs["headerSetSha256"] = hashes.headerSetSha256;
+  inputs["closureSha256"] = hashes.closureSha256;
+  (payload["extraction"] as Record<string, unknown>)["inputClosureSha256"] = hashes.closureSha256;
+  const passes = payload["semanticPasses"] as Record<string, unknown>[];
+  for (const [index, pass] of passes.entries()) {
+    if (pass["status"] === "not-run") continue;
+    pass["observedInputClosureSha256"] = await computeCppCuteSemanticPassInputClosureHash(payload as never, index);
+    pass["sharedSurfaceSha256"] = await computeCppCuteSharedSurfaceHash(
+      payload as never,
+      pass["domain"] as "host" | "device",
+    );
+  }
+  await rebindArtifactId(value);
+}
+
+function clearNotRunPass(pass: Record<string, unknown>): void {
+  pass["status"] = "not-run";
+  pass["openedFileIds"] = [];
+  pass["includeEdgeIds"] = [];
+  pass["observedInputClosureSha256"] = null;
+  pass["sharedSurfaceSha256"] = null;
+  pass["selectedSourceRootEntityIds"] = [];
+  pass["factIds"] = [];
+  pass["diagnosticIds"] = [];
 }
 
 describe("C++/CuTe frontend artifact", () => {
@@ -40,16 +78,24 @@ describe("C++/CuTe frontend artifact", () => {
       headerSetSha256: verified.headerSetSha256,
       inputClosureSha256: verified.inputClosureSha256,
     }).toEqual({
-      artifactHash: "4870ab7a360c0dd1f9ea0600b7df8097396e642ff7ee71a55e6c680fd6ace7eb",
+      artifactHash: "f635757deb2eb8734826c7586f56e0884abe5778401fd0bb866542946c626de5",
       sourceSetSha256: "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46",
       headerSetSha256: "a2974167b9230f04b7cf95e0d2e2d1304b9974ba90398fadd93d087b12d44b91",
       inputClosureSha256: "4df918262f32e5655e26fc72c7f9053e707c9612216733146d035d75870e2f7b",
     });
     expect(verified.transportHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(verified.artifactBytesSha256).toBe("addbd4e2fbb0ec3b9c5ad82060bc017942c80dfc08761dd2ee3e1d684b14a321");
-    expect(verified.artifactByteLength).toBe("11088");
+    expect(verified.artifactBytesSha256).toBe("f90119c4607edbb96a365f0e1160441c08a85759afcd6aaf402577529c10f09d");
+    expect(verified.artifactByteLength).toBe("14772");
     expect(verified.compilationContractHash).toBe(CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH);
     expect(verified.outcome).toBe("accepted");
+    expect(record.envelope.payload.semanticPasses).toEqual([
+      expect.objectContaining({ ordinal: 0, passId: "cuda-device-sema", domain: "device", status: "succeeded" }),
+      expect.objectContaining({ ordinal: 1, passId: "cuda-host-sema", domain: "host", status: "succeeded" }),
+    ]);
+    expect(record.envelope.payload.sourceAbi.types.map(({ domain, sourceTypeEntityId }) => ({ domain, sourceTypeEntityId }))).toEqual([
+      { domain: "device", sourceTypeEntityId: expect.stringMatching(/^bg\.cpp\.source-entity\.sha256\./u) },
+      { domain: "host", sourceTypeEntityId: expect.stringMatching(/^bg\.cpp\.source-entity\.sha256\./u) },
+    ]);
     expect(record.envelope.payload.facts).toContainEqual(expect.objectContaining({
       kind: "target-intrinsic",
       familyId: "nvidia:wgmma@1",
@@ -57,6 +103,471 @@ describe("C++/CuTe frontend artifact", () => {
     }));
     expect(Object.isFrozen(verified)).toBe(true);
     expect(Object.isFrozen(record.envelope.payload)).toBe(true);
+  });
+
+  it("closes semantic-pass evidence and rejects missing, duplicate, reordered, or cross-domain facts", async () => {
+    const missing = await cloneCppCuteArtifactInput();
+    const missingPayload = missing["payload"] as Record<string, unknown>;
+    const missingPasses = missingPayload["semanticPasses"] as Record<string, unknown>[];
+    if (missingPasses[0] === undefined) throw new Error("fixture lost device semantic pass");
+    missingPasses[0]["factIds"] = [];
+    await expect(verifyCppCuteFrontendArtifact(missing)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.semanticPasses[0].factIds",
+    });
+
+    const duplicate = await cloneCppCuteArtifactInput();
+    const duplicatePayload = duplicate["payload"] as Record<string, unknown>;
+    const duplicatePasses = duplicatePayload["semanticPasses"] as Record<string, unknown>[];
+    const duplicateFacts = duplicatePayload["facts"] as Record<string, unknown>[];
+    if (duplicatePasses[1] === undefined || duplicateFacts[0] === undefined) {
+      throw new Error("fixture lost semantic pass facts");
+    }
+    duplicatePasses[1]["factIds"] = [duplicateFacts[0]["factId"], ...(duplicatePasses[1]["factIds"] as unknown[])];
+    await expect(verifyCppCuteFrontendArtifact(duplicate)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.semanticPasses[1].factIds[0]",
+    });
+
+    const reordered = await cloneCppCuteArtifactInput();
+    const reorderedPasses = (reordered["payload"] as Record<string, unknown>)["semanticPasses"] as unknown[];
+    reorderedPasses.reverse();
+    await expect(verifyCppCuteFrontendArtifact(reordered)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.semanticPasses[0].ordinal",
+    });
+
+    const crossDomain = await cloneCppCuteArtifactInput();
+    const crossPayload = crossDomain["payload"] as Record<string, unknown>;
+    const crossPasses = crossPayload["semanticPasses"] as Record<string, unknown>[];
+    const crossFacts = crossPayload["facts"] as Record<string, unknown>[];
+    if (crossPasses[0] === undefined || crossPasses[1] === undefined ||
+        crossFacts[0] === undefined || crossFacts[1] === undefined) {
+      throw new Error("fixture lost cross-domain fact");
+    }
+    crossPasses[0]["factIds"] = [crossFacts[1]["factId"]];
+    crossPasses[1]["factIds"] = [crossFacts[0]["factId"]];
+    await expect(verifyCppCuteFrontendArtifact(crossDomain)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.semanticPasses[0].factIds",
+    });
+  });
+
+  it("permits target-conditional pass closures while requiring forced includes in every executed pass", async () => {
+    const divergent = await cloneCppCuteArtifactInput();
+    const payload = divergent["payload"] as Record<string, unknown>;
+    const passes = payload["semanticPasses"] as Record<string, unknown>[];
+    const hostPass = passes[1];
+    if (hostPass === undefined) throw new Error("fixture lost host semantic pass");
+    const inputs = payload["inputs"] as Record<string, unknown>;
+    const dependencyHeader = (inputs["files"] as Record<string, unknown>[])
+      .find((file) => file["role"] === "dependency-header");
+    if (dependencyHeader === undefined) throw new Error("fixture lost dependency header");
+    hostPass["openedFileIds"] = (hostPass["openedFileIds"] as string[])
+      .filter((id) => id !== dependencyHeader["fileId"]);
+    const sourceEdge = (inputs["includeEdges"] as Record<string, unknown>[])
+      .find((edge) => edge["kind"] === "source-directive");
+    if (sourceEdge === undefined) throw new Error("fixture lost source include edge");
+    hostPass["includeEdgeIds"] = (hostPass["includeEdgeIds"] as string[])
+      .filter((id) => id !== sourceEdge["includeEdgeId"]);
+    await rebindInputAndPassEvidence(divergent);
+    await expect(verifyCppCuteFrontendArtifact(divergent)).resolves.toMatchObject({ outcome: "accepted" });
+
+    const missingForced = structuredClone(divergent) as Record<string, unknown>;
+    const missingPayload = missingForced["payload"] as Record<string, unknown>;
+    const missingHost = (missingPayload["semanticPasses"] as Record<string, unknown>[])[1];
+    if (missingHost === undefined) throw new Error("fixture lost host semantic pass");
+    const forcedEdge = ((missingPayload["inputs"] as Record<string, unknown>)["includeEdges"] as Record<string, unknown>[])
+      .find((edge) => edge["kind"] === "compiler-forced");
+    if (forcedEdge === undefined) throw new Error("fixture lost forced include edge");
+    missingHost["includeEdgeIds"] = (missingHost["includeEdgeIds"] as string[])
+      .filter((id) => id !== forcedEdge["includeEdgeId"]);
+    missingHost["openedFileIds"] = (missingHost["openedFileIds"] as string[])
+      .filter((id) => id !== forcedEdge["fileId"]);
+    await expect(verifyCppCuteFrontendArtifact(missingForced)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.semanticPasses[1].includeEdgeIds",
+    });
+  });
+
+  it("binds unresolved-include diagnostics to the pass that observed the edge", async () => {
+    const value = await cloneCppCuteArtifactInput();
+    const payload = value["payload"] as Record<string, unknown>;
+    const inputs = payload["inputs"] as Record<string, unknown>;
+    const files = inputs["files"] as Record<string, unknown>[];
+    const dependencyHeader = files.find((file) => file["role"] === "dependency-header");
+    const sourceEdge = (inputs["includeEdges"] as Record<string, unknown>[])
+      .find((edge) => edge["kind"] === "source-directive");
+    if (dependencyHeader === undefined || sourceEdge === undefined) throw new Error("fixture lost source include closure");
+    const blockingId = stableId("diagnostic", "d");
+    sourceEdge["resolution"] = { kind: "unresolved", diagnosticId: blockingId };
+    inputs["files"] = files.filter((file) => file !== dependencyHeader);
+
+    const passes = payload["semanticPasses"] as Record<string, unknown>[];
+    const devicePass = passes[0];
+    const hostPass = passes[1];
+    if (devicePass === undefined || hostPass === undefined) throw new Error("fixture lost semantic passes");
+    for (const pass of passes) {
+      pass["openedFileIds"] = (pass["openedFileIds"] as string[])
+        .filter((id) => id !== dependencyHeader["fileId"]);
+    }
+    hostPass["includeEdgeIds"] = (hostPass["includeEdgeIds"] as string[])
+      .filter((id) => id !== sourceEdge["includeEdgeId"]);
+    hostPass["status"] = "failed";
+    hostPass["diagnosticIds"] = [blockingId];
+    (payload["diagnostics"] as unknown[]).push({
+      diagnosticId: blockingId,
+      phase: "preprocessing",
+      severity: "error",
+      code: "browsergrad.cpp-cute:unresolved-include",
+      renderedMessage: "Header is unavailable in the host semantic pass.",
+      location: { kind: "none" },
+      subject: { kind: "compiler" },
+      parentDiagnosticId: null,
+    });
+    payload["outcome"] = { kind: "rejected", blockingDiagnosticIds: [blockingId] };
+    await rebindInputAndPassEvidence(value);
+
+    await expect(verifyCppCuteFrontendArtifact(value)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".resolution.diagnosticId"),
+    });
+  });
+
+  it("rejects shared-source drift, unowned diagnostics, and cross-pass notes", async () => {
+    const forgedIdentity = await cloneCppCuteArtifactInput();
+    const forgedPayload = forgedIdentity["payload"] as Record<string, unknown>;
+    const forgedEntity = (forgedPayload["sourceEntities"] as Record<string, unknown>[])[0];
+    if (forgedEntity === undefined) throw new Error("fixture lost source entity");
+    forgedEntity["canonicalIdentity"] = "signed int";
+    await expect(verifyCppCuteFrontendArtifact(forgedIdentity)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
+      path: "$.payload.sourceEntities[0].sourceEntityId",
+    });
+
+    const hiddenShared = await cloneCppCuteArtifactInput();
+    const hiddenPayload = hiddenShared["payload"] as Record<string, unknown>;
+    const hiddenAbi = hiddenPayload["sourceAbi"] as Record<string, unknown>;
+    for (const entry of hiddenAbi["types"] as Record<string, unknown>[]) entry["shared"] = false;
+    await rebindInputAndPassEvidence(hiddenShared);
+    await expect(verifyCppCuteFrontendArtifact(hiddenShared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining("$.payload.sourceAbi.types"),
+    });
+
+    const drift = await cloneCppCuteArtifactInput();
+    const driftPayload = drift["payload"] as Record<string, unknown>;
+    const hostPass = (driftPayload["semanticPasses"] as Record<string, unknown>[])[1];
+    if (hostPass === undefined) throw new Error("fixture lost host ABI surface");
+    hostPass["sharedSurfaceSha256"] = "0".repeat(64);
+    await expect(verifyCppCuteFrontendArtifact(drift)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
+      path: "$.payload.semanticPasses[1].sharedSurfaceSha256",
+    });
+
+    const unowned = await cloneCppCuteArtifactInput();
+    const unownedPayload = unowned["payload"] as Record<string, unknown>;
+    (unownedPayload["diagnostics"] as unknown[]).push({
+      diagnosticId: stableId("diagnostic", "d"),
+      phase: "parsing",
+      severity: "warning",
+      code: "browsergrad.cpp-cute:unowned-parser-warning",
+      renderedMessage: "Parser warning must belong to one semantic pass.",
+      location: { kind: "none" },
+      subject: { kind: "compiler" },
+      parentDiagnosticId: null,
+    });
+    await expect(verifyCppCuteFrontendArtifact(unowned)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining("$.payload.diagnostics"),
+    });
+
+    const crossNote = await cloneCppCuteArtifactInput();
+    const crossPayload = crossNote["payload"] as Record<string, unknown>;
+    const noteId = stableId("diagnostic", "d");
+    (crossPayload["diagnostics"] as unknown[]).push({
+      diagnosticId: noteId,
+      phase: "artifact-extraction",
+      severity: "note",
+      code: "browsergrad.cpp-cute:cross-pass-note",
+      renderedMessage: "Notes cannot cross semantic-pass ownership.",
+      location: { kind: "none" },
+      subject: { kind: "compiler" },
+      parentDiagnosticId: CPP_CUTE_FIXTURE_DIAGNOSTIC_ID,
+    });
+    const crossHost = (crossPayload["semanticPasses"] as Record<string, unknown>[])[1];
+    if (crossHost === undefined) throw new Error("fixture lost host semantic pass");
+    crossHost["diagnosticIds"] = [noteId];
+    await expect(verifyCppCuteFrontendArtifact(crossNote)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".parentDiagnosticId"),
+    });
+
+    const hostGraphReference = await cloneCppCuteArtifactInput();
+    const hostGraphPayload = hostGraphReference["payload"] as Record<string, unknown>;
+    const hostDiagnosticId = stableId("diagnostic", "d");
+    (hostGraphPayload["diagnostics"] as unknown[]).push({
+      diagnosticId: hostDiagnosticId,
+      phase: "cuda-sema",
+      severity: "warning",
+      code: "browsergrad.cpp-cute:host-device-graph-reference",
+      renderedMessage: "Host diagnostics cannot reference device graph declarations.",
+      location: { kind: "source", primarySpanId: CPP_CUTE_FIXTURE_SPAN_ID, related: [] },
+      subject: { kind: "declaration", declarationId: CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID },
+      parentDiagnosticId: null,
+    });
+    const hostGraphPass = (hostGraphPayload["semanticPasses"] as Record<string, unknown>[])[1];
+    if (hostGraphPass === undefined) throw new Error("fixture lost host semantic pass");
+    hostGraphPass["diagnosticIds"] = [hostDiagnosticId];
+    await expect(verifyCppCuteFrontendArtifact(hostGraphReference)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".subject"),
+    });
+  });
+
+  it("rejects split host/device identities for one selected source root", async () => {
+    const split = await cloneCppCuteArtifactInput();
+    const payload = split["payload"] as Record<string, unknown>;
+    const entities = payload["sourceEntities"] as Record<string, unknown>[];
+    const realRoot = entities.find((entity) => entity["entityKind"] === "variable");
+    if (realRoot === undefined) throw new Error("fixture lost selected root source entity");
+    realRoot["domains"] = ["device"];
+    const forgedBody = {
+      entityKind: "variable" as const,
+      canonicalIdentity: "c:@forged_layout",
+      origin: structuredClone(realRoot["origin"]),
+      domains: ["host"] as const,
+    };
+    const forgedId = await deriveCppCuteSourceEntityId(payload as never, forgedBody as never);
+    entities.push({ sourceEntityId: forgedId, ...forgedBody });
+    entities.sort((left, right) => String(left["sourceEntityId"]).localeCompare(String(right["sourceEntityId"])));
+    const hostPass = (payload["semanticPasses"] as Record<string, unknown>[])[1];
+    if (hostPass === undefined) throw new Error("fixture lost host semantic pass");
+    hostPass["selectedSourceRootEntityIds"] = [forgedId];
+    await rebindInputAndPassEvidence(split);
+
+    await expect(verifyCppCuteFrontendArtifact(split)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
+      path: "$.payload.semanticPasses[1].selectedSourceRootEntityIds",
+    });
+  });
+
+  it("enforces the device-first pass state matrix", async () => {
+    const skippedHost = await cloneCppCuteArtifactInput();
+    const skippedPayload = skippedHost["payload"] as Record<string, unknown>;
+    const skippedPass = (skippedPayload["semanticPasses"] as Record<string, unknown>[])[1];
+    if (skippedPass === undefined) throw new Error("fixture lost host semantic pass");
+    clearNotRunPass(skippedPass);
+    const skippedAbi = skippedPayload["sourceAbi"] as Record<string, unknown>;
+    skippedAbi["types"] = (skippedAbi["types"] as Record<string, unknown>[])
+      .filter((entry) => entry["domain"] !== "host");
+    skippedAbi["functions"] = (skippedAbi["functions"] as Record<string, unknown>[])
+      .filter((entry) => entry["domain"] !== "host");
+    for (const entity of skippedPayload["sourceEntities"] as Record<string, unknown>[]) entity["domains"] = ["device"];
+    for (const entry of skippedAbi["types"] as Record<string, unknown>[]) entry["shared"] = false;
+    for (const entry of skippedAbi["functions"] as Record<string, unknown>[]) entry["shared"] = false;
+    const skippedDevice = (skippedPayload["semanticPasses"] as Record<string, unknown>[])[0];
+    if (skippedDevice === undefined) throw new Error("fixture lost device semantic pass");
+    skippedDevice["sharedSurfaceSha256"] = await computeCppCuteSharedSurfaceHash(skippedPayload as never, "device");
+    await expect(verifyCppCuteFrontendArtifact(skippedHost)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.semanticPasses[1].status",
+    });
+
+    const deviceFailure = await cloneCppCuteArtifactInput();
+    const failedPayload = deviceFailure["payload"] as Record<string, unknown>;
+    const failedPasses = failedPayload["semanticPasses"] as Record<string, unknown>[];
+    const devicePass = failedPasses[0];
+    const notRunHost = failedPasses[1];
+    if (devicePass === undefined || notRunHost === undefined) throw new Error("fixture lost semantic passes");
+    const blockingId = stableId("diagnostic", "d");
+    (failedPayload["diagnostics"] as unknown[]).push({
+      diagnosticId: blockingId,
+      phase: "cuda-sema",
+      severity: "error",
+      code: "browsergrad.cpp-cute:device-sema-failed",
+      renderedMessage: "Device semantic extraction failed.",
+      location: { kind: "none" },
+      subject: { kind: "compiler" },
+      parentDiagnosticId: null,
+    });
+    devicePass["status"] = "failed";
+    devicePass["diagnosticIds"] = [...(devicePass["diagnosticIds"] as string[]), blockingId];
+    devicePass["selectedSourceRootEntityIds"] = [];
+    clearNotRunPass(notRunHost);
+    const failedAbi = failedPayload["sourceAbi"] as Record<string, unknown>;
+    failedAbi["types"] = (failedAbi["types"] as Record<string, unknown>[])
+      .filter((entry) => entry["domain"] !== "host");
+    failedAbi["functions"] = (failedAbi["functions"] as Record<string, unknown>[])
+      .filter((entry) => entry["domain"] !== "host");
+    const failedEntities = failedPayload["sourceEntities"] as Record<string, unknown>[];
+    failedPayload["sourceEntities"] = failedEntities
+      .filter((entity) => entity["entityKind"] !== "variable")
+      .map((entity) => ({ ...entity, domains: ["device"] }));
+    for (const entry of failedAbi["types"] as Record<string, unknown>[]) entry["shared"] = false;
+    for (const entry of failedAbi["functions"] as Record<string, unknown>[]) entry["shared"] = false;
+    devicePass["sharedSurfaceSha256"] = null;
+    failedPayload["entries"] = [];
+    failedPayload["outcome"] = { kind: "rejected", blockingDiagnosticIds: [blockingId] };
+    await rebindArtifactId(deviceFailure);
+    await expect(verifyCppCuteFrontendArtifact(deviceFailure)).resolves.toMatchObject({ outcome: "rejected" });
+  });
+
+  it("binds semantic-pass diagnostics, input closure, status, target, and ABI domain", async () => {
+    const missingDiagnostic = await cloneCppCuteArtifactInput();
+    const missingDiagnosticPasses = (
+      (missingDiagnostic["payload"] as Record<string, unknown>)["semanticPasses"] as Record<string, unknown>[]
+    );
+    if (missingDiagnosticPasses[0] === undefined) throw new Error("fixture lost device semantic pass");
+    missingDiagnosticPasses[0]["diagnosticIds"] = [];
+    await expect(verifyCppCuteFrontendArtifact(missingDiagnostic)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringContaining(".availability.diagnosticId"),
+    });
+
+    const closure = await cloneCppCuteArtifactInput();
+    const closurePasses = (closure["payload"] as Record<string, unknown>)["semanticPasses"] as Record<string, unknown>[];
+    if (closurePasses[0] === undefined) throw new Error("fixture lost device semantic pass");
+    closurePasses[0]["observedInputClosureSha256"] = "0".repeat(64);
+    await expect(verifyCppCuteFrontendArtifact(closure)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
+      path: "$.payload.semanticPasses[0].observedInputClosureSha256",
+    });
+
+    const status = await cloneCppCuteArtifactInput();
+    const statusPasses = (status["payload"] as Record<string, unknown>)["semanticPasses"] as Record<string, unknown>[];
+    if (statusPasses[0] === undefined) throw new Error("fixture lost device semantic pass");
+    statusPasses[0]["status"] = "not-run";
+    await expect(verifyCppCuteFrontendArtifact(status)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.semanticPasses[0].status",
+    });
+
+    const abi = await cloneCppCuteArtifactInput();
+    const sourceAbi = (abi["payload"] as Record<string, unknown>)["sourceAbi"] as Record<string, unknown>;
+    const abiTypes = sourceAbi["types"] as Record<string, unknown>[];
+    if (abiTypes[0] === undefined) throw new Error("fixture lost device ABI");
+    delete abiTypes[0]["domain"];
+    await expect(verifyCppCuteFrontendArtifact(abi)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.sourceAbi.types[0]",
+    });
+
+    const target = await createCppCuteArtifactInput();
+    (target.payload.semanticPasses[0] as { deviceArchitecture: string }).deviceArchitecture = "sm_90";
+    expect(findCppCuteFrontendProfileBindingMismatch(target.payload, createCppCuteProfileInput())).toEqual({
+      path: "$.artifact.semanticPasses[0]",
+      message: "artifact semantic-pass domain or target differs from prepared profile",
+    });
+  });
+
+  it("rejects function ABI facts attributed to the wrong CUDA domain", async () => {
+    const valid = await cloneCppCuteArtifactInput();
+    const payload = valid["payload"] as Record<string, unknown>;
+    const types = payload["types"] as Record<string, unknown>[];
+    const declarations = payload["declarations"] as Record<string, unknown>[];
+    const intType = types.find((type) => type["kind"] === "builtin");
+    if (intType === undefined) throw new Error("fixture lost integer type");
+    const functionTypeId = stableId("type", "f");
+    const functionDeclarationId = stableId("declaration", "f");
+    types.push({
+      typeId: functionTypeId,
+      kind: "function",
+      canonicalName: "int device_only()",
+      qualifiers: structuredClone(intType["qualifiers"]),
+      origin: structuredClone(intType["origin"]),
+      returnTypeId: intType["typeId"],
+      parameterTypeIds: [],
+      variadic: false,
+      callingConvention: "cuda-device",
+    });
+    declarations.push({
+      declarationId: functionDeclarationId,
+      kind: "function",
+      canonicalUsr: "c:@F@device_only#",
+      canonicalName: "device_only",
+      lexicalParentId: null,
+      semanticParentId: null,
+      typeId: functionTypeId,
+      targetTypeId: null,
+      initializerExpressionId: null,
+      origin: structuredClone(intType["origin"]),
+      definitionKind: "declaration-only",
+      linkage: "external",
+      storageDuration: "none",
+      memorySpace: "generic",
+      mangledName: "_Z11device_onlyv",
+      cudaAttributes: { host: false, device: true, global: false, forceInline: false },
+    });
+    const sourceAbi = payload["sourceAbi"] as Record<string, unknown>;
+    const intSourceAbi = (sourceAbi["types"] as Record<string, unknown>[])
+      .find((entry) => entry["domain"] === "device" && entry["deviceTypeId"] === intType["typeId"]);
+    if (intSourceAbi === undefined) throw new Error("fixture lost integer source ABI");
+    const functionSourceEntityBody = {
+      entityKind: "function" as const,
+      canonicalIdentity: "c:@F@device_only#",
+      origin: structuredClone(intType["origin"]),
+      domains: ["device"] as const,
+    };
+    const functionSourceEntityId = await deriveCppCuteSourceEntityId(payload as never, functionSourceEntityBody as never);
+    (payload["sourceEntities"] as unknown[]).push({
+      sourceEntityId: functionSourceEntityId,
+      ...functionSourceEntityBody,
+    });
+    (sourceAbi["functions"] as unknown[]).push({
+      domain: "device",
+      shared: false,
+      sourceEntityId: functionSourceEntityId,
+      deviceDeclarationId: functionDeclarationId,
+      loweredCallingConvention: "nvptx-device",
+      returnSourceTypeEntityId: intSourceAbi["sourceTypeEntityId"],
+      returnPassing: "direct",
+      parameters: [],
+    });
+    await rebindArtifactId(valid);
+    await expect(verifyCppCuteFrontendArtifact(valid)).resolves.toMatchObject({ outcome: "accepted" });
+
+    const wrongReturn = structuredClone(valid) as Record<string, unknown>;
+    const wrongReturnPayload = wrongReturn["payload"] as Record<string, unknown>;
+    const wrongReturnTypes = wrongReturnPayload["types"] as Record<string, unknown>[];
+    const layoutType = wrongReturnTypes.find((type) => type["kind"] === "template-specialization");
+    const wrongReturnSourceAbi = wrongReturnPayload["sourceAbi"] as Record<string, unknown>;
+    if (layoutType === undefined) throw new Error("fixture lost return-type inputs");
+    const layoutSourceBody = {
+      entityKind: "type" as const,
+      canonicalIdentity: String(layoutType["canonicalName"]),
+      origin: structuredClone(layoutType["origin"]),
+      domains: ["device"] as const,
+    };
+    const layoutSourceEntityId = await deriveCppCuteSourceEntityId(wrongReturnPayload as never, layoutSourceBody as never);
+    (wrongReturnPayload["sourceEntities"] as unknown[]).push({ sourceEntityId: layoutSourceEntityId, ...layoutSourceBody });
+    (wrongReturnSourceAbi["types"] as unknown[]).push({
+      domain: "device",
+      shared: false,
+      sourceTypeEntityId: layoutSourceEntityId,
+      deviceTypeId: layoutType["typeId"],
+      sizeBits: "64",
+      alignmentBits: "32",
+      fields: [],
+      bases: [],
+    });
+    const wrongFunction = (wrongReturnSourceAbi["functions"] as Record<string, unknown>[])[0];
+    if (wrongFunction === undefined) throw new Error("fixture lost function ABI");
+    wrongFunction["returnSourceTypeEntityId"] = layoutSourceEntityId;
+    await expect(verifyCppCuteFrontendArtifact(wrongReturn)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.sourceAbi.functions[0].returnSourceTypeEntityId",
+    });
+
+    const wrongDomain = structuredClone(valid) as Record<string, unknown>;
+    const wrongSourceAbi = (wrongDomain["payload"] as Record<string, unknown>)["sourceAbi"] as Record<string, unknown>;
+    const functions = wrongSourceAbi["functions"] as Record<string, unknown>[];
+    if (functions[0] === undefined) throw new Error("fixture lost function ABI");
+    functions[0]["loweredCallingConvention"] = "c";
+    await expect(verifyCppCuteFrontendArtifact(wrongDomain)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: "$.payload.sourceAbi.functions[0].loweredCallingConvention",
+    });
   });
 
   it("decodes bounded UTF-8 bytes through the untrusted wire parser", async () => {
@@ -158,7 +669,19 @@ describe("C++/CuTe frontend artifact", () => {
     const files = inputs["files"] as Record<string, unknown>[];
     if (files[0] === undefined) throw new Error("fixture lost main source");
     files[0]["contentSha256"] = "b".repeat(64);
+    const semanticPasses = payload["semanticPasses"] as Record<string, unknown>[];
+    for (const [index, pass] of semanticPasses.entries()) {
+      pass["observedInputClosureSha256"] = await computeCppCuteSemanticPassInputClosureHash(payload as never, index);
+    }
     await expect(verifyCppCuteFrontendArtifact(value)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
+      path: "$.payload.sourceEntities[0].sourceEntityId",
+    });
+
+    const sourceSet = await cloneCppCuteArtifactInput();
+    const sourceSetInputs = (sourceSet["payload"] as Record<string, unknown>)["inputs"] as Record<string, unknown>;
+    sourceSetInputs["sourceSetSha256"] = "b".repeat(64);
+    await expect(verifyCppCuteFrontendArtifact(sourceSet)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
       path: "$.payload.inputs.sourceSetSha256",
     });
@@ -196,6 +719,10 @@ describe("C++/CuTe frontend artifact", () => {
     (input.payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
     (input.payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
     (input.payload.inputs as { closureSha256: string }).closureSha256 = hashes.closureSha256;
+    for (const [index, pass] of input.payload.semanticPasses.entries()) {
+      (pass as { observedInputClosureSha256: string }).observedInputClosureSha256 =
+        await computeCppCuteSemanticPassInputClosureHash(input.payload, index);
+    }
     (input.payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
     (input as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(input.payload);
 

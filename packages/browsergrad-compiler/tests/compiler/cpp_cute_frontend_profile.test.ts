@@ -29,12 +29,101 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("40f020f44a0577a35c3caa2f741f90922df5ca1e927ca5ff3a1eed9a2a1a6a29");
+    expect(first.profileHash).toBe("eeda4ccb6334a81bac8fd4a4e99475041eb72e5528670767cc59bb78692b68ee");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.extractionLimits)).toBe(true);
-    expect(Object.isFrozen(unwrapPreparedCppCuteFrontendProfile(first).profile)).toBe(true);
+    const record = unwrapPreparedCppCuteFrontendProfile(first);
+    expect(record.compilationContract.language.semanticPasses).toEqual([
+      {
+        ordinal: 0,
+        passId: "cuda-device-sema",
+        domain: "device",
+        role: "semantic-extraction",
+        invocationMode: "cuda-device-only",
+        targetTriple: "nvptx64-nvidia-cuda",
+        auxiliaryTargetTriple: "x86_64-unknown-linux-gnu",
+        deviceArchitecture: "sm_80",
+      },
+      {
+        ordinal: 1,
+        passId: "cuda-host-sema",
+        domain: "host",
+        role: "validation",
+        invocationMode: "cuda-host-only",
+        targetTriple: "x86_64-unknown-linux-gnu",
+        auxiliaryTargetTriple: "nvptx64-nvidia-cuda",
+        deviceArchitecture: "sm_80",
+      },
+    ]);
+    expect(Object.isFrozen(record.profile)).toBe(true);
+  });
+
+  it("requires exact ordered host and device semantic passes instead of host-only flags", async () => {
+    const missing = cloneCppCuteProfileInput();
+    delete (missing["language"] as Record<string, unknown>)["semanticPasses"];
+    await expectProfileError(missing, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.language");
+
+    const reordered = cloneCppCuteProfileInput();
+    const reorderedPasses = (reordered["language"] as Record<string, unknown>)["semanticPasses"] as unknown[];
+    reorderedPasses.reverse();
+    await expectProfileError(
+      reordered,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.semanticPasses[0].ordinal",
+    );
+
+    const duplicate = cloneCppCuteProfileInput();
+    const duplicatePasses = (duplicate["language"] as Record<string, unknown>)["semanticPasses"] as unknown[];
+    duplicatePasses[1] = structuredClone(duplicatePasses[0]);
+    await expectProfileError(
+      duplicate,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.semanticPasses[1].ordinal",
+    );
+
+    const wrongDomain = cloneCppCuteProfileInput();
+    const domainPasses = (wrongDomain["language"] as Record<string, unknown>)["semanticPasses"] as Record<string, unknown>[];
+    if (domainPasses[0] === undefined) throw new Error("fixture lost device semantic pass");
+    domainPasses[0]["domain"] = "host";
+    await expectProfileError(
+      wrongDomain,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.semanticPasses[0].domain",
+    );
+
+    const wrongTarget = cloneCppCuteProfileInput();
+    const targetPasses = (wrongTarget["language"] as Record<string, unknown>)["semanticPasses"] as Record<string, unknown>[];
+    if (targetPasses[0] === undefined) throw new Error("fixture lost device semantic pass");
+    targetPasses[0]["targetTriple"] = "x86_64-unknown-linux-gnu";
+    await expectProfileError(
+      wrongTarget,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.semanticPasses[0]",
+    );
+
+    const hostOnly = cloneCppCuteProfileInput();
+    const options = (hostOnly["language"] as Record<string, unknown>)["options"] as unknown[];
+    options.push({ kind: "frontend-option", id: "cuda-host-only", value: null });
+    await expectProfileError(
+      hostOnly,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.options[3].id",
+    );
+  });
+
+  it("binds per-pass target identity into compilation-contract hash", async () => {
+    const sm80 = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
+    const sm90Input = cloneCppCuteProfileInput();
+    const target = sm90Input["target"] as Record<string, unknown>;
+    (target["device"] as Record<string, unknown>)["architecture"] = "sm_90";
+    const passes = (sm90Input["language"] as Record<string, unknown>)["semanticPasses"] as Record<string, unknown>[];
+    if (passes[0] === undefined || passes[1] === undefined) throw new Error("fixture lost semantic passes");
+    passes[0]["deviceArchitecture"] = "sm_90";
+    passes[1]["deviceArchitecture"] = "sm_90";
+    const sm90 = await prepareCppCuteFrontendProfile(sm90Input);
+    expect(sm90.compilationContractHash).not.toBe(sm80.compilationContractHash);
   });
 
   it("prepares one deterministic browser-local profile authority", async () => {
@@ -43,11 +132,11 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("f075a7596dae001aa124407a583ea3647d0e1e392d594f93686848a399f4b815");
+    expect(first.profileHash).toBe("350b7bf56b2f416f2083aed62e4444ad72b1e1aad2d8c0f1eb90d2a25fff1dda");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
-    expect(first.compilationContractHash).toBe("c0329555bbbabbacb65f173d008f77020124e1a685710ce67a7a4ea4a012a67f");
+    expect(first.compilationContractHash).toBe("73172738b46f28fac64e958ff1bc11c901aa0a35494c36cb56f14f403fc47e77");
     const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
     expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
     expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
@@ -243,6 +332,14 @@ describe("C++/CuTe frontend profile", () => {
     const value = cloneCppCuteProfileInput();
     value["version"] = { major: 1, minor: 0 };
     await expectProfileError(value, "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION", "$.version.major");
+
+    const staleMinor = cloneCppCuteProfileInput();
+    staleMinor["version"] = { major: 2, minor: 0 };
+    await expectProfileError(
+      staleMinor,
+      "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION",
+      "$.version.minor",
+    );
   });
 
   it("requires sorted set-like profile fields", async () => {
@@ -535,7 +632,7 @@ describe("C++/CuTe frontend profile", () => {
     await expectProfileError(
       duplicate,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
-      "$.language.options[4]",
+      "$.language.options[3]",
     );
   });
 

@@ -90,7 +90,7 @@ async function createJobFixture(): Promise<JobFixture> {
     entryRequests: [request],
     expectedOutput: {
       schema: "browsergrad.compiler.cpp-cute.frontend-artifact" as const,
-      version: { major: 2 as const, minor: 0 as const },
+      version: { major: 2 as const, minor: 1 as const },
       sourceSetSha256: "a".repeat(64),
       headerSetSha256: CPP_CUTE_FIXTURE_HEADER_SET_HASH,
       inputClosureSha256: "b".repeat(64),
@@ -118,7 +118,7 @@ describe("C++/CuTe AOT producer request", () => {
       entryRequestId: fixture.job.entryRequests[0]?.requestId,
     });
     expect(prepared.jobId).toBe(
-      "bg.cpp.aot-job.sha256.db907469aa5aebc0e06753bb540dfcd6e4687a346e3e6bfac813d5875449a5e6",
+      "bg.cpp.aot-job.sha256.055efcbc87d600138a1f6ae1c500ca8b0ad1fa71de897138890b0b0f8936531a",
     );
     expect(prepared.entryRequestId).toBe(
       "bg.cpp.entry-request.sha256.6f962caa8bc9f13d38abdaab77f296fd412e1323c1d077dbf8152eda4cbbbb5e",

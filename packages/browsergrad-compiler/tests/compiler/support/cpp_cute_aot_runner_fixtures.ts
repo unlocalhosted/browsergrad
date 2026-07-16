@@ -18,6 +18,8 @@ import type {
 } from "../../../src/cpp_cute_aot_environment.js";
 import {
   computeCppCuteInputHashes,
+  computeCppCuteSemanticPassInputClosureHash,
+  computeCppCuteSharedSurfaceHash,
 } from "../../../src/cpp_cute_frontend_verify.js";
 import type {
   CppCuteFrontendArtifactV2,
@@ -31,6 +33,7 @@ import {
 import {
   artifactCompatibleProfileOptions,
   createCppCuteArtifactInput,
+  rebindCppCuteFixtureSourceEntityIds,
   type CppCuteProfileFixtureOptions,
 } from "./cpp_cute_frontend_fixtures.js";
 import {
@@ -132,10 +135,17 @@ async function createRealSourceBackedArtifact(
   if (rewrittenMain === undefined) throw new Error("runner fixture failed to rewrite source identity");
   (rewrittenMain as { contentSha256: string }).contentSha256 = contentSha256;
   (rewrittenMain as { byteLength: string }).byteLength = String(bytes.byteLength);
+  await rebindCppCuteFixtureSourceEntityIds(payload);
   const hashes = await computeCppCuteInputHashes(payload);
   (payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
   (payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
   (payload.inputs as { closureSha256: string }).closureSha256 = hashes.closureSha256;
+  for (const [index, pass] of payload.semanticPasses.entries()) {
+    (pass as { observedInputClosureSha256: string }).observedInputClosureSha256 =
+      await computeCppCuteSemanticPassInputClosureHash(payload, index);
+    (pass as { sharedSurfaceSha256: string }).sharedSurfaceSha256 =
+      await computeCppCuteSharedSurfaceHash(payload, pass.domain);
+  }
   (payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
   if (outcome === "rejected") rejectPayload(payload);
   return {
@@ -155,12 +165,16 @@ function rejectPayload(payload: CppCuteFrontendPayloadV2): void {
     severity: "error",
     code: "browsergrad.cpp-cute:fixture-rejected",
     renderedMessage: "Fixture rejection for offline-runner coverage.",
-    location: structuredClone(diagnostic.location),
-    subject: structuredClone(diagnostic.subject),
+    location: { kind: "none" },
+    subject: { kind: "compiler" },
     parentDiagnosticId: null,
   });
   (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((left, right) =>
     left.diagnosticId.localeCompare(right.diagnosticId));
+  const hostPass = payload.semanticPasses[1];
+  if (hostPass === undefined) throw new Error("runner fixture lost host validation pass");
+  (hostPass as { status: string }).status = "failed";
+  (hostPass as { diagnosticIds: readonly string[] }).diagnosticIds = [blockingDiagnosticId];
   (payload as { outcome: unknown }).outcome = {
     kind: "rejected",
     blockingDiagnosticIds: [blockingDiagnosticId],

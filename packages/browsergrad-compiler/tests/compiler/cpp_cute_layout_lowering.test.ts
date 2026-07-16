@@ -246,10 +246,12 @@ describe("authorized C++/CuTe layout lowering", () => {
     const fixture = await createAuthorizedCppCuteProvenanceFixture({
       mutatePayload: (payload) => {
         const original = payload.facts.find((fact) => fact.kind === "affine-layout") as CppCuteAffineLayoutFactV1;
+        const duplicateFactId = `bg.cpp.fact.sha256.${"f".repeat(64)}`;
         (payload.facts as CppCuteFrontendPayloadV2["facts"] & CppCuteAffineLayoutFactV1[]).push({
           ...structuredClone(original),
-          factId: `bg.cpp.fact.sha256.${"f".repeat(64)}`,
+          factId: duplicateFactId,
         });
+        (payload.semanticPasses[0]?.factIds as string[]).push(duplicateFactId);
       },
     });
     await expect(lower(fixture.authorization)).rejects.toMatchObject({

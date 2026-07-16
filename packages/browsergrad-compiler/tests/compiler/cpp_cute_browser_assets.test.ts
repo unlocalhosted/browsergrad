@@ -70,12 +70,12 @@ describe("C++/CuTe browser-local asset manifest", () => {
     expect(first.manifestId).toBe(fixture.input.manifestId);
     expect(fixture.input.body.assetSetSha256).toBe(first.assetSetSha256);
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.83a7799b5c99f05454bafcf23df0e825e7d06a275449f40e58b39d111df531ab",
+      "bg.cpp.browser-assets.sha256.d5af15d5251daf122b26d9585fda0e5b6ac9bd07a52854d46b94fdcaba4d8bb9",
     );
-    expect(first.assetSetSha256).toBe("fbfffa89d087e1cbb7bf1301d28368f42099d1c85c8b74a356fbd6d98202e402");
+    expect(first.assetSetSha256).toBe("44520f6d9f9ef9aa403a3c281142b463a66adc874d3b914d97c04f9b02af2829");
     expect(first.assetCount).toBe(7);
-    expect(first.manifestSha256).toBe("ea5a9ffcc07b7b8d48f2068b77144afe967bba973d86de3e7d86d23749b46a7a");
-    expect(first.manifestByteLength).toBe("8666");
+    expect(first.manifestSha256).toBe("d232e86f9f0a5856e197f61925833a8ecc9c98a0d5c6b68a26d2d408cacba688");
+    expect(first.manifestByteLength).toBe("9315");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
     expect(record.profile).toBe(fixture.profile);
@@ -253,7 +253,8 @@ describe("C++/CuTe browser-local asset manifest", () => {
 
     const sourceAbi = cloneCppCuteBrowserAssetInput(fixture.input);
     const sourceAbiValue = body(sourceAbi)["sourceAbi"] as Record<string, unknown>;
-    (sourceAbiValue["target"] as Record<string, unknown>)["pointerBits"] = 32;
+    const sourceAbiTarget = sourceAbiValue["target"] as Record<string, unknown>;
+    (sourceAbiTarget["device"] as Record<string, unknown>)["pointerBits"] = 32;
     await expectAssetError(
       prepareCppCuteBrowserAssetManifest(sourceAbi, fixture.profile),
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",

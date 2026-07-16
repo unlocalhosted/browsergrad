@@ -54,10 +54,10 @@ import {
 
 const wire = (value: number | bigint): WireU64 => parseWireU64(String(value));
 
-export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.a96294575c7814aa21e2db47ffcc7a12abfedf092209f379ce4c9f6cca2a8438";
-export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.3226e37a246add09e41fbb0ab318c046f354bde6c81346a6bd8720aaf812b99d";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.9ce254bad45ebe5792f0752c78b3aed6cd76aafc1938e2e853d8019dad58e1a6";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "c24e8d2b7d74b315e3af3b1f18fa82b19f5247a596d05a73280e82206b4bf0b6";
+export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.ab039f0a40c8c390da95a82422c1a1957f8352a6665b125d5f5ff26b9f822cb5";
+export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.cc6c224308df2e95b7693b578b73da872e6dab6209190a68c59fdd393b8c6276";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.38ce469c2540427f553c0dc2475457377b794c3665556b2d91ec003ec8dc939d";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "af196a537a076d94d3220aee3e2bef549603c79cd8c1a84e3cbb5c44be7b38cc";
 export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH = "4986";
 
 export interface CppCuteAotReceiptFixture {

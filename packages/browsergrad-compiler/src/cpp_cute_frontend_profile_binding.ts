@@ -28,6 +28,20 @@ export function findCppCuteFrontendProfileBindingMismatch(
       "artifact compilation contract differs from prepared profile",
     );
   }
+  for (const [index, artifactPass] of payload.semanticPasses.entries()) {
+    const profilePass = profile.language.semanticPasses[index];
+    if (profilePass === undefined || artifactPass.ordinal !== profilePass.ordinal ||
+        artifactPass.passId !== profilePass.passId || artifactPass.domain !== profilePass.domain ||
+        artifactPass.role !== profilePass.role || artifactPass.invocationMode !== profilePass.invocationMode ||
+        artifactPass.targetTriple !== profilePass.targetTriple ||
+        artifactPass.auxiliaryTargetTriple !== profilePass.auxiliaryTargetTriple ||
+        artifactPass.deviceArchitecture !== profilePass.deviceArchitecture) {
+      return mismatch(
+        `$.artifact.semanticPasses[${index}]`,
+        "artifact semantic-pass domain or target differs from prepared profile",
+      );
+    }
+  }
   const artifactRoots = payload.inputs.includeRoots;
   const profileRoots = profile.virtualFileSystem.includeRoots;
   if (artifactRoots.length !== profileRoots.length) {

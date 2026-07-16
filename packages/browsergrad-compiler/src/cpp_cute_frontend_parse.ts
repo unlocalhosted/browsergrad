@@ -42,7 +42,10 @@ import type {
   CppCuteParameterAbiV1,
   CppCuteResolvedFactV1,
   CppCuteResolvedTypeV1,
+  CppCuteSemanticDomainV1,
+  CppCuteSemanticPassRecordV1,
   CppCuteSourceAbiV1,
+  CppCuteSourceEntityV1,
   CppCuteSourceFileV2,
   CppCuteSourceOriginV1,
   CppCuteSourceSpanV1,
@@ -140,6 +143,8 @@ export function parseCppCuteFrontendPayload(
   const object = closedObject(value, [
     "compilationContractHash",
     "inputs",
+    "semanticPasses",
+    "semanticGraphOwnerPassId",
     "spans",
     "macroExpansions",
     "types",
@@ -148,6 +153,7 @@ export function parseCppCuteFrontendPayload(
     "initializerExpressions",
     "templateInstantiations",
     "overloadResolutions",
+    "sourceEntities",
     "sourceAbi",
     "functionBodies",
     "facts",
@@ -162,6 +168,16 @@ export function parseCppCuteFrontendPayload(
       "$.payload.compilationContractHash",
     ),
     inputs: parseInputs(field(object, "inputs", "$.payload"), limits, "$.payload.inputs"),
+    semanticPasses: parseSemanticPasses(
+      field(object, "semanticPasses", "$.payload"),
+      limits,
+      "$.payload.semanticPasses",
+    ),
+    semanticGraphOwnerPassId: exactString(
+      field(object, "semanticGraphOwnerPassId", "$.payload"),
+      "cuda-device-sema",
+      "$.payload.semanticGraphOwnerPassId",
+    ),
     spans: parseSetArray(object, "spans", limits.maxSpans, parseSpan, (entry) => entry.spanId),
     macroExpansions: parseSetArray(
       object,
@@ -200,6 +216,13 @@ export function parseCppCuteFrontendPayload(
       parseOverloadResolution,
       (entry) => entry.resolutionId,
     ),
+    sourceEntities: parseSetArray(
+      object,
+      "sourceEntities",
+      limits.maxAbiEntries,
+      parseSourceEntity,
+      (entry) => entry.sourceEntityId,
+    ),
     sourceAbi: parseSourceAbi(field(object, "sourceAbi", "$.payload"), limits, "$.payload.sourceAbi"),
     functionBodies: parseSetArray(
       object,
@@ -217,10 +240,113 @@ export function parseCppCuteFrontendPayload(
       (entry, path) => parseDiagnostic(entry, limits, path),
       (entry) => entry.diagnosticId,
     ),
-    outcome: parseOutcome(field(object, "outcome", "$.payload"), "$.payload.outcome"),
+    outcome: parseOutcome(field(object, "outcome", "$.payload"), limits, "$.payload.outcome"),
     extraction: parseExtraction(field(object, "extraction", "$.payload"), "$.payload.extraction"),
   } as CppCuteFrontendPayloadV2;
   return deepFreezeJson(payload);
+}
+
+function parseSemanticPasses(
+  value: JsonValue,
+  limits: CppCuteFrontendArtifactLimits,
+  path: string,
+): readonly CppCuteSemanticPassRecordV1[] {
+  const values = arrayValue(value, path);
+  if (values.length !== 2) invalid(path, "artifact requires exactly device extraction then host validation records");
+  const expected = [
+    {
+      ordinal: 0,
+      passId: "cuda-device-sema",
+      domain: "device",
+      role: "semantic-extraction",
+      invocationMode: "cuda-device-only",
+    },
+    {
+      ordinal: 1,
+      passId: "cuda-host-sema",
+      domain: "host",
+      role: "validation",
+      invocationMode: "cuda-host-only",
+    },
+  ] as const;
+  return values.map((entry, index) => {
+    const passPath = `${path}[${index}]`;
+    const object = closedObject(entry, [
+      "ordinal", "passId", "domain", "role", "invocationMode", "targetTriple", "auxiliaryTargetTriple",
+      "deviceArchitecture", "status", "openedFileIds", "includeEdgeIds", "observedInputClosureSha256",
+      "sharedSurfaceSha256", "selectedSourceRootEntityIds", "factIds", "diagnosticIds",
+    ], passPath);
+    const wanted = expected[index];
+    if (wanted === undefined) invalid(passPath, "unexpected semantic pass");
+    if (object.ordinal !== wanted.ordinal) invalid(`${passPath}.ordinal`, `semantic pass ordinal must equal ${wanted.ordinal}`);
+    if (object.passId !== wanted.passId) invalid(`${passPath}.passId`, `semantic pass must be ${wanted.passId}`);
+    if (object.domain !== wanted.domain) invalid(`${passPath}.domain`, `semantic pass domain must be ${wanted.domain}`);
+    if (object.role !== wanted.role) invalid(`${passPath}.role`, `semantic pass role must be ${wanted.role}`);
+    if (object.invocationMode !== wanted.invocationMode) {
+      invalid(`${passPath}.invocationMode`, `semantic pass invocationMode must be ${wanted.invocationMode}`);
+    }
+    const sharedSurface = field(object, "sharedSurfaceSha256", passPath);
+    return {
+      ordinal: wanted.ordinal,
+      passId: wanted.passId,
+      domain: wanted.domain,
+      role: wanted.role,
+      invocationMode: wanted.invocationMode,
+      targetTriple: boundedString(field(object, "targetTriple", passPath), `${passPath}.targetTriple`, 256),
+      auxiliaryTargetTriple: boundedString(
+        field(object, "auxiliaryTargetTriple", passPath),
+        `${passPath}.auxiliaryTargetTriple`,
+        256,
+      ),
+      deviceArchitecture: boundedString(
+        field(object, "deviceArchitecture", passPath),
+        `${passPath}.deviceArchitecture`,
+        64,
+      ),
+      status: enumValue(
+        field(object, "status", passPath),
+        ["succeeded", "failed", "not-run"] as const,
+        `${passPath}.status`,
+      ),
+      openedFileIds: sortedStableIdSet(
+        field(object, "openedFileIds", passPath),
+        `${passPath}.openedFileIds`,
+        "file",
+        limits.maxFiles,
+      ),
+      includeEdgeIds: sortedStableIdSet(
+        field(object, "includeEdgeIds", passPath),
+        `${passPath}.includeEdgeIds`,
+        "include-edge",
+        limits.maxIncludeEdges,
+      ),
+      observedInputClosureSha256: nullableSha256(
+        field(object, "observedInputClosureSha256", passPath),
+        `${passPath}.observedInputClosureSha256`,
+      ),
+      sharedSurfaceSha256: sharedSurface === null
+        ? null
+        : sha256(sharedSurface, `${passPath}.sharedSurfaceSha256`),
+      selectedSourceRootEntityIds: sortedStableIdSet(
+        field(object, "selectedSourceRootEntityIds", passPath),
+        `${passPath}.selectedSourceRootEntityIds`,
+        "source-entity",
+        limits.maxDeclarations,
+      ),
+      factIds: sortedStableIdSet(
+        field(object, "factIds", passPath),
+        `${passPath}.factIds`,
+        "fact",
+        limits.maxFacts,
+      ),
+      diagnosticIds: sortedStableIdSet(
+        field(object, "diagnosticIds", passPath),
+        `${passPath}.diagnosticIds`,
+        "diagnostic",
+        limits.maxDiagnostics,
+      ),
+    };
+  });
 }
 
 function parseInputs(value: JsonValue, limits: CppCuteFrontendArtifactLimits, path: string): CppCuteInputClosureV2 {
@@ -736,22 +862,65 @@ function parseOverloadResolution(value: JsonValue, path: string): CppCuteOverloa
 function parseSourceAbi(value: JsonValue, limits: CppCuteFrontendArtifactLimits, path: string): CppCuteSourceAbiV1 {
   const object = closedObject(value, ["types", "functions"], path);
   return {
-    types: setArrayField(object, "types", path, limits.maxAbiEntries, parseTypeAbi, (entry) => entry.typeId),
+    types: setArrayField(
+      object,
+      "types",
+      path,
+      limits.maxAbiEntries,
+      parseTypeAbi,
+      (entry) => `${entry.domain}:${entry.sourceTypeEntityId}`,
+    ),
     functions: setArrayField(
       object,
       "functions",
       path,
       limits.maxAbiEntries,
       parseFunctionAbi,
-      (entry) => entry.declarationId,
+      (entry) => `${entry.domain}:${entry.sourceEntityId}`,
     ),
   };
 }
 
-function parseTypeAbi(value: JsonValue, path: string): CppCuteTypeAbiV1 {
-  const object = closedObject(value, ["typeId", "sizeBits", "alignmentBits", "fields", "bases"], path);
+function parseSourceEntity(value: JsonValue, path: string): CppCuteSourceEntityV1 {
+  const object = closedObject(value, [
+    "sourceEntityId", "entityKind", "canonicalIdentity", "origin", "domains",
+  ], path);
+  const domains = arrayValue(field(object, "domains", path), `${path}.domains`).map((entry, index) =>
+    parseSemanticDomain(entry, `${path}.domains[${index}]`));
+  if (domains.length === 0 || domains.length > 2) {
+    invalid(`${path}.domains`, "source entity requires one or two semantic domains");
+  }
+  requireStrictlySorted(domains, (entry) => entry, `${path}.domains`);
   return {
-    typeId: stableId(field(object, "typeId", path), `${path}.typeId`, "type"),
+    sourceEntityId: stableId(field(object, "sourceEntityId", path), `${path}.sourceEntityId`, "source-entity"),
+    entityKind: enumValue(
+      field(object, "entityKind", path),
+      ["type", "function", "field", "parameter", "variable"] as const,
+      `${path}.entityKind`,
+    ),
+    canonicalIdentity: boundedString(
+      field(object, "canonicalIdentity", path),
+      `${path}.canonicalIdentity`,
+      4_096,
+    ),
+    origin: parseOrigin(field(object, "origin", path), `${path}.origin`),
+    domains,
+  };
+}
+
+function parseTypeAbi(value: JsonValue, path: string): CppCuteTypeAbiV1 {
+  const object = closedObject(value, [
+    "domain", "shared", "sourceTypeEntityId", "deviceTypeId", "sizeBits", "alignmentBits", "fields", "bases",
+  ], path);
+  return {
+    domain: parseSemanticDomain(field(object, "domain", path), `${path}.domain`),
+    shared: booleanValue(field(object, "shared", path), `${path}.shared`),
+    sourceTypeEntityId: stableId(
+      field(object, "sourceTypeEntityId", path),
+      `${path}.sourceTypeEntityId`,
+      "source-entity",
+    ),
+    deviceTypeId: nullableStableId(field(object, "deviceTypeId", path), `${path}.deviceTypeId`, "type"),
     sizeBits: parseWireU64(field(object, "sizeBits", path), `${path}.sizeBits`),
     alignmentBits: parseWireU64(field(object, "alignmentBits", path), `${path}.alignmentBits`),
     fields: orderedArrayField(object, "fields", path, 16_384).map((entry, index) =>
@@ -762,18 +931,26 @@ function parseTypeAbi(value: JsonValue, path: string): CppCuteTypeAbiV1 {
 }
 
 function parseAbiField(value: JsonValue, path: string): CppCuteAbiFieldV1 {
-  const object = closedObject(value, ["declarationId", "typeId", "bitOffset"], path);
+  const object = closedObject(value, ["sourceEntityId", "sourceTypeEntityId", "bitOffset"], path);
   return {
-    declarationId: stableId(field(object, "declarationId", path), `${path}.declarationId`, "declaration"),
-    typeId: stableId(field(object, "typeId", path), `${path}.typeId`, "type"),
+    sourceEntityId: stableId(field(object, "sourceEntityId", path), `${path}.sourceEntityId`, "source-entity"),
+    sourceTypeEntityId: stableId(
+      field(object, "sourceTypeEntityId", path),
+      `${path}.sourceTypeEntityId`,
+      "source-entity",
+    ),
     bitOffset: parseWireU64(field(object, "bitOffset", path), `${path}.bitOffset`),
   };
 }
 
 function parseAbiBase(value: JsonValue, path: string): CppCuteAbiBaseV1 {
-  const object = closedObject(value, ["typeId", "bitOffset", "virtual"], path);
+  const object = closedObject(value, ["sourceTypeEntityId", "bitOffset", "virtual"], path);
   return {
-    typeId: stableId(field(object, "typeId", path), `${path}.typeId`, "type"),
+    sourceTypeEntityId: stableId(
+      field(object, "sourceTypeEntityId", path),
+      `${path}.sourceTypeEntityId`,
+      "source-entity",
+    ),
     bitOffset: parseWireU64(field(object, "bitOffset", path), `${path}.bitOffset`),
     virtual: booleanValue(field(object, "virtual", path), `${path}.virtual`),
   };
@@ -781,12 +958,28 @@ function parseAbiBase(value: JsonValue, path: string): CppCuteAbiBaseV1 {
 
 function parseFunctionAbi(value: JsonValue, path: string): CppCuteFunctionAbiV1 {
   const object = closedObject(value, [
-    "declarationId", "callingConvention", "returnTypeId", "returnPassing", "parameters",
+    "domain", "shared", "sourceEntityId", "deviceDeclarationId", "loweredCallingConvention",
+    "returnSourceTypeEntityId", "returnPassing", "parameters",
   ], path);
   return {
-    declarationId: stableId(field(object, "declarationId", path), `${path}.declarationId`, "declaration"),
-    callingConvention: parseCallingConvention(field(object, "callingConvention", path), `${path}.callingConvention`),
-    returnTypeId: stableId(field(object, "returnTypeId", path), `${path}.returnTypeId`, "type"),
+    domain: parseSemanticDomain(field(object, "domain", path), `${path}.domain`),
+    shared: booleanValue(field(object, "shared", path), `${path}.shared`),
+    sourceEntityId: stableId(field(object, "sourceEntityId", path), `${path}.sourceEntityId`, "source-entity"),
+    deviceDeclarationId: nullableStableId(
+      field(object, "deviceDeclarationId", path),
+      `${path}.deviceDeclarationId`,
+      "declaration",
+    ),
+    loweredCallingConvention: enumValue(
+      field(object, "loweredCallingConvention", path),
+      ["c", "cxx-member", "cuda-launch-stub", "nvptx-kernel", "nvptx-device"] as const,
+      `${path}.loweredCallingConvention`,
+    ),
+    returnSourceTypeEntityId: stableId(
+      field(object, "returnSourceTypeEntityId", path),
+      `${path}.returnSourceTypeEntityId`,
+      "source-entity",
+    ),
     returnPassing: enumValue(field(object, "returnPassing", path), ["direct", "indirect", "ignore"] as const, `${path}.returnPassing`),
     parameters: orderedArrayField(object, "parameters", path, 16_384).map((entry, index) =>
       parseParameterAbi(entry, `${path}.parameters[${index}]`)),
@@ -794,10 +987,15 @@ function parseFunctionAbi(value: JsonValue, path: string): CppCuteFunctionAbiV1 
 }
 
 function parseParameterAbi(value: JsonValue, path: string): CppCuteParameterAbiV1 {
-  const object = closedObject(value, ["declarationId", "typeId", "passing"], path);
+  const object = closedObject(value, ["ordinal", "sourceEntityId", "sourceTypeEntityId", "passing"], path);
   return {
-    declarationId: stableId(field(object, "declarationId", path), `${path}.declarationId`, "declaration"),
-    typeId: stableId(field(object, "typeId", path), `${path}.typeId`, "type"),
+    ordinal: boundedNonnegativeInteger(field(object, "ordinal", path), `${path}.ordinal`, 65_535),
+    sourceEntityId: stableId(field(object, "sourceEntityId", path), `${path}.sourceEntityId`, "source-entity"),
+    sourceTypeEntityId: stableId(
+      field(object, "sourceTypeEntityId", path),
+      `${path}.sourceTypeEntityId`,
+      "source-entity",
+    ),
     passing: enumValue(field(object, "passing", path), ["direct", "indirect", "ignore"] as const, `${path}.passing`),
   };
 }
@@ -1297,13 +1495,13 @@ function parseDiagnostic(
   if (!DIAGNOSTIC_CODE.test(code)) invalid(`${path}.code`, "diagnostic code must be namespaced");
   const subject = parseDiagnosticSubject(field(object, "subject", path), `${path}.subject`);
   const location = parseDiagnosticLocation(field(object, "location", path), limits, `${path}.location`);
-  if (location.kind === "none" && subject.kind !== "invocation" && subject.kind !== "profile" && subject.kind !== "compiler") {
-    invalid(`${path}.location`, "locationless diagnostics require an invocation, profile, or compiler subject");
+  if (location.kind === "none" && subject.kind !== "compiler") {
+    invalid(`${path}.location`, "locationless frontend diagnostics require a compiler subject");
   }
   return {
     diagnosticId: stableId(field(object, "diagnosticId", path), `${path}.diagnosticId`, "diagnostic"),
     phase: enumValue(field(object, "phase", path), [
-      "invocation", "profile-validation", "preprocessing", "parsing", "name-lookup", "overload-resolution",
+      "preprocessing", "parsing", "name-lookup", "overload-resolution",
       "template-instantiation", "cuda-sema", "artifact-extraction",
     ] as const, `${path}.phase`) as CppCuteDiagnosticPhaseV2,
     severity: enumValue(field(object, "severity", path), [
@@ -1362,7 +1560,7 @@ function parseRelatedDiagnostic(
 
 function parseDiagnosticSubject(value: JsonValue, path: string): CppCuteDiagnosticSubjectV2 {
   if (!isJsonObject(value)) invalid(path, "diagnostic subject must be an object");
-  if (value.kind === "invocation" || value.kind === "profile" || value.kind === "compiler") {
+  if (value.kind === "compiler") {
     closedObject(value, ["kind"], path);
     return { kind: value.kind };
   }
@@ -1389,13 +1587,22 @@ function parseDiagnosticSubject(value: JsonValue, path: string): CppCuteDiagnost
   invalid(`${path}.kind`, "unknown diagnostic subject kind");
 }
 
-function parseOutcome(value: JsonValue, path: string): CppCuteFrontendOutcomeV1 {
+function parseOutcome(
+  value: JsonValue,
+  limits: CppCuteFrontendArtifactLimits,
+  path: string,
+): CppCuteFrontendOutcomeV1 {
   if (!isJsonObject(value)) invalid(path, "frontend outcome must be an object");
   if (value.kind === "accepted") {
     const object = closedObject(value, ["kind", "selectedEntryIds"], path);
     return {
       kind: "accepted",
-      selectedEntryIds: sortedStableIdSet(field(object, "selectedEntryIds", path), `${path}.selectedEntryIds`, "entry"),
+      selectedEntryIds: sortedStableIdSet(
+        field(object, "selectedEntryIds", path),
+        `${path}.selectedEntryIds`,
+        "entry",
+        limits.maxEntries,
+      ),
     };
   }
   if (value.kind === "rejected") {
@@ -1406,6 +1613,7 @@ function parseOutcome(value: JsonValue, path: string): CppCuteFrontendOutcomeV1 
         field(object, "blockingDiagnosticIds", path),
         `${path}.blockingDiagnosticIds`,
         "diagnostic",
+        limits.maxDiagnostics,
       ),
     };
   }
@@ -1434,6 +1642,10 @@ function parseCallingConvention(value: JsonValue, path: string): CppCuteCallingC
   return enumValue(value, ["c", "cuda-kernel", "cuda-device", "cxx-member"] as const, path);
 }
 
+function parseSemanticDomain(value: JsonValue, path: string): CppCuteSemanticDomainV1 {
+  return enumValue(value, ["host", "device"] as const, path);
+}
+
 function sortedCapabilitySet(value: JsonValue, path: string): readonly string[] {
   const values = arrayValue(value, path).map((entry, index) => capabilityId(entry, `${path}[${index}]`));
   requireStrictlySorted(values, (entry) => entry, path);
@@ -1450,8 +1662,16 @@ function stableIdArray(value: JsonValue, path: string, kind: string): readonly s
   return arrayValue(value, path).map((entry, index) => stableId(entry, `${path}[${index}]`, kind));
 }
 
-function sortedStableIdSet(value: JsonValue, path: string, kind: string): readonly string[] {
+function sortedStableIdSet(
+  value: JsonValue,
+  path: string,
+  kind: string,
+  maximum?: number,
+): readonly string[] {
   const values = stableIdArray(value, path, kind);
+  if (maximum !== undefined && values.length > maximum) {
+    resource(path, `${kind} ID count ${values.length} exceeds ${maximum}`);
+  }
   requireStrictlySorted(values, (entry) => entry, path);
   return values;
 }
@@ -1481,6 +1701,10 @@ function sha256(value: JsonValue, path: string): string {
   const text = stringValue(value, path);
   if (!SHA256_HEX.test(text)) invalid(path, "SHA-256 must be 64 lowercase hexadecimal digits");
   return text;
+}
+
+function nullableSha256(value: JsonValue, path: string): string | null {
+  return value === null ? null : sha256(value, path);
 }
 
 function parseSetArray<T>(
@@ -1556,6 +1780,12 @@ function stringValue(value: JsonValue, path: string): string {
   return value;
 }
 
+function exactString<const T extends string>(value: JsonValue, expected: T, path: string): T {
+  const text = stringValue(value, path);
+  if (text !== expected) invalid(path, `expected ${JSON.stringify(expected)}`);
+  return expected;
+}
+
 function boundedString(value: JsonValue, path: string, maximumBytes: number): string {
   const text = stringValue(value, path);
   const bytes = new TextEncoder().encode(text).byteLength;
@@ -1593,6 +1823,12 @@ function enumValue<const T extends readonly string[]>(value: JsonValue, values: 
 function nonnegativeInteger(value: JsonValue, path: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) invalid(path, "expected non-negative safe integer");
   return value;
+}
+
+function boundedNonnegativeInteger(value: JsonValue, path: string, maximum: number): number {
+  const integer = nonnegativeInteger(value, path);
+  if (integer > maximum) invalid(path, `expected non-negative safe integer no greater than ${maximum}`);
+  return integer;
 }
 
 function positiveInteger(value: JsonValue, path: string, maximum: number): number {

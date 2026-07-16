@@ -33,7 +33,7 @@ import { unwrapPreparedCppCuteAotJob } from "./cpp_cute_aot_job.js";
 export const CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA = "browsergrad.compiler.cpp-cute.attestation-trust-store";
 export const CPP_CUTE_FRONTEND_PROVENANCE_MAJOR = 1;
 export const CPP_CUTE_FRONTEND_PROVENANCE_MINOR = 0;
-export const CPP_CUTE_FRONTEND_BUILD_TYPE = "https://browsergrad.dev/build-types/cpp-cute-aot/v1";
+export const CPP_CUTE_FRONTEND_BUILD_TYPE = "https://browsergrad.dev/build-types/cpp-cute-aot/v2";
 export const CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
 export const CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 

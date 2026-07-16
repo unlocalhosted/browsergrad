@@ -10,9 +10,9 @@ import {
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 0;
+export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 1;
 export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
-  "https://browsergrad.dev/provenance/cpp-cute-aot/v1";
+  "https://browsergrad.dev/provenance/cpp-cute-aot/v2";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const OCI_SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -22,7 +22,8 @@ const CAPABILITY_ID = /^[a-z][a-z0-9.-]*:[a-z][a-z0-9._-]*(?:@[1-9][0-9]*)?$/u;
 const DEPENDENCY_ID = /^[a-z][a-z0-9._-]*$/u;
 const MACRO_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const WARNING_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
-const TARGET_ARCHITECTURE = /^(?:sm|compute)_[1-9][0-9][a-z]?$/u;
+const TARGET_ARCHITECTURE = /^sm_[1-9][0-9][a-z]?$/u;
+const LLVM_DATA_LAYOUT = /^[A-Za-z0-9:_+.-]+$/u;
 const OCI_REPOSITORY = /^[a-z0-9.-]+(?::[1-9][0-9]*)?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/u;
 const PREPARED_PROFILES = new WeakMap<object, PreparedCppCuteFrontendProfileRecord>();
 
@@ -242,7 +243,7 @@ export type CppCuteFrontendCompilerOption =
     })
   | (JsonObject & {
       readonly kind: "frontend-option";
-      readonly id: "syntax-only" | "cuda-host-only" | "error-limit";
+      readonly id: "syntax-only" | "error-limit";
       readonly value: string | null;
     })
   | (JsonObject & {
@@ -256,18 +257,47 @@ export type CppCuteFrontendCompilerOption =
       readonly virtualPath: string;
     });
 
+export type CppCuteFrontendSemanticDomain = "host" | "device";
+
+export interface CppCuteFrontendSemanticPassProfile extends JsonObject {
+  /** Array position and ordinal are both semantic. */
+  readonly ordinal: number;
+  readonly passId: "cuda-device-sema" | "cuda-host-sema";
+  readonly domain: CppCuteFrontendSemanticDomain;
+  /** Device pass owns the extracted graph; host pass validates its shared surface. */
+  readonly role: "semantic-extraction" | "validation";
+  /** Exact Clang frontend mode; this is not a free-form compiler option. */
+  readonly invocationMode: "cuda-device-only" | "cuda-host-only";
+  /** Exact primary and auxiliary Clang target identities for the pass. */
+  readonly targetTriple: string;
+  readonly auxiliaryTargetTriple: string;
+  /** Exact CUDA target CPU used by both the primary and auxiliary compilation views. */
+  readonly deviceArchitecture: string;
+}
+
 export interface CppCuteFrontendLanguageProfile extends JsonObject {
   readonly cxxStandard: "c++17";
   readonly cudaCompatibility: string;
+  /** Exactly device extraction then host validation over the same unmodified input closure. */
+  readonly semanticPasses: readonly CppCuteFrontendSemanticPassProfile[];
   /** Compiler option order is semantic and therefore preserved, not sorted. */
   readonly options: readonly CppCuteFrontendCompilerOption[];
 }
 
 export interface CppCuteFrontendTargetProfile extends JsonObject {
-  readonly hostTriple: string;
-  readonly deviceArchitecture: string;
-  readonly endianness: "little" | "big";
-  readonly pointerBits: 32 | 64;
+  readonly host: JsonObject & {
+    readonly triple: string;
+    readonly endianness: "little";
+    readonly pointerBits: 64;
+    readonly dataLayout: string;
+  };
+  readonly device: JsonObject & {
+    readonly triple: "nvptx64-nvidia-cuda";
+    readonly architecture: string;
+    readonly endianness: "little";
+    readonly pointerBits: 64;
+    readonly dataLayout: string;
+  };
 }
 
 export interface CppCuteFrontendCompilerProfile extends JsonObject {
@@ -339,7 +369,7 @@ export interface CppCuteFrontendProfileV2 extends JsonObject {
   readonly extractionLimits: CppCuteFrontendExtractionLimits;
 }
 
-export interface CppCuteFrontendCompilationContractV1 extends JsonObject {
+export interface CppCuteFrontendCompilationContractV2 extends JsonObject {
   readonly profileVersion: CppCuteFrontendProfileVersion;
   readonly language: CppCuteFrontendLanguageProfile;
   readonly target: CppCuteFrontendTargetProfile;
@@ -397,7 +427,7 @@ export class CppCuteFrontendProfileError extends Error {
 export interface PreparedCppCuteFrontendProfileRecord {
   readonly profile: CppCuteFrontendProfileV2;
   readonly profileHash: string;
-  readonly compilationContract: CppCuteFrontendCompilationContractV1;
+  readonly compilationContract: CppCuteFrontendCompilationContractV2;
   readonly compilationContractHash: string;
 }
 
@@ -426,7 +456,7 @@ export async function prepareCppCuteFrontendProfile(
   });
   const compilationContract = cppCuteFrontendCompilationContract(profile);
   const compilationContractHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.compilation-contract.v1",
+    domain: "browsergrad.compiler.cpp-cute.compilation-contract.v2",
     contract: compilationContract,
   });
   throwIfAborted(options.signal);
@@ -448,10 +478,10 @@ export async function prepareCppCuteFrontendProfile(
 
 export function cppCuteFrontendCompilationContract(
   profile: CppCuteFrontendProfileV2,
-): CppCuteFrontendCompilationContractV1 {
+): CppCuteFrontendCompilationContractV2 {
   const semanticLimits = Object.fromEntries(
     CPP_CUTE_FRONTEND_SEMANTIC_EXTRACTION_LIMIT_KEYS.map((key) => [key, profile.extractionLimits[key]]),
-  ) as CppCuteFrontendCompilationContractV1["extractionLimits"];
+  ) as CppCuteFrontendCompilationContractV2["extractionLimits"];
   return deepFreezeJson({
     profileVersion: profile.version,
     language: profile.language,
@@ -528,6 +558,8 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
     invalid("$.profileId", "profileId must be a versioned BrowserGrad C++/CuTe profile identifier");
   }
   const language = parseLanguage(field(object, "language", "$"), "$.language");
+  const target = parseTarget(field(object, "target", "$"), "$.target");
+  validateSemanticPassTargets(language.semanticPasses, target);
   const toolchain = parseToolchain(field(object, "toolchain", "$"), "$.toolchain");
   const virtualFileSystem = parseVirtualFileSystem(
     field(object, "virtualFileSystem", "$"),
@@ -576,7 +608,7 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
     profileId,
     deployment,
     language,
-    target: parseTarget(field(object, "target", "$"), "$.target"),
+    target,
     toolchain,
     virtualFileSystem,
     compatibility: parseCompatibility(field(object, "compatibility", "$"), "$.compatibility"),
@@ -1030,13 +1062,96 @@ function parseExtractorProfile(value: JsonValue, path: string): CppCuteFrontendE
 }
 
 function parseLanguage(value: JsonValue, path: string): CppCuteFrontendLanguageProfile {
-  const object = closedObject(value, ["cxxStandard", "cudaCompatibility", "options"], path);
+  const object = closedObject(value, ["cxxStandard", "cudaCompatibility", "semanticPasses", "options"], path);
   if (object.cxxStandard !== "c++17") invalid(`${path}.cxxStandard`, "profile v2 supports c++17 only");
   return {
     cxxStandard: "c++17",
     cudaCompatibility: boundedString(field(object, "cudaCompatibility", path), `${path}.cudaCompatibility`, 128),
+    semanticPasses: parseSemanticPasses(field(object, "semanticPasses", path), `${path}.semanticPasses`),
     options: parseCompilerOptions(field(object, "options", path), `${path}.options`),
   };
+}
+
+function parseSemanticPasses(value: JsonValue, path: string): readonly CppCuteFrontendSemanticPassProfile[] {
+  const values = arrayValue(value, path);
+  if (values.length !== 2) invalid(path, "CUDA profile requires exactly device extraction then host validation passes");
+  const expected = [
+    {
+      ordinal: 0,
+      passId: "cuda-device-sema",
+      domain: "device",
+      role: "semantic-extraction",
+      invocationMode: "cuda-device-only",
+    },
+    {
+      ordinal: 1,
+      passId: "cuda-host-sema",
+      domain: "host",
+      role: "validation",
+      invocationMode: "cuda-host-only",
+    },
+  ] as const;
+  return values.map((entry, index) => {
+    const passPath = `${path}[${index}]`;
+    const object = closedObject(entry, [
+      "ordinal", "passId", "domain", "role", "invocationMode",
+      "targetTriple", "auxiliaryTargetTriple", "deviceArchitecture",
+    ], passPath);
+    const wanted = expected[index];
+    if (wanted === undefined) invalid(passPath, "unexpected semantic pass");
+    if (object.ordinal !== wanted.ordinal) invalid(`${passPath}.ordinal`, `semantic pass ordinal must equal ${wanted.ordinal}`);
+    if (object.passId !== wanted.passId) invalid(`${passPath}.passId`, `semantic pass must be ${wanted.passId}`);
+    if (object.domain !== wanted.domain) invalid(`${passPath}.domain`, `semantic pass domain must be ${wanted.domain}`);
+    if (object.role !== wanted.role) invalid(`${passPath}.role`, `semantic pass role must be ${wanted.role}`);
+    if (object.invocationMode !== wanted.invocationMode) {
+      invalid(`${passPath}.invocationMode`, `semantic pass invocationMode must be ${wanted.invocationMode}`);
+    }
+    const deviceArchitecture = stringValue(
+      field(object, "deviceArchitecture", passPath),
+      `${passPath}.deviceArchitecture`,
+    );
+    if (!TARGET_ARCHITECTURE.test(deviceArchitecture)) {
+      invalid(`${passPath}.deviceArchitecture`, "device architecture must be an sm_NN Clang CUDA target CPU");
+    }
+    return {
+      ordinal: wanted.ordinal,
+      passId: wanted.passId,
+      domain: wanted.domain,
+      role: wanted.role,
+      invocationMode: wanted.invocationMode,
+      targetTriple: boundedString(field(object, "targetTriple", passPath), `${passPath}.targetTriple`, 256),
+      auxiliaryTargetTriple: boundedString(
+        field(object, "auxiliaryTargetTriple", passPath),
+        `${passPath}.auxiliaryTargetTriple`,
+        256,
+      ),
+      deviceArchitecture,
+    };
+  });
+}
+
+function validateSemanticPassTargets(
+  passes: readonly CppCuteFrontendSemanticPassProfile[],
+  target: CppCuteFrontendTargetProfile,
+): void {
+  const devicePass = passes[0];
+  if (devicePass?.targetTriple !== target.device.triple ||
+      devicePass.auxiliaryTargetTriple !== target.host.triple ||
+      devicePass.deviceArchitecture !== target.device.architecture) {
+    invalid(
+      "$.language.semanticPasses[0]",
+      "device semantic pass must bind the exact device triple, host auxiliary triple, and device architecture",
+    );
+  }
+  const hostPass = passes[1];
+  if (hostPass?.targetTriple !== target.host.triple ||
+      hostPass.auxiliaryTargetTriple !== target.device.triple ||
+      hostPass.deviceArchitecture !== target.device.architecture) {
+    invalid(
+      "$.language.semanticPasses[1]",
+      "host semantic pass must bind the exact host triple, device auxiliary triple, and device architecture",
+    );
+  }
 }
 
 function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteFrontendCompilerOption[] {
@@ -1064,12 +1179,12 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
     } else if (kind === "frontend-option") {
       const object = closedObject(entry, ["kind", "id", "value"], optionPath);
       const id = stringValue(field(object, "id", optionPath), `${optionPath}.id`);
-      if (id !== "syntax-only" && id !== "cuda-host-only" && id !== "error-limit") {
+      if (id !== "syntax-only" && id !== "error-limit") {
         invalid(`${optionPath}.id`, `frontend option ${JSON.stringify(id)} is not allowlisted by profile v2`);
       }
       const rawValue = field(object, "value", optionPath);
       const optionValue = rawValue === null ? null : boundedString(rawValue, `${optionPath}.value`, 64);
-      if ((id === "syntax-only" || id === "cuda-host-only") && optionValue !== null) {
+      if (id === "syntax-only" && optionValue !== null) {
         invalid(`${optionPath}.value`, `${id} does not accept a value`);
       }
       if (id === "error-limit" && (optionValue === null || !/^[1-9][0-9]{0,5}$/u.test(optionValue))) {
@@ -1107,22 +1222,46 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
 }
 
 function parseTarget(value: JsonValue, path: string): CppCuteFrontendTargetProfile {
-  const object = closedObject(value, ["hostTriple", "deviceArchitecture", "endianness", "pointerBits"], path);
-  const deviceArchitecture = stringValue(field(object, "deviceArchitecture", path), `${path}.deviceArchitecture`);
+  const object = closedObject(value, ["host", "device"], path);
+  const hostPath = `${path}.host`;
+  const host = closedObject(field(object, "host", path), ["triple", "endianness", "pointerBits", "dataLayout"], hostPath);
+  const devicePath = `${path}.device`;
+  const device = closedObject(
+    field(object, "device", path),
+    ["triple", "architecture", "endianness", "pointerBits", "dataLayout"],
+    devicePath,
+  );
+  const deviceArchitecture = stringValue(field(device, "architecture", devicePath), `${devicePath}.architecture`);
   if (!TARGET_ARCHITECTURE.test(deviceArchitecture)) {
-    invalid(`${path}.deviceArchitecture`, "device architecture must be an sm_NN or compute_NN profile");
+    invalid(`${devicePath}.architecture`, "device architecture must be an sm_NN Clang CUDA target CPU");
   }
-  if (object.endianness !== "little" && object.endianness !== "big") {
-    invalid(`${path}.endianness`, "endianness must be little or big");
+  if (device.triple !== "nvptx64-nvidia-cuda") {
+    invalid(`${devicePath}.triple`, "profile v2.1 requires the nvptx64-nvidia-cuda device triple");
   }
-  if (object.pointerBits !== 32 && object.pointerBits !== 64) {
-    invalid(`${path}.pointerBits`, "pointerBits must be 32 or 64");
+  if (host.endianness !== "little" || device.endianness !== "little") {
+    invalid(path, "CUDA profile v2.1 requires little-endian host and NVPTX targets");
   }
+  if (host.pointerBits !== 64 || device.pointerBits !== 64) {
+    invalid(path, "CUDA profile v2.1 requires matching 64-bit host and device pointer widths");
+  }
+  const hostDataLayout = boundedString(field(host, "dataLayout", hostPath), `${hostPath}.dataLayout`, 1_024);
+  const deviceDataLayout = boundedString(field(device, "dataLayout", devicePath), `${devicePath}.dataLayout`, 1_024);
+  if (!LLVM_DATA_LAYOUT.test(hostDataLayout)) invalid(`${hostPath}.dataLayout`, "invalid closed LLVM data-layout string");
+  if (!LLVM_DATA_LAYOUT.test(deviceDataLayout)) invalid(`${devicePath}.dataLayout`, "invalid closed LLVM data-layout string");
   return {
-    hostTriple: boundedString(field(object, "hostTriple", path), `${path}.hostTriple`, 256),
-    deviceArchitecture,
-    endianness: object.endianness,
-    pointerBits: object.pointerBits,
+    host: {
+      triple: boundedString(field(host, "triple", hostPath), `${hostPath}.triple`, 256),
+      endianness: "little",
+      pointerBits: 64,
+      dataLayout: hostDataLayout,
+    },
+    device: {
+      triple: "nvptx64-nvidia-cuda",
+      architecture: deviceArchitecture,
+      endianness: "little",
+      pointerBits: 64,
+      dataLayout: deviceDataLayout,
+    },
   };
 }
 

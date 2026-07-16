@@ -256,8 +256,6 @@ describe("C++/CuTe AOT runner receipt", () => {
   it("allows a successful process receipt for a structurally valid rejected artifact", async () => {
     const base = await createCppCuteProvenanceFixture({
       mutatePayload: (payload: CppCuteFrontendPayloadV2) => {
-        const diagnostic = payload.diagnostics[0];
-        if (diagnostic === undefined) throw new Error("fixture lost diagnostic");
         const blockingDiagnosticId = `bg.cpp.diagnostic.sha256.${"1".repeat(64)}`;
         (payload.diagnostics as unknown as Array<unknown>).push({
           diagnosticId: blockingDiagnosticId,
@@ -265,12 +263,16 @@ describe("C++/CuTe AOT runner receipt", () => {
           severity: "error",
           code: "browsergrad.cpp-cute:fixture-rejected",
           renderedMessage: "Fixture rejection for receipt coverage.",
-          location: structuredClone(diagnostic.location),
-          subject: structuredClone(diagnostic.subject),
+          location: { kind: "none" },
+          subject: { kind: "compiler" },
           parentDiagnosticId: null,
         });
         (payload.diagnostics as unknown as Array<{ diagnosticId: string }>).sort((left, right) =>
           left.diagnosticId.localeCompare(right.diagnosticId));
+        const hostPass = payload.semanticPasses[1];
+        if (hostPass === undefined) throw new Error("fixture lost host validation pass");
+        (hostPass as { status: string }).status = "failed";
+        (hostPass as { diagnosticIds: readonly string[] }).diagnosticIds = [blockingDiagnosticId];
         (payload as { outcome: unknown }).outcome = {
           kind: "rejected",
           blockingDiagnosticIds: [blockingDiagnosticId],

@@ -7,11 +7,54 @@ import type {
 
 export const CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-artifact";
 export const CPP_CUTE_FRONTEND_ARTIFACT_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_ARTIFACT_MINOR = 0;
+export const CPP_CUTE_FRONTEND_ARTIFACT_MINOR = 1;
+
+export type CppCuteSemanticDomainV1 = "host" | "device";
+
+export interface CppCuteSourceEntityV1 extends JsonObject {
+  readonly sourceEntityId: string;
+  readonly entityKind: "type" | "function" | "field" | "parameter" | "variable";
+  /** Source-level identity: canonical type spelling or declaration USR, never target ABI spelling. */
+  readonly canonicalIdentity: string;
+  readonly origin: CppCuteSourceOriginV1;
+  /** Exact semantic passes in which this source entity was observed. */
+  readonly domains: readonly CppCuteSemanticDomainV1[];
+}
+
+export interface CppCuteSemanticPassRecordV1 extends JsonObject {
+  readonly ordinal: number;
+  readonly passId: "cuda-device-sema" | "cuda-host-sema";
+  readonly domain: CppCuteSemanticDomainV1;
+  readonly role: "semantic-extraction" | "validation";
+  readonly invocationMode: "cuda-device-only" | "cuda-host-only";
+  readonly targetTriple: string;
+  readonly auxiliaryTargetTriple: string;
+  readonly deviceArchitecture: string;
+  readonly status: "succeeded" | "failed" | "not-run";
+  /** Exact per-pass subset of the union input observation stored in payload.inputs. */
+  readonly openedFileIds: readonly string[];
+  readonly includeEdgeIds: readonly string[];
+  readonly observedInputClosureSha256: string | null;
+  /**
+   * Versioned digest of the selected transitive host/device surface. It is
+   * required for a successful pass and must converge before acceptance.
+   */
+  readonly sharedSurfaceSha256: string | null;
+  /** Source identities for every serialized device entry root observed by this pass. */
+  readonly selectedSourceRootEntityIds: readonly string[];
+  /** Strictly sorted partition of facts produced by this pass. */
+  readonly factIds: readonly string[];
+  /** Strictly sorted CUDA-sema diagnostics and fact diagnostics owned by this pass. */
+  readonly diagnosticIds: readonly string[];
+}
 
 export interface CppCuteFrontendPayloadV2 extends JsonObject {
   readonly compilationContractHash: string;
   readonly inputs: CppCuteInputClosureV2;
+  /** Exact device extraction then host validation evidence over one verified VFS universe. */
+  readonly semanticPasses: readonly CppCuteSemanticPassRecordV1[];
+  /** All resolved graph tables below come only from this pass; no host/device AST merge exists. */
+  readonly semanticGraphOwnerPassId: "cuda-device-sema";
   readonly spans: readonly CppCuteSourceSpanV1[];
   readonly macroExpansions: readonly CppCuteMacroExpansionV1[];
   readonly types: readonly CppCuteResolvedTypeV1[];
@@ -21,6 +64,8 @@ export interface CppCuteFrontendPayloadV2 extends JsonObject {
   readonly initializerExpressions: readonly CppCuteExpressionV1[];
   readonly templateInstantiations: readonly CppCuteTemplateInstantiationV1[];
   readonly overloadResolutions: readonly CppCuteOverloadResolutionV1[];
+  /** Producer-neutral source identities shared by pass evidence, ABI records, and selected roots. */
+  readonly sourceEntities: readonly CppCuteSourceEntityV1[];
   readonly sourceAbi: CppCuteSourceAbiV1;
   readonly functionBodies: readonly CppCuteFunctionBodyV1[];
   readonly facts: readonly CppCuteResolvedFactV1[];
@@ -325,19 +370,24 @@ export type CppCuteCallingConventionV1 =
   | "cxx-member";
 
 export interface CppCuteAbiFieldV1 extends JsonObject {
-  readonly declarationId: string;
-  readonly typeId: string;
+  readonly sourceEntityId: string;
+  readonly sourceTypeEntityId: string;
   readonly bitOffset: WireU64;
 }
 
 export interface CppCuteAbiBaseV1 extends JsonObject {
-  readonly typeId: string;
+  readonly sourceTypeEntityId: string;
   readonly bitOffset: WireU64;
   readonly virtual: boolean;
 }
 
 export interface CppCuteTypeAbiV1 extends JsonObject {
-  readonly typeId: string;
+  readonly domain: CppCuteSemanticDomainV1;
+  readonly shared: boolean;
+  /** Target-independent identity shared by the host and device ABI projections. */
+  readonly sourceTypeEntityId: string;
+  /** Device canonical-graph type; host ABI never pretends to reference a device-resolved type. */
+  readonly deviceTypeId: string | null;
   readonly sizeBits: WireU64;
   readonly alignmentBits: WireU64;
   readonly fields: readonly CppCuteAbiFieldV1[];
@@ -345,15 +395,24 @@ export interface CppCuteTypeAbiV1 extends JsonObject {
 }
 
 export interface CppCuteParameterAbiV1 extends JsonObject {
-  readonly declarationId: string;
-  readonly typeId: string;
+  readonly ordinal: number;
+  readonly sourceEntityId: string;
+  readonly sourceTypeEntityId: string;
   readonly passing: "direct" | "indirect" | "ignore";
 }
 
 export interface CppCuteFunctionAbiV1 extends JsonObject {
-  readonly declarationId: string;
-  readonly callingConvention: CppCuteCallingConventionV1;
-  readonly returnTypeId: string;
+  readonly domain: CppCuteSemanticDomainV1;
+  readonly shared: boolean;
+  readonly sourceEntityId: string;
+  readonly deviceDeclarationId: string | null;
+  readonly loweredCallingConvention:
+    | "c"
+    | "cxx-member"
+    | "cuda-launch-stub"
+    | "nvptx-kernel"
+    | "nvptx-device";
+  readonly returnSourceTypeEntityId: string;
   readonly returnPassing: "direct" | "indirect" | "ignore";
   readonly parameters: readonly CppCuteParameterAbiV1[];
 }
@@ -599,8 +658,6 @@ export type CppCuteFrontendEntryV1 =
     });
 
 export type CppCuteDiagnosticPhaseV2 =
-  | "invocation"
-  | "profile-validation"
   | "preprocessing"
   | "parsing"
   | "name-lookup"
@@ -610,8 +667,6 @@ export type CppCuteDiagnosticPhaseV2 =
   | "artifact-extraction";
 
 export type CppCuteDiagnosticSubjectV2 =
-  | (JsonObject & { readonly kind: "invocation" })
-  | (JsonObject & { readonly kind: "profile" })
   | (JsonObject & { readonly kind: "compiler" })
   | (JsonObject & { readonly kind: "file"; readonly fileId: string })
   | (JsonObject & { readonly kind: "declaration"; readonly declarationId: string })

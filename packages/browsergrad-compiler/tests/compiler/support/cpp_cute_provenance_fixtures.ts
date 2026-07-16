@@ -42,7 +42,10 @@ import {
   type AuthorizedCppCuteFrontendArtifact,
 } from "../../../src/cpp_cute_frontend_authorization.js";
 import type { CppCuteFrontendPayloadV2 } from "../../../src/cpp_cute_frontend_types.js";
-import { computeCppCuteInputHashes } from "../../../src/cpp_cute_frontend_verify.js";
+import {
+  computeCppCuteInputHashes,
+  computeCppCuteSemanticPassInputClosureHash,
+} from "../../../src/cpp_cute_frontend_verify.js";
 import {
   artifactCompatibleProfileOptions,
   CPP_CUTE_FIXTURE_BUILDER_ID,
@@ -66,10 +69,10 @@ const TEST_PRIVATE_JWK: JsonWebKey = Object.freeze({
 export const TEST_CPP_CUTE_SPKI_BASE64 =
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl8h7VCP+TUDyAHiNww/AEpx+H6YG/bXR1bsUEtcquSfen4okTS1aPQ0oyKgQtZPo2Mn2pfS6TSArNTL7ACRmdQ==";
 export const PINNED_CPP_CUTE_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
-export const PINNED_CPP_CUTE_PROFILE_HASH = "75267d04e9aab9f900b7591de627106fb4218d3c63e323fe60a5477ba792f987";
-export const PINNED_CPP_CUTE_ARTIFACT_HASH = "b6262132cceece13365ee8d2abac26f381953d5da694b4e9b771200c50de47ec";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "5e6dfb606be9026c186b546e7e38485771c9a2f7bbec900cd6bf414bb692df83";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "11088";
+export const PINNED_CPP_CUTE_PROFILE_HASH = "a0637faf35755bc18d6d763a804a46b1ec75ce86561d5750482653399d667be0";
+export const PINNED_CPP_CUTE_ARTIFACT_HASH = "b8b9ebb2b91cff2f6e47a786493e059b02e5c9d58e52ea925364b3ec01630a76";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "ed5eb85d2f2dcfdf7a2ca345d2ea49e8f75320b9020817f8c4f9ec45e886b1f5";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "14772";
 export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46";
 
 export interface CppCuteProvenanceFixture {
@@ -129,6 +132,10 @@ export async function createCppCuteProvenanceFixture(
     (artifactInput.payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
     (artifactInput.payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
     (artifactInput.payload.inputs as { closureSha256: string }).closureSha256 = hashes.closureSha256;
+    for (const [index, pass] of artifactInput.payload.semanticPasses.entries()) {
+      (pass as { observedInputClosureSha256: string }).observedInputClosureSha256 =
+        await computeCppCuteSemanticPassInputClosureHash(artifactInput.payload, index);
+    }
     (artifactInput.payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
     (artifactInput as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(artifactInput.payload);
   }
