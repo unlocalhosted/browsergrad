@@ -75,7 +75,7 @@ export async function createCppCuteAotRunnerFixture(
   });
   const profile = environmentFixture.profile;
   const artifactInput = await createRealSourceBackedArtifact(
-    profile.profileHash,
+    profile.compilationContractHash,
     options.outcome ?? "accepted",
   );
   const artifact = await verifyCppCuteFrontendArtifact(artifactInput);
@@ -110,10 +110,10 @@ export async function createCppCuteAotRunnerFixture(
 }
 
 async function createRealSourceBackedArtifact(
-  profileHash: string,
+  compilationContractHash: string,
   outcome: "accepted" | "rejected",
 ): Promise<CppCuteFrontendArtifactV2> {
-  const artifact = await createCppCuteArtifactInput(profileHash);
+  const artifact = await createCppCuteArtifactInput(compilationContractHash);
   const payload = structuredClone(artifact.payload) as CppCuteFrontendPayloadV2;
   const main = payload.inputs.files.find((file) => file.role === "main-source");
   if (main === undefined) throw new Error("runner fixture lost source file");

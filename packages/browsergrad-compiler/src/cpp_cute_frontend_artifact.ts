@@ -41,7 +41,7 @@ export interface VerifiedCppCuteFrontendArtifact {
   readonly transportHash: string;
   readonly artifactBytesSha256: string;
   readonly artifactByteLength: WireU64;
-  readonly profileHash: string;
+  readonly compilationContractHash: string;
   readonly sourceSetSha256: string;
   readonly headerSetSha256: string;
   readonly inputClosureSha256: string;
@@ -139,7 +139,7 @@ export async function verifyCppCuteFrontendArtifact(
     transportHash,
     artifactBytesSha256,
     artifactByteLength,
-    profileHash: payload.profileHash,
+    compilationContractHash: payload.compilationContractHash,
     sourceSetSha256: inputHashes.sourceSetSha256,
     headerSetSha256: inputHashes.headerSetSha256,
     inputClosureSha256: inputHashes.closureSha256,

@@ -1,5 +1,7 @@
 import {
   CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE,
+  type CppCuteFrontendAotDeploymentProfile,
+  type CppCuteFrontendBrowserDeploymentProfile,
   type CppCuteFrontendIncludeRoot,
   type CppCuteFrontendProfileV2,
 } from "../../../src/cpp_cute_frontend_profile.js";
@@ -43,9 +45,14 @@ export interface CppCuteProfileFixtureOptions {
   readonly containerConfigDigest?: string;
 }
 
+export interface CppCuteBrowserProfileFixtureOptions extends CppCuteProfileFixtureOptions {
+  readonly assetSetSha256?: string;
+  readonly buildProvenanceLockSha256?: string;
+}
+
 export function createCppCuteProfileInput(
   options: CppCuteProfileFixtureOptions = {},
-): CppCuteFrontendProfileV2 {
+): CppCuteFrontendProfileV2 & { readonly deployment: CppCuteFrontendAotDeploymentProfile } {
   const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
@@ -180,6 +187,62 @@ export function createCppCuteProfileInput(
   };
 }
 
+export function createCppCuteBrowserProfileInput(
+  options: CppCuteBrowserProfileFixtureOptions = {},
+): CppCuteFrontendProfileV2 & { readonly deployment: CppCuteFrontendBrowserDeploymentProfile } {
+  const aot = createCppCuteProfileInput(options);
+  const browserExtractorSha256 = "a".repeat(64);
+  return {
+    ...aot,
+    profileId: "browsergrad.compiler.cpp-cute.browser-clang@1",
+    toolchain: {
+      ...aot.toolchain,
+      compiler: {
+        ...aot.toolchain.compiler,
+        binarySha256: browserExtractorSha256,
+      },
+    },
+    deployment: {
+      mode: "browser-local",
+      contractId: "browsergrad.compiler.cpp-cute.browser-worker@1",
+      assetSetSha256: options.assetSetSha256 ?? "8".repeat(64),
+      buildProvenanceLockSha256: options.buildProvenanceLockSha256 ?? "7".repeat(64),
+      extractor: {
+        id: "browsergrad-tools/cpp-cute-clang-wasm",
+        version: "0.1.0",
+        buildId: "browsergrad-cpp-cute-clang-wasm-0.1.0",
+        binarySha256: browserExtractorSha256,
+        semanticAdapterManifestSha256: CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH,
+      },
+      worker: {
+        protocolId: "browsergrad.compiler.cpp-cute.browser-worker@1",
+        buildId: "browsergrad-cpp-cute-browser-worker-0.1.0",
+        moduleSha256: "9".repeat(64),
+        scriptType: "module",
+        isolation: "dedicated-worker",
+        threading: "single-thread",
+        cancellation: "terminate-worker",
+        sourceNetwork: "forbidden",
+        assetNetwork: "same-origin-root-relative-only",
+        cache: "content-addressed",
+        maxWasmMemoryBytes: 1024 * 1024 * 1024,
+      },
+      assetLimits: {
+        maxAssets: 32,
+        maxAssetCompressedByteLength: 256 * 1024 * 1024,
+        maxAssetUnpackedByteLength: 512 * 1024 * 1024,
+        maxTotalCompressedByteLength: 512 * 1024 * 1024,
+        maxTotalUnpackedByteLength: 1024 * 1024 * 1024,
+      },
+    },
+    extractionLimits: {
+      ...aot.extractionLimits,
+      maxMemoryBytes: 1024 * 1024 * 1024,
+      maxProcesses: 1,
+    },
+  };
+}
+
 function createDefaultCppCuteIncludeRoots(sourceRoot: string): readonly CppCuteFrontendIncludeRoot[] {
   return [
     {
@@ -233,7 +296,7 @@ export function cloneCppCuteProfileInput(
   return structuredClone(createCppCuteProfileInput(options)) as unknown as Record<string, unknown>;
 }
 
-export const CPP_CUTE_FIXTURE_PROFILE_HASH = "a".repeat(64);
+export const CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH = "a".repeat(64);
 export const CPP_CUTE_FIXTURE_MAIN_FILE_ID = stableId("file", "1");
 export const CPP_CUTE_FIXTURE_COMPILER_HEADER_FILE_ID = stableId("file", "d");
 export const CPP_CUTE_FIXTURE_HEADER_FILE_ID = stableId("file", "e");
@@ -271,10 +334,10 @@ function qualifiers(): { readonly const: boolean; readonly volatile: boolean; re
 }
 
 export async function createCppCutePayloadInput(
-  profileHash = CPP_CUTE_FIXTURE_PROFILE_HASH,
+  compilationContractHash = CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
 ): Promise<CppCuteFrontendPayloadV2> {
   const payload: CppCuteFrontendPayloadV2 = {
-    profileHash,
+    compilationContractHash,
     inputs: {
       mainFileId: CPP_CUTE_FIXTURE_MAIN_FILE_ID,
       includeRoots: [
@@ -541,7 +604,7 @@ export async function createCppCutePayloadInput(
     }],
     outcome: { kind: "accepted", selectedEntryIds: [CPP_CUTE_FIXTURE_ENTRY_ID] },
     extraction: {
-      profileHash,
+      compilationContractHash,
       inputClosureSha256: ZERO_HASH,
       appliedTransforms: [],
     },
@@ -560,9 +623,9 @@ export async function createCppCutePayloadInput(
 }
 
 export async function createCppCuteArtifactInput(
-  profileHash = CPP_CUTE_FIXTURE_PROFILE_HASH,
+  compilationContractHash = CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
 ): Promise<CppCuteFrontendArtifactV2> {
-  const payload = await createCppCutePayloadInput(profileHash);
+  const payload = await createCppCutePayloadInput(compilationContractHash);
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
     version: { major: 2, minor: 0 },
@@ -574,9 +637,9 @@ export async function createCppCuteArtifactInput(
 }
 
 export async function cloneCppCuteArtifactInput(
-  profileHash = CPP_CUTE_FIXTURE_PROFILE_HASH,
+  compilationContractHash = CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
 ): Promise<Record<string, unknown>> {
-  return structuredClone(await createCppCuteArtifactInput(profileHash)) as unknown as Record<string, unknown>;
+  return structuredClone(await createCppCuteArtifactInput(compilationContractHash)) as unknown as Record<string, unknown>;
 }
 
 export function artifactCompatibleProfileOptions(

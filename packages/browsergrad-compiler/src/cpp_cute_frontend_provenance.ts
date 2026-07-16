@@ -14,7 +14,7 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE,
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
 import {
@@ -29,7 +29,6 @@ import {
   type VerifiedCppCuteAotRunnerReceiptResource,
 } from "./cpp_cute_aot_receipt.js";
 import { unwrapPreparedCppCuteAotJob } from "./cpp_cute_aot_job.js";
-import { findCppCuteFrontendProfileBindingMismatch } from "./cpp_cute_frontend_profile_binding.js";
 
 export const CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA = "browsergrad.compiler.cpp-cute.attestation-trust-store";
 export const CPP_CUTE_FRONTEND_PROVENANCE_MAJOR = 1;
@@ -52,7 +51,6 @@ const SHA256_KEY_ID = /^sha256:[0-9a-f]{64}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const PREPARED_TRUST_STORES = new WeakMap<object, PreparedCppCuteAttestationTrustStoreRecord>();
 const VERIFIED_ATTESTATIONS = new WeakMap<object, VerifiedCppCuteFrontendAttestationRecord>();
-const AUTHORIZED_ARTIFACTS = new WeakMap<object, AuthorizedCppCuteFrontendArtifactRecord>();
 
 export interface CppCuteAttestationTrustKeyV1 extends JsonObject {
   readonly keyId: string;
@@ -93,6 +91,7 @@ export interface CppCuteProvenanceSubjectV1 extends JsonObject {
   readonly artifactBytesSha256: string;
   readonly artifactByteLength: WireU64;
   readonly profileHash: string;
+  readonly compilationContractHash: string;
   readonly sourceSetSha256: string;
   readonly headerSetSha256: string;
   readonly inputClosureSha256: string;
@@ -190,6 +189,7 @@ declare const verifiedAttestationBrand: unique symbol;
 export interface VerifiedCppCuteFrontendAttestation {
   readonly [verifiedAttestationBrand]: true;
   readonly statementHash: string;
+  readonly evidenceHash: string;
   readonly builderId: string;
   readonly keyId: string;
   readonly artifactHash: string;
@@ -208,50 +208,15 @@ export interface VerifiedCppCuteFrontendAttestation {
   readonly sourceRevision: CppCuteProvenanceGitRevisionV1;
 }
 
-interface VerifiedCppCuteFrontendAttestationRecord {
+export interface VerifiedCppCuteFrontendAttestationRecord {
   readonly provenance: CppCuteFrontendProvenanceV1;
   readonly receiptResource: VerifiedCppCuteAotRunnerReceiptResource;
   readonly receipt: VerifiedCppCuteAotRunnerReceipt;
   readonly artifact: VerifiedCppCuteFrontendArtifact;
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly statementHash: string;
+  readonly evidenceHash: string;
   readonly trustStoreHash: string;
-}
-
-declare const authorizedArtifactBrand: unique symbol;
-
-export interface AuthorizedCppCuteFrontendArtifact {
-  readonly [authorizedArtifactBrand]: true;
-  readonly artifactHash: string;
-  readonly artifactBytesSha256: string;
-  readonly artifactByteLength: WireU64;
-  readonly receiptId: string;
-  readonly receiptBytesSha256: string;
-  readonly receiptByteLength: WireU64;
-  readonly jobId: string;
-  readonly invocationManifestSha256: string;
-  readonly executionPlanSha256: string;
-  readonly executionEnvironmentManifestSha256: string;
-  readonly profileHash: string;
-  readonly sourceSetSha256: string;
-  readonly statementHash: string;
-  readonly trustStoreHash: string;
-  readonly builderId: string;
-  readonly sourceRevision: CppCuteProvenanceGitRevisionV1;
-}
-
-export interface AuthorizeCppCuteFrontendArtifactRequest {
-  readonly attestation: VerifiedCppCuteFrontendAttestation;
-  readonly expectedProfileHash: string;
-  readonly expectedSourceSetSha256: string;
-  readonly expectedSourceRepository: string;
-  readonly expectedSourceRevision: CppCuteProvenanceGitRevisionV1;
-}
-
-export interface AuthorizedCppCuteFrontendArtifactRecord {
-  readonly artifact: VerifiedCppCuteFrontendArtifact;
-  readonly profile: PreparedCppCuteFrontendProfile;
-  readonly attestation: VerifiedCppCuteFrontendAttestation;
 }
 
 export type CppCuteFrontendProvenanceErrorCode =
@@ -262,8 +227,7 @@ export type CppCuteFrontendProvenanceErrorCode =
   | "BG-COMPILER-CPP-CUTE-PROVENANCE-SIGNATURE"
   | "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH"
   | "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH"
-  | "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED"
-  | "BG-COMPILER-CPP-CUTE-PROVENANCE-ARTIFACT-REJECTED";
+  | "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED";
 
 export class CppCuteFrontendProvenanceError extends Error {
   constructor(
@@ -346,7 +310,7 @@ export async function verifyCppCuteFrontendAttestation(
   const artifact = receiptRecord.artifact;
   const profile = receiptRecord.profile;
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   const trustStoreRecord = unwrapTrustStore(request.trustStore);
   if (trustStoreRecord.trustStoreHash !== profileRecord.profile.deployment.provenance.trustStoreSha256) {
     policyMismatch("$.trustStore", "prepared trust store differs from profile-pinned trust anchor");
@@ -404,8 +368,19 @@ export async function verifyCppCuteFrontendAttestation(
     domain: "browsergrad.compiler.cpp-cute.frontend-provenance-statement.v1",
     statement,
   });
+  const evidenceHash = await hashCanonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.aot-attestation-evidence.v1",
+    statementHash,
+    trustStoreHash: trustStoreRecord.trustStoreHash,
+    keyId: dsseSignature.keyid,
+    builderId: predicate.builderId,
+    receiptId: receipt.receiptId,
+    receiptBytesSha256: receipt.receiptBytesSha256,
+    receiptByteLength: receipt.receiptByteLength,
+  });
   const verified = Object.freeze({
     statementHash,
+    evidenceHash,
     builderId: predicate.builderId,
     keyId: dsseSignature.keyid,
     artifactHash: predicate.artifact.artifactHash,
@@ -430,88 +405,10 @@ export async function verifyCppCuteFrontendAttestation(
     artifact,
     profile,
     statementHash,
+    evidenceHash,
     trustStoreHash: trustStoreRecord.trustStoreHash,
   }));
   return verified;
-}
-
-export function authorizeCppCuteFrontendArtifact(
-  request: AuthorizeCppCuteFrontendArtifactRequest,
-): AuthorizedCppCuteFrontendArtifact {
-  const attestationRecord = unwrapVerifiedAttestation(request.attestation);
-  const artifact = attestationRecord.artifact;
-  const profile = attestationRecord.profile;
-  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
-  if (artifact.outcome !== "accepted") {
-    provenanceFailure(
-      "BG-COMPILER-CPP-CUTE-PROVENANCE-ARTIFACT-REJECTED",
-      "$.artifact.outcome",
-      "rejected frontend artifact cannot receive semantic-lowering authority",
-    );
-  }
-  if (artifact.profileHash !== profile.profileHash) {
-    subjectMismatch("$.artifact.profileHash", "artifact profile hash differs from prepared profile");
-  }
-  if (profile.profileHash !== request.expectedProfileHash) {
-    subjectMismatch("$.expectedProfileHash", "prepared profile differs from caller-pinned profile identity");
-  }
-  if (artifact.headerSetSha256 !== profile.expectedHeaderSetSha256) {
-    subjectMismatch("$.artifact.headerSetSha256", "artifact header closure differs from prepared profile");
-  }
-  if (artifact.sourceSetSha256 !== request.expectedSourceSetSha256) {
-    subjectMismatch("$.expectedSourceSetSha256", "artifact source set differs from caller-pinned source manifest");
-  }
-  if (request.attestation.sourceRepository !== request.expectedSourceRepository) {
-    subjectMismatch("$.expectedSourceRepository", "attested source repository differs from expectation");
-  }
-  if (canonicalJsonText(request.attestation.sourceRevision) !== canonicalJsonText(request.expectedSourceRevision)) {
-    subjectMismatch("$.expectedSourceRevision", "attested source revision differs from expectation");
-  }
-  if (artifactRecord.envelope.producer.id !== profileRecord.profile.deployment.extractor.id ||
-      artifactRecord.envelope.producer.version !== profileRecord.profile.deployment.extractor.version) {
-    subjectMismatch("$.artifact.producer", "artifact transport producer differs from prepared extractor profile");
-  }
-  const profileBindingMismatch = findCppCuteFrontendProfileBindingMismatch(
-    artifactRecord.envelope.payload,
-    profileRecord.profile,
-  );
-  if (profileBindingMismatch !== null) {
-    subjectMismatch(profileBindingMismatch.path, profileBindingMismatch.message);
-  }
-  const authorized = Object.freeze({
-    artifactHash: artifact.artifactHash,
-    artifactBytesSha256: artifact.artifactBytesSha256,
-    artifactByteLength: artifact.artifactByteLength,
-    receiptId: request.attestation.receiptId,
-    receiptBytesSha256: request.attestation.receiptBytesSha256,
-    receiptByteLength: request.attestation.receiptByteLength,
-    jobId: request.attestation.jobId,
-    invocationManifestSha256: request.attestation.invocationManifestSha256,
-    executionPlanSha256: request.attestation.executionPlanSha256,
-    executionEnvironmentManifestSha256: request.attestation.executionEnvironmentManifestSha256,
-    profileHash: profile.profileHash,
-    sourceSetSha256: artifact.sourceSetSha256,
-    statementHash: request.attestation.statementHash,
-    trustStoreHash: request.attestation.trustStoreHash,
-    builderId: request.attestation.builderId,
-    sourceRevision: request.attestation.sourceRevision,
-  }) as AuthorizedCppCuteFrontendArtifact;
-  AUTHORIZED_ARTIFACTS.set(authorized, Object.freeze({
-    artifact,
-    profile,
-    attestation: request.attestation,
-  }));
-  return authorized;
-}
-
-export function unwrapAuthorizedCppCuteFrontendArtifact(
-  artifact: AuthorizedCppCuteFrontendArtifact,
-): AuthorizedCppCuteFrontendArtifactRecord {
-  if (typeof artifact !== "object" || artifact === null) unverified("$.artifact");
-  const record = AUTHORIZED_ARTIFACTS.get(artifact as object);
-  if (record === undefined) unverified("$.artifact");
-  return record;
 }
 
 export function cppCuteFrontendProvenancePayloadBytes(
@@ -661,6 +558,7 @@ function parseGitRevision(value: JsonValue, path: string): CppCuteProvenanceGitR
 function parseSubject(value: JsonValue, path: string): CppCuteProvenanceSubjectV1 {
   const object = closedObject(value, [
     "artifactId", "artifactHash", "transportHash", "artifactBytesSha256", "artifactByteLength", "profileHash",
+    "compilationContractHash",
     "sourceSetSha256", "headerSetSha256", "inputClosureSha256",
   ], path);
   return {
@@ -670,6 +568,10 @@ function parseSubject(value: JsonValue, path: string): CppCuteProvenanceSubjectV
     artifactBytesSha256: sha256(field(object, "artifactBytesSha256", path), `${path}.artifactBytesSha256`),
     artifactByteLength: parseWireU64(field(object, "artifactByteLength", path), `${path}.artifactByteLength`),
     profileHash: sha256(field(object, "profileHash", path), `${path}.profileHash`),
+    compilationContractHash: sha256(
+      field(object, "compilationContractHash", path),
+      `${path}.compilationContractHash`,
+    ),
     sourceSetSha256: sha256(field(object, "sourceSetSha256", path), `${path}.sourceSetSha256`),
     headerSetSha256: sha256(field(object, "headerSetSha256", path), `${path}.headerSetSha256`),
     inputClosureSha256: sha256(field(object, "inputClosureSha256", path), `${path}.inputClosureSha256`),
@@ -777,7 +679,7 @@ async function verifyStatementBindings(
   receipt: VerifiedCppCuteAotRunnerReceipt,
   receiptRecord: VerifiedCppCuteAotRunnerReceiptRecord,
   artifactRecord: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>,
-  profileRecord: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>,
+  profileRecord: ReturnType<typeof unwrapPreparedCppCuteAotFrontendProfile>,
 ): Promise<void> {
   const predicate = statement.predicate;
   const artifact = receiptRecord.artifact;
@@ -790,7 +692,8 @@ async function verifyStatementBindings(
     transportHash: artifact.transportHash,
     artifactBytesSha256: artifact.artifactBytesSha256,
     artifactByteLength: artifact.artifactByteLength,
-    profileHash: artifact.profileHash,
+    profileHash: profile.profileHash,
+    compilationContractHash: artifact.compilationContractHash,
     sourceSetSha256: artifact.sourceSetSha256,
     headerSetSha256: artifact.headerSetSha256,
     inputClosureSha256: artifact.inputClosureSha256,
@@ -804,7 +707,8 @@ async function verifyStatementBindings(
   if (canonicalJsonText(predicate.artifact) !== canonicalJsonText(expectedSubject)) {
     subjectMismatch("$.payload.predicate.artifact", "attestation artifact projection differs from verified artifact identity");
   }
-  if (predicate.profileId !== profile.profileId || predicate.artifact.profileHash !== profile.profileHash) {
+  if (predicate.profileId !== profile.profileId || predicate.artifact.profileHash !== profile.profileHash ||
+      predicate.artifact.compilationContractHash !== profile.compilationContractHash) {
     subjectMismatch("$.payload.predicate.profileId", "attestation profile identity differs from prepared profile");
   }
   const configured = profileRecord.profile;
@@ -866,7 +770,9 @@ function unwrapTrustStore(store: PreparedCppCuteAttestationTrustStore): Prepared
   return record;
 }
 
-function unwrapVerifiedAttestation(attestation: VerifiedCppCuteFrontendAttestation): VerifiedCppCuteFrontendAttestationRecord {
+export function unwrapVerifiedCppCuteFrontendAttestation(
+  attestation: VerifiedCppCuteFrontendAttestation,
+): VerifiedCppCuteFrontendAttestationRecord {
   if (typeof attestation !== "object" || attestation === null) unverified("$.attestation");
   const record = VERIFIED_ATTESTATIONS.get(attestation as object);
   if (record === undefined) unverified("$.attestation");

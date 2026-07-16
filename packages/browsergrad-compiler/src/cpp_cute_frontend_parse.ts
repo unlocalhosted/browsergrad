@@ -138,7 +138,7 @@ export function parseCppCuteFrontendPayload(
   limits: CppCuteFrontendArtifactLimits = DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS,
 ): CppCuteFrontendPayloadV2 {
   const object = closedObject(value, [
-    "profileHash",
+    "compilationContractHash",
     "inputs",
     "spans",
     "macroExpansions",
@@ -157,7 +157,10 @@ export function parseCppCuteFrontendPayload(
     "extraction",
   ], "$.payload");
   const payload = {
-    profileHash: sha256(field(object, "profileHash", "$.payload"), "$.payload.profileHash"),
+    compilationContractHash: sha256(
+      field(object, "compilationContractHash", "$.payload"),
+      "$.payload.compilationContractHash",
+    ),
     inputs: parseInputs(field(object, "inputs", "$.payload"), limits, "$.payload.inputs"),
     spans: parseSetArray(object, "spans", limits.maxSpans, parseSpan, (entry) => entry.spanId),
     macroExpansions: parseSetArray(
@@ -1410,11 +1413,14 @@ function parseOutcome(value: JsonValue, path: string): CppCuteFrontendOutcomeV1 
 }
 
 function parseExtraction(value: JsonValue, path: string): CppCuteExtractionRecordV1 {
-  const object = closedObject(value, ["profileHash", "inputClosureSha256", "appliedTransforms"], path);
+  const object = closedObject(value, ["compilationContractHash", "inputClosureSha256", "appliedTransforms"], path);
   const transforms = arrayValue(field(object, "appliedTransforms", path), `${path}.appliedTransforms`);
   if (transforms.length !== 0) invalid(`${path}.appliedTransforms`, "CUTE-002 profile forbids source transformations");
   return {
-    profileHash: sha256(field(object, "profileHash", path), `${path}.profileHash`),
+    compilationContractHash: sha256(
+      field(object, "compilationContractHash", path),
+      `${path}.compilationContractHash`,
+    ),
     inputClosureSha256: sha256(field(object, "inputClosureSha256", path), `${path}.inputClosureSha256`),
     appliedTransforms: [],
   };

@@ -1,5 +1,6 @@
 import { canonicalizeJson } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import type {
+  PreparedCppCuteFrontendProfileRecord,
   CppCuteFrontendProfileV2,
 } from "./cpp_cute_frontend_profile.js";
 import type {
@@ -19,7 +20,14 @@ export interface CppCuteFrontendProfileBindingMismatch {
 export function findCppCuteFrontendProfileBindingMismatch(
   payload: CppCuteFrontendPayloadV2,
   profile: CppCuteFrontendProfileV2,
+  compilationContractHash?: string,
 ): CppCuteFrontendProfileBindingMismatch | null {
+  if (compilationContractHash !== undefined && payload.compilationContractHash !== compilationContractHash) {
+    return mismatch(
+      "$.artifact.compilationContractHash",
+      "artifact compilation contract differs from prepared profile",
+    );
+  }
   const artifactRoots = payload.inputs.includeRoots;
   const profileRoots = profile.virtualFileSystem.includeRoots;
   if (artifactRoots.length !== profileRoots.length) {
@@ -97,6 +105,17 @@ export function findCppCuteFrontendProfileBindingMismatch(
     }
   }
   return null;
+}
+
+export function findCppCutePreparedFrontendProfileBindingMismatch(
+  payload: CppCuteFrontendPayloadV2,
+  profileRecord: PreparedCppCuteFrontendProfileRecord,
+): CppCuteFrontendProfileBindingMismatch | null {
+  return findCppCuteFrontendProfileBindingMismatch(
+    payload,
+    profileRecord.profile,
+    profileRecord.compilationContractHash,
+  );
 }
 
 function sameOwner(left: CppCuteInputOwnerV2, right: CppCuteInputOwnerV2): boolean {

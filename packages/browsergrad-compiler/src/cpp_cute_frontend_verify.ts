@@ -65,8 +65,11 @@ export async function verifyCppCuteFrontendPayload(
   if (payload.inputs.closureSha256 !== hashes.closureSha256) {
     mismatch("$.payload.inputs.closureSha256", "input-closure hash does not match normalized files, roots, and include edges");
   }
-  if (payload.extraction.profileHash !== payload.profileHash) {
-    mismatch("$.payload.extraction.profileHash", "extraction profile hash does not match artifact profileHash");
+  if (payload.extraction.compilationContractHash !== payload.compilationContractHash) {
+    mismatch(
+      "$.payload.extraction.compilationContractHash",
+      "extraction compilation-contract hash does not match artifact compilationContractHash",
+    );
   }
   if (payload.extraction.inputClosureSha256 !== hashes.closureSha256) {
     mismatch("$.payload.extraction.inputClosureSha256", "extraction record does not bind the verified input closure");

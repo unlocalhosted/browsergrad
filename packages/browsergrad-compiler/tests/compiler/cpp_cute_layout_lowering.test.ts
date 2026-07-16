@@ -10,7 +10,7 @@ import {
 } from "../../src/cpp_cute_layout_lowering.js";
 import type {
   AuthorizedCppCuteFrontendArtifact,
-} from "../../src/cpp_cute_frontend_provenance.js";
+} from "../../src/cpp_cute_frontend_authorization.js";
 import type {
   CppCuteAffineLayoutFactV1,
   CppCuteFrontendPayloadV2,
@@ -260,7 +260,7 @@ describe("authorized C++/CuTe layout lowering", () => {
 
   it("keeps frontend authorization and lowered authority instance-bound", async () => {
     await expect(lower({ ...canonicalFixture.authorization } as AuthorizedCppCuteFrontendArtifact)).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED",
+      code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-UNVERIFIED",
     });
     const lowered = await lower();
     expect(() => trace({ ...lowered } as LoweredCppCuteLayoutEntry, ["0", "0"]))

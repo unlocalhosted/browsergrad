@@ -39,7 +39,7 @@ import {
   type VerifiedCppCuteFrontendArtifactResource,
 } from "../../../src/cpp_cute_frontend_artifact.js";
 import {
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   type CppCuteFrontendExtractionLimits,
   type PreparedCppCuteFrontendProfile,
 } from "../../../src/cpp_cute_frontend_profile.js";
@@ -56,8 +56,8 @@ const wire = (value: number | bigint): WireU64 => parseWireU64(String(value));
 
 export const PINNED_CPP_CUTE_AOT_JOB_ID = "bg.cpp.aot-job.sha256.d6209a75ffa045f3577ccc5e1b9bf27ba6653cbcb27691fade433ca98770bcc2";
 export const PINNED_CPP_CUTE_AOT_INVOCATION_ID = "bg.cpp.aot-invocation.sha256.edfb964e38fada31ac42bb9b926e384e4fd3cf30ee40e8c3ba1cfdc6c6079656";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.d24f53360a204497a79fa64bae074eaa3a4644536ce8132545afdcc4097f40ca";
-export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "72ba2d402bd05b59e1087ad58250a03f51c3bf09628c330c88beed9bb936f5c6";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_ID = "bg.cpp.aot-receipt.sha256.d3f114238e9a4b7298b967870b02efac70bcc64ca6e755f574cc3354e9033997";
+export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTES_SHA256 = "6115696a2e2cb9239eb8374b0e094d66d98ee8dfbb4989a275a552d4f04a7427";
 export const PINNED_CPP_CUTE_AOT_RECEIPT_BYTE_LENGTH = "4986";
 
 export interface CppCuteAotReceiptFixture {
@@ -150,7 +150,7 @@ export async function createCppCuteAotReceiptBody(
 ): Promise<CppCuteAotRunnerReceiptBodyV2> {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
   const profile = jobRecord.profile;
-  const configured = unwrapPreparedCppCuteFrontendProfile(profile).profile;
+  const configured = unwrapPreparedCppCuteAotFrontendProfile(profile).profile;
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
   const payload = artifactRecord.envelope.payload;
   const request = jobRecord.job.entryRequests[0];

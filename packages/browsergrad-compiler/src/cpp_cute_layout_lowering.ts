@@ -18,7 +18,7 @@ import { unwrapVerifiedCppCuteFrontendArtifact } from "./cpp_cute_frontend_artif
 import {
   unwrapAuthorizedCppCuteFrontendArtifact,
   type AuthorizedCppCuteFrontendArtifact,
-} from "./cpp_cute_frontend_provenance.js";
+} from "./cpp_cute_frontend_authorization.js";
 import type {
   CppCuteAffineLayoutFactV1,
   CppCuteFrontendEntryV1,
@@ -110,7 +110,7 @@ class LoweredCppCuteLayoutEntryValue {
 }
 
 /**
- * Lowers one explicitly selected, attestation-authorized CuTe layout entry
+ * Lowers one explicitly selected, producer-authorized CuTe layout entry
  * through semantic-core. No merely verified/raw artifact overload exists.
  */
 export async function lowerAuthorizedCppCuteLayoutEntry(
@@ -191,21 +191,19 @@ export async function lowerAuthorizedCppCuteLayoutEntry(
   let originHash: string;
   try {
     originHash = await hashCanonicalJson({
-      domain: "browsergrad.compiler.cpp-cute.layout-origin.v1",
+      domain: "browsergrad.compiler.cpp-cute.layout-origin.v2",
       layoutSemanticHash: preparedLayout.layoutSemanticHash,
-      frontendArtifactHash: authorized.artifact.artifactHash,
-      frontendArtifactBytesSha256: authorized.artifact.artifactBytesSha256,
-      frontendArtifactByteLength: authorized.artifact.artifactByteLength,
-      runnerReceiptId: authorization.receiptId,
-      runnerReceiptBytesSha256: authorization.receiptBytesSha256,
-      runnerReceiptByteLength: authorization.receiptByteLength,
-      aotJobId: authorization.jobId,
-      invocationManifestSha256: authorization.invocationManifestSha256,
-      executionPlanSha256: authorization.executionPlanSha256,
-      executionEnvironmentManifestSha256: authorization.executionEnvironmentManifestSha256,
+      frontendArtifactId: authorization.artifactId,
+      frontendArtifactHash: authorization.artifactHash,
+      frontendArtifactBytesSha256: authorization.artifactBytesSha256,
+      frontendArtifactByteLength: authorization.artifactByteLength,
       profileHash: authorization.profileHash,
-      statementHash: authorization.statementHash,
-      trustStoreHash: authorization.trustStoreHash,
+      compilationContractHash: authorization.compilationContractHash,
+      sourceSetSha256: authorization.sourceSetSha256,
+      headerSetSha256: authorization.headerSetSha256,
+      inputClosureSha256: authorization.inputClosureSha256,
+      evidenceKind: authorization.evidenceKind,
+      evidenceHash: authorization.evidenceHash,
       entryId: entry.entryId,
       factId: fact.factId,
       resultDeclarationId: fact.resultDeclarationId,

@@ -19,7 +19,7 @@ import {
   deriveCppCuteStableId,
 } from "./cpp_cute_frontend_artifact.js";
 import {
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   validateCppCuteVirtualPath,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
@@ -163,7 +163,7 @@ export async function prepareCppCuteAotJob(
   value: unknown,
   options: PrepareCppCuteAotJobOptions = {},
 ): Promise<PreparedCppCuteAotJob> {
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   const limits = normalizeOptions(options);
   throwIfAborted(options.signal);
   let job: CppCuteAotJobV2;

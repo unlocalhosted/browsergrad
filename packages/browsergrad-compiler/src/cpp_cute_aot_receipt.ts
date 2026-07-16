@@ -41,14 +41,14 @@ import {
   type VerifiedCppCuteFrontendArtifactResource,
 } from "./cpp_cute_frontend_artifact.js";
 import {
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   type CppCuteFrontendCompilerProfile,
   type CppCuteFrontendContainerProfile,
   type CppCuteFrontendExtractorProfile,
   type CppCuteFrontendRunnerProfile,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
-import { findCppCuteFrontendProfileBindingMismatch } from "./cpp_cute_frontend_profile_binding.js";
+import { findCppCutePreparedFrontendProfileBindingMismatch } from "./cpp_cute_frontend_profile_binding.js";
 
 export const CPP_CUTE_AOT_RECEIPT_SCHEMA = "browsergrad.compiler.cpp-cute.aot-runner-receipt";
 export const CPP_CUTE_AOT_RECEIPT_MAJOR = 2;
@@ -312,7 +312,7 @@ export async function verifyCppCuteAotRunnerReceipt(
 ): Promise<VerifiedCppCuteAotRunnerReceipt> {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
   const profile = jobRecord.profile;
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(executionEnvironment);
   if (environmentRecord.profile !== profile || executionEnvironment.profileHash !== profile.profileHash) {
     mismatch(
@@ -765,7 +765,7 @@ function verifyJobAndArtifactBindings(
   job: PreparedCppCuteAotJob,
   artifact: VerifiedCppCuteFrontendArtifact,
   artifactRecord: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>,
-  profileRecord: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>,
+  profileRecord: ReturnType<typeof unwrapPreparedCppCuteAotFrontendProfile>,
 ): void {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
   if (receipt.jobId !== job.jobId || receipt.profileHash !== job.profileHash) {
@@ -781,7 +781,7 @@ function verifyJobAndArtifactBindings(
     mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH", "$.openedInputs", "opened input report differs from the prepared request");
   }
   if (
-    artifact.profileHash !== job.profileHash
+    artifact.compilationContractHash !== profileRecord.compilationContractHash
     || artifact.sourceSetSha256 !== expectedInputs.sourceSetSha256
     || artifact.headerSetSha256 !== expectedInputs.headerSetSha256
     || artifact.inputClosureSha256 !== expectedInputs.inputClosureSha256
@@ -830,7 +830,7 @@ function verifyJobAndArtifactBindings(
       mismatch("BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH", `$.artifact.inputs.includeRoots[${index}]`, "artifact include-root precedence or manifest differs from prepared profile");
     }
   }
-  const profileBindingMismatch = findCppCuteFrontendProfileBindingMismatch(payload, profileRecord.profile);
+  const profileBindingMismatch = findCppCutePreparedFrontendProfileBindingMismatch(payload, profileRecord);
   if (profileBindingMismatch !== null) {
     mismatch(
       "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-INPUT-MISMATCH",
@@ -880,7 +880,7 @@ async function verifyInvocationBindings(
   job: PreparedCppCuteAotJob,
   executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   profile: PreparedCppCuteFrontendProfile,
-  profileRecord: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>,
+  profileRecord: ReturnType<typeof unwrapPreparedCppCuteAotFrontendProfile>,
 ): Promise<void> {
   const configured = profileRecord.profile;
   const invocationManifestSha256 = await computeCppCuteAotInvocationManifestHash(job);
@@ -934,7 +934,7 @@ function verifyResourceBindings(
   artifact: VerifiedCppCuteFrontendArtifact,
   artifactRecord: ReturnType<typeof unwrapVerifiedCppCuteFrontendArtifact>,
 ): void {
-  const configured = unwrapPreparedCppCuteFrontendProfile(profile).profile.extractionLimits;
+  const configured = unwrapPreparedCppCuteAotFrontendProfile(profile).profile.extractionLimits;
   const payload = artifactRecord.envelope.payload;
   const sources = payload.inputs.files.filter(
     (file) => file.role === "main-source" || file.role === "project-header",

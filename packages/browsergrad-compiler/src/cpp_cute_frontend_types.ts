@@ -10,7 +10,7 @@ export const CPP_CUTE_FRONTEND_ARTIFACT_MAJOR = 2;
 export const CPP_CUTE_FRONTEND_ARTIFACT_MINOR = 0;
 
 export interface CppCuteFrontendPayloadV2 extends JsonObject {
-  readonly profileHash: string;
+  readonly compilationContractHash: string;
   readonly inputs: CppCuteInputClosureV2;
   readonly spans: readonly CppCuteSourceSpanV1[];
   readonly macroExpansions: readonly CppCuteMacroExpansionV1[];
@@ -654,7 +654,7 @@ export type CppCuteFrontendOutcomeV1 =
     });
 
 export interface CppCuteExtractionRecordV1 extends JsonObject {
-  readonly profileHash: string;
+  readonly compilationContractHash: string;
   readonly inputClosureSha256: string;
   /** CUTE-002 requires unmodified source; the closed artifact schema requires this to stay empty. */
   readonly appliedTransforms: readonly never[];

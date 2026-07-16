@@ -53,6 +53,29 @@ const EXTRACTION_LIMIT_KEYS = [
   "maxProcesses",
 ] as const;
 
+const COMPILATION_CONTRACT_EXTRACTION_LIMIT_KEYS = [
+  "maxSourceFiles",
+  "maxSourceBytes",
+  "maxHeaderFiles",
+  "maxHeaderBytes",
+  "maxIncludeDepth",
+  "maxMacroExpansions",
+  "maxPreprocessedTokens",
+  "maxAstNodes",
+  "maxConstexprSteps",
+  "maxTemplateInstantiations",
+  "maxTemplateDepth",
+  "maxDeclarations",
+  "maxTypes",
+  "maxConstants",
+  "maxLayouts",
+  "maxTensors",
+  "maxOperations",
+  "maxTargetIntrinsics",
+  "maxDiagnostics",
+  "maxOutputBytes",
+] as const satisfies readonly CppCuteExtractionLimitName[];
+
 export type CppCuteExtractionLimitName = (typeof EXTRACTION_LIMIT_KEYS)[number];
 
 const MAXIMUM_EXTRACTION_LIMITS: Readonly<Record<CppCuteExtractionLimitName, number>> = Object.freeze({
@@ -124,7 +147,7 @@ export interface CppCuteFrontendProvenancePolicy extends JsonObject {
   readonly builderIds: readonly string[];
 }
 
-export interface CppCuteFrontendDeploymentProfile extends JsonObject {
+export interface CppCuteFrontendAotDeploymentProfile extends JsonObject {
   readonly mode: "ahead-of-time";
   readonly contractId: "browsergrad.compiler.cpp-cute.aot@1";
   readonly sandboxPolicySha256: string;
@@ -135,6 +158,46 @@ export interface CppCuteFrontendDeploymentProfile extends JsonObject {
   readonly container: CppCuteFrontendContainerProfile;
   readonly provenance: CppCuteFrontendProvenancePolicy;
 }
+
+export interface CppCuteFrontendBrowserWorkerProfile extends JsonObject {
+  readonly protocolId: "browsergrad.compiler.cpp-cute.browser-worker@1";
+  /** Package-owned worker module build identity. */
+  readonly buildId: string;
+  /** Package-owned worker module bytes; executable JS is not asset-manifest supplied. */
+  readonly moduleSha256: string;
+  readonly scriptType: "module";
+  readonly isolation: "dedicated-worker";
+  readonly threading: "single-thread";
+  readonly cancellation: "terminate-worker";
+  readonly sourceNetwork: "forbidden";
+  readonly assetNetwork: "same-origin-root-relative-only";
+  readonly cache: "content-addressed";
+  readonly maxWasmMemoryBytes: number;
+}
+
+export interface CppCuteFrontendBrowserAssetLimits extends JsonObject {
+  readonly maxAssets: number;
+  readonly maxAssetCompressedByteLength: number;
+  readonly maxAssetUnpackedByteLength: number;
+  readonly maxTotalCompressedByteLength: number;
+  readonly maxTotalUnpackedByteLength: number;
+}
+
+export interface CppCuteFrontendBrowserDeploymentProfile extends JsonObject {
+  readonly mode: "browser-local";
+  readonly contractId: "browsergrad.compiler.cpp-cute.browser-worker@1";
+  /** Hash of the exact content-addressed browser asset identity projection. */
+  readonly assetSetSha256: string;
+  /** Hash of release-verified build evidence for every member of the asset set. */
+  readonly buildProvenanceLockSha256: string;
+  readonly extractor: CppCuteFrontendExtractorProfile;
+  readonly worker: CppCuteFrontendBrowserWorkerProfile;
+  readonly assetLimits: CppCuteFrontendBrowserAssetLimits;
+}
+
+export type CppCuteFrontendDeploymentProfile =
+  | CppCuteFrontendAotDeploymentProfile
+  | CppCuteFrontendBrowserDeploymentProfile;
 
 export type CppCuteFrontendCompilerOption =
   | (JsonObject & {
@@ -246,13 +309,35 @@ export interface CppCuteFrontendProfileV2 extends JsonObject {
   readonly extractionLimits: CppCuteFrontendExtractionLimits;
 }
 
+export interface CppCuteFrontendCompilationContractV1 extends JsonObject {
+  readonly profileVersion: CppCuteFrontendProfileVersion;
+  readonly language: CppCuteFrontendLanguageProfile;
+  readonly target: CppCuteFrontendTargetProfile;
+  readonly compiler: JsonObject & {
+    readonly id: string;
+    readonly version: string;
+    readonly buildId: string;
+    readonly resourceDirectorySha256: string;
+  };
+  readonly dependencies: readonly CppCuteFrontendDependencyProfile[];
+  readonly virtualFileSystem: CppCuteFrontendVirtualFileSystemProfile;
+  readonly compatibility: CppCuteFrontendCompatibilityProfile;
+  readonly semanticAdapterManifestSha256: string;
+  readonly extractionLimits: JsonObject & Readonly<Record<
+    (typeof COMPILATION_CONTRACT_EXTRACTION_LIMIT_KEYS)[number],
+    number
+  >>;
+}
+
 declare const preparedCppCuteFrontendProfileBrand: unique symbol;
 
 export interface PreparedCppCuteFrontendProfile {
   readonly [preparedCppCuteFrontendProfileBrand]: true;
   readonly profileId: string;
   readonly profileHash: string;
-  readonly deploymentMode: "ahead-of-time";
+  /** Producer-neutral source-analysis contract used inside frontend artifacts. */
+  readonly compilationContractHash: string;
+  readonly deploymentMode: "ahead-of-time" | "browser-local";
   readonly expectedHeaderSetSha256: string;
   readonly extractionLimits: CppCuteFrontendExtractionLimits;
 }
@@ -283,6 +368,20 @@ export class CppCuteFrontendProfileError extends Error {
 export interface PreparedCppCuteFrontendProfileRecord {
   readonly profile: CppCuteFrontendProfileV2;
   readonly profileHash: string;
+  readonly compilationContract: CppCuteFrontendCompilationContractV1;
+  readonly compilationContractHash: string;
+}
+
+export interface PreparedCppCuteAotFrontendProfileRecord extends PreparedCppCuteFrontendProfileRecord {
+  readonly profile: CppCuteFrontendProfileV2 & {
+    readonly deployment: CppCuteFrontendAotDeploymentProfile;
+  };
+}
+
+export interface PreparedCppCuteBrowserFrontendProfileRecord extends PreparedCppCuteFrontendProfileRecord {
+  readonly profile: CppCuteFrontendProfileV2 & {
+    readonly deployment: CppCuteFrontendBrowserDeploymentProfile;
+  };
 }
 
 export async function prepareCppCuteFrontendProfile(
@@ -296,25 +395,86 @@ export async function prepareCppCuteFrontendProfile(
     domain: "browsergrad.compiler.cpp-cute.frontend-profile.v2",
     profile,
   });
+  const compilationContract = cppCuteFrontendCompilationContract(profile);
+  const compilationContractHash = await hashCanonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.compilation-contract.v1",
+    contract: compilationContract,
+  });
   throwIfAborted(options.signal);
   const prepared = Object.freeze({
     profileId: profile.profileId,
     profileHash,
+    compilationContractHash,
     deploymentMode: profile.deployment.mode,
     expectedHeaderSetSha256: profile.compatibility.expectedHeaderSetSha256,
     extractionLimits: profile.extractionLimits,
   }) as PreparedCppCuteFrontendProfile;
-  PREPARED_PROFILES.set(prepared, Object.freeze({ profile, profileHash }));
+  PREPARED_PROFILES.set(prepared, Object.freeze({
+    profile,
+    profileHash,
+    compilationContract,
+    compilationContractHash,
+  }));
   return prepared;
 }
 
+export function cppCuteFrontendCompilationContract(
+  profile: CppCuteFrontendProfileV2,
+): CppCuteFrontendCompilationContractV1 {
+  const semanticLimits = Object.fromEntries(
+    COMPILATION_CONTRACT_EXTRACTION_LIMIT_KEYS.map((key) => [key, profile.extractionLimits[key]]),
+  ) as CppCuteFrontendCompilationContractV1["extractionLimits"];
+  return deepFreezeJson({
+    profileVersion: profile.version,
+    language: profile.language,
+    target: profile.target,
+    compiler: {
+      id: profile.toolchain.compiler.id,
+      version: profile.toolchain.compiler.version,
+      buildId: profile.toolchain.compiler.buildId,
+      resourceDirectorySha256: profile.toolchain.compiler.resourceDirectorySha256,
+    },
+    dependencies: profile.toolchain.dependencies,
+    virtualFileSystem: profile.virtualFileSystem,
+    compatibility: profile.compatibility,
+    semanticAdapterManifestSha256: profile.deployment.extractor.semanticAdapterManifestSha256,
+    extractionLimits: semanticLimits,
+  });
+}
+
 export function unwrapPreparedCppCuteFrontendProfile(
+  prepared: PreparedCppCuteFrontendProfile,
+): PreparedCppCuteFrontendProfileRecord {
+  return getPreparedCppCuteFrontendProfileRecord(prepared);
+}
+
+function getPreparedCppCuteFrontendProfileRecord(
   prepared: PreparedCppCuteFrontendProfile,
 ): PreparedCppCuteFrontendProfileRecord {
   if (typeof prepared !== "object" || prepared === null) unverified();
   const record = PREPARED_PROFILES.get(prepared as object);
   if (record === undefined) unverified();
   return record;
+}
+
+export function unwrapPreparedCppCuteAotFrontendProfile(
+  prepared: PreparedCppCuteFrontendProfile,
+): PreparedCppCuteAotFrontendProfileRecord {
+  const record = getPreparedCppCuteFrontendProfileRecord(prepared);
+  if (record.profile.deployment.mode !== "ahead-of-time") {
+    invalid("$.deployment.mode", "prepared frontend profile is not an ahead-of-time deployment");
+  }
+  return record as PreparedCppCuteAotFrontendProfileRecord;
+}
+
+export function unwrapPreparedCppCuteBrowserFrontendProfile(
+  prepared: PreparedCppCuteFrontendProfile,
+): PreparedCppCuteBrowserFrontendProfileRecord {
+  const record = getPreparedCppCuteFrontendProfileRecord(prepared);
+  if (record.profile.deployment.mode !== "browser-local") {
+    invalid("$.deployment.mode", "prepared frontend profile is not a browser-local deployment");
+  }
+  return record as PreparedCppCuteBrowserFrontendProfileRecord;
 }
 
 function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
@@ -346,17 +506,32 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
     "$.virtualFileSystem",
   );
   validateProfileReferences(language, toolchain, virtualFileSystem);
+  const deployment = parseDeployment(field(object, "deployment", "$"), "$.deployment");
+  const extractionLimits = parseExtractionLimits(field(object, "extractionLimits", "$"), "$.extractionLimits");
+  if (deployment.mode === "browser-local" &&
+      toolchain.compiler.binarySha256 !== deployment.extractor.binarySha256) {
+    invalid(
+      "$.toolchain.compiler.binarySha256",
+      "browser-local profile requires one content-identical monolithic Clang/extractor WASM binary",
+    );
+  }
+  if (deployment.mode === "browser-local" && extractionLimits.maxMemoryBytes > deployment.worker.maxWasmMemoryBytes) {
+    invalid(
+      "$.extractionLimits.maxMemoryBytes",
+      "browser extraction memory must not exceed the worker WebAssembly memory ceiling",
+    );
+  }
   const profile = {
     schema: CPP_CUTE_FRONTEND_PROFILE_SCHEMA,
     version,
     profileId,
-    deployment: parseDeployment(field(object, "deployment", "$"), "$.deployment"),
+    deployment,
     language,
     target: parseTarget(field(object, "target", "$"), "$.target"),
     toolchain,
     virtualFileSystem,
     compatibility: parseCompatibility(field(object, "compatibility", "$"), "$.compatibility"),
-    extractionLimits: parseExtractionLimits(field(object, "extractionLimits", "$"), "$.extractionLimits"),
+    extractionLimits,
   } as CppCuteFrontendProfileV2;
   return deepFreezeJson(profile);
 }
@@ -381,6 +556,16 @@ function parseVersion(value: JsonValue, path: string): CppCuteFrontendProfileVer
 }
 
 function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploymentProfile {
+  if (!isJsonObject(value)) invalid(path, "expected object");
+  const mode = stringValue(field(value, "mode", path), `${path}.mode`);
+  if (mode === "browser-local") return parseBrowserDeployment(value, path);
+  if (mode !== "ahead-of-time") {
+    invalid(`${path}.mode`, `unknown deployment mode ${JSON.stringify(mode)}`);
+  }
+  return parseAotDeployment(value, path);
+}
+
+function parseAotDeployment(value: JsonValue, path: string): CppCuteFrontendAotDeploymentProfile {
   const object = closedObject(
     value,
     [
@@ -389,25 +574,10 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     ],
     path,
   );
-  if (object.mode !== "ahead-of-time") invalid(`${path}.mode`, "profile v2 supports ahead-of-time extraction only");
   if (object.contractId !== "browsergrad.compiler.cpp-cute.aot@1") {
     invalid(`${path}.contractId`, "profile v2 requires browsergrad.compiler.cpp-cute.aot@1 deployment contract");
   }
-  const extractorObject = closedObject(
-    field(object, "extractor", path),
-    ["id", "version", "buildId", "binarySha256", "semanticAdapterManifestSha256"],
-    `${path}.extractor`,
-  );
-  const extractor = {
-    id: boundedString(field(extractorObject, "id", `${path}.extractor`), `${path}.extractor.id`, 256),
-    version: boundedString(field(extractorObject, "version", `${path}.extractor`), `${path}.extractor.version`, 128),
-    buildId: boundedString(field(extractorObject, "buildId", `${path}.extractor`), `${path}.extractor.buildId`, 256),
-    binarySha256: sha256(field(extractorObject, "binarySha256", `${path}.extractor`), `${path}.extractor.binarySha256`),
-    semanticAdapterManifestSha256: sha256(
-      field(extractorObject, "semanticAdapterManifestSha256", `${path}.extractor`),
-      `${path}.extractor.semanticAdapterManifestSha256`,
-    ),
-  };
+  const extractor = parseExtractorProfile(field(object, "extractor", path), `${path}.extractor`);
   const runnerObject = closedObject(
     field(object, "runner", path),
     ["id", "version", "binarySha256"],
@@ -486,6 +656,161 @@ function parseDeployment(value: JsonValue, path: string): CppCuteFrontendDeploym
     runner,
     container,
     provenance,
+  };
+}
+
+function parseBrowserDeployment(value: JsonValue, path: string): CppCuteFrontendBrowserDeploymentProfile {
+  const object = closedObject(
+    value,
+    [
+      "mode",
+      "contractId",
+      "assetSetSha256",
+      "buildProvenanceLockSha256",
+      "extractor",
+      "worker",
+      "assetLimits",
+    ],
+    path,
+  );
+  if (object.contractId !== "browsergrad.compiler.cpp-cute.browser-worker@1") {
+    invalid(
+      `${path}.contractId`,
+      "browser-local profile requires browsergrad.compiler.cpp-cute.browser-worker@1 deployment contract",
+    );
+  }
+  const workerObject = closedObject(
+    field(object, "worker", path),
+    [
+      "protocolId",
+      "buildId",
+      "moduleSha256",
+      "scriptType",
+      "isolation",
+      "threading",
+      "cancellation",
+      "sourceNetwork",
+      "assetNetwork",
+      "cache",
+      "maxWasmMemoryBytes",
+    ],
+    `${path}.worker`,
+  );
+  requireLiteral(
+    field(workerObject, "protocolId", `${path}.worker`),
+    "browsergrad.compiler.cpp-cute.browser-worker@1",
+    `${path}.worker.protocolId`,
+  );
+  requireLiteral(field(workerObject, "scriptType", `${path}.worker`), "module", `${path}.worker.scriptType`);
+  requireLiteral(field(workerObject, "isolation", `${path}.worker`), "dedicated-worker", `${path}.worker.isolation`);
+  requireLiteral(field(workerObject, "threading", `${path}.worker`), "single-thread", `${path}.worker.threading`);
+  requireLiteral(field(workerObject, "cancellation", `${path}.worker`), "terminate-worker", `${path}.worker.cancellation`);
+  requireLiteral(field(workerObject, "sourceNetwork", `${path}.worker`), "forbidden", `${path}.worker.sourceNetwork`);
+  requireLiteral(
+    field(workerObject, "assetNetwork", `${path}.worker`),
+    "same-origin-root-relative-only",
+    `${path}.worker.assetNetwork`,
+  );
+  requireLiteral(field(workerObject, "cache", `${path}.worker`), "content-addressed", `${path}.worker.cache`);
+  const worker: CppCuteFrontendBrowserWorkerProfile = {
+    protocolId: "browsergrad.compiler.cpp-cute.browser-worker@1",
+    buildId: boundedString(field(workerObject, "buildId", `${path}.worker`), `${path}.worker.buildId`, 256),
+    moduleSha256: sha256(
+      field(workerObject, "moduleSha256", `${path}.worker`),
+      `${path}.worker.moduleSha256`,
+    ),
+    scriptType: "module",
+    isolation: "dedicated-worker",
+    threading: "single-thread",
+    cancellation: "terminate-worker",
+    sourceNetwork: "forbidden",
+    assetNetwork: "same-origin-root-relative-only",
+    cache: "content-addressed",
+    maxWasmMemoryBytes: boundedPositiveInteger(
+      field(workerObject, "maxWasmMemoryBytes", `${path}.worker`),
+      `${path}.worker.maxWasmMemoryBytes`,
+      2 * 1024 * 1024 * 1024,
+    ),
+  };
+  const assetLimitsObject = closedObject(
+    field(object, "assetLimits", path),
+    [
+      "maxAssets",
+      "maxAssetCompressedByteLength",
+      "maxAssetUnpackedByteLength",
+      "maxTotalCompressedByteLength",
+      "maxTotalUnpackedByteLength",
+    ],
+    `${path}.assetLimits`,
+  );
+  const assetLimits: CppCuteFrontendBrowserAssetLimits = {
+    maxAssets: boundedPositiveInteger(
+      field(assetLimitsObject, "maxAssets", `${path}.assetLimits`),
+      `${path}.assetLimits.maxAssets`,
+      256,
+    ),
+    maxAssetCompressedByteLength: boundedPositiveInteger(
+      field(assetLimitsObject, "maxAssetCompressedByteLength", `${path}.assetLimits`),
+      `${path}.assetLimits.maxAssetCompressedByteLength`,
+      1024 * 1024 * 1024,
+    ),
+    maxAssetUnpackedByteLength: boundedPositiveInteger(
+      field(assetLimitsObject, "maxAssetUnpackedByteLength", `${path}.assetLimits`),
+      `${path}.assetLimits.maxAssetUnpackedByteLength`,
+      2 * 1024 * 1024 * 1024,
+    ),
+    maxTotalCompressedByteLength: boundedPositiveInteger(
+      field(assetLimitsObject, "maxTotalCompressedByteLength", `${path}.assetLimits`),
+      `${path}.assetLimits.maxTotalCompressedByteLength`,
+      2 * 1024 * 1024 * 1024,
+    ),
+    maxTotalUnpackedByteLength: boundedPositiveInteger(
+      field(assetLimitsObject, "maxTotalUnpackedByteLength", `${path}.assetLimits`),
+      `${path}.assetLimits.maxTotalUnpackedByteLength`,
+      4 * 1024 * 1024 * 1024,
+    ),
+  };
+  if (assetLimits.maxAssetCompressedByteLength > assetLimits.maxTotalCompressedByteLength) {
+    invalid(
+      `${path}.assetLimits.maxAssetCompressedByteLength`,
+      "per-asset compressed limit must not exceed the total compressed limit",
+    );
+  }
+  if (assetLimits.maxAssetUnpackedByteLength > assetLimits.maxTotalUnpackedByteLength) {
+    invalid(
+      `${path}.assetLimits.maxAssetUnpackedByteLength`,
+      "per-asset unpacked limit must not exceed the total unpacked limit",
+    );
+  }
+  return {
+    mode: "browser-local",
+    contractId: "browsergrad.compiler.cpp-cute.browser-worker@1",
+    assetSetSha256: sha256(field(object, "assetSetSha256", path), `${path}.assetSetSha256`),
+    buildProvenanceLockSha256: sha256(
+      field(object, "buildProvenanceLockSha256", path),
+      `${path}.buildProvenanceLockSha256`,
+    ),
+    extractor: parseExtractorProfile(field(object, "extractor", path), `${path}.extractor`),
+    worker,
+    assetLimits,
+  };
+}
+
+function parseExtractorProfile(value: JsonValue, path: string): CppCuteFrontendExtractorProfile {
+  const object = closedObject(
+    value,
+    ["id", "version", "buildId", "binarySha256", "semanticAdapterManifestSha256"],
+    path,
+  );
+  return {
+    id: boundedString(field(object, "id", path), `${path}.id`, 256),
+    version: boundedString(field(object, "version", path), `${path}.version`, 128),
+    buildId: boundedString(field(object, "buildId", path), `${path}.buildId`, 256),
+    binarySha256: sha256(field(object, "binarySha256", path), `${path}.binarySha256`),
+    semanticAdapterManifestSha256: sha256(
+      field(object, "semanticAdapterManifestSha256", path),
+      `${path}.semanticAdapterManifestSha256`,
+    ),
   };
 }
 
@@ -928,6 +1253,17 @@ function boundedString(value: JsonValue, path: string, maximumBytes: number): st
     invalid(path, `string must be non-empty, NUL-free, and at most ${maximumBytes} UTF-8 bytes`);
   }
   return text;
+}
+
+function boundedPositiveInteger(value: JsonValue, path: string, maximum: number): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > maximum) {
+    resource(path, `value must be a positive safe integer no greater than ${maximum}`);
+  }
+  return value;
+}
+
+function requireLiteral(value: JsonValue, expected: string, path: string): void {
+  if (value !== expected) invalid(path, `expected ${JSON.stringify(expected)}`);
 }
 
 function sha256(value: JsonValue, path: string): string {

@@ -32,7 +32,7 @@ import {
   type VerifiedCppCuteFrontendArtifactResource,
 } from "./cpp_cute_frontend_artifact.js";
 import {
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
 import {
@@ -181,7 +181,7 @@ export async function prepareCppCuteAotOfflineRun(
 ): Promise<PreparedCppCuteAotOfflineRun> {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
   const profile = jobRecord.profile;
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   const signal = normalizeOptions(options);
   throwIfAborted(signal);
   const snapshots = snapshotSourceBlobs(sourceBlobs, jobRecord.job.files);
@@ -286,7 +286,7 @@ export function copyCppCuteAotOfflineRunStagingInputs(
   if (typeof prepared !== "object" || prepared === null) unverified();
   const record = PREPARED_RUNS.get(prepared as object);
   if (record === undefined) unverified();
-  const profile = unwrapPreparedCppCuteFrontendProfile(record.profile).profile;
+  const profile = unwrapPreparedCppCuteAotFrontendProfile(record.profile).profile;
   const job = unwrapPreparedCppCuteAotJob(record.job).job;
   return Object.freeze({
     profileBytes: new Uint8Array(canonicalJsonBytes(profile)),

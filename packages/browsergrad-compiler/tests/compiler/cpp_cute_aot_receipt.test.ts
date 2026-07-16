@@ -10,7 +10,7 @@ import {
   verifyCppCuteAotRunnerReceipt,
   type CppCuteAotRunnerReceiptV2,
 } from "../../src/cpp_cute_aot_receipt.js";
-import { unwrapPreparedCppCuteFrontendProfile } from "../../src/cpp_cute_frontend_profile.js";
+import { unwrapPreparedCppCuteAotFrontendProfile } from "../../src/cpp_cute_frontend_profile.js";
 import type { CppCuteFrontendPayloadV2 } from "../../src/cpp_cute_frontend_types.js";
 import {
   createCppCuteAotReceiptFixture,
@@ -88,7 +88,7 @@ describe("C++/CuTe AOT runner receipt", () => {
     expect(record.receipt.resources.observedInputs.values).not.toHaveProperty("constexprSteps");
     expect(record.receipt.resources.emittedArtifact.values).not.toHaveProperty("constexprSteps");
     expect(record.receipt.resources.enforcedCeilings.values.maxConstexprSteps).toBe(
-      String(unwrapPreparedCppCuteFrontendProfile(fixture.profile).profile.extractionLimits.maxConstexprSteps),
+      String(unwrapPreparedCppCuteAotFrontendProfile(fixture.profile).profile.extractionLimits.maxConstexprSteps),
     );
   });
 
@@ -309,7 +309,7 @@ describe("C++/CuTe AOT runner receipt", () => {
 
   it("separates exact observations and emitted counts from enforced compiler-work ceilings", async () => {
     const fixture = await createFixture();
-    const limits = unwrapPreparedCppCuteFrontendProfile(fixture.profile).profile.extractionLimits;
+    const limits = unwrapPreparedCppCuteAotFrontendProfile(fixture.profile).profile.extractionLimits;
     const boundedGroups: Readonly<Record<string, Readonly<Record<string, number>>>> = {
       observedInputs: {
         openedSourceFiles: limits.maxSourceFiles,

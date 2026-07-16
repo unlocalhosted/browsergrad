@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CppCuteFrontendProfileError,
   prepareCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
+  unwrapPreparedCppCuteBrowserFrontendProfile,
   unwrapPreparedCppCuteFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../src/cpp_cute_frontend_profile.js";
@@ -10,6 +12,7 @@ import {
   CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
   CPP_CUTE_FIXTURE_HEADER_SET_HASH,
   CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH,
+  createCppCuteBrowserProfileInput,
   createCppCuteProfileInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
 
@@ -34,6 +37,142 @@ describe("C++/CuTe frontend profile", () => {
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.extractionLimits)).toBe(true);
     expect(Object.isFrozen(unwrapPreparedCppCuteFrontendProfile(first).profile)).toBe(true);
+  });
+
+  it("prepares one deterministic browser-local profile authority", async () => {
+    const first = await prepareCppCuteFrontendProfile(createCppCuteBrowserProfileInput());
+    const second = await prepareCppCuteFrontendProfile(createCppCuteBrowserProfileInput());
+    const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
+
+    expect(first).toEqual(second);
+    expect(first.profileHash).toBe("2699c9a2b312fefcc29fd652a227468f7b437a5fcf3181cda898e5b3ba7af2da");
+    expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
+    expect(first.deploymentMode).toBe("browser-local");
+    expect(first.compilationContractHash).toBe(aot.compilationContractHash);
+    expect(first.compilationContractHash).toBe("41e2b47805aec06b4d4b762cd1e9c0662bc8dc2fcf43f259d00247600ac34052");
+    const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
+    expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
+    expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
+    expect(record.profile.deployment.worker.moduleSha256).toBe("9".repeat(64));
+    expect(Object.isFrozen(record.profile.deployment)).toBe(true);
+  });
+
+  it("narrows prepared authorities by deployment mode", async () => {
+    const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
+    const browser = await prepareCppCuteFrontendProfile(createCppCuteBrowserProfileInput());
+
+    expect(unwrapPreparedCppCuteAotFrontendProfile(aot).profile.deployment.mode).toBe("ahead-of-time");
+    expect(unwrapPreparedCppCuteBrowserFrontendProfile(browser).profile.deployment.mode).toBe("browser-local");
+    expect(() => unwrapPreparedCppCuteAotFrontendProfile(browser)).toThrowError(
+      expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", path: "$.deployment.mode" }),
+    );
+    expect(() => unwrapPreparedCppCuteBrowserFrontendProfile(aot)).toThrowError(
+      expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", path: "$.deployment.mode" }),
+    );
+  });
+
+  it("closes and pins every browser-local deployment identity", async () => {
+    const unknown = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    (unknown["deployment"] as Record<string, unknown>)["workerUrl"] = "https://example.test/worker.js";
+    await expectProfileError(unknown, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.deployment");
+
+    const contract = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    (contract["deployment"] as Record<string, unknown>)["contractId"] = "browsergrad.compiler.cpp-cute.browser-worker@2";
+    await expectProfileError(contract, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.deployment.contractId");
+
+    const assetSet = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    (assetSet["deployment"] as Record<string, unknown>)["assetSetSha256"] = "not-a-digest";
+    await expectProfileError(assetSet, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.deployment.assetSetSha256");
+
+    const provenance = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    (provenance["deployment"] as Record<string, unknown>)["buildProvenanceLockSha256"] = "not-a-digest";
+    await expectProfileError(
+      provenance,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.buildProvenanceLockSha256",
+    );
+
+    const workerModule = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const worker = ((workerModule["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
+    worker["moduleSha256"] = "not-a-digest";
+    await expectProfileError(
+      workerModule,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.worker.moduleSha256",
+    );
+  });
+
+  it("requires the closed single-threaded dedicated browser worker contract", async () => {
+    for (const [field, replacement] of [
+      ["protocolId", "other@1"],
+      ["scriptType", "classic"],
+      ["isolation", "shared-worker"],
+      ["threading", "pthreads"],
+      ["cancellation", "cooperative"],
+      ["sourceNetwork", "allowed"],
+      ["assetNetwork", "arbitrary"],
+      ["cache", "url-keyed"],
+    ] as const) {
+      const value = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+      const worker = ((value["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
+      worker[field] = replacement;
+      await expectProfileError(
+        value,
+        "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+        `$.deployment.worker.${field}`,
+      );
+    }
+  });
+
+  it("binds browser Clang and the semantic extractor to one exact WASM executable", async () => {
+    const value = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const toolchain = value["toolchain"] as Record<string, unknown>;
+    const compiler = toolchain["compiler"] as Record<string, unknown>;
+    compiler["binarySha256"] = "0".repeat(64);
+    await expectProfileError(
+      value,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.toolchain.compiler.binarySha256",
+    );
+  });
+
+  it("bounds browser worker and asset resources with coherent totals", async () => {
+    const memory = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const memoryWorker = ((memory["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
+    memoryWorker["maxWasmMemoryBytes"] = 2 * 1024 * 1024 * 1024 + 1;
+    await expectProfileError(
+      memory,
+      "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT",
+      "$.deployment.worker.maxWasmMemoryBytes",
+    );
+
+    const assetCount = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const countLimits = ((assetCount["deployment"] as Record<string, unknown>)["assetLimits"] as Record<string, unknown>);
+    countLimits["maxAssets"] = 257;
+    await expectProfileError(
+      assetCount,
+      "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT",
+      "$.deployment.assetLimits.maxAssets",
+    );
+
+    const totals = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const totalLimits = ((totals["deployment"] as Record<string, unknown>)["assetLimits"] as Record<string, unknown>);
+    totalLimits["maxAssetCompressedByteLength"] = 512 * 1024 * 1024;
+    totalLimits["maxTotalCompressedByteLength"] = 256 * 1024 * 1024;
+    await expectProfileError(
+      totals,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.assetLimits.maxAssetCompressedByteLength",
+    );
+
+    const extraction = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
+    const extractionWorker = ((extraction["deployment"] as Record<string, unknown>)["worker"] as Record<string, unknown>);
+    extractionWorker["maxWasmMemoryBytes"] = 512 * 1024 * 1024;
+    await expectProfileError(
+      extraction,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.extractionLimits.maxMemoryBytes",
+    );
   });
 
   it("rejects structural copies without profile authority", () => {

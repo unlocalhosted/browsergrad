@@ -19,12 +19,11 @@ import {
   type VerifiedCppCuteFrontendArtifactResource,
 } from "../../../src/cpp_cute_frontend_artifact.js";
 import {
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../../src/cpp_cute_frontend_profile.js";
 import type { PreparedCppCuteAotExecutionEnvironment } from "../../../src/cpp_cute_aot_environment.js";
 import {
-  authorizeCppCuteFrontendArtifact,
   CPP_CUTE_FRONTEND_BUILD_TYPE,
   CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE,
   CPP_CUTE_FRONTEND_IN_TOTO_STATEMENT_TYPE,
@@ -32,13 +31,16 @@ import {
   cppCuteFrontendProvenanceSigningBytes,
   prepareCppCuteAttestationTrustStore,
   verifyCppCuteFrontendAttestation,
-  type AuthorizedCppCuteFrontendArtifact,
   type CppCuteFrontendProvenanceStatementV1,
   type CppCuteFrontendProvenanceV1,
   type CppCuteProvenanceSourceV1,
   type PreparedCppCuteAttestationTrustStore,
   type VerifiedCppCuteFrontendAttestation,
 } from "../../../src/cpp_cute_frontend_provenance.js";
+import {
+  authorizeAotCppCuteFrontendArtifact,
+  type AuthorizedCppCuteFrontendArtifact,
+} from "../../../src/cpp_cute_frontend_authorization.js";
 import type { CppCuteFrontendPayloadV2 } from "../../../src/cpp_cute_frontend_types.js";
 import { computeCppCuteInputHashes } from "../../../src/cpp_cute_frontend_verify.js";
 import {
@@ -65,9 +67,9 @@ export const TEST_CPP_CUTE_SPKI_BASE64 =
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEl8h7VCP+TUDyAHiNww/AEpx+H6YG/bXR1bsUEtcquSfen4okTS1aPQ0oyKgQtZPo2Mn2pfS6TSArNTL7ACRmdQ==";
 export const PINNED_CPP_CUTE_TRUST_STORE_HASH = "c4bda05f76d001931f301942bec20462bc04926a75474b954cc9ec5e11754b2a";
 export const PINNED_CPP_CUTE_PROFILE_HASH = "5092db2cbe369b22e817cfe2e94e244f5180abf3b80fc9230d5f7f7a3285b64a";
-export const PINNED_CPP_CUTE_ARTIFACT_HASH = "de50d94c50a0d77d8724e31cbf4a325efd980bae28181cadec0bc5a048b3a654";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "6c488751b88b9b614b652ce6ce4172214b4e4c98aa61661f306fec537e6244d7";
-export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "11064";
+export const PINNED_CPP_CUTE_ARTIFACT_HASH = "934fc4093bfc0d0af168f845c620592077b444e8df12018f70121be89ddc5427";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTES_HASH = "37ba1fd04a4c868de5aa8a3ab4e559aa7948cf54ca83cff45497c522fd5b9709";
+export const PINNED_CPP_CUTE_ARTIFACT_BYTE_LENGTH = "11088";
 export const PINNED_CPP_CUTE_SOURCE_SET_HASH = "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46";
 
 export interface CppCuteProvenanceFixture {
@@ -125,7 +127,7 @@ export async function createCppCuteProvenanceFixture(
     ),
   });
   const profile = environmentFixture.profile;
-  const artifactInput = await createCppCuteArtifactInput(profile.profileHash);
+  const artifactInput = await createCppCuteArtifactInput(profile.compilationContractHash);
   options.mutatePayload?.(artifactInput.payload);
   if (options.mutatePayload !== undefined) {
     const hashes = await computeCppCuteInputHashes(artifactInput.payload);
@@ -180,7 +182,7 @@ export async function createAuthorizedCppCuteProvenanceFixture(
 ): Promise<AuthorizedCppCuteProvenanceFixture> {
   const fixture = await createCppCuteProvenanceFixture(options);
   const attestation = await verifyCppCuteFixtureAttestation(fixture);
-  const authorization = authorizeCppCuteFrontendArtifact(cppCuteAuthorizationRequest(fixture, attestation));
+  const authorization = authorizeAotCppCuteFrontendArtifact(cppCuteAuthorizationRequest(fixture, attestation));
   return { ...fixture, attestation, authorization };
 }
 
@@ -191,7 +193,7 @@ export async function createCppCuteProvenanceStatement(
   const receiptRecord = unwrapVerifiedCppCuteAotRunnerReceipt(receipt);
   const artifact = receiptRecord.artifact;
   const profile = receiptRecord.profile;
-  const configured = unwrapPreparedCppCuteFrontendProfile(profile).profile;
+  const configured = unwrapPreparedCppCuteAotFrontendProfile(profile).profile;
   const source: CppCuteProvenanceSourceV1 = unwrapPreparedCppCuteAotJob(receiptRecord.job).job.source;
   const run = receiptRecord.receipt;
   return {
@@ -208,7 +210,8 @@ export async function createCppCuteProvenanceStatement(
         transportHash: artifact.transportHash,
         artifactBytesSha256: artifact.artifactBytesSha256,
         artifactByteLength: artifact.artifactByteLength,
-        profileHash: artifact.profileHash,
+        profileHash: profile.profileHash,
+        compilationContractHash: artifact.compilationContractHash,
         sourceSetSha256: artifact.sourceSetSha256,
         headerSetSha256: artifact.headerSetSha256,
         inputClosureSha256: artifact.inputClosureSha256,
@@ -293,7 +296,7 @@ export async function verifyCppCuteFixtureAttestation(
 export function cppCuteAuthorizationRequest(
   fixture: CppCuteProvenanceFixture,
   attestation: VerifiedCppCuteFrontendAttestation,
-): Parameters<typeof authorizeCppCuteFrontendArtifact>[0] {
+): Parameters<typeof authorizeAotCppCuteFrontendArtifact>[0] {
   return {
     attestation,
     expectedProfileHash: fixture.profile.profileHash,

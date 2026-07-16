@@ -10,7 +10,7 @@ import {
   type VerifiedCppCuteFrontendArtifact,
 } from "./cpp_cute_frontend_artifact.js";
 import {
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   type CppCuteFrontendExtractionLimits,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
@@ -19,7 +19,7 @@ import {
 export async function computeCppCuteAotDependencyManifestHash(
   profile: PreparedCppCuteFrontendProfile,
 ): Promise<string> {
-  const record = unwrapPreparedCppCuteFrontendProfile(profile);
+  const record = unwrapPreparedCppCuteAotFrontendProfile(profile);
   return hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.profile-dependencies.v1",
     dependencies: record.profile.toolchain.dependencies,
@@ -44,7 +44,7 @@ export async function computeCppCuteAotInvocationManifestHash(
   job: PreparedCppCuteAotJob,
 ): Promise<string> {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(jobRecord.profile);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(jobRecord.profile);
   return hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.aot-invocation.v1",
     job: jobRecord.job,

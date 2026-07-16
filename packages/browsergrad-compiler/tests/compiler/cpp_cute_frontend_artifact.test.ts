@@ -14,7 +14,7 @@ import { computeCppCuteInputHashes } from "../../src/cpp_cute_frontend_verify.js
 import {
   cloneCppCuteArtifactInput,
   CPP_CUTE_FIXTURE_DIAGNOSTIC_ID,
-  CPP_CUTE_FIXTURE_PROFILE_HASH,
+  CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH,
   CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID,
   CPP_CUTE_FIXTURE_SPAN_ID,
   createCppCuteArtifactInput,
@@ -40,15 +40,15 @@ describe("C++/CuTe frontend artifact", () => {
       headerSetSha256: verified.headerSetSha256,
       inputClosureSha256: verified.inputClosureSha256,
     }).toEqual({
-      artifactHash: "b007e902edf81d64bf1508ce71cee635fba9bc11d1ab4914ceb3288c7f82b2e2",
+      artifactHash: "4870ab7a360c0dd1f9ea0600b7df8097396e642ff7ee71a55e6c680fd6ace7eb",
       sourceSetSha256: "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46",
       headerSetSha256: "a2974167b9230f04b7cf95e0d2e2d1304b9974ba90398fadd93d087b12d44b91",
       inputClosureSha256: "4df918262f32e5655e26fc72c7f9053e707c9612216733146d035d75870e2f7b",
     });
     expect(verified.transportHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(verified.artifactBytesSha256).toBe("8f53eb66109db78973ebd082033741e9a00a4430a81c6ac224169acd7bfd4680");
-    expect(verified.artifactByteLength).toBe("11064");
-    expect(verified.profileHash).toBe(CPP_CUTE_FIXTURE_PROFILE_HASH);
+    expect(verified.artifactBytesSha256).toBe("addbd4e2fbb0ec3b9c5ad82060bc017942c80dfc08761dd2ee3e1d684b14a321");
+    expect(verified.artifactByteLength).toBe("11088");
+    expect(verified.compilationContractHash).toBe(CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH);
     expect(verified.outcome).toBe("accepted");
     expect(record.envelope.payload.facts).toContainEqual(expect.objectContaining({
       kind: "target-intrinsic",

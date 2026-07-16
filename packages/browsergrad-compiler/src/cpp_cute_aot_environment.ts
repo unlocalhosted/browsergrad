@@ -14,7 +14,7 @@ import {
   inspectUnsharedPlainUint8Array,
 } from "./cpp_cute_aot_bytes.js";
 import {
-  unwrapPreparedCppCuteFrontendProfile,
+  unwrapPreparedCppCuteAotFrontendProfile,
   type CppCuteFrontendDependencyProfile,
   type CppCuteFrontendIncludeRoot,
   type CppCuteFrontendIncludeRootOwner,
@@ -265,7 +265,7 @@ export async function prepareCppCuteAotExecutionEnvironment(
 ): Promise<PreparedCppCuteAotExecutionEnvironment> {
   const signal = normalizeOptions(options);
   const snapshot = snapshotBytes(bytes);
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(profile);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   throwIfAborted(signal);
   let value: JsonValue;
   try {
@@ -897,7 +897,7 @@ function parseLsm(value: JsonValue, path: string): CppCuteAotExecutionEnvironmen
 }
 
 function verifyProfileClosure(
-  profile: ReturnType<typeof unwrapPreparedCppCuteFrontendProfile>["profile"],
+  profile: ReturnType<typeof unwrapPreparedCppCuteAotFrontendProfile>["profile"],
   body: CppCuteAotExecutionEnvironmentManifestV2["body"],
 ): void {
   if (

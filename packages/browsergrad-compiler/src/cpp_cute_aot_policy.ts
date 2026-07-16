@@ -17,7 +17,7 @@ import {
   unwrapPreparedCppCuteAotJob,
   type PreparedCppCuteAotJob,
 } from "./cpp_cute_aot_job.js";
-import { unwrapPreparedCppCuteFrontendProfile } from "./cpp_cute_frontend_profile.js";
+import { unwrapPreparedCppCuteAotFrontendProfile } from "./cpp_cute_frontend_profile.js";
 
 export const CPP_CUTE_AOT_SANDBOX_POLICY_SCHEMA =
   "browsergrad.compiler.cpp-cute.aot-sandbox-policy";
@@ -471,7 +471,7 @@ export async function computeCppCuteAotExecutionPlanHash(
   environment: PreparedCppCuteAotExecutionEnvironment,
 ): Promise<string> {
   const jobRecord = unwrapPreparedCppCuteAotJob(job);
-  const profileRecord = unwrapPreparedCppCuteFrontendProfile(jobRecord.profile);
+  const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(jobRecord.profile);
   const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(environment);
   if (environmentRecord.profile !== jobRecord.profile || environment.profileHash !== job.profileHash) {
     throw new Error("BG-COMPILER-CPP-CUTE-AOT-ENVIRONMENT-PROFILE-MISMATCH: execution environment belongs to a different prepared profile");

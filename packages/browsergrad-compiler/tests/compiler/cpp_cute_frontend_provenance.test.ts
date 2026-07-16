@@ -7,18 +7,20 @@ import {
   PINNED_CPP_CUTE_AOT_RECEIPT_ID,
 } from "./support/cpp_cute_aot_receipt_fixtures.js";
 import {
-  authorizeCppCuteFrontendArtifact,
   CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE,
   cppCuteFrontendProvenancePayloadBytes,
   cppCuteFrontendProvenanceSigningBytes,
   prepareCppCuteAttestationTrustStore,
-  unwrapAuthorizedCppCuteFrontendArtifact,
   verifyCppCuteFrontendAttestation,
   type CppCuteAttestationTrustStoreV1,
   type CppCuteFrontendProvenanceV1,
   type PreparedCppCuteAttestationTrustStore,
   type VerifiedCppCuteFrontendAttestation,
 } from "../../src/cpp_cute_frontend_provenance.js";
+import {
+  authorizeAotCppCuteFrontendArtifact,
+  unwrapAuthorizedCppCuteFrontendArtifact,
+} from "../../src/cpp_cute_frontend_authorization.js";
 import {
   CPP_CUTE_FIXTURE_BUILDER_ID,
   CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
@@ -44,7 +46,7 @@ describe("C++/CuTe frontend provenance", () => {
   it("authorizes one canonical DSSE/in-toto statement through pinned opaque authority", async () => {
     const fixture = await createProvenanceFixture();
     const attestation = await verifyFixtureAttestation(fixture);
-    const authorized = authorizeCppCuteFrontendArtifact(authorizationRequest(fixture, attestation));
+    const authorized = authorizeAotCppCuteFrontendArtifact(authorizationRequest(fixture, attestation));
     const payloadBytes = cppCuteFrontendProvenancePayloadBytes(fixture.statement);
     const expectedPaePrefix = new TextEncoder().encode(
       `DSSEv1 ${new TextEncoder().encode(CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE).byteLength} ${CPP_CUTE_FRONTEND_DSSE_PAYLOAD_TYPE} ${payloadBytes.byteLength} `,
@@ -95,15 +97,19 @@ describe("C++/CuTe frontend provenance", () => {
       artifactHash: fixture.artifact.artifactHash,
       artifactBytesSha256: fixture.artifact.artifactBytesSha256,
       profileHash: fixture.profile.profileHash,
-      trustStoreHash: fixture.trustStore.trustStoreHash,
-      sourceRevision: CPP_CUTE_FIXTURE_SOURCE_REVISION,
+      compilationContractHash: fixture.artifact.compilationContractHash,
+      evidenceKind: "aot-attestation",
+      evidenceHash: attestation.evidenceHash,
     });
     expect(Object.isFrozen(attestation)).toBe(true);
     expect(Object.isFrozen(authorized)).toBe(true);
     expect(unwrapAuthorizedCppCuteFrontendArtifact(authorized)).toEqual({
       artifact: fixture.artifact,
       profile: fixture.profile,
-      attestation,
+      evidence: {
+        kind: "aot-attestation",
+        authority: attestation,
+      },
     });
     expect(cppCuteFrontendProvenanceSigningBytes(fixture.statement)).toEqual(expectedPae);
   });
@@ -411,8 +417,8 @@ describe("C++/CuTe frontend provenance", () => {
       { expectedSourceRevision: { algorithm: "git-sha1", value: "0".repeat(40) } },
     ];
     for (const override of cases) {
-      expect(() => authorizeCppCuteFrontendArtifact({ ...base, ...override })).toThrowError(
-        expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-SUBJECT-MISMATCH" }),
+      expect(() => authorizeAotCppCuteFrontendArtifact({ ...base, ...override })).toThrowError(
+        expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-SUBJECT-MISMATCH" }),
       );
     }
   });
@@ -426,14 +432,14 @@ describe("C++/CuTe frontend provenance", () => {
     })).rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-AOT-RECEIPT-UNVERIFIED" });
 
     const forgedAttestation = { ...attestation } as VerifiedCppCuteFrontendAttestation;
-    expect(() => authorizeCppCuteFrontendArtifact({
+    expect(() => authorizeAotCppCuteFrontendArtifact({
       ...authorizationRequest(fixture, attestation),
       attestation: forgedAttestation,
     })).toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED" }));
 
     expect(() => unwrapAuthorizedCppCuteFrontendArtifact({
       artifactHash: fixture.artifact.artifactHash,
-    } as never)).toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-UNVERIFIED" }));
+    } as never)).toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-UNVERIFIED" }));
   });
 
   it("never grants lowering authority to a structurally valid rejected artifact", async () => {
@@ -461,8 +467,8 @@ describe("C++/CuTe frontend provenance", () => {
       },
     });
     const attestation = await verifyFixtureAttestation(fixture);
-    expect(() => authorizeCppCuteFrontendArtifact(authorizationRequest(fixture, attestation)))
-      .toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-PROVENANCE-ARTIFACT-REJECTED" }));
+    expect(() => authorizeAotCppCuteFrontendArtifact(authorizationRequest(fixture, attestation)))
+      .toThrowError(expect.objectContaining({ code: "BG-COMPILER-CPP-CUTE-AUTHORIZATION-ARTIFACT-REJECTED" }));
   });
 
   it("honors cancellation and rejects hostile in-memory values", async () => {
