@@ -583,6 +583,28 @@ Compilation may use one of three explicit deployment modes:
 | **Trusted compiler service** | A sandboxed service processes source and returns a signed or hash-addressed frontend/semantic artifact. Source-upload and retention policy are explicit. |
 | **Ahead-of-time artifact** | A build tool emits a versioned artifact consumed later by the browser. The artifact retains source maps and provenance. |
 
+For the portable BrowserGrad product, the browser-local frontend is the
+primary Gate 3 path. A normal user MUST be able to compile a supported,
+profile-pinned C++/CuTe source unit in the browser without Docker, a native
+toolchain installation, or a network compiler service. The browser-local
+profile MUST run the pinned CUDA-capable Clang frontend as WASM in a dedicated
+worker, use the same closed virtual-filesystem and artifact contracts as every
+other producer, and enforce explicit memory, work, output, and cancellation
+limits. Clang-WASM performs source analysis and emits the frontend artifact; it
+does not execute a user-produced native binary. BrowserGrad executes the
+portable meaning only after verified lowering to its reference or WebGPU
+backend.
+
+Trusted-service and AOT producers remain valid optional protocol modes. A
+native or Docker-hosted producer MAY serve CI, corpus qualification,
+cross-implementation comparison, release-time precompilation, or deployments
+that explicitly select that profile. It MUST NOT be a browser runtime
+dependency, a prerequisite for the portable product, or an alternate semantic
+authority. When both browser-local and native producers support a profile,
+their canonical frontend facts, diagnostics, selected entries, and lowered
+semantic identities MUST be compared under one versioned parity policy;
+producer-specific provenance and resource observations remain distinct.
+
 "Browser-native" always promises browser execution for the portable backend.
 It promises browser-local compilation only for profiles that explicitly name
 the browser-local frontend mode.
@@ -1420,15 +1442,27 @@ widening the frozen tensor-plan schema or treating device absence as success.
 
 ### Gate 3 — Real C++/CuTe frontend slice
 
-- Pin one CUDA-capable compiler profile and CuTe/CUTLASS revision.
+- Pin one browser-local CUDA-capable Clang-WASM profile and CuTe/CUTLASS
+  revision, including exact compiler/WASM assets, headers, options, target ABI,
+  and virtual include roots.
+- Compile supported unmodified source inside a dedicated browser worker with
+  bounded input, preprocessing/template work, memory, output, time, and
+  cancellation. Docker, native Clang, and a compiler service are absent from
+  this required path.
 - Prove layout-only fixtures, then dynamic `Tensor<Engine, Layout>` binding and
   copy/view operations.
 - Preserve source spans and typed unsupported target intrinsics.
-- Exercise the selected browser-local, service, or AOT artifact deployment
-  contract with sandbox and provenance tests.
+- Verify the browser-produced artifact through the producer-neutral artifact
+  contract and lower it through the same semantic-core seams used by Gate 2.
+- If a service or native/AOT producer is retained, prove it as an optional
+  profile with the same protocol and explicit cross-producer parity evidence;
+  its availability is not a Gate 3 exit condition for the portable product.
 
-**Exit:** unmodified pinned source produces the same verified view/index
-semantics as Gate 2 and runs its portable subset on real WebGPU.
+**Exit:** without Docker, a native toolchain, or a compiler service, unmodified
+pinned source compiles in a supported browser into a verified artifact,
+produces the same verified view/index semantics as Gate 2, and runs its
+portable subset on real WebGPU. Retained optional producers pass their declared
+parity profiles, but their absence cannot block this browser-local exit.
 
 ### Gate 4 — Tiled GEMM and schedule separation
 

@@ -4,7 +4,7 @@
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
 - **Ledger status:** active
 - **Last updated:** 2026-07-16
-- **Current implementation slice:** Gate 3 native producer after execution-environment authority
+- **Current implementation slice:** Gate 3 browser-local Clang-WASM producer audit and integration
 
 This is the durable implementation and recovery record for the semantic-systems
 architecture. Update it after every implementation slice, material decision,
@@ -33,7 +33,7 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
 | Gate 2 — multi-frontend, multi-backend view slice | `verified` | Semantic-core `0.2.0` owns verified view-copy meaning, shared specialization, and the sole canonical frontend construction sink. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix. Compiler L1 preserves its six-case non-padded contract; sibling L2 binds the exact verified operation and proves rank-2/rank-3 guarded padding through CPU, structured IR, WGSL, and actual WebGPU. JIT `0.9.0` emits a closed typed permutation request and executes the same canonical operation through materializing/resident production routes without recovering semantic args from the frozen plan. All strict lanes passed from one clean detached worktree at exact source revision `aa605421410e9d4190d8939c24b1057731111231`. | None for the initial Gate 2 profile. Release CI must repeat the exact-source lanes before publication; registry publication is a separate release operation. | Exact clean-source Apple Metal 3 records: compiler L2 3 cases, compiler L1 6 cases, kernels 9 cases, and JIT 2 cases; compiler `verify:compiler` passed 35 files/1004 tests; release package gate passed 19 hostile-archive and 35 Node security tests plus packed/fresh consumers; combined publish guards accepted only exact L1/L2/JIT/kernels markers. |
-| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Existing source-spelling CuTe adapters are frozen. Closed profile, execution environment, job, logical plan, artifact/resource, receipt, provenance, authorization, OCI metadata, image observation, and completed-run authorities remain distinct. The exact canonical environment resource now binds declared Linux/kernel/cgroup/LSM/runtime identities, ordered OCI rootfs closure, compiler/extractor/supervisor binaries, dynamic libraries, headers/include roots, and external-attestor policy to one prepared profile. Plan, OCI authorization, staged control input, receipt, and provenance cross-bind that exact authority. One private Node session performs `version -> info -> image-inspect -> stage -> create -> inspect-created -> start-attached -> inspect-terminal -> remove -> prove-absent`. Docker creation now requests one exact checked Moby seccomp snapshot staged privately for each run and rejects Docker-reported option drift. This remains synthetic configuration-contract evidence: requested/inspected seccomp configuration does not prove kernel/runc/seccomp/cgroup enforcement. No live image, native extractor/supervisor, real receipt, external signing, dynamic tensor/storage meaning, backend execution, or source-compatibility claim exists. | Build and pin the real extractor/supervisor OCI image; produce and externally authenticate the exact environment resource; exercise the lifecycle on its live Linux/Docker/runc environment; authenticate the resulting receipt; then implement dynamic tensor copy and exact Gate 2 semantic/backend convergence. | Gate 2 exact-source baseline at `aa605421`; execution-environment/plan/receipt/OCI focused suite 70 tests; Docker shell/lifecycle 96 tests; compiler gate 45 files/1100 tests; packed release gate; all producer and Docker execution evidence remains synthetic until the pinned live environment is exercised. |
+| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Browser-local Clang-WASM is now the primary portable-product producer. Existing source-spelling CuTe adapters remain frozen, and the producer-neutral profile, artifact/resource, request, verification, authorization, static-layout lowering, and provenance seams are reusable. No tracked Clang-WASM build, browser worker, packaged compiler/header assets, browser-local producer, real CuTe artifact, dynamic tensor/storage meaning, or browser-local source-compatibility evidence exists yet. The Docker/native execution-environment, plan, OCI, observation, receipt, and lifecycle contracts are synthetic and optional CI/reference-producer infrastructure only; they are not browser runtime or Gate 3 exit evidence. | Pin a browser-capable Clang-WASM distribution and exact header closure; define its browser-local profile and worker/VFS/resource contract; emit and verify the canonical artifact from unmodified source in-browser; then prove dynamic tensor copy, exact Gate 2 semantic convergence, and required real WebGPU execution. If the native/AOT producer is retained, prove parity separately without placing it on the portable-product critical path. | Gate 2 exact-source baseline at `aa605421`; producer-neutral artifact and static-layout verifier tests; no browser-local C++ producer test or artifact exists. Existing Docker shell/lifecycle tests prove only synthetic optional-adapter contracts. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
 | Gate 6 — framework convergence | `not-started` | No implementation in this workstream. | All Gate 6 exit criteria. | None. |
@@ -46,11 +46,19 @@ test does not make a gate verified unless every exit criterion is covered.
 Gates 0 through 2 are verified. Gate 2 has one shared materializing view-copy
 contract, CPU evaluator, canonical WGSL lowering, and compiler/JIT tracer
 bullets through actual WebGPU, all re-proved at one exact clean revision. Gate
-3 now audits the real C++/CuTe frontend boundary. Its first tracer must reuse
-the verified layout and backend seams rather than add source-shaped execution
-or spelling-specific lowering paths.
+3 now audits and implements the browser-local C++/CuTe frontend boundary. Its
+primary producer is a pinned CUDA-capable Clang frontend running as WASM in a
+dedicated browser worker. Its first tracer must reuse the verified artifact,
+layout, and backend seams rather than add source-shaped execution or
+spelling-specific lowering paths. Docker/native AOT remains an optional
+CI/reference parity lane and is not a browser requirement.
 
 ### Work in flight
+
+Rows below that retain `AOT`, `OCI`, or `Docker` in their names record completed
+protocol and synthetic-adapter work for the optional native parity lane. Their
+`verified` status applies only to the named contract; it does not count as
+browser-local producer evidence or make Docker a product dependency.
 
 | Work item | Status | Notes | Remaining | Evidence |
 |---|---|---|---|---|
@@ -62,7 +70,8 @@ or spelling-specific lowering paths.
 | Semantic-core package adoption gate | `verified` | `0.2.0` is public-package shaped, dependency-free, subpath-only, locally packed, and now consumed through kernels' packed exact dependency. A fresh temporary consumer installs both tarballs, resolves bare public subpaths, typechecks, and prepares matching CPU/WGSL specializations. It has not been published. |
 | Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus compiler L1 read binding and sibling L2 guarded materializing view copy. The full required matrix and strict exact-source WebGPU proof now pass; broader view families must add typed operation variants rather than reinterpret frozen plans. |
 | Gate 3 legacy CuTe motif freeze | `verified` | Existing transpose, GEMV, GEMM, affine-tile, flash-attention, and WGMMA/TMA source-spelling normalizers are explicitly frozen compatibility debt. Exact exception-file membership and source hashes are architecture-guarded; new motifs, replacement bodies, files, or call sites require an accepted architecture decision. | Delete these adapters after pinned resolved frontend artifacts cover their retained fixtures through shared semantics. | Architecture guard and two mutation tests. |
-| Gate 3 AOT C++/CuTe frontend artifact | `in-progress` | Ahead-of-time profile, job, structural artifact, canonical resource, receipt, receipt-authenticated provenance, offline source/frame authority, local Docker observation, and completed lifecycle authority are implemented as separate instance-authorized records. The request pins exact source Git identity, source blobs, VFS paths, declaration anchor/expected entry, and output closure. The one-TU artifact preserves resolved source/type/template/layout/intrinsic facts. Its semantic hash excludes producer metadata; canonical bytes retain independent resource identity. | Real native extractor/supervisor image/profile/fixture/signing workflow, live receipt, dynamic tensor copy, exact Gate 2 hash equality, and required WebGPU evidence. | Focused compiler contracts plus 96 Docker shell/lifecycle tests; pinned synthetic request/profile/job/invocation/receipt/raw/semantic identities; strict Node typecheck/lint. |
+| Gate 3 browser-local Clang-WASM producer | `audit` | The product direction is accepted, but the repository has no tracked Clang-WASM build, loader, dedicated compiler worker, packaged CUDA/CuTe header closure, or browser-produced frontend artifact. The existing canonical profile/artifact/request contracts are the integration targets; they are not evidence that a WASM producer exists. | Select and license-audit the exact compiler distribution; pin hashes and build provenance; define worker/VFS/cancellation/memory/output ceilings; compile one unmodified layout fixture locally in a supported browser; verify its artifact and diagnostic/source-map closure. | Direction and acceptance contract only; zero browser-local producer executions. |
+| Gate 3 optional native/AOT parity producer | `partial` | Ahead-of-time profile, job, structural artifact, canonical resource, receipt, receipt-authenticated provenance, offline source/frame authority, local Docker observation, and completed lifecycle authority exist as separate instance-authorized contracts. They are retained only for optional CI/reference parity, corpus qualification, and release precompilation. The Docker lifecycle is synthetic; no live native producer exists. | Optional: build a real native producer only when it directly supports cross-producer parity or CI qualification. Its absence does not block the browser-local Gate 3 exit. | Focused compiler contracts plus 96 Docker shell/lifecycle tests; pinned synthetic identities only; no live image, extractor, receipt, signature, or parity result. |
 | Gate 3 pre-run AOT producer request | `verified` | `browsergrad.compiler.cpp-cute.aot-job@1.0` is a closed immutable request authority. It pins exact prepared profile, canonical HTTPS repository and tagged Git revision, sorted content-addressed source VFS files, exactly one main source, one bounded declaration-token anchor plus expected stable entry ID, and expected artifact schema/source/header/input closure. Source counts/bytes use the profile ceilings; semantic decode budgets, cancellation, versioning, hashes, and instance authority fail closed. Compiler flags, commands, environment, host paths, include-root overrides, and output destinations are absent by schema. | Runner must open and hash actual blobs, resolve the anchor through the real Clang AST, and compare the emitted artifact to every expected field. This authority proves a request contract only, not producer execution or trust. | 6 focused tests with pinned job/request IDs; profile drift, request/job hash drift, header mismatch, VFS/main/anchor escape, operational fields, accessors, structural copies, budgets, version, and cancellation. |
 | Gate 3 execution-environment authority | `verified` | `browsergrad.compiler.cpp-cute.execution-environment@1.0` snapshots and strict-decodes one canonical resource before authority minting. Its content ID and raw digest remain distinct. The resource is instance-bound to one prepared profile and closes declared Linux/kernel/cgroup/LSM/Docker/containerd/runc/seccomp identities, ordered image layers/diff IDs, compiler/extractor/supervisor binaries, dynamic libraries, header sets/include roots, and external-attestor policy. Inline rootfs, binary, dynamic-library, and header inventories have independently recomputed canonical hashes. The resource explicitly says environment-only and detached; it is not run evidence. | Real externally authenticated environment bytes and live enforcement evidence remain required. A declared seccomp hash is not proof Docker loaded that filter. | 11 execution-environment tests; canonical/hostile-byte/version/budget/cancellation/authority/profile/closure-hash matrices; full transitive plan/receipt/OCI coverage. |
 | Gate 3 logical AOT execution plan | `verified` | Checked policy `1.3` defines one exact local Docker endpoint and client/engine/API/store tuple, authorized-manifest creation with pull forbidden, fixed native supervisor/hostname/argv, Docker-injected versus supervisor-cleared environment, non-root identity, no network/IPC, private remaining namespaces, read-only image rootfs plus explicit Docker-managed mounts, no added capabilities/new privileges/host-device passthrough/socket, bounded tmpfs/frame/stderr, profile-derived limits, complete lifecycle/decode budgets, fail-stop cleanup, and a dedicated single-job host trust boundary. Its seccomp request binds the exact 13,470-byte Moby snapshot and requires separate external run evidence for effective enforcement. Plan-v2 hashing re-verifies the current policy and exact prepared environment authority. | CPU/peak resource observations and actual seccomp/runc/kernel/cgroup/LSM enforcement still require live authenticated evidence; Docker create/inspect and the environment declaration cannot prove them. | Checked JSON/TypeScript equality; policy `14052e2d877fb00a293ef21ad64721b6432274b4e25400a85d2314f0fa1c773b`; fixture execution plan `684616abea77112a4351bd0d64dbdd5cef0a908c60ac6c923a21d50e2944d7da`; pinned upstream lock plus raw source hash/length; nested immutability; 96 Docker tests; strict typecheck/lint. |
@@ -255,6 +264,7 @@ or spelling-specific lowering paths.
 | D-058 | 2026-07-16 | accepted | Pin the local observation contract to Docker CLI/Engine 29.6.1, request API 1.49, client-default/engine-maximum API 1.55, engine-minimum API 1.40, the exact local Unix socket, `linux/amd64`, and the containerd image store. Probe in fixed order `version -> info -> image-inspect`; accept the platform-selected manifest ID only after the runtime/store proof; and bind its raw config descriptor, repo digest, diff IDs, platform, and semantically empty image config to the authorized OCI metadata. Every child settles on `close`; timeout, abort, and overflow terminate the Linux process group and wait for closure, while an unreaped child after grace fail-stops the parent. Observation authority is minted only after private run-root removal, and production/test issuers are disjoint. This contract does not establish Docker binary provenance, live-daemon availability, container execution, or producer trust. | Generic Docker API descriptions do not determine image-ID semantics across storage backends and versions. Exact runtime/store preflight plus pinned implementation semantics prevent a config digest from being misread as the selected manifest digest. Waiting for `close` prevents cleanup or authority minting while stdio or descendants remain live; fail-stop is safer than returning after failed termination. Disjoint issuers prevent fake-process evidence from crossing the production authority seam. |
 | D-059 | 2026-07-16 | accepted | Make the execution environment an exact canonical byte authority bound to one prepared profile instance, not a free digest string. Keep declared configuration separate from per-run enforcement evidence. Bind its raw/content identities into plan v2, staged supervisor input, receipt 1.1, provenance, and ordered OCI layer/diff-ID authorization. Recompute every inline inventory hash rather than trusting self-declared closure digests. | A profile string alone cannot prove which bytes named the kernel/runtime/toolchain/image closure, and daemon inspect cannot establish kernel enforcement. Passing an opaque prepared authority closes substitution across pre-run seams while explicit `environment-only`/`detached` semantics prevent configuration from masquerading as run evidence. Recomputed inline hashes prevent internally contradictory manifests. |
 | D-060 | 2026-07-16 | accepted | Vendor one exact upstream Moby seccomp profile with repository/revision/path/hash/length lock; bind its raw identity into sandbox policy 1.3 and execution environment; open the checked source with `O_NOFOLLOW`, require one regular single-link exact-length file, verify descriptor identity before/after read, compact validated JSON, and stage one private mode-0444 snapshot under the run root. Docker creation receives only that private path. Created-container inspection must report the exact compact profile after `no-new-privileges`; missing, changed, or reordered security options force cleanup. Effective seccomp remains separate externally authenticated run evidence. | Relying on Docker's mutable runtime default leaves policy meaning dependent on host daemon version/config. Passing a shared host path permits replacement between verification and Docker CLI read. Conversely, treating create arguments or `HostConfig.SecurityOpt` as proof of kernel filter installation would overclaim enforcement. Private checked staging closes request substitution while preserving the declared/requested/effective evidence boundary. |
+| D-061 | 2026-07-16 | accepted | Make browser-local Clang-WASM the primary Gate 3 producer and portable-product requirement. Keep the three deployment modes and producer-neutral artifact protocol. Reclassify native/Docker AOT as an optional CI/reference parity producer that can qualify corpora or prebuild artifacts but can never be required by browser runtime, ordinary browser compilation, or the portable Gate 3 exit. This supersedes only D-045's AOT-first deployment selection; its legacy-adapter freeze and resolved-artifact seam remain in force. D-050 through D-060 continue to define the optional native lane and do not constitute browser-local evidence. | The product promise is source compilation and portable execution in the browser. Treating the native container as the primary next checkpoint would turn an optional producer into an end-user/environment requirement and allow extensive sandbox evidence to hide the absence of a browser compiler. One artifact protocol plus explicit parity avoids a second semantic implementation while preserving useful CI/reference tooling. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -954,6 +964,8 @@ affected implementation slice is marked complete.
 - Selected an AOT resolved frontend artifact as the first Gate 3 deployment
   mode. Browser-safe verification/lowering stays in compiler; native extraction
   remains outside browser packages and must use pinned compiler/header inputs.
+  D-061 later superseded this AOT-first deployment selection while retaining
+  the artifact seam and optional native parity lane.
 
 ### 2026-07-16 — Gate 3 closed AOT profile authority
 
@@ -1828,6 +1840,29 @@ whether any files may be left partially changed.
   enforcement, native producer, real image, real receipt, or external
   signature was exercised.
 
+### 2026-07-16 — Gate 3 WASM-first producer pivot
+
+- Clarified the portable-product requirement: supported C++/CuTe source is
+  compiled by a pinned CUDA-capable Clang-WASM frontend in a dedicated browser
+  worker, then verified and lowered through the existing producer-neutral
+  artifact and semantic-core contracts.
+- Reclassified Docker/native AOT as an optional CI/reference parity producer.
+  It may qualify corpora, compare producer output, or prebuild artifacts for an
+  explicitly selected deployment profile; it is never a browser runtime,
+  ordinary browser-compilation, or portable Gate 3 dependency.
+- Preserved the normative three-mode protocol and retained completed AOT,
+  receipt, provenance, OCI, lifecycle, and seccomp contracts as optional-lane
+  work. Their evidence remains valid only for those named contracts.
+- Corrected current status: there is no tracked Clang-WASM build, compiler
+  worker, packaged CUDA/CuTe header closure, browser-produced artifact, or live
+  native producer. No real C++/CuTe source-compatibility claim is currently
+  supported by either lane.
+- Defined the browser-local acceptance path: pinned compiler and asset
+  provenance; bounded worker/VFS/resource/cancellation behavior; unmodified
+  source to canonical artifact; source-map/diagnostic/entry closure; semantic
+  convergence with Gate 2; and required actual-WebGPU execution. Optional
+  native parity is evaluated separately and cannot substitute for this path.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -1841,14 +1876,18 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Implement and pin the real native producer without weakening the completed
-synthetic lifecycle contract. Add extractor and supervisor sources, hermetic
-Dockerfile/build inputs, exact Clang/CuTe/header closure, explicit pinned
-seccomp request, supervisor environment clearing, cgroup/resource observation,
-production trust/signing workflow, and at least one real CuTe fixture. Produce
-the exact environment bytes already required by the plan; build the digest-
-qualified `linux/amd64` image; exercise the exact Linux Docker 29.6.1/runc
-lifecycle; retain authenticated artifact/receipt/effective-enforcement
-evidence; keep declarations, daemon-recorded request state, and kernel/runtime
-enforcement evidence separate. Only then continue to dynamic tensor copy,
-exact Gate 2 semantic-hash convergence, and required WebGPU execution.
+Audit and pin the browser-local Clang-WASM toolchain before adding more Docker
+producer work. Select the exact compiler distribution and build recipe; record
+license, compiler/WASM/loader hashes, CUDA/CuTe header closure, target ABI, and
+browser support floor. Define the dedicated worker protocol, closed virtual
+filesystem, lazy/eager asset loading policy, cache identity, isolation,
+cancellation, and hard memory/work/output/time ceilings.
+
+The first executable checkpoint is one unmodified pinned layout-only source
+compiled in a supported browser with network and Docker absent. Its canonical
+frontend artifact must pass the existing strict verifier, preserve exact
+diagnostics/source spans/selected-entry identity, lower through the authorized
+layout seam, and match an independently derived expected semantic result. A
+retained native producer may later run the same fixture as an optional parity
+oracle, but it cannot block or stand in for this browser-local proof. Dynamic
+tensor copy and required real-WebGPU convergence follow that checkpoint.
