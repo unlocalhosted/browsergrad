@@ -1,7 +1,10 @@
 import {
+  SCHEMA_DIAGNOSTIC_CODES,
+  SemanticSchemaError,
   encodeWireU64,
   hashCanonicalJson,
   sha256Hex,
+  type DecodeLimits,
   type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
@@ -17,6 +20,9 @@ import {
 export const CPP_CUTE_BROWSER_VFS_PACK_MAJOR = 1;
 export const CPP_CUTE_BROWSER_VFS_PACK_MINOR = 0;
 export const CPP_CUTE_BROWSER_VFS_PACK_HEADER_BYTES = 96;
+export const CPP_CUTE_BROWSER_VFS_CONTENT_SET_HASH_DOMAIN =
+  "browsergrad.compiler.cpp-cute.browser-vfs-content-set.v1";
+export const CPP_CUTE_BROWSER_VFS_CONTENT_SET_MAX_STRING_BYTES = 16 * 1024 * 1024;
 
 const MAGIC = Uint8Array.of(0x42, 0x47, 0x56, 0x46, 0x53, 0x50, 0x4b, 0x31); // BGVFSPK1
 const SHA256_BYTES = 32;
@@ -37,6 +43,17 @@ const HARD_LIMITS = Object.freeze({
   maxFileBytes: 64 * 1024 * 1024,
   maxFileContentBytes: 512 * 1024 * 1024,
 });
+const CONTENT_SET_HASH_LIMITS = Object.freeze({
+  maxDocumentBytes: 64 * 1024 * 1024,
+  maxDepth: 8,
+  maxNodes: (HARD_LIMITS.maxFiles * 4) + 8,
+  maxStringBytes: CPP_CUTE_BROWSER_VFS_CONTENT_SET_MAX_STRING_BYTES,
+  maxArrayLength: HARD_LIMITS.maxFiles,
+  maxObjectProperties: 4,
+  maxRank: 64,
+  maxIntegerBits: 256,
+  maxArithmeticOperations: 200_000,
+} satisfies DecodeLimits);
 
 export interface CppCuteBrowserVfsPackEntry {
   readonly virtualPath: string;
@@ -466,14 +483,33 @@ export async function verifyCppCuteBrowserVfsPackAsset(
 export async function deriveCppCuteBrowserVfsContentSetSha256(
   entries: readonly CppCuteBrowserVfsPackEntry[],
 ): Promise<string> {
-  return hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.browser-vfs-content-set.v1",
-    files: entries.map((entry) => ({
-      virtualPath: entry.virtualPath,
-      contentSha256: entry.contentSha256,
-      byteLength: entry.byteLength,
-    })),
-  });
+  try {
+    return await hashCanonicalJson({
+      domain: CPP_CUTE_BROWSER_VFS_CONTENT_SET_HASH_DOMAIN,
+      files: entries.map((entry) => ({
+        virtualPath: entry.virtualPath,
+        contentSha256: entry.contentSha256,
+        byteLength: entry.byteLength,
+      })),
+    }, { limits: CONTENT_SET_HASH_LIMITS });
+  } catch (error) {
+    if (error instanceof SemanticSchemaError) {
+      if (error.diagnostic.code === SCHEMA_DIAGNOSTIC_CODES.resourceLimit) {
+        resource("$.entries", "content-set canonical projection exceeds its explicit VFS-pack hash limits", {
+          cause: error,
+        });
+      }
+      if (error.diagnostic.code === SCHEMA_DIAGNOSTIC_CODES.hashUnavailable) {
+        fail(
+          "BG-COMPILER-CPP-CUTE-BROWSER-VFS-HASH-UNAVAILABLE",
+          "$.entries",
+          "SHA-256 is unavailable for the content-set projection",
+          { cause: error },
+        );
+      }
+    }
+    invalid("$.entries", "content-set canonical projection is invalid", { cause: error });
+  }
 }
 
 export function canonicalInspectedCppCuteBrowserVfsPackBytes(
@@ -806,8 +842,8 @@ function unsupported(path: string, message: string): never {
   fail("BG-COMPILER-CPP-CUTE-BROWSER-VFS-UNSUPPORTED-VERSION", path, message);
 }
 
-function resource(path: string, message: string): never {
-  fail("BG-COMPILER-CPP-CUTE-BROWSER-VFS-RESOURCE-LIMIT", path, message);
+function resource(path: string, message: string, options?: ErrorOptions): never {
+  fail("BG-COMPILER-CPP-CUTE-BROWSER-VFS-RESOURCE-LIMIT", path, message, options);
 }
 
 function mismatch(path: string, message: string): never {

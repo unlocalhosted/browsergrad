@@ -383,4 +383,19 @@ describe("C++/CuTe closed browser VFS pack", () => {
       }),
     );
   });
+
+  it("uses explicit content-set limits above semantic-core cumulative-string defaults", async () => {
+    const sharedTail = "x".repeat(54);
+    const entries: CppCuteBrowserVfsPackEntry[] = Array.from(
+      { length: 20_000 },
+      (_, index) => ({
+        virtualPath: `${String(index).padStart(5, "0")}-${sharedTail}.h`,
+        contentSha256: "0".repeat(64),
+        byteLength: wire(0),
+      }),
+    );
+    await expect(deriveCppCuteBrowserVfsContentSetSha256(entries)).resolves.toMatch(
+      /^[0-9a-f]{64}$/u,
+    );
+  });
 });
