@@ -214,6 +214,7 @@ import type { PreparedCppCuteBrowserWorkerRealmInput } from "../../src/cpp_cute_
 const INVOCATION_ID = `bg.cpp.browser-worker-invocation.sha256.${"1".repeat(64)}`;
 const REQUEST_ID = `bg.cpp.frontend-request.sha256.${"2".repeat(64)}`;
 const PROFILE_HASH = "3".repeat(64);
+const INVOCATION_NONCE_SHA256 = "4".repeat(64);
 const CLANG_WASM_BYTES = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0);
 const INPUT_FRAME_BYTES = new TextEncoder().encode("BGCCABI1-runtime-frame");
 const VFS_SESSION_CLOSED = 9;
@@ -333,6 +334,7 @@ async function runtimeFixture(
   const realmInput = Object.freeze({
     authority: "realm-local-runtime-input-only",
     invocationId: options.realmInvocationId ?? INVOCATION_ID,
+    invocationNonceSha256: INVOCATION_NONCE_SHA256,
     requestId: options.realmRequestId ?? REQUEST_ID,
     profileHash: options.realmProfileHash ?? PROFILE_HASH,
     inputFrameSha256: options.realmInputFrameSha256 ?? actualFrameSha256,

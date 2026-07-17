@@ -121,5 +121,8 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "sideEffects": false
+  "sideEffects": [
+    "./dist/cpp_cute_browser_worker_module.js",
+    "./src/cpp_cute_browser_worker_module.ts"
+  ]
 }

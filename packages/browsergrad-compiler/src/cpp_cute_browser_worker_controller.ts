@@ -14,44 +14,34 @@ import {
   type PrepareCppCuteBrowserWorkerInvocationInput,
   type ValidatedCppCuteBrowserWorkerResultFrame,
 } from "./cpp_cute_browser_worker_protocol.js";
+import {
+  CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
+  type CppCuteBrowserWorkerControllerFailureMessage,
+  type CppCuteBrowserWorkerControllerInboundMessage,
+  type CppCuteBrowserWorkerControllerTerminalMessage,
+} from "./cpp_cute_browser_worker_messages.js";
+import {
+  CPP_CUTE_BROWSER_WORKER_TRANSFER_MAJOR,
+  CPP_CUTE_BROWSER_WORKER_TRANSFER_MINOR,
+  CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
+  type CppCuteBrowserWorkerTransferMessage,
+} from "./cpp_cute_browser_worker_transfer.js";
 
-export const CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL =
-  "browsergrad.compiler.cpp-cute.browser-worker-controller@1";
+export { CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL };
+export type {
+  CppCuteBrowserWorkerControllerFailureMessage,
+  CppCuteBrowserWorkerControllerTerminalMessage,
+};
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_IMPLEMENTATION_STATUS =
   "missing-self-contained-package-worker-and-transferred-emscripten-factory";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const INVOCATION_ID = /^bg\.cpp\.browser-worker-invocation\.sha256\.[0-9a-f]{64}$/u;
 const REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
-
-export interface CppCuteBrowserWorkerControllerLaunchMessage {
-  readonly kind: "browsergrad-cpp-cute-worker-launch";
-  readonly version: 1;
-  readonly controllerProtocol: typeof CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL;
-  readonly invocationId: string;
-  readonly invocationNonceSha256: string;
-  readonly invocationBytes: Uint8Array;
-  readonly profileRegionBytes: Uint8Array;
-  readonly requestRegionBytes: Uint8Array;
-  readonly clangWasmBytes: Uint8Array;
-  readonly sourceSnapshots: readonly {
-    readonly virtualPath: string;
-    readonly bytes: Uint8Array;
-  }[];
-}
-
-export interface CppCuteBrowserWorkerControllerTerminalMessage {
-  readonly kind: "browsergrad-cpp-cute-worker-terminal";
-  readonly version: 1;
-  readonly controllerProtocol: typeof CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL;
-  readonly invocationId: string;
-  readonly invocationNonceSha256: string;
-  readonly controlBytes: Uint8Array;
-  readonly artifactBytes: Uint8Array;
-}
+const WORKER_FAILURE_CODE = /^BG-[A-Z0-9-]+$/u;
 
 export interface CppCuteBrowserWorkerPlatformWorker {
-  postMessage(message: CppCuteBrowserWorkerControllerLaunchMessage, transfer: Transferable[]): void;
+  postMessage(message: CppCuteBrowserWorkerTransferMessage, transfer: readonly ArrayBuffer[]): void;
   addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void;
   addEventListener(type: "error" | "messageerror", listener: (event: unknown) => void): void;
   removeEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void;
@@ -122,6 +112,7 @@ export type CppCuteBrowserWorkerControllerErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CANCELLED"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TIMEOUT"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-ERROR"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-FAILURE"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CLEANUP"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-UNVERIFIED";
@@ -135,6 +126,22 @@ export class CppCuteBrowserWorkerControllerError extends Error {
   ) {
     super(`${code}: ${message}`, options);
     this.name = "CppCuteBrowserWorkerControllerError";
+  }
+}
+
+/** Machine-readable authenticated infrastructure failure reported by the owned Worker. */
+export class CppCuteBrowserWorkerReportedFailureError
+  extends CppCuteBrowserWorkerControllerError {
+  constructor(
+    readonly workerFailure: CppCuteBrowserWorkerControllerFailureMessage,
+  ) {
+    super(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-FAILURE",
+      "$.terminal.failure",
+      `owned Worker failed during ${workerFailure.phase}: ` +
+        `${workerFailure.failureCode} at ${workerFailure.failurePath}`,
+    );
+    this.name = "CppCuteBrowserWorkerReportedFailureError";
   }
 }
 
@@ -160,7 +167,8 @@ interface LaunchCopies {
   readonly invocationBytes: Uint8Array;
   readonly profileRegionBytes: Uint8Array;
   readonly requestRegionBytes: Uint8Array;
-  readonly clangWasmBytes: Uint8Array;
+  readonly assetManifestBytes: Uint8Array;
+  readonly assets: readonly { readonly assetId: string; readonly bytes: Uint8Array }[];
   readonly sourceSnapshots: readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[];
 }
 
@@ -208,7 +216,8 @@ export interface PrepareCppCuteBrowserWorkerControllerTestInvocationInput {
   readonly invocationBytes: Uint8Array;
   readonly profileRegionBytes: Uint8Array;
   readonly requestRegionBytes: Uint8Array;
-  readonly clangWasmBytes: Uint8Array;
+  readonly assetManifestBytes: Uint8Array;
+  readonly assets: readonly { readonly assetId: string; readonly bytes: Uint8Array }[];
   readonly sourceSnapshots: readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[];
   readonly maxWallTimeMs: number;
   readonly expectedControlBytes: Uint8Array;
@@ -227,7 +236,7 @@ export async function __prepareCppCuteBrowserWorkerControllerInvocationForTest(
 ): Promise<PreparedCppCuteBrowserWorkerControllerTestInvocation> {
   const values = exactDataRecord(input, "$.input", [
     "invocationId", "profileHash", "requestId", "invocationNonceSha256", "workerModuleBytes",
-    "invocationBytes", "profileRegionBytes", "requestRegionBytes", "clangWasmBytes",
+    "invocationBytes", "profileRegionBytes", "requestRegionBytes", "assetManifestBytes", "assets",
     "sourceSnapshots", "maxWallTimeMs", "expectedControlBytes", "expectedArtifactBytes",
   ]);
   const invocationId = pattern(values["invocationId"], INVOCATION_ID, "$.input.invocationId");
@@ -240,7 +249,11 @@ export async function __prepareCppCuteBrowserWorkerControllerInvocationForTest(
     invocationBytes: snapshotBytes(values["invocationBytes"], "$.input.invocationBytes"),
     profileRegionBytes: snapshotBytes(values["profileRegionBytes"], "$.input.profileRegionBytes"),
     requestRegionBytes: snapshotBytes(values["requestRegionBytes"], "$.input.requestRegionBytes"),
-    clangWasmBytes: snapshotBytes(values["clangWasmBytes"], "$.input.clangWasmBytes"),
+    assetManifestBytes: snapshotBytes(
+      values["assetManifestBytes"],
+      "$.input.assetManifestBytes",
+    ),
+    assets: snapshotTestAssets(values["assets"]),
     sourceSnapshots: snapshotTestSources(values["sourceSnapshots"]),
   });
   const expectedControl = snapshotBytes(values["expectedControlBytes"], "$.input.expectedControlBytes");
@@ -399,7 +412,7 @@ async function executeWithPlatform(
     const onMessage = (event: { readonly data: unknown }): void => {
       if (settled) return;
       settled = true;
-      let terminalMessage: CppCuteBrowserWorkerControllerTerminalMessage;
+      let terminalMessage: CppCuteBrowserWorkerControllerInboundMessage;
       let end: number;
       try {
         end = checkedNow(platform.monotonicNowMilliseconds(), "$.hostTime.terminal");
@@ -422,6 +435,16 @@ async function executeWithPlatform(
       if (cleanupError !== undefined) {
         try { invocation.discard("worker-unavailable"); } catch { /* preserve cleanup failure */ }
         reject(cleanupError);
+        return;
+      }
+      if (terminalMessage.kind === "browsergrad-cpp-cute-worker-failure") {
+        try {
+          invocation.discard("worker-unavailable");
+        } catch (cause) {
+          reject(cause);
+          return;
+        }
+        reject(new CppCuteBrowserWorkerReportedFailureError(terminalMessage));
         return;
       }
       terminalStarted = true;
@@ -501,40 +524,53 @@ async function executeWithPlatform(
 function createLaunchMessage(
   invocation: InvocationAdapter,
   launch: LaunchCopies,
-): CppCuteBrowserWorkerControllerLaunchMessage {
-  return {
-    kind: "browsergrad-cpp-cute-worker-launch",
-    version: 1,
-    controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
+): CppCuteBrowserWorkerTransferMessage {
+  return Object.freeze({
+    kind: "browsergrad-cpp-cute-worker-transfer",
+    version: Object.freeze({
+      major: CPP_CUTE_BROWSER_WORKER_TRANSFER_MAJOR,
+      minor: CPP_CUTE_BROWSER_WORKER_TRANSFER_MINOR,
+    }),
+    protocol: CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
     invocationId: invocation.invocationId,
     invocationNonceSha256: invocation.invocationNonceSha256,
     invocationBytes: launch.invocationBytes,
     profileRegionBytes: launch.profileRegionBytes,
     requestRegionBytes: launch.requestRegionBytes,
-    clangWasmBytes: launch.clangWasmBytes,
+    assetManifestBytes: launch.assetManifestBytes,
+    assets: launch.assets,
     sourceSnapshots: launch.sourceSnapshots,
-  };
+  });
 }
 
-function transferList(message: CppCuteBrowserWorkerControllerLaunchMessage): Transferable[] {
+function transferList(message: CppCuteBrowserWorkerTransferMessage): ArrayBuffer[] {
   return [
-    message.invocationBytes.buffer,
-    message.profileRegionBytes.buffer,
-    message.requestRegionBytes.buffer,
-    message.clangWasmBytes.buffer,
-    ...message.sourceSnapshots.map((source) => source.bytes.buffer),
+    message.invocationBytes.buffer as ArrayBuffer,
+    message.profileRegionBytes.buffer as ArrayBuffer,
+    message.requestRegionBytes.buffer as ArrayBuffer,
+    message.assetManifestBytes.buffer as ArrayBuffer,
+    ...message.assets.map((asset) => asset.bytes.buffer as ArrayBuffer),
+    ...message.sourceSnapshots.map((source) => source.bytes.buffer as ArrayBuffer),
   ];
 }
 
 function parseTerminalMessage(
   value: unknown,
   invocation: InvocationAdapter,
-): CppCuteBrowserWorkerControllerTerminalMessage {
-  const data = exactDataRecord(value, "$.terminal", [
-    "kind", "version", "controllerProtocol", "invocationId", "invocationNonceSha256",
-    "controlBytes", "artifactBytes",
-  ]);
-  if (data["kind"] !== "browsergrad-cpp-cute-worker-terminal" || data["version"] !== 1 ||
+): CppCuteBrowserWorkerControllerInboundMessage {
+  const kind = terminalKind(value);
+  const keys = kind === "browsergrad-cpp-cute-worker-terminal"
+    ? [
+        "kind", "version", "controllerProtocol", "invocationId", "invocationNonceSha256",
+        "controlBytes", "artifactBytes",
+      ]
+    : [
+        "kind", "version", "controllerProtocol", "invocationId", "invocationNonceSha256",
+        "phase", "failureCode", "failurePath", "workerExecutionObserved",
+        "loweringAuthorityMinted",
+      ];
+  const data = exactDataRecord(value, "$.terminal", keys);
+  if (data["version"] !== 1 ||
       data["controllerProtocol"] !== CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL) {
     terminal("$.terminal", "terminal envelope differs from controller protocol v1");
   }
@@ -542,8 +578,42 @@ function parseTerminalMessage(
       data["invocationNonceSha256"] !== invocation.invocationNonceSha256) {
     terminal("$.terminal.invocationId", "terminal envelope differs from the controller-owned invocation or nonce");
   }
+  if (kind === "browsergrad-cpp-cute-worker-failure") {
+    if (data["phase"] !== "runtime-adoption" && data["phase"] !== "runtime-start") {
+      terminal("$.terminal.phase", "Worker failure phase is not recognized");
+    }
+    if (typeof data["failureCode"] !== "string" ||
+        !WORKER_FAILURE_CODE.test(data["failureCode"])) {
+      terminal("$.terminal.failureCode", "Worker failure code is invalid");
+    }
+    const failureCode = data["failureCode"];
+    if (typeof data["failurePath"] !== "string" ||
+        !validWorkerFailurePath(data["failurePath"])) {
+      terminal("$.terminal.failurePath", "Worker failure path is invalid");
+    }
+    const failurePath = data["failurePath"];
+    if (data["workerExecutionObserved"] !== false ||
+        data["loweringAuthorityMinted"] !== false) {
+      terminal(
+        "$.terminal.workerExecutionObserved",
+        "Worker failure cannot claim execution or lowering authority",
+      );
+    }
+    return Object.freeze({
+      kind,
+      version: 1,
+      controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
+      invocationId: invocation.invocationId,
+      invocationNonceSha256: invocation.invocationNonceSha256,
+      phase: data["phase"],
+      failureCode,
+      failurePath,
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+    }) as CppCuteBrowserWorkerControllerFailureMessage;
+  }
   return Object.freeze({
-    kind: "browsergrad-cpp-cute-worker-terminal",
+    kind,
     version: 1,
     controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
     invocationId: invocation.invocationId,
@@ -559,6 +629,37 @@ function parseTerminalMessage(
       invocation.maxArtifactByteLength,
     ),
   });
+}
+
+function terminalKind(
+  value: unknown,
+): CppCuteBrowserWorkerControllerInboundMessage["kind"] {
+  if (typeof value !== "object" || value === null) {
+    terminal("$.terminal", "terminal message must be a plain data record");
+  }
+  let descriptor: PropertyDescriptor | undefined;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(value, "kind");
+  } catch (cause) {
+    terminal("$.terminal.kind", "terminal kind is not safely inspectable", { cause });
+  }
+  if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
+    terminal("$.terminal.kind", "terminal kind must be an enumerable data property");
+  }
+  if (descriptor.value !== "browsergrad-cpp-cute-worker-terminal" &&
+      descriptor.value !== "browsergrad-cpp-cute-worker-failure") {
+    terminal("$.terminal.kind", "terminal kind is not recognized");
+  }
+  return descriptor.value as CppCuteBrowserWorkerControllerInboundMessage["kind"];
+}
+
+function validWorkerFailurePath(value: string): boolean {
+  if (!value.startsWith("$") || value.length > 512) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return false;
+  }
+  return true;
 }
 
 function exactTestPlatform(value: unknown): CppCuteBrowserWorkerControllerTestPlatform {
@@ -615,12 +716,33 @@ function copyLaunch(value: LaunchCopies): LaunchCopies {
     invocationBytes: new Uint8Array(value.invocationBytes),
     profileRegionBytes: new Uint8Array(value.profileRegionBytes),
     requestRegionBytes: new Uint8Array(value.requestRegionBytes),
-    clangWasmBytes: new Uint8Array(value.clangWasmBytes),
+    assetManifestBytes: new Uint8Array(value.assetManifestBytes),
+    assets: value.assets.map((asset) => ({
+      assetId: asset.assetId,
+      bytes: new Uint8Array(asset.bytes),
+    })),
     sourceSnapshots: value.sourceSnapshots.map((source) => ({
       virtualPath: source.virtualPath,
       bytes: new Uint8Array(source.bytes),
     })),
   };
+}
+
+function snapshotTestAssets(value: unknown): readonly {
+  readonly assetId: string;
+  readonly bytes: Uint8Array;
+}[] {
+  if (!Array.isArray(value)) invalid("$.input.assets", "expected asset array");
+  return Object.freeze(value.map((entry, index) => {
+    const data = exactDataRecord(entry, `$.input.assets[${index}]`, ["assetId", "bytes"]);
+    if (typeof data["assetId"] !== "string" || data["assetId"].length === 0) {
+      invalid(`$.input.assets[${index}].assetId`, "expected nonempty asset ID");
+    }
+    return Object.freeze({
+      assetId: data["assetId"],
+      bytes: snapshotBytes(data["bytes"], `$.input.assets[${index}].bytes`),
+    });
+  }));
 }
 
 function snapshotTestSources(value: unknown): readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[] {

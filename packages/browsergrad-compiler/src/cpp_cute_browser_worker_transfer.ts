@@ -183,6 +183,7 @@ export interface PreparedCppCuteBrowserWorkerRealmInput {
   readonly authority: "realm-local-runtime-input-only";
   readonly protocol: typeof CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL;
   readonly invocationId: string;
+  readonly invocationNonceSha256: string;
   readonly requestId: string;
   readonly profileHash: string;
   readonly inputFrameSha256: string;
@@ -212,6 +213,7 @@ export interface CppCuteBrowserWorkerRealmInputRecord {
 export interface CppCuteBrowserWorkerRealmInputInspection {
   readonly state: "prepared" | "adopted" | "discarded";
   readonly invocationId: string;
+  readonly invocationNonceSha256: string;
   readonly requestId: string;
   readonly profileHash: string;
   readonly inputFrameSha256: string;
@@ -510,6 +512,7 @@ export async function reconstructCppCuteBrowserWorkerTransfer(
       authority: "realm-local-runtime-input-only",
       protocol: CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
       invocationId: invocation.invocationId,
+      invocationNonceSha256: invocationRecord.invocationNonceSha256,
       requestId: invocation.requestId,
       profileHash: invocation.profileHash,
       inputFrameSha256: inputFrame.frameSha256,
@@ -539,6 +542,7 @@ export async function reconstructCppCuteBrowserWorkerTransfer(
       active,
       inspection: NATIVE_OBJECT_FREEZE({
         invocationId: prepared.invocationId,
+        invocationNonceSha256: prepared.invocationNonceSha256,
         requestId: prepared.requestId,
         profileHash: prepared.profileHash,
         inputFrameSha256: prepared.inputFrameSha256,

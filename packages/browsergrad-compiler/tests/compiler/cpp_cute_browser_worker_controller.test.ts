@@ -3,12 +3,13 @@ import {
   CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
   CPP_CUTE_BROWSER_WORKER_RUNTIME_IMPLEMENTATION_STATUS,
   CppCuteBrowserWorkerControllerError,
+  CppCuteBrowserWorkerReportedFailureError,
   __executeCppCuteBrowserWorkerWithPlatformForTest,
   __prepareCppCuteBrowserWorkerControllerInvocationForTest,
   __unwrapCppCuteBrowserWorkerTestSimulationForTest,
   executeCppCuteBrowserWorker,
   unwrapObservedCppCuteBrowserWorkerExecution,
-  type CppCuteBrowserWorkerControllerLaunchMessage,
+  type CppCuteBrowserWorkerControllerFailureMessage,
   type CppCuteBrowserWorkerControllerTerminalMessage,
   type CppCuteBrowserWorkerControllerTestPlatform,
   type CppCuteBrowserWorkerTestSimulation,
@@ -16,6 +17,10 @@ import {
   type ObservedCppCuteBrowserWorkerExecution,
   type PreparedCppCuteBrowserWorkerControllerTestInvocation,
 } from "../../src/cpp_cute_browser_worker_controller.js";
+import {
+  CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
+  type CppCuteBrowserWorkerTransferMessage,
+} from "../../src/cpp_cute_browser_worker_transfer.js";
 
 const HASH = "a".repeat(64);
 const NONCE = "b".repeat(64);
@@ -32,12 +37,15 @@ class FakeWorker implements CppCuteBrowserWorkerPlatformWorker {
     error: new Set<ErrorListener>(),
     messageerror: new Set<ErrorListener>(),
   };
-  posted: CppCuteBrowserWorkerControllerLaunchMessage | undefined;
-  transfer: Transferable[] | undefined;
+  posted: CppCuteBrowserWorkerTransferMessage | undefined;
+  transfer: readonly ArrayBuffer[] | undefined;
   terminateCalls = 0;
   throwOnTerminate = false;
 
-  postMessage(message: CppCuteBrowserWorkerControllerLaunchMessage, transfer: Transferable[]): void {
+  postMessage(
+    message: CppCuteBrowserWorkerTransferMessage,
+    transfer: readonly ArrayBuffer[],
+  ): void {
     this.posted = message;
     this.transfer = transfer;
   }
@@ -155,8 +163,9 @@ async function prepareTestInvocation(
     invocationBytes: new Uint8Array([10]),
     profileRegionBytes: new Uint8Array([11]),
     requestRegionBytes: new Uint8Array([12]),
-    clangWasmBytes: new Uint8Array([13]),
-    sourceSnapshots: [{ virtualPath: "/main.cu", bytes: new Uint8Array([14]) }],
+    assetManifestBytes: new Uint8Array([13]),
+    assets: [{ assetId: "clang-wasm", bytes: new Uint8Array([14]) }],
+    sourceSnapshots: [{ virtualPath: "/main.cu", bytes: new Uint8Array([15]) }],
     maxWallTimeMs: overrides.maxWallTimeMs ?? 500,
     expectedControlBytes: overrides.expectedControlBytes ?? CONTROL_BYTES,
     expectedArtifactBytes: overrides.expectedArtifactBytes ?? ARTIFACT_BYTES,
@@ -178,7 +187,25 @@ function terminalMessage(
   };
 }
 
-async function waitForPost(worker: FakeWorker): Promise<CppCuteBrowserWorkerControllerLaunchMessage> {
+function failureMessage(
+  overrides: Partial<CppCuteBrowserWorkerControllerFailureMessage> = {},
+): CppCuteBrowserWorkerControllerFailureMessage {
+  return {
+    kind: "browsergrad-cpp-cute-worker-failure",
+    version: 1,
+    controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
+    invocationId: `bg.cpp.browser-worker-invocation.sha256.${HASH}`,
+    invocationNonceSha256: NONCE,
+    phase: "runtime-start",
+    failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
+    failurePath: "$.bundle",
+    workerExecutionObserved: false,
+    loweringAuthorityMinted: false,
+    ...overrides,
+  };
+}
+
+async function waitForPost(worker: FakeWorker): Promise<CppCuteBrowserWorkerTransferMessage> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (worker.posted !== undefined) return worker.posted;
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -239,15 +266,19 @@ describe("C++/CuTe host-owned browser Worker controller", () => {
     expect(harness.order[0]).toBe("blob");
     expect(harness.blobCopies[0]).toEqual(WORKER_BYTES);
     expect(launch).toMatchObject({
-      kind: "browsergrad-cpp-cute-worker-launch",
-      version: 1,
-      controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
+      kind: "browsergrad-cpp-cute-worker-transfer",
+      version: { major: 1, minor: 0 },
+      protocol: CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
       invocationId: invocation.invocationId,
       invocationNonceSha256: NONCE,
     });
-    expect(launch.clangWasmBytes).toEqual(new Uint8Array([13]));
-    expect(launch.sourceSnapshots[0]?.bytes).toEqual(new Uint8Array([14]));
-    expect(harness.worker.transfer).toHaveLength(5);
+    expect(launch.assetManifestBytes).toEqual(new Uint8Array([13]));
+    expect(launch.assets[0]).toMatchObject({
+      assetId: "clang-wasm",
+      bytes: new Uint8Array([14]),
+    });
+    expect(launch.sourceSnapshots[0]?.bytes).toEqual(new Uint8Array([15]));
+    expect(harness.worker.transfer).toHaveLength(6);
 
     harness.worker.emitMessage(terminalMessage());
     harness.worker.emitMessage(terminalMessage());
@@ -312,6 +343,46 @@ describe("C++/CuTe host-owned browser Worker controller", () => {
     harness.worker.emitMessage(terminalMessage());
     expect(harness.worker.terminateCalls).toBe(1);
     expect(harness.revoked).toEqual(["blob:verified-worker"]);
+  });
+
+  it("accepts one authenticated typed Worker failure without treating it as a result", async () => {
+    const invocation = await prepareTestInvocation();
+    const harness = createHarness();
+    const promise = __executeCppCuteBrowserWorkerWithPlatformForTest(invocation, harness.platform);
+    await waitForPost(harness.worker);
+    const failure = failureMessage();
+    harness.worker.emitMessage(failure);
+
+    await expect(promise).rejects.toMatchObject({
+      name: "CppCuteBrowserWorkerReportedFailureError",
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-FAILURE",
+      path: "$.terminal.failure",
+      workerFailure: failure,
+    });
+    expect(harness.worker.terminateCalls).toBe(1);
+    expect(harness.revoked).toEqual(["blob:verified-worker"]);
+    expect(() => harness.worker.emitMessage(terminalMessage())).not.toThrow();
+  });
+
+  it("rejects failure envelopes that claim execution authority or use a wrong nonce", async () => {
+    for (const failure of [
+      failureMessage({ workerExecutionObserved: true as never }),
+      failureMessage({ invocationNonceSha256: "c".repeat(64) }),
+    ]) {
+      const invocation = await prepareTestInvocation();
+      const harness = createHarness();
+      const promise = __executeCppCuteBrowserWorkerWithPlatformForTest(
+        invocation,
+        harness.platform,
+      );
+      await waitForPost(harness.worker);
+      harness.worker.emitMessage(failure);
+      await expectControllerError(
+        promise,
+        "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+      );
+      expect(harness.worker.terminateCalls).toBe(1);
+    }
   });
 
   it("uses the owned host timeout and destructively retires the Worker", async () => {
@@ -587,5 +658,10 @@ describe("C++/CuTe host-owned browser Worker controller", () => {
     );
     expect(error.name).toBe("CppCuteBrowserWorkerControllerError");
     expect(error.message).toContain("CONTROLLER-CAPABILITY");
+    const reported = new CppCuteBrowserWorkerReportedFailureError(failureMessage());
+    expect(reported).toBeInstanceOf(CppCuteBrowserWorkerControllerError);
+    expect(reported.workerFailure.failureCode).toBe(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
+    );
   });
 });

@@ -87,6 +87,16 @@ export interface PrepareCppCuteBrowserWorkerRuntimeBindingInput {
   readonly realmInput: PreparedCppCuteBrowserWorkerRealmInput;
 }
 
+/**
+ * One successful runtime terminal result. The entrypoint snapshots these bytes
+ * into dedicated transferable buffers before handing them to the controller.
+ */
+export interface CppCuteBrowserWorkerRuntimeResult {
+  readonly kind: "browsergrad-cpp-cute-runtime-result";
+  readonly controlBytes: Uint8Array;
+  readonly artifactBytes: Uint8Array;
+}
+
 export interface CppCuteBrowserWorkerRuntimeBindingInspection {
   readonly state: "prepared" | "blocked-terminal" | "discarded";
   readonly invocationId: string;
@@ -269,7 +279,7 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
  */
 export async function startCppCuteBrowserWorkerRuntime(
   binding: PreparedCppCuteBrowserWorkerRuntimeBinding,
-): Promise<never> {
+): Promise<CppCuteBrowserWorkerRuntimeResult> {
   const stored = storedBinding(binding);
   if (stored.state !== "prepared" || stored.active === null) {
     state("$.binding", "runtime binding already reached its terminal blocked state");

@@ -427,6 +427,15 @@ import {
   inspectCppCuteBrowserWorkerRuntimeBinding,
   prepareCppCuteBrowserWorkerRuntimeBinding,
 } from "../../src/cpp_cute_browser_worker_runtime.js";
+import {
+  handleCppCuteBrowserWorkerTransfer,
+  installCppCuteBrowserWorkerEntry,
+  type CppCuteBrowserWorkerEntryMessageListener,
+  type CppCuteBrowserWorkerEntryScope,
+} from "../../src/cpp_cute_browser_worker_entry.js";
+import type {
+  CppCuteBrowserWorkerControllerInboundMessage,
+} from "../../src/cpp_cute_browser_worker_messages.js";
 
 const PROFILE_HASH = "a".repeat(64);
 const REQUEST_HASH = "b".repeat(64);
@@ -597,6 +606,7 @@ describe("C++/CuTe browser Worker transfer boundary", () => {
     expect(realmInput).toMatchObject({
       authority: "realm-local-runtime-input-only",
       invocationId: INVOCATION_ID,
+      invocationNonceSha256: NONCE,
       requestId: REQUEST_ID,
       profileHash: PROFILE_HASH,
       inputFrameSha256: await sha256Hex(INPUT_FRAME_BYTES),
@@ -654,6 +664,93 @@ describe("C++/CuTe browser Worker transfer boundary", () => {
     expect(downstream.discardInvocation).toHaveBeenCalledWith(
       expect.any(Object),
       "abandoned",
+    );
+  });
+
+  it("runs canonical transfer through the Worker entry and reports only typed blocked-start failure", async () => {
+    const taken = takeEnvironment();
+    const transferredViews = messageByteViews(taken.message);
+    const terminalMessages: CppCuteBrowserWorkerControllerInboundMessage[] = [];
+
+    await handleCppCuteBrowserWorkerTransfer(
+      taken.message,
+      (message) => terminalMessages.push(message),
+    );
+
+    expect(transferredViews.every((view) => view.byteLength === 0)).toBe(true);
+    expect(terminalMessages).toEqual([{
+      kind: "browsergrad-cpp-cute-worker-failure",
+      version: 1,
+      controllerProtocol: "browsergrad.compiler.cpp-cute.browser-worker-controller@1",
+      invocationId: INVOCATION_ID,
+      invocationNonceSha256: NONCE,
+      phase: "runtime-start",
+      failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
+      failurePath: "$.bundle",
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+    }]);
+    expect(downstream.discardMount).toHaveBeenCalledTimes(1);
+    expect(downstream.discardInvocation).toHaveBeenCalledWith(
+      expect.any(Object),
+      "worker-unavailable",
+    );
+  });
+
+  it("installs one one-shot Worker message listener with no loader or network effect", async () => {
+    const listeners = new Set<CppCuteBrowserWorkerEntryMessageListener>();
+    const terminalMessages: CppCuteBrowserWorkerControllerInboundMessage[] = [];
+    const queuedFailures: (() => void)[] = [];
+    const scope: CppCuteBrowserWorkerEntryScope = {
+      addEventListener: (_type, listener) => listeners.add(listener),
+      removeEventListener: (_type, listener) => listeners.delete(listener),
+      postMessage: (message, transfer) => {
+        expect(transfer).toEqual([]);
+        terminalMessages.push(message);
+      },
+      queueMicrotask: (callback) => queuedFailures.push(callback),
+    };
+    installCppCuteBrowserWorkerEntry(scope);
+    expect(listeners.size).toBe(1);
+
+    const listener = [...listeners][0]!;
+    listener({ data: takeEnvironment().message });
+    expect(listeners.size).toBe(0);
+    for (let attempt = 0; terminalMessages.length === 0 && attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(terminalMessages).toHaveLength(1);
+    expect(terminalMessages[0]).toMatchObject({
+      kind: "browsergrad-cpp-cute-worker-failure",
+      phase: "runtime-start",
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+    });
+    expect(queuedFailures).toEqual([]);
+  });
+
+  it("routes an untrusted pre-identity transfer rejection to Worker error, not a terminal frame", async () => {
+    const listeners = new Set<CppCuteBrowserWorkerEntryMessageListener>();
+    const terminalMessages: CppCuteBrowserWorkerControllerInboundMessage[] = [];
+    const queuedFailures: (() => void)[] = [];
+    installCppCuteBrowserWorkerEntry({
+      addEventListener: (_type, listener) => listeners.add(listener),
+      removeEventListener: (_type, listener) => listeners.delete(listener),
+      postMessage: (message) => terminalMessages.push(message),
+      queueMicrotask: (callback) => queuedFailures.push(callback),
+    });
+    [...listeners][0]!({ data: Object.freeze({ kind: "attacker" }) });
+    for (let attempt = 0; queuedFailures.length === 0 && attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(terminalMessages).toEqual([]);
+    expect(queuedFailures).toHaveLength(1);
+    expect(() => queuedFailures[0]!()).toThrowError(
+      expect.objectContaining({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-TRANSFER-INVALID",
+      }),
     );
   });
 
