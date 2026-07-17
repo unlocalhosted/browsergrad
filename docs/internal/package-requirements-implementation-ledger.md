@@ -82,6 +82,8 @@ browser-local producer evidence or make Docker a product dependency.
 | Gate 3 Worker invocation/result protocol | `partial` | Exact profile/asset/VFS/request/ABI/raw-Wasm identities bind one invocation. Host transfer preparation is single-reservation/single-materialization; its closed message carries no Worker module or network authority. The entry installs one listener, removes it before asynchronous work, reconstructs local authority, settles pre-adoption ownership exactly once, and emits one discriminated terminal success or bounded typed failure. Success bytes are copied into standalone transferable buffers. The controller test shell posts the exact transfer, owns nonce/event-source/replay cleanup, and exposes authenticated failure phase/code/path through a dedicated typed error. Pure result validation remains `caller-frame-consistency-only`; production execution and lowering authority remain false. | Bundle the reviewed generated factory and Worker bytes, then deliberately enable the captured production platform adapter only after the real asset/build review. | Focused 4 files/62 tests; real Chromium one-shot/error path 1/1; independent final review found no P0/P1; no production issuer, valid Worker compile, C++ ABI execution, or lowering authority exists. |
 | Gate 3 deterministic header-pack selection and assembly | `partial` | One opaque selection binds the exact prepared build lock and frontend profile to complete compiler-resource, libc++, CUDA, CuTe/CUTLASS, and Linux-sysroot inventories. Selection and content-set hashes use explicit closed canonical limits. Offline assembly rechecks exact unshared bytes immediately before hashing, writes and re-inspects the canonical VFS pack, and enforces aggregate asset ceilings plus a conservative byte-copy projection that includes retained outputs, source/index/canonical buffers, and the inspector's three full-pack copies. Policy is intentionally non-authoritative: exact notice bytes and externally reviewed per-file license mappings remain blockers; output, build, reproducibility, and release facts are false. | Acquire the pinned upstream inputs; verify exact notice bytes and an external file-license map; materialize and independently inspect all real packs; bind their observed output identities into the asset/build-provenance chain; then mount them only inside the package Worker. | Focused header/VFS 2 files/19 tests; strict typecheck/lint/architecture; independent final P0/P1 review; full compiler 59 files/1,316 tests; release package gate 19 Python and 35 Node security tests. No network, build, real pack, Worker, Docker, or browser execution occurred. |
 
+| Gate 3 native compile-session foundation | `partial` | Runtime ABI 1.1 now pins canonical-region decoder ceilings and accounting. Extractor source closure contains allocation-free canonical JSON validation and incremental SHA-256 with strict UTF-8, canonical escapes, UTF-16 key order, duplicate rejection, safe-integer parsing, bounded depth/nodes/strings/containers, sticky hash lifecycle, and fixed independent vectors. Source identities and every dependent ABI/build/profile/asset fixture are repinned. Normal Linux CI runs the build-plan/native gate. | Implement one closed noncopyable typed compile session; decode complete profile/request schemas; recompute profile/contract/request/file/entry identities; verify exact VFS bytes only after canonical/identity checks; privately bind effective output ceiling. Resolve the recorded temporal-macro, warning-policy, virtual-path, opened-source subset, pass observer, and diagnostic-normalization gaps first. | Commit `719cca9b`; compiler build/typecheck/lint; full compiler 65 files/1,403 tests; build-plan/native 7 files/61 passed/3 Darwin skips; architecture and whitespace checks. No pinned Emscripten compile, executed Wasm, VFS read, Clang action, or artifact output. |
+
 ### Optional native/AOT parity ledger
 
 These rows are not portable-product work or Gate 3 critical-path evidence.
@@ -329,6 +331,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-100 | 2026-07-17 | accepted | The package runtime adopts one reconstructed realm input containing exact invocation, canonical frame, verified Wasm, pre-bind VFS mount, and stable imports—not a memory-bound session. Adoption is one-time, rechecks hashes and liveness after asynchronous work, and preserves the same import references until a future reviewed factory binds only `instance.exports.memory`. Preparation failure and explicit abandonment use `abandoned`; a start blocked by missing package-owned Worker/factory capability uses `worker-unavailable`. All paths terminalize invocation and mount with aggregate cleanup reporting. | Binding memory before Emscripten instantiation recreates the import cycle, while accepting a host-bound session recreates the cross-realm authority defect. Phase-accurate terminal reasons prevent lifecycle telemetry from claiming a missing Worker when the caller simply abandoned work, and deterministic aggregate cleanup prevents a secondary failure from hiding retained authority. |
 | D-101 | 2026-07-17 | accepted | Use one package Worker entry and one controller terminal protocol for both future success and current infrastructure failure. The entry removes its sole message listener before asynchronous work, consumes only the canonical transfer, derives terminal identity only after reconstruction, and routes pre-identity rejection through the Worker `error` event rather than self-attesting an invocation. After trusted identity exists it emits exactly one discriminated outcome: standalone transferable control/artifact bytes on success, or bounded phase/code/path fields on failure with execution and lowering fixed false. Entry owns cleanup only while the reconstructed realm input is still prepared; runtime owns cleanup after adoption. The controller preserves authenticated failure fields in a dedicated typed error and never requires clients to parse an error string. | A failure-only callback, generic launch message, or flattened error string would force an API redesign when Wasm execution becomes available. Unconditional entry cleanup would double-discard runtime-owned authority, while no pre-adoption settlement would leak it. A success-capable one-shot protocol and explicit ownership handoff close those future refactor seams without enabling the still-unreviewed runtime. |
 | D-102 | 2026-07-17 | accepted | Order canonical set-like wire strings with explicit lexicographic UTF-16 code-unit comparison, matching canonical JSON object-key order. Locale collation is forbidden in profile, request, artifact, and provenance validation or normalization. | `localeCompare` depends on ambient locale/ICU data and cannot be reproduced reliably by the C++/Wasm decoder. A shared comparator plus Unicode vectors makes order and identity portable without restricting valid normalized POSIX virtual paths to ASCII. |
+| D-103 | 2026-07-17 | accepted | Runtime ABI 1.1 owns exact per-region canonical-JSON decode budgets and accounting. Native frame work must validate canonical bytes before allocation or VFS access, use bounded locale-free UTF-16 key order and safe-integer numbers, and recompute identities through BrowserGrad-owned SHA-256. The primitive parser has a compiled recursion ceiling of 256 while runtime v1 pins 128. Canonical validation and hashing are part of the exact extractor source/build lock and Linux CI gate, but they grant no typed profile/request, Clang, Wasm, or artifact authority alone. | Decoder limits otherwise become an unversioned implementation detail and valid producer bytes can trigger unbounded native work. Direct canonical-byte validation avoids a second DOM/reserialization truth. A reviewed local SHA implementation avoids LLVM/OpenSSL/environment dependencies. Explicit proof-layer limits prevent host-native tests from masquerading as executed-Wasm conformance. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -1364,12 +1367,38 @@ affected implementation slice is marked complete.
 | 2026-07-17 | Gate 3 ABI 1.1 module-owned result lifecycle | Strict native C++ lifecycle and UBSan model using TypeScript-verifier-accepted canonical artifact-v3 bytes; source-closure/build-lock Vitest; compiler build/typecheck/lint; independent adversarial review and final re-review; `pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler`; `pnpm test:release-packages`; `git diff --check` | Passed after review fixes: native lifecycle 2 passed/1 Darwin ASan skip; build-plan/source/native models 5 files/56 passed/2 Darwin ASan skips; focused ABI/build-lock/Worker 3 files/81 tests; full compiler 65 files/1,398 tests; optional Docker 2 files/96 tests; release 19 Python and 35 Node security tests plus packed/fresh consumers. Review closed status-zero with a live review blocker, noncanonical success-fixture bytes, global-only output limits, sink-failure status masking, and inaccurate poison cleanup modeling. Runtime success now requires no blocker, one strictly bound invocation ceiling, one committed nonempty module-owned allocation, healthy metrics, and disjoint nonwrapping Wasm32 ranges. Exact input free preserves the immutable result; reset releases live owners while poisoned modules rely on mandatory Worker/module disposal. Final independent review found no P0/P1. Commit `f6431c9a` is pushed to `origin/main`. The real artifact callback remains the status-106 CUDA-dual-pass placeholder; no Wasm build or ABI execution occurred. | Next decode the canonical profile/request regions into a closed compile session and bind its `maxOutputBytes` before real CUDA passes/writer integration. |
 | 2026-07-17 | Gate 3 locale-free cross-language wire ordering | Semantic-core canonical/hash tests; focused profile/request/provenance/artifact Vitest; semantic-core and compiler typecheck/build; focused oxlint; `git diff --check` | Passed: semantic-core 12 files/108 tests; compiler 4 files/72 tests; request-only 1 file/12 tests; both package typechecks, both builds, focused lint, and whitespace clean. Shared UTF-16 code-unit comparison now owns set-like wire order and canonical object-key sorting; all C++/CuTe production `localeCompare` use is removed. Unicode vectors cover composed/decomposed text, supplementary code points, and private-use code points. Commit `449fc9d1` is pushed to `origin/main`. | Reuse the same code-unit comparison in the native canonical JSON/session decoder. Do not treat this TypeScript prerequisite as native frame-decode evidence. |
 
+| 2026-07-17 | Gate 3 bounded native canonical/identity foundation | Runtime-ABI/build-lock/profile/assets/Worker Vitest; compiler build/typecheck/lint; Clang-Wasm build-plan/source/native gate; optimized native C++ plus UBSan and platform-gated ASan; independent schema and primitive audits; architecture check; `git diff --check` | Passed after hardening: full compiler 65 files/1,403 tests; build-plan/native 7 files/61 passed/3 Darwin skips; strict runtime/build identity gates, compiler build/typecheck/lint, architecture, and whitespace clean. Review added a compiled parser-depth ceiling, standalone implementation linking, ABI-exact native limits, independent SHA padding/binary vectors, accurate direct-validation policy naming, and Linux CI execution. Commit `719cca9b` is pushed to `origin/main`. This proves native primitives and source closure only: no typed profile/request decode, VFS access, Clang action, Emscripten build, Wasm execution, browser C++, or artifact output occurred. | Resolve the six recorded compile-session contract gaps, then implement the immutable typed decoder and identity/VFS binding before CUDA passes. Run full `verify:compiler` and release gates after that integrated producer slice. |
+
 ## Failure and Recovery Log
 
 Record failures that may matter after context loss. Include the exact failing
 command, concise error, suspected cause, resolution or next experiment, and
 whether any files may be left partially changed.
 
+- Compile-session schema audit found six pre-decoder contract gaps: unused
+  request headers conflict with artifact opened-source closure; temporal macros
+  have no reject/pin policy; warning-policy IDs have no closed Clang mapping;
+  TypeScript and native virtual-path predicates disagree on C0/DEL bytes;
+  imported VFS has no pass-scoped successful-read/include-edge observer; and
+  Clang diagnostics have no frozen normalization/mapping contract. Do not let
+  the native decoder or dual-pass actions invent these policies. Resolve and
+  version them in producer-neutral contracts first.
+- First build-plan/native rerun after adding four extractor files failed two
+  deterministic fixture assertions (`fileCount: 12` and the old 12-path list).
+  Executor/plan fixtures now pin all 16 source files; the complete 7-file gate
+  passes 61 tests with three Darwin sanitizer skips.
+- First full compiler test after ABI/build-lock repinning failed only stale
+  profile and asset identity goldens. Canonical values were recomputed through
+  production preparation paths and repinned; 65 files/1,403 tests pass.
+- Primitive review found caller-controlled recursion depth, a canonical test
+  that included its implementation directly, ABI/test limit drift, missing
+  independent SHA boundary vectors, and no normal Linux CI route. The parser
+  now rejects depth ceilings above 256, tests link the standalone translation
+  unit, runtime-v1 limits are source-locked, fixed SHA vectors cover 55/57/63/
+  64/65-byte and binary inputs, and CI runs the native/build-plan gate.
+- The first canonical native fixture compile failed on a C++ vexing-parse
+  vector declaration. Brace initialization fixed the test; optimized and
+  UBSan cases pass. No production source or generated Wasm was left partial.
 - The first ABI-result native run reported one live allocation after reset.
   Runtime ownership was correct; the test allocator stopped at an older freed
   record when `malloc` reused the same native address. Release lookup now
@@ -1388,7 +1417,7 @@ whether any files may be left partially changed.
 - Source edits intentionally invalidated the extractor source set, recipe,
   resource hash, and build-lock ID while review was active. The final stable
   source closure was recomputed once, repinned to source set
-  `cae5aa99d17b5ef2d856be02636f5804a11e017ae39acf44ddcaed9643c04593`,
+  `8652de75e259ce63eada90b42ae6337a417eb76891578d46b549ada9df088fcf`,
   and the strict lock/source gates pass. No generated Wasm existed to mutate.
 - Compile-session audit found set-like profile/request ordering depended on
   ambient `localeCompare`, preventing reproducible C++ parity for Unicode
@@ -2936,6 +2965,25 @@ whether any files may be left partially changed.
   and private-use code points. This is a prerequisite for the native decoder;
   it is not native frame validation or executed-Wasm evidence.
 
+### 2026-07-17 — Gate 3 bounded native canonical and identity foundation
+
+- Commit `719cca9b` is pushed to `origin/main`.
+- Runtime ABI 1.1 now owns exact canonical-region decoder ceilings,
+  accounting, number policy, and direct canonical-byte validation policy.
+- Added allocation-free native canonical JSON validation and incremental
+  SHA-256. Canonical parsing is strict UTF-8, locale-free UTF-16 ordered,
+  duplicate-free, safe-integer-only, and bounded by both ABI budgets and a
+  compiled recursion ceiling.
+- Added optimized/sanitized hostile fixtures, independent SHA boundary and
+  binary vectors, exact extractor source/build identities, transitive
+  profile/asset pins, and a Linux CI gate.
+- Parallel compile-session audit recorded six contract gaps that must close
+  before typed decoder/Clang work: opened-source subset semantics, temporal
+  macros, warning mapping, virtual-path parity, pass-scoped VFS observation,
+  and diagnostic normalization.
+- This slice is a prerequisite, not browser C++ execution. No VFS read, Clang
+  action, Emscripten build, Wasm instance, browser compile, or artifact occurred.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -2948,6 +2996,18 @@ whether any files may be left partially changed.
    decisions, and the next smallest checkpoint.
 
 ## Next Checkpoint
+
+Before typed native decode, close six producer-neutral contracts: artifact
+source inputs must be the successfully opened subset of request descriptors
+with main required; temporal macros must be rejected or exactly pinned;
+warning-policy IDs must map through a closed versioned registry; TypeScript and
+native virtual paths must share one C0/DEL rule; each CUDA pass needs its own
+VFS read/include-edge observer; and diagnostic IDs/codes/messages/spans need a
+versioned normalization contract. Then build one noncopyable
+`DecodedCompileSession` that validates both canonical regions, recomputes every
+profile/contract/request/file/entry identity, verifies exact VFS bytes only
+after identity admission, and privately binds `maxOutputBytes`. Raw frame bytes
+must never reach the Clang callback.
 
 Build-input selection, deterministic command materialization, canonical ABI,
 profile binding, exact ABI asset/build closure, bounded raw-WASM inspection,
