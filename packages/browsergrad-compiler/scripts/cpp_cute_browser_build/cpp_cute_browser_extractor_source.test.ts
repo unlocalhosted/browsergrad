@@ -124,14 +124,24 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
       ]);
   });
 
-  it("owns lifecycle/frame validation in runtime while preserving fail-closed result state", async () => {
+  it("owns frame validation and the bounded module-owned result lifecycle", async () => {
+    const header = await extractorSource("BrowserGradCppCuteRuntime.h");
     const source = await extractorSource("BrowserGradCppCuteRuntime.cpp");
     expect(source).toContain("kRuntimeAbiVersion = 0x0001'0001U");
     expect(source).toContain("validate_frame_envelope");
     expect(source).toContain("RuntimeState g_runtime");
-    expect(source).toContain("result.status == WireCompileStatus::kArtifactReady");
-    expect(source).toMatch(/runtime_result_length\(\)[\s\S]*?return 0U;/u);
-    expect(source).toMatch(/runtime_result_pointer\(\)[\s\S]*?return 0U;/u);
+    expect(source).toContain("ArtifactV3ResultSink::allocate");
+    expect(source).toContain("RuntimePhase::kCompiling");
+    expect(source).toContain("RuntimePhase::kArtifactReady");
+    expect(source).toContain("result.blocker.has_value()");
+    expect(source).toContain("ranges_overlap");
+    expect(source).toMatch(/runtime_result_length\(\)[\s\S]*?g_runtime\.result_byte_length/u);
+    expect(source).toMatch(/runtime_result_pointer\(\)[\s\S]*?g_runtime\.result_wire_pointer/u);
+    expect(header).toContain("class ArtifactV3ResultSink final");
+    expect(header).toContain("kAbiMaximumByteLength");
+    expect(header).toContain("8U * 1024U * 1024U");
+    expect(header).toContain("bind_invocation_maximum_byte_length");
+    expect(header).toContain("ArtifactV3ResultSink(const ArtifactV3ResultSink&) = delete");
     expect(source).not.toMatch(/clang\/|llvm\/|bg_vfs_/u);
   });
 

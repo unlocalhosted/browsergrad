@@ -18,9 +18,25 @@ constexpr std::uint32_t kInputFrameAlignment = 8U;
 constexpr std::array<std::uint8_t, 8> kInputFrameMagic = {
     'B', 'G', 'C', 'C', 'A', 'B', 'I', '1'};
 
+#if defined(__EMSCRIPTEN__) && defined(BG_CPP_CUTE_RUNTIME_TESTING)
+#error "runtime test hooks must never be enabled in the Wasm producer"
+#endif
+
+#if defined(BG_CPP_CUTE_RUNTIME_TESTING)
+struct RuntimeTestAllocationHooks {
+  void* (*allocate)(std::size_t) = nullptr;
+  void (*release)(void*) = nullptr;
+  std::uint32_t (*wire_pointer)(const void*) = nullptr;
+};
+
+RuntimeTestAllocationHooks g_runtime_test_allocation_hooks;
+#endif
+
 enum class RuntimePhase {
   kIdle,
   kInputAllocated,
+  kCompiling,
+  kArtifactReady,
   kFailed,
 };
 
@@ -29,7 +45,10 @@ struct RuntimeState {
   WireCompileStatus status = WireCompileStatus::kIdle;
   std::uint8_t* input = nullptr;
   std::uint32_t input_byte_length = 0;
-  ReviewOnlyBlocker blocker = ReviewOnlyBlocker::kCudaDualPassUnavailable;
+  std::uint32_t input_wire_pointer = 0;
+  std::uint8_t* result = nullptr;
+  std::uint32_t result_byte_length = 0;
+  std::uint32_t result_wire_pointer = 0;
 };
 
 RuntimeState g_runtime;
@@ -55,6 +74,62 @@ bool all_zero(const std::uint8_t* begin, const std::uint8_t* end) {
     if (*cursor != 0U) return false;
   }
   return true;
+}
+
+void* allocate_bytes(std::size_t byte_length) {
+#if defined(BG_CPP_CUTE_RUNTIME_TESTING)
+  if (g_runtime_test_allocation_hooks.allocate != nullptr) {
+    return g_runtime_test_allocation_hooks.allocate(byte_length);
+  }
+#endif
+  return std::malloc(byte_length);
+}
+
+void release_bytes(void* pointer) {
+  if (pointer == nullptr) return;
+#if defined(BG_CPP_CUTE_RUNTIME_TESTING)
+  if (g_runtime_test_allocation_hooks.release != nullptr) {
+    g_runtime_test_allocation_hooks.release(pointer);
+    return;
+  }
+#endif
+  std::free(pointer);
+}
+
+bool encode_wire_pointer(const void* pointer, std::uint32_t byte_length,
+                         std::uint32_t* wire_pointer) {
+  if (pointer == nullptr || byte_length == 0U || wire_pointer == nullptr) {
+    return false;
+  }
+#if defined(BG_CPP_CUTE_RUNTIME_TESTING)
+  if (g_runtime_test_allocation_hooks.wire_pointer != nullptr) {
+    const std::uint32_t encoded =
+        g_runtime_test_allocation_hooks.wire_pointer(pointer);
+    const std::uint64_t end =
+        static_cast<std::uint64_t>(encoded) + byte_length;
+    if (encoded == 0U || end > (std::uint64_t{1U} << 32U)) return false;
+    *wire_pointer = encoded;
+    return true;
+  }
+#endif
+  const auto encoded = reinterpret_cast<std::uintptr_t>(pointer);
+  const std::uint64_t end = static_cast<std::uint64_t>(encoded) + byte_length;
+  if (encoded == 0U || encoded > std::numeric_limits<std::uint32_t>::max() ||
+      end > (std::uint64_t{1U} << 32U)) {
+    return false;
+  }
+  *wire_pointer = static_cast<std::uint32_t>(encoded);
+  return true;
+}
+
+bool ranges_overlap(std::uint32_t left_pointer, std::uint32_t left_length,
+                    std::uint32_t right_pointer,
+                    std::uint32_t right_length) {
+  const std::uint64_t left_begin = left_pointer;
+  const std::uint64_t left_end = left_begin + left_length;
+  const std::uint64_t right_begin = right_pointer;
+  const std::uint64_t right_end = right_begin + right_length;
+  return left_begin < right_end && right_begin < left_end;
 }
 
 bool validate_frame_envelope(const std::uint8_t* bytes,
@@ -98,9 +173,17 @@ bool validate_frame_envelope(const std::uint8_t* bytes,
 }
 
 void release_input() {
-  std::free(g_runtime.input);
+  release_bytes(g_runtime.input);
   g_runtime.input = nullptr;
   g_runtime.input_byte_length = 0;
+  g_runtime.input_wire_pointer = 0;
+}
+
+void release_result() {
+  release_bytes(g_runtime.result);
+  g_runtime.result = nullptr;
+  g_runtime.result_byte_length = 0;
+  g_runtime.result_wire_pointer = 0;
 }
 
 std::int32_t wire_status(WireCompileStatus status) {
@@ -108,6 +191,86 @@ std::int32_t wire_status(WireCompileStatus status) {
 }
 
 }  // namespace
+
+bool ArtifactV3ResultSink::bind_invocation_maximum_byte_length(
+    std::uint32_t byte_length) {
+  if (failed_ || invocation_limit_bound_ || allocation_attempted_ || committed_ ||
+      byte_length == 0U || byte_length > kAbiMaximumByteLength) {
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kInternalError;
+    return false;
+  }
+  invocation_maximum_byte_length_ = byte_length;
+  invocation_limit_bound_ = true;
+  return true;
+}
+
+std::uint8_t* ArtifactV3ResultSink::allocate(std::uint32_t byte_length) {
+  if (failed_ || allocation_attempted_ || committed_) {
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kInternalError;
+    return nullptr;
+  }
+  allocation_attempted_ = true;
+  if (!invocation_limit_bound_ || byte_length == 0U) {
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kInternalError;
+    return nullptr;
+  }
+  if (byte_length > invocation_maximum_byte_length_) {
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kResourceLimit;
+    return nullptr;
+  }
+  if (!allocator_metrics_healthy()) {
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kInternalError;
+    return nullptr;
+  }
+
+  bytes_ = static_cast<std::uint8_t*>(allocate_bytes(byte_length));
+  if (bytes_ == nullptr) {
+    failed_ = true;
+    failure_status_ = allocator_metrics_healthy()
+                          ? WireCompileStatus::kResourceLimit
+                          : WireCompileStatus::kInternalError;
+    return nullptr;
+  }
+  byte_length_ = byte_length;
+  if (!encode_wire_pointer(bytes_, byte_length_, &wire_pointer_) ||
+      !allocator_metrics_healthy()) {
+    discard();
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kInternalError;
+    return nullptr;
+  }
+  return bytes_;
+}
+
+bool ArtifactV3ResultSink::commit() {
+  if (failed_ || !allocation_attempted_ || bytes_ == nullptr || committed_) {
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kInternalError;
+    return false;
+  }
+  if (!allocator_metrics_healthy()) {
+    failed_ = true;
+    failure_status_ = WireCompileStatus::kInternalError;
+    return false;
+  }
+  committed_ = true;
+  return true;
+}
+
+void ArtifactV3ResultSink::discard() {
+  if (!adopted_) release_bytes(bytes_);
+  bytes_ = nullptr;
+  byte_length_ = 0;
+  wire_pointer_ = 0;
+  committed_ = false;
+}
+
+ArtifactV3ResultSink::~ArtifactV3ResultSink() { discard(); }
 
 std::uint32_t runtime_abi_version() { return kRuntimeAbiVersion; }
 
@@ -123,7 +286,7 @@ std::uint32_t runtime_allocate(std::uint32_t byte_length) {
     g_runtime.phase = RuntimePhase::kFailed;
     return 0U;
   }
-  auto* allocation = static_cast<std::uint8_t*>(std::malloc(byte_length));
+  auto* allocation = static_cast<std::uint8_t*>(allocate_bytes(byte_length));
   if (allocation == nullptr) {
     g_runtime.status = allocator_metrics_healthy()
                            ? WireCompileStatus::kResourceLimit
@@ -131,18 +294,20 @@ std::uint32_t runtime_allocate(std::uint32_t byte_length) {
     g_runtime.phase = RuntimePhase::kFailed;
     return 0U;
   }
-  const auto pointer = reinterpret_cast<std::uintptr_t>(allocation);
-  if (pointer > std::numeric_limits<std::uint32_t>::max()) {
-    std::free(allocation);
+  std::uint32_t wire_pointer = 0U;
+  if (!encode_wire_pointer(allocation, byte_length, &wire_pointer) ||
+      !allocator_metrics_healthy()) {
+    release_bytes(allocation);
     g_runtime.status = WireCompileStatus::kInternalError;
     g_runtime.phase = RuntimePhase::kFailed;
     return 0U;
   }
   g_runtime.input = allocation;
   g_runtime.input_byte_length = byte_length;
+  g_runtime.input_wire_pointer = wire_pointer;
   g_runtime.status = WireCompileStatus::kInputAllocated;
   g_runtime.phase = RuntimePhase::kInputAllocated;
-  return static_cast<std::uint32_t>(pointer);
+  return wire_pointer;
 }
 
 std::int32_t runtime_compile(std::uint32_t input_pointer,
@@ -159,8 +324,7 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
     g_runtime.phase = RuntimePhase::kFailed;
     return wire_status(g_runtime.status);
   }
-  const auto expected_pointer = reinterpret_cast<std::uintptr_t>(g_runtime.input);
-  if (input_pointer != expected_pointer ||
+  if (input_pointer != g_runtime.input_wire_pointer ||
       input_length != g_runtime.input_byte_length) {
     g_runtime.status = WireCompileStatus::kInvalidArgument;
     g_runtime.phase = RuntimePhase::kFailed;
@@ -172,32 +336,90 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
     return wire_status(g_runtime.status);
   }
 
-  // The only wired producer is the fail-closed artifact-v3 placeholder. Keep
-  // status zero unreachable until lifecycle/result ownership exists here.
+  g_runtime.phase = RuntimePhase::kCompiling;
+  ArtifactV3ResultSink result_sink;
   const ArtifactV3CompileResult result =
       compile_artifact == nullptr
           ? ArtifactV3CompileResult{
                 WireCompileStatus::kInternalError,
                 ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable}
-          : compile_artifact(g_runtime.input, g_runtime.input_byte_length);
-  g_runtime.blocker = result.blocker;
-  g_runtime.status = !allocator_metrics_healthy() ||
-                             result.status == WireCompileStatus::kArtifactReady
-                         ? WireCompileStatus::kInternalError
-                         : result.status;
+          : compile_artifact(g_runtime.input, g_runtime.input_byte_length,
+                             result_sink);
+  if (g_runtime.phase != RuntimePhase::kCompiling ||
+      !allocator_metrics_healthy()) {
+    result_sink.discard();
+    g_runtime.status = WireCompileStatus::kInternalError;
+    g_runtime.phase = RuntimePhase::kFailed;
+    return wire_status(g_runtime.status);
+  }
+
+  if (result.status == WireCompileStatus::kArtifactReady) {
+    if (result.blocker.has_value() || result_sink.failed_ ||
+        !result_sink.invocation_limit_bound_ || !result_sink.committed_ ||
+        result_sink.bytes_ == nullptr || result_sink.byte_length_ == 0U ||
+        ranges_overlap(g_runtime.input_wire_pointer,
+                       g_runtime.input_byte_length,
+                       result_sink.wire_pointer_,
+                       result_sink.byte_length_)) {
+      const WireCompileStatus failure =
+          result.blocker.has_value()
+              ? WireCompileStatus::kInternalError
+              : result_sink.failed_ ? result_sink.failure_status_
+                                    : WireCompileStatus::kInternalError;
+      result_sink.discard();
+      g_runtime.status = !allocator_metrics_healthy()
+                             ? WireCompileStatus::kInternalError
+                             : failure;
+      g_runtime.phase = RuntimePhase::kFailed;
+      return wire_status(g_runtime.status);
+    }
+    g_runtime.result = result_sink.bytes_;
+    g_runtime.result_byte_length = result_sink.byte_length_;
+    g_runtime.result_wire_pointer = result_sink.wire_pointer_;
+    result_sink.adopted_ = true;
+    g_runtime.status = WireCompileStatus::kArtifactReady;
+    g_runtime.phase = RuntimePhase::kArtifactReady;
+    return wire_status(g_runtime.status);
+  }
+
+  const WireCompileStatus terminal_status = result_sink.failed_
+                                                ? result_sink.failure_status_
+                                                : result.status;
+  result_sink.discard();
+  switch (terminal_status) {
+    case WireCompileStatus::kInvalidFrame:
+    case WireCompileStatus::kAbiMismatch:
+    case WireCompileStatus::kVfsError:
+    case WireCompileStatus::kResourceLimit:
+    case WireCompileStatus::kInternalError:
+      g_runtime.status = terminal_status;
+      break;
+    default:
+      g_runtime.status = WireCompileStatus::kInternalError;
+      break;
+  }
+  if (!allocator_metrics_healthy()) {
+    g_runtime.status = WireCompileStatus::kInternalError;
+  }
   g_runtime.phase = RuntimePhase::kFailed;
   return wire_status(g_runtime.status);
 }
 
 void runtime_free(std::uint32_t pointer, std::uint32_t byte_length) {
+  if (g_runtime.phase == RuntimePhase::kCompiling) {
+    g_runtime.status = WireCompileStatus::kInvalidState;
+    g_runtime.phase = RuntimePhase::kFailed;
+    return;
+  }
   if (g_runtime.input == nullptr ||
-      pointer != reinterpret_cast<std::uintptr_t>(g_runtime.input) ||
+      pointer != g_runtime.input_wire_pointer ||
       byte_length != g_runtime.input_byte_length) {
     g_runtime.status = WireCompileStatus::kInvalidArgument;
     g_runtime.phase = RuntimePhase::kFailed;
     return;
   }
   const bool was_allocated = g_runtime.phase == RuntimePhase::kInputAllocated;
+  const bool artifact_ready = g_runtime.phase == RuntimePhase::kArtifactReady;
   release_input();
   if (!allocator_metrics_healthy()) {
     g_runtime.phase = RuntimePhase::kFailed;
@@ -207,11 +429,15 @@ void runtime_free(std::uint32_t pointer, std::uint32_t byte_length) {
   if (was_allocated) {
     g_runtime.phase = RuntimePhase::kIdle;
     g_runtime.status = WireCompileStatus::kIdle;
+  } else if (artifact_ready) {
+    g_runtime.phase = RuntimePhase::kArtifactReady;
+    g_runtime.status = WireCompileStatus::kArtifactReady;
   }
 }
 
 void runtime_reset() {
   release_input();
+  release_result();
   g_runtime = RuntimeState{};
   if (!allocator_metrics_healthy()) {
     g_runtime.phase = RuntimePhase::kFailed;
@@ -219,9 +445,17 @@ void runtime_reset() {
   }
 }
 
-std::uint32_t runtime_result_length() { return 0U; }
+std::uint32_t runtime_result_length() {
+  return g_runtime.phase == RuntimePhase::kArtifactReady
+             ? g_runtime.result_byte_length
+             : 0U;
+}
 
-std::uint32_t runtime_result_pointer() { return 0U; }
+std::uint32_t runtime_result_pointer() {
+  return g_runtime.phase == RuntimePhase::kArtifactReady
+             ? g_runtime.result_wire_pointer
+             : 0U;
+}
 
 std::int32_t runtime_status() { return wire_status(g_runtime.status); }
 

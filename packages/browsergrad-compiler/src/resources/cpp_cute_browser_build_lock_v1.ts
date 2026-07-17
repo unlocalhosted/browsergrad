@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.57b38d19b1b7ae05c316583b9367d81491bd45f2348ab4c38526ff1e23852469",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.c684dd200e414220b7d8c13aa25d905b3be57cf3dd66a80d49c2b7af9adb3e82",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -250,18 +250,18 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "92026b36f1e4f732199a14b2a402c233b6c46d274789085e0144d4c5461789a2",
+        sourceSetSha256: "cae5aa99d17b5ef2d856be02636f5804a11e017ae39acf44ddcaed9643c04593",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
             path: "BrowserGradCppCuteArtifactV3.cpp",
-            sha256: "0d47aa560d23148a4b9cf3d7cb84299c79a33834043c208b829a0e108de64748",
-            byteLength: "649",
+            sha256: "0eabed195a9caccf4d6c1e93aa0d7ad528c1fe09e3c70ff80945b89284cf4f7d",
+            byteLength: "722",
           },
           {
             path: "BrowserGradCppCuteArtifactV3.h",
-            sha256: "60cd86a5142064be9f505199b3d2911d9e0ecc5121ee6b6c30aae1a985b93c80",
-            byteLength: "268",
+            sha256: "c2d85065beffe01a36fc7691c1137db877167ab79054e97eac001e1c1910ec07",
+            byteLength: "307",
           },
           {
             path: "BrowserGradCppCuteClangAction.cpp",
@@ -300,13 +300,13 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteRuntime.cpp",
-            sha256: "d687bbcda548a1efb5089be8d4fe697ca97ee1e2dc62308330fee7705a004780",
-            byteLength: "8306",
+            sha256: "c2ca1dcf688ee64496235a7dcf7abbe59dc709760903f62bebde661f7e5ab946",
+            byteLength: "16075",
           },
           {
             path: "BrowserGradCppCuteRuntime.h",
-            sha256: "d8674f98e1dcb67cb152f1defc7a54e6d38595aad86ac26bbc978722d94b263f",
-            byteLength: "1408",
+            sha256: "5db52dff5856c12fb9cb887043c1b42fb2b36a3332c14badca4f590de35bb3a7",
+            byteLength: "3037",
           },
           {
             path: "CMakeLists.txt",
