@@ -1,20 +1,23 @@
 import {
   copyPreparedCppCuteBrowserInputFrameBytes,
-  type PreparedCppCuteBrowserInputFrame,
 } from "./cpp_cute_browser_input_frame.js";
 import {
-  copyCppCuteBrowserWorkerClangWasmBytes,
   discardCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
+  type CppCuteBrowserWorkerInvocationDiscardReason,
   type PreparedCppCuteBrowserWorkerInvocation,
 } from "./cpp_cute_browser_worker_protocol.js";
 import {
-  cancelCppCuteBrowserVfsSession,
-  createCppCuteBrowserVfsHostImports,
-  observeCppCuteBrowserVfsSession,
+  createCppCuteBrowserVfsMountHostImports,
+  discardCppCuteBrowserVfsMount,
+  observeCppCuteBrowserVfsMount,
   type CppCuteBrowserVfsHostImports,
-  type PreparedCppCuteBrowserVfsSession,
+  type PreparedCppCuteBrowserVfsMount,
 } from "./cpp_cute_browser_vfs_session.js";
+import {
+  takeCppCuteBrowserWorkerRealmInput,
+  type PreparedCppCuteBrowserWorkerRealmInput,
+} from "./cpp_cute_browser_worker_transfer.js";
 
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_PROTOCOL =
   "browsergrad.compiler.cpp-cute.package-worker-runtime@1";
@@ -29,6 +32,7 @@ export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS = Object.freeze([
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const NATIVE_UINT8_ARRAY = Uint8Array;
 const NATIVE_UINT8_ARRAY_SET = Uint8Array.prototype.set;
+const NATIVE_UINT8_ARRAY_FILL = Uint8Array.prototype.fill;
 const NATIVE_REFLECT_APPLY = Reflect.apply;
 const NATIVE_REFLECT_OWN_KEYS = Reflect.ownKeys;
 const NATIVE_GET_OWN_PROPERTY_DESCRIPTORS = Object.getOwnPropertyDescriptors;
@@ -37,8 +41,6 @@ const NATIVE_OBJECT_PROTOTYPE = Object.prototype;
 const NATIVE_OBJECT_FREEZE = Object.freeze;
 const NATIVE_WEAK_MAP_GET = WeakMap.prototype.get;
 const NATIVE_WEAK_MAP_SET = WeakMap.prototype.set;
-const NATIVE_WEAK_MAP_HAS = WeakMap.prototype.has;
-const NATIVE_WEAK_MAP_DELETE = WeakMap.prototype.delete;
 const NATIVE_REGEXP_TEST = RegExp.prototype.test;
 const NATIVE_AGGREGATE_ERROR = AggregateError;
 const NATIVE_SUBTLE = globalThis.crypto?.subtle;
@@ -58,8 +60,8 @@ const NATIVE_WASM_MEMORY = typeof WebAssembly === "undefined"
 declare const preparedRuntimeBindingBrand: unique symbol;
 
 /**
- * Opaque composition of one verified invocation, one exact input frame, and
- * one active Worker VFS session. It is not Worker execution evidence.
+ * Opaque composition adopted inside the Worker realm before Wasm memory exists.
+ * It is not Worker execution evidence.
  */
 export interface PreparedCppCuteBrowserWorkerRuntimeBinding {
   readonly [preparedRuntimeBindingBrand]: true;
@@ -72,7 +74,7 @@ export interface PreparedCppCuteBrowserWorkerRuntimeBinding {
   readonly inputFrameByteLength: number;
   readonly clangWasmSha256: string;
   readonly clangWasmByteLength: number;
-  readonly vfsSessionOrdinal: number;
+  readonly vfsMountOrdinal: number;
   readonly bundleStatus: typeof CPP_CUTE_BROWSER_WORKER_RUNTIME_BUNDLE_STATUS;
   readonly blockers: typeof CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS;
   readonly networkAuthorityGranted: false;
@@ -82,17 +84,15 @@ export interface PreparedCppCuteBrowserWorkerRuntimeBinding {
 }
 
 export interface PrepareCppCuteBrowserWorkerRuntimeBindingInput {
-  readonly invocation: PreparedCppCuteBrowserWorkerInvocation;
-  readonly inputFrame: PreparedCppCuteBrowserInputFrame;
-  readonly vfsSession: PreparedCppCuteBrowserVfsSession;
+  readonly realmInput: PreparedCppCuteBrowserWorkerRealmInput;
 }
 
 export interface CppCuteBrowserWorkerRuntimeBindingInspection {
-  readonly state: "prepared" | "blocked-terminal";
+  readonly state: "prepared" | "blocked-terminal" | "discarded";
   readonly invocationId: string;
   readonly inputFrameByteLength: number;
   readonly clangWasmByteLength: number;
-  readonly vfsSessionOrdinal: number;
+  readonly vfsMountOrdinal: number;
   readonly nativeIntrinsicSnapshot:
     "byte-copy-hash-wasm-object-inspection-and-authority-bookkeeping";
   readonly requiredWasmConstructionIntrinsicsAvailable: boolean;
@@ -105,7 +105,6 @@ export interface CppCuteBrowserWorkerRuntimeBindingInspection {
 export type CppCuteBrowserWorkerRuntimeErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-MISMATCH"
-  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-DUPLICATE"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-HASH-UNAVAILABLE"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CLEANUP"
@@ -128,58 +127,52 @@ interface ActiveRuntimeBinding {
   readonly invocation: PreparedCppCuteBrowserWorkerInvocation;
   readonly inputFrameBytes: Uint8Array;
   readonly clangWasmBytes: Uint8Array;
-  readonly vfsSession: PreparedCppCuteBrowserVfsSession;
+  readonly vfsMount: PreparedCppCuteBrowserVfsMount;
   readonly vfsImports: CppCuteBrowserVfsHostImports;
 }
 
 interface StoredRuntimeBinding {
-  state: "prepared" | "blocked-terminal";
+  state: "prepared" | "blocked-terminal" | "discarded";
   active: ActiveRuntimeBinding | null;
   readonly inspection: Omit<CppCuteBrowserWorkerRuntimeBindingInspection, "state">;
 }
 
-const BINDING_RESERVATIONS = new WeakMap<object, object>();
-const FRAME_RESERVATIONS = new WeakMap<object, object>();
-const VFS_RESERVATIONS = new WeakMap<object, object>();
 const RUNTIME_BINDINGS = new WeakMap<object, StoredRuntimeBinding>();
 
 export async function prepareCppCuteBrowserWorkerRuntimeBinding(
   input: PrepareCppCuteBrowserWorkerRuntimeBindingInput,
 ): Promise<PreparedCppCuteBrowserWorkerRuntimeBinding> {
-  const values = exactDataRecord(input, "$.input", ["invocation", "inputFrame", "vfsSession"]);
-  const invocation = values["invocation"] as PreparedCppCuteBrowserWorkerInvocation;
-  const inputFrame = values["inputFrame"] as PreparedCppCuteBrowserInputFrame;
-  const vfsSession = values["vfsSession"] as PreparedCppCuteBrowserVfsSession;
-  const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(invocation);
-  // Validate the opaque frame before reading any of its public projection.
-  // A forged object may carry hostile getters despite its TypeScript type.
-  const initialInputFrameBytes = copyPreparedCppCuteBrowserInputFrameBytes(inputFrame);
-  const vfsObservation = observeCppCuteBrowserVfsSession(vfsSession);
-  if (inputFrame.invocationId !== invocation.invocationId) {
-    mismatch("$.input.inputFrame", "input frame belongs to a different prepared invocation");
-  }
-  if (vfsObservation.state !== "active") {
-    state("$.input.vfsSession", "VFS session must be active when the runtime binding is prepared");
-  }
-  if (vfsObservation.requestId !== invocation.requestId ||
-      vfsObservation.profileHash !== invocation.profileHash) {
-    mismatch("$.input.vfsSession", "VFS session differs from the exact invocation request or profile");
-  }
-
-  const reservation = NATIVE_OBJECT_FREEZE({});
-  reserve(BINDING_RESERVATIONS, invocation as object, reservation, "$.input.invocation");
-  try {
-    reserve(FRAME_RESERVATIONS, inputFrame as object, reservation, "$.input.inputFrame");
-    reserve(VFS_RESERVATIONS, vfsSession as object, reservation, "$.input.vfsSession");
-  } catch (cause) {
-    releaseReservation(BINDING_RESERVATIONS, invocation as object, reservation);
-    releaseReservation(FRAME_RESERVATIONS, inputFrame as object, reservation);
-    throw cause;
-  }
+  const values = exactDataRecord(input, "$.input", ["realmInput"]);
+  const realmInput = values["realmInput"] as PreparedCppCuteBrowserWorkerRealmInput;
+  const adopted = takeCppCuteBrowserWorkerRealmInput(realmInput);
+  const invocation = adopted.invocation;
+  const inputFrame = adopted.inputFrame;
+  const vfsMount = adopted.vfsMount;
+  let inputFrameBytes: Uint8Array = new NATIVE_UINT8_ARRAY(0);
+  let clangWasmBytes: Uint8Array = new NATIVE_UINT8_ARRAY(0);
 
   try {
-    const inputFrameBytes = capturedCopy(initialInputFrameBytes);
-    const clangWasmBytes = capturedCopy(copyCppCuteBrowserWorkerClangWasmBytes(invocation));
+    const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(invocation);
+    inputFrameBytes = copyPreparedCppCuteBrowserInputFrameBytes(inputFrame);
+    clangWasmBytes = adopted.clangWasmBytes;
+    const vfsObservation = observeCppCuteBrowserVfsMount(vfsMount);
+    if (inputFrame.invocationId !== invocation.invocationId ||
+        realmInput.invocationId !== invocation.invocationId) {
+      mismatch("$.input.realmInput.inputFrame", "input frame belongs to a different invocation");
+    }
+    if (vfsObservation.state !== "prepared") {
+      state("$.input.realmInput.vfsMount", "VFS mount must be unbound during runtime adoption");
+    }
+    if (vfsObservation.requestId !== invocation.requestId ||
+        vfsObservation.profileHash !== invocation.profileHash ||
+        vfsObservation.mountOrdinal !== realmInput.vfsMountOrdinal ||
+        realmInput.requestId !== invocation.requestId ||
+        realmInput.profileHash !== invocation.profileHash) {
+      mismatch(
+        "$.input.realmInput.vfsMount",
+        "VFS mount differs from the exact invocation request or profile",
+      );
+    }
     const inputFrameSha256 = await nativeSha256Hex(
       inputFrameBytes,
       "$.input.inputFrame",
@@ -189,12 +182,16 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
       "$.input.invocation.clangWasmBytes",
     );
     if (inputFrameBytes.byteLength !== inputFrame.frameByteLength ||
-        inputFrameSha256 !== inputFrame.frameSha256) {
+        inputFrameSha256 !== inputFrame.frameSha256 ||
+        inputFrameBytes.byteLength !== realmInput.inputFrameByteLength ||
+        inputFrameSha256 !== realmInput.inputFrameSha256) {
       mismatch("$.input.inputFrame", "copied input-frame bytes differ from the opaque frame authority");
     }
     if (!nativeRegexTest(SHA256_HEX, invocationRecord.rawWasmConformance.wasmSha256) ||
         clangWasmBytes.byteLength !== invocationRecord.rawWasmConformance.wasmByteLength ||
-        clangWasmSha256 !== invocationRecord.rawWasmConformance.wasmSha256) {
+        clangWasmSha256 !== invocationRecord.rawWasmConformance.wasmSha256 ||
+        clangWasmBytes.byteLength !== realmInput.clangWasmByteLength ||
+        clangWasmSha256 !== realmInput.clangWasmSha256) {
       mismatch("$.input.invocation.clangWasmBytes", "copied Clang-Wasm bytes differ from raw-Wasm conformance authority");
     }
 
@@ -202,10 +199,13 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
     // composition so terminalization cannot race a stale runtime binding.
     unwrapPreparedCppCuteBrowserWorkerInvocation(invocation);
     copyPreparedCppCuteBrowserInputFrameBytes(inputFrame);
-    if (observeCppCuteBrowserVfsSession(vfsSession).state !== "active") {
-      state("$.input.vfsSession", "VFS session terminalized while runtime bytes were hashed");
+    if (observeCppCuteBrowserVfsMount(vfsMount).state !== "prepared") {
+      state("$.input.realmInput.vfsMount", "VFS mount terminalized while runtime bytes were hashed");
     }
-    const vfsImports = createCppCuteBrowserVfsHostImports(vfsSession);
+    const vfsImports = createCppCuteBrowserVfsMountHostImports(vfsMount);
+    if (vfsImports !== adopted.vfsImports) {
+      mismatch("$.input.realmInput.vfsImports", "VFS import table differs from reconstructed authority");
+    }
     const prepared = NATIVE_OBJECT_FREEZE({
       authority: "package-worker-runtime-binding-only",
       protocol: CPP_CUTE_BROWSER_WORKER_RUNTIME_PROTOCOL,
@@ -216,7 +216,7 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
       inputFrameByteLength: inputFrameBytes.byteLength,
       clangWasmSha256,
       clangWasmByteLength: clangWasmBytes.byteLength,
-      vfsSessionOrdinal: vfsSession.sessionOrdinal,
+      vfsMountOrdinal: vfsMount.mountOrdinal,
       bundleStatus: CPP_CUTE_BROWSER_WORKER_RUNTIME_BUNDLE_STATUS,
       blockers: CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS,
       networkAuthorityGranted: false,
@@ -230,14 +230,14 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
         invocation,
         inputFrameBytes,
         clangWasmBytes,
-        vfsSession,
+        vfsMount,
         vfsImports,
       }),
       inspection: NATIVE_OBJECT_FREEZE({
         invocationId: invocation.invocationId,
         inputFrameByteLength: inputFrameBytes.byteLength,
         clangWasmByteLength: clangWasmBytes.byteLength,
-        vfsSessionOrdinal: vfsSession.sessionOrdinal,
+        vfsMountOrdinal: vfsMount.mountOrdinal,
         nativeIntrinsicSnapshot:
           "byte-copy-hash-wasm-object-inspection-and-authority-bookkeeping",
         requiredWasmConstructionIntrinsicsAvailable: NATIVE_WASM_COMPILE !== undefined &&
@@ -250,9 +250,13 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
     });
     return prepared;
   } catch (cause) {
-    releaseReservation(BINDING_RESERVATIONS, invocation as object, reservation);
-    releaseReservation(FRAME_RESERVATIONS, inputFrame as object, reservation);
-    releaseReservation(VFS_RESERVATIONS, vfsSession as object, reservation);
+    cleanupAdoptedRuntimeInput(
+      { invocation, inputFrameBytes, clangWasmBytes,
+        vfsMount, vfsImports: adopted.vfsImports },
+      cause,
+      "preparation",
+      "abandoned",
+    );
     throw cause;
   }
 }
@@ -273,38 +277,66 @@ export async function startCppCuteBrowserWorkerRuntime(
   const active = stored.active;
   stored.state = "blocked-terminal";
   stored.active = null;
-  let vfsCleanupFailed = false;
-  let invocationCleanupFailed = false;
-  let vfsCleanupCause: unknown;
-  let invocationCleanupCause: unknown;
-  try {
-    cancelCppCuteBrowserVfsSession(active.vfsSession);
-  } catch (cause) {
-    vfsCleanupFailed = true;
-    vfsCleanupCause = cause;
-  }
-  try {
-    discardCppCuteBrowserWorkerInvocation(active.invocation, "worker-unavailable");
-  } catch (cause) {
-    invocationCleanupFailed = true;
-    invocationCleanupCause = cause;
-  }
-  if (vfsCleanupFailed || invocationCleanupFailed) {
-    const cleanupCauses = vfsCleanupFailed && invocationCleanupFailed
-      ? [vfsCleanupCause, invocationCleanupCause]
-      : [vfsCleanupFailed ? vfsCleanupCause : invocationCleanupCause];
-    cleanup(
-      "$.binding.cleanup",
-      "blocked runtime cleanup failed after both owned-authority cleanup attempts completed",
-      new NATIVE_AGGREGATE_ERROR(cleanupCauses, "package Worker runtime cleanup failures"),
-    );
-  }
+  cleanupAdoptedRuntimeInput(active, undefined, "blocked start", "worker-unavailable");
   capability(
     "$.bundle",
     "package Worker runtime is blocked: missing-reviewed-first-build-wasm-projections, " +
       "missing-self-contained-package-worker-bundle-bytes, " +
       "missing-package-owned-emscripten-factory-bytes",
   );
+}
+
+/** Abandons a prepared runtime binding without attempting Worker execution. */
+export function discardCppCuteBrowserWorkerRuntimeBinding(
+  binding: PreparedCppCuteBrowserWorkerRuntimeBinding,
+): void {
+  const stored = storedBinding(binding);
+  if (stored.state !== "prepared" || stored.active === null) {
+    state("$.binding", "only a prepared runtime binding may be discarded");
+  }
+  const active = stored.active;
+  stored.state = "discarded";
+  stored.active = null;
+  cleanupAdoptedRuntimeInput(active, undefined, "abandoned binding", "abandoned");
+}
+
+function cleanupAdoptedRuntimeInput(
+  active: ActiveRuntimeBinding,
+  primaryCause: unknown,
+  phase: string,
+  discardReason: CppCuteBrowserWorkerInvocationDiscardReason,
+): void {
+  const cleanupCauses: unknown[] = [];
+  try {
+    discardCppCuteBrowserVfsMount(active.vfsMount);
+  } catch (cause) {
+    cleanupCauses.push(cause);
+  }
+  try {
+    discardCppCuteBrowserWorkerInvocation(active.invocation, discardReason);
+  } catch (cause) {
+    cleanupCauses.push(cause);
+  }
+  zeroBytes(active.inputFrameBytes);
+  zeroBytes(active.clangWasmBytes);
+  if (cleanupCauses.length !== 0) {
+    const causes = primaryCause === undefined
+      ? cleanupCauses
+      : [primaryCause, ...cleanupCauses];
+    cleanup(
+      "$.binding.cleanup",
+      `${phase} cleanup failed after both owned-authority cleanup attempts completed`,
+      new NATIVE_AGGREGATE_ERROR(causes, "package Worker runtime cleanup failures"),
+    );
+  }
+}
+
+function zeroBytes(bytes: Uint8Array): void {
+  try {
+    NATIVE_REFLECT_APPLY(NATIVE_UINT8_ARRAY_FILL, bytes, [0]);
+  } catch {
+    // Terminal cleanup is best effort after authority was already severed.
+  }
 }
 
 export function inspectCppCuteBrowserWorkerRuntimeBinding(
@@ -358,28 +390,6 @@ async function nativeSha256Hex(bytes: Uint8Array, path: string): Promise<string>
     hex += hexDigits[value >>> 4]! + hexDigits[value & 0x0f]!;
   }
   return hex;
-}
-
-function reserve(
-  reservations: WeakMap<object, object>,
-  authority: object,
-  reservation: object,
-  path: string,
-): void {
-  if (weakMapHas(reservations, authority)) {
-    duplicate(path, "authority is already bound to a Worker runtime");
-  }
-  weakMapSet(reservations, authority, reservation);
-}
-
-function releaseReservation(
-  reservations: WeakMap<object, object>,
-  authority: object,
-  reservation: object,
-): void {
-  if (weakMapGet(reservations, authority) === reservation) {
-    weakMapDelete(reservations, authority);
-  }
 }
 
 function storedBinding(
@@ -438,14 +448,6 @@ function weakMapSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V): 
   NATIVE_REFLECT_APPLY(NATIVE_WEAK_MAP_SET, map, [key, value]);
 }
 
-function weakMapHas<K extends object, V>(map: WeakMap<K, V>, key: K): boolean {
-  return NATIVE_REFLECT_APPLY(NATIVE_WEAK_MAP_HAS, map, [key]) as boolean;
-}
-
-function weakMapDelete<K extends object, V>(map: WeakMap<K, V>, key: K): void {
-  NATIVE_REFLECT_APPLY(NATIVE_WEAK_MAP_DELETE, map, [key]);
-}
-
 function nativeRegexTest(pattern: RegExp, value: string): boolean {
   return NATIVE_REFLECT_APPLY(NATIVE_REGEXP_TEST, pattern, [value]) as boolean;
 }
@@ -472,10 +474,6 @@ function invalid(path: string, message: string, options?: ErrorOptions): never {
 
 function mismatch(path: string, message: string): never {
   fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-MISMATCH", path, message);
-}
-
-function duplicate(path: string, message: string): never {
-  fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-DUPLICATE", path, message);
 }
 
 function capability(path: string, message: string): never {
