@@ -12,6 +12,9 @@ import {
   CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
 } from "../../../src/cpp_cute_semantic_adapter_manifest.js";
 import {
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+} from "../../../src/cpp_cute_diagnostic_normalization.js";
+import {
   CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID,
   CPP_CUTE_FRONTEND_WARNING_BASELINE,
   CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
@@ -79,7 +82,7 @@ export function createCppCuteProfileInput(
   const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
-    version: { major: 2, minor: 5 },
+    version: { major: 2, minor: 6 },
     profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
     deployment: {
       mode: "ahead-of-time",
@@ -125,6 +128,8 @@ export function createCppCuteProfileInput(
       diagnostics: {
         warningRegistryId: CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
         baseline: CPP_CUTE_FRONTEND_WARNING_BASELINE,
+        normalizationManifestSha256:
+          CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
       },
       semanticPasses: [
         {
@@ -179,6 +184,7 @@ export function createCppCuteProfileInput(
         version: "22.1.8",
         buildId: "llvmorg-22.1.8",
         binarySha256: CPP_CUTE_FIXTURE_COMPILER_HASH,
+        resourceDirectoryVirtualPath: "/toolchain/clang/lib/clang/22",
         resourceDirectorySha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
       },
       dependencies: [

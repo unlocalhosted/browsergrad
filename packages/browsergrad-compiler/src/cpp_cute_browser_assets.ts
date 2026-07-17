@@ -25,6 +25,10 @@ import {
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "./cpp_cute_browser_runtime_abi.js";
 import {
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+  cppCuteDiagnosticNormalizationResourceBytes,
+} from "./cpp_cute_diagnostic_normalization.js";
+import {
   CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
   cppCuteSemanticAdapterManifestResourceBytes,
 } from "./cpp_cute_semantic_adapter_manifest.js";
@@ -42,7 +46,7 @@ import {
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-asset-manifest";
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR = 1;
-export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 1;
+export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 2;
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_BYTE_LIMIT = 256 * 1024;
 
 const MANIFEST_ID = /^bg\.cpp\.browser-assets\.sha256\.[0-9a-f]{64}$/u;
@@ -56,6 +60,8 @@ const HARD_MAX_ASSET_UNPACKED_BYTES = 4n * 1024n * 1024n * 1024n;
 const HARD_MAX_TOTAL_COMPRESSED_BYTES = 2n * 1024n * 1024n * 1024n;
 const HARD_MAX_TOTAL_UNPACKED_BYTES = 8n * 1024n * 1024n * 1024n;
 const RUNTIME_ABI_RESOURCE_BYTE_LENGTH = cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength;
+const DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH =
+  cppCuteDiagnosticNormalizationResourceBytes().byteLength;
 const SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH =
   cppCuteSemanticAdapterManifestResourceBytes().byteLength;
 const TEXT_ENCODER = new TextEncoder();
@@ -136,6 +142,11 @@ export type CppCuteBrowserAssetV1 =
   | (CppCuteBrowserAssetCommonV1 & {
       readonly kind: "semantic-adapter-manifest";
       readonly mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json";
+      readonly compression: "identity";
+    })
+  | (CppCuteBrowserAssetCommonV1 & {
+      readonly kind: "diagnostic-normalization-manifest";
+      readonly mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json";
       readonly compression: "identity";
     })
   | (CppCuteBrowserAssetCommonV1 & {
@@ -652,6 +663,25 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
       compression: "identity",
     };
   }
+  if (kind === "diagnostic-normalization-manifest") {
+    requireExactFields(base, [
+      "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
+      "mediaType", "compression", "buildProvenanceId",
+    ], path);
+    exactString(
+      field(base, "mediaType", path),
+      "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+      `${path}.mediaType`,
+    );
+    exactString(field(base, "compression", path), "identity", `${path}.compression`);
+    requireIdentityLength(common, path);
+    return {
+      ...common,
+      kind,
+      mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+      compression: "identity",
+    };
+  }
   if (kind === "runtime-abi-manifest") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
@@ -769,6 +799,21 @@ function validateAssetProfileClosure(
       "semantic-adapter asset must bind exact package canonical policy bytes",
     );
   }
+  const diagnosticNormalization = body.assets.find(
+    (asset) => asset.kind === "diagnostic-normalization-manifest",
+  );
+  if (diagnosticNormalization?.kind !== "diagnostic-normalization-manifest" ||
+      diagnosticNormalization.sha256 !== CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256 ||
+      diagnosticNormalization.sha256 !== profile.language.diagnostics.normalizationManifestSha256 ||
+      wireIntegerToBigInt(diagnosticNormalization.byteLength) !==
+        BigInt(DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH) ||
+      wireIntegerToBigInt(diagnosticNormalization.unpackedByteLength) !==
+        BigInt(DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH)) {
+    hashMismatch(
+      "$.body.assets",
+      "diagnostic-normalization asset must bind exact package canonical policy bytes",
+    );
+  }
   const runtimeAbi = body.assets.find((asset) => asset.kind === "runtime-abi-manifest");
   if (runtimeAbi?.kind !== "runtime-abi-manifest" ||
       runtimeAbi.runtimeAbiId !== profile.deployment.compilerRuntime.runtimeAbiId ||
@@ -822,6 +867,7 @@ function validateAssetCardinalities(assets: readonly CppCuteBrowserAssetV1[]): v
   requireCardinality(assets, "compiler-resource-pack", 1);
   requireCardinality(assets, "runtime-abi-manifest", 1);
   requireCardinality(assets, "semantic-adapter-manifest", 1);
+  requireCardinality(assets, "diagnostic-normalization-manifest", 1);
 }
 
 function requireCardinality(

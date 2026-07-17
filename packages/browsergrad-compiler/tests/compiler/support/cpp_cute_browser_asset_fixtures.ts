@@ -20,6 +20,9 @@ import {
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "../../../src/cpp_cute_browser_runtime_abi.js";
 import {
+  cppCuteDiagnosticNormalizationResourceBytes,
+} from "../../../src/cpp_cute_diagnostic_normalization.js";
+import {
   cppCuteSemanticAdapterManifestResourceBytes,
 } from "../../../src/cpp_cute_semantic_adapter_manifest.js";
 import {
@@ -36,6 +39,8 @@ import {
 const PROVENANCE_ID = `bg.build-provenance.sha256.${"9".repeat(64)}`;
 const SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH =
   cppCuteSemanticAdapterManifestResourceBytes().byteLength;
+const DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH =
+  cppCuteDiagnosticNormalizationResourceBytes().byteLength;
 
 export interface CppCuteBrowserAssetFixture {
   readonly profile: PreparedCppCuteFrontendProfile;
@@ -93,6 +98,18 @@ export async function createCppCuteBrowserAssetFixture(
       compression: "identity",
       buildProvenanceId: PROVENANCE_ID,
       sourceAbiSha256,
+    },
+    {
+      assetId: "diagnostic-normalization",
+      kind: "diagnostic-normalization-manifest",
+      url: "/browsergrad/cpp-cute/diagnostic-normalization.json",
+      urlPolicy: "same-origin-root-relative",
+      sha256: provisionalRecord.language.diagnostics.normalizationManifestSha256,
+      byteLength: wire(DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH),
+      unpackedByteLength: wire(DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH),
+      mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+      compression: "identity",
+      buildProvenanceId: PROVENANCE_ID,
     },
     {
       assetId: "runtime-abi",

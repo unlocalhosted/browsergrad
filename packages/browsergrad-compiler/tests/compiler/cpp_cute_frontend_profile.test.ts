@@ -19,6 +19,9 @@ import {
   createCppCuteBrowserProfileInput,
   createCppCuteProfileInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
+import {
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+} from "../../src/cpp_cute_diagnostic_normalization.js";
 
 function expectProfileError(
   value: unknown,
@@ -34,7 +37,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("bf29e78145dcd0e0b4b4e3859c1c35c55c40061f832c471d471d8d09d23363e7");
+    expect(first.profileHash).toBe("b3e94f64bc351173e248850e5d2066b9b5b9a2e3429eef3a931da9ed33d77926");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(Object.isFrozen(first)).toBe(true);
@@ -156,11 +159,11 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("02829315865f3fdf3523893a317a0d373582fbd989c45bf7b6b06b6a95229cd9");
+    expect(first.profileHash).toBe("9b0575cd9d7739df2e9f2f1235b07c9fa841c25a0aad7c51db5f4b9147c78563");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
-    expect(first.compilationContractHash).toBe("18e46c4e9cfaca6c9a23114c68f7dd6fce489f50f5c74e5b3277878a3d35ca62");
+    expect(first.compilationContractHash).toBe("6e6aa8e13d3c534b1d2c13d2a35bfe9f006bd8664f6d0de05902c0c933b0228b");
     const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
     expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
     expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
@@ -524,6 +527,36 @@ describe("C++/CuTe frontend profile", () => {
       otherClang,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
       "$.toolchain.compiler",
+    );
+  });
+
+  it("binds one exact diagnostic-normalization manifest into shared compilation semantics", async () => {
+    const prepared = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
+    expect(
+      unwrapPreparedCppCuteFrontendProfile(prepared)
+        .compilationContract.language.diagnostics.normalizationManifestSha256,
+    ).toBe(CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256);
+
+    const malformed = cloneCppCuteProfileInput();
+    const malformedDiagnostics = (malformed["language"] as Record<string, unknown>)[
+      "diagnostics"
+    ] as Record<string, unknown>;
+    malformedDiagnostics["normalizationManifestSha256"] = "not-a-digest";
+    await expectProfileError(
+      malformed,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.diagnostics.normalizationManifestSha256",
+    );
+
+    const drifted = cloneCppCuteProfileInput();
+    const driftedDiagnostics = (drifted["language"] as Record<string, unknown>)[
+      "diagnostics"
+    ] as Record<string, unknown>;
+    driftedDiagnostics["normalizationManifestSha256"] = "0".repeat(64);
+    await expectProfileError(
+      drifted,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.language.diagnostics.normalizationManifestSha256",
     );
   });
 

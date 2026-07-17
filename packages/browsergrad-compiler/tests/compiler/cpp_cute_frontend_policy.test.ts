@@ -13,6 +13,9 @@ import {
   unwrapPreparedCppCuteFrontendProfile,
 } from "../../src/cpp_cute_frontend_profile.js";
 import {
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+} from "../../src/cpp_cute_diagnostic_normalization.js";
+import {
   cloneCppCuteProfileInput,
   createCppCuteProfileInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
@@ -31,6 +34,8 @@ describe("C++/CuTe closed compiler policy", () => {
     expect(contract.language.diagnostics).toEqual({
       warningRegistryId: CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
       baseline: CPP_CUTE_FRONTEND_WARNING_BASELINE,
+      normalizationManifestSha256:
+        CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
     });
     expect(contract.compatibility.unsupportedSourceFeatures).toContain(
       "cxx:temporal-macros@1",

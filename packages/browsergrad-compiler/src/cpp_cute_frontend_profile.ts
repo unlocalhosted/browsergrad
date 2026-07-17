@@ -15,6 +15,9 @@ import {
   CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
 } from "./cpp_cute_semantic_adapter_manifest.js";
 import {
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+} from "./cpp_cute_diagnostic_normalization.js";
+import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE,
 } from "./resources/cpp_cute_browser_runtime_abi_v1.js";
 import {
@@ -32,11 +35,11 @@ import {
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 5;
+export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 6;
 export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA =
   "browsergrad.compiler.cpp-cute.compilation-contract";
 export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR = 1;
-export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR = 1;
+export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR = 2;
 export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
   "https://browsergrad.dev/provenance/cpp-cute-aot/v3";
 
@@ -313,6 +316,9 @@ export interface CppCuteFrontendPreprocessingPolicy extends JsonObject {
 export interface CppCuteFrontendDiagnosticPolicy extends JsonObject {
   readonly warningRegistryId: typeof CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID;
   readonly baseline: typeof CPP_CUTE_FRONTEND_WARNING_BASELINE;
+  /** Exact canonical Clang-to-Artifact-V3 normalization authority. */
+  readonly normalizationManifestSha256:
+    typeof CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256;
 }
 
 export interface CppCuteFrontendLanguageProfile extends JsonObject {
@@ -347,6 +353,8 @@ export interface CppCuteFrontendCompilerProfile extends JsonObject {
   readonly version: string;
   readonly buildId: string;
   readonly binarySha256: string;
+  /** Canonical VFS directory passed exactly to Clang `-resource-dir`. */
+  readonly resourceDirectoryVirtualPath: string;
   readonly resourceDirectorySha256: string;
 }
 
@@ -426,6 +434,7 @@ export interface CppCuteFrontendCompilationContractV1 extends JsonObject {
     readonly id: string;
     readonly version: string;
     readonly buildId: string;
+    readonly resourceDirectoryVirtualPath: string;
     readonly resourceDirectorySha256: string;
   };
   readonly dependencies: readonly CppCuteFrontendDependencyProfile[];
@@ -543,6 +552,8 @@ export function cppCuteFrontendCompilationContract(
       id: profile.toolchain.compiler.id,
       version: profile.toolchain.compiler.version,
       buildId: profile.toolchain.compiler.buildId,
+      resourceDirectoryVirtualPath:
+        profile.toolchain.compiler.resourceDirectoryVirtualPath,
       resourceDirectorySha256: profile.toolchain.compiler.resourceDirectorySha256,
     },
     dependencies: profile.toolchain.dependencies,
@@ -687,14 +698,14 @@ function validateSemanticAdapterBinding(
   if (toolchain.compiler.id !== "clang" || toolchain.compiler.version !== "22.1.8") {
     invalid(
       "$.toolchain.compiler",
-      "profile v2.5 semantic adapter requires exact Clang 22.1.8 identity",
+      "profile v2.6 semantic adapter requires exact Clang 22.1.8 identity",
     );
   }
   if (deployment.extractor.semanticAdapterManifestSha256 !==
       CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256) {
     invalid(
       "$.deployment.extractor.semanticAdapterManifestSha256",
-      "profile v2.5 requires the package canonical semantic-adapter manifest",
+      "profile v2.6 requires the package canonical semantic-adapter manifest",
     );
   }
 }
@@ -1256,7 +1267,11 @@ function parseDiagnosticPolicy(
   value: JsonValue,
   path: string,
 ): CppCuteFrontendDiagnosticPolicy {
-  const object = closedObject(value, ["warningRegistryId", "baseline"], path);
+  const object = closedObject(
+    value,
+    ["warningRegistryId", "baseline", "normalizationManifestSha256"],
+    path,
+  );
   if (object.warningRegistryId !== CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID) {
     invalid(
       `${path}.warningRegistryId`,
@@ -1266,9 +1281,22 @@ function parseDiagnosticPolicy(
   if (object.baseline !== CPP_CUTE_FRONTEND_WARNING_BASELINE) {
     invalid(`${path}.baseline`, `warning baseline must equal ${CPP_CUTE_FRONTEND_WARNING_BASELINE}`);
   }
+  const normalizationManifestSha256 = sha256(
+    field(object, "normalizationManifestSha256", path),
+    `${path}.normalizationManifestSha256`,
+  );
+  if (normalizationManifestSha256 !==
+      CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256) {
+    invalid(
+      `${path}.normalizationManifestSha256`,
+      "profile v2.6 requires the package canonical diagnostic-normalization manifest",
+    );
+  }
   return {
     warningRegistryId: CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
     baseline: CPP_CUTE_FRONTEND_WARNING_BASELINE,
+    normalizationManifestSha256:
+      CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
   };
 }
 
@@ -1451,13 +1479,13 @@ function parseTarget(value: JsonValue, path: string): CppCuteFrontendTargetProfi
     invalid(`${devicePath}.architecture`, "device architecture must be an sm_NN Clang CUDA target CPU");
   }
   if (device.triple !== "nvptx64-nvidia-cuda") {
-    invalid(`${devicePath}.triple`, "profile v2.5 requires the nvptx64-nvidia-cuda device triple");
+    invalid(`${devicePath}.triple`, "profile v2.6 requires the nvptx64-nvidia-cuda device triple");
   }
   if (host.endianness !== "little" || device.endianness !== "little") {
-    invalid(path, "CUDA profile v2.5 requires little-endian host and NVPTX targets");
+    invalid(path, "CUDA profile v2.6 requires little-endian host and NVPTX targets");
   }
   if (host.pointerBits !== 64 || device.pointerBits !== 64) {
-    invalid(path, "CUDA profile v2.5 requires matching 64-bit host and device pointer widths");
+    invalid(path, "CUDA profile v2.6 requires matching 64-bit host and device pointer widths");
   }
   const hostDataLayout = boundedString(field(host, "dataLayout", hostPath), `${hostPath}.dataLayout`, 1_024);
   const deviceDataLayout = boundedString(field(device, "dataLayout", devicePath), `${devicePath}.dataLayout`, 1_024);
@@ -1484,14 +1512,39 @@ function parseToolchain(value: JsonValue, path: string): CppCuteFrontendToolchai
   const object = closedObject(value, ["compiler", "dependencies"], path);
   const compilerObject = closedObject(
     field(object, "compiler", path),
-    ["id", "version", "buildId", "binarySha256", "resourceDirectorySha256"],
+    [
+      "id",
+      "version",
+      "buildId",
+      "binarySha256",
+      "resourceDirectoryVirtualPath",
+      "resourceDirectorySha256",
+    ],
     `${path}.compiler`,
   );
+  const resourceDirectoryVirtualPath = stringValue(
+    field(compilerObject, "resourceDirectoryVirtualPath", `${path}.compiler`),
+    `${path}.compiler.resourceDirectoryVirtualPath`,
+  );
+  requireVirtualPath(
+    resourceDirectoryVirtualPath,
+    `${path}.compiler.resourceDirectoryVirtualPath`,
+  );
+  if (
+    resourceDirectoryVirtualPath === "/"
+    || resourceDirectoryVirtualPath.length + "/include".length > 4_096
+  ) {
+    invalid(
+      `${path}.compiler.resourceDirectoryVirtualPath`,
+      "compiler resource directory must be a non-root path with a representable include child",
+    );
+  }
   const compiler = {
     id: boundedString(field(compilerObject, "id", `${path}.compiler`), `${path}.compiler.id`, 128),
     version: boundedString(field(compilerObject, "version", `${path}.compiler`), `${path}.compiler.version`, 128),
     buildId: boundedString(field(compilerObject, "buildId", `${path}.compiler`), `${path}.compiler.buildId`, 256),
     binarySha256: sha256(field(compilerObject, "binarySha256", `${path}.compiler`), `${path}.compiler.binarySha256`),
+    resourceDirectoryVirtualPath,
     resourceDirectorySha256: sha256(
       field(compilerObject, "resourceDirectorySha256", `${path}.compiler`),
       `${path}.compiler.resourceDirectorySha256`,
@@ -1621,6 +1674,15 @@ function validateProfileReferences(
     }
     if (root.owner.kind === "compiler-resource-directory") {
       compilerResourceRoots += 1;
+      if (
+        root.mode !== "system"
+        || root.virtualPath !== `${toolchain.compiler.resourceDirectoryVirtualPath}/include`
+      ) {
+        invalid(
+          rootPath,
+          "compiler-owned include root must be the exact system include child of resourceDirectoryVirtualPath",
+        );
+      }
       if (root.manifestSha256 !== toolchain.compiler.resourceDirectorySha256) {
         invalid(`${rootPath}.manifestSha256`, "compiler-owned include root must bind the compiler resource directory");
       }
