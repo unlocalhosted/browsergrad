@@ -17,7 +17,7 @@ browsergrad/
 ├── packages/
 │   ├── browsergrad-runtime/    Pyodide-in-Worker host
 │   ├── browsergrad-kernels/    WGSL kernel catalog
-│   ├── browsergrad-compiler/   CUDA-lite compiler + WebGPU runner
+│   ├── browsergrad-compiler/   current CUDA-lite frontend + semantic execution pipeline
 │   ├── browsergrad-grad/       tensor + autograd library
 │   └── browsergrad-primitives/ browser-safe lab primitives
 ├── package.json                pnpm workspaces
@@ -38,7 +38,9 @@ Every layer is built one test at a time:
 
 1. Write a behavior test against an **independent oracle** — NumPy result, hand-derived math identity, or finite-difference numerical check. Never compare an implementation against itself.
 2. Run it; watch it fail (`RED`).
-3. Write the minimum implementation to make that one test pass (`GREEN`).
+3. Write the smallest correct semantic slice to make that one test pass
+   (`GREEN`). Do not use a source-pattern special case when the test exposes a
+   missing reusable abstraction.
 4. Never refactor while red.
 5. Repeat until the feature is complete.
 
@@ -66,6 +68,12 @@ Three independent reference points are used to validate behavior:
 | **Hand-derived math** | Known closed-form values | E.g. `d(x²)/dx = 2x`, `softmax` rows sum to 1, etc. |
 
 For cross-package, `browsergrad-kernels` JS reference impls and `browsergrad-grad` NumPy ops are tested against each other in `tests-integration/cross-package-conformance.test.ts` — two independent implementations agreeing within `1e-4`.
+
+For compiler and backend work, read
+[`docs/platform/package-requirements-lld.md`](./docs/platform/package-requirements-lld.md).
+Its required evidence separates frontend acceptance, canonical semantic
+representation, CPU reference execution, portable WebGPU execution, and native
+execution. No one tier is evidence for another.
 
 ### Integration testing
 
@@ -96,7 +104,7 @@ pnpm -F <pkg> test:integration   # integration tests for one package
 
 - **`browsergrad-kernels`** is the WGSL catalog. It depends on nothing. Each kernel ships the WGSL string, a JS dispatcher, AND a pure-JS reference implementation. The reference impls are testable in node; the WGSL impls require WebGPU.
 
-- **`browsergrad-compiler`** owns CUDA-lite semantics: source/context normalization, parser/analyzer, Kernel IR, lockstep CPU reference, WGSL emission, WebGPU runner orchestration, and pinned real-world corpus gates. It consumes `browsergrad-kernels` dispatch helpers; platform code should consume compiler capability reports instead of copying CUDA heuristics.
+- **`browsergrad-compiler`** owns the current CUDA-lite frontend: source/context normalization, parser/analyzer, Kernel IR, lockstep CPU reference, WGSL emission, WebGPU runner orchestration, and pinned real-world corpus gates. It consumes `browsergrad-kernels` dispatch helpers; platform code should consume compiler capability reports instead of copying CUDA heuristics. The required expansion is versioned C++/CuTe source compatibility lowered through canonical tensor/view/layout/tile semantics, not a larger collection of parser cases.
 
 - **`browsergrad-grad`** is the tensor + autograd library, in Python, embedded as TypeScript string constants. It's installed into a Pyodide target via `installGrad(target)` — duck-typed so it works with the runtime's `Session` OR any other Pyodide setup. Optional `install_torch_alias()` registers a `torch` namespace shim.
 

@@ -14,7 +14,8 @@ basis, read [`package-requirements-lld.md`](./package-requirements-lld.md).
 | "Simple autograd", "teaching tensor", "eager backward" | `@unlocalhosted/browsergrad-grad` |
 | "Eager autograd plus WebGPU forward matmul/softmax/layernorm/attention" | `@unlocalhosted/browsergrad-grad` + `@unlocalhosted/browsergrad-kernels` |
 | "WebGPU kernels", "WGSL", "FlashAttention reference", "rubric tensor compare" | `@unlocalhosted/browsergrad-kernels` |
-| "CUDA-like kernel source", "compile CUDA to WGSL", "real CUDA corpus" | `@unlocalhosted/browsergrad-compiler` |
+| "Current CUDA-lite kernel source", "compile CUDA-lite to WGSL", "real CUDA corpus" | `@unlocalhosted/browsergrad-compiler` |
+| "CuTe/CUTLASS source", "cute::Tensor", "dynamic tensor layouts" | Read `package-requirements-lld.md`; this is a required compiler direction, not a claim that the current CUDA-lite frontend already accepts it. |
 | "Tokenization/data/eval/simulation/RL helper" | `@unlocalhosted/browsergrad-primitives` |
 
 ## Import Rules
@@ -29,7 +30,12 @@ basis, read [`package-requirements-lld.md`](./package-requirements-lld.md).
 - Do not assume a workspace package is publishable just because local imports
   work. Verify the packed tarball.
 
-## CUDA-Lite Agent Flow
+## Current CUDA-Lite Agent Flow
+
+This flow applies to the shipping CUDA-lite frontend. It does not establish
+generic C++/CuTe support. For tensor views, layouts, tiles, dynamic rank, or
+CuTe objects, design the shared semantic representation before modifying parser
+rules.
 
 1. Use `detectKernelFeatures(device)` from `browsergrad-kernels`.
 2. Convert features with `compileCudaLiteOptionsFromKernelFeatures()`.
@@ -69,3 +75,5 @@ shows `workspace:*`, the release is broken even if CI was green.
 - Do not claim WebGPU coverage from unit tests. Use browser/WebGPU gates when
   shader behavior matters.
 - Do not skip tests to make release green.
+- Do not turn a missing view/layout/tile/dtype semantic model into a
+  source-spelling handler, opaque host callback, or silently renamed fallback.

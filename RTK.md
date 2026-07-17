@@ -10,6 +10,12 @@ This is the short operational runbook for future agents.
 4. Identify whether the change touches editable source, generated source, or published `dist/`.
 5. Choose the smallest test command that exercises the change.
 
+For compiler, kernel, JIT realization, dtype/device, or capability-language
+work, also read `docs/platform/package-requirements-lld.md`. It is the
+normative semantics-first contract: a parse result, CPU reference, portable
+WebGPU execution, and native execution are separate claims and must be named
+separately.
+
 ## Editing Rules
 
 - Use `apply_patch` for manual file edits.
@@ -17,6 +23,9 @@ This is the short operational runbook for future agents.
 - Do not revert user changes.
 - Keep Python package generated files synchronized through codegen.
 - Keep public errors descriptive and explicit when functionality is unsupported.
+- Do not resolve a missing semantic abstraction by adding source-spelling
+  handlers, a renamed CPU fallback, a silent dtype conversion, or an opaque
+  callback in a claimed core execution path.
 
 ## Pyodide Probe Pattern
 
@@ -52,7 +61,17 @@ Before changing package APIs for a course/lab:
 - Add focused package tests for reusable APIs.
 - Keep native-only upstream harness assumptions out of root package code.
 
-## CUDA-Lite Compiler Iteration
+## Current CUDA-Lite Compiler Workflow
+
+`compileCudaLiteKernel*()` is the workflow for the current CUDA-lite frontend.
+It is not authorization to model real C++/CuTe compatibility as a growing list
+of parser cases. Before extending layouts, tensors, tiled algorithms, barriers,
+or pointer/view behavior, identify the canonical `TensorView`, `IndexMap`,
+`Tile`, uniformity, or host-graph semantic change required by the LLD.
+
+Keep the existing architecture gate: parser facts, semantic IR, CPU reference,
+and WGSL lowering must agree. A clearer error is useful only after that shared
+model can state exactly what is unavailable.
 
 Track active bugbash state in `docs/internal/compiler-bugbash-progress.md`.
 It should show the latest green gates, remaining probes, and exact next command

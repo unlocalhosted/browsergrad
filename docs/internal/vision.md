@@ -1,6 +1,14 @@
-# Browsergrad: Vision and Architecture
+# BrowserGrad: Vision and Architecture
 
 This document is for someone who hasn't built a deep learning library before. It explains what we have, where it hits a ceiling, and what we'd build next if we were unafraid of the work. Every technical term is explained the first time it appears.
+
+The current normative engineering direction is
+[`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md).
+BrowserGrad is a browser-native systems and ML execution platform; guided labs
+are a demanding consumer, not a reason to substitute simplified language,
+tensor, dtype, or execution semantics. This document remains an accessible
+architecture narrative and should defer to that requirements document for
+capability claims and implementation priorities.
 
 For the day-to-day "what shipped this week" view, see [PROGRESS.md](PROGRESS.md). For decisions we've already made on the *current* library, see [ARCHITECTURE.md](ARCHITECTURE.md). This file is forward-looking.
 
@@ -14,7 +22,7 @@ This setup is brilliant if you're a researcher at a lab. It's miserable if you'r
 
 **Browsergrad is the bet that the browser is enough.** Every modern browser has access to the GPU through a standardized API (WebGPU). Every modern browser can run Python (via Pyodide, which compiles Python to WebAssembly). Every modern browser can run multi-threaded code (via Web Workers + SharedArrayBuffer). If you compose those primitives carefully, you can build a deep learning environment that runs entirely in a webpage. No install. No driver mismatches. No proprietary runtime. The student lands on a URL and they're training a model in fifteen seconds.
 
-What we have today is the proof-of-concept of that bet. What this document describes is what we'd build next to turn the proof-of-concept into something that competes with PyTorch on its own terms.
+What we have today is the first implementation of that bet. What this document describes is what we'd build next to compete with PyTorch on its own terms.
 
 ---
 

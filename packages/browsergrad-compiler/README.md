@@ -1,8 +1,9 @@
 # @unlocalhosted/browsergrad-compiler
 
-CUDA-lite compiler for browser-native GPU labs.
+Current CUDA-lite frontend and semantic execution pipeline for browser-native
+GPU work.
 
-The default path is small and inspectable:
+The shipping path is inspectable:
 
 ```text
 CUDA-lite source -> BrowserGrad Kernel IR -> WGSL -> WebGPU
@@ -11,6 +12,14 @@ CUDA-lite source -> BrowserGrad Kernel IR -> WGSL -> WebGPU
 
 This package is independent of Pyodide. It uses
 `@unlocalhosted/browsergrad-kernels` for WGSL dispatch.
+
+CUDA-lite is the current frontend, not the compatibility ceiling. BrowserGrad’s
+target is versioned C++/CuTe source compatibility lowered through canonical
+tensor/view/layout/tile semantics into the same CPU-reference, WebGPU, and
+native-companion execution tiers. See
+[`docs/platform/package-requirements-lld.md`](../../docs/platform/package-requirements-lld.md)
+for the normative requirements and the exact distinction between frontend,
+semantic, reference, and backend support.
 Install the compiler and kernels together from npm:
 
 ```sh
@@ -23,10 +32,13 @@ publish.
 
 Compatibility vocabulary:
 
-- **native lowering**: CUDA primitive lowers directly to WGSL/WebGPU.
-- **GPU polyfill lowering**: CUDA primitive lowers into one or more real WebGPU passes.
+- **direct portable lowering**: current CUDA-lite primitive lowers directly to
+  WGSL/WebGPU.
+- **portable multi-pass lowering**: current CUDA-lite primitive lowers into one
+  or more real WebGPU passes.
 - **CPU reference**: correctness and teaching trace, not primary runtime.
-- **unsupported diagnostic**: no honest lowering exists yet.
+- **unavailable backend capability**: the semantic program is understood, but
+  this execution tier has no correct lowering yet.
 
 Low-level extension boundaries live in
 [`docs/platform/cuda-lite-compiler-architecture.md`](../../docs/platform/cuda-lite-compiler-architecture.md).

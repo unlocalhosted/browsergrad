@@ -2,9 +2,14 @@
 
 BrowserGrad should be the execution substrate for many guided labs, ported from
 many courses, lectures, papers, and class assignments. The product direction is
-not one course clone. It is a browser-native lab layer that can sit beside a
-YouTube lecture, course page, reading group, or workshop and give learners a
-structured place to do the work.
+not one course clone. It is a browser-native systems and ML platform that can
+sit beside a YouTube lecture, course page, reading group, or workshop and give
+learners a structured place to do real work.
+
+Education is a demanding product consumer, not a license to replace language,
+tensor, numerical, or execution semantics with an assignment-specific
+simulation. The platform-wide contract lives in
+[package-requirements-lld.md](./package-requirements-lld.md).
 
 ## North Star
 
@@ -30,9 +35,11 @@ structured place to do the work.
    cancellation, structured assertions, and JS oracle registration.
 6. **ML libraries/backends**: `grad`, `jit`, `kernels`, and future libraries
    that provide reusable capability across many assignments.
-7. **Kernel lab foundation**: a small WebGPU/WGSL core for systems assignments
-   that can mature into native runners, CUDA-lite syntax, and Worker-mesh
-   collectives.
+7. **Kernel/compiler foundation**: a semantics-first WebGPU/WGSL execution
+   tier with CPU conformance and optional native companions. The current
+   CUDA-lite frontend is one source path; versioned C++/CuTe compatibility,
+   tensor views, layouts, tiles, and worker-mesh collectives are platform
+   capabilities to build through shared semantics.
 
 ## Design Rules
 
@@ -46,6 +53,9 @@ structured place to do the work.
   or internal handoff docs.
 - Failure output should teach: tell the learner which concept broke, not which
   browser API was used.
+- A lab may teach a capability progressively, but it must state whether it ran
+  a semantic reference, portable WebGPU, or a native backend. Do not label a
+  simulation or source spelling acceptance as the stronger execution claim.
 
 ## Implementation Shape
 

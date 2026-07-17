@@ -1,10 +1,18 @@
 # CUDA Compatibility Spine
 
-BrowserGrad compiler is a real-GPU compatibility compiler, not a CPU simulator.
-CUDA-shaped source lowers into semantic IR, then each primitive gets one of four
+This document describes the **current CUDA-lite frontend**. BrowserGrad's
+compiler executes real WebGPU work when its portable lowering is available; it
+is not a CPU simulator. It does not, however, establish generic C++ or CuTe
+source compatibility. That target requires the shared tensor/view/layout/tile
+semantics in
+[package-requirements-lld.md](./package-requirements-lld.md).
+
+CUDA-lite source lowers into semantic IR, then each primitive gets one of four
 lowering decisions:
 
-- `native`: direct WGSL/WebGPU lowering runs on real GPU.
+- `native`: legacy lowering-plan enum for direct portable WGSL/WebGPU lowering
+  on a real GPU; documentation should call this **direct portable lowering**,
+  not native CUDA execution.
 - `gpu-polyfill`: one or more WGSL/WebGPU passes implement CUDA semantics on real GPU.
 - `cpu-reference`: CPU reference exists for correctness/traces, but GPU lowering is not available.
 - `unsupported`: no honest implementation yet; emit diagnostic.
@@ -51,6 +59,9 @@ Public APIs:
 
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.
+For layouts, tensor objects, dynamic views, collective tiles, or CuTe syntax,
+do not add a CUDA-lite spelling rule. Add the canonical semantic abstraction
+described in the requirements document.
 For file-level boundaries and extension order, see
 [CUDA-lite Compiler Architecture](./cuda-lite-compiler-architecture.md).
 
