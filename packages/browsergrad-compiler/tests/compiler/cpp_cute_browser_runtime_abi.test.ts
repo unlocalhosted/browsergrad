@@ -70,7 +70,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       contractSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256,
       generatedImportAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
-      resourceByteLength: 19_127,
+      resourceByteLength: 19_849,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -402,6 +402,30 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       sourceBytes: "out-of-band-through-worker-owned-vfs-session",
       compileReadRule: "synchronous-complete-frame-validation-before-vfs-access",
     });
+    expect(frame.decodeLimits).toEqual({
+      maxDocumentByteLength: frame.maxFrameByteLength,
+      maxNestingDepth: 128,
+      maxNodeCount: 1_000_000,
+      maxCumulativeStringByteLength: frame.maxFrameByteLength,
+      maxArrayElementCount: 65_536,
+      maxObjectPropertyCount: 512,
+      maxScratchByteLength: frame.maxFrameByteLength * 4,
+      accounting: {
+        documentBytes: "per-region-before-utf8-decode",
+        nestingNodesAndStrings:
+          "per-region-root-depth-one-strings-include-object-keys-and-values",
+        containers: "per-array-or-object",
+        scratchBytes:
+          "peak-live-decoder-owned-bytes-per-compile-session-excluding-input-frame-vfs-and-producer-state",
+      },
+      numberPolicy:
+        "safe-integer-lexemes-only-no-negative-zero-fraction-or-exponent",
+      canonicalValidationPolicy:
+        "byte-exact-browsergrad-canonical-json-validation-per-region-rejecting-duplicate-keys",
+    });
+    expect(frame.decodeLimits.maxScratchByteLength)
+      .toBeLessThanOrEqual(unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared)
+        .manifest.body.wasm.memory.maxCompilerWorkingByteLength);
     expect(frame.fields.map((entry) => [entry.name, entry.offset])).toEqual([
       ["magic", 0],
       ["major", 8],
@@ -595,6 +619,22 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     ["frame magic", (value: MutableJson) => {
       objectField(body(value), "inputFrame").magicAscii = "EVILABI1";
     }, "inputFrame"],
+    ["widened frame decoder document budget", (value: MutableJson) => {
+      objectField(objectField(body(value), "inputFrame"), "decodeLimits")
+        .maxDocumentByteLength = 4_194_305;
+    }, "inputFrame.decodeLimits"],
+    ["widened frame decoder scratch budget", (value: MutableJson) => {
+      objectField(objectField(body(value), "inputFrame"), "decodeLimits")
+        .maxScratchByteLength = 16_777_217;
+    }, "inputFrame.decodeLimits"],
+    ["weakened frame decoder number policy", (value: MutableJson) => {
+      objectField(objectField(body(value), "inputFrame"), "decodeLimits")
+        .numberPolicy = "any-json-number";
+    }, "inputFrame.decodeLimits"],
+    ["weakened frame decoder canonical policy", (value: MutableJson) => {
+      objectField(objectField(body(value), "inputFrame"), "decodeLimits")
+        .canonicalValidationPolicy = "parse-only";
+    }, "inputFrame.decodeLimits"],
     ["result version", (value: MutableJson) => {
       objectField(objectField(body(value), "result"), "version").major = 4;
     }, "result"],

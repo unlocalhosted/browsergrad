@@ -107,6 +107,8 @@ const WASM_TARGETS = Object.freeze(["browsergrad-cpp-cute-extractor"]);
 const EXTRACTOR_SOURCE_PATHS = Object.freeze([
   "BrowserGradCppCuteArtifactV3.cpp",
   "BrowserGradCppCuteArtifactV3.h",
+  "BrowserGradCppCuteCanonicalJson.cpp",
+  "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",
   "BrowserGradCppCuteClangAction.h",
   "BrowserGradCppCuteExtractor.cpp",
@@ -116,6 +118,8 @@ const EXTRACTOR_SOURCE_PATHS = Object.freeze([
   "BrowserGradCppCuteMetrics.h",
   "BrowserGradCppCuteRuntime.cpp",
   "BrowserGradCppCuteRuntime.h",
+  "BrowserGradCppCuteSha256.cpp",
+  "BrowserGradCppCuteSha256.h",
   "CMakeLists.txt",
 ]);
 

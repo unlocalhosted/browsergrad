@@ -13,7 +13,7 @@ import {
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
   version: { major: 1, minor: 1 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.df1948909dc26d5339659c380a4a5d1601ccecba43433585a779ebe3e3a16d0e",
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.146ef5a52df89b88d8845f3c0c4ff149c8baaa7a77c05705b65087254e2291a8",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -557,6 +557,27 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       requestRegion: "exact-canonical-producer-neutral-frontend-request-json",
       regionOrder: "profile-then-zero-padding-then-request-then-zero-padding",
       totalLengthRule: "aligned-request-end-equals-total-byte-length-and-all-regions-are-in-bounds",
+      decodeLimits: {
+        maxDocumentByteLength: 4_194_304,
+        maxNestingDepth: 128,
+        maxNodeCount: 1_000_000,
+        maxCumulativeStringByteLength: 4_194_304,
+        maxArrayElementCount: 65_536,
+        maxObjectPropertyCount: 512,
+        maxScratchByteLength: 16_777_216,
+        accounting: {
+          documentBytes: "per-region-before-utf8-decode",
+          nestingNodesAndStrings:
+            "per-region-root-depth-one-strings-include-object-keys-and-values",
+          containers: "per-array-or-object",
+          scratchBytes:
+            "peak-live-decoder-owned-bytes-per-compile-session-excluding-input-frame-vfs-and-producer-state",
+        },
+        numberPolicy:
+          "safe-integer-lexemes-only-no-negative-zero-fraction-or-exponent",
+        canonicalValidationPolicy:
+          "byte-exact-browsergrad-canonical-json-validation-per-region-rejecting-duplicate-keys",
+      },
       sourceBytes: "out-of-band-through-worker-owned-vfs-session",
       compileReadRule: "synchronous-complete-frame-validation-before-vfs-access",
     },

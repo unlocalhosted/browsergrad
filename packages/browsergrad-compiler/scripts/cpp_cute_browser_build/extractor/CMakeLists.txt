@@ -21,6 +21,8 @@ endif()
 add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteArtifactV3.cpp
   BrowserGradCppCuteArtifactV3.h
+  BrowserGradCppCuteCanonicalJson.cpp
+  BrowserGradCppCuteCanonicalJson.h
   BrowserGradCppCuteClangAction.cpp
   BrowserGradCppCuteClangAction.h
   BrowserGradCppCuteExtractor.cpp
@@ -30,6 +32,8 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteMetrics.h
   BrowserGradCppCuteRuntime.cpp
   BrowserGradCppCuteRuntime.h
+  BrowserGradCppCuteSha256.cpp
+  BrowserGradCppCuteSha256.h
 )
 
 target_compile_features(browsergrad-cpp-cute-extractor PRIVATE cxx_std_20)

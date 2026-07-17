@@ -24,11 +24,11 @@ export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.df1948909dc26d5339659c380a4a5d1601ccecba43433585a779ebe3e3a16d0e";
+  "bg.cpp.browser-runtime-abi.sha256.146ef5a52df89b88d8845f3c0c4ff149c8baaa7a77c05705b65087254e2291a8";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "476f47b4248aa1c0ca6087b6f015c2c9bd5d8bf329a2da9cbf8193140ca900e7";
+  "73d4fdea7530053c0b308ff50684980ca48ec23f538b768c32c935e22a567f4f";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "22ab84e0c24ce2de988524dded779a0455d24ba4ceb3a86ba638df5c28ca56d5";
+  "c7b0aad19e5a76b481927f77e4ff3c0319398d2a13fa9d19e48baf608e0192da";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075";
 
@@ -633,6 +633,35 @@ function validateBodyInvariants(value: JsonObject): void {
         body.inputFrame.alignmentByteLength !== 8 ||
         body.inputFrame.maxFrameByteLength !== memory.maxInputFrameByteLength) {
       invalid("$.body.inputFrame", "input frame does not match the fixed runtime-v1 framing contract");
+    }
+    const decodeLimits = body.inputFrame.decodeLimits;
+    if (decodeLimits.maxDocumentByteLength !== body.inputFrame.maxFrameByteLength ||
+        decodeLimits.maxNestingDepth !== 128 ||
+        decodeLimits.maxNodeCount !== 1_000_000 ||
+        decodeLimits.maxCumulativeStringByteLength !== body.inputFrame.maxFrameByteLength ||
+        decodeLimits.maxArrayElementCount !== 65_536 ||
+        decodeLimits.maxObjectPropertyCount !== 512 ||
+        decodeLimits.maxScratchByteLength !== body.inputFrame.maxFrameByteLength * 4 ||
+        decodeLimits.maxScratchByteLength > memory.maxCompilerWorkingByteLength) {
+      invalid(
+        "$.body.inputFrame.decodeLimits",
+        "input-frame decoder resource ceilings differ from the fixed runtime-v1 contract",
+      );
+    }
+    if (decodeLimits.accounting.documentBytes !== "per-region-before-utf8-decode" ||
+        decodeLimits.accounting.nestingNodesAndStrings !==
+          "per-region-root-depth-one-strings-include-object-keys-and-values" ||
+        decodeLimits.accounting.containers !== "per-array-or-object" ||
+        decodeLimits.accounting.scratchBytes !==
+          "peak-live-decoder-owned-bytes-per-compile-session-excluding-input-frame-vfs-and-producer-state" ||
+        decodeLimits.numberPolicy !==
+          "safe-integer-lexemes-only-no-negative-zero-fraction-or-exponent" ||
+        decodeLimits.canonicalValidationPolicy !==
+          "byte-exact-browsergrad-canonical-json-validation-per-region-rejecting-duplicate-keys") {
+      invalid(
+        "$.body.inputFrame.decodeLimits",
+        "input-frame decoder accounting or canonical JSON policy differs from runtime v1",
+      );
     }
     const expectedFieldNames = [
       "magic", "major", "minor", "headerByteLength", "totalByteLength", "flags",

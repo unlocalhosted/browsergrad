@@ -21,6 +21,8 @@ const extractorRoot = join(dirname(fileURLToPath(import.meta.url)), "extractor")
 const expectedSourcePaths = [
   "BrowserGradCppCuteArtifactV3.cpp",
   "BrowserGradCppCuteArtifactV3.h",
+  "BrowserGradCppCuteCanonicalJson.cpp",
+  "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",
   "BrowserGradCppCuteClangAction.h",
   "BrowserGradCppCuteExtractor.cpp",
@@ -30,6 +32,8 @@ const expectedSourcePaths = [
   "BrowserGradCppCuteMetrics.h",
   "BrowserGradCppCuteRuntime.cpp",
   "BrowserGradCppCuteRuntime.h",
+  "BrowserGradCppCuteSha256.cpp",
+  "BrowserGradCppCuteSha256.h",
   "CMakeLists.txt",
 ] as const;
 
@@ -45,6 +49,14 @@ let runtimeVfsLimits: {
   readonly maxIndexedNodes: number;
   readonly maxLiveFileHandles: number;
   readonly maxAggregateLiveOpenByteLength: number;
+};
+let runtimeJsonLimits: {
+  readonly maxDocumentByteLength: number;
+  readonly maxNestingDepth: number;
+  readonly maxNodeCount: number;
+  readonly maxCumulativeStringByteLength: number;
+  readonly maxArrayElementCount: number;
+  readonly maxObjectPropertyCount: number;
 };
 let allocatorInterception: {
   readonly exactEntrypoints: readonly string[];
@@ -67,6 +79,7 @@ beforeAll(async () => {
     .manifest.body;
   applicationImportNames = body.hostImports.functions.map((entry) => entry.fieldName);
   runtimeVfsLimits = body.vfs;
+  runtimeJsonLimits = body.inputFrame.decodeLimits;
   allocatorInterception = body.allocatorMetricsRecord.accounting.interception;
 });
 
@@ -143,6 +156,37 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(header).toContain("bind_invocation_maximum_byte_length");
     expect(header).toContain("ArtifactV3ResultSink(const ArtifactV3ResultSink&) = delete");
     expect(source).not.toMatch(/clang\/|llvm\/|bg_vfs_/u);
+  });
+
+  it("keeps canonical JSON and SHA-256 deterministic, bounded, and ambient-free", async () => {
+    const canonicalHeader = await extractorSource("BrowserGradCppCuteCanonicalJson.h");
+    const canonicalSource = await extractorSource("BrowserGradCppCuteCanonicalJson.cpp");
+    const shaHeader = await extractorSource("BrowserGradCppCuteSha256.h");
+    const shaSource = await extractorSource("BrowserGradCppCuteSha256.cpp");
+    const primitives = [canonicalHeader, canonicalSource, shaHeader, shaSource].join("\n");
+
+    expect(canonicalHeader).toContain("struct CanonicalJsonLimits");
+    expect(canonicalHeader).toContain("validate_canonical_json");
+    for (const [name, value] of [
+      ["kRuntimeV1MaxDocumentByteLength", runtimeJsonLimits.maxDocumentByteLength],
+      ["kRuntimeV1MaxNestingDepth", runtimeJsonLimits.maxNestingDepth],
+      ["kRuntimeV1MaxNodeCount", runtimeJsonLimits.maxNodeCount],
+      ["kRuntimeV1MaxStringByteLength", runtimeJsonLimits.maxCumulativeStringByteLength],
+      ["kRuntimeV1MaxArrayElementCount", runtimeJsonLimits.maxArrayElementCount],
+      ["kRuntimeV1MaxObjectPropertyCount", runtimeJsonLimits.maxObjectPropertyCount],
+    ] as const) {
+      expect(canonicalHeader).toContain(`${name} = ${value}U`);
+    }
+    expect(canonicalSource).toContain("kMaximumSafeInteger");
+    expect(canonicalSource).toContain("compare_utf16");
+    expect(canonicalSource).toContain("depth > limits_.max_depth");
+    expect(shaHeader).toContain("class Sha256 final");
+    expect(shaHeader).toContain("Sha256(const Sha256&) = delete");
+    expect(shaSource).toContain("kRoundConstants");
+    expect(shaSource).toContain("kMaximumMessageByteLength");
+    expect(primitives).not.toMatch(
+      /clang\/|llvm\/|std::(?:filesystem|locale|random_device|thread)|\b(?:new|delete|malloc|calloc|realloc|free|fopen|getenv|setlocale|time|clock|fetch)\s*\(/u,
+    );
   });
 
   it("owns exact requested-byte allocator metrics without recursive allocation", async () => {

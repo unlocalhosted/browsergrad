@@ -175,7 +175,7 @@ describe("bounded Clang-WASM build source executor", () => {
       authority: "build-source-snapshot-only",
       lockId: lock.lockId,
       sourceSetSha256: lock.extractorSourceSetSha256,
-      fileCount: 12,
+      fileCount: 16,
       sourceVerified: true,
       buildExecuted: false,
       outputIdentityAuthorized: false,
@@ -185,6 +185,8 @@ describe("bounded Clang-WASM build source executor", () => {
     expect((await readdir(input.roots.extractorSourceRoot)).sort()).toEqual([
       "BrowserGradCppCuteArtifactV3.cpp",
       "BrowserGradCppCuteArtifactV3.h",
+      "BrowserGradCppCuteCanonicalJson.cpp",
+      "BrowserGradCppCuteCanonicalJson.h",
       "BrowserGradCppCuteClangAction.cpp",
       "BrowserGradCppCuteClangAction.h",
       "BrowserGradCppCuteExtractor.cpp",
@@ -194,6 +196,8 @@ describe("bounded Clang-WASM build source executor", () => {
       "BrowserGradCppCuteMetrics.h",
       "BrowserGradCppCuteRuntime.cpp",
       "BrowserGradCppCuteRuntime.h",
+      "BrowserGradCppCuteSha256.cpp",
+      "BrowserGradCppCuteSha256.h",
       "CMakeLists.txt",
     ]);
     const stagedCpp = join(input.roots.extractorSourceRoot, "BrowserGradCppCuteExtractor.cpp");

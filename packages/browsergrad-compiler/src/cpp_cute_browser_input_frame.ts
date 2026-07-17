@@ -12,9 +12,11 @@ import {
   type PreparedCppCuteBrowserWorkerInvocation,
 } from "./cpp_cute_browser_worker_protocol.js";
 import { unwrapPreparedCppCuteBrowserRuntimeAbiManifest } from "./cpp_cute_browser_runtime_abi.js";
+import { CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE } from "./resources/cpp_cute_browser_runtime_abi_v1.js";
 
 const UINT32_MAX = 0xffff_ffff;
-const INPUT_FRAME_MAXIMUM_BYTE_LENGTH = 4 * 1024 * 1024;
+const INPUT_FRAME_MAXIMUM_BYTE_LENGTH =
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.inputFrame.maxFrameByteLength;
 const SOURCE_SNAPSHOT_MAXIMUM_COUNT = 10_000;
 const SOURCE_SNAPSHOT_MAXIMUM_BYTE_LENGTH = 64 * 1024 * 1024;
 const INPUT_FRAME_MAGIC_BYTES = Uint8Array.of(0x42, 0x47, 0x43, 0x43, 0x41, 0x42, 0x49, 0x31);

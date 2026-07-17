@@ -298,13 +298,16 @@ describe("C++/CuTe browser Worker positive framing", () => {
     const requestRegionBytes = canonicalCppCuteBrowserWorkerRequestRegionBytes(
       environment.invocation,
     );
+    const inputFrame = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(
+      invocationRecord.runtimeAbi,
+    ).manifest.body.inputFrame;
     const sourceSnapshots = copyCppCuteBrowserWorkerSourceSnapshots(environment.invocation);
     const assembled = assembleCppCuteBrowserInputFrameRegions({
       profileRegionBytes,
       requestRegionBytes,
       sourceSnapshots,
       limits: {
-        maxFrameByteLength: 4 * 1024 * 1024,
+        maxFrameByteLength: inputFrame.maxFrameByteLength,
         maxSourceSnapshotCount: invocationRecord.request.sourceFileCount,
         maxSourceSnapshotByteLength: Number(invocationRecord.request.sourceByteLength),
       },
@@ -395,7 +398,12 @@ describe("C++/CuTe browser Worker positive framing", () => {
     }
   });
 
-  it("fails closed on frame, source-count, source-byte, and hard-limit overflow", () => {
+  it("fails closed on frame, source-count, source-byte, and manifest hard-limit overflow", async () => {
+    const runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
+      cppCuteBrowserRuntimeAbiManifestResourceBytes(),
+    );
+    const maxFrameByteLength = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(runtimeAbi)
+      .manifest.body.inputFrame.maxFrameByteLength;
     const base = {
       profileRegionBytes: Uint8Array.of(1),
       requestRegionBytes: Uint8Array.of(2),
@@ -437,7 +445,7 @@ describe("C++/CuTe browser Worker positive framing", () => {
     expect(() => assembleCppCuteBrowserInputFrameRegions({
       ...base,
       limits: {
-        maxFrameByteLength: 4 * 1024 * 1024 + 1,
+        maxFrameByteLength: maxFrameByteLength + 1,
         maxSourceSnapshotCount: 1,
         maxSourceSnapshotByteLength: 2,
       },

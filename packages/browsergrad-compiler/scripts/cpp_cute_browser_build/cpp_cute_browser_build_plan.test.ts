@@ -159,6 +159,8 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
     }))).toEqual([
       "BrowserGradCppCuteArtifactV3.cpp",
       "BrowserGradCppCuteArtifactV3.h",
+      "BrowserGradCppCuteCanonicalJson.cpp",
+      "BrowserGradCppCuteCanonicalJson.h",
       "BrowserGradCppCuteClangAction.cpp",
       "BrowserGradCppCuteClangAction.h",
       "BrowserGradCppCuteExtractor.cpp",
@@ -168,6 +170,8 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
       "BrowserGradCppCuteMetrics.h",
       "BrowserGradCppCuteRuntime.cpp",
       "BrowserGradCppCuteRuntime.h",
+      "BrowserGradCppCuteSha256.cpp",
+      "BrowserGradCppCuteSha256.h",
       "CMakeLists.txt",
     ].map((path) => ({
       path,

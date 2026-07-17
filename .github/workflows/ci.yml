@@ -51,6 +51,10 @@ jobs:
       - name: Verify compiler Node-only Docker shell
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:aot-docker-shell:run
 
+      - name: Verify compiler Clang-Wasm build plan and native primitives
+        if: matrix.node == 24
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
+
       - run: pnpm architecture:check
       - run: pnpm -r test
 
