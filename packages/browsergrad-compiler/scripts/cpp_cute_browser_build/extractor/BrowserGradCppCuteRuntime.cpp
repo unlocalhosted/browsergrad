@@ -436,6 +436,11 @@ void runtime_free(std::uint32_t pointer, std::uint32_t byte_length) {
 }
 
 void runtime_reset() {
+  if (g_runtime.phase == RuntimePhase::kCompiling) {
+    g_runtime.status = WireCompileStatus::kInvalidState;
+    g_runtime.phase = RuntimePhase::kFailed;
+    return;
+  }
   release_input();
   release_result();
   g_runtime = RuntimeState{};

@@ -288,6 +288,19 @@ ArtifactV3CompileResult reentrant_compile(
   return {WireCompileStatus::kArtifactReady, std::nullopt};
 }
 
+ArtifactV3CompileResult reentrant_reset(
+    const std::uint8_t* input, std::uint32_t byte_length,
+    ArtifactV3ResultSink&) {
+  runtime_reset();
+  if (runtime_status() !=
+          static_cast<std::int32_t>(WireCompileStatus::kInvalidState) ||
+      input == nullptr || byte_length != kValidFrameByteLength ||
+      std::memcmp(input, "BGCCABI1", 8U) != 0) {
+    return {WireCompileStatus::kInternalError, std::nullopt};
+  }
+  return {WireCompileStatus::kArtifactReady, std::nullopt};
+}
+
 ArtifactV3CompileResult poison_after_commit(
     const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
@@ -456,6 +469,16 @@ int run_runtime_tests() {
            static_cast<std::int32_t>(WireCompileStatus::kInternalError));
   BG_CHECK(runtime_result_pointer() == 0U);
   runtime_reset();
+
+  input = prepare_valid_input();
+  BG_CHECK(input != 0U);
+  BG_CHECK(runtime_compile(input, kValidFrameByteLength,
+                           reentrant_reset) ==
+           static_cast<std::int32_t>(WireCompileStatus::kInternalError));
+  BG_CHECK(runtime_result_pointer() == 0U);
+  BG_CHECK(live_allocation_count() == 1U);
+  runtime_reset();
+  BG_CHECK(live_allocation_count() == 0U);
 
   input = prepare_valid_input();
   BG_CHECK(input != 0U);
