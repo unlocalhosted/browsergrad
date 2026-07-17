@@ -4,6 +4,19 @@ import { type DecodeLimits, resolveDecodeLimits } from "./limits.js";
 
 const UTF8 = new TextEncoder();
 
+/**
+ * Locale-free string order used by canonical set-like wire collections.
+ *
+ * JavaScript relational string comparison is lexicographic over UTF-16 code
+ * units, matching the ordering already used by canonical JSON object keys.
+ * Never replace this with localeCompare: locale data is ambient authority and
+ * cannot be reproduced by non-JavaScript readers.
+ */
+export function compareCanonicalStrings(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
 export function canonicalizeJson(
   value: unknown,
   options: { readonly limits?: Partial<DecodeLimits> } = {},
@@ -37,6 +50,6 @@ function encodeCanonical(value: JsonValue): string {
   if (typeof value === "string") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((entry) => encodeCanonical(entry)).join(",")}]`;
   const objectValue = value as JsonObject;
-  const keys = Object.keys(objectValue).sort();
+  const keys = Object.keys(objectValue).sort(compareCanonicalStrings);
   return `{${keys.map((key) => `${JSON.stringify(key)}:${encodeCanonical(objectValue[key] as JsonValue)}`).join(",")}}`;
 }

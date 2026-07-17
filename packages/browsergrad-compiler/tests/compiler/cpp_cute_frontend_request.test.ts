@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { encodeWireU64, sha256Hex } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
+  compareCanonicalStrings,
+  encodeWireU64,
+  sha256Hex,
+} from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
   CppCuteFrontendRequestError,
@@ -55,7 +59,8 @@ async function createRequestFixture(
     createFile("main-source", MAIN_PATH, null, mainBytes),
     createFile("project-header", HEADER_PATH, "workspace-source", headerBytes),
   ]);
-  files.sort((left, right) => left.virtualPath.localeCompare(right.virtualPath));
+  files.sort((left, right) =>
+    compareCanonicalStrings(left.virtualPath, right.virtualPath));
   const tokenStart = mainBytesIndexOf(mainBytes, ENCODER.encode(TOKEN));
   const anchor = {
     virtualPath: MAIN_PATH,
@@ -163,6 +168,59 @@ function mainBytesIndexOf(haystack: Uint8Array, needle: Uint8Array): number {
 }
 
 describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
+  it("uses locale-free UTF-16 code-unit ordering for Unicode virtual paths", async () => {
+    const fixture = await createRequestFixture();
+    const main = fixture.input.files.find((file) => file.role === "main-source");
+    if (main === undefined) throw new Error("fixture lost main source");
+    const unicodePath = "/workspace/src/é.hpp";
+    const unicodeBytes = ENCODER.encode("constexpr int unicode_header = 1;\n");
+    const unicodeHeader = await createFile(
+      "project-header",
+      unicodePath,
+      "workspace-source",
+      unicodeBytes,
+    );
+    const files = [main, unicodeHeader];
+    expect(compareCanonicalStrings(main.virtualPath, unicodePath)).toBeLessThan(0);
+    const body: CppCuteFrontendRequestBodyV1 = {
+      schema: fixture.input.schema,
+      version: fixture.input.version,
+      compilationContractHash: fixture.input.compilationContractHash,
+      mainVirtualPath: fixture.input.mainVirtualPath,
+      files,
+      entryRequests: fixture.input.entryRequests,
+      expectedArtifact: fixture.input.expectedArtifact,
+      limits: fixture.input.limits,
+    };
+    const input: CppCuteFrontendRequestV1 = {
+      ...body,
+      requestId:
+        `bg.cpp.frontend-request.sha256.${await deriveCppCuteFrontendRequestHash(body)}`,
+    };
+    const mainSnapshot = fixture.snapshots.find(
+      (snapshot) => snapshot.virtualPath === main.virtualPath,
+    );
+    if (mainSnapshot === undefined) throw new Error("fixture lost main snapshot");
+    const snapshots: readonly CppCuteFrontendSourceSnapshotInput[] = [
+      mainSnapshot,
+      { virtualPath: unicodePath, bytes: unicodeBytes },
+    ];
+
+    await expect(prepareCppCuteFrontendRequest(
+      fixture.profile,
+      input,
+      snapshots,
+    )).resolves.toBeDefined();
+    await expect(prepareCppCuteFrontendRequest(
+      fixture.profile,
+      { ...input, files: [...files].reverse() },
+      [...snapshots].reverse(),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-REQUEST-INVALID",
+      path: "$.files",
+    });
+  });
+
   it("prepares deterministic opaque authority over copied caller source bytes", async () => {
     const fixture = await createRequestFixture();
     const first = await prepareCppCuteFrontendRequest(fixture.profile, fixture.input, fixture.snapshots);

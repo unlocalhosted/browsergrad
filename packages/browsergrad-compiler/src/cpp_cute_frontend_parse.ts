@@ -1,4 +1,5 @@
 import {
+  compareCanonicalStrings,
   deepFreezeJson,
   isJsonObject,
   parseWireI64,
@@ -1736,7 +1737,7 @@ function setArrayField<T>(
     if (seen.has(key)) duplicate(path, `duplicate ID ${key}`);
     seen.add(key);
   }
-  return parsed.sort((left, right) => id(left).localeCompare(id(right)));
+  return parsed.sort((left, right) => compareCanonicalStrings(id(left), id(right)));
 }
 
 function orderedArrayField(object: JsonObject, name: string, parentPath: string, maximum: number): readonly JsonValue[] {
@@ -1750,7 +1751,8 @@ function requireStrictlySorted<T>(values: readonly T[], key: (value: T) => strin
   for (let index = 1; index < values.length; index += 1) {
     const previous = values[index - 1];
     const current = values[index];
-    if (previous === undefined || current === undefined || key(previous).localeCompare(key(current)) >= 0) {
+    if (previous === undefined || current === undefined ||
+        compareCanonicalStrings(key(previous), key(current)) >= 0) {
       invalid(path, "set-like entries must be strictly sorted and unique");
     }
   }

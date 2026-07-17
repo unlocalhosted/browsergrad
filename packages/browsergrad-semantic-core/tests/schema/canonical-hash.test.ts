@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalizeJson,
+  compareCanonicalStrings,
   derivePureValueId,
   deriveScopedEntityId,
   hashNamedComponents,
@@ -26,6 +27,29 @@ function envelope(source: string): VerifiedArtifact<JsonValue> {
 }
 
 describe("canonical JSON and hashing", () => {
+  it("orders set-like strings by UTF-16 code units without locale authority", () => {
+    expect([
+      "\ue000",
+      "😀",
+      "é",
+      "z",
+      "e\u0301",
+      "a",
+      "Z",
+      "A",
+    ].sort(compareCanonicalStrings)).toEqual([
+      "A",
+      "Z",
+      "a",
+      "e\u0301",
+      "z",
+      "é",
+      "😀",
+      "\ue000",
+    ]);
+    expect(compareCanonicalStrings("same", "same")).toBe(0);
+  });
+
   it("sorts object keys by UTF-16 code units and preserves array order", () => {
     const first = { "\ue000": 1, "😀": 2, a: [2, 1] };
     const second = { a: [2, 1], "😀": 2, "\ue000": 1 };

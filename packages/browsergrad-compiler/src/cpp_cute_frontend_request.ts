@@ -3,6 +3,7 @@ import {
   SemanticSchemaError,
   assertJsonValue,
   canonicalizeJson,
+  compareCanonicalStrings,
   deepFreezeJson,
   encodeWireU64,
   hashCanonicalJson,
@@ -834,7 +835,8 @@ function requireSortedUnique<T>(values: readonly T[], key: (value: T) => string,
   for (let index = 1; index < values.length; index += 1) {
     const previous = values[index - 1];
     const current = values[index];
-    if (previous === undefined || current === undefined || key(previous).localeCompare(key(current)) >= 0) {
+    if (previous === undefined || current === undefined ||
+        compareCanonicalStrings(key(previous), key(current)) >= 0) {
       invalid(path, "set-like records must be strictly sorted and unique");
     }
   }

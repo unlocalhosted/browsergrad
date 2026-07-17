@@ -39,7 +39,11 @@ export {
   type WireI64,
   type WireU64,
 } from "./schema/integers.js";
-export { canonicalizeJson, canonicalJsonBytes } from "./schema/canonical-json.js";
+export {
+  canonicalizeJson,
+  canonicalJsonBytes,
+  compareCanonicalStrings,
+} from "./schema/canonical-json.js";
 export {
   CACHE_KEY_HASH_DOMAIN,
   SEMANTIC_ARTIFACT_HASH_DOMAIN,
