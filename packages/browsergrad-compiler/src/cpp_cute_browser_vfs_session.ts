@@ -397,11 +397,18 @@ interface StoredMount {
   readonly indexLogicalByteLength: number;
   readonly expectedInitialMemoryByteLength: number;
   readonly maxMemoryByteLength: number;
+  /** Stable imports supplied to instantiation before module-owned memory exists. */
+  readonly hostImports: CppCuteBrowserVfsHostImports;
+  readonly importState: MountImportState;
   installation: VerifiedCppCuteBrowserVfsInstallation | undefined;
   request: PreparedCppCuteFrontendRequest | undefined;
   files: Map<string, SessionFile> | undefined;
   directories: Map<string, SessionDirectory> | undefined;
   state: "prepared" | "bound" | "discarded";
+}
+
+interface MountImportState {
+  session: PreparedCppCuteBrowserVfsSession | undefined;
 }
 
 interface CleanupFailure {
@@ -478,6 +485,8 @@ export function prepareCppCuteBrowserVfsMount(
     workerExecutionObserved: false,
     loweringAuthorityReady: false,
   }) as PreparedCppCuteBrowserVfsMount;
+  const importState: MountImportState = { session: undefined };
+  const hostImports = makeCppCuteBrowserVfsMountHostImports(importState);
   weakMapSet(MOUNTS, prepared, {
     mountOrdinal,
     installationId: installation.installationId,
@@ -495,6 +504,8 @@ export function prepareCppCuteBrowserVfsMount(
       deployment.compilerRuntime.memory.initialPages * WASM_PAGE_BYTE_LENGTH,
     maxMemoryByteLength:
       deployment.compilerRuntime.memory.maximumPages * WASM_PAGE_BYTE_LENGTH,
+    hostImports,
+    importState,
     installation,
     request,
     files,
@@ -536,7 +547,7 @@ export function bindCppCuteBrowserVfsMount(
     workerExecutionObserved: false,
     loweringAuthorityReady: false,
   }) as PreparedCppCuteBrowserVfsSession;
-  const hostImports = makeCppCuteBrowserVfsHostImports(session);
+  const hostImports = stored.hostImports;
   weakMapSet(SESSIONS, session, {
     sessionOrdinal,
     installationId: stored.installationId,
@@ -568,6 +579,7 @@ export function bindCppCuteBrowserVfsMount(
   stored.request = undefined;
   stored.files = undefined;
   stored.directories = undefined;
+  stored.importState.session = session;
   stored.state = "bound";
   return session;
 }
@@ -649,32 +661,65 @@ export function prepareCppCuteBrowserVfsSession(
   }
 }
 
+/**
+ * Returns one stable import table before module-owned memory exists. Every
+ * import fails closed with `sessionClosed` until this exact mount is bound.
+ * Binding activates these same function references; discard keeps them
+ * permanently terminal.
+ */
+export function createCppCuteBrowserVfsMountHostImports(
+  mount: PreparedCppCuteBrowserVfsMount,
+): CppCuteBrowserVfsHostImports {
+  return storedMount(mount).hostImports;
+}
+
 export function createCppCuteBrowserVfsHostImports(
   session: PreparedCppCuteBrowserVfsSession,
 ): CppCuteBrowserVfsHostImports {
   return storedSession(session).hostImports;
 }
 
-function makeCppCuteBrowserVfsHostImports(
-  session: PreparedCppCuteBrowserVfsSession,
+function makeCppCuteBrowserVfsMountHostImports(
+  state: MountImportState,
 ): CppCuteBrowserVfsHostImports {
   const imports: CppCuteBrowserVfsHostImports = {
-    bg_vfs_status: (pathPointer, pathByteLength, metadataPointer) =>
-      cppCuteBrowserVfsStatus(session, pathPointer, pathByteLength, metadataPointer),
-    bg_vfs_open: (pathPointer, pathByteLength, openResultPointer) =>
-      cppCuteBrowserVfsOpen(session, pathPointer, pathByteLength, openResultPointer),
-    bg_vfs_read: (handle, offsetLow, offsetHigh, destinationPointer, byteLength) =>
-      cppCuteBrowserVfsRead(
-        session,
-        handle,
-        offsetLow,
-        offsetHigh,
-        destinationPointer,
-        byteLength,
-      ),
-    bg_vfs_close: (handle) => cppCuteBrowserVfsClose(session, handle),
-    bg_vfs_directory_count: (pathPointer, pathByteLength, countPointer) =>
-      cppCuteBrowserVfsDirectoryCount(session, pathPointer, pathByteLength, countPointer),
+    bg_vfs_status: (pathPointer, pathByteLength, metadataPointer) => {
+      const session = state.session;
+      return session === undefined
+        ? CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed
+        : cppCuteBrowserVfsStatus(session, pathPointer, pathByteLength, metadataPointer);
+    },
+    bg_vfs_open: (pathPointer, pathByteLength, openResultPointer) => {
+      const session = state.session;
+      return session === undefined
+        ? CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed
+        : cppCuteBrowserVfsOpen(session, pathPointer, pathByteLength, openResultPointer);
+    },
+    bg_vfs_read: (handle, offsetLow, offsetHigh, destinationPointer, byteLength) => {
+      const session = state.session;
+      return session === undefined
+        ? CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed
+        : cppCuteBrowserVfsRead(
+            session,
+            handle,
+            offsetLow,
+            offsetHigh,
+            destinationPointer,
+            byteLength,
+          );
+    },
+    bg_vfs_close: (handle) => {
+      const session = state.session;
+      return session === undefined
+        ? CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed
+        : cppCuteBrowserVfsClose(session, handle);
+    },
+    bg_vfs_directory_count: (pathPointer, pathByteLength, countPointer) => {
+      const session = state.session;
+      return session === undefined
+        ? CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed
+        : cppCuteBrowserVfsDirectoryCount(session, pathPointer, pathByteLength, countPointer);
+    },
     bg_vfs_directory_entry: (
       pathPointer,
       pathByteLength,
@@ -682,15 +727,20 @@ function makeCppCuteBrowserVfsHostImports(
       namePointer,
       nameCapacity,
       metadataPointer,
-    ) => cppCuteBrowserVfsDirectoryEntry(
-      session,
-      pathPointer,
-      pathByteLength,
-      index,
-      namePointer,
-      nameCapacity,
-      metadataPointer,
-    ),
+    ) => {
+      const session = state.session;
+      return session === undefined
+        ? CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed
+        : cppCuteBrowserVfsDirectoryEntry(
+            session,
+            pathPointer,
+            pathByteLength,
+            index,
+            namePointer,
+            nameCapacity,
+            metadataPointer,
+          );
+    },
   };
   return OBJECT_FREEZE(imports);
 }

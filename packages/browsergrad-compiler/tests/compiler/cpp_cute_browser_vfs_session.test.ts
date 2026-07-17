@@ -72,6 +72,7 @@ import {
   cppCuteBrowserVfsRead,
   cppCuteBrowserVfsStatus,
   createCppCuteBrowserVfsHostImports,
+  createCppCuteBrowserVfsMountHostImports,
   discardCppCuteBrowserVfsMount,
   observeCppCuteBrowserVfsMount,
   observeCppCuteBrowserVfsSession,
@@ -201,20 +202,38 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
       workerExecutionObserved: false,
       loweringAuthorityReady: false,
     });
-    expectSessionError(
-      () => createCppCuteBrowserVfsHostImports(mount as unknown as PreparedCppCuteBrowserVfsSession),
-      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-UNVERIFIED",
-      "$.session",
-    );
+    const imports = createCppCuteBrowserVfsMountHostImports(mount);
+    expect(createCppCuteBrowserVfsMountHostImports(mount)).toBe(imports);
 
     const memory = new WebAssembly.Memory({
       initial: MEMORY_INITIAL_PAGES,
       maximum: MEMORY_MAXIMUM_PAGES,
     });
+    const sentinel = new Uint8Array(96).fill(0xa5);
+    memoryBytes(memory, 512, sentinel.byteLength).set(sentinel);
+    expect([
+      imports.bg_vfs_status(-1, -1, -1),
+      imports.bg_vfs_open(-1, -1, -1),
+      imports.bg_vfs_read(-1, -1, -1, -1, -1),
+      imports.bg_vfs_close(-1),
+      imports.bg_vfs_directory_count(-1, -1, -1),
+      imports.bg_vfs_directory_entry(-1, -1, -1, -1, -1, -1),
+    ]).toEqual(Array.from({ length: 6 }, () => CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed));
+    expect(memoryBytes(memory, 512, sentinel.byteLength)).toEqual(sentinel);
+
     const session = bindCppCuteBrowserVfsMount({ mount, memory });
     expect(observeCppCuteBrowserVfsMount(mount).state).toBe("bound");
-    const imports = createCppCuteBrowserVfsHostImports(session);
     expect(createCppCuteBrowserVfsHostImports(session)).toBe(imports);
+    expect(createCppCuteBrowserVfsMountHostImports(mount)).toBe(imports);
+    expect(observeCppCuteBrowserVfsSession(session).counters).toMatchObject({
+      totalSessionCalls: "0",
+      statusCalls: "0",
+      openCalls: "0",
+      readCalls: "0",
+      closeCalls: "0",
+      directoryCountCalls: "0",
+      directoryEntryCalls: "0",
+    });
     writePath(memory, 64, MAIN_PATH);
     expect(imports.bg_vfs_status(64, byteLength(MAIN_PATH), 512)).toBe(
       CPP_CUTE_BROWSER_VFS_STATUS.ok,
@@ -225,6 +244,9 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
       "$.mount",
     );
     closeCppCuteBrowserVfsSession(session, "completed");
+    expect(imports.bg_vfs_status(64, byteLength(MAIN_PATH), 512)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed,
+    );
   });
 
   it("rejects cloned mount authority and invalid memory without consuming the real mount", async () => {
@@ -235,6 +257,11 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
       runtimeAbiAsset: authority.runtimeAbiAsset,
     });
     const cloned = structuredClone(mount) as PreparedCppCuteBrowserVfsMount;
+    expectSessionError(
+      () => createCppCuteBrowserVfsMountHostImports(cloned),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-UNVERIFIED",
+      "$.mount",
+    );
     expectSessionError(
       () => bindCppCuteBrowserVfsMount({
         mount: cloned,
@@ -287,8 +314,17 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
       request: authority.request,
       runtimeAbiAsset: authority.runtimeAbiAsset,
     });
+    const imports = createCppCuteBrowserVfsMountHostImports(mount);
     discardCppCuteBrowserVfsMount(mount);
     expect(observeCppCuteBrowserVfsMount(mount).state).toBe("discarded");
+    expect([
+      imports.bg_vfs_status(0, 0, 0),
+      imports.bg_vfs_open(0, 0, 0),
+      imports.bg_vfs_read(0, 0, 0, 0, 0),
+      imports.bg_vfs_close(0),
+      imports.bg_vfs_directory_count(0, 0, 0),
+      imports.bg_vfs_directory_entry(0, 0, 0, 0, 0, 0),
+    ]).toEqual(Array.from({ length: 6 }, () => CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed));
     expectSessionError(
       () => bindCppCuteBrowserVfsMount({
         mount,
