@@ -14,6 +14,9 @@ import {
 import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE,
 } from "./resources/cpp_cute_browser_runtime_abi_v1.js";
+import {
+  findCppCuteVirtualPathError,
+} from "./cpp_cute_virtual_path.js";
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
@@ -1295,7 +1298,7 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
         `${optionPath}.includeRootId`,
       );
       const virtualPath = stringValue(field(object, "virtualPath", optionPath), `${optionPath}.virtualPath`);
-      validateVirtualPath(virtualPath, `${optionPath}.virtualPath`);
+      requireVirtualPath(virtualPath, `${optionPath}.virtualPath`);
       option = { kind, includeRootId, virtualPath };
       singleton = `forced-include:${includeRootId}:${virtualPath}`;
     } else {
@@ -1441,7 +1444,7 @@ function parseIncludeRoot(value: JsonValue, path: string): CppCuteFrontendInclud
   const includeRootId = dependencyId(field(object, "includeRootId", path), `${path}.includeRootId`);
   if (object.mode !== "quote" && object.mode !== "system") invalid(`${path}.mode`, "include root mode must be quote or system");
   const virtualPath = stringValue(field(object, "virtualPath", path), `${path}.virtualPath`);
-  validateVirtualPath(virtualPath, `${path}.virtualPath`);
+  requireVirtualPath(virtualPath, `${path}.virtualPath`);
   return {
     includeRootId,
     mode: object.mode,
@@ -1579,24 +1582,20 @@ function parseExtractionLimits(value: JsonValue, path: string): CppCuteFrontendE
 }
 
 function virtualRootArray(value: JsonValue, path: string): readonly string[] {
-  const roots = stringArray(value, path, 256, 1_024);
+  const values = arrayValue(value, path);
+  if (values.length > 256) resource(path, "array length exceeds 256");
+  const roots = values.map((entry, index) => {
+    const root = stringValue(entry, `${path}[${index}]`);
+    requireVirtualPath(root, `${path}[${index}]`);
+    return root;
+  });
   if (new Set(roots).size !== roots.length) invalid(path, "virtual roots must be unique");
-  roots.forEach((root, index) => validateVirtualPath(root, `${path}[${index}]`));
   return roots;
 }
 
-export function validateCppCuteVirtualPath(value: string, path = "$"): void {
-  validateVirtualPath(value, path);
-}
-
-function validateVirtualPath(value: string, path: string): void {
-  if (!value.startsWith("/") || value.length > 1_024 || value.includes("\\") || value.includes("\0")) {
-    invalid(path, "virtual path must be bounded absolute POSIX syntax");
-  }
-  const segments = value.split("/");
-  if (value !== "/" && segments.some((segment, index) => index > 0 && (segment.length === 0 || segment === "." || segment === ".."))) {
-    invalid(path, "virtual path must be normalized and must not contain empty, . or .. segments");
-  }
+function requireVirtualPath(value: string, path: string): void {
+  const error = findCppCuteVirtualPathError(value);
+  if (error !== null) invalid(path, error);
 }
 
 function virtualPathContains(root: string, candidate: string): boolean {

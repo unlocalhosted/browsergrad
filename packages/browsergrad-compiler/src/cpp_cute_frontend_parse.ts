@@ -7,6 +7,7 @@ import {
   type JsonObject,
   type JsonValue,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import { findCppCuteVirtualPathError } from "./cpp_cute_virtual_path.js";
 import type {
   CppCuteAbiBaseV1,
   CppCuteAbiFieldV1,
@@ -387,8 +388,7 @@ function parseIncludeRoot(value: JsonValue, path: string): CppCuteIncludeRootV3 
     "includeRootId", "ordinal", "mode", "virtualPath", "manifestSha256", "owner",
   ], path);
   const mode = enumValue(field(object, "mode", path), ["quote", "system"] as const, `${path}.mode`);
-  const virtualPath = boundedString(field(object, "virtualPath", path), `${path}.virtualPath`, 4_096);
-  validateVirtualPath(virtualPath, `${path}.virtualPath`);
+  const virtualPath = parseVirtualPath(field(object, "virtualPath", path), `${path}.virtualPath`);
   return {
     includeRootId: dependencyId(field(object, "includeRootId", path), `${path}.includeRootId`),
     ordinal: nonnegativeInteger(field(object, "ordinal", path), `${path}.ordinal`),
@@ -403,8 +403,7 @@ function parseSourceFile(value: JsonValue, path: string): CppCuteSourceFileV3 {
   const object = closedObject(value, [
     "fileId", "role", "virtualPath", "contentSha256", "byteLength", "owner", "includeRootId",
   ], path);
-  const virtualPath = boundedString(field(object, "virtualPath", path), `${path}.virtualPath`, 4_096);
-  validateVirtualPath(virtualPath, `${path}.virtualPath`);
+  const virtualPath = parseVirtualPath(field(object, "virtualPath", path), `${path}.virtualPath`);
   return {
     fileId: stableId(field(object, "fileId", path), `${path}.fileId`, "file"),
     role: enumValue(field(object, "role", path), [
@@ -1798,14 +1797,11 @@ function boundedString(value: JsonValue, path: string, maximumBytes: number): st
   return text;
 }
 
-function validateVirtualPath(value: string, path: string): void {
-  if (!value.startsWith("/") || value.length > 4_096 || value.includes("\\") || value.includes("\0")) {
-    invalid(path, "virtual path must be bounded absolute POSIX syntax");
-  }
-  const segments = value.split("/");
-  if (value !== "/" && segments.some((segment, index) => index > 0 && (segment.length === 0 || segment === "." || segment === ".."))) {
-    invalid(path, "virtual path must be normalized and must not contain empty, . or .. segments");
-  }
+function parseVirtualPath(value: JsonValue, path: string): string {
+  const text = stringValue(value, path);
+  const error = findCppCuteVirtualPathError(text);
+  if (error !== null) invalid(path, error);
+  return text;
 }
 
 function nullableBoundedString(value: JsonValue, path: string, maximumBytes: number): string | null {

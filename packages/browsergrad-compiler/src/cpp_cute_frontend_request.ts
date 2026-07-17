@@ -24,12 +24,12 @@ import {
 import {
   CPP_CUTE_FRONTEND_SEMANTIC_EXTRACTION_LIMIT_KEYS,
   unwrapPreparedCppCuteFrontendProfile,
-  validateCppCuteVirtualPath,
   type CppCuteFrontendCompilerOption,
   type CppCuteFrontendExtractionLimits,
   type CppCuteFrontendIncludeRoot,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
+import { findCppCuteVirtualPathError } from "./cpp_cute_virtual_path.js";
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
@@ -793,12 +793,9 @@ function arrayValue(value: JsonValue, path: string): readonly JsonValue[] {
 }
 
 function virtualPath(value: JsonValue, path: string): string {
-  const result = boundedString(value, path, 1_024);
-  try {
-    validateCppCuteVirtualPath(result, path);
-  } catch (error) {
-    invalid(path, "invalid normalized absolute virtual path", { cause: error });
-  }
+  const result = stringValue(value, path);
+  const error = findCppCuteVirtualPathError(result);
+  if (error !== null) invalid(path, error);
   return result;
 }
 
