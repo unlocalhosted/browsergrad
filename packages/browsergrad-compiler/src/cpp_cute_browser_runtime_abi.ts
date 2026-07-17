@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 0;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.ae0515505eb966285d3a3e8be44c2d1755e895bdc3994c60f4c7404439ade6a5";
+  "bg.cpp.browser-runtime-abi.sha256.80506ea26d2a0eafae7a5f9babe28e04e28642b0f6014eba8f76e206fa428a90";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "65b9de1679ffcf93004544f001f44dcca9c22cec6bcc46d9ab7287d68a33f569";
+  "a61d6f2d219dbc7f7ede1acce60e38ad6d778df6a785037c27210e3c53584ba9";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "f58247d7e2c0b89f3c71f33d07ef30b34186324bbafc427b947c760d05fac617";
+  "8e04871b85e3ee977713098056655dbec671649bd5a8abed623bf08f5957c026";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075";
 
@@ -270,7 +270,7 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid("$.body.authority", "manifest must not claim Wasm observation, execution, or release authority");
     }
     if (body.wasm.moduleRole !== "compiler-extractor-only-user-programs-never-linked-or-executed" ||
-        body.wasm.cAbiVersion !== 65_536 ||
+        body.wasm.cAbiVersion !== 65_537 ||
         body.wasm.cAbiVersionEncoding !== "major-shift-left-16-bitwise-or-minor" ||
         body.wasm.startSection !== "forbidden" || body.wasm.unlistedCExports !== "forbidden") {
       invalid("$.body.wasm", "module role, ABI version, start, or export closure differs from runtime v1");
@@ -378,6 +378,7 @@ function validateBodyInvariants(value: JsonObject): void {
     const expectedExports = [
       ["bg_cpp_cute_abi_version", "uint32_t bg_cpp_cute_abi_version(void)", 0, 1, "u32-packed-abi-version"],
       ["bg_cpp_cute_alloc", "uint32_t bg_cpp_cute_alloc(uint32_t byte_length)", 1, 1, "u32-input-pointer-zero-on-failure"],
+      ["bg_cpp_cute_allocator_metrics_pointer", "uint32_t bg_cpp_cute_allocator_metrics_pointer(void)", 0, 1, "u32-nonzero-stable-read-only-allocator-metrics-record-v1-pointer"],
       ["bg_cpp_cute_compile", "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)", 2, 1, "typed-compile-status"],
       ["bg_cpp_cute_free", "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)", 2, 0, "void-status-readable-separately"],
       ["bg_cpp_cute_reset", "void bg_cpp_cute_reset(void)", 0, 0, "void-infallible-for-live-instance"],
@@ -385,7 +386,7 @@ function validateBodyInvariants(value: JsonObject): void {
       ["bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", 0, 1, "u32-result-pointer-zero-unless-artifact-ready"],
       ["bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", 0, 1, "current-typed-status-without-state-mutation"],
     ] as const;
-    if (body.cExports.length !== expectedExports.length) invalid("$.body.cExports", "expected exactly eight C exports");
+    if (body.cExports.length !== expectedExports.length) invalid("$.body.cExports", "expected exactly nine C exports");
     for (const [index, expected] of expectedExports.entries()) {
       const actual = body.cExports[index];
       if (actual?.ordinal !== index || actual.cSymbol !== expected[0] || actual.wasmExportName !== expected[0] ||
@@ -394,6 +395,102 @@ function validateBodyInvariants(value: JsonObject): void {
           [...actual.wasmParameters, ...actual.wasmResults].some((type) => type !== "i32")) {
         invalid(`$.body.cExports[${index}]`, "C export does not match the exact runtime-v1 signature inventory");
       }
+    }
+    const metrics = body.allocatorMetricsRecord;
+    if (metrics.schema !== "browsergrad.compiler.cpp-cute.allocator-metrics-record" ||
+        metrics.version.major !== 1 || metrics.version.minor !== 0 ||
+        metrics.magicAscii !== "BGRTMET1" || metrics.byteLength !== 72 ||
+        metrics.alignmentByteLength !== 8 || metrics.encoding !== "little-endian-fixed-width" ||
+        metrics.storage !== "module-global-linear-memory-record" ||
+        metrics.pointerExport !== "bg_cpp_cute_allocator_metrics_pointer") {
+      invalid("$.body.allocatorMetricsRecord", "allocator metrics record identity or layout differs from runtime v1");
+    }
+    assertExactNumbers(metrics.magicBytes, [66, 71, 82, 84, 77, 69, 84, 49],
+      "$.body.allocatorMetricsRecord.magicBytes");
+    if (metrics.pointerContract.resultEncoding !== "u32-wasm32-linear-memory-offset" ||
+        metrics.pointerContract.zero !== "forbidden-for-conforming-live-module-instance" ||
+        metrics.pointerContract.stability !== "constant-for-module-instance-lifetime" ||
+        metrics.pointerContract.completeRange !== "must-fit-current-exported-memory" ||
+        metrics.pointerContract.mutability !== "module-writes-host-read-only") {
+      invalid("$.body.allocatorMetricsRecord.pointerContract", "allocator metrics pointer contract differs from runtime v1");
+    }
+    if (metrics.snapshotContract.allowedPhases !== "between-synchronous-runtime-calls-only" ||
+        metrics.snapshotContract.hostRead !== "copy-exact-record-before-decoding" ||
+        metrics.snapshotContract.memoryGrowthDuringCopy !== "forbidden" ||
+        metrics.snapshotContract.consistency !==
+          "module-calls-are-synchronous-and-memory-is-unshared") {
+      invalid("$.body.allocatorMetricsRecord.snapshotContract", "allocator metrics snapshot contract differs from runtime v1");
+    }
+    const accounting = metrics.accounting;
+    if (accounting.unit !== "requested-bytes" ||
+        accounting.scope !== "all-instrumented-module-global-allocator-events" ||
+        accounting.requestedByteBasis !==
+          "caller-requested-byte-length-before-alignment-or-allocator-rounding" ||
+        accounting.currentFormula !== "cumulative-allocated-minus-cumulative-freed" ||
+        accounting.peakFormula !== "maximum-current-live-since-module-instantiation" ||
+        accounting.resetPolicy !==
+          "counters-persist-and-reset-frees-are-accounted-until-worker-termination" ||
+        accounting.allocationCountSemantics !==
+          "successful-creation-or-resize-of-one-tracked-live-allocation" ||
+        accounting.freeCountSemantics !== "successful-release-of-one-tracked-live-allocation" ||
+        accounting.failedAllocationCountSemantics !==
+          "failed-nonzero-request-that-preserves-all-prior-live-allocations" ||
+        accounting.zeroByteCreationSemantics !==
+          "nonnull-result-counts-one-tracked-zero-byte-allocation-null-result-is-permitted-no-op-neither-success-nor-failure" ||
+        accounting.freeNullSemantics !== "no-op-with-no-counter-change" ||
+        accounting.reallocNullPointerSemantics !== "same-as-creation-at-requested-size" ||
+        accounting.reallocNonzeroSuccessSemantics !==
+          "allocated-adds-new-requested-size-freed-adds-old-requested-size-success-and-free-counts-each-increment-once-even-in-place" ||
+        accounting.reallocNonzeroFailureSemantics !==
+          "failed-count-increments-once-and-all-live-byte-and-success-free-counters-remain-unchanged" ||
+        accounting.reallocZeroSizeSemantics !==
+          "nonnull-old-pointer-is-released-freed-adds-old-requested-size-free-count-increments-once-result-is-null-and-failure-count-does-not-change" ||
+        accounting.overflowPolicy !==
+          "counter-overflow-must-fail-closed-before-wrap-and-forbids-artifact-ready") {
+      invalid("$.body.allocatorMetricsRecord.accounting", "allocator metrics accounting differs from runtime v1");
+    }
+    assertExactStrings(accounting.excludes, [
+      "allocator-metadata-alignment-and-size-class-rounding",
+      "javascript-heap-and-worker-host-memory",
+      "static-data-and-module-globals",
+      "vfs-logical-reservations-not-resident-in-wasm-memory",
+      "wasm-stack",
+    ], "$.body.allocatorMetricsRecord.accounting.excludes");
+    assertExactStrings(accounting.invariants, [
+      "cumulative-freed-is-less-than-or-equal-to-cumulative-allocated",
+      "current-equals-cumulative-allocated-minus-cumulative-freed",
+      "free-count-is-less-than-or-equal-to-successful-allocation-count",
+      "peak-is-between-current-and-cumulative-allocated-inclusive",
+      "peak-cumulative-and-count-counters-are-monotonic-for-module-instance-lifetime",
+    ], "$.body.allocatorMetricsRecord.accounting.invariants");
+    assertExactNumbers(metrics.fields.map((field) => field.ordinal), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "$.body.allocatorMetricsRecord.fields[*].ordinal");
+    assertExactStrings(metrics.fields.map((field) => field.name), [
+      "magic", "version", "byteLength", "currentLiveGlobalRequestedByteLength",
+      "peakLiveGlobalRequestedByteLength", "cumulativeGlobalAllocatedRequestedByteLength",
+      "cumulativeGlobalFreedRequestedByteLength", "successfulAllocationCount", "freeCount",
+      "failedAllocationCount",
+    ], "$.body.allocatorMetricsRecord.fields[*].name");
+    assertExactNumbers(metrics.fields.map((field) => field.offset), [0, 8, 12, 16, 24, 32, 40, 48, 56, 64],
+      "$.body.allocatorMetricsRecord.fields[*].offset");
+    assertExactNumbers(metrics.fields.map((field) => field.byteLength), [8, 4, 4, 8, 8, 8, 8, 8, 8, 8],
+      "$.body.allocatorMetricsRecord.fields[*].byteLength");
+    assertExactStrings(metrics.fields.map((field) => field.encoding), [
+      "ascii[8]", "u32le", "u32le", "u64le", "u64le", "u64le", "u64le", "u64le",
+      "u64le", "u64le",
+    ], "$.body.allocatorMetricsRecord.fields[*].encoding");
+    assertExactStrings(metrics.fields.map((field) => field.semantics), [
+      "must-equal-BGRTMET1", "must-equal-1", "must-equal-72", "current-live-requested-bytes",
+      "peak-live-requested-bytes", "cumulative-successfully-allocated-requested-bytes",
+      "cumulative-successfully-freed-requested-bytes", "successful-creation-or-resize-event-count",
+      "successful-tracked-release-event-count", "failed-request-event-count",
+    ], "$.body.allocatorMetricsRecord.fields[*].semantics");
+    if (metrics.authority.values !== "module-self-reported-local-observation-only" ||
+        metrics.authority.producerConformance !==
+          "detached-observed-wasm-verification-required" ||
+        metrics.authority.workerExecution !== "not-authorized-by-record-values" ||
+        metrics.authority.lowering !== "not-authorized-by-record-values") {
+      invalid("$.body.allocatorMetricsRecord.authority", "allocator metrics record must not grant execution or lowering authority");
     }
     const expectedImports = [
       ["bg_vfs_status", "int32_t bg_vfs_status(uint32_t path_pointer, uint32_t path_length, uint32_t metadata_pointer)", 3, "write-one-32-byte-metadata-record-for-an-existing-file-or-directory"],

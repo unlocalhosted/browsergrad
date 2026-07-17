@@ -17,6 +17,7 @@ import {
   unwrapPreparedCppCuteBrowserFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../src/cpp_cute_frontend_profile.js";
+import { CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE } from "../../src/resources/cpp_cute_browser_runtime_abi_v1.js";
 import { createCppCuteBrowserProfileInput } from "./support/cpp_cute_frontend_fixtures.js";
 
 const ALLOCATOR_RECORD_POINTER = 64;
@@ -100,6 +101,14 @@ function expectMetricsError(
 }
 
 describe("C++/CuTe runtime-local Wasm metrics", () => {
+  it("derives the local record decoder identity from the canonical runtime ABI", () => {
+    const contract = CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.allocatorMetricsRecord;
+    expect(CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_MAGIC).toBe(contract.magicAscii);
+    expect(CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_VERSION).toBe(contract.version.major);
+    expect(CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_BYTE_LENGTH).toBe(contract.byteLength);
+    expect(contract.pointerContract.zero).toBe("forbidden-for-conforming-live-module-instance");
+  });
+
   it("observes exact pages, requested-byte allocator counters, and ordered phase wall time", () => {
     const memory = memoryFixture();
     const metrics = prepareCppCuteBrowserWasmRuntimeMetrics({
@@ -289,6 +298,15 @@ describe("C++/CuTe runtime-local Wasm metrics", () => {
       () => prepareCppCuteBrowserWasmRuntimeMetrics({
         profile,
         memory,
+        allocatorRecordPointer: 0,
+      }),
+      "BG-COMPILER-CPP-CUTE-BROWSER-WASM-METRICS-INVALID",
+      "$.input.allocatorRecordPointer",
+    );
+    expectMetricsError(
+      () => prepareCppCuteBrowserWasmRuntimeMetrics({
+        profile,
+        memory,
         allocatorRecordPointer: 4,
       }),
       "BG-COMPILER-CPP-CUTE-BROWSER-WASM-METRICS-INVALID",
@@ -347,7 +365,7 @@ describe("C++/CuTe runtime-local Wasm metrics", () => {
       () => prepareCppCuteBrowserWasmRuntimeMetrics({
         profile,
         memory: sharedMemory,
-        allocatorRecordPointer: 0,
+        allocatorRecordPointer: ALLOCATOR_RECORD_POINTER,
       }),
       "BG-COMPILER-CPP-CUTE-BROWSER-WASM-METRICS-INVALID",
       "$.input.memory.wasmMemory",

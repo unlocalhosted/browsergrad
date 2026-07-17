@@ -22,8 +22,8 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.f87eeade367023fa1b730548f02db18667f0136b755cababcfc0643c81a77a60";
-const RESOURCE_SHA256 = "623bb4e0805e4d3ecb78d711c164867e9ff904c9f412e881c7833670650a3be8";
+  "bg.cpp.browser-build-input-lock.sha256.de1034d01b37c1ee37da20c0deae95f4b7dc03ed8a9b46a118e9711645ac47e6";
+const RESOURCE_SHA256 = "8878e747335c0f99813be224dd8ccc9067dc847e176a0530689f0eafa0ec88d1";
 const RECIPE_SHA256 = "6377c0d63755dff378aa583c6631f389836205ea1424e40e3877cde3af1fe7f2";
 const EXTRACTOR_SOURCE_SHA256 = "b7b5c1ac3b9989fc8614819efc25e53dba3bb46c5c1e15f3ddeccd4d10ad0958";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
@@ -31,6 +31,7 @@ const BLOCKERS = [
   "browsergrad-extractor-artifact-v3",
   "browsergrad-extractor-cuda-dual-pass",
   "browsergrad-extractor-distributed-materialization",
+  "browsergrad-extractor-runtime-metrics-export",
   "browsergrad-extractor-source-verification",
   "browsergrad-extractor-vfs-bridge",
   "browsergrad-worker-emscripten-factory-bundle",
@@ -55,7 +56,7 @@ describe("browser Clang-WASM build-input lock", () => {
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
       runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
       runtimeAbiResourceByteLength: cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength,
-      resourceByteLength: 20_263,
+      resourceByteLength: 20_498,
       releaseReady: false,
       releaseBlockerIds: BLOCKERS,
     });
@@ -174,6 +175,12 @@ describe("browser Clang-WASM build-input lock", () => {
     expect(recipe.stages[1]?.linkerFlags).toContain("-sFILESYSTEM=0");
     expect(recipe.stages[1]?.linkerFlags).toContain("-sMAXIMUM_MEMORY=1073741824");
     expect(recipe.stages[1]?.linkerFlags).toContain(
+      "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
+    );
+    expect(recipe.stages[1]?.linkerFlags.join(" ")).not.toContain(
+      "_bg_cpp_cute_allocator_metrics_pointer",
+    );
+    expect(recipe.stages[1]?.linkerFlags).toContain(
       "-Wl,--Map=@BUILD_EVIDENCE@/clang-extractor.link.map",
     );
     expect(recipe.reproducibility).toEqual({
@@ -186,6 +193,12 @@ describe("browser Clang-WASM build-input lock", () => {
       buildLogs: "canonical-command-and-environment-records-required",
       attestation: "externally-signed-detached-required",
     });
+    expect(unwrapPreparedCppCuteBrowserBuildInputLock(prepared).lock.body.unresolvedBuildInputs)
+      .toContainEqual({
+        blockerId: "browsergrad-extractor-runtime-metrics-export",
+        requirement:
+          "current-extractor-abi-1.0-lacks-runtime-abi-1.1-metrics-export-producer-and-zero-size-reallocation-conformance",
+      });
   });
 
   it("closes ambient discovery, extractor links, and every distributed output path", async () => {

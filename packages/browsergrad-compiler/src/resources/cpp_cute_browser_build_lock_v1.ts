@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.f87eeade367023fa1b730548f02db18667f0136b755cababcfc0643c81a77a60",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.de1034d01b37c1ee37da20c0deae95f4b7dc03ed8a9b46a118e9711645ac47e6",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -30,9 +30,9 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
-      manifestId: "bg.cpp.browser-runtime-abi.sha256.ae0515505eb966285d3a3e8be44c2d1755e895bdc3994c60f4c7404439ade6a5",
-      resourceSha256: "65b9de1679ffcf93004544f001f44dcca9c22cec6bcc46d9ab7287d68a33f569",
-      resourceByteLength: "13523",
+      manifestId: "bg.cpp.browser-runtime-abi.sha256.80506ea26d2a0eafae7a5f9babe28e04e28642b0f6014eba8f76e206fa428a90",
+      resourceSha256: "a61d6f2d219dbc7f7ede1acce60e38ad6d778df6a785037c27210e3c53584ba9",
+      resourceByteLength: "18363",
       byteIdentity: "must-equal-package-canonical-resource",
       authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
     },
@@ -578,6 +578,11 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         requirement: "deterministic-hash-verified-copy-of-generated-wasm-sidecar-into-declared-distributed-output",
       },
       {
+        blockerId: "browsergrad-extractor-runtime-metrics-export",
+        requirement:
+          "current-extractor-abi-1.0-lacks-runtime-abi-1.1-metrics-export-producer-and-zero-size-reallocation-conformance",
+      },
+      {
         blockerId: "browsergrad-extractor-source-verification",
         requirement: "build-executor-hash-and-length-verification-of-exact-source-set-before-configure",
       },
@@ -596,6 +601,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         "browsergrad-extractor-artifact-v3",
         "browsergrad-extractor-cuda-dual-pass",
         "browsergrad-extractor-distributed-materialization",
+        "browsergrad-extractor-runtime-metrics-export",
         "browsergrad-extractor-source-verification",
         "browsergrad-extractor-vfs-bridge",
         "browsergrad-worker-emscripten-factory-bundle",

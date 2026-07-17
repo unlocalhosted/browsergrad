@@ -70,7 +70,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       contractSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256,
       generatedImportAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
-      resourceByteLength: 13_523,
+      resourceByteLength: 18_363,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -78,6 +78,8 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
+    expect(record.manifest.version).toEqual({ major: 1, minor: 1 });
+    expect(record.manifest.body.wasm.cAbiVersion).toBe(65_537);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     );
@@ -92,7 +94,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
   });
 
-  it("pins the eight exported C signatures and no generic execution surface", async () => {
+  it("pins the nine exported C signatures and no generic execution surface", async () => {
     const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
       cppCuteBrowserRuntimeAbiManifestResourceBytes(),
     );
@@ -111,12 +113,71 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     ])).toEqual([
       [0, "bg_cpp_cute_abi_version", "uint32_t bg_cpp_cute_abi_version(void)", [], ["i32"]],
       [1, "bg_cpp_cute_alloc", "uint32_t bg_cpp_cute_alloc(uint32_t byte_length)", ["i32"], ["i32"]],
-      [2, "bg_cpp_cute_compile", "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)", ["i32", "i32"], ["i32"]],
-      [3, "bg_cpp_cute_free", "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)", ["i32", "i32"], []],
-      [4, "bg_cpp_cute_reset", "void bg_cpp_cute_reset(void)", [], []],
-      [5, "bg_cpp_cute_result_length", "uint32_t bg_cpp_cute_result_length(void)", [], ["i32"]],
-      [6, "bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", [], ["i32"]],
-      [7, "bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", [], ["i32"]],
+      [2, "bg_cpp_cute_allocator_metrics_pointer", "uint32_t bg_cpp_cute_allocator_metrics_pointer(void)", [], ["i32"]],
+      [3, "bg_cpp_cute_compile", "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)", ["i32", "i32"], ["i32"]],
+      [4, "bg_cpp_cute_free", "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)", ["i32", "i32"], []],
+      [5, "bg_cpp_cute_reset", "void bg_cpp_cute_reset(void)", [], []],
+      [6, "bg_cpp_cute_result_length", "uint32_t bg_cpp_cute_result_length(void)", [], ["i32"]],
+      [7, "bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", [], ["i32"]],
+      [8, "bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", [], ["i32"]],
+    ]);
+  });
+
+  it("pins one nonzero stable allocator-metrics pointer and exact v1 record", async () => {
+    const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
+      cppCuteBrowserRuntimeAbiManifestResourceBytes(),
+    );
+    const contract = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared)
+      .manifest.body.allocatorMetricsRecord;
+
+    expect(contract).toMatchObject({
+      schema: "browsergrad.compiler.cpp-cute.allocator-metrics-record",
+      version: { major: 1, minor: 0 },
+      magicAscii: "BGRTMET1",
+      byteLength: 72,
+      alignmentByteLength: 8,
+      pointerExport: "bg_cpp_cute_allocator_metrics_pointer",
+      pointerContract: {
+        zero: "forbidden-for-conforming-live-module-instance",
+        stability: "constant-for-module-instance-lifetime",
+        mutability: "module-writes-host-read-only",
+      },
+      accounting: {
+        requestedByteBasis:
+          "caller-requested-byte-length-before-alignment-or-allocator-rounding",
+        zeroByteCreationSemantics:
+          "nonnull-result-counts-one-tracked-zero-byte-allocation-null-result-is-permitted-no-op-neither-success-nor-failure",
+        freeNullSemantics: "no-op-with-no-counter-change",
+        reallocNullPointerSemantics: "same-as-creation-at-requested-size",
+        reallocNonzeroSuccessSemantics:
+          "allocated-adds-new-requested-size-freed-adds-old-requested-size-success-and-free-counts-each-increment-once-even-in-place",
+        reallocNonzeroFailureSemantics:
+          "failed-count-increments-once-and-all-live-byte-and-success-free-counters-remain-unchanged",
+        reallocZeroSizeSemantics:
+          "nonnull-old-pointer-is-released-freed-adds-old-requested-size-free-count-increments-once-result-is-null-and-failure-count-does-not-change",
+      },
+      authority: {
+        workerExecution: "not-authorized-by-record-values",
+        lowering: "not-authorized-by-record-values",
+      },
+    });
+    expect(contract.fields.map((field) => [
+      field.ordinal,
+      field.name,
+      field.offset,
+      field.byteLength,
+      field.encoding,
+    ])).toEqual([
+      [0, "magic", 0, 8, "ascii[8]"],
+      [1, "version", 8, 4, "u32le"],
+      [2, "byteLength", 12, 4, "u32le"],
+      [3, "currentLiveGlobalRequestedByteLength", 16, 8, "u64le"],
+      [4, "peakLiveGlobalRequestedByteLength", 24, 8, "u64le"],
+      [5, "cumulativeGlobalAllocatedRequestedByteLength", 32, 8, "u64le"],
+      [6, "cumulativeGlobalFreedRequestedByteLength", 40, 8, "u64le"],
+      [7, "successfulAllocationCount", 48, 8, "u64le"],
+      [8, "freeCount", 56, 8, "u64le"],
+      [9, "failedAllocationCount", 64, 8, "u64le"],
     ]);
   });
 
@@ -431,14 +492,30 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       const policy = objectField(objectField(body(value), "wasm"), "featurePolicy");
       policy.unlistedExtensions = "allowed";
     }, "featurePolicy"],
-    ["ninth C export", (value: MutableJson) => {
+    ["tenth C export", (value: MutableJson) => {
       const exports = arrayField(body(value), "cExports");
       const copied = structuredClone(exports[0]);
-      exports.push({ ...copied, ordinal: 8, cSymbol: "bg_escape" });
+      exports.push({ ...copied, ordinal: 9, cSymbol: "bg_escape" });
     }, "cExports"],
     ["changed C signature", (value: MutableJson) => {
-      arrayField(body(value), "cExports")[2]!.wasmParameters = ["i32"];
-    }, "cExports[2]"],
+      arrayField(body(value), "cExports")[3]!.wasmParameters = ["i32"];
+    }, "cExports[3]"],
+    ["nullable allocator metrics pointer", (value: MutableJson) => {
+      const metrics = objectField(body(value), "allocatorMetricsRecord");
+      objectField(metrics, "pointerContract").zero = "allowed";
+    }, "allocatorMetricsRecord.pointerContract"],
+    ["shifted allocator metrics field", (value: MutableJson) => {
+      const metrics = objectField(body(value), "allocatorMetricsRecord");
+      arrayField(metrics, "fields")[3]!.offset = 24;
+    }, "allocatorMetricsRecord.fields"],
+    ["wrapping allocator metrics counter", (value: MutableJson) => {
+      const metrics = objectField(body(value), "allocatorMetricsRecord");
+      objectField(metrics, "accounting").overflowPolicy = "wrap-u64";
+    }, "allocatorMetricsRecord.accounting"],
+    ["ambiguous allocator realloc accounting", (value: MutableJson) => {
+      const metrics = objectField(body(value), "allocatorMetricsRecord");
+      objectField(metrics, "accounting").reallocNonzeroSuccessSemantics = "implementation-defined";
+    }, "allocatorMetricsRecord.accounting"],
     ["async VFS", (value: MutableJson) => {
       objectField(body(value), "hostImports").invocation = "asynchronous";
     }, "hostImports"],
@@ -514,7 +591,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 1]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 2]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(

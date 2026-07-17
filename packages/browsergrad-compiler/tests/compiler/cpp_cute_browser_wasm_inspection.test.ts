@@ -53,6 +53,7 @@ const VFS_IMPORTS = [
 const C_EXPORTS = [
   ["bg_cpp_cute_abi_version", 0],
   ["bg_cpp_cute_alloc", 1],
+  ["bg_cpp_cute_allocator_metrics_pointer", 0],
   ["bg_cpp_cute_compile", 2],
   ["bg_cpp_cute_free", 3],
   ["bg_cpp_cute_reset", 4],
@@ -103,8 +104,8 @@ function abiShapedModule(options: ModuleOptions = {}): Uint8Array {
   };
   const voidBody = (): number[] => [...u32(2), 0x00, 0x0b];
   const bodies = [
-    resultBody(options.firstResultOpcode), resultBody(), resultBody(), voidBody(),
-    voidBody(), resultBody(), resultBody(), resultBody(),
+    resultBody(options.firstResultOpcode), resultBody(), resultBody(), resultBody(),
+    voidBody(), voidBody(), resultBody(), resultBody(), resultBody(),
   ];
   const standard = [
     section(1, vector(types)),
@@ -112,7 +113,7 @@ function abiShapedModule(options: ModuleOptions = {}): Uint8Array {
     section(3, vector(definedTypeIndices)),
     section(5, [0x01, 0x01, ...u32(options.memoryMinimum ?? 4_096), ...u32(options.memoryMaximum ?? 16_384)]),
     section(7, vector(exports)),
-    ...(options.start === true ? [section(8, u32(VFS_IMPORTS.length + 4))] : []),
+    ...(options.start === true ? [section(8, u32(VFS_IMPORTS.length + 5))] : []),
     section(10, vector(bodies)),
   ];
   return new Uint8Array([

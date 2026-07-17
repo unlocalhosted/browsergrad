@@ -10,14 +10,31 @@ import { CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE } from "./resources/cpp_cute_b
 
 export const CPP_CUTE_BROWSER_WASM_PAGE_BYTE_LENGTH =
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.wasm.memory.pageByteLength;
-export const CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_MAGIC = "BGRTMET1";
-export const CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_VERSION = 1;
-export const CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_BYTE_LENGTH = 72;
+const ALLOCATOR_METRICS_RECORD =
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.allocatorMetricsRecord;
+export const CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_MAGIC =
+  ALLOCATOR_METRICS_RECORD.magicAscii;
+export const CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_VERSION =
+  ALLOCATOR_METRICS_RECORD.version.major;
+export const CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_BYTE_LENGTH =
+  ALLOCATOR_METRICS_RECORD.byteLength;
 
 const U32_LIMIT = 0x1_0000_0000n;
 const U32_LIMIT_NUMBER = 0x1_0000_0000;
-const ALLOCATOR_RECORD_ALIGNMENT = 8;
-const ALLOCATOR_MAGIC_BYTES = [0x42, 0x47, 0x52, 0x54, 0x4d, 0x45, 0x54, 0x31] as const;
+const ALLOCATOR_RECORD_ALIGNMENT = ALLOCATOR_METRICS_RECORD.alignmentByteLength;
+const ALLOCATOR_MAGIC_BYTES = ALLOCATOR_METRICS_RECORD.magicBytes;
+const [
+  ALLOCATOR_MAGIC_FIELD,
+  ALLOCATOR_VERSION_FIELD,
+  ALLOCATOR_BYTE_LENGTH_FIELD,
+  ALLOCATOR_CURRENT_LIVE_FIELD,
+  ALLOCATOR_PEAK_LIVE_FIELD,
+  ALLOCATOR_CUMULATIVE_ALLOCATED_FIELD,
+  ALLOCATOR_CUMULATIVE_FREED_FIELD,
+  ALLOCATOR_SUCCESSFUL_ALLOCATION_COUNT_FIELD,
+  ALLOCATOR_FREE_COUNT_FIELD,
+  ALLOCATOR_FAILED_ALLOCATION_COUNT_FIELD,
+] = ALLOCATOR_METRICS_RECORD.fields;
 const PHASES = [
   "input-frame-copy",
   "frontend-extractor",
@@ -554,24 +571,30 @@ function readAllocatorRecord(
   );
   ensureMemoryEpoch(epoch, `${path}.memoryEpoch`);
   for (let index = 0; index < ALLOCATOR_MAGIC_BYTES.length; index += 1) {
-    if (snapshot[index] !== ALLOCATOR_MAGIC_BYTES[index]) {
+    if (snapshot[ALLOCATOR_MAGIC_FIELD.offset + index] !== ALLOCATOR_MAGIC_BYTES[index]) {
       mismatch(`${path}.magic`, "allocator metrics record has the wrong magic");
     }
   }
-  if (readU32Le(snapshot, 8) !== CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_VERSION) {
+  if (readU32Le(snapshot, ALLOCATOR_VERSION_FIELD.offset) !==
+      CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_VERSION) {
     mismatch(`${path}.version`, "allocator metrics record has an unsupported version");
   }
-  if (readU32Le(snapshot, 12) !== CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_BYTE_LENGTH) {
+  if (readU32Le(snapshot, ALLOCATOR_BYTE_LENGTH_FIELD.offset) !==
+      CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_BYTE_LENGTH) {
     mismatch(`${path}.byteLength`, "allocator metrics record has the wrong byte length");
   }
   const counters = NATIVE_OBJECT_FREEZE({
-    currentLiveGlobalRequestedByteLength: readU64Le(snapshot, 16),
-    peakLiveGlobalRequestedByteLength: readU64Le(snapshot, 24),
-    cumulativeGlobalAllocatedRequestedByteLength: readU64Le(snapshot, 32),
-    cumulativeGlobalFreedRequestedByteLength: readU64Le(snapshot, 40),
-    successfulAllocationCount: readU64Le(snapshot, 48),
-    freeCount: readU64Le(snapshot, 56),
-    failedAllocationCount: readU64Le(snapshot, 64),
+    currentLiveGlobalRequestedByteLength: readU64Le(snapshot, ALLOCATOR_CURRENT_LIVE_FIELD.offset),
+    peakLiveGlobalRequestedByteLength: readU64Le(snapshot, ALLOCATOR_PEAK_LIVE_FIELD.offset),
+    cumulativeGlobalAllocatedRequestedByteLength:
+      readU64Le(snapshot, ALLOCATOR_CUMULATIVE_ALLOCATED_FIELD.offset),
+    cumulativeGlobalFreedRequestedByteLength:
+      readU64Le(snapshot, ALLOCATOR_CUMULATIVE_FREED_FIELD.offset),
+    successfulAllocationCount:
+      readU64Le(snapshot, ALLOCATOR_SUCCESSFUL_ALLOCATION_COUNT_FIELD.offset),
+    freeCount: readU64Le(snapshot, ALLOCATOR_FREE_COUNT_FIELD.offset),
+    failedAllocationCount:
+      readU64Le(snapshot, ALLOCATOR_FAILED_ALLOCATION_COUNT_FIELD.offset),
   });
   if (counters.cumulativeGlobalFreedRequestedByteLength >
       counters.cumulativeGlobalAllocatedRequestedByteLength ||
@@ -736,8 +759,8 @@ function monotonicNow(path: string): number {
 
 function u32Pointer(value: unknown, path: string): number {
   if (typeof value !== "number" || !NATIVE_NUMBER_IS_SAFE_INTEGER(value) ||
-      value < 0 || value >= U32_LIMIT_NUMBER) {
-    invalid(path, "expected an unsigned wasm32 pointer");
+      value <= 0 || value >= U32_LIMIT_NUMBER) {
+    invalid(path, "expected a nonzero unsigned wasm32 pointer");
   }
   if (value % ALLOCATOR_RECORD_ALIGNMENT !== 0) {
     invalid(path, `allocator metrics record must be ${ALLOCATOR_RECORD_ALIGNMENT}-byte aligned`);
