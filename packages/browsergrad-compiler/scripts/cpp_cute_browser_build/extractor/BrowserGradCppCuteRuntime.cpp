@@ -132,10 +132,18 @@ bool ranges_overlap(std::uint32_t left_pointer, std::uint32_t left_length,
   return left_begin < right_end && right_begin < left_end;
 }
 
+struct InputFrameRegionOffsets {
+  std::uint32_t profile_offset = 0U;
+  std::uint32_t profile_byte_length = 0U;
+  std::uint32_t request_offset = 0U;
+  std::uint32_t request_byte_length = 0U;
+};
+
 bool validate_frame_envelope(const std::uint8_t* bytes,
-                             std::uint32_t byte_length) {
+                             std::uint32_t byte_length,
+                             InputFrameRegionOffsets* regions) {
   if (bytes == nullptr || byte_length < kInputFrameHeaderByteLength ||
-      byte_length > kInputFrameMaximumByteLength) {
+      byte_length > kInputFrameMaximumByteLength || regions == nullptr) {
     return false;
   }
   for (std::size_t index = 0; index < kInputFrameMagic.size(); ++index) {
@@ -168,8 +176,17 @@ bool validate_frame_envelope(const std::uint8_t* bytes,
       request_offset != expected_request_offset || expected_total != byte_length) {
     return false;
   }
-  return all_zero(bytes + profile_end, bytes + request_offset) &&
-         all_zero(bytes + request_end, bytes + byte_length);
+  if (!all_zero(bytes + profile_end, bytes + request_offset) ||
+      !all_zero(bytes + request_end, bytes + byte_length)) {
+    return false;
+  }
+  *regions = InputFrameRegionOffsets{
+      static_cast<std::uint32_t>(profile_offset),
+      static_cast<std::uint32_t>(profile_byte_length),
+      static_cast<std::uint32_t>(request_offset),
+      static_cast<std::uint32_t>(request_byte_length),
+  };
+  return true;
 }
 
 void release_input() {
@@ -330,11 +347,18 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
     g_runtime.phase = RuntimePhase::kFailed;
     return wire_status(g_runtime.status);
   }
-  if (!validate_frame_envelope(g_runtime.input, g_runtime.input_byte_length)) {
+  InputFrameRegionOffsets input_offsets;
+  if (!validate_frame_envelope(g_runtime.input, g_runtime.input_byte_length,
+                               &input_offsets)) {
     g_runtime.status = WireCompileStatus::kInvalidFrame;
     g_runtime.phase = RuntimePhase::kFailed;
     return wire_status(g_runtime.status);
   }
+  const ValidatedInputFrameRegions input_regions(
+      g_runtime.input + input_offsets.profile_offset,
+      input_offsets.profile_byte_length,
+      g_runtime.input + input_offsets.request_offset,
+      input_offsets.request_byte_length);
 
   g_runtime.phase = RuntimePhase::kCompiling;
   ArtifactV3ResultSink result_sink;
@@ -343,8 +367,7 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
           ? ArtifactV3CompileResult{
                 WireCompileStatus::kInternalError,
                 ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable}
-          : compile_artifact(g_runtime.input, g_runtime.input_byte_length,
-                             result_sink);
+          : compile_artifact(input_regions, result_sink);
   if (g_runtime.phase != RuntimePhase::kCompiling ||
       !allocator_metrics_healthy()) {
     result_sink.discard();

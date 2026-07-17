@@ -156,6 +156,12 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(source).toMatch(/runtime_result_length\(\)[\s\S]*?g_runtime\.result_byte_length/u);
     expect(source).toMatch(/runtime_result_pointer\(\)[\s\S]*?g_runtime\.result_wire_pointer/u);
     expect(header).toContain("class ArtifactV3ResultSink final");
+    expect(header).toContain("class ValidatedInputFrameRegions final");
+    expect(header).toContain("const ValidatedInputFrameRegions& input");
+    expect(header).toContain("ValidatedInputFrameRegions(const ValidatedInputFrameRegions&) = delete");
+    expect(header).not.toMatch(
+      /using ArtifactV3Compile[\s\S]*?const std::uint8_t\* input/u,
+    );
     expect(header).toContain("kAbiMaximumByteLength");
     expect(header).toContain("8U * 1024U * 1024U");
     expect(header).toContain("bind_invocation_maximum_byte_length");

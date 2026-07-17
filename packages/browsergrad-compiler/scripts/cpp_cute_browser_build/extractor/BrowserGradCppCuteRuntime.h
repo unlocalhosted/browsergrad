@@ -33,11 +33,60 @@ struct ArtifactV3CompileResult {
       ReviewOnlyBlocker::kCudaDualPassUnavailable;
 };
 
+class ValidatedInputFrameRegions;
 class ArtifactV3ResultSink;
 
 using ArtifactV3Compile = ArtifactV3CompileResult (*)(
-    const std::uint8_t* input, std::uint32_t input_byte_length,
+    const ValidatedInputFrameRegions& input,
     ArtifactV3ResultSink& result_sink);
+
+/**
+ * Immutable region views produced only after runtime-v1 frame validation.
+ *
+ * The compile callback receives no raw frame/header/padding bytes. Typed
+ * session admission must independently validate both regions as canonical
+ * JSON before any VFS or Clang work.
+ */
+class ValidatedInputFrameRegions final {
+ public:
+  ValidatedInputFrameRegions(const ValidatedInputFrameRegions&) = delete;
+  ValidatedInputFrameRegions& operator=(const ValidatedInputFrameRegions&) =
+      delete;
+  ValidatedInputFrameRegions(ValidatedInputFrameRegions&&) = delete;
+  ValidatedInputFrameRegions& operator=(ValidatedInputFrameRegions&&) = delete;
+
+  const std::uint8_t* profile_bytes() const noexcept {
+    return profile_bytes_;
+  }
+  std::uint32_t profile_byte_length() const noexcept {
+    return profile_byte_length_;
+  }
+  const std::uint8_t* request_bytes() const noexcept {
+    return request_bytes_;
+  }
+  std::uint32_t request_byte_length() const noexcept {
+    return request_byte_length_;
+  }
+
+ private:
+  friend std::int32_t runtime_compile(std::uint32_t input_pointer,
+                                      std::uint32_t input_length,
+                                      ArtifactV3Compile compile_artifact);
+
+  ValidatedInputFrameRegions(const std::uint8_t* profile_bytes,
+                             std::uint32_t profile_byte_length,
+                             const std::uint8_t* request_bytes,
+                             std::uint32_t request_byte_length) noexcept
+      : profile_bytes_(profile_bytes),
+        profile_byte_length_(profile_byte_length),
+        request_bytes_(request_bytes),
+        request_byte_length_(request_byte_length) {}
+
+  const std::uint8_t* profile_bytes_ = nullptr;
+  std::uint32_t profile_byte_length_ = 0;
+  const std::uint8_t* request_bytes_ = nullptr;
+  std::uint32_t request_byte_length_ = 0;
+};
 
 /**
  * Single-allocation sink for one complete canonical artifact-v3 payload.

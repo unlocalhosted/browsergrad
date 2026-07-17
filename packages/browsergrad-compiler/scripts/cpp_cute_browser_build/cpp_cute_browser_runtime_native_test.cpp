@@ -192,8 +192,16 @@ bool load_artifact_bytes(const char* path) {
 }
 
 ArtifactV3CompileResult successful_artifact(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions& regions, ArtifactV3ResultSink& sink) {
   ++g_callback_count;
+  if (regions.profile_bytes() == nullptr ||
+      regions.profile_byte_length() != 2U ||
+      std::memcmp(regions.profile_bytes(), "{}", 2U) != 0 ||
+      regions.request_bytes() == nullptr ||
+      regions.request_byte_length() != 2U ||
+      std::memcmp(regions.request_bytes(), "{}", 2U) != 0) {
+    return {WireCompileStatus::kInvalidFrame, std::nullopt};
+  }
   if (g_artifact_bytes.empty() ||
       !sink.bind_invocation_maximum_byte_length(
           static_cast<std::uint32_t>(g_artifact_bytes.size()))) {
@@ -212,35 +220,35 @@ ArtifactV3CompileResult successful_artifact(
 }
 
 ArtifactV3CompileResult ready_without_output(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
   return {WireCompileStatus::kArtifactReady, std::nullopt};
 }
 
 ArtifactV3CompileResult output_without_invocation_limit(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.allocate(8U));
   return {WireCompileStatus::kArtifactReady, std::nullopt};
 }
 
 ArtifactV3CompileResult ready_with_review_blocker(
-    const std::uint8_t* input, std::uint32_t input_byte_length,
+    const ValidatedInputFrameRegions& input,
     ArtifactV3ResultSink& sink) {
   ArtifactV3CompileResult result =
-      successful_artifact(input, input_byte_length, sink);
+      successful_artifact(input, sink);
   result.blocker = ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable;
   return result;
 }
 
 ArtifactV3CompileResult oversized_output(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
   static_cast<void>(sink.allocate(9U));
   return {WireCompileStatus::kArtifactReady, std::nullopt};
 }
 
 ArtifactV3CompileResult double_allocate(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
   static_cast<void>(sink.allocate(8U));
   static_cast<void>(sink.allocate(8U));
@@ -248,14 +256,14 @@ ArtifactV3CompileResult double_allocate(
 }
 
 ArtifactV3CompileResult commit_without_allocation(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
   static_cast<void>(sink.commit());
   return {WireCompileStatus::kArtifactReady, std::nullopt};
 }
 
 ArtifactV3CompileResult double_commit(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
   auto* output = sink.allocate(8U);
   if (output != nullptr) std::memset(output, 0, 8U);
@@ -265,7 +273,7 @@ ArtifactV3CompileResult double_commit(
 }
 
 ArtifactV3CompileResult vfs_failure_with_output(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
   auto* output = sink.allocate(8U);
   if (output != nullptr) {
@@ -276,12 +284,12 @@ ArtifactV3CompileResult vfs_failure_with_output(
 }
 
 ArtifactV3CompileResult invalid_terminal_status(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink&) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink&) {
   return {WireCompileStatus::kIdle, std::nullopt};
 }
 
 ArtifactV3CompileResult reentrant_compile(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink&) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink&) {
   static_cast<void>(runtime_compile(g_reentrant_input_pointer,
                                     g_reentrant_input_length,
                                     ready_without_output));
@@ -289,20 +297,22 @@ ArtifactV3CompileResult reentrant_compile(
 }
 
 ArtifactV3CompileResult reentrant_reset(
-    const std::uint8_t* input, std::uint32_t byte_length,
+    const ValidatedInputFrameRegions& input,
     ArtifactV3ResultSink&) {
   runtime_reset();
   if (runtime_status() !=
           static_cast<std::int32_t>(WireCompileStatus::kInvalidState) ||
-      input == nullptr || byte_length != kValidFrameByteLength ||
-      std::memcmp(input, "BGCCABI1", 8U) != 0) {
+      input.profile_bytes() == nullptr || input.profile_byte_length() != 2U ||
+      std::memcmp(input.profile_bytes(), "{}", 2U) != 0 ||
+      input.request_bytes() == nullptr || input.request_byte_length() != 2U ||
+      std::memcmp(input.request_bytes(), "{}", 2U) != 0) {
     return {WireCompileStatus::kInternalError, std::nullopt};
   }
   return {WireCompileStatus::kArtifactReady, std::nullopt};
 }
 
 ArtifactV3CompileResult poison_after_commit(
-    const std::uint8_t*, std::uint32_t, ArtifactV3ResultSink& sink) {
+    const ValidatedInputFrameRegions&, ArtifactV3ResultSink& sink) {
   static_cast<void>(sink.bind_invocation_maximum_byte_length(8U));
   auto* output = sink.allocate(8U);
   if (output != nullptr) {
@@ -314,6 +324,11 @@ ArtifactV3CompileResult poison_after_commit(
 }
 
 int run_runtime_tests() {
+  static_assert(!std::is_default_constructible_v<ValidatedInputFrameRegions>);
+  static_assert(!std::is_copy_constructible_v<ValidatedInputFrameRegions>);
+  static_assert(!std::is_copy_assignable_v<ValidatedInputFrameRegions>);
+  static_assert(!std::is_move_constructible_v<ValidatedInputFrameRegions>);
+  static_assert(!std::is_move_assignable_v<ValidatedInputFrameRegions>);
   static_assert(!std::is_copy_constructible_v<ArtifactV3ResultSink>);
   static_assert(!std::is_copy_assignable_v<ArtifactV3ResultSink>);
   g_runtime_test_allocation_hooks = {
