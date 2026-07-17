@@ -101,6 +101,7 @@ import {
   type VerifiedCppCuteFrontendArtifact,
 } from "../../src/cpp_cute_frontend_artifact.js";
 import {
+  assembleCppCuteBrowserInputFrameRegions,
   copyPreparedCppCuteBrowserInputFrameBytes,
   CppCuteBrowserInputFrameError,
   prepareCppCuteBrowserInputFrame,
@@ -113,6 +114,7 @@ import {
 import {
   canonicalCppCuteBrowserWorkerProfileRegionBytes,
   canonicalCppCuteBrowserWorkerRequestRegionBytes,
+  copyCppCuteBrowserWorkerSourceSnapshots,
   discardCppCuteBrowserWorkerInvocation,
   prepareCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
@@ -285,6 +287,164 @@ describe("C++/CuTe browser Worker positive framing", () => {
       }, () => 0));
     expect(prepared.frameByteLength).toBeLessThanOrEqual(abi.maxFrameByteLength);
     expect(prepared.frameSha256).toBe(await sha256Hex(bytes));
+  });
+
+  it("delegates to the pure region assembler with byte-identical framing", async () => {
+    const environment = await createEnvironment("accepted");
+    const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(environment.invocation);
+    const profileRegionBytes = canonicalCppCuteBrowserWorkerProfileRegionBytes(
+      environment.invocation,
+    );
+    const requestRegionBytes = canonicalCppCuteBrowserWorkerRequestRegionBytes(
+      environment.invocation,
+    );
+    const sourceSnapshots = copyCppCuteBrowserWorkerSourceSnapshots(environment.invocation);
+    const assembled = assembleCppCuteBrowserInputFrameRegions({
+      profileRegionBytes,
+      requestRegionBytes,
+      sourceSnapshots,
+      limits: {
+        maxFrameByteLength: 4 * 1024 * 1024,
+        maxSourceSnapshotCount: invocationRecord.request.sourceFileCount,
+        maxSourceSnapshotByteLength: Number(invocationRecord.request.sourceByteLength),
+      },
+    });
+    const prepared = await prepareCppCuteBrowserInputFrame(environment.invocation);
+
+    expect(assembled.frameBytes).toEqual(
+      copyPreparedCppCuteBrowserInputFrameBytes(prepared),
+    );
+    expect(assembled).toMatchObject({
+      frameByteLength: prepared.frameByteLength,
+      profileOffset: prepared.profileOffset,
+      profileByteLength: prepared.profileByteLength,
+      requestOffset: prepared.requestOffset,
+      requestByteLength: prepared.requestByteLength,
+      sourceSnapshotCount: sourceSnapshots.length,
+      sourceSnapshotByteLength: SOURCE_BYTES.byteLength,
+    });
+    expect(Reflect.ownKeys(assembled)).toEqual([
+      "frameBytes",
+      "frameByteLength",
+      "profileOffset",
+      "profileByteLength",
+      "requestOffset",
+      "requestByteLength",
+      "sourceSnapshotCount",
+      "sourceSnapshotByteLength",
+    ]);
+    expect(assembled).not.toHaveProperty("invocationId");
+    expect(assembled).not.toHaveProperty("workerExecutionObserved");
+    expect(assembled).not.toHaveProperty("loweringAuthorityMinted");
+
+    profileRegionBytes.fill(0);
+    requestRegionBytes.fill(0);
+    sourceSnapshots[0]?.bytes.fill(0);
+    expect(new TextDecoder().decode(assembled.frameBytes.subarray(0, 8))).toBe("BGCCABI1");
+    expect(assembled.frameBytes.subarray(
+      assembled.profileOffset,
+      assembled.profileOffset + assembled.profileByteLength,
+    )).not.toEqual(profileRegionBytes);
+  });
+
+  it("rejects hostile region/source buffers and accessor-bearing records", () => {
+    class DerivedBytes extends Uint8Array {}
+    const limits = {
+      maxFrameByteLength: 1024,
+      maxSourceSnapshotCount: 1,
+      maxSourceSnapshotByteLength: 4,
+    };
+    expect(() => assembleCppCuteBrowserInputFrameRegions({
+      profileRegionBytes: new DerivedBytes([1]),
+      requestRegionBytes: Uint8Array.of(2),
+      sourceSnapshots: [],
+      limits,
+    })).toThrowError(expect.objectContaining<Partial<CppCuteBrowserInputFrameError>>({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-INPUT-FRAME-INVALID",
+      path: "$.input.profileRegionBytes",
+    }));
+
+    const accessorSource = Object.defineProperty({}, "bytes", {
+      enumerable: true,
+      get: () => Uint8Array.of(3),
+    });
+    Object.defineProperty(accessorSource, "virtualPath", {
+      enumerable: true,
+      value: "/src/main.cu",
+    });
+    expect(() => assembleCppCuteBrowserInputFrameRegions({
+      profileRegionBytes: Uint8Array.of(1),
+      requestRegionBytes: Uint8Array.of(2),
+      sourceSnapshots: [accessorSource as never],
+      limits,
+    })).toThrowError(expect.objectContaining<Partial<CppCuteBrowserInputFrameError>>({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-INPUT-FRAME-INVALID",
+      path: "$.input.sourceSnapshots[0].bytes",
+    }));
+
+    if (typeof SharedArrayBuffer !== "undefined") {
+      expect(() => assembleCppCuteBrowserInputFrameRegions({
+        profileRegionBytes: Uint8Array.of(1),
+        requestRegionBytes: new Uint8Array(new SharedArrayBuffer(1)),
+        sourceSnapshots: [],
+        limits,
+      })).toThrowError(expect.objectContaining<Partial<CppCuteBrowserInputFrameError>>({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-INPUT-FRAME-INVALID",
+        path: "$.input.requestRegionBytes",
+      }));
+    }
+  });
+
+  it("fails closed on frame, source-count, source-byte, and hard-limit overflow", () => {
+    const base = {
+      profileRegionBytes: Uint8Array.of(1),
+      requestRegionBytes: Uint8Array.of(2),
+      sourceSnapshots: [{ virtualPath: "/src/main.cu", bytes: Uint8Array.of(3, 4) }],
+    };
+    expect(() => assembleCppCuteBrowserInputFrameRegions({
+      ...base,
+      limits: {
+        maxFrameByteLength: 64,
+        maxSourceSnapshotCount: 1,
+        maxSourceSnapshotByteLength: 2,
+      },
+    })).toThrowError(expect.objectContaining<Partial<CppCuteBrowserInputFrameError>>({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-INPUT-FRAME-RESOURCE-LIMIT",
+      path: "$.frameByteLength",
+    }));
+    expect(() => assembleCppCuteBrowserInputFrameRegions({
+      ...base,
+      limits: {
+        maxFrameByteLength: 1024,
+        maxSourceSnapshotCount: 0,
+        maxSourceSnapshotByteLength: 2,
+      },
+    })).toThrowError(expect.objectContaining<Partial<CppCuteBrowserInputFrameError>>({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-INPUT-FRAME-RESOURCE-LIMIT",
+      path: "$.input.sourceSnapshots",
+    }));
+    expect(() => assembleCppCuteBrowserInputFrameRegions({
+      ...base,
+      limits: {
+        maxFrameByteLength: 1024,
+        maxSourceSnapshotCount: 1,
+        maxSourceSnapshotByteLength: 1,
+      },
+    })).toThrowError(expect.objectContaining<Partial<CppCuteBrowserInputFrameError>>({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-INPUT-FRAME-RESOURCE-LIMIT",
+      path: "$.input.sourceSnapshots",
+    }));
+    expect(() => assembleCppCuteBrowserInputFrameRegions({
+      ...base,
+      limits: {
+        maxFrameByteLength: 4 * 1024 * 1024 + 1,
+        maxSourceSnapshotCount: 1,
+        maxSourceSnapshotByteLength: 2,
+      },
+    })).toThrowError(expect.objectContaining<Partial<CppCuteBrowserInputFrameError>>({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-INPUT-FRAME-INVALID",
+      path: "$.input.limits.maxFrameByteLength",
+    }));
   });
 
   it("keeps frame bytes isolated and rejects forged frame authorities", async () => {

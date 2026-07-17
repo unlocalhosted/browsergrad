@@ -72,6 +72,7 @@ export const CPP_CUTE_BROWSER_WORKER_RESULT_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-worker-result";
 export const CPP_CUTE_BROWSER_WORKER_PROTOCOL_MAJOR = 1;
 export const CPP_CUTE_BROWSER_WORKER_PROTOCOL_MINOR = 0;
+export const CPP_CUTE_BROWSER_WORKER_INVOCATION_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_WORKER_RESULT_CONTROL_BYTE_LIMIT = 1024 * 1024;
 // Covers the artifact envelope plus the verifier's bounded 128-level semantic
 // expression/template structures without opening the global 256-level maximum.
@@ -79,6 +80,12 @@ const CPP_CUTE_BROWSER_ARTIFACT_DECODE_DEPTH = 192;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const INVOCATION_ID = /^bg\.cpp\.browser-worker-invocation\.sha256\.[0-9a-f]{64}$/u;
+const ASSET_MANIFEST_ID = /^bg\.cpp\.browser-assets\.sha256\.[0-9a-f]{64}$/u;
+const VFS_INSTALLATION_ID = /^bg\.cpp\.browser-vfs-installation\.sha256\.[0-9a-f]{64}$/u;
+const RUNTIME_ABI_MANIFEST_ID = /^bg\.cpp\.browser-runtime-abi\.sha256\.[0-9a-f]{64}$/u;
+const RAW_WASM_CONFORMANCE_ID = /^bg\.cpp\.browser-wasm-conformance\.sha256\.[0-9a-f]{64}$/u;
+const FRONTEND_REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
+const ENTRY_REQUEST_ID = /^bg\.cpp\.entry-request\.sha256\.[0-9a-f]{64}$/u;
 const ARTIFACT_ID = /^bg\.artifact\.cpp-cute-frontend\.sha256\.[0-9a-f]{64}$/u;
 const SECURE_GET_RANDOM_VALUES = typeof globalThis.crypto?.getRandomValues === "function"
   ? globalThis.crypto.getRandomValues.bind(globalThis.crypto)
@@ -150,6 +157,20 @@ export interface PrepareCppCuteBrowserWorkerInvocationInput {
   readonly workerModuleBytes: Uint8Array;
 }
 
+/**
+ * Worker-realm reconstruction inputs. The running package Worker is already
+ * authenticated by its host-owned controller, so its own module bytes are not
+ * transferred back into the Worker or retained by this authority.
+ */
+export interface DecodeCppCuteBrowserWorkerInvocationInput {
+  readonly profile: PreparedCppCuteFrontendProfile;
+  readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
+  readonly vfsInstallation: VerifiedCppCuteBrowserVfsInstallation;
+  readonly request: PreparedCppCuteFrontendRequest;
+  readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
+  readonly rawWasmConformance: PreparedCppCuteBrowserWasmConformance;
+}
+
 export interface PreparedCppCuteBrowserWorkerInvocationRecord {
   readonly profile: PreparedCppCuteFrontendProfile;
   readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
@@ -165,7 +186,7 @@ interface ActiveStoredInvocation extends PreparedCppCuteBrowserWorkerInvocationR
   readonly canonicalBytes: Uint8Array;
   readonly profileRegionBytes: Uint8Array;
   readonly requestRegionBytes: Uint8Array;
-  readonly workerModuleBytes: Uint8Array;
+  readonly workerModuleBytes: Uint8Array | null;
   readonly clangWasmBytes: Uint8Array;
   readonly extractionLimits: CppCuteFrontendExtractionLimits;
   readonly artifactVerification: WorkerArtifactVerificationContract;
@@ -360,13 +381,86 @@ export async function prepareCppCuteBrowserWorkerInvocation(
     "profile", "assetManifest", "vfsInstallation", "request", "runtimeAbiAsset",
     "rawWasmConformance", "workerModuleBytes",
   ]);
-  const profile = values["profile"] as PreparedCppCuteFrontendProfile;
-  const assetManifest = values["assetManifest"] as PreparedCppCuteBrowserAssetManifest;
-  const vfsInstallation = values["vfsInstallation"] as VerifiedCppCuteBrowserVfsInstallation;
-  const request = values["request"] as PreparedCppCuteFrontendRequest;
-  const runtimeAbiAsset = values["runtimeAbiAsset"] as VerifiedCppCuteBrowserRuntimeAbiAsset;
-  const rawWasmConformance = values["rawWasmConformance"] as PreparedCppCuteBrowserWasmConformance;
-  const workerModuleInput = values["workerModuleBytes"];
+  return prepareWorkerInvocationAuthority(
+    workerInvocationAuthorityInputs(values),
+    { kind: "host-prepared", workerModuleInput: values["workerModuleBytes"] },
+  );
+}
+
+/**
+ * Strictly reconstructs one invocation authority inside the package Worker.
+ * Canonical bytes supply only the already-hashed nonce. Every deterministic
+ * identity and binding is recomputed from locally reconstructed authorities
+ * through the same preparation path used by the host.
+ *
+ * Decoding alone proves neither Worker execution nor lowering authority.
+ */
+export async function decodeCppCuteBrowserWorkerInvocation(
+  invocationBytes: Uint8Array,
+  input: DecodeCppCuteBrowserWorkerInvocationInput,
+): Promise<PreparedCppCuteBrowserWorkerInvocation> {
+  const canonicalBytes = snapshotBytesWithinLimit(
+    invocationBytes,
+    "$.invocationBytes",
+    CPP_CUTE_BROWSER_WORKER_INVOCATION_BYTE_LIMIT,
+  );
+  const decodedInvocation = parseCanonicalInvocation(canonicalBytes);
+  const values = exactDataRecord(input, "$.input", [
+    "profile", "assetManifest", "vfsInstallation", "request", "runtimeAbiAsset",
+    "rawWasmConformance",
+  ]);
+  return prepareWorkerInvocationAuthority(
+    workerInvocationAuthorityInputs(values),
+    { kind: "worker-decoded", decodedInvocation, canonicalBytes },
+  );
+}
+
+interface WorkerInvocationAuthorityInputs {
+  readonly profile: PreparedCppCuteFrontendProfile;
+  readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
+  readonly vfsInstallation: VerifiedCppCuteBrowserVfsInstallation;
+  readonly request: PreparedCppCuteFrontendRequest;
+  readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
+  readonly rawWasmConformance: PreparedCppCuteBrowserWasmConformance;
+}
+
+type WorkerInvocationPreparationSource =
+  | {
+      readonly kind: "host-prepared";
+      readonly workerModuleInput: unknown;
+    }
+  | {
+      readonly kind: "worker-decoded";
+      readonly decodedInvocation: CppCuteBrowserWorkerInvocationV1;
+      readonly canonicalBytes: Uint8Array;
+    };
+
+function workerInvocationAuthorityInputs(
+  values: Readonly<Record<string, unknown>>,
+): WorkerInvocationAuthorityInputs {
+  return Object.freeze({
+    profile: values["profile"] as PreparedCppCuteFrontendProfile,
+    assetManifest: values["assetManifest"] as PreparedCppCuteBrowserAssetManifest,
+    vfsInstallation: values["vfsInstallation"] as VerifiedCppCuteBrowserVfsInstallation,
+    request: values["request"] as PreparedCppCuteFrontendRequest,
+    runtimeAbiAsset: values["runtimeAbiAsset"] as VerifiedCppCuteBrowserRuntimeAbiAsset,
+    rawWasmConformance:
+      values["rawWasmConformance"] as PreparedCppCuteBrowserWasmConformance,
+  });
+}
+
+async function prepareWorkerInvocationAuthority(
+  input: WorkerInvocationAuthorityInputs,
+  source: WorkerInvocationPreparationSource,
+): Promise<PreparedCppCuteBrowserWorkerInvocation> {
+  const {
+    profile,
+    assetManifest,
+    vfsInstallation,
+    request,
+    runtimeAbiAsset,
+    rawWasmConformance,
+  } = input;
   const profileRecord = unwrapPreparedCppCuteBrowserFrontendProfile(profile);
   const manifestRecord = unwrapPreparedCppCuteBrowserAssetManifest(assetManifest);
   const installationRecord = unwrapVerifiedCppCuteBrowserVfsInstallation(vfsInstallation);
@@ -430,14 +524,17 @@ export async function prepareCppCuteBrowserWorkerInvocation(
       BigInt(clangWasmBytes.byteLength) !== wireIntegerToBigInt(clangAsset.byteLength)) {
     mismatch("$.clangWasmBytes", "verified asset bytes differ from the bound Clang-Wasm identity");
   }
-  const workerModuleBytes = snapshotBytesWithinLimit(
-    workerModuleInput,
-    "$.workerModuleBytes",
-    deployment.worker.moduleByteLength,
-  );
-  if (workerModuleBytes.byteLength !== deployment.worker.moduleByteLength ||
-      await hashBytes(workerModuleBytes, "$.workerModuleBytes") !== deployment.worker.moduleSha256) {
-    mismatch("$.workerModuleBytes", "package-owned worker module differs from the exact prepared profile identity");
+  let workerModuleBytes: Uint8Array | null = null;
+  if (source.kind === "host-prepared") {
+    workerModuleBytes = snapshotBytesWithinLimit(
+      source.workerModuleInput,
+      "$.workerModuleBytes",
+      deployment.worker.moduleByteLength,
+    );
+    if (workerModuleBytes.byteLength !== deployment.worker.moduleByteLength ||
+        await hashBytes(workerModuleBytes, "$.workerModuleBytes") !== deployment.worker.moduleSha256) {
+      mismatch("$.workerModuleBytes", "package-owned worker module differs from the exact prepared profile identity");
+    }
   }
   const entryRequest = requestRecord.request.entryRequests[0];
   if (entryRequest === undefined) mismatch("$.request.entryRequests", "prepared request lost its entry anchor");
@@ -446,8 +543,9 @@ export async function prepareCppCuteBrowserWorkerInvocation(
     requestId: request.requestId,
     files: requestRecord.request.files,
   });
-  const invocationNonceBytes = createSingleUseInvocationNonce();
-  const invocationNonceSha256 = await hashBytes(invocationNonceBytes, "$.invocationNonce");
+  const invocationNonceSha256 = source.kind === "worker-decoded"
+    ? source.decodedInvocation.invocationNonceSha256
+    : await hashBytes(createSingleUseInvocationNonce(), "$.invocationNonce");
   const rawWasmConformanceHash = await hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.browser-wasm-conformance-identity.v1",
     wasmSha256: rawWasmConformance.wasmSha256,
@@ -502,6 +600,14 @@ export async function prepareCppCuteBrowserWorkerInvocation(
   });
   const invocationId = `bg.cpp.browser-worker-invocation.sha256.${invocationHash}`;
   const invocation = deepFreezeJson({ ...invocationBody, invocationId }) as CppCuteBrowserWorkerInvocationV1;
+  const canonicalBytes = canonicalJsonBytes(invocation);
+  if (source.kind === "worker-decoded" &&
+      !equalBytes(source.canonicalBytes, canonicalBytes)) {
+    mismatch(
+      "$.invocationBytes",
+      "canonical invocation differs from identities recomputed from Worker-local authorities",
+    );
+  }
   const prepared = Object.freeze({
     invocationId,
     invocationHash,
@@ -521,7 +627,7 @@ export async function prepareCppCuteBrowserWorkerInvocation(
       runtimeAbi,
       rawWasmConformance,
       invocation,
-      canonicalBytes: canonicalJsonBytes(invocation),
+      canonicalBytes,
       profileRegionBytes,
       requestRegionBytes,
       workerModuleBytes,
@@ -572,7 +678,15 @@ export function canonicalCppCuteBrowserWorkerRequestRegionBytes(
 export function copyCppCuteBrowserWorkerModuleBytes(
   invocation: PreparedCppCuteBrowserWorkerInvocation,
 ): Uint8Array {
-  return new Uint8Array(activeStoredInvocation(invocation).workerModuleBytes);
+  const workerModuleBytes = activeStoredInvocation(invocation).workerModuleBytes;
+  if (workerModuleBytes === null) {
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-UNVERIFIED",
+      "$.invocation.workerModuleBytes",
+      "Worker-decoded invocation does not retain its already-running Worker module bytes",
+    );
+  }
+  return new Uint8Array(workerModuleBytes);
 }
 
 export function copyCppCuteBrowserWorkerClangWasmBytes(
@@ -729,6 +843,142 @@ export function decodeCppCuteBrowserWorkerResultControl(
     CPP_CUTE_BROWSER_WORKER_RESULT_CONTROL_BYTE_LIMIT,
   );
   return parseCanonicalResult(snapshot);
+}
+
+function parseCanonicalInvocation(bytes: Uint8Array): CppCuteBrowserWorkerInvocationV1 {
+  let value: JsonValue;
+  try {
+    value = decodeWireJson(bytes, {
+      limits: {
+        maxDocumentBytes: CPP_CUTE_BROWSER_WORKER_INVOCATION_BYTE_LIMIT,
+        maxDepth: 6,
+        maxNodes: 96,
+        maxStringBytes: CPP_CUTE_BROWSER_WORKER_INVOCATION_BYTE_LIMIT,
+        maxArrayLength: 1,
+        maxObjectProperties: 32,
+        maxRank: 1,
+        maxIntegerBits: 64,
+        maxArithmeticOperations: 256,
+      },
+    });
+  } catch (cause) {
+    invalid(
+      "$.invocationBytes",
+      "Worker invocation is not bounded duplicate-aware JSON",
+      { cause },
+    );
+  }
+  const invocation = parseInvocation(value);
+  if (!equalBytes(bytes, canonicalJsonBytes(invocation))) {
+    noncanonical(
+      "$.invocationBytes",
+      "Worker invocation must exactly equal canonical JSON bytes",
+    );
+  }
+  return invocation;
+}
+
+function parseInvocation(value: JsonValue): CppCuteBrowserWorkerInvocationV1 {
+  const path = "$.invocation";
+  const root = closedObject(value, [
+    "schema", "version", "invocationId", "invocationNonceSha256", "profileHash",
+    "compilationContractHash", "assetManifestId", "assetManifestSha256",
+    "assetSetSha256", "vfsInstallationId", "runtimeAbiManifestId",
+    "runtimeAbiResourceSha256", "runtimeAbiContractSha256", "rawWasmConformanceId",
+    "clangWasmSha256", "clangWasmByteLength", "worker", "requestId", "requestHash",
+    "sourceSnapshotSetSha256", "entry",
+  ], path);
+  literal(
+    field(root, "schema", path),
+    CPP_CUTE_BROWSER_WORKER_INVOCATION_SCHEMA,
+    `${path}.schema`,
+  );
+  const version = closedObject(field(root, "version", path), ["major", "minor"], `${path}.version`);
+  literal(
+    field(version, "major", `${path}.version`),
+    CPP_CUTE_BROWSER_WORKER_PROTOCOL_MAJOR,
+    `${path}.version.major`,
+  );
+  literal(
+    field(version, "minor", `${path}.version`),
+    CPP_CUTE_BROWSER_WORKER_PROTOCOL_MINOR,
+    `${path}.version.minor`,
+  );
+  const worker = closedObject(
+    field(root, "worker", path),
+    ["protocolId", "buildId", "moduleSha256", "moduleByteLength"],
+    `${path}.worker`,
+  );
+  literal(
+    field(worker, "protocolId", `${path}.worker`),
+    "browsergrad.compiler.cpp-cute.browser-worker@1",
+    `${path}.worker.protocolId`,
+  );
+  const entry = closedObject(
+    field(root, "entry", path),
+    [
+      "entryRequestId", "kind", "declarationKind", "virtualPath", "beginByte",
+      "endByte", "tokenSha256",
+    ],
+    `${path}.entry`,
+  );
+  const entryKind = enumString(
+    field(entry, "kind", `${path}.entry`),
+    ["layout", "view-copy"] as const,
+    `${path}.entry.kind`,
+  );
+  const declarationKind = enumString(
+    field(entry, "declarationKind", `${path}.entry`),
+    ["variable", "function"] as const,
+    `${path}.entry.declarationKind`,
+  );
+  if ((entryKind === "layout" && declarationKind !== "variable") ||
+      (entryKind === "view-copy" && declarationKind !== "function")) {
+    invalid(
+      `${path}.entry.declarationKind`,
+      "entry kind and declaration kind are inconsistent",
+    );
+  }
+
+  return deepFreezeJson({
+    schema: CPP_CUTE_BROWSER_WORKER_INVOCATION_SCHEMA,
+    version: {
+      major: CPP_CUTE_BROWSER_WORKER_PROTOCOL_MAJOR,
+      minor: CPP_CUTE_BROWSER_WORKER_PROTOCOL_MINOR,
+    },
+    invocationId: patternString(field(root, "invocationId", path), INVOCATION_ID, `${path}.invocationId`),
+    invocationNonceSha256: sha256(field(root, "invocationNonceSha256", path), `${path}.invocationNonceSha256`),
+    profileHash: sha256(field(root, "profileHash", path), `${path}.profileHash`),
+    compilationContractHash: sha256(field(root, "compilationContractHash", path), `${path}.compilationContractHash`),
+    assetManifestId: patternString(field(root, "assetManifestId", path), ASSET_MANIFEST_ID, `${path}.assetManifestId`),
+    assetManifestSha256: sha256(field(root, "assetManifestSha256", path), `${path}.assetManifestSha256`),
+    assetSetSha256: sha256(field(root, "assetSetSha256", path), `${path}.assetSetSha256`),
+    vfsInstallationId: patternString(field(root, "vfsInstallationId", path), VFS_INSTALLATION_ID, `${path}.vfsInstallationId`),
+    runtimeAbiManifestId: patternString(field(root, "runtimeAbiManifestId", path), RUNTIME_ABI_MANIFEST_ID, `${path}.runtimeAbiManifestId`),
+    runtimeAbiResourceSha256: sha256(field(root, "runtimeAbiResourceSha256", path), `${path}.runtimeAbiResourceSha256`),
+    runtimeAbiContractSha256: sha256(field(root, "runtimeAbiContractSha256", path), `${path}.runtimeAbiContractSha256`),
+    rawWasmConformanceId: patternString(field(root, "rawWasmConformanceId", path), RAW_WASM_CONFORMANCE_ID, `${path}.rawWasmConformanceId`),
+    clangWasmSha256: sha256(field(root, "clangWasmSha256", path), `${path}.clangWasmSha256`),
+    clangWasmByteLength: wire(field(root, "clangWasmByteLength", path), `${path}.clangWasmByteLength`),
+    worker: {
+      protocolId: "browsergrad.compiler.cpp-cute.browser-worker@1",
+      buildId: boundedString(field(worker, "buildId", `${path}.worker`), `${path}.worker.buildId`, 256),
+      moduleSha256: sha256(field(worker, "moduleSha256", `${path}.worker`), `${path}.worker.moduleSha256`),
+      moduleByteLength: wire(field(worker, "moduleByteLength", `${path}.worker`), `${path}.worker.moduleByteLength`),
+    },
+    requestId: patternString(field(root, "requestId", path), FRONTEND_REQUEST_ID, `${path}.requestId`),
+    requestHash: sha256(field(root, "requestHash", path), `${path}.requestHash`),
+    sourceSnapshotSetSha256: sha256(field(root, "sourceSnapshotSetSha256", path), `${path}.sourceSnapshotSetSha256`),
+    entry: {
+      entryRequestId: patternString(field(entry, "entryRequestId", `${path}.entry`), ENTRY_REQUEST_ID, `${path}.entry.entryRequestId`),
+      kind: entryKind,
+      declarationKind,
+      virtualPath: boundedString(field(entry, "virtualPath", `${path}.entry`), `${path}.entry.virtualPath`, 8_192),
+      beginByte: wire(field(entry, "beginByte", `${path}.entry`), `${path}.entry.beginByte`),
+      endByte: wire(field(entry, "endByte", `${path}.entry`), `${path}.entry.endByte`),
+      tokenSha256: sha256(field(entry, "tokenSha256", `${path}.entry`), `${path}.entry.tokenSha256`),
+    },
+  }) as CppCuteBrowserWorkerInvocationV1;
 }
 
 function storedInvocationSlot(invocation: PreparedCppCuteBrowserWorkerInvocation): StoredInvocationSlot {
@@ -1346,6 +1596,17 @@ function sha256(value: JsonValue, path: string): string {
 
 function patternString(value: JsonValue, pattern: RegExp, path: string): string {
   if (typeof value !== "string" || !pattern.test(value)) invalid(path, `string does not match ${pattern.source}`);
+  return value;
+}
+
+function boundedString(
+  value: JsonValue,
+  path: string,
+  maximumLength: number,
+): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximumLength) {
+    invalid(path, `expected nonempty string no longer than ${maximumLength} UTF-16 code units`);
+  }
   return value;
 }
 

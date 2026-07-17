@@ -14,6 +14,8 @@ import {
   loadCppCuteBrowserAssetSetFromCache,
   unwrapVerifiedCppCuteBrowserRuntimeAbiAsset,
   unwrapVerifiedCppCuteBrowserVfsInstallation,
+  verifyTransferredCppCuteBrowserAssetSet,
+  type CppCuteBrowserTransferredAssetInput,
   type VerifiedCppCuteBrowserRuntimeAbiAsset,
   type CppCuteBrowserContentCache,
   type CppCuteBrowserHostFetch,
@@ -26,6 +28,7 @@ import {
   deriveCppCuteBrowserAssetManifestId,
   deriveCppCuteBrowserAssetSetSha256,
   prepareCppCuteBrowserAssetManifest,
+  unwrapPreparedCppCuteBrowserAssetManifest,
   type CppCuteBrowserAssetManifestBodyV1,
   type CppCuteBrowserAssetManifestV1,
   type CppCuteBrowserAssetV1,
@@ -312,7 +315,159 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
   return { manifest, bytesByUrl };
 }
 
+function transferredAssets(environment: Environment): CppCuteBrowserTransferredAssetInput[] {
+  const manifest = unwrapPreparedCppCuteBrowserAssetManifest(environment.manifest).manifest;
+  return manifest.body.assets.map((asset) => {
+    const bytes = environment.bytesByUrl.get(`${ORIGIN}${asset.url}`);
+    if (bytes === undefined) throw new Error(`fixture asset bytes missing for ${asset.assetId}`);
+    return { assetId: asset.assetId, bytes: new Uint8Array(bytes) };
+  });
+}
+
 describe("C++/CuTe browser asset acquisition and VFS installation", () => {
+  it("reconstructs isolated local authority from exact ordered transferred buffers", async () => {
+    const environment = await createEnvironment();
+    const transferred = transferredAssets(environment);
+    const expectedClang = new Uint8Array(
+      transferred.find((entry) => entry.assetId === "clang-wasm")?.bytes ?? Uint8Array.of(),
+    );
+    const pending = verifyTransferredCppCuteBrowserAssetSet(environment.manifest, transferred);
+    for (const entry of transferred) entry.bytes.fill(0);
+    const assetSet = await pending;
+
+    expect(assetSet).toMatchObject({
+      source: "worker-transfer",
+      assetCount: transferred.length,
+      manifestId: environment.manifest.manifestId,
+      assetSetSha256: environment.manifest.assetSetSha256,
+    });
+    expect(assetSet).not.toHaveProperty("workerExecutionReady");
+    expect(assetSet).not.toHaveProperty("releaseReady");
+    expect(copyVerifiedCppCuteBrowserAssetBytes(assetSet, "clang-wasm")).toEqual(expectedClang);
+    const runtimeAbi = await decodeAcquiredCppCuteBrowserRuntimeAbiAsset(assetSet);
+    expect(runtimeAbi).toMatchObject({
+      observedWasmVerified: false,
+      workerExecutionReady: false,
+      releaseReady: false,
+    });
+    await expect(installCppCuteBrowserVfs(assetSet)).resolves.toMatchObject({
+      manifestId: environment.manifest.manifestId,
+    });
+  });
+
+  it("requires exact manifest cardinality, order, IDs, fields, lengths, and hashes", async () => {
+    const environment = await createEnvironment();
+    const exact = transferredAssets(environment);
+
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, exact.slice(0, -1)),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets",
+    );
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, [...exact, exact[0]!]),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets",
+    );
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, [...exact].reverse()),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets[0].assetId",
+    );
+
+    const wrongId = transferredAssets(environment);
+    wrongId[0] = { assetId: `${wrongId[0]!.assetId}.wrong`, bytes: wrongId[0]!.bytes };
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, wrongId),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets[0].assetId",
+    );
+
+    const wrongLength = transferredAssets(environment);
+    wrongLength[0] = { assetId: wrongLength[0]!.assetId, bytes: new Uint8Array(1) };
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, wrongLength),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-LENGTH-MISMATCH",
+      "$.assets[0].bytes",
+    );
+
+    const wrongHash = transferredAssets(environment);
+    wrongHash[0]!.bytes[0] = (wrongHash[0]!.bytes[0] ?? 0) ^ 0xff;
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, wrongHash),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-HASH-MISMATCH",
+      "$.assets[0].bytes",
+    );
+
+    const extraField = transferredAssets(environment);
+    Object.assign(extraField[0]!, { url: "/must-not-be-used" });
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, extraField),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets[0]",
+    );
+
+    let accessorRead = false;
+    const hostile = transferredAssets(environment);
+    hostile[0] = Object.defineProperty({ assetId: hostile[0]!.assetId }, "bytes", {
+      enumerable: true,
+      get: () => {
+        accessorRead = true;
+        throw new Error("transferred accessor must not run");
+      },
+    }) as CppCuteBrowserTransferredAssetInput;
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, hostile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets[0].bytes",
+    );
+    expect(accessorRead).toBe(false);
+  });
+
+  it("requires unique standalone unshared readable transfer buffers", async () => {
+    const environment = await createEnvironment();
+
+    const duplicate = transferredAssets(environment);
+    duplicate[1] = { assetId: duplicate[1]!.assetId, bytes: duplicate[0]!.bytes };
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, duplicate),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets[1].bytes",
+    );
+
+    const partial = transferredAssets(environment);
+    const first = partial[0]!.bytes;
+    const padded = new Uint8Array(first.byteLength + 1);
+    padded.set(first, 1);
+    partial[0] = {
+      assetId: partial[0]!.assetId,
+      bytes: new Uint8Array(padded.buffer, 1, first.byteLength),
+    };
+    await expectIoError(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, partial),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+      "$.assets[0].bytes",
+    );
+
+    if (typeof SharedArrayBuffer !== "undefined") {
+      const shared = transferredAssets(environment);
+      const sharedBytes = new Uint8Array(new SharedArrayBuffer(shared[0]!.bytes.byteLength));
+      sharedBytes.set(shared[0]!.bytes);
+      shared[0] = { assetId: shared[0]!.assetId, bytes: sharedBytes };
+      await expectIoError(
+        verifyTransferredCppCuteBrowserAssetSet(environment.manifest, shared),
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-INVALID",
+        "$.assets[0].bytes",
+      );
+    }
+
+    const detached = transferredAssets(environment);
+    structuredClone(detached[0]!.bytes.buffer, { transfer: [detached[0]!.bytes.buffer] });
+    await expect(
+      verifyTransferredCppCuteBrowserAssetSet(environment.manifest, detached),
+    ).rejects.toMatchObject({ path: "$.assets[0].bytes" });
+  });
+
   it("fetches exact same-origin bytes, verifies them, and installs every collision-free pack", async () => {
     const environment = await createEnvironment();
     const requests: Array<{ readonly url: string; readonly init: RequestInit }> = [];

@@ -54,12 +54,31 @@ const READER_CANCEL = typeof ReadableStreamDefaultReader === "undefined"
 const READER_RELEASE_LOCK = typeof ReadableStreamDefaultReader === "undefined"
   ? undefined
   : ReadableStreamDefaultReader.prototype.releaseLock;
+const ARRAY_IS_ARRAY = Array.isArray;
+const ARRAY_PROTOTYPE = Array.prototype;
+const OBJECT_PROTOTYPE = Object.prototype;
+const OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
+const OBJECT_GET_OWN_PROPERTY_DESCRIPTORS = Object.getOwnPropertyDescriptors;
+const REFLECT_OWN_KEYS = Reflect.ownKeys;
+const TYPED_ARRAY_PROTOTYPE = OBJECT_GET_PROTOTYPE_OF(Uint8Array.prototype) as object;
+const TYPED_ARRAY_BUFFER_GETTER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "buffer",
+)?.get;
+const TYPED_ARRAY_BYTE_OFFSET_GETTER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "byteOffset",
+)?.get;
+const ARRAY_BUFFER_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+  ArrayBuffer.prototype,
+  "byteLength",
+)?.get;
 const VERIFIED_ASSET_SETS = new WeakMap<object, StoredVerifiedAssetSet>();
 const VERIFIED_RUNTIME_ABI_ASSETS = new WeakMap<object, StoredVerifiedRuntimeAbiAsset>();
 const CACHE_ADMISSIONS = new WeakMap<object, StoredCacheAdmission>();
 const VFS_INSTALLATIONS = new WeakMap<object, StoredVfsInstallation>();
 
-export type CppCuteBrowserAssetSetSource = "host-fetch" | "content-cache";
+export type CppCuteBrowserAssetSetSource = "host-fetch" | "content-cache" | "worker-transfer";
 
 export type CppCuteBrowserHostFetch = (
   input: string,
@@ -75,9 +94,15 @@ export interface CppCuteBrowserAssetOperationOptions {
   readonly signal?: AbortSignal;
 }
 
+/** One exact standalone transferred buffer, in prepared-manifest order. */
+export interface CppCuteBrowserTransferredAssetInput {
+  readonly assetId: string;
+  readonly bytes: Uint8Array;
+}
+
 declare const verifiedAssetSetBrand: unique symbol;
 
-/** Host-verified exact bytes for every member of one prepared manifest. */
+/** Locally verified exact bytes for every member of one prepared manifest. */
 export interface VerifiedCppCuteBrowserAssetSet {
   readonly [verifiedAssetSetBrand]: true;
   readonly manifestId: string;
@@ -275,6 +300,36 @@ export async function loadCppCuteBrowserAssetSetFromCache(
     assets.push(Object.freeze({ asset, bytes }));
   }
   return mintAssetSet(manifest, assets, "content-cache");
+}
+
+/**
+ * Reconstructs local asset authority from an exact structured-clone transfer.
+ * This ingress has no fetch, URL, cache, Worker-execution, or release authority.
+ */
+export async function verifyTransferredCppCuteBrowserAssetSet(
+  manifest: PreparedCppCuteBrowserAssetManifest,
+  transferredAssets: readonly CppCuteBrowserTransferredAssetInput[],
+  options: CppCuteBrowserAssetOperationOptions = {},
+): Promise<VerifiedCppCuteBrowserAssetSet> {
+  const signal = normalizeSignal(options.signal);
+  throwIfAborted(signal);
+  const manifestRecord = unwrapPreparedCppCuteBrowserAssetManifest(manifest);
+  const snapshots = snapshotTransferredAssets(
+    transferredAssets,
+    manifestRecord.manifest.body.assets,
+  );
+  const assets: StoredVerifiedAsset[] = [];
+  for (const [index, snapshot] of snapshots.entries()) {
+    throwIfAborted(signal);
+    const digest = await sha256Hex(snapshot.bytes);
+    throwIfAborted(signal);
+    if (digest !== snapshot.asset.sha256) {
+      hashMismatch(`$.assets[${index}].bytes`, "transferred asset bytes differ from declared SHA-256");
+    }
+    assets.push(Object.freeze({ asset: snapshot.asset, bytes: snapshot.bytes }));
+  }
+  throwIfAborted(signal);
+  return mintAssetSet(manifest, assets, "worker-transfer");
 }
 
 export async function admitCppCuteBrowserAssetSetToCache(
@@ -636,6 +691,148 @@ async function verifyExactAssetBytes(
   throwIfAborted(signal);
   if (digest !== asset.sha256) hashMismatch(path, "asset bytes differ from declared SHA-256");
   return bytes;
+}
+
+interface SnapshottedTransferredAsset {
+  readonly asset: CppCuteBrowserAssetV1;
+  readonly bytes: Uint8Array;
+}
+
+function snapshotTransferredAssets(
+  value: unknown,
+  expectedAssets: readonly CppCuteBrowserAssetV1[],
+): readonly SnapshottedTransferredAsset[] {
+  if (!ARRAY_IS_ARRAY(value)) invalid("$.assets", "transferred assets must be a plain dense array");
+  let prototype: object | null;
+  let keys: readonly PropertyKey[];
+  let descriptors: PropertyDescriptorMap;
+  try {
+    prototype = OBJECT_GET_PROTOTYPE_OF(value);
+    keys = REFLECT_OWN_KEYS(value);
+    descriptors = OBJECT_GET_OWN_PROPERTY_DESCRIPTORS(value) as unknown as PropertyDescriptorMap;
+  } catch (cause) {
+    invalid("$.assets", "transferred asset array is not safely inspectable", { cause });
+  }
+  if (prototype !== ARRAY_PROTOTYPE) invalid("$.assets", "transferred assets must be a plain dense array");
+  const lengthDescriptor = descriptors["length"];
+  if (lengthDescriptor === undefined || !("value" in lengthDescriptor) ||
+      lengthDescriptor.value !== expectedAssets.length || lengthDescriptor.enumerable !== false ||
+      lengthDescriptor.configurable !== false || lengthDescriptor.writable !== true) {
+    invalid("$.assets", "transferred asset count differs from the prepared manifest");
+  }
+  if (keys.length !== expectedAssets.length + 1 || keys[keys.length - 1] !== "length") {
+    invalid("$.assets", "transferred assets must be a dense array without extra properties");
+  }
+
+  const seenBuffers: ArrayBuffer[] = [];
+  const snapshots: SnapshottedTransferredAsset[] = [];
+  for (let index = 0; index < expectedAssets.length; index += 1) {
+    const indexKey = String(index);
+    if (keys[index] !== indexKey) {
+      invalid("$.assets", "transferred assets must be a dense array in exact manifest order");
+    }
+    const descriptor = descriptors[indexKey];
+    if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
+      invalid(`$.assets[${index}]`, "transferred asset must be an enumerable data element");
+    }
+    const expected = expectedAssets[index];
+    if (expected === undefined) invalid(`$.assets[${index}]`, "prepared manifest asset is missing");
+    const entry = exactTransferredAssetRecord(descriptor.value, index);
+    if (entry.assetId !== expected.assetId) {
+      invalid(
+        `$.assets[${index}].assetId`,
+        "transferred asset ID or order differs from the prepared manifest",
+      );
+    }
+    const inspected = inspectTransferredStandaloneBytes(entry.bytes, index);
+    for (const seen of seenBuffers) {
+      if (seen === inspected.buffer) {
+        invalid(`$.assets[${index}].bytes`, "every transferred asset must own a unique ArrayBuffer");
+      }
+    }
+    seenBuffers.push(inspected.buffer);
+    const expectedLength = exactAssetLength(expected, `$.assets[${index}].bytes`);
+    if (inspected.inspection.byteLength !== expectedLength) {
+      lengthMismatch(`$.assets[${index}].bytes`, "transferred asset bytes differ from declared length");
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = copyInspectedUnsharedUint8Array(entry.bytes, inspected.inspection);
+    } catch (cause) {
+      invalid(`$.assets[${index}].bytes`, "transferred asset bytes changed during snapshot", { cause });
+    }
+    snapshots.push(Object.freeze({ asset: expected, bytes }));
+  }
+  return Object.freeze(snapshots);
+}
+
+function exactTransferredAssetRecord(
+  value: unknown,
+  index: number,
+): { readonly assetId: string; readonly bytes: unknown } {
+  const path = `$.assets[${index}]`;
+  if (typeof value !== "object" || value === null) invalid(path, "transferred asset must be a plain data record");
+  let prototype: object | null;
+  let keys: readonly PropertyKey[];
+  let descriptors: PropertyDescriptorMap;
+  try {
+    prototype = OBJECT_GET_PROTOTYPE_OF(value);
+    keys = REFLECT_OWN_KEYS(value);
+    descriptors = OBJECT_GET_OWN_PROPERTY_DESCRIPTORS(value);
+  } catch (cause) {
+    invalid(path, "transferred asset record is not safely inspectable", { cause });
+  }
+  if (prototype !== OBJECT_PROTOTYPE && prototype !== null) {
+    invalid(path, "transferred asset must be a plain data record");
+  }
+  if (keys.length !== 2 ||
+      !keys.every((key) => key === "assetId" || key === "bytes")) {
+    invalid(path, "transferred asset must contain exactly assetId and bytes");
+  }
+  const assetIdDescriptor = descriptors["assetId"];
+  const bytesDescriptor = descriptors["bytes"];
+  if (assetIdDescriptor === undefined || assetIdDescriptor.enumerable !== true ||
+      !("value" in assetIdDescriptor) || typeof assetIdDescriptor.value !== "string") {
+    invalid(`${path}.assetId`, "assetId must be an enumerable string data property");
+  }
+  if (bytesDescriptor === undefined || bytesDescriptor.enumerable !== true || !("value" in bytesDescriptor)) {
+    invalid(`${path}.bytes`, "bytes must be an enumerable data property");
+  }
+  return Object.freeze({ assetId: assetIdDescriptor.value, bytes: bytesDescriptor.value });
+}
+
+function inspectTransferredStandaloneBytes(
+  value: unknown,
+  index: number,
+): {
+  readonly inspection: ReturnType<typeof inspectUnsharedPlainUint8Array>;
+  readonly buffer: ArrayBuffer;
+} {
+  const path = `$.assets[${index}].bytes`;
+  let inspection: ReturnType<typeof inspectUnsharedPlainUint8Array>;
+  try {
+    inspection = inspectUnsharedPlainUint8Array(value);
+  } catch (cause) {
+    invalid(path, "transferred bytes must be an unshared plain Uint8Array", { cause });
+  }
+  if (TYPED_ARRAY_BUFFER_GETTER === undefined || TYPED_ARRAY_BYTE_OFFSET_GETTER === undefined ||
+      ARRAY_BUFFER_BYTE_LENGTH_GETTER === undefined) {
+    invalid(path, "required ArrayBuffer intrinsic accessors are unavailable");
+  }
+  let buffer: ArrayBuffer;
+  let byteOffset: number;
+  let bufferByteLength: number;
+  try {
+    buffer = TYPED_ARRAY_BUFFER_GETTER.call(value) as ArrayBuffer;
+    byteOffset = TYPED_ARRAY_BYTE_OFFSET_GETTER.call(value) as number;
+    bufferByteLength = ARRAY_BUFFER_BYTE_LENGTH_GETTER.call(buffer) as number;
+  } catch (cause) {
+    invalid(path, "transferred ArrayBuffer is detached or unreadable", { cause });
+  }
+  if (byteOffset !== 0 || bufferByteLength !== inspection.byteLength) {
+    invalid(path, "transferred bytes must span one standalone ArrayBuffer exactly");
+  }
+  return Object.freeze({ inspection, buffer });
 }
 
 function mintAssetSet(
