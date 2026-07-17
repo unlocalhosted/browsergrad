@@ -149,7 +149,7 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
     const plan = planCppCuteClangWasmBuild(input());
 
     expect(plan.extractorSource).toEqual({
-      sourceSetSha256: "c54c248660a85bd709b42c1590d042dc8f224782e1b3f2a7a2fa9a7fbe1e6b5c",
+      sourceSetSha256: "b7b5c1ac3b9989fc8614819efc25e53dba3bb46c5c1e15f3ddeccd4d10ad0958",
       buildVerified: false,
       blockerId: "browsergrad-extractor-source-verification",
       files: [
