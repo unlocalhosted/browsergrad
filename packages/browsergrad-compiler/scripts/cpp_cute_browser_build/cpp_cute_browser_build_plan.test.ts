@@ -148,21 +148,29 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
   it("materializes every lock-pinned extractor source path without granting source verification", () => {
     const plan = planCppCuteClangWasmBuild(input());
 
-    expect(plan.extractorSource).toEqual({
-      sourceSetSha256: "b7b5c1ac3b9989fc8614819efc25e53dba3bb46c5c1e15f3ddeccd4d10ad0958",
+    expect(plan.extractorSource).toMatchObject({
+      sourceSetSha256: "acdd9846dcf5e15e299b99bcdf59bf5d0e10dbd1213c9fbb6a5cc7f8e0fc4a32",
       buildVerified: false,
       blockerId: "browsergrad-extractor-source-verification",
-      files: [
-        expect.objectContaining({
-          path: "BrowserGradCppCuteExtractor.cpp",
-          absolutePath: "/source/browsergrad-extractor/BrowserGradCppCuteExtractor.cpp",
-        }),
-        expect.objectContaining({
-          path: "CMakeLists.txt",
-          absolutePath: "/source/browsergrad-extractor/CMakeLists.txt",
-        }),
-      ],
     });
+    expect(plan.extractorSource.files.map(({ path, absolutePath }) => ({
+      path,
+      absolutePath,
+    }))).toEqual([
+      "BrowserGradCppCuteArtifactV3.cpp",
+      "BrowserGradCppCuteArtifactV3.h",
+      "BrowserGradCppCuteClangAction.cpp",
+      "BrowserGradCppCuteClangAction.h",
+      "BrowserGradCppCuteExtractor.cpp",
+      "BrowserGradCppCuteImportedVfs.cpp",
+      "BrowserGradCppCuteImportedVfs.h",
+      "BrowserGradCppCuteRuntime.cpp",
+      "BrowserGradCppCuteRuntime.h",
+      "CMakeLists.txt",
+    ].map((path) => ({
+      path,
+      absolutePath: `/source/browsergrad-extractor/${path}`,
+    })));
   });
 
   it("prefix-maps every selected source/build/output root", () => {

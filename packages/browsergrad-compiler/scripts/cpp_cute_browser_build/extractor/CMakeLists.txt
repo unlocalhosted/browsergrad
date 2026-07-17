@@ -19,7 +19,15 @@ if(NOT BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_FILENAME STREQUAL "clang-extractor.m
 endif()
 
 add_llvm_executable(browsergrad-cpp-cute-extractor
+  BrowserGradCppCuteArtifactV3.cpp
+  BrowserGradCppCuteArtifactV3.h
+  BrowserGradCppCuteClangAction.cpp
+  BrowserGradCppCuteClangAction.h
   BrowserGradCppCuteExtractor.cpp
+  BrowserGradCppCuteImportedVfs.cpp
+  BrowserGradCppCuteImportedVfs.h
+  BrowserGradCppCuteRuntime.cpp
+  BrowserGradCppCuteRuntime.h
 )
 
 target_compile_features(browsergrad-cpp-cute-extractor PRIVATE cxx_std_20)

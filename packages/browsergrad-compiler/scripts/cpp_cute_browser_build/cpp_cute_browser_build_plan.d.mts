@@ -31,7 +31,17 @@ export interface CppCuteClangWasmBuildStep {
 }
 
 export interface CppCuteClangWasmExtractorSourceFile {
-  readonly path: "BrowserGradCppCuteExtractor.cpp" | "CMakeLists.txt";
+  readonly path:
+    | "BrowserGradCppCuteArtifactV3.cpp"
+    | "BrowserGradCppCuteArtifactV3.h"
+    | "BrowserGradCppCuteClangAction.cpp"
+    | "BrowserGradCppCuteClangAction.h"
+    | "BrowserGradCppCuteExtractor.cpp"
+    | "BrowserGradCppCuteImportedVfs.cpp"
+    | "BrowserGradCppCuteImportedVfs.h"
+    | "BrowserGradCppCuteRuntime.cpp"
+    | "BrowserGradCppCuteRuntime.h"
+    | "CMakeLists.txt";
   readonly sha256: string;
   readonly byteLength: string;
   readonly absolutePath: string;

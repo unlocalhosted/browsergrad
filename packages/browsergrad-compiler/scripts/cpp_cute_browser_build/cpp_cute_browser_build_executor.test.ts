@@ -69,6 +69,7 @@ import {
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
   type PreparedCppCuteBrowserBuildInputLock,
+  unwrapPreparedCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
 import {
   CppCuteBrowserBuildExecutorError,
@@ -111,16 +112,12 @@ async function fixture(): Promise<{
   const sourceRoot = join(root, "source-input");
   const outputRoot = join(root, "output");
   await Promise.all([mkdir(sourceRoot), mkdir(outputRoot)]);
-  await Promise.all([
-    copyFile(
-      join(checkedInExtractorRoot, "BrowserGradCppCuteExtractor.cpp"),
-      join(sourceRoot, "BrowserGradCppCuteExtractor.cpp"),
-    ),
-    copyFile(
-      join(checkedInExtractorRoot, "CMakeLists.txt"),
-      join(sourceRoot, "CMakeLists.txt"),
-    ),
-  ]);
+  const sourcePaths = unwrapPreparedCppCuteBrowserBuildInputLock(lock)
+    .lock.body.recipe.extractorSource.files.map((file) => file.path);
+  await Promise.all(sourcePaths.map((path) => copyFile(
+    join(checkedInExtractorRoot, path),
+    join(sourceRoot, path),
+  )));
   return {
     root,
     input: {
@@ -178,7 +175,7 @@ describe("bounded Clang-WASM build source executor", () => {
       authority: "build-source-snapshot-only",
       lockId: lock.lockId,
       sourceSetSha256: lock.extractorSourceSetSha256,
-      fileCount: 2,
+      fileCount: 10,
       sourceVerified: true,
       buildExecuted: false,
       outputIdentityAuthorized: false,
@@ -186,7 +183,15 @@ describe("bounded Clang-WASM build source executor", () => {
       releaseReady: false,
     });
     expect((await readdir(input.roots.extractorSourceRoot)).sort()).toEqual([
+      "BrowserGradCppCuteArtifactV3.cpp",
+      "BrowserGradCppCuteArtifactV3.h",
+      "BrowserGradCppCuteClangAction.cpp",
+      "BrowserGradCppCuteClangAction.h",
       "BrowserGradCppCuteExtractor.cpp",
+      "BrowserGradCppCuteImportedVfs.cpp",
+      "BrowserGradCppCuteImportedVfs.h",
+      "BrowserGradCppCuteRuntime.cpp",
+      "BrowserGradCppCuteRuntime.h",
       "CMakeLists.txt",
     ]);
     const stagedCpp = join(input.roots.extractorSourceRoot, "BrowserGradCppCuteExtractor.cpp");

@@ -18,6 +18,18 @@ import {
 } from "../../dist/cpp_cute_browser_runtime_abi.js";
 
 const extractorRoot = join(dirname(fileURLToPath(import.meta.url)), "extractor");
+const expectedSourcePaths = [
+  "BrowserGradCppCuteArtifactV3.cpp",
+  "BrowserGradCppCuteArtifactV3.h",
+  "BrowserGradCppCuteClangAction.cpp",
+  "BrowserGradCppCuteClangAction.h",
+  "BrowserGradCppCuteExtractor.cpp",
+  "BrowserGradCppCuteImportedVfs.cpp",
+  "BrowserGradCppCuteImportedVfs.h",
+  "BrowserGradCppCuteRuntime.cpp",
+  "BrowserGradCppCuteRuntime.h",
+  "CMakeLists.txt",
+] as const;
 
 let sourceFiles: readonly {
   readonly path: string;
@@ -50,12 +62,13 @@ beforeAll(async () => {
   runtimeVfsLimits = body.vfs;
 });
 
+async function extractorSource(path: typeof expectedSourcePaths[number]): Promise<string> {
+  return readFile(join(extractorRoot, path), "utf8");
+}
+
 describe("BrowserGrad-owned Clang-WASM extractor source", () => {
-  it("matches the exact source file and source-set identities in the build lock", async () => {
-    expect(sourceFiles.map((file) => file.path)).toEqual([
-      "BrowserGradCppCuteExtractor.cpp",
-      "CMakeLists.txt",
-    ]);
+  it("matches the exact split source closure and source-set identity in the build lock", async () => {
+    expect(sourceFiles.map((file) => file.path)).toEqual(expectedSourcePaths);
     for (const file of sourceFiles) {
       const bytes = await readFile(join(extractorRoot, file.path));
       expect(String(bytes.byteLength)).toBe(file.byteLength);
@@ -67,10 +80,12 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     })).toBe(sourceSetSha256);
   });
 
-  it("builds an Emscripten ES-module factory plus Wasm sidecar, not a misleading standalone Wasm target", async () => {
-    const cmake = await readFile(join(extractorRoot, "CMakeLists.txt"), "utf8");
-
+  it("builds every owned translation unit into the Emscripten factory target", async () => {
+    const cmake = await extractorSource("CMakeLists.txt");
     expect(cmake).toContain("add_llvm_executable(browsergrad-cpp-cute-extractor");
+    for (const path of expectedSourcePaths.filter((path) => path.endsWith(".cpp"))) {
+      expect(cmake).toContain(`  ${path}\n`);
+    }
     expect(cmake).toContain("BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH");
     expect(cmake).toContain('SUFFIX ".mjs"');
     expect(cmake).not.toContain('SUFFIX ".wasm"');
@@ -82,12 +97,37 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     }
   });
 
-  it("declares and consumes only the exact closed-VFS application imports", async () => {
-    const source = await readFile(
-      join(extractorRoot, "BrowserGradCppCuteExtractor.cpp"),
-      "utf8",
-    );
+  it("keeps the top-level translation unit as exact ABI-1.0 composition only", async () => {
+    const source = await extractorSource("BrowserGradCppCuteExtractor.cpp");
+    expect(source).toContain('#include "BrowserGradCppCuteArtifactV3.h"');
+    expect(source).toContain('#include "BrowserGradCppCuteRuntime.h"');
+    expect(source).not.toMatch(/clang\/|llvm\/|ImportedVfs|LayoutTrace|g_runtime|std::malloc/u);
+    expect([...source.matchAll(/BG_CPP_CUTE_EXPORT[\s\S]*?\b(bg_cpp_cute_[a-z_]+)\(/gu)]
+      .map((match) => match[1])).toEqual([
+        "bg_cpp_cute_abi_version",
+        "bg_cpp_cute_alloc",
+        "bg_cpp_cute_compile",
+        "bg_cpp_cute_free",
+        "bg_cpp_cute_reset",
+        "bg_cpp_cute_result_length",
+        "bg_cpp_cute_result_pointer",
+        "bg_cpp_cute_status",
+      ]);
+  });
 
+  it("owns lifecycle/frame validation in runtime while preserving fail-closed result state", async () => {
+    const source = await extractorSource("BrowserGradCppCuteRuntime.cpp");
+    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0000U");
+    expect(source).toContain("validate_frame_envelope");
+    expect(source).toContain("RuntimeState g_runtime");
+    expect(source).toContain("result.status == WireCompileStatus::kArtifactReady");
+    expect(source).toMatch(/runtime_result_length\(\)[\s\S]*?return 0U;/u);
+    expect(source).toMatch(/runtime_result_pointer\(\)[\s\S]*?return 0U;/u);
+    expect(source).not.toMatch(/clang\/|llvm\/|bg_vfs_/u);
+  });
+
+  it("declares and consumes only the exact imported-VFS application surface", async () => {
+    const source = await extractorSource("BrowserGradCppCuteImportedVfs.cpp");
     expect([...source.matchAll(/BG_CPP_CUTE_VFS_IMPORT\("([^"]+)"\)/gu)]
       .map((match) => match[1])).toEqual(applicationImportNames);
     expect(source).toContain('__attribute__((import_module("browsergrad_vfs_v1")))');
@@ -95,60 +135,47 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
       expect([...source.matchAll(new RegExp(`\\b${name}\\(`, "gu"))].length)
         .toBeGreaterThanOrEqual(2);
     }
-    expect(source).not.toMatch(
-      /getRealFileSystem|createPhysicalFileSystem|std::ifstream|\bfopen\(|\bfetch\(/u,
-    );
-  });
-
-  it("bounds paths and reads while streaming directories and fail-stopping handle errors", async () => {
-    const source = await readFile(
-      join(extractorRoot, "BrowserGradCppCuteExtractor.cpp"),
-      "utf8",
-    );
-
-    expect(source).toContain(
-      `kVfsMaximumPathByteLength = ${runtimeVfsLimits.maxPathByteLength}U`,
-    );
-    expect(source).toContain(
-      `kVfsMaximumDirectoryEntryCount = ${runtimeVfsLimits.maxIndexedNodes}U`,
-    );
-    expect(source).toContain(
-      `kVfsMaximumLiveHandleCount = ${runtimeVfsLimits.maxLiveFileHandles}U`,
-    );
+    expect(source).toContain(`kVfsMaximumPathByteLength = ${runtimeVfsLimits.maxPathByteLength}U`);
+    expect(source).toContain(`kVfsMaximumDirectoryEntryCount = ${runtimeVfsLimits.maxIndexedNodes}U`);
+    expect(source).toContain(`kVfsMaximumLiveHandleCount = ${runtimeVfsLimits.maxLiveFileHandles}U`);
     expect(source).toContain(
       `kVfsMaximumReadableFileByteLength = ${runtimeVfsLimits.maxAggregateLiveOpenByteLength}ULL`,
     );
+    expect(source).toContain("class ImportedVfsFileSystem final");
+    expect(source).toContain("class ImportedVfsFile final");
+    expect(source).toContain("class ImportedVfsDirectoryIterator final");
+    expect(source).toContain("class ImportedVfsOpenGuard final");
     expect(source).toContain("kVfsReadChunkByteLength = 64U * 1024U");
     expect(source).toContain("valid_canonical_path");
     expect(source).toContain("valid_utf8");
     expect(source).toContain("!utf8_byte_less(previous_name_, name)");
     expect(source).toContain("std::error_code load_current()");
     expect(source).not.toContain("std::vector<llvm::vfs::directory_entry>");
-    expect(source).toContain("class ImportedVfsOpenGuard final");
     expect(source).toContain("handle_budget_->terminal_error");
-    expect(source).toContain("live_ = false;");
     expect(source).toContain("std::errc::operation_canceled");
     expect(source).toContain("std::errc::protocol_error");
     expect(source).not.toMatch(/bg_vfs_(?:cancel|abort|terminate)/u);
   });
 
-  it("wires the imported VFS into LibTooling but keeps artifact-ready unreachable", async () => {
-    const source = await readFile(
-      join(extractorRoot, "BrowserGradCppCuteExtractor.cpp"),
-      "utf8",
+  it("keeps Clang instrumentation on the imported VFS and nowhere on a physical filesystem", async () => {
+    const action = await extractorSource("BrowserGradCppCuteClangAction.cpp");
+    const allSource = (await Promise.all(expectedSourcePaths
+      .filter((path) => path.endsWith(".cpp") || path.endsWith(".h"))
+      .map(extractorSource))).join("\n");
+    expect(action).toContain('#include "BrowserGradCppCuteImportedVfs.h"');
+    expect(action).toContain("class LayoutTraceVisitor final");
+    expect(action).toContain("class LayoutTraceAction final");
+    expect(action).toContain("clang::tooling::ToolInvocation invocation");
+    expect(action).toContain("clang::FileManager files(file_system_options, imported_closed_vfs())");
+    expect(allSource).not.toMatch(
+      /getRealFileSystem|createPhysicalFileSystem|std::ifstream|std::filesystem|\bfopen\(|\bfetch\(/u,
     );
+  });
 
-    expect(source).toContain("class ImportedVfsFileSystem final");
-    expect(source).toContain("class ImportedVfsFile final");
-    expect(source).toContain("class ImportedVfsDirectoryIterator final");
-    expect(source).toContain("class LayoutTraceVisitor final");
-    expect(source).toContain("class LayoutTraceAction final");
-    expect(source).toContain("clang::tooling::ToolInvocation invocation");
-    expect(source).toContain("clang::FileManager files(file_system_options, imported_closed_vfs())");
-    expect(source).toContain("ReviewOnlyBlocker::kCudaDualPassUnavailable");
-    expect(source).not.toContain("kCustomVfsUnavailable");
-    expect(source).not.toMatch(/g_runtime\.status\s*=\s*WireCompileStatus::kArtifactReady/u);
-    expect(source).toMatch(/bg_cpp_cute_result_length\(void\)[\s\S]*?return 0U;/u);
-    expect(source).toMatch(/bg_cpp_cute_result_pointer\(void\)[\s\S]*?return 0U;/u);
+  it("keeps artifact-v3 as a wired non-authoritative placeholder", async () => {
+    const artifact = await extractorSource("BrowserGradCppCuteArtifactV3.cpp");
+    expect(artifact).toContain("ReviewOnlyBlocker::kCudaDualPassUnavailable");
+    expect(artifact).toContain("WireCompileStatus::kInternalError");
+    expect(artifact).not.toContain("run_layout_trace_for_review");
   });
 });

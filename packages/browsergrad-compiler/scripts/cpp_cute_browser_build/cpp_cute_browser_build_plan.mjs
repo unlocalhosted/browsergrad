@@ -105,7 +105,15 @@ const WASM_DEFINITION_NAMES = Object.freeze([
 const NATIVE_TARGETS = Object.freeze(["clang-tblgen", "llvm-tblgen"]);
 const WASM_TARGETS = Object.freeze(["browsergrad-cpp-cute-extractor"]);
 const EXTRACTOR_SOURCE_PATHS = Object.freeze([
+  "BrowserGradCppCuteArtifactV3.cpp",
+  "BrowserGradCppCuteArtifactV3.h",
+  "BrowserGradCppCuteClangAction.cpp",
+  "BrowserGradCppCuteClangAction.h",
   "BrowserGradCppCuteExtractor.cpp",
+  "BrowserGradCppCuteImportedVfs.cpp",
+  "BrowserGradCppCuteImportedVfs.h",
+  "BrowserGradCppCuteRuntime.cpp",
+  "BrowserGradCppCuteRuntime.h",
   "CMakeLists.txt",
 ]);
 
