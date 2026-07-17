@@ -25,11 +25,16 @@ const expectedSourcePaths = [
   "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",
   "BrowserGradCppCuteClangAction.h",
+  "BrowserGradCppCuteCommandLine.cpp",
+  "BrowserGradCppCuteCommandLine.h",
+  "BrowserGradCppCuteCommandLinePolicy.inc",
   "BrowserGradCppCuteExtractor.cpp",
   "BrowserGradCppCuteImportedVfs.cpp",
   "BrowserGradCppCuteImportedVfs.h",
   "BrowserGradCppCuteMetrics.cpp",
   "BrowserGradCppCuteMetrics.h",
+  "BrowserGradCppCutePreprocessorPolicy.cpp",
+  "BrowserGradCppCutePreprocessorPolicy.h",
   "BrowserGradCppCuteRuntime.cpp",
   "BrowserGradCppCuteRuntime.h",
   "BrowserGradCppCuteSha256.cpp",
@@ -104,7 +109,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   it("builds every owned translation unit into the Emscripten factory target", async () => {
     const cmake = await extractorSource("CMakeLists.txt");
     expect(cmake).toContain("add_llvm_executable(browsergrad-cpp-cute-extractor");
-    for (const path of expectedSourcePaths.filter((path) => path.endsWith(".cpp"))) {
+    for (const path of expectedSourcePaths.filter((path) => path !== "CMakeLists.txt")) {
       expect(cmake).toContain(`  ${path}\n`);
     }
     expect(cmake).toContain("BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH");
@@ -194,7 +199,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     const source = await extractorSource("BrowserGradCppCuteMetrics.cpp");
     const allOtherSource = (await Promise.all(expectedSourcePaths
       .filter((path) => path !== "BrowserGradCppCuteMetrics.cpp")
-      .filter((path) => path.endsWith(".cpp") || path.endsWith(".h"))
+      .filter((path) => path.endsWith(".cpp") || path.endsWith(".h") || path.endsWith(".inc"))
       .map(extractorSource))).join("\n");
     expect(header).toContain("struct alignas(8) AllocatorMetricsRecordV1");
     expect(header).toContain("sizeof(AllocatorMetricsRecordV1) == 72U");
@@ -268,7 +273,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   it("keeps Clang instrumentation on the imported VFS and nowhere on a physical filesystem", async () => {
     const action = await extractorSource("BrowserGradCppCuteClangAction.cpp");
     const allSource = (await Promise.all(expectedSourcePaths
-      .filter((path) => path.endsWith(".cpp") || path.endsWith(".h"))
+      .filter((path) => path.endsWith(".cpp") || path.endsWith(".h") || path.endsWith(".inc"))
       .map(extractorSource))).join("\n");
     expect(action).toContain('#include "BrowserGradCppCuteImportedVfs.h"');
     expect(action).toContain("class LayoutTraceVisitor final");

@@ -25,11 +25,16 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteCanonicalJson.h
   BrowserGradCppCuteClangAction.cpp
   BrowserGradCppCuteClangAction.h
+  BrowserGradCppCuteCommandLine.cpp
+  BrowserGradCppCuteCommandLine.h
+  BrowserGradCppCuteCommandLinePolicy.inc
   BrowserGradCppCuteExtractor.cpp
   BrowserGradCppCuteImportedVfs.cpp
   BrowserGradCppCuteImportedVfs.h
   BrowserGradCppCuteMetrics.cpp
   BrowserGradCppCuteMetrics.h
+  BrowserGradCppCutePreprocessorPolicy.cpp
+  BrowserGradCppCutePreprocessorPolicy.h
   BrowserGradCppCuteRuntime.cpp
   BrowserGradCppCuteRuntime.h
   BrowserGradCppCuteSha256.cpp

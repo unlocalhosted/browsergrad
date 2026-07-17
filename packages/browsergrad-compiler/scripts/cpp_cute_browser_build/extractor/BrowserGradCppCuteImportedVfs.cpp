@@ -2,7 +2,6 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 #include <algorithm>
@@ -159,39 +158,16 @@ bool wasm_pointer(const void* pointer, std::uint32_t& result) {
   return true;
 }
 
-bool valid_utf8(llvm::StringRef value) {
-  const auto* begin = reinterpret_cast<const llvm::UTF8*>(value.data());
-  const auto* cursor = begin;
-  return llvm::isLegalUTF8String(&cursor, begin + value.size()) != 0;
-}
-
 bool valid_canonical_path(llvm::StringRef path) {
-  if (path.empty() || path.size() > kVfsMaximumPathByteLength ||
-      path.front() != '/' || !valid_utf8(path) ||
-      (path.size() > 1U && path.back() == '/')) {
-    return false;
-  }
-  if (path == "/") return true;
-
-  std::size_t segment_begin = 1U;
-  for (std::size_t index = 1U; index <= path.size(); ++index) {
-    if (index < path.size()) {
-      const auto byte = static_cast<unsigned char>(path[index]);
-      if (byte == '\\' || byte == 0U || byte < 0x20U || byte == 0x7fU) {
-        return false;
-      }
-      if (byte != '/') continue;
-    }
-    const llvm::StringRef segment = path.slice(segment_begin, index);
-    if (segment.empty() || segment == "." || segment == "..") return false;
-    segment_begin = index + 1U;
-  }
-  return true;
+  return imported_vfs_detail::valid_canonical_path(
+      std::string_view(path.data(), path.size()));
 }
 
 bool valid_basename(llvm::StringRef name) {
   if (name.empty() || name.size() > kVfsMaximumPathByteLength ||
-      name == "." || name == ".." || !valid_utf8(name)) {
+      name == "." || name == ".." ||
+      !imported_vfs_detail::valid_utf8(
+          std::string_view(name.data(), name.size()))) {
     return false;
   }
   for (const unsigned char byte : name.bytes()) {
@@ -204,13 +180,9 @@ bool valid_basename(llvm::StringRef name) {
 }
 
 bool utf8_byte_less(llvm::StringRef left, llvm::StringRef right) {
-  const auto limit = std::min(left.size(), right.size());
-  for (std::size_t index = 0; index < limit; ++index) {
-    const auto left_byte = static_cast<unsigned char>(left[index]);
-    const auto right_byte = static_cast<unsigned char>(right[index]);
-    if (left_byte != right_byte) return left_byte < right_byte;
-  }
-  return left.size() < right.size();
+  return imported_vfs_detail::compare_utf8_bytes(
+             std::string_view(left.data(), left.size()),
+             std::string_view(right.data(), right.size())) < 0;
 }
 
 std::error_code imported_path_pointer(llvm::StringRef path,
@@ -305,12 +277,14 @@ class ImportedVfsFile final : public llvm::vfs::File {
  public:
   ImportedVfsFile(std::string path, llvm::vfs::Status status,
                   ImportedVfsOpenResult open_result,
-                  std::shared_ptr<ImportedVfsHandleBudget> handle_budget)
+                  std::shared_ptr<ImportedVfsHandleBudget> handle_budget,
+                  std::shared_ptr<ImportedVfsObserver> observer)
       : path_(std::move(path)),
         status_(std::move(status)),
         handle_(open_result.handle),
         file_byte_length_(open_result.file_byte_length),
-        handle_budget_(std::move(handle_budget)) {}
+        handle_budget_(std::move(handle_budget)),
+        observer_(std::move(observer)) {}
 
   ~ImportedVfsFile() override { static_cast<void>(close()); }
 
@@ -327,6 +301,9 @@ class ImportedVfsFile final : public llvm::vfs::File {
       return handle_budget_ == nullptr
                  ? std::make_error_code(std::errc::protocol_error)
                  : handle_budget_->terminal_error;
+    }
+    if (observer_ != nullptr && observer_->terminal_error()) {
+      return observer_->terminal_error();
     }
     if (file_size < -1 ||
         (file_size >= 0 &&
@@ -364,6 +341,12 @@ class ImportedVfsFile final : public llvm::vfs::File {
         return imported_vfs_error(read_status);
       }
     }
+    if (observer_ != nullptr) {
+      if (const auto error = observer_->record_successful_read(path_)) {
+        poison_handle_budget(handle_budget_, error);
+        return error;
+      }
+    }
     return std::unique_ptr<llvm::MemoryBuffer>(std::move(buffer));
   }
 
@@ -390,6 +373,7 @@ class ImportedVfsFile final : public llvm::vfs::File {
   std::uint32_t handle_ = 0;
   std::uint64_t file_byte_length_ = 0;
   std::shared_ptr<ImportedVfsHandleBudget> handle_budget_;
+  std::shared_ptr<ImportedVfsObserver> observer_;
   bool live_ = true;
 };
 
@@ -505,9 +489,16 @@ class ImportedVfsDirectoryIterator final
 
 class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
  public:
+  explicit ImportedVfsFileSystem(
+      std::shared_ptr<ImportedVfsObserver> observer = nullptr)
+      : observer_(std::move(observer)) {}
+
   llvm::ErrorOr<llvm::vfs::Status> status(
       const llvm::Twine& path_twine) override {
     if (handle_budget_->terminal_error) return handle_budget_->terminal_error;
+    if (observer_ != nullptr && observer_->terminal_error()) {
+      return observer_->terminal_error();
+    }
     llvm::SmallString<kVfsMaximumPathByteLength> path;
     path_twine.toVector(path);
     auto metadata = imported_status(path);
@@ -518,6 +509,9 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
   llvm::ErrorOr<std::unique_ptr<llvm::vfs::File>> openFileForRead(
       const llvm::Twine& path_twine) override {
     if (handle_budget_->terminal_error) return handle_budget_->terminal_error;
+    if (observer_ != nullptr && observer_->terminal_error()) {
+      return observer_->terminal_error();
+    }
     llvm::SmallString<kVfsMaximumPathByteLength> path;
     path_twine.toVector(path);
     auto metadata = imported_status(path);
@@ -538,7 +532,7 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
     }
     auto file = std::make_unique<ImportedVfsFile>(
         std::move(stable_path), std::move(stable_status), *open_result,
-        handle_budget_);
+        handle_budget_, observer_);
     ++handle_budget_->live_handle_count;
     open_guard.release();
     return std::unique_ptr<llvm::vfs::File>(std::move(file));
@@ -548,6 +542,10 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
       const llvm::Twine& directory_twine, std::error_code& error) override {
     if (handle_budget_->terminal_error) {
       error = handle_budget_->terminal_error;
+      return {};
+    }
+    if (observer_ != nullptr && observer_->terminal_error()) {
+      error = observer_->terminal_error();
       return {};
     }
     llvm::SmallString<kVfsMaximumPathByteLength> directory;
@@ -608,12 +606,19 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
  private:
   std::shared_ptr<ImportedVfsHandleBudget> handle_budget_ =
       std::make_shared<ImportedVfsHandleBudget>();
+  std::shared_ptr<ImportedVfsObserver> observer_;
 };
 
 }  // namespace
 
 llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> imported_closed_vfs() {
-  return llvm::makeIntrusiveRefCnt<ImportedVfsFileSystem>();
+  return imported_closed_vfs(nullptr);
+}
+
+llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> imported_closed_vfs(
+    std::shared_ptr<ImportedVfsObserver> observer) {
+  return llvm::makeIntrusiveRefCnt<ImportedVfsFileSystem>(
+      std::move(observer));
 }
 
 }  // namespace browsergrad::cpp_cute
