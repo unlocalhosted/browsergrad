@@ -280,7 +280,7 @@ interface StoredSession {
   readonly files: Map<string, SessionFile>;
   readonly directories: Map<string, SessionDirectory>;
   readonly handles: Map<number, LiveHandle>;
-  readonly openedPaths: Set<string>;
+  readonly successfullyReadPaths: Set<string>;
   readonly counters: SessionCountersMutable;
   nextHandle: number;
   state: "active" | "disposed";
@@ -301,6 +301,7 @@ interface PlannedWrite {
 interface CallPlan {
   readonly status: number;
   readonly writes: readonly PlannedWrite[];
+  readonly successfullyReadFile?: SessionFile;
 }
 
 interface SessionIndex {
@@ -399,7 +400,7 @@ export function prepareCppCuteBrowserVfsSession(
     files,
     directories: index.directories,
     handles: new Map(),
-    openedPaths: new Set(),
+    successfullyReadPaths: new Set(),
     counters: {
       totalSessionCalls: 0n,
       statusCalls: 0n,
@@ -504,7 +505,6 @@ export function cppCuteBrowserVfsOpen(
       stored.counters.peakLiveLogicalReservationBytes,
       nextLiveBytes,
     );
-    stored.openedPaths.add(file.virtualPath);
     return successWrite(output.pointer, openResultBytes(handle, file.byteLength));
   });
 }
@@ -528,7 +528,12 @@ export function cppCuteBrowserVfsRead(
       throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.outOfRange);
     }
     const bytes = copyFileRange(handle.file, Number(offset), byteLength);
-    return successWrite(output.pointer, bytes);
+    // A zero-length read observes all content only for an actually empty file.
+    // A nonempty file is recorded only after at least one byte commits.
+    const observesFileContent = byteLength > 0 || handle.file.byteLength === 0;
+    return observesFileContent
+      ? successfulRead(output.pointer, bytes, handle.file)
+      : successWrite(output.pointer, bytes);
   });
 }
 
@@ -666,6 +671,9 @@ function invoke(
     const plan = operation(stored, epoch);
     commitWrites(stored, epoch, plan.writes);
     ensureMemoryUnchanged(stored, epoch);
+    if (plan.successfullyReadFile !== undefined) {
+      stored.successfullyReadPaths.add(plan.successfullyReadFile.virtualPath);
+    }
     return plan.status;
   } catch (cause) {
     if (cause instanceof AbiStatus) {
@@ -684,6 +692,14 @@ function invoke(
 
 function successWrite(pointer: number, bytes: Uint8Array): CallPlan {
   return { status: CPP_CUTE_BROWSER_VFS_STATUS.ok, writes: [{ pointer, bytes }] };
+}
+
+function successfulRead(pointer: number, bytes: Uint8Array, file: SessionFile): CallPlan {
+  return {
+    status: CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    writes: [{ pointer, bytes }],
+    successfullyReadFile: file,
+  };
 }
 
 function commitWrites(stored: StoredSession, epoch: MemoryEpoch, writes: readonly PlannedWrite[]): void {
@@ -1004,7 +1020,7 @@ function disposeStored(
   stored.handles.clear();
   stored.files.clear();
   stored.directories.clear();
-  stored.openedPaths.clear();
+  stored.successfullyReadPaths.clear();
   stored.counters.currentLiveSourceBytes = 0n;
   stored.counters.currentLiveInstalledBytes = 0n;
   stored.installation = undefined;
@@ -1039,7 +1055,7 @@ function sessionObservation(
   stored: StoredSession,
   forcedState?: "disposed",
 ): CppCuteBrowserVfsSessionObservation {
-  const openedFiles = [...stored.openedPaths]
+  const openedFiles = [...stored.successfullyReadPaths]
     .sort(compareUtf8)
     .map((path): CppCuteBrowserVfsOpenedFileObservation => {
       const file = stored.files.get(path);

@@ -178,6 +178,12 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
     );
     expect(observation.counters.currentLiveHandles).toBe("0");
     expect(observation.counters.logicalOpenedSourceByteLength).toBe(String(MAIN_BYTES.byteLength));
+    expect(observation.counters.logicalOpenedInstalledVfsByteLength).toBe(
+      String(expectedInstalled.byteLength),
+    );
+    expect(observation.counters.logicalOpenedTotalByteLength).toBe(
+      String(MAIN_BYTES.byteLength + expectedInstalled.byteLength),
+    );
     const expectedIndex = indexAccounting([
       MAIN_PATH,
       HEADER_PATH,
@@ -190,6 +196,76 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
       String(expectedIndex.indexLogicalByteLength),
     );
     expect(observation).not.toHaveProperty("workerExecutionObserved");
+    closeCppCuteBrowserVfsSession(fixture.session, "completed");
+  });
+
+  it("observes only unique files with successful content reads", async () => {
+    const fixture = await sessionFixture();
+    writePath(fixture.memory, 64, MAIN_PATH);
+    expect(cppCuteBrowserVfsOpen(fixture.session, 64, byteLength(MAIN_PATH), 560)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    );
+    const handle = readU32(fixture.memory, 560);
+
+    let observation = observeCppCuteBrowserVfsSession(fixture.session);
+    expect(observation.openedFiles).toEqual([]);
+    expect(observation.counters.logicalOpenedSourceByteLength).toBe("0");
+    expect(observation.counters.currentLiveSourceLogicalReservationByteLength).toBe(
+      String(MAIN_BYTES.byteLength),
+    );
+
+    expect(cppCuteBrowserVfsRead(fixture.session, handle, 0, 0, 640, 0)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    );
+    expect(cppCuteBrowserVfsRead(
+      fixture.session,
+      handle,
+      MAIN_BYTES.byteLength,
+      0,
+      640,
+      1,
+    )).toBe(CPP_CUTE_BROWSER_VFS_STATUS.outOfRange);
+    expect(observeCppCuteBrowserVfsSession(fixture.session).openedFiles).toEqual([]);
+
+    expect(cppCuteBrowserVfsRead(fixture.session, handle, 1, 0, 640, 1)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    );
+    expect(cppCuteBrowserVfsRead(fixture.session, handle, 2, 0, 640, 2)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    );
+    observation = observeCppCuteBrowserVfsSession(fixture.session);
+    expect(observation.openedFiles.map((file) => file.virtualPath)).toEqual([MAIN_PATH]);
+    expect(observation.counters.logicalOpenedSourceByteLength).toBe(String(MAIN_BYTES.byteLength));
+    expect(observation.counters.logicalOpenedTotalByteLength).toBe(String(MAIN_BYTES.byteLength));
+    expect(observation.counters.currentLiveSourceLogicalReservationByteLength).toBe(
+      String(MAIN_BYTES.byteLength),
+    );
+
+    const installedZeroBytePath = [...fixture.installedBytes.entries()]
+      .find(([, bytes]) => bytes.byteLength === 0)?.[0];
+    expect(installedZeroBytePath).toBeDefined();
+    writePath(fixture.memory, 64, installedZeroBytePath!);
+    expect(cppCuteBrowserVfsOpen(
+      fixture.session,
+      64,
+      byteLength(installedZeroBytePath!),
+      560,
+    )).toBe(CPP_CUTE_BROWSER_VFS_STATUS.ok);
+    const zeroByteHandle = readU32(fixture.memory, 560);
+    expect(cppCuteBrowserVfsRead(fixture.session, zeroByteHandle, 0, 0, 640, 0)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    );
+    expect(cppCuteBrowserVfsClose(fixture.session, zeroByteHandle)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    );
+    expect(observeCppCuteBrowserVfsSession(fixture.session).openedFiles.map(
+      (file) => file.virtualPath,
+    )).toEqual([installedZeroBytePath!, MAIN_PATH].sort(compareUtf8));
+    expect(observeCppCuteBrowserVfsSession(
+      fixture.session,
+    ).counters.logicalOpenedInstalledVfsByteLength).toBe("0");
+
+    expect(cppCuteBrowserVfsClose(fixture.session, handle)).toBe(CPP_CUTE_BROWSER_VFS_STATUS.ok);
     closeCppCuteBrowserVfsSession(fixture.session, "completed");
   });
 
@@ -354,7 +430,7 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
     expect(terminal.observation.counters.currentLiveHandles).toBe("0");
     expect(terminal.observation.counters.currentLiveLogicalReservationByteLength).toBe("0");
     expect(terminal.observation.counters.peakLiveHandles).toBe("1");
-    expect(terminal.observation.openedFiles.map((file) => file.virtualPath)).toEqual([HEADER_PATH]);
+    expect(terminal.observation.openedFiles).toEqual([]);
     expect(cppCuteBrowserVfsRead(fixture.session, secondHandle, 0, 0, 640, 1)).toBe(
       CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed,
     );
