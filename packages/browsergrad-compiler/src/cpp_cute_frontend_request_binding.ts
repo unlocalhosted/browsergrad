@@ -223,18 +223,17 @@ async function verifySourceAuthority(
 ): Promise<void> {
   const requestRecord = unwrapPreparedCppCuteFrontendRequest(request);
   const snapshots = copyPreparedCppCuteFrontendSourceSnapshots(request);
-  const sourceFiles = payload.inputs.files.filter((file) => file.owner.kind === "source");
-  if (sourceFiles.length !== requestRecord.request.files.length || snapshots.length !== requestRecord.request.files.length) {
+  if (snapshots.length !== requestRecord.request.files.length) {
     mismatch(
       "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
-      "$.artifact.inputs.files",
-      "artifact source-owned input cardinality differs from prepared request authority",
+      "$.request.files",
+      "prepared request source snapshot cardinality differs from its descriptors",
     );
   }
+  const requestSources = new Map<string, CppCuteFrontendPayloadV3["inputs"]["files"][number]>();
   for (const [index, descriptor] of requestRecord.request.files.entries()) {
     throwIfAborted(signal);
     const snapshot = snapshots[index];
-    const actual = sourceFiles.find((candidate) => candidate.virtualPath === descriptor.virtualPath);
     if (snapshot === undefined || snapshot.virtualPath !== descriptor.virtualPath) {
       mismatch(
         "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
@@ -251,24 +250,40 @@ async function verifySourceAuthority(
         "prepared request source snapshot differs from its descriptor",
       );
     }
-    if (actual === undefined || actual.fileId !== descriptor.fileId || actual.role !== descriptor.role ||
-        actual.contentSha256 !== descriptor.contentSha256 || actual.byteLength !== descriptor.byteLength ||
-        actual.includeRootId !== descriptor.includeRootId || actual.owner.kind !== "source") {
-      mismatch(
-        "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
-        `$.artifact.inputs.files[${index}]`,
-        "artifact source differs from exact prepared request descriptor and bytes",
-      );
-    }
+    requestSources.set(descriptor.virtualPath, { ...descriptor, owner: { kind: "source" } });
   }
   const mainFile = payload.inputs.files.find((file) => file.fileId === payload.inputs.mainFileId);
-  if (mainFile?.virtualPath !== request.mainVirtualPath || mainFile.role !== "main-source") {
+  const requestMain = requestSources.get(request.mainVirtualPath);
+  if (mainFile === undefined || requestMain === undefined ||
+      !sameSourceDescriptor(mainFile, requestMain) || mainFile.role !== "main-source") {
     mismatch(
       "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
       "$.artifact.inputs.mainFileId",
-      "artifact main source differs from prepared request",
+      "artifact main source differs from exact prepared request descriptor and bytes",
     );
   }
+  for (const [index, actual] of payload.inputs.files.entries()) {
+    if (actual.owner.kind !== "source") continue;
+    throwIfAborted(signal);
+    const descriptor = requestSources.get(actual.virtualPath);
+    if (descriptor === undefined || !sameSourceDescriptor(actual, descriptor)) {
+      mismatch(
+        "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
+        `$.artifact.inputs.files[${index}]`,
+        "artifact source-owned input is not an exact prepared request descriptor and byte snapshot",
+      );
+    }
+  }
+}
+
+function sameSourceDescriptor(
+  actual: CppCuteFrontendPayloadV3["inputs"]["files"][number],
+  expected: CppCuteFrontendPayloadV3["inputs"]["files"][number],
+): boolean {
+  return actual.fileId === expected.fileId && actual.role === expected.role &&
+    actual.virtualPath === expected.virtualPath && actual.contentSha256 === expected.contentSha256 &&
+    actual.byteLength === expected.byteLength && actual.includeRootId === expected.includeRootId &&
+    actual.owner.kind === "source" && expected.owner.kind === "source";
 }
 
 function expectedSelectionFor(

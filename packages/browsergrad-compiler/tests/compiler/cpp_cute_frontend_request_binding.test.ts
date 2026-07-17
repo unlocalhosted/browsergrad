@@ -8,6 +8,7 @@ import {
   canonicalCppCuteFrontendArtifactBytes,
   decodeCppCuteFrontendArtifact,
   deriveCppCuteFrontendArtifactId,
+  unwrapVerifiedCppCuteFrontendArtifact,
   unwrapVerifiedCppCuteFrontendArtifactResource,
   verifyCppCuteFrontendArtifact,
   type VerifiedCppCuteFrontendArtifactResource,
@@ -151,7 +152,11 @@ async function artifactResourceFor(
   profile: PreparedCppCuteFrontendProfile,
   requestFiles: readonly CppCuteFrontendRequestSourceFileV1[],
   requestEntry: CppCuteFrontendEntryRequestV1,
-  options: { readonly injectUnrequestedSource?: boolean } = {},
+  options: {
+    readonly injectUnrequestedSource?: boolean;
+    readonly omitProjectHeader?: boolean;
+    readonly omitRequestedMain?: boolean;
+  } = {},
 ): Promise<VerifiedCppCuteFrontendArtifactResource> {
   const artifact = await createCppCuteArtifactInput(profile.compilationContractHash);
   const payload = artifact.payload as CppCuteFrontendPayloadV3;
@@ -162,43 +167,51 @@ async function artifactResourceFor(
   if (oldMain === undefined || oldHeader === undefined || main === undefined || header === undefined) {
     throw new Error("fixture lost source files");
   }
-  replaceStrings(artifact as unknown as JsonValue, new Map([
-    [oldMain.fileId, main.fileId],
-    [oldHeader.fileId, header.fileId],
-  ]));
+  const oldMainFileId = oldMain.fileId;
+  const oldHeaderFileId = oldHeader.fileId;
+  const replacements = new Map<string, string>();
+  if (options.omitRequestedMain !== true) replacements.set(oldMainFileId, main.fileId);
+  if (options.omitProjectHeader !== true) replacements.set(oldHeaderFileId, header.fileId);
+  replaceStrings(artifact as unknown as JsonValue, replacements);
   const mutablePayload = artifact.payload as unknown as Record<string, unknown>;
   const inputs = mutablePayload["inputs"] as Record<string, unknown>;
   const artifactFiles = inputs["files"] as Record<string, unknown>[];
-  const mutableMain = artifactFiles.find((file) => file["fileId"] === main.fileId);
-  const mutableHeader = artifactFiles.find((file) => file["fileId"] === header.fileId);
+  const artifactMainFileId = options.omitRequestedMain === true ? oldMainFileId : main.fileId;
+  const artifactHeaderFileId = options.omitProjectHeader === true ? oldHeaderFileId : header.fileId;
+  const mutableMain = artifactFiles.find((file) => file["fileId"] === artifactMainFileId);
+  const mutableHeader = artifactFiles.find((file) => file["fileId"] === artifactHeaderFileId);
   if (mutableMain === undefined || mutableHeader === undefined) throw new Error("fixture replacement failed");
-  Object.assign(mutableMain, {
-    role: main.role,
-    virtualPath: main.virtualPath,
-    contentSha256: main.contentSha256,
-    byteLength: main.byteLength,
-    owner: { kind: "source" },
-    includeRootId: main.includeRootId,
-  });
-  Object.assign(mutableHeader, {
-    role: header.role,
-    virtualPath: header.virtualPath,
-    contentSha256: header.contentSha256,
-    byteLength: header.byteLength,
-    owner: { kind: "source" },
-    includeRootId: header.includeRootId,
-  });
+  if (options.omitRequestedMain !== true) {
+    Object.assign(mutableMain, {
+      role: main.role,
+      virtualPath: main.virtualPath,
+      contentSha256: main.contentSha256,
+      byteLength: main.byteLength,
+      owner: { kind: "source" },
+      includeRootId: main.includeRootId,
+    });
+  }
+  if (options.omitProjectHeader !== true) {
+    Object.assign(mutableHeader, {
+      role: header.role,
+      virtualPath: header.virtualPath,
+      contentSha256: header.contentSha256,
+      byteLength: header.byteLength,
+      owner: { kind: "source" },
+      includeRootId: header.includeRootId,
+    });
+  }
   const spans = mutablePayload["spans"] as Record<string, unknown>[];
   const identitySpanId = `bg.cpp.span.sha256.${"f".repeat(64)}`;
   spans.push({
     spanId: identitySpanId,
     spelling: {
-      fileId: main.fileId,
+      fileId: artifactMainFileId,
       startByte: requestEntry.anchor.beginByte,
       endByte: requestEntry.anchor.endByte,
     },
     expansion: {
-      fileId: main.fileId,
+      fileId: artifactMainFileId,
       startByte: requestEntry.anchor.beginByte,
       endByte: requestEntry.anchor.endByte,
     },
@@ -219,7 +232,7 @@ async function artifactResourceFor(
   const sourceEdge = includeEdges.find((edge) => edge["kind"] === "source-directive");
   if (sourceEdge === undefined) throw new Error("fixture lost source include edge");
   const resolution = sourceEdge["resolution"] as Record<string, unknown>;
-  resolution["includeRootId"] = "workspace-source";
+  if (options.omitProjectHeader !== true) resolution["includeRootId"] = "workspace-source";
   if (options.injectUnrequestedSource === true) {
     const injectedFileId = `bg.cpp.file.sha256.${"9".repeat(64)}`;
     const injectedEdgeId = `bg.cpp.include-edge.sha256.${"9".repeat(64)}`;
@@ -392,6 +405,34 @@ describe("producer-neutral frontend request binding", () => {
     expect(Object.isFrozen(record.binding.selection)).toBe(true);
   });
 
+  it("accepts an unopened request project header omitted from artifact source inputs", async () => {
+    const fixture = await createBindingFixture();
+    const requestEntry = fixture.requestInput.entryRequests[0];
+    if (requestEntry === undefined) throw new Error("fixture request entry missing");
+    const artifactResource = await artifactResourceFor(
+      fixture.profile,
+      fixture.requestInput.files,
+      requestEntry,
+      { omitProjectHeader: true },
+    );
+    const request = await preparedRequest(
+      fixture.profile,
+      fixture.requestInput,
+      fixture.snapshots,
+      artifactResource,
+    );
+
+    await expect(prepareCppCuteFrontendRequestBinding(request, artifactResource))
+      .resolves.toMatchObject({ requestId: request.requestId });
+    const artifact = unwrapVerifiedCppCuteFrontendArtifact(
+      unwrapVerifiedCppCuteFrontendArtifactResource(artifactResource),
+    );
+    expect(artifact.envelope.payload.inputs.files
+      .filter((file) => file.owner.kind === "source")
+      .map((file) => file.virtualPath)).toEqual([MAIN_PATH]);
+    expect(fixture.requestInput.files.some((file) => file.virtualPath === HEADER_PATH)).toBe(true);
+  });
+
   it("keeps common binding valid for equivalent AOT and browser compilation contracts", async () => {
     const fixture = await createBindingFixture();
     await expect(prepareCppCuteFrontendRequestBinding(
@@ -443,7 +484,50 @@ describe("producer-neutral frontend request binding", () => {
     await expectBindingError(
       prepareCppCuteFrontendRequestBinding(fixture.request, injected),
       "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
-      "$.artifact.inputs.files",
+      expect.stringMatching(/^\$\.artifact\.inputs\.files\[\d+\]$/u),
+    );
+  });
+
+  it("rejects an artifact source descriptor and bytes mutated from request authority", async () => {
+    const fixture = await createBindingFixture();
+    const requestEntry = fixture.requestInput.entryRequests[0];
+    if (requestEntry === undefined) throw new Error("fixture request entry missing");
+    const mutatedHeader = await requestFile(
+      "project-header",
+      HEADER_PATH,
+      "workspace-source",
+      paddedBytes("constexpr int project_value = 3;\n", 200),
+    );
+    const mutatedFiles = fixture.requestInput.files.map((file) =>
+      file.virtualPath === HEADER_PATH ? mutatedHeader : file);
+    const artifactResource = await artifactResourceFor(
+      fixture.profile,
+      mutatedFiles,
+      requestEntry,
+    );
+
+    await expectBindingError(
+      prepareCppCuteFrontendRequestBinding(fixture.request, artifactResource),
+      "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
+      expect.stringMatching(/^\$\.artifact\.inputs\.files\[\d+\]$/u),
+    );
+  });
+
+  it("rejects an artifact that omits the exact requested main descriptor", async () => {
+    const fixture = await createBindingFixture();
+    const requestEntry = fixture.requestInput.entryRequests[0];
+    if (requestEntry === undefined) throw new Error("fixture request entry missing");
+    const artifactResource = await artifactResourceFor(
+      fixture.profile,
+      fixture.requestInput.files,
+      requestEntry,
+      { omitRequestedMain: true },
+    );
+
+    await expectBindingError(
+      prepareCppCuteFrontendRequestBinding(fixture.request, artifactResource),
+      "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-INPUT-MISMATCH",
+      "$.artifact.inputs.mainFileId",
     );
   });
 
