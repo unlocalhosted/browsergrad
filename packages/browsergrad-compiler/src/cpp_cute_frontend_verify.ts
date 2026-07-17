@@ -1041,9 +1041,10 @@ async function deriveSelectedSourceRootEntityIds(
     if (declaration.kind !== "function" && declaration.kind !== "variable") {
       invalid(path, "selected root must be a function or variable source declaration");
     }
-    if (!declaration.cudaAttributes.device && !declaration.cudaAttributes.global) {
-      invalid(path, "selected root must belong to the canonical device semantic pass");
-    }
+    // Root membership comes from device-owned frontend entries and their
+    // canonical fact ownership, not from CUDA attribute spelling. Real CuTe
+    // layout variables are commonly unannotated; attributes remain source
+    // facts and cannot add a declaration to the selected-root projection.
     const entityKind = declaration.kind;
     const sourceEntityId = await deriveSourceEntityId({
       entityKind,

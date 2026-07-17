@@ -326,9 +326,97 @@ describe("C++/CuTe frontend artifact", () => {
     });
   });
 
+  it("accepts an unannotated CuTe layout variable selected by the device-owned entry graph", async () => {
+    const unannotated = await cloneCppCuteArtifactInput();
+    const payload = unannotated["payload"] as Record<string, unknown>;
+    const declarations = payload["declarations"] as Record<string, unknown>[];
+    const entries = payload["entries"] as Record<string, unknown>[];
+    const selectedDeclarationId = (entries[0]?.["selectedRootDeclarationIds"] as string[] | undefined)?.[0];
+    const selected = declarations.find(
+      (declaration) => declaration["declarationId"] === selectedDeclarationId,
+    );
+    if (selected === undefined) throw new Error("fixture lost selected layout declaration");
+    selected["cudaAttributes"] = {
+      host: false,
+      device: false,
+      global: false,
+      forceInline: false,
+    };
+    await rebindInputAndPassEvidence(unannotated);
+
+    const verified = await verifyCppCuteFrontendArtifact(unannotated);
+    const record = unwrapVerifiedCppCuteFrontendArtifact(verified);
+    expect(record.envelope.payload.entries[0]?.selectedRootDeclarationIds).toEqual([
+      selectedDeclarationId,
+    ]);
+    expect(record.envelope.payload.semanticPasses[0]?.factIds).toEqual(
+      record.envelope.payload.facts.map((fact) => fact.factId),
+    );
+  });
+
+  it("does not let a CUDA attribute manufacture selected-root membership", async () => {
+    const attributeOnly = await cloneCppCuteArtifactInput();
+    const payload = attributeOnly["payload"] as Record<string, unknown>;
+    const declarations = payload["declarations"] as Record<string, unknown>[];
+    const selected = declarations.find((declaration) => declaration["kind"] === "variable");
+    if (selected === undefined) throw new Error("fixture lost selected layout declaration");
+    const candidateDeclarationId = stableId("declaration", "e");
+    const candidateCanonicalIdentity = "c:@attribute_only_layout";
+    declarations.push({
+      ...structuredClone(selected),
+      declarationId: candidateDeclarationId,
+      canonicalUsr: candidateCanonicalIdentity,
+      canonicalName: "attribute_only_layout",
+      mangledName: "_ZL21attribute_only_layout",
+      cudaAttributes: {
+        host: false,
+        device: true,
+        global: false,
+        forceInline: false,
+      },
+    });
+    declarations.sort((left, right) =>
+      String(left["declarationId"]).localeCompare(String(right["declarationId"])));
+    const candidateBody = {
+      entityKind: "variable" as const,
+      canonicalIdentity: candidateCanonicalIdentity,
+      origin: structuredClone(selected["origin"]),
+      domains: ["device"] as const,
+    };
+    const candidateSourceEntityId = await deriveCppCuteSourceEntityId(
+      payload as never,
+      candidateBody as never,
+    );
+    const sourceEntities = payload["sourceEntities"] as Record<string, unknown>[];
+    sourceEntities.push({ sourceEntityId: candidateSourceEntityId, ...candidateBody });
+    sourceEntities.sort((left, right) =>
+      String(left["sourceEntityId"]).localeCompare(String(right["sourceEntityId"])));
+    const devicePass = (payload["semanticPasses"] as Record<string, unknown>[])[0];
+    if (devicePass === undefined) throw new Error("fixture lost device semantic pass");
+    devicePass["selectedSourceRootEntityIds"] = [
+      ...(devicePass["selectedSourceRootEntityIds"] as string[]),
+      candidateSourceEntityId,
+    ].sort();
+    await rebindInputAndPassEvidence(attributeOnly);
+
+    await expect(verifyCppCuteFrontendArtifact(attributeOnly)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-HASH-MISMATCH",
+      path: "$.payload.semanticPasses[0].selectedSourceRootEntityIds",
+    });
+  });
+
   it("rejects split host/device identities for one selected source root", async () => {
     const split = await cloneCppCuteArtifactInput();
     const payload = split["payload"] as Record<string, unknown>;
+    const declarations = payload["declarations"] as Record<string, unknown>[];
+    const selected = declarations.find((declaration) => declaration["kind"] === "variable");
+    if (selected === undefined) throw new Error("fixture lost selected layout declaration");
+    selected["cudaAttributes"] = {
+      host: false,
+      device: false,
+      global: false,
+      forceInline: false,
+    };
     const entities = payload["sourceEntities"] as Record<string, unknown>[];
     const realRoot = entities.find((entity) => entity["entityKind"] === "variable");
     if (realRoot === undefined) throw new Error("fixture lost selected root source entity");
